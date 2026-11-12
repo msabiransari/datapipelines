@@ -46,7 +46,12 @@ class Argon2SecretHasherNativeFailureTest {
                     "Argon2SecretHasher.hash" to Argon2SecretHasher().hash(password),
                     "library String overload" to libraryStringHash(password),
                     "library char[] overload" to
-                        library.hash(Argon2SecretHasher.ITERATIONS, Argon2SecretHasher.MEMORY_KIB, Argon2SecretHasher.PARALLELISM, password.toCharArray()),
+                        library.hash(
+                            Argon2SecretHasher.ITERATIONS,
+                            Argon2SecretHasher.MEMORY_KIB,
+                            Argon2SecretHasher.PARALLELISM,
+                            password.toCharArray(),
+                        ),
                 )
             made.forEach { (how, encoded) ->
                 withClue("$how, password of ${password.length} chars") {
@@ -80,7 +85,10 @@ class Argon2SecretHasherNativeFailureTest {
         // The fixed message reaches the envelope; the library text rides only on the cause.
         thrown.message shouldBe "Secret verification is temporarily unavailable"
         thrown.message.orEmpty() shouldNotContain "emory"
-        thrown.cause?.message.orEmpty().contains("Memory allocation error") shouldBe true
+        thrown.cause
+            ?.message
+            .orEmpty()
+            .contains("Memory allocation error") shouldBe true
     }
 
     @Test

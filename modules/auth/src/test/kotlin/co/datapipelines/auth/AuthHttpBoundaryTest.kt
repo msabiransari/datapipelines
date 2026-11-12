@@ -87,19 +87,6 @@ class AuthHttpBoundaryTest {
     private lateinit var mustChangeSession: String
 
     /**
-     * Probe endpoints standing in for the controllers P6a will ship — this module owns
-     * the gate, not the endpoints, so the gate is what gets exercised.
-     *
-     * Two wiring facts this arrangement depends on, both verified the hard way:
-     * `@Controller` is required (Spring 6.2's `RequestMappingHandlerMapping.isHandler`
-     * detects only `@Controller`, no longer a bare `@RequestMapping`), and a
-     * `@Component`-meta-annotated class nested inside a `@Configuration` is registered
-     * by `ConfigurationClassParser`'s member-class processing — so it needs no `@Bean`
-     * method, and adding one registers it TWICE (ambiguous mapping). Nesting it inside
-     * this test's `@TestConfiguration` also keeps it out of every other context, since
-     * Boot's `TestTypeExcludeFilter` bars test-nested classes from component scanning.
-     */
-    /**
      * #847 — the production bounded hasher with a fault switch: while [failing] is on, `verify`
      * throws the native-fault exception (no real memory pressure anywhere). Every call is counted,
      * so a case can prove the fault was actually REACHED rather than bypassed by the outcome cache.
@@ -125,6 +112,19 @@ class AuthHttpBoundaryTest {
         }
     }
 
+    /**
+     * Probe endpoints standing in for the controllers P6a will ship — this module owns
+     * the gate, not the endpoints, so the gate is what gets exercised.
+     *
+     * Two wiring facts this arrangement depends on, both verified the hard way:
+     * `@Controller` is required (Spring 6.2's `RequestMappingHandlerMapping.isHandler`
+     * detects only `@Controller`, no longer a bare `@RequestMapping`), and a
+     * `@Component`-meta-annotated class nested inside a `@Configuration` is registered
+     * by `ConfigurationClassParser`'s member-class processing — so it needs no `@Bean`
+     * method, and adding one registers it TWICE (ambiguous mapping). Nesting it inside
+     * this test's `@TestConfiguration` also keeps it out of every other context, since
+     * Boot's `TestTypeExcludeFilter` bars test-nested classes from component scanning.
+     */
     @TestConfiguration
     class ProbeConfiguration {
         /**

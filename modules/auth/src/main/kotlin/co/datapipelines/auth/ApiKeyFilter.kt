@@ -120,22 +120,23 @@ class ApiKeyFilter(
                 auditLogger.log(event = "auth.api_key.used", userId = principal.userId, keyId = principal.keyId)
             }
             return principal
+        } catch (e: SecretVerificationUnavailableException) {
+            // #847 — the secret was never judged: stashed for the entry point's 503, but no
+            // `auth.api_key.rejected` row. The native code and text ride on the exception
+            // (stack), never on the credential. Caught BEFORE the general AuthException.
+            request.setAttribute(AuthAttributes.AUTH_ERROR, e)
+            log.error(
+                "event={} path={} client={} native_code={}",
+                AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE,
+                request.requestURI,
+                clientAddressResolver.clientAddressOf(request),
+                e.nativeCode,
+                e,
+            )
+            return null
         } catch (e: AuthException) {
             request.setAttribute(AuthAttributes.AUTH_ERROR, e)
             val client = clientAddressResolver.clientAddressOf(request)
-            if (e is SecretVerificationUnavailableException) {
-                // #847 — the secret was never judged: no `auth.api_key.rejected` row. The native
-                // code and text ride on the exception (stack), never on the credential.
-                log.error(
-                    "event={} path={} client={} native_code={}",
-                    AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE,
-                    request.requestURI,
-                    client,
-                    e.nativeCode,
-                    e,
-                )
-                return null
-            }
             if (ApiKeyCredential.hasValidShape(credential)) {
                 auditLogger.log(
                     event = "auth.api_key.rejected",

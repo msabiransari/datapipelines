@@ -289,7 +289,11 @@ class PromotionServerKeyFilterTest {
     fun `a native verification fault is a 503, never key_invalid, with no audit row and the chain stopped`() {
         val response = MockHttpServletResponse()
         val chain = MockFilterChain()
-        val fault = SecretVerificationUnavailableException(Argon2SecretHasher.MEMORY_ALLOCATION_ERROR, IllegalStateException("Memory allocation error (-22)"))
+        val fault =
+            SecretVerificationUnavailableException(
+                Argon2SecretHasher.MEMORY_ALLOCATION_ERROR,
+                IllegalStateException("Memory allocation error (-22)"),
+            )
 
         filter(configuredKey = KEY, stored = null, refusal = fault)
             .doFilter(promotionRequest(header = "dpk_ZZZZZZZZZZZZ.$SECRET_HALF"), response, chain)

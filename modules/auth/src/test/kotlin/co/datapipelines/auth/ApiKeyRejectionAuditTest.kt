@@ -14,10 +14,10 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.mock.web.MockFilterChain
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
-import org.slf4j.LoggerFactory
 import org.springframework.security.authentication.InsufficientAuthenticationException
 import org.springframework.security.core.context.SecurityContextHolder
 
@@ -110,7 +110,10 @@ class ApiKeyRejectionAuditTest {
     fun `a native verification fault is a 503 with no audit row and an ERROR line that carries no credential`() {
         val service = mockk<ApiKeyService>()
         every { service.validate(any()) } throws
-            SecretVerificationUnavailableException(Argon2SecretHasher.MEMORY_ALLOCATION_ERROR, IllegalStateException("Memory allocation error (-22)"))
+            SecretVerificationUnavailableException(
+                Argon2SecretHasher.MEMORY_ALLOCATION_ERROR,
+                IllegalStateException("Memory allocation error (-22)"),
+            )
         val writer = AuthErrorWriter(ObjectMapper())
         val unavailable = ApiKeyFilter(service, apiKeyRepository, auditLogger, ClientAddressResolver(emptyList()), writer)
         val request = MockHttpServletRequest("GET", "/api/v1/pipelines")

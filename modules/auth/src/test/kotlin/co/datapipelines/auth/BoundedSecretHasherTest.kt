@@ -173,7 +173,12 @@ class BoundedSecretHasherTest {
                 .find(BoundedSecretHasher.SECRET_VERIFICATION_FAILED_METRIC)
                 .counters()
                 .map { it.id.getTag("cause") }
-                .toSet() shouldBe setOf(BoundedSecretHasher.CAUSE_MEMORY, BoundedSecretHasher.CAUSE_ENCODING, BoundedSecretHasher.CAUSE_OTHER)
+                .toSet() shouldBe
+                setOf(
+                    BoundedSecretHasher.CAUSE_MEMORY,
+                    BoundedSecretHasher.CAUSE_ENCODING,
+                    BoundedSecretHasher.CAUSE_OTHER,
+                )
         }
     }
 
