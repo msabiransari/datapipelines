@@ -50,7 +50,7 @@ class DependencyTreeProjectionTest {
         goldens.size shouldBeGreaterThanOrEqual MIN_DATA_GOLDENS
         goldens.forEach { (name, golden) ->
             withClue(name) {
-                val projected = mapper.valueToTree<JsonNode>(DependencyTreeProjection.project(snapshotOf(golden)))
+                val projected = mapper.valueToTree<JsonNode>(DependencyTreeProjection.project(snapshotOf(golden), unmetOf(golden)))
                 projected shouldBe golden
                 mapper.writeValueAsString(projected) shouldBe mapper.writeValueAsString(golden)
             }
@@ -111,6 +111,17 @@ class DependencyTreeProjectionTest {
             internalFingerprint = "not-on-the-wire",
         )
     }
+
+    /** #892: a constraint's `unmet_names` is not a snapshot field — it is the stage's request-local mark, read back here. */
+    private fun unmetOf(golden: JsonNode): UnmetParameterNames.Unmet =
+        UnmetParameterNames.Unmet(
+            golden["edges"]
+                .flatMap { e ->
+                    e["constraints"].filter { it.has("unmet_names") }.map { c ->
+                        (e["edge_id"].asText() to constraintOf(c) as Constraint.ParameterNames) to c["unmet_names"].map { it.asText() }
+                    }
+                }.toMap(),
+        )
 
     private fun nodeOf(n: JsonNode): Node {
         val family = FamilyKey(n["family"].asText())

@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.117 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112, v2.116) rows for the deliberate breaks)
+**Status:** v2.118 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37) and 2026-11-11 (v2.112, v2.116) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-11
@@ -3018,7 +3018,7 @@ Edge       = { edge_id, from: node_id, to: node_id, relationship: Relationship,
 Relationship = "TEMPLATE" | "CHILD_PIPELINE" | "DATASOURCE" | "IMPORT" | "PARAMETER_SOURCE_TEMPLATE"
              | "PARAMETER_SOURCE_DATASOURCE" | "TRANSFORM_TEMPLATE" | "PARAMETER_SET" | "SOURCE_PIPELINE"
              | "VISUALIZATION" | "PIPELINE_PIN" | "EXECUTOR_TARGET"
-Constraint = { kind: "parameter_names", names: [string] }
+Constraint = { kind: "parameter_names", names: [string], unmet_names?: [string] }
            | { kind: "datasource_access", mode: "read" | "write" }
            | { kind: "datasource_dialect", dialect: string }
 Diagnostic = { code: "MISSING" | "DISCARDED" | "UNSUPPORTED_FAMILY" | "CYCLE" | "LIMIT" | "INCOMPLETE_VIEW",
@@ -3034,6 +3034,23 @@ and no facts, and the absent and hidden cases are byte-identical. The routes run
 them apart and remove no node. `source_path` is `null` when a reference has no single field (a body
 read as a whole). The payload never carries a stored body, SQL, parameter values, an internal
 fingerprint or a hidden count.
+
+A dashboard's `PARAMETER_SET` edge carries one `parameter_names` constraint: the set parameters its
+`{parameter}` source bindings use, each once, sorted. A literal binding adds nothing. When the set version
+the edge reached does not declare some of those names, the constraint also carries `unmet_names`: those
+names, each once, in the order `names` uses — always a subset of `names`.
+
+```json
+"constraints": [ { "kind": "parameter_names", "names": ["region", "since"], "unmet_names": ["since"] } ]
+```
+
+`unmet_names` is absent when every name is met, and also when the set was not read: a set node that is
+`missing` (absent, in another workspace, or otherwise not visible) never carries it, so the payload says
+nothing more about a set you cannot read. It is never `[]` and never `null`. It is shown for a `DISCARDED` set
+too. It is a fact about the edge, not a refusal: it never changes `complete`, `acyclic` or `diagnostics`.
+It describes the set as read for this request, so an open draft edited meanwhile is reflected on the next
+request. A save already refuses a binding the pinned set lacks; an unmet name appears when the pinned set's
+open draft is edited afterwards. Releasing such a dashboard is still refused, at that edge, as before.
 
 | Case | Answer |
 |---|---|
@@ -3063,6 +3080,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v2.118 | #892 unmet parameter names | **§25, additive:** a dashboard's `parameter_names` edge constraint gains the optional `unmet_names` — the bound names the reached set version does not declare, a subset of `names` in its order. It is absent when every name is met and when the set is `missing`, never `[]` or `null`, and it changes no other field. `schema_version` stays `1`. |
 | 2026-11-11 | v2.117 | #875 dependency trees (G4) | **New §25 Dependency trees, additive:** the eight session-only routes `GET /api/v1/dependencies/<family>`, each with its family's READ permission, return the bounded dependency closure of one root (`name` + `version`, `id` for a schedule, `name` alone for a datasource) as the frozen dependency-graph wire contract. Refusals are catalogued in pipeline-contract §13.26; a hidden or missing root answers its family's own not-found. No key kind is admitted. A DISCARDED version is a terminal node (`complete: false`, `acyclic: null`). A tree over `max-wire-bytes` is reduced to the longest prefix of its nodes that fits and answers `200` with a `wire_bytes` `LIMIT`; only a tree whose roots alone do not fit answers `503 dependencies.response.too_large`. Each case the routes produce is pinned by an enveloped golden. |
 | 2026-11-11 | v2.116 | #894 endpoint-root audit provenance — a deliberate break | **§5.10** (the audit paragraph): a template row an API release cascades carries `cascade_from_api_endpoint_id` and the API's `cascade_from_version`, and no longer `cascade_from_pipeline_id` holding the API's id (owner ruling 2026-11-11, an explicit exception to the frozen release-dependencies record §11). A pipeline release's rows are unchanged; rows written before #894 are not rewritten. No route, field, permission or role changed. |
 | 2026-11-11 | v2.115 | #896 review F2 | **§9.1:** distinguish `global: true` (super-admin-only) from `global: false` (accepted on create below super admin); the update rule in §9.4 still requires super admin for either value. No wire or authorization change. |

@@ -118,14 +118,20 @@ data class WireDiagnostic(
  * visible parent spells it, no `entity_id`, no fact — and its `version` from the REQUEST (an exact or CURRENT selector
  * names an artifact version, an entity selector an unversioned object), the one representation for an absent and an
  * invisible target alike (§12; erratum (8)(c)). This projection removes no node, so it emits no `INCOMPLETE_VIEW`.
+ *
+ * A `parameter_names` constraint carries `unmet_names` (#892, erratum (11)) exactly when [UnmetParameterNames] marked it —
+ * a non-empty subset of its `names`, after them; otherwise the key is absent, never `[]` or `null`.
  */
 object DependencyTreeProjection {
-    fun project(graph: GraphSnapshot): DependencyTreeData =
+    fun project(
+        graph: GraphSnapshot,
+        unmet: UnmetParameterNames.Unmet = UnmetParameterNames.Unmet.NONE,
+    ): DependencyTreeData =
         DependencyTreeData(
             schemaVersion = graph.schemaVersion,
             roots = graph.roots,
             nodes = graph.nodes.map(::node),
-            edges = graph.edges.map(::edge),
+            edges = graph.edges.map { edge(it, unmet) },
             diagnostics = graph.diagnostics.map(::diagnostic),
             complete = graph.complete,
             acyclic = graph.acyclic,
@@ -168,7 +174,10 @@ object DependencyTreeProjection {
             is Operational.Visualization -> mapOf("evidence_ready" to operational.evidenceReady)
         }
 
-    private fun edge(edge: Edge): WireEdge =
+    private fun edge(
+        edge: Edge,
+        unmet: UnmetParameterNames.Unmet,
+    ): WireEdge =
         WireEdge(
             edgeId = edge.edgeId,
             from = edge.fromNodeId,
@@ -177,12 +186,18 @@ object DependencyTreeProjection {
             sourcePath = edge.sourcePath?.let(::jsonPointer),
             requestedSelector = WireNumbered(edge.requestedSelector.kind.wire, edge.requestedSelector.number),
             resolvedVersion = edge.resolvedVersion,
-            constraints = edge.constraints.map(::constraint),
+            constraints = edge.constraints.map { constraint(it) { names -> unmet.of(edge.edgeId, names) } },
         )
 
-    private fun constraint(constraint: Constraint): Map<String, Any> =
+    private fun constraint(
+        constraint: Constraint,
+        unmetOf: (Constraint.ParameterNames) -> List<String>?,
+    ): Map<String, Any> =
         when (constraint) {
-            is Constraint.ParameterNames -> linkedMapOf("kind" to constraint.kind.wire, "names" to constraint.names)
+            is Constraint.ParameterNames ->
+                linkedMapOf<String, Any>("kind" to constraint.kind.wire, "names" to constraint.names).apply {
+                    unmetOf(constraint)?.let { put(UNMET_NAMES, it) }
+                }
             is Constraint.DatasourceAccess -> linkedMapOf("kind" to constraint.kind.wire, "mode" to constraint.mode.wire)
             is Constraint.DatasourceDialect -> linkedMapOf("kind" to constraint.kind.wire, "dialect" to constraint.dialect)
         }
@@ -209,4 +224,7 @@ object DependencyTreeProjection {
     }
 
     private val INDEX = Regex("\\[([0-9]+)]")
+
+    /** The erratum (11) key of a `parameter_names` constraint element. */
+    const val UNMET_NAMES = "unmet_names"
 }
