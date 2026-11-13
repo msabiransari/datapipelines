@@ -49,6 +49,9 @@ visitor behind the relay.
    — the table and KPI kinds' adapters, each registering its kind at load;
 6. `embed.js` — mounts the container and inits.
 
+The boot glue declares `charts: { library: "plotly", instance: window.Plotly }`
+at init so the chart adapter uses the loaded Plotly library.
+
 ## Stylesheets, in this order
 
 `tokens.css`, the theme sheet, `base.css`, `primitives.css`, `app.css`,
