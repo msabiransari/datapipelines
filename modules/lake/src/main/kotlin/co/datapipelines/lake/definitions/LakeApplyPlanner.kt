@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *   it is handed back;
  * - REVIEWED / BREAKING → refused, no commit; anything else → drift, with a field-by-field diff.
  *
- * S is read from the table's current schema, default spec and properties; "last applied" is the version its
+ * S is read from the table's current schema, default spec, sort order and properties; "last applied" is the version its
  * `dp.definition.version` names, whose body [bodyOf] reads from the definition versions.
  */
 internal class LakeApplyPlanner(
