@@ -26,7 +26,11 @@ class DuckDbScratchHealthIndicatorTest {
 
     /** A file system of named paths; anything not named is absent below an existing `/` and `/srv`. */
     private class FakeReader : ScratchSpaceReader {
-        val kinds = mutableMapOf<Path, ScratchPathKind>(Path.of("/") to ScratchPathKind.DIRECTORY, Path.of("/srv") to ScratchPathKind.DIRECTORY)
+        val kinds =
+            mutableMapOf(
+                Path.of("/") to ScratchPathKind.DIRECTORY,
+                Path.of("/srv") to ScratchPathKind.DIRECTORY,
+            )
         val writable = mutableSetOf<Path>()
         val usable = mutableMapOf<Path, Long>()
         val throwOnKind = mutableSetOf<Path>()

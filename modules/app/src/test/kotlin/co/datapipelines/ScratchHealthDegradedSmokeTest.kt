@@ -83,7 +83,11 @@ class ScratchHealthDegradedSmokeTest {
 
         val ready = rest.getForEntity("/ready", String::class.java)
         ready.statusCode.value() shouldBe 200
-        mapper.readTree(ready.body)["components"].fieldNames().asSequence().toList() shouldContainExactly
+        mapper
+            .readTree(ready.body)["components"]
+            .fieldNames()
+            .asSequence()
+            .toList() shouldContainExactly
             listOf("database", "redis", "h2_factory")
     }
 
@@ -110,7 +114,10 @@ class ScratchHealthDegradedSmokeTest {
         /** In-process OIDC discovery for the configured providers, exactly as [ApplicationSmokeTest] boots it. */
         private val oidc = OidcDiscoveryStub()
 
-        private fun randomSecret(): String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { SecureRandom().nextBytes(it) })
+        private fun randomSecret(): String =
+            Base64
+                .getEncoder()
+                .encodeToString(ByteArray(SECRET_BYTES).also { SecureRandom().nextBytes(it) })
 
         @DynamicPropertySource
         @JvmStatic

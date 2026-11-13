@@ -63,22 +63,28 @@ class DuckDbScratchHealthIndicator(
         val isTarget = nearest.path == space.directory
         val target = if (isTarget) "the scratch directory" else "its nearest existing parent ${nearest.path}"
         return when {
-            isTarget && nearest.kind != ScratchPathKind.DIRECTORY ->
+            isTarget && nearest.kind != ScratchPathKind.DIRECTORY -> {
                 Verdict(Status.OUT_OF_SERVICE, "the scratch path exists and is not a directory")
+            }
 
-            isTarget && !writable ->
+            isTarget && !writable -> {
                 Verdict(Status.OUT_OF_SERVICE, "the scratch directory is not writable by the process")
+            }
 
-            !isTarget && (nearest.kind != ScratchPathKind.DIRECTORY || !writable) ->
+            !isTarget && (nearest.kind != ScratchPathKind.DIRECTORY || !writable) -> {
                 Verdict(Status.OUT_OF_SERVICE, "the scratch directory is absent and could not be created under ${nearest.path}")
+            }
 
-            usable < thresholdBytes ->
+            usable < thresholdBytes -> {
                 Verdict(
                     Status.OUT_OF_SERVICE,
                     "$target has $usable usable bytes, below one default reservation of $thresholdBytes bytes",
                 )
+            }
 
-            else -> Verdict(Status.UP, "$target has $usable usable bytes; one default reservation is $thresholdBytes bytes")
+            else -> {
+                Verdict(Status.UP, "$target has $usable usable bytes; one default reservation is $thresholdBytes bytes")
+            }
         }
     }
 

@@ -110,13 +110,6 @@ class WebSurfaceConfiguration {
     @Bean
     fun scratchSpaceReader(): ScratchSpaceReader = FileSystemScratchSpaceReader()
 
-    /** #806 — the DuckDB factory's scratch directory, read by the `duckdb_scratch` indicator and the `usable` gauge. */
-    @Bean
-    fun duckDbScratchSpace(
-        stagingFactory: StagingFactory,
-        reader: ScratchSpaceReader,
-    ): ScratchSpace = ScratchSpace(duckDbFactoryOf(stagingFactory).properties.scratchDir, reader)
-
     /**
      * #806 (owner ruling 2026-11-12) — the DuckDB scratch indicator, status only, on the management port's
      * `/actuator/health`. The name is pinned like `h2_factory`'s; it is NOT one of `HealthController`'s three
@@ -125,9 +118,12 @@ class WebSurfaceConfiguration {
     @Bean(name = ["duckdb_scratch"])
     fun duckDbScratchHealthIndicator(
         stagingFactory: StagingFactory,
-        space: ScratchSpace,
+        reader: ScratchSpaceReader,
     ): DuckDbScratchHealthIndicator =
-        DuckDbScratchHealthIndicator(space, duckDbFactoryOf(stagingFactory).properties.defaultReservationBytes)
+        DuckDbScratchHealthIndicator(
+            duckDbScratchSpace(stagingFactory, reader),
+            duckDbFactoryOf(stagingFactory).properties.defaultReservationBytes,
+        )
 
     /**
      * The SSE log streamer's executor (`dp-sse-log`): replays (rest-api §10.3) and idempotent-retry
@@ -208,12 +204,12 @@ class WebSurfaceConfiguration {
         writers: ObjectProvider<BatchingWriter<*>>,
         // #806 — the DuckDB scratch gauges read the factory's budget and the scratch directory's space.
         stagingFactory: StagingFactory,
-        scratchSpace: ScratchSpace,
+        scratchSpaceReader: ScratchSpaceReader,
     ): WebMetrics =
         WebMetrics(registry).also { metrics ->
             metrics.bindStreams(streams)
             writers.orderedStream().forEach(metrics::bindPersistence)
-            metrics.bindScratch(duckDbFactoryOf(stagingFactory).budget, scratchSpace)
+            metrics.bindScratch(duckDbFactoryOf(stagingFactory).budget, duckDbScratchSpace(stagingFactory, scratchSpaceReader))
         }
 
     @Bean
@@ -456,6 +452,15 @@ class WebSurfaceConfiguration {
 }
 
 /**
+ * #806 — the DuckDB factory's scratch directory as the `duckdb_scratch` indicator and the `usable` gauge read it,
+ * through the context's one [ScratchSpaceReader] bean. Holds no state of its own, so each reader gets its own.
+ */
+internal fun duckDbScratchSpace(
+    stagingFactory: StagingFactory,
+    reader: ScratchSpaceReader,
+): ScratchSpace = ScratchSpace(duckDbFactoryOf(stagingFactory).properties.scratchDir, reader)
+
+/**
  * #806 — the DuckDB factory behind the context's [StagingFactory]: the production bean is an
  * [EngineDispatchingStagingFactory] (`DomainConfiguration.stagingFactory`), whose `duckDb` delegate owns the scratch
  * budget and directory. Any other shape fails the context — the scratch signal never degrades silently to nothing.
@@ -464,8 +469,5 @@ internal fun duckDbFactoryOf(stagingFactory: StagingFactory): DuckDbStagingFacto
     when (stagingFactory) {
         is EngineDispatchingStagingFactory -> stagingFactory.duckDb
         is DuckDbStagingFactory -> stagingFactory
-        else -> error(
-            "the DuckDB scratch signal (#806) needs the DuckDB staging factory, but the context's StagingFactory is a " +
-                stagingFactory.javaClass.name,
-        )
+        else -> error("the DuckDB scratch signal (#806) needs the DuckDB staging factory, not a ${stagingFactory.javaClass.name}")
     }

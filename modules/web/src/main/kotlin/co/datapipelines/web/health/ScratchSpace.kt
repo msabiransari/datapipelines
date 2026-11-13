@@ -91,9 +91,9 @@ class ScratchSpace(
         if (rootKind == ScratchPathKind.ABSENT) throw IOException("the root $root of the scratch directory is absent")
         var nearest = Nearest(root, rootKind)
         var current = root
-        for (name in directory) {
-            if (nearest.kind != ScratchPathKind.DIRECTORY) break
-            current = current.resolve(name)
+        val names = directory.iterator()
+        while (nearest.kind == ScratchPathKind.DIRECTORY && names.hasNext()) {
+            current = current.resolve(names.next())
             val kind = reader.kind(current)
             if (kind == ScratchPathKind.ABSENT) break
             nearest = Nearest(current, kind)

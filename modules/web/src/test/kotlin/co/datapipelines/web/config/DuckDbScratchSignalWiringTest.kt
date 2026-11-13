@@ -51,7 +51,7 @@ class DuckDbScratchSignalWiringTest {
     private val factory by lazy { stagingFactoryFor(StagingH2Properties(), LakeProperties.Admission(), scratch) }
 
     private fun bind() {
-        WebMetrics(registry).bindScratch(duckDbFactoryOf(factory).budget, configuration.duckDbScratchSpace(factory, reader))
+        WebMetrics(registry).bindScratch(duckDbFactoryOf(factory).budget, duckDbScratchSpace(factory, reader))
     }
 
     private fun gauge(name: String): Double = registry.get(name).gauge().value()
@@ -113,9 +113,8 @@ class DuckDbScratchSignalWiringTest {
 
     @Test
     fun `the indicator bean watches the factory's scratch directory with one default reservation as its threshold`() {
-        val space = configuration.duckDbScratchSpace(factory, reader)
-        space.directory shouldBe scratch
-        val indicator = configuration.duckDbScratchHealthIndicator(factory, space)
+        duckDbScratchSpace(factory, reader).directory shouldBe scratch
+        val indicator = configuration.duckDbScratchHealthIndicator(factory, reader)
         reader.usable = DEFAULT_RESERVATION
         indicator.health().status shouldBe Status.UP
         reader.usable = DEFAULT_RESERVATION - 1
@@ -133,7 +132,7 @@ class DuckDbScratchSignalWiringTest {
                     engine: StagingEngine,
                 ): Staging = error("not used")
             }
-        shouldThrow<IllegalStateException> { configuration.duckDbScratchSpace(foreign, reader) }.message.orEmpty() shouldContain
+        shouldThrow<IllegalStateException> { configuration.duckDbScratchHealthIndicator(foreign, reader) }.message.orEmpty() shouldContain
             "needs the DuckDB staging factory"
     }
 

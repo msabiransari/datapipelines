@@ -294,7 +294,11 @@ class ApplicationSmokeTest {
         val health = get(managementPort, "/actuator/health")
         withClue("anonymous GET /actuator/health on the management port: ${health.body()}") {
             health.statusCode() shouldBe 200
-            mapper.readTree(health.body()).fieldNames().asSequence().toList() shouldContainExactly listOf("status")
+            mapper
+                .readTree(health.body())
+                .fieldNames()
+                .asSequence()
+                .toList() shouldContainExactly listOf("status")
             mapper.readTree(health.body())["status"].asText() shouldBe "UP"
             health.body() shouldNotContain "dp-staging"
             health.body().any(Char::isDigit) shouldBe false
