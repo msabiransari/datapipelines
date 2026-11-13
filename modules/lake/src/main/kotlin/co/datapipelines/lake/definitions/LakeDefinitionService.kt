@@ -115,9 +115,10 @@ class LakeDefinitionService(
      * busy table, a catalog refusal, or an unknown commit outcome, which includes an exception the catalog does not
      * classify from the commit step (`Unknown`, `lake.definition.apply_unclassified`, #811).
      *
-     * Still thrown after the landing committed (#822): an unclassified failure before the commit (the row is put
-     * back to `pending` first), a failure opening the table's catalog session (the row stays `applying`), and a
-     * failure of DP's metadata store during the apply. The landing has committed in each case.
+     * Nothing is thrown after the landing committed (#822, record §7): a failure at any step of the apply — the
+     * deadline read itself, which the applier performs, the catalog session, DP's metadata store — is returned as
+     * `Pending` or `Unknown` (`lake.definition.apply_unclassified` unless the catalog classified it). Thrown after the
+     * landing only: `lake.definition.not_found`, for a table or version that does not exist when the apply starts.
      */
     fun release(
         tableId: UUID,
@@ -148,7 +149,7 @@ class LakeDefinitionService(
                     ),
             )
         }
-        return LakeReleaseResult(version, applier.apply(tableId, version, leases.catalogNowPlus(jobTimeout), actor))
+        return LakeReleaseResult(version, applier.apply(tableId, version, { leases.catalogNowPlus(jobTimeout) }, actor))
     }
 
     /**

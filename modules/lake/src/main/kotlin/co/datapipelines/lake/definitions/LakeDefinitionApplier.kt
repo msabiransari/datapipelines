@@ -5,6 +5,7 @@ import co.datapipelines.lake.LakeCatalogException
 import co.datapipelines.lake.LakeCatalogSession
 import co.datapipelines.lake.LakeCatalogs
 import co.datapipelines.lake.LakeNames
+import co.datapipelines.lake.LeaseHandle
 import co.datapipelines.lake.LeaseOutcome
 import co.datapipelines.lake.settle.LakeMetadataRead
 import co.datapipelines.lake.settle.LakeMetadataReads
@@ -22,10 +23,19 @@ import java.util.UUID
 
 /**
  * The apply state machine (dp-lake design record §7, lake.md §3): brings one managed table's Iceberg state to its
- * current released definition, or records why not. Called by the release request (A2), by P4's sweep and by the
- * retry path; never inside a transaction (leases autocommit). Every stamp is conditional on the attempt's operation id,
+ * current released definition, or records why not. [apply] is called by the release request (A2), [verifyApplying] by
+ * P4's sweep; never inside a transaction (leases autocommit). Every stamp is conditional on the attempt's operation id,
  * so a stale attempt changes nothing; the leases are released in `finally`, after the session is closed.
+ *
+ * [apply] never throws after the caller's landing (record §7, erratum 2026-11-12, #822): a failure of any step is
+ * RETURNED as the attempt's outcome and logged once at ERROR naming the step that caught it ([LakeApplyLog.Step]) —
+ * [LakeApplyOutcome.Pending] where nothing was committed and the row is, or was put back to, `pending`;
+ * [LakeApplyOutcome.Unknown] where the row could not be stamped, left for [verifyApplying]. A failure the catalog
+ * classifies keeps its own code; any other is `lake.definition.apply_unclassified`. Thrown only:
+ * [LakeDefinitionErrors.notFound] for a table or version that does not exist (a caller's error before any attempt),
+ * and an [Error], which is never caught.
  */
+@Suppress("TooGenericExceptionCaught") // #822: every Exception of an apply step, runtime or not, becomes an outcome
 class LakeDefinitionApplier(
     private val definitions: LakeDefinitionRepository,
     private val applies: LakeApplyRepository,
@@ -47,44 +57,173 @@ class LakeDefinitionApplier(
         version: Int,
         deadline: Instant,
         actor: UUID? = null,
+    ): LakeApplyOutcome = apply(tableId, version, { deadline }, actor)
+
+    /**
+     * [apply], the deadline read through [deadline] once the table and its version are known to exist and the version
+     * is current, before the attempt starts (#822, owner ruling 2026-11-13): the release passes its catalog-clock read
+     * here, so that read's failure is this attempt's `pending` outcome (step `deadline`), not an exception after the
+     * landing. A failure reading the table's own row answers `pending` too, logged without its names.
+     */
+    @Suppress("ReturnCount") // a failed row read, a missing table and a stale version each end the call before the attempt
+    fun apply(
+        tableId: UUID,
+        version: Int,
+        deadline: () -> Instant,
+        actor: UUID? = null,
     ): LakeApplyOutcome {
-        val row = definitions.findTable(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
-        if (row.currentDefinitionVersion != version) return LakeApplyOutcome.NotApplicable(row.applyState, row.currentDefinitionVersion)
-        val intent = bodyOf(tableId, version) ?: throw LakeDefinitionErrors.notFound(tableId, version)
-        LakeNames.requireName(row.namespace)
-        LakeNames.requireName(row.name)
         val operationId = UUID.randomUUID()
-        val outcome =
+        val row =
             try {
-                applyLeased(Attempt(row, version, intent, operationId, actor), deadline)
-            } finally {
-                leases.release(operationId)
-            }
+                definitions.findTable(tableId)
+            } catch (e: Exception) {
+                LakeApplyLog.unclassified(tableId, version, operationId, LakeApplyLog.Step.METADATA_STORE, e)
+                return LakeApplyOutcome.Pending(UNCLASSIFIED)
+            } ?: throw LakeDefinitionErrors.notFound(tableId)
+        if (row.currentDefinitionVersion != version) return LakeApplyOutcome.NotApplicable(row.applyState, row.currentDefinitionVersion)
+        val outcome = begin(row, version, deadline, operationId, actor)
         LakeApplyLog.ended(OPERATION_APPLY, row, version, operationId, outcome)
         return outcome
     }
 
+    /** Reads the version's body (3a) and the deadline (0) while nothing is held yet, then runs the leased attempt. */
+    @Suppress("ReturnCount") // each read's converted failure ends the attempt before a lease is taken
+    private fun begin(
+        row: LakeManagedTable,
+        version: Int,
+        deadline: () -> Instant,
+        operationId: UUID,
+        actor: UUID?,
+    ): LakeApplyOutcome {
+        val intent =
+            try {
+                LakeNames.requireName(row.namespace)
+                LakeNames.requireName(row.name)
+                bodyOf(row.id, version)
+            } catch (e: Exception) {
+                LakeApplyLog.unclassified(row, version, operationId, LakeApplyLog.Step.METADATA_STORE, e)
+                return LakeApplyOutcome.Pending(UNCLASSIFIED)
+            } ?: throw LakeDefinitionErrors.notFound(row.id, version)
+        val due =
+            try {
+                deadline()
+            } catch (e: Exception) {
+                LakeApplyLog.unclassified(row, version, operationId, LakeApplyLog.Step.DEADLINE, e)
+                return LakeApplyOutcome.Pending(UNCLASSIFIED)
+            }
+        val attempt = Attempt(row, version, intent, operationId, actor)
+        return try {
+            applyLeased(attempt, due)
+        } finally {
+            releaseLeases(attempt)
+        }
+    }
+
+    @Suppress("ReturnCount") // each step's converted failure is its own exit (#822)
     private fun applyLeased(
         attempt: Attempt,
         deadline: Instant,
     ): LakeApplyOutcome {
         val row = attempt.row
-        val namespaceExists = applies.icebergNamespaceExists(lakeName, row.namespace)
         val held =
-            when (val taken = leases.take(row.namespace, row.name, namespaceExists, attempt.operationId, deadline, OPERATION_APPLY)) {
-                is LakeApplyLeases.Taken.Busy -> return LakeApplyOutcome.Busy(taken.reason)
-                is LakeApplyLeases.Taken.Ok -> taken.held
+            try {
+                val namespaceExists = applies.icebergNamespaceExists(lakeName, row.namespace)
+                when (val taken = leases.take(row.namespace, row.name, namespaceExists, attempt.operationId, deadline, OPERATION_APPLY)) {
+                    is LakeApplyLeases.Taken.Busy -> return LakeApplyOutcome.Busy(taken.reason)
+                    is LakeApplyLeases.Taken.Ok -> taken.held
+                }
+            } catch (e: Exception) {
+                // 3a: the row is not marked yet, so it is `pending` as the landing left it.
+                logUnclassified(attempt, LakeApplyLog.Step.METADATA_STORE, e)
+                return LakeApplyOutcome.Pending(UNCLASSIFIED)
             }
-        if (applies.markApplying(row.id, attempt.version, attempt.operationId) == 0) {
-            val now = definitions.findTable(row.id)
+        val marked =
+            try {
+                applies.markApplying(row.id, attempt.version, attempt.operationId)
+            } catch (e: Exception) {
+                return unknown(attempt, e)
+            }
+        if (marked == 0) {
+            val now =
+                try {
+                    definitions.findTable(row.id)
+                } catch (e: Exception) {
+                    return unknown(attempt, e)
+                }
             return LakeApplyOutcome.NotApplicable(now?.applyState, now?.currentDefinitionVersion)
         }
         held.namespace?.let { lease ->
-            preCommit(attempt) { catalogs.open(lease).use { it.createNamespace(row.namespace) } }?.let { return it }
+            inSession(attempt, lease) { session -> preCommit(attempt) { session.createNamespace(row.namespace) } }?.let { return it }
         }
-        return catalogs.open(held.table).use { session ->
-            if (!leases.renew(held.table)) return@use pending(attempt, PipelineErrorCodes.Lake.CATALOG_FENCED)
-            run(attempt, session)
+        // The table step always answers an outcome; the elvis only satisfies the type of the shared session helper.
+        return inSession(attempt, held.table) { session -> leased(attempt, session) } ?: pending(attempt, UNCLASSIFIED)
+    }
+
+    /**
+     * Runs [step] in a catalog session under [lease] and closes it. The open (path 2): a refusal the catalog classifies
+     * ends the attempt `pending` with its code, any other failure `pending(apply_unclassified)`. The close (3c, 3d) runs
+     * whatever [step] answered; its failure is logged, and the outcome [step] answered stands — a step that completed
+     * (null, the namespace step) instead ends the attempt `pending` before anything is committed for the table.
+     */
+    private fun inSession(
+        attempt: Attempt,
+        lease: LeaseHandle,
+        step: (LakeCatalogSession) -> LakeApplyOutcome?,
+    ): LakeApplyOutcome? {
+        val session =
+            try {
+                catalogs.open(lease)
+            } catch (e: LakeCatalogException) {
+                return pending(attempt, e.code)
+            } catch (e: Exception) {
+                logUnclassified(attempt, LakeApplyLog.Step.SESSION_OPEN, e)
+                return pending(attempt, UNCLASSIFIED)
+            }
+        var closed = false
+        val outcome =
+            try {
+                step(session)
+            } finally {
+                closed = close(attempt, session)
+            }
+        return outcome ?: if (closed) null else pending(attempt, UNCLASSIFIED)
+    }
+
+    /** Closes [session]; false when the close failed, which is logged (step `session_close`) and dropped. */
+    private fun close(
+        attempt: Attempt,
+        session: LakeCatalogSession,
+    ): Boolean =
+        try {
+            session.close()
+            hooks.afterSessionClose(session.lease)
+            true
+        } catch (e: Exception) {
+            logUnclassified(attempt, LakeApplyLog.Step.SESSION_CLOSE, e)
+            false
+        }
+
+    /** The table step under its lease: renews it before the commit (3b), then [run]. */
+    private fun leased(
+        attempt: Attempt,
+        session: LakeCatalogSession,
+    ): LakeApplyOutcome {
+        val renewed =
+            try {
+                leases.renew(session.lease)
+            } catch (e: Exception) {
+                return unknown(attempt, e)
+            }
+        if (!renewed) return pending(attempt, PipelineErrorCodes.Lake.CATALOG_FENCED)
+        return run(attempt, session)
+    }
+
+    /** 3c: a failed release is logged and dropped — every lease of the attempt ends by its own deadline. */
+    private fun releaseLeases(attempt: Attempt) {
+        try {
+            leases.release(attempt.operationId)
+        } catch (e: Exception) {
+            logUnclassified(attempt, LakeApplyLog.Step.LEASE_RELEASE, e)
         }
     }
 
@@ -190,8 +329,8 @@ class LakeDefinitionApplier(
                 }
         }?.let { return it }
         return when (val decided = requireNotNull(plan) { "the planner decided nothing" }) {
-            LakeApplyPlanner.Plan.AlreadyApplied -> stampApplied(attempt, committed = false)
-            is LakeApplyPlanner.Plan.Refuse -> stampFailed(attempt, decided.code, decided.error)
+            LakeApplyPlanner.Plan.AlreadyApplied -> stamped(attempt) { stampApplied(attempt, committed = false) }
+            is LakeApplyPlanner.Plan.Refuse -> stamped(attempt) { stampFailed(attempt, decided.code, decided.error) }
             is LakeApplyPlanner.Plan.Commit -> commit(attempt, session, decided)
         }
     }
@@ -199,9 +338,9 @@ class LakeDefinitionApplier(
     /**
      * The commit, through the session so its failure is classified. A fence or restoring refusal means nothing was
      * committed → `pending`; an unknown outcome leaves `applying` for [verifyApplying]. Any other exception from the
-     * commit step (#811) is logged at ERROR by class and SQLSTATE and ALSO leaves `applying`, returned as
-     * [LakeApplyOutcome.Unknown] (`lake.definition.apply_unclassified`): whether the commit landed is the revision
-     * log's to say, not this exception's, and a release's landing has already committed (lake.md §3).
+     * commit step, runtime or not (#811, #822), is logged at ERROR by class and SQLSTATE (step `commit`) and ALSO leaves
+     * `applying`, returned as [LakeApplyOutcome.Unknown] (`lake.definition.apply_unclassified`): whether the commit
+     * landed is the revision log's to say, not this exception's, and a release's landing has already committed.
      */
     private fun commit(
         attempt: Attempt,
@@ -215,20 +354,18 @@ class LakeDefinitionApplier(
             return LakeApplyOutcome.Unknown(e.code)
         } catch (e: LakeCatalogException) {
             return pending(attempt, e.code)
-        } catch (
+        } catch (e: Exception) {
             // The commit may have landed whatever the failure is: never `failed`, never `pending`, never thrown.
-            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
-        ) {
-            LakeApplyLog.unclassified(attempt.row, attempt.version, attempt.operationId, e)
-            return LakeApplyOutcome.Unknown(PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED)
+            logUnclassified(attempt, LakeApplyLog.Step.COMMIT, e)
+            return LakeApplyOutcome.Unknown(UNCLASSIFIED)
         }
-        return stampApplied(attempt, committed = true)
+        return stamped(attempt) { stampApplied(attempt, committed = true) }
     }
 
     /**
      * Runs a step that commits nothing. Its catalogued refusals end the attempt as `pending`, an Iceberg validation
-     * refusal as `failed(breaking_change)`; any other failure puts the row back to `pending` and propagates.
-     * Answers null when the step completed.
+     * refusal as `failed(breaking_change)`; any other failure, runtime or not, is logged (step `pre_commit`) and puts
+     * the row back to `pending` as `apply_unclassified` (#822). Answers null when the step completed.
      */
     private fun preCommit(
         attempt: Attempt,
@@ -240,24 +377,60 @@ class LakeDefinitionApplier(
         } catch (e: LakeCatalogException) {
             pending(attempt, e.code)
         } catch (e: ValidationException) {
-            stampFailed(
-                attempt,
-                PipelineErrorCodes.Lake.DEFINITION_BREAKING_CHANGE,
-                mapOf("reason" to "iceberg_validation", "detail" to e.message),
-            )
-        } catch (
+            stamped(attempt) {
+                stampFailed(
+                    attempt,
+                    PipelineErrorCodes.Lake.DEFINITION_BREAKING_CHANGE,
+                    mapOf("reason" to "iceberg_validation", "detail" to e.message),
+                )
+            }
+        } catch (e: Exception) {
             // Nothing was committed whatever the failure is; the row must not stay `applying` for a sweep to settle.
-            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
-        ) {
-            applies.finishPending(attempt.row.id, attempt.operationId)
-            throw e
+            logUnclassified(attempt, LakeApplyLog.Step.PRE_COMMIT, e)
+            pending(attempt, UNCLASSIFIED)
         }
 
+    /** Puts the row back to `pending` with [code]; a put-back the metadata store refuses is [unknown] (3b). */
     private fun pending(
         attempt: Attempt,
         code: String,
     ): LakeApplyOutcome =
-        if (applies.finishPending(attempt.row.id, attempt.operationId) == 1) LakeApplyOutcome.Pending(code) else LakeApplyOutcome.Superseded
+        stamped(attempt) {
+            if (applies.finishPending(attempt.row.id, attempt.operationId) == 1) {
+                LakeApplyOutcome.Pending(code)
+            } else {
+                LakeApplyOutcome.Superseded
+            }
+        }
+
+    /** A stamp of the apply path; a failure of DP's metadata store there is [unknown] (3b). */
+    private fun stamped(
+        attempt: Attempt,
+        stamp: () -> LakeApplyOutcome,
+    ): LakeApplyOutcome =
+        try {
+            stamp()
+        } catch (e: Exception) {
+            unknown(attempt, e)
+        }
+
+    /**
+     * 3b: DP's metadata store failed at or after the `applying` mark, so the row could not be stamped: whether it is
+     * `pending` or `applying` is not this attempt's to say. Logged (step `metadata_store`) and left for [verifyApplying].
+     */
+    private fun unknown(
+        attempt: Attempt,
+        failure: Exception,
+    ): LakeApplyOutcome {
+        logUnclassified(attempt, LakeApplyLog.Step.METADATA_STORE, failure)
+        return LakeApplyOutcome.Unknown(UNCLASSIFIED)
+    }
+
+    private fun logUnclassified(
+        attempt: Attempt,
+        step: LakeApplyLog.Step,
+        failure: Exception,
+    ) = LakeApplyLog.unclassified(attempt.row, attempt.version, attempt.operationId, step, failure)
 
     private fun stampApplied(
         attempt: Attempt,
@@ -321,5 +494,8 @@ class LakeDefinitionApplier(
 
         /** `lake_leases.operation` of a verify's takeover. */
         const val OPERATION_VERIFY = "lake.definition.verify"
+
+        /** The code of a failure no catalog classified, at any step of the apply (#811, #822). */
+        private const val UNCLASSIFIED = PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED
     }
 }

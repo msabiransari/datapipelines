@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.94 (revised — see Change Log)
+**Status:** v1.95 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-13
@@ -1789,7 +1789,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.definition.table_busy` | — | Another operation holds the table (its lease, or an apply in flight); nothing changed. |
 | `lake.definition.authoring_disabled` | — | This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. |
 | `lake.unavailable` | 503 | The catalog read a new managed reader generation is built from failed, so no generation was built (#818, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)). A live generation keeps serving until its age bound; a lease with none fails here. `details` carry `datasource` and the bounded `cause`. |
-| `lake.definition.apply_unclassified` | — | The apply's commit step failed with an exception that is not one of the catalog's refusals (#811), so whether the commit landed is unknown. The row stays `applying` until `verifyApplying` settles it from the revision log; it is never recorded as `failed`. A release that reached this outcome has landed, and it returns the outcome. |
+| `lake.definition.apply_unclassified` | — | A step of the apply failed with an exception that is not one of the catalog's refusals (#811, #822): before the commit the row is `pending` again, and from the commit on, or when the row could not be stamped, it is left for `verifyApplying` to settle from the revision log; it is never recorded as `failed`. A release that reached this outcome has landed, and it returns the outcome. |
 
 
 ### 13.26 Dependency trees
@@ -2041,6 +2041,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.95 | 822 (#822) | §13.25 `lake.definition.apply_unclassified`: any step of the apply, not only the commit step, returns it — `pending` before the commit, left for `verifyApplying` after it; a release throws nothing after its landing but `lake.definition.not_found`. No code added or removed. |
 | 2026-11-12 | v1.94 | 847 (#847) — renumbered at merge after #821's v1.89 — renumbered at final sync after dependency-graph | §13.7 gains `auth.secret_verification.unavailable` (503): a native Argon2 verification failure that is not a mismatch is no longer a silent wrong password. Landed with the constants in `AuthErrorCodes` and `PipelineErrorCodes.Auth` and the explicit `ApiErrorCatalog` row (§13 row count 508 → 509, recounted with the drift test's own regex). |
 | 2026-11-12 | v1.93 | #821 invariants count a table caller output — renumbered at final sync after dependency-graph | §13.18 `invariants_too_large`: the COMBINED count also includes a `table` caller output's gated rows (it writes no tempdb table; a tempdb output is counted once, as its written table). No code, code count or permission change. |
 | 2026-11-12 | v1.92 | #876 alias flip | **§13 `pipeline`, `parameter`, `visualization` and `dashboard` `.release.dependency_not_released`, no new code:** the rows stop saying a bare `release_pinned_templates=true` cascades; since #876 it is refused `<family>.release.plan_required` (428) and nothing flips (versioning §5.3). |

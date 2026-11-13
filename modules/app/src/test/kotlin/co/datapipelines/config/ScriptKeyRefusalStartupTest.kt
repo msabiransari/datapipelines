@@ -24,10 +24,11 @@ import java.util.Base64
 class ScriptKeyRefusalStartupTest {
     @Test
     fun `a datapipelines transform key set refuses startup naming the stale key and the script knob`() {
-        // Spring wraps the validator's @PostConstruct refusal in a BeanCreationException; the
-        // §3.28 message rides its cause chain verbatim — the operator sees the full text.
+        // The validator's @PostConstruct refusal reaches the caller wrapped by whichever bean pulled it
+        // first — since #804 R2 the key consumers depend on it, so that is web-server creation pulling
+        // the staging factory. The §3.28 report is the ROOT of the chain, verbatim — the operator sees it.
         val failure =
-            shouldThrow<org.springframework.beans.factory.BeanCreationException> {
+            shouldThrow<Exception> {
                 SpringApplicationBuilder(DatapipelinesApplication::class.java)
                     .run(
                         *(
@@ -37,8 +38,9 @@ class ScriptKeyRefusalStartupTest {
                     ).close()
             }
 
-        var cause: Throwable? = failure
-        val text = generateSequence(cause) { it.cause }.take(10).joinToString(" ") { it.message.orEmpty() }
+        val root = generateSequence<Throwable>(failure) { it.cause }.last()
+        check(root is IllegalStateException) { "the boot failed, but not on the §7 report: $root" }
+        val text = root.message.orEmpty()
         text.shouldContain("startup refused")
         text.shouldContain("datapipelines.transform.pool-size")
         text.shouldContain("datapipelines.script.*")
