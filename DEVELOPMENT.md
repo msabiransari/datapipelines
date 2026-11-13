@@ -198,7 +198,9 @@ the repo Dockerfile as `datapipelines:local`, and runs the **production-shape
 stack** (`deploy/compose.yml` + the `compose.local-build.yml` image
 override — the same stack deployment.md Appendix A describes; secrets in
 git-ignored `deploy/secrets.env`, scaffolded with generated values on first
-run). `./app.sh --stop`
+run). A checkout also built by a host `./gradlew` has its `modules/*/build` removed by the
+next `--start`, once, because the container's build would otherwise package host outputs
+whose sources are gone (#281). `./app.sh --stop`
 stops it; `--status` / `--logs` inspect it. The rest of this section is the
 Gradle-on-host development flow the IDE path also uses:
 
@@ -259,20 +261,25 @@ If startup fails with `datapipelines.auth.base-url must be set…`, your env fil
 ### 6.2 Dependency lockfiles
 
 Every module resolves its dependencies against its committed `gradle.lockfile`
-(module-structure.md §7.6). Locking is STRICT: if resolution drifts from the
-lock — a version changed in `gradle/libs.versions.toml`, a dependency added or
-removed in a module build file, a transitive shifting — the build FAILS with a
-lock-state error. That failure is the guard working; do not try to bypass it.
+(module-structure.md §7.6). STRICT locking constrains resolution to the committed
+versions and refuses unresolved lock state. It does not guarantee that a catalog
+version change fails: a lower request can resolve to the locked higher version
+(#566). Check the resolved dependency graph and the lock diff when changing the
+catalog; a passing build alone does not prove that the requested version took
+effect. The catalog/lock agreement guard remains tracked in #694. Do not bypass
+lock-state or dependency-verification failures.
 
 **Updating the locks** — the only correct response to a *deliberate* dependency
 change:
 
 ```bash
-./gradlew resolveAndLockAll --write-locks
+./gradlew resolveAndLockAll :buildSrc:resolveAndLockAll --write-locks
 ```
 
 This resolves every resolvable configuration in every module and rewrites all
-`gradle.lockfile` files (plus `buildSrc/gradle.lockfile`). Read the resulting
+`gradle.lockfile` files (plus `buildSrc/gradle.lockfile`). The bare `resolveAndLockAll`
+selects the root build's projects only; without `:buildSrc:resolveAndLockAll`, buildSrc's
+ktlint and detekt tool configurations (#724) keep their old lock state. Read the resulting
 diff like any dependency review — it shows exactly which versions moved — and
 commit it in the same commit as the catalog/build-file change that caused it.
 A lockfile diff with no corresponding dependency change means something drifted
@@ -302,6 +309,25 @@ mode). A download whose checksum differs from the committed one fails the
 build naming the artifact: this is the supply-chain twin of the lockfiles
 (locks pin WHICH version; verification pins WHAT BYTES).
 
+Invoke buildSrc's tests by root task path (`./gradlew :buildSrc:cleanTest :buildSrc:test`)
+so their classpath is verified; `-p buildSrc` makes buildSrc its own root build with
+no verification metadata and verifies nothing — never use it where verification matters.
+
+buildSrc's Gradle TestKit probes are root builds of their own too, so each probe copies this
+file into its root (`gradle/verification-metadata.xml`, via `ProbeVerification.kt`, #742):
+everything a probe downloads from Maven Central verifies against the same committed
+checksums as the modules, and a mismatch fails the probe naming the artifact.
+`ProbeVerificationTest` plants one wrong checksum to prove it. Gradle re-verifies
+artifacts already in a warm TestKit cache, so a laptop run checks them too. CI's
+`cold-verify` job runs the probes on a cold TestKit cache every time. A probe that needs an
+artifact the modules never resolve fails on the MISSING entry. To add it, remove the cache used by that probe: `buildSrc/build/tmp/test/work/.gradle-test-kit`
+for the default TestKit runner, or `build/703-probes/gradle-user-home` for
+`KtlintRemovedOnlyTest` (the writer, like the one below, needs a cold cache). Add `"--write-verification-metadata", "sha256"` to that probe's runner arguments for
+one local run, and copy the probe root's
+`gradle/verification-metadata.xml` out before the test ends. Diff it against this file, copy ONLY
+the new `<component>` blocks in at the writer's sorted position, and revert the test edit. Name
+each block in the commit, with its sha256 and why the probe resolves it.
+
 PGP/signature verification is deliberately NOT enabled (deferred — key
 management for ~500 artifacts is its own project; checksums already close the
 "artifact changed upstream / MITM mirror" hole against a trusted first
@@ -312,7 +338,7 @@ deliberate, in the same commit as the lockfile update:
 
 ```bash
 GRADLE_USER_HOME=$(mktemp -d) ./gradlew --write-verification-metadata sha256 --write-locks \
-  resolveAndLockAll help :modules:app:bootJar resolveDependencyVerificationSurface
+  resolveAndLockAll :buildSrc:resolveAndLockAll help :modules:app:bootJar resolveDependencyVerificationSurface
 ```
 
 This resolves every configuration (the point of `resolveAndLockAll`) and
@@ -532,6 +558,37 @@ use `BrowserSuite.FIRST_RENDER_TIMEOUT_MS` (90 s, CI and local alike); every act
 acts on a present DOM and keeps the ordinary patience (30 s locally, where a 30 s wait IS the
 defect; the gates raise that to CI's 90 s per action with `-Pdp.browser.ciPatience=true`, #438).
 
+**A failed workspace switch names the ONE phase that did not finish (#761).**
+`BrowserSuite.enterWorkspace` runs seven phases in order: `switcher-render` (the reload and the
+switcher's first render), `shell-init` (the `window.__dpShellInit` wait), `select`,
+`switch-request` (the 15 s wait for the switch request and its one re-dispatch), `switch-result`
+(the response or failure and its `Location`), `dashboard-landing` and `selected-value`. Every red
+it raises leads with `phase=<name>` and prints only what that phase can have observed. A shell that
+never initialized reads `phase=shell-init`, `request=none`, the document's URL, readiness and flag,
+and the subresource loads that failed since the reload (all counted, the first ten listed, origin
+and path only). It never claims a switch request the page did not send.
+`WorkspaceSwitchOutcomeBrowserTest` pins the init phase with a planted `shell.js` abort, and the
+switch-result phase with an aborted, a 403 and a 302 switch.
+
+**Every `BrowserSuite` setup wait names its step (#825).** A timeout in `login`, the workspace
+create flow (`createWorkspace`, `createWorkspaceOn`, `createWorkspaceWithoutEntering`),
+`openBrowserTree` or `ensureTheme` raises an `AssertionError` from `BrowserSuite.named`, never
+Playwright's bare `TimeoutError`: `<the step> timed out — url=<where the page was>`, the step
+naming what it waited on (a selector, an address, a family); login steps never name typed credentials. The render
+and init waits append the document's facts from the suite's one probe, `shellInitFacts` (URL,
+`readyState`, `__dpShellInit`): the login form's fields, the create form's first render and all
+four of `ensureTheme`'s waits. The browser tree's root-level wait appends the tree as the wait
+left it (mounted families, level count, the root level's status, completion, rows and error
+sentence) before those facts. `BrowserSuiteSetupWaitsBrowserTest` pins every wrapper with a
+planted failure (a held route, a planted page, a removed control) at a 5 s bound, then runs the
+helper's real path with the plant gone. The derived fixtures (`DashboardBrowserSuite`,
+`ParameterSetBrowserSuite`, `SchedulesBrowserSuite`, `VisualizationBrowserSuite`,
+`RestTreeBrowserFixture`) and the support objects (`OverviewHomeBrowserSupport`,
+`EditorRunFixtures`, through the top-level `namedWait`) name their waits
+the same way, second sessions sign in through `login(on, …)` and `landOnDashboard(on)`, and
+`FixtureSetupWaitsBrowserTest` pins each wrapper (#831); a change to `BrowserSuite` or to any of
+these runs the FULL browser suite locally before handback (the #456 rule).
+
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
 ./app.sh --start --demo nyc                      # the deployment being photographed
@@ -559,6 +616,8 @@ screenshot may be illustrated, composited or retouched.
 | Not blanked | **Node run times.** "Run time and rows on each card" is content the page asks for; a card reading `000 ms` would be a retouched screenshot of a product that never ran |
 | Reproducibility | Byte-identical across consecutive runs except `graph-cards.png` (its node run times), `executions.png` (the rows the run itself just added), and the release-step dialog's verdict rows (the check's own run stamps them) |
 | Seeded state | The release-step capture seeds its own small draft (`nyc/review/release_gate` — one node, one release check) through the REST surface, because no seeded pipeline carries `checks[]`; the dialog is photographed, never submitted (release is a human's verb) |
+
+**The `app` set (076 §E, #602).** `-PshotsSet=app` photographs every top-level screen at both review widths in both themes, plus one Playwright video of the boosted-navigation click-through. The shot list follows the menu — each of the eight families is photographed twice, the overview its rail item links and the flat catalog behind its View all — and the click-through walks the rail by `data-nav-section`, waiting on each anchor's own destination, so a menu re-route cannot strand it. The per-family table lives in the driver's KDoc (`SiteShotsMain.kt`, "The `app` set").
 
 **The `home` set (175, #175).** `-PshotsSet=home` produces the home page's seven capability
 figures (`home-*.png`): the same 1440×900 viewport at `deviceScaleFactor = 2` (2880×1800 PNGs),
@@ -749,7 +808,31 @@ the *shell's* last command. `scripts/test-recount.sh` reads the JUnit XML both t
 artifacts — and prints `files/tests/failures/errors/skipped/unreadable`. It exits 0 regardless of
 the counts, 2 for a root that is not a directory, and 3 when no result XML is found. It is committed
 rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
-total for four consecutive rounds before it existed.
+total for four consecutive rounds before it existed. A test JVM that HotSpot's own handler kills (the
+worker ends with `exit value 134`) leaves its error report in that module's
+`build/hs_err/hs_err_pid<pid>.log` (#685), which CI's `gate-reports` artifact keeps; an unhandled SIGSEGV
+(`exit value 139`) may leave no report — #685 traced the observed loss to a stray guard page in a
+thread stack reused after a GraalJS isolate thread, so every test JVM starts with glibc's stack cache off
+(`GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0`, `ThreadStackReuseTest`; see the
+[GNU libc tunable documentation](https://sourceware.org/glibc/manual/2.35/html_node/POSIX-Thread-Tunables.html)).
+
+**What the scripts print for a crashed test JVM (#773).** A failed `scripts/gate.sh` step and a
+failed `scripts/pregate.sh` stage both call one helper, `gate_crash_explain` in
+`scripts/lib/gate-stages.sh`. When the step's log carries `finished with non-zero exit value N`, it
+prints `a test worker CRASHED (exit value N) — not a test failure`, then each report under
+`modules/*/build/hs_err/` or `tests/*/build/hs_err/` that is not older than the step's own start
+marker — the gate's `.gate-logs/<step>.log.started`, the pre-gate's
+`.pregate-logs/runs/<run-id>/stage-<id>.start` — as three lines: `crash report  module=<module>
+path=<path>`, the report's signal line (`#  SIGSEGV (0xb) …` or `#  Internal Error …`) and the line
+after `# Problematic frame:`. An mtime equal to the marker's counts: two files written within one
+coarse clock tick share an mtime, so `find -newer` would miss the report. Those lines are all
+the helper reads out of a report, each reduced to printable ASCII and cut at 240 characters. The
+rest of the report, which includes the JVM's environment variables, is never printed; open the
+file for it. With no report, it says why: exit 139 is an unhandled SIGSEGV, which leaves none;
+exit 134 is HotSpot's own abort, which writes one under `build/hs_err` only in a module that
+applies the conventions' `-XX:ErrorFile` (anywhere else, in the JVM's working directory). Older
+reports are counted (`older reports exist, not from this step: N`), never attributed or deleted.
+The pre-gate also keeps the lines in `stage-<id>.crash-reports.txt` beside the run's manifest.
 
 **One recount over a CI run (#669).** CI's results are four artifacts: `gate-reports` (every test
 task of the gate job) and `browser-reports-1` … `browser-reports-3` (one per browser shard). Download
@@ -782,8 +865,13 @@ of their own; a filtered `:modules:scripting:test` no longer touches it, and
 recount's `test-results/**` glob counts them; `verifyBreachSuiteExecuted` is its zero-test
 guard. A red there reads one of two ways, both named in the XML and the report: a prediction
 that no longer holds (reconcile the doc), or a `SKIPPED` row — the case could not start with the
-headroom the calibration needs, an environment verdict to re-run, not a bound. The worker itself
-no longer dies of a heap event: everything after a bomb runs inside the suite's OOM guard.
+headroom the calibration needs, an environment verdict to re-run, not a bound. Before either
+corpus starts, the harness instantiates the post-bomb exception and row classes and exercises
+the report writer once per JVM, preventing their first class initialisation under heap pressure.
+The classification and bookkeeping guard records direct `OutOfMemoryError` and
+`ExceptionInInitializerError` / `NoClassDefFoundError` whose cause chain contains one as UNBOUNDED
+after waiting for headroom; unrelated linkage errors propagate. An OOM inside JUnit itself
+remains outside this guard and can still kill the worker.
 
 **Focused iteration with existing tasks.** Run the exact module-qualified test task and
 class (or `Class.method`) while editing. For example, this existing auth guard can run alone:
@@ -827,9 +915,24 @@ all of a module's `*Test.kt` sources. Exclude that module's exact `verifyTestsEx
 for `--tests` iteration and filtered pregate stages, as above. Gradle's refusal when a filter
 discovers no tests stays enabled. Unfiltered module checks and Gate A keep the guard.
 
-**The pre-gate (before the first full gate).** `./scripts/pregate.sh [base]` runs, in a few
-minutes, exactly what a targeted test run cannot see and the full gate keeps finding two or
-three runs late: (1) `ktlintCheck detekt` plus the four root audits (`composeEnvAudit`,
+**The pre-gate (before the first full gate).** `./scripts/pregate.sh [base]` (default: the local
+`main` when it exists, else `origin/main` — lanes are cut from local `main`, which runs ahead of
+`origin/main` while a batch waits for CI, so an `origin/main` base would plan that whole batch
+too, #757) runs, in a few minutes, exactly what a targeted test run cannot see and the full
+gate keeps finding two or three runs late: (0) when the diff (committed, staged, unstaged or
+untracked) changes a `gradle.lockfile`, `gradle/libs.versions.toml` or
+`gradle/verification-metadata.xml`, Gate A's dependency scan, `scripts/vuln-scan.sh` (§10.2), before
+any Gradle stage, with the gate's exit contract: `0` PASS; `1` FAIL, known vulnerabilities, the OSV
+table in the run directory's `0-deps-scan.log`; `200` skipped `reason=offline` — fail-soft by design
+as in the gate, printed as `!! SKIPPED — offline (… NOT a clean result …)` with the scanner's WARNING
+lines, and the outcome is unaffected; any other exit FAIL, no verdict, never a pass. The stage calls
+`https://api.osv.dev/`, and when the machine's scanner cache holds no osv-scanner yet it first downloads
+the pinned release from `github.com/google/osv-scanner/releases`. It scans the lockfiles git tracks, so
+a new lockfile not yet added to git triggers the stage without being scanned. With none of those
+files changed, the stage is skipped and says so (`0 deps-scan skipped — no dependency file changed`,
+manifest `reason=no-dependency-change`); `--plan` prints the decision (`deps-scan: run — <files>` or
+`deps-scan: skip — …`); (1) `ktlintCheck detekt` plus the four root audits
+(`composeEnvAudit`,
 `composeArgvSecretsAudit`, `verifyModuleDependencies`, `verifyVerificationMetadataDocs` — they hang
 off every module's `check`, so the gate's `build` reaches them before any test); (2) `check` of
 every module the diff touched — its **unfiltered** `test` (so `verifyTestsExecuted` stays
@@ -853,14 +956,18 @@ Pregate cannot emit an unfiltered `tests/*:test` task. Deferred modules appear i
 the run manifest and the verdict's `deferred=` field; a pregate PASS does not claim those tests
 ran. Full browser/integration coverage belongs to CI on `next` — its `browser` and `integration` jobs (and on `main` after the fast-forward).
 `./scripts/pregate.sh --self-test` checks the selector, resource limits, evidence and overlap
-refusal using isolated fixtures and a refusing Gradle stand-in; (3) the
+refusal using isolated fixtures and a refusing Gradle stand-in, including a fixture whose local
+`main` is ahead of `origin/main` (a bare run plans only the lane's diff) and one with no local
+`main` (the default falls back to `origin/main`); (3) the
 cross-cutting guard classes still needed after stage 2, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
 reads the whole tree or the docs is added there in the same commit). Iterate on its output,
 then deliver the lane for the lander's gate. It is not the gate: its exit code decides nothing
 about a merge. Every run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time,
-the five stage exits, `snap`, `prune`, deferred work, elapsed time and the run id — to
+the six stage exits (`scan=` for stage 0, between `at=` and `lint=`; a stage skipped for no
+dependency change reads `scan=0`, and `scan=200` reads "scan not done here"), `snap`, `prune`,
+deferred work, elapsed time and the run id — to
 `.pregate-logs/0-verdict.log`, which is where the lander reads a delivered lane's verdict (the terminal is the only other place it is printed).
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
 cross-cutting guards or foreign fixtures. This script passes `-Pdp.browser.ciPatience=true` to
@@ -870,17 +977,27 @@ until the browser suite left the gate, owner ruling 2026-10-09).
 
 **The pre-gate reads and writes Gradle's local build cache; Gate A and CI never do (#480).**
 Every pregate Gradle invocation passes `--build-cache` (`PG_COMMON` in
-`scripts/pregate-plan-lib.sh`), so a fresh lane worktree's first pregate takes compile and lint
+`scripts/pregate-plan-lib.sh`), so a fresh lane worktree's first pregate takes compile and detekt
 outputs from any earlier build on this box with identical inputs instead of recompiling the whole
-tree and re-running detekt on every module. What may come `FROM-CACHE`: Kotlin/Java compilation,
-`detekt` and the `ktlint*` source-set checks. What never does: every `Test` task (the touched
+tree and re-running detekt on every module. What may come `FROM-CACHE`: Kotlin/Java compilation
+and `detekt`. What never does: ktlint's `BaseKtLintCheckTask` workers (`runKtlintCheckOver*`) — a worker's stored output is the
+last incremental execution's, not a function of its inputs, so a cache hit can name another
+checkout's files (#689) — plus every `Test` task (the touched
 modules' `test`, `breachSuite`, the stage-3 guards, the focused `tests/*` classes), every Kover
 task (the XML/HTML/binary reports and the floor verdict behind `koverVerify`) and
 `verifyTestsExecuted` — `CommonConventionsPlugin` sets `cacheIf { false }` on each — and the
 ad-hoc and `Exec` tasks (`editorJsTest`, the four root audits, `processResources`), which Gradle
 never caches in the first place. `CommonConventionsPluginTest` proves the guard with a probe built
 twice around a `clean` (the compile task `FROM_CACHE`, the test and Kover tasks executed both
-times). Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
+times). `KtlintCacheBoundaryTest` proves the ktlint boundary (#689) with two probes sharing one
+cache: after the first probe lints a violating tree and deletes the file, the second probe's lint
+task executes, passes, and carries no path from the first. The separate `GenerateReportsTask`
+remains cacheable by the contents of `discoveredErrors`; it does not inherit the worker's
+cache exemption. Gradle's up-to-date checks and the worker's in-checkout incrementality still
+apply. A removed source forces a full lint of its source set (#703): the lazy, sorted relative
+source-path input `ktlintSourceInventory` changes, so Gradle discards incremental history and
+the worker rewrites its findings. Content-only edits remain incremental; unchanged inputs stay
+up-to-date. Why tests stay out, for two independent reasons: a test verdict must come from this run, and a cached `:test` line is not fresh evidence,
 so stage 3 would keep every guard (`pgres::guards_covered`). The cache is the pre-gate's alone:
 `scripts/gate.sh` runs `clean` and then `build`, and with the cache on that build would be
 served from the cache and stop proving the tree compiles, so neither `gate.sh`, CI's workflows
@@ -891,7 +1008,37 @@ either, and both would make Gate A warm. Any change under `buildSrc/` changes ev
 implementation hash, so the first pregate after such a change misses the cache once. Location,
 cleanup and clearing: §9.5.
 
+**Every test task tracks the repository tree (#718).** Gradle knows a `Test` task's classpath, not
+the files its tests open: the spec-drift and source-scan guards find the repo root by walking up to
+`settings.gradle.kts` and read docs, the Helm chart, compose and env files, scripts, the
+`Dockerfile`, the version catalog, the plugin mirror, other modules' sources as text, and in two
+scanners every tracked file. Until #718 a docs-, chart-, script- or comment-only change left those
+tasks `UP-TO-DATE` and the previous run's XML stood in for this run's verdict (#712 saw a planted
+chart mutation stay green until it forced `--rerun`). `CommonConventionsPlugin` now declares the
+whole checkout as the input `repoFilesReadByTests` of every `Test` task (`RepoTestInputs`), hashed
+by content under repo-relative paths: a touch alone re-runs nothing, and an edit anywhere in the
+tree re-runs every test task the build invokes — by design, because the guards read it (owner
+ruling 2026-10-25). The first build after this change, or after any edit, therefore executes the
+pregate's stage-3 guards instead of reporting them `UP-TO-DATE`. Not inputs: what `.gitignore`
+names — build output and Gradle/Kotlin state, `.claude/` (lane worktrees), IDE and tool
+directories, the gate and pregate logs, the sample-data `work/` directories, and the secrets
+(`deploy/secrets.env`, `.env` files, keys and keystores, `credentials.*`, `secrets.*`; the tracked
+template `deploy/secrets.env.example` stays an input) — plus Git's own directory and the
+lander wrapper's root `gate.log`. A secret file never enters Gradle's task history, not even
+as a hash. The one thing a guard may do with such a path is assert it ABSENT (for example, a retired
+secrets template): `RepoTestInputs.EXISTENCE_ONLY` lists those paths, and a second input,
+`repoPathsCheckedForExistence`, carries the names of the listed paths that exist — names from a committed
+list, never content — so creating or removing one re-runs every test task while editing one re-runs nothing (#728).
+`RepoTestInputsTest` fails when a
+`.gitignore` entry lands without its mirror in `RepoTestInputs`, and when a module or integration test
+asserts an excluded literal path absent in one of the scan's recognized forms without a listing.
+Runtime-built paths and other assertion forms need a manual listing. The `--rerun` #712 needed is no
+longer needed for this cause; `modules/parameters` and `modules/templates` carried their own input
+lists for it (049), which the convention replaced.
+
 **Preview and failure handling (#479).** `./scripts/pregate.sh --plan [base]` shows the
+base with how it was chosen — `(default:main; origin/main is N behind[, M ahead])`,
+`(default:origin/main)` or `(explicit)`, also on the run's `Pre-gate base=` console line — the
 resolved base, merge-base and HEAD, selected files (including staged, unstaged and untracked
 edits), touched modules, exact test classes, deferred coverage, guard candidates, stage order
 and intended commands. It also names files selected only by the supplied base or only by the
@@ -974,7 +1121,7 @@ every copied task directory with no exact `> Task :…` line in the stage log it
 `# NO-STATUS-LINE <repo-relative-task-directory>` (a missing log annotates every copied directory,
 and similarly-prefixed task names such as `test` and `testExtra` stay distinct), while the status
 lines themselves are preserved. A copy, provenance or manifest write failure refuses a PASS
-(`snap=1` in the verdict line, beside the unchanged five stage exits) even when every Gradle stage
+(`snap=1` in the verdict line, beside the unchanged six stage exits) even when every Gradle stage
 exited 0; it never turns a Gradle failure into success. A stage that ran but produced no XML is
 recorded (`files=0`): the recount searches `modules/*/build/test-results/**/*.xml`,
 `tests/*/build/test-results/**/*.xml`, and `TEST-*.xml` directly at the root, and exits 3 when
@@ -1003,7 +1150,10 @@ failure-run snapshots are retained under the same policy.
 **A tooling crash is neither green nor red.** An OOM-killed daemon, `Could not write XML test
 results` (two builds sharing one `build/`), a corrupted result store — re-run before drawing any
 conclusion. `scripts/gate.sh` classifies these for you and is the scripted form of all of the
-above.
+above. A word such as `EOFException` that a test prints is a test failure when a fresh failed
+JUnit XML of that step carries it; with no such XML the log is still classified as a crash. The
+gate decides this right after each Gradle invocation, because the next one rewrites the result
+files.
 
 ### 9.5 Sizing the build for your machine
 
@@ -1031,8 +1181,17 @@ their build files set; any `-Pjunit.jupiter.testclass.order.default=…` you pas
 one-fork order with
 `./gradlew :tests:integration-tests:test :tests:browser-tests:test -Pdp.test.forks.e2e=1 -Pjunit.jupiter.testclass.order.default='org.junit.jupiter.api.ClassOrderer$ClassName'`.
 
-**CI's gate job: the budget and the report step (#290).** At #290 the job budgeted 90 minutes (the
-integration job's figure) and its build step 70 of them (today's values: the end of this paragraph). Before #290 the four green jobs took
+**CI's gate job: the budget and the report step (#290, #669).** The gate job's budget, as dated
+history: 90 minutes at #290 (the integration job's figure), its build step 70 of them; 2026-10-21
+(#669's stopgap): 120, step 100, as the serial browser suite grew the step to 60–68 min; 2026-11-13
+(the serial stopgap's last form, 9c22b3404): 170, step 150 — run 43354061464 had reached the
+100-minute build ceiling with 11,796 unit tests passing and browser cases still passing, without
+completed browser XML, and the dependency-graph tip's separate local serial browser run took 83
+minutes for 735 cases. Since #669 the browser suite is the `browser` job's: the gate job's budget
+is 80 INITIAL (build step 60), to be set from the first run on `next`. The integration job retains
+its own 90-minute budget.
+
+Before #290 the four green jobs took
 48–57 min, and 19–23 of those were the coverage-report step RE-RUNNING tests: Kover 0.9.9's report
 tasks depend on every instrumented test task, a task that failed is never up to date, and neither
 was anything downstream of `modules/app`, whose build-info stamped a new `build.time` on every
@@ -1045,15 +1204,20 @@ compiled that module's tests, and `--offline` cannot resolve them); it fails as 
 `|| true`. A following step names every failing test on the run's summary page, and the
 `gate-reports` artifact now carries every test task's XML and the breach report. Before #669 the
 browser suite ran in the gate job, as the build step's long pole (20.4 of 29.5 min on run
-36334831413), and one job of its own, compiling the app first, would have finished no sooner (#290).
-Three parallel shards change that: on run 39689954314 (2026-10-21) the build step took 56.9 min, and
-for its last 41 it waited on the browser suite alone (126 classes, 585 tests, 46.9 class-minutes,
-serial in one JVM); #669's stopgap had raised the ceilings to 100 (step) and 120 (job). Since #669
-the gate job excludes the suite (§9.0) and CI's `browser` job runs it as three legs of ~15 min of
-test time each (the sorted round-robin over that run's XML: 14.6–16.8 min) plus ~10.5 min of setup
-and compile. The budgets are initial values from that projection — gate step 40 / job 60, browser
-step 45 / job 60 — until the first run on `next` measures them (#669). `browser-verdict` is red
-unless every leg succeeded: the one check name the `main` ruleset requires for the suite.
+36334831413 — a measurement that predates the suite's growth to 735 cases), and one job of its
+own, compiling the app first, would have finished no sooner (#290). Three parallel shards change
+that: on run 39689954314 (2026-10-21) the build step took 56.9 min, and for its last 41 it waited
+on the browser suite alone (126 classes, 585 tests, 46.9 class-minutes, serial in one JVM); the
+serial stopgaps raised the ceilings to 100 (step) and 120 (job), then to 150/170 (2026-11-13,
+9c22b3404). Since #669 the gate job excludes the suite (§9.0) and CI's `browser` job runs it as
+three legs: of the 2026-11-13 serial run's 82.3 class-minutes (153 classes, 735 tests), the sorted
+round-robin gives 23.3 / 28.5 / 30.5 min per leg (51 classes each); a fourth leg would put the
+slowest at ≈ 24 class-minutes — under the `integration` job's 50–55 — so it would cost a runner
+and shorten nothing. Each leg is its own runner and its own Postgres (#933);
+`BrowserSuite.checkConnectionBudget` prints the shared server's client count once per class and
+fails a class above 340. The budgets are initial values — gate step 60 / job 80, browser step 60 /
+job 75 — until the first run on `next` measures them (#669). `browser-verdict` is red unless
+every leg succeeded: the one check name the `main` ruleset requires for the suite.
 
 **Measured on 2026-09-12** (2 × 24-core Xeon, 96 threads, 64 GB, NVMe, native Docker, Ubuntu
 26.04) — the numbers to size against:
@@ -1099,8 +1263,11 @@ be changed by an init script in `~/.gradle/init.d`, and this repo ships none). T
 or after a suspected bad entry: `rm -rf ~/.gradle/caches/build-cache-1` while no build is running;
 the next pregate repopulates it. A single pregate can also skip it with `--no-build-cache` on its
 stage commands (copy them from the run's `PLAN.txt`). A fresh worktree's first pregate is now mostly
-cache hits for compile, detekt and ktlint, as long as some build on the box has compiled the same
-inputs since the last `buildSrc` change.
+cache hits for compile and detekt, as long as some build on the box has compiled the same
+inputs since the last `buildSrc` change. Ktlint worker outputs cannot be restored from the
+build cache (#689); up-to-date and incremental behavior still apply. Deleting the shared cache
+was the former workaround for a poisoned entry naming another checkout's files. For a retained
+in-checkout finding after a deletion (#703), use the forced affected-task check above instead.
 
 **Three more things worth a minute on a dedicated Linux box.**
 
@@ -1117,9 +1284,36 @@ inputs since the last `buildSrc` change.
   sudo sysctl --system
   ```
 
+  The CI gate job applies this new-interface default before its build and browser suite
+  (#696). `scripts/ci-browser-network-check.sh` brings up a temporary veth pair, checks that
+  both peers inherit `disable_ipv6=1` and have no IPv6 addresses, then removes the pair.
+  A missing setting or failed probe fails the job. The runner's existing interfaces,
+  including loopback, keep their settings; no browser assertion, timeout or retry changes.
+
 - **`--profile`** on any gate writes `build/reports/profile/` with per-task times — that
   report, plus `scripts/test-recount.sh`, is how to tell whether a knob helped; never the feel
   of it.
+
+### 9.6 Capturing log lines in a test
+
+A test that asserts on log output captures it through the shared `SnapshotListAppender` of the
+test-only module `modules/log-capture` (#756; module-structure §5.23): the module declares
+`testImplementation(project(":modules:log-capture"))` — never another configuration, which
+`verifyModuleDependencies` refuses — and the test imports `co.datapipelines.logcapture.SnapshotListAppender`,
+`capturingLogEvents` or `capturingLogs`. It reads `events()` or `messages()`, detached copies taken
+under the list's own lock. The block helpers start, attach, detach and stop around a block:
+`capturingLogEvents(logger) { … }` for one logger, or `capturingLogs { … }` over the root logger.
+No module keeps its own copy of the helper or its test; the guard below refuses one. Logback's raw
+`ListAppender.list` is a plain `ArrayList` that every logging thread appends to — a pool, a
+scheduler, a coroutine dispatcher, Hikari's housekeeper, a Spring context — so reading it while any
+of them can still log is a `ConcurrentModificationException` or a torn read on a slow runner
+(#362, #391). A raw `ListAppender` is allowed only when the test thread is
+the sole writer between attach and the last read, and it then says so on its construction line, or
+alone on the line directly above it when the construction line would pass 120 columns:
+`// raw-list-appender: synchronous — <the fact that makes it safe>`. `RawListAppenderGuardTest`
+(buildSrc, run by the gate and CI's cold job) refuses any other raw construction, naming it
+`path:line` (#484), and refuses a `SnapshotListAppender.kt` or `SnapshotListAppenderTest.kt`
+outside `modules/log-capture` (#756).
 
 ---
 
@@ -1137,6 +1331,13 @@ inputs since the last `buildSrc` change.
 ```
 
 CI runs all three. No code merges with violations.
+
+`buildSrc` is linted too, since #724, with the same ktlint engine and the repo's
+`config/detekt/detekt.yml` (no baseline). It is a separate build that the root
+`ktlintCheck`/`detekt` never reach, so it is run by task path:
+`./gradlew :buildSrc:ktlintCheck :buildSrc:detekt` (`:buildSrc:ktlintFormat` to fix). The
+pre-gate's stage 1 and a CI step run that; `scripts/gate.sh`'s buildSrc stage combines
+those task paths with `:buildSrc:cleanTest :buildSrc:test --continue` (see §6.3).
 
 ### 10.1 Documentation audit
 
@@ -1201,6 +1402,24 @@ Guards beyond lint/static analysis. Each tool below is pinned exactly, and every
 guard has been proven able to fail — the buildSrc guard tests in-tree are
 those proofs, and a new guard lands with its own.
 
+`ElvisBoundMatcherGuardTest` scans Kotlin test sources under `modules`, `tests` and
+`buildSrc` (excluding build output and its own fixture source), and runs in pregate
+stage 3. It rejects Kotest matchers bound to an Elvis fallback: group the resolved
+value, `(count ?: 0) shouldBe 0`, or assert on a local value. The text scan masks
+line and nested block comments, escaped and raw strings, character literals,
+and backtick identifiers, keeping literal value placeholders to preserve statement
+boundaries. It ignores regex-group punctuation `(?:` and SQL casts `?::`, joins lines
+starting with `.`, `?:`, `?.`, `&&`, `||` or a `should…` matcher, and tracks
+parentheses, braces and brackets. Semicolons separate statements. Its birth
+inventory held 1,558 test files, 851 Elvis-bearing lines (including 237 regex-group
+and 54 SQL-cast lines), and 29 same-line matcher candidates: one bypass, 27 grouped,
+and one safe qualified call. Floors require 1,400 files, 700 raw Elvis occurrences
+and 20 classified grouped forms; the birth tree had 919 raw occurrences. Raw
+counts include masked text, while grouped
+counts come from code. Detection limits: reflection, aliased or backtick-escaped matcher names,
+string template expressions, and following lines without a continuation prefix
+are unsupported. These are lexical checks, not a Kotlin precedence parser.
+
 #### Coverage (Kover)
 
 ```bash
@@ -1224,10 +1443,15 @@ coverage has genuinely improved, and never lower one to make a build pass.
 The floors guard itself is tested (`buildSrc/src/test`, Gradle TestKit — a
 project missing from the maps fails configuration; `-Pkover.off` drops the
 floor rule). A main build only builds buildSrc through its jar, so its tests
-never run automatically: `./gradlew -p buildSrc test` runs them, and
-`scripts/gate.sh` runs that as a stage — forced to execute (`cleanTest`;
+never run automatically: `./gradlew :buildSrc:cleanTest :buildSrc:test` runs them, and
+`scripts/gate.sh` runs that as a stage, with buildSrc's `ktlintCheck` and `detekt`
+in the same invocation (`--continue`, since #724) — forced to execute (`cleanTest`;
 the catalog file's content is a declared test input, so a
 `gradle/libs.versions.toml` edit re-runs the guards even without the gate).
+CI's `cold-verify` job runs the same test command with its fresh `GRADLE_USER_HOME`
+after the root dependency-verification surface, covering buildSrc's test classpath (§6.3).
+The TestKit probes those tests drive verify their own downloads against
+`gradle/verification-metadata.xml` too (#742, §6.3).
 The stage is attempted even when the network preflight says offline (a warm
 TestKit cache passes offline). The fail-soft offline skip is earned only by
 a dependency-resolution failure — evidenced in the stage log **or the JUnit
@@ -1237,6 +1461,185 @@ surface) — with **no other genuine test failure** among the results; a
 tooling crash (OOM, dead daemon) classifies as "no verdict, re-run" *ahead*
 of any skip, and skipped stages are counted and named in the gate's summary
 line — a PASS never hides an unrun guard (014/F4, 018/F1+ F2).
+
+#### Third-party notices
+
+```bash
+./gradlew :modules:app:generateThirdPartyNotices
+./gradlew :modules:app:bootJar  # generates and packages the same notices automatically
+./gradlew -Pmysql -Poracle :modules:app:generateThirdPartyNotices
+```
+
+Added 2026-10-24 (#677). The task writes
+`modules/app/build/generated/third-party-notices/THIRD-PARTY-NOTICES` from the
+resolved `productionRuntimeClasspath` graph, including its platform POMs,
+Spring Boot's jar-mode tools, both image isolate coordinates and the four
+bundled DuckDB extensions with every component statically linked into each binary
+(#747): the full vcpkg port closure, direct and transitive, the DuckDB core
+`third_party` code each extension links through `duckdb_static`, and third-party code
+vendored inside a port. It follows
+POM parents when licences are inherited. The isolate version is read from
+`Dockerfile`'s `GRAALJS_VERSION` ARG. Internal project modules are excluded.
+The DuckDB core version and extension names come from the Dockerfile; checksums
+and per-name footer commits come from `deploy/duckdb-extensions.sha256`; each
+extension's closure comes from `deploy/duckdb-extension-ports/<name>.tsv`. A closure
+file opens with `# <name> commit=<footer> baseline=<vcpkg> overlays=<repo@sha,...>
+features=<port[feature,...];...>` and lists one sorted row per component:
+`port`, version, licence expression, source URL and kind, tab-separated, LF, no
+timestamp. Kind is `linked`, `header-only` (no compilable upstream source) or
+`build-only`, and every `build-only` row follows a `# why: <port> — <reason>` line.
+`DuckDbExtensionLicenses.kt` binds each extension's MIT licence, copyright and
+reviewed component licences to that exact commit. A closure file bound to another
+commit fails as `DuckDB closure commit mismatch for <name>`. A `linked` or
+`header-only` row with no reviewed inventory component fails as `DuckDB closure entry
+without a reviewed licence for <name>: <port>`, and one whose expression or source
+differs from the review as `DuckDB closure entry differs from its reviewed licence`.
+An inventory component the file lacks fails as `DuckDB inventory component not in
+closure for <name>: <port>`. A missing or extra closure file, an unsorted, duplicate
+or malformed row and a `build-only` row without its `# why:` line fail too. Each
+extension's section names the direct port that pulls a transitive component (`via`)
+and ends with a `Build-only (not distributed)` line; build-only ports get no licence
+row and no text. Combined terms (`AND`) and alternatives (`OR`) retain every declared
+licence text.
+
+**Re-pinning a core or extension version refreshes the closure** in the same commit
+as the sums (docs/deployment.md §3.1). For each extension, at its footer commit, merge
+the extensions' `vcpkg.json` manifests the way DuckDB's main-extensions build does, at
+the vcpkg baseline and with the extension-ci-tools and per-extension overlay ports.
+Walk every port's `vcpkg.json` at its baseline or overlay commit. Evaluate `platform`
+for `linux & x64` and `linux & arm64` separately and honour top-level
+`"default-features": false`. A port reached only through `"host": true` edges, and a
+`vcpkg-*` script port, is `build-only`: it is built for the host triplet and nothing
+of it is compiled into the binary. Everything else is `linked`. Then run `nm` on both
+platforms' binaries. Add every DuckDB core `third_party` directory whose namespaced
+symbols survive in both, and every library vendored inside a port that its symbols
+witness. Inlined header code is witnessed through its caller's symbol. A library the
+binaries witness that the closure lacks is a finding, as is a platform difference.
+Before writing a row, read the port's upstream `LICENSE` at that version. Write the
+expression and source into both the TSV and `DuckDbExtensionLicenses.kt`, and vendor
+any new SPDX text from the allowlist's snapshot. A notice SPDX does not list is a
+`LicenseRef-` text, vendored verbatim from upstream, with its own `source(id)` URL.
+Derive the closure from retained inputs: a second offline run must reproduce the four
+files byte-identically before they are committed.
+
+`processResources` puts the file at `META-INF/THIRD-PARTY-NOTICES` in the boot
+jar; the Dockerfile copies it to `/app/THIRD-PARTY-NOTICES`. Generate the jar
+before building the image, with the same optional-driver flags.
+
+`buildSrc/src/main/kotlin/ThirdPartyLicenseAllowlist.kt` maps exact POM
+licence names to SPDX identifiers/expressions and records canonical source
+URLs. Its comments explain each mapping's intended adopters. For a new
+spelling, inspect the actual resolved POM and its upstream licence, add a
+mapping with that intent, and vendor the canonical text once as
+`gradle/licenses/<SPDX-id>.txt`. Licence exceptions get separate text files.
+The allowlist records the SPDX text snapshot used; Oracle FUTC uses the
+local SPDX identifier `LicenseRef-Oracle-FUTC` and its Oracle source URL.
+No plugin or dependency is added, and licence texts are never downloaded
+by the build. POMs are resolved through Gradle's checksum verification;
+if the task first resolves a new POM artifact, regenerate verification
+metadata from a cold cache using §6.3, then review the added checksums.
+After warming resolution, `./gradlew --offline :modules:app:bootJar` works.
+
+The guard reports `Unresolved licence for <group:name:version>: raw POM
+license=...` for an unknown name, or `raw POM licenses=<none>` after the
+parent walk finds none. An unused mapping fails as `STALE licence
+allowlist entries (matched no POM)`. The MySQL and Oracle mappings are
+active only with their corresponding flags; the generated notice lists
+all declared alternatives and includes each licence/exception text once.
+It has sorted coordinates and text sections, UTF-8 output, and no time or
+git stamp. The task always revalidates POMs and mappings; tests under
+`buildSrc` exercise missing, unknown, inherited and stale licences, XML
+hardening, the isolate pin and deterministic output:
+
+```bash
+./gradlew :buildSrc:cleanTest :buildSrc:test
+```
+
+DuckDB validation fails closed with these message prefixes (details name the
+extension, path or identifier): `DuckDB checksum coverage mismatch:`,
+`Invalid DuckDB checksum entry for core v<version>:`, `Duplicate DuckDB checksum entries:`,
+`DuckDB commit annotations mismatch:`, `Invalid DuckDB commit annotation:`,
+`Duplicate DuckDB commit annotation:`, `DuckDB licence inventory mismatch:`,
+`DuckDB licence commit mismatch for <name>:` and `Unknown DuckDB component licence:`.
+Malformed Dockerfile declarations fail as
+`Dockerfile must declare exactly one DUCKDB_CORE_VERSION`,
+`Invalid DUCKDB_CORE_VERSION:`,
+`Dockerfile must declare exactly one DuckDB extension loop` or
+`Duplicate or empty DuckDB extension names:`.
+The version catalog's `duckdb-jdbc` is the one hand-edited DuckDB version (#781); the
+read refuses any other site that disagrees with it as
+`Invalid catalog duckdb-jdbc version:`,
+`DUCKDB_CORE_VERSION <arg> is not the core of the catalog's duckdb-jdbc <jdbc>` (the ARG
+must be the catalog version's first three components),
+`DuckDB reviewed licence tag is not core v<version> for <name>:` (the inventory's
+`duckdb/duckdb/tree/v…` tag) and
+`DuckDB closure row names core <x>, not v<version>, for <name>:` (a `duckdb` or
+`duckdb/*` closure row).
+A needed text absent from `gradle/licenses` fails as `Missing vendored licence text:`.
+Re-pin the core ARG, checksum/commit manifest and reviewed licence inventory together;
+see [Deployment §3.1](docs/deployment.md#31-docker-image).
+
+Build-generated notices describe the graph that was packaged. Drivers
+mounted later through `lib/` require their own notices.
+
+#### Vendored browser-asset notices
+
+```bash
+./gradlew :modules:web:generateVendoredAssetNotices
+```
+
+The offline task reads `modules/web/src/main/resources/static/vendor/design-system/vendor-manifest.json`
+and each third-party block's `license_file`, relative to `static/`. It writes
+`modules/web/build/generated/vendored-asset-notices/THIRD-PARTY-NOTICES.txt`.
+Web `processResources` packages this at `static/vendor/THIRD-PARTY-NOTICES.txt`,
+served at `/vendor/THIRD-PARTY-NOTICES.txt` by the existing public static-resource
+handler. `websiteExportAssets` also copies it to
+`modules/web/build/website-export/vendor/THIRD-PARTY-NOTICES.txt`.
+These browser notices supplement the Maven/image notices above.
+
+The inventory and full upstream licence sections are sorted by manifest block,
+UTF-8, with no time or git stamp. Sections preserve upstream text after CRLF-to-LF
+normalisation and trimming. The owner-authored `design-system` starter and
+`datapipelines-dashboard-runtime` are listed separately as own code; their exemption
+is an explicit task input in `modules/web/build.gradle.kts`.
+
+To vendor another asset, add its manifest block and upstream licence file; the
+inventory and sections update automatically. Record the exact release source in
+`source`. Fetch the licence from the exact pinned upstream release's URL, run
+`sha256sum` on that file, and write `license_file_source` and `license_file_sha256`
+together in the same edit when adding or refreshing the licence; the build refuses a
+third-party block without it. The checksum is
+lowercase hexadecimal SHA-256 of the raw file bytes, before CRLF normalisation or
+trimming; the build verifies it offline and never fetches the licence. Preserve
+copyright lines and existing bundle hashes. MIT, ISC, 0BSD and OFL-1.1 are the
+currently used allowlist; a new licence family requires an inspected phrase check
+and offline fixtures in `VendoredAssetNotices`, with no download during the build.
+
+The guard refuses these conditions (the block name identifies the input to fix):
+
+- `Missing <key> for vendored block <block>`: a required `license`, `license_file`,
+  `version` or `source` is absent or blank.
+- `Missing license_file_sha256 for vendored block <block>`: no licence checksum is declared.
+- `Missing license_file_source for vendored block <block>`: no upstream licence URL is recorded.
+- `Invalid license_file_source for vendored block <block>: <value>`: the value is not an
+  absolute `https://` URL with a host; the build parses it as a string and never fetches it.
+- `Licence checksum mismatch for vendored block <block>: <path> expected <declared> actual <computed>`:
+  the raw file bytes differ from the declared lowercase checksum.
+- `Unknown licence <id> for vendored block <block>`: an unreviewed licence family.
+- `Missing or blank licence text for vendored block <block>: <path>`: no usable file.
+- `Wrong licence text for vendored block <block>: expected <id>`: the distinguishing
+  licence phrase is missing (ISC also requires its copyright condition).
+- `Invalid license_file for vendored block <block>: <path>`: the path is not under
+  `vendor/`, or has empty, dot or parent segments; filesystem escapes, including
+  symlinks, fail as `Licence path escapes vendor directory: <path>`.
+- `STALE vendored licence allowlist entries (matched no block): <ids>`: remove an
+  unused allowance deliberately rather than silently retaining it.
+- `STALE first-party blocks: <blocks>`: an own-code exemption no longer exists.
+
+Offline renderer fixtures live in `buildSrc/src/test/kotlin/VendoredAssetNoticesTest.kt`;
+`VendoredNoticesAuditTest` checks the generated classpath file against every real
+third-party manifest block and licence text. The buildSrc command above runs its
+fixtures; the web tests exercise the packaging boundary.
 
 #### Dependency vulnerabilities (OSV-Scanner)
 
@@ -1326,6 +1729,22 @@ borrows the install helpers below and their exit-`2` tooling contract, but its
 own exit `1` means a chart check failed (a render verdict), never a scan
 finding.
 
+**Bumping kubeconform (#712).** `scripts/helm-check.sh` validates every
+successful render with a pinned kubeconform. As with helm, one commit carries
+BOTH edits: the new `KUBECONFORM_VERSION` and the refreshed
+`KUBECONFORM_SUMS_SHA256`. To compute the pin, download the new release's
+`CHECKSUMS` from
+`https://github.com/yannh/kubeconform/releases/download/<version>/CHECKSUMS`
+(one multi-platform manifest, like osv-scanner's), run `shasum -a 256` on it,
+and record the value (with the date) beside the version. The schemas are pinned
+separately, by commit, in `KC_SCHEMA_CORE` (yannh/kubernetes-json-schema) and
+`KC_SCHEMA_CRDS` (datreeio/CRDs-catalog), with `KC_KUBERNETES_VERSION`. Bump them
+together: read each repository's current commit, confirm that
+`v<k8s-version>-standalone-strict/networkpolicy-networking-v1.json` and
+`monitoring.coreos.com/servicemonitor_v1.json` exist at that commit, then run
+the script. A schema that cannot be fetched exits `2` (tooling), never a chart
+verdict.
+
 The shared install helpers in `scripts/lib/scan-tools.sh` (download, SHA256
 verify) exit `2` on failure for **all three** scanner scripts —
 secret-scan (`1` = leaks found) and container-scan (`1` = trivy finding)
@@ -1353,9 +1772,15 @@ entries are SECRET-targeted and path-scoped with `condition = "AND"`
 secret co-located with an allowlisted token still fires), each with a reason +
 date comment, and the config EXTENDS the gitleaks default ruleset (a bare
 custom config silently replaces it — that mistake was made and caught here).
-The full-history scan runs by hand and is expected to exit 0 on `main`; a
-finding in a committed test fixture is triaged with a path + exact-value
-allowlist entry, never by reshaping the fixture's history.
+CI runs the full-history scan and `scripts/secret-scan-selftest.sh` on every
+push to `main`/`next` and every pull request (`.github/workflows/secret-scan.yml`);
+`secret-scan` is the required check on `main` (the owner adds it to the ruleset
+before the first promotion). The pre-commit hook remains the local staged-change
+check. Full-history scans use Git mode only (#686): directory scans can skip an
+entire path despite an AND allowlist. The self-test proves default-rule detection,
+admission of a triaged fixture, and detection of a different generated value on
+the same line at the same path. A finding in a committed test fixture is triaged
+with a path + exact-value allowlist entry, never by reshaping the fixture's history.
 
 #### Container scanning (trivy)
 
@@ -1366,7 +1791,10 @@ allowlist entry, never by reshaping the fixture's history.
 
 trivy (pinned in the script, same verified-download pattern) scans the
 Dockerfile for misconfigurations and the locally-built production image for
-package CVEs. Baseline exceptions live in `.trivyignore` with a reason + date
+package CVEs, then the egress proxy image deploy/compose.yml pins. Baseline
+exceptions live in `.trivyignore` (the production image and the config scans)
+and `.trivyignore.egress-proxy` (the proxy image only, so one image's triage
+never suppresses the other's findings), each with a reason + date
 comment AND an `exp:` expiry per entry — an expired entry fails the scan
 again, so baselines get re-triaged instead of rotting (same discipline as
 `osv-scanner.toml`'s `ignoreUntil`). Anything NOT ignored exits 1, so new

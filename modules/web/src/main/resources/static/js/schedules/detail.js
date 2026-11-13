@@ -43,6 +43,7 @@
 
   function paneMessage(title, description) {
     var view = pane();
+    if (window.DependenciesMount) window.DependenciesMount.unmount(view);
     S.clear(view);
     var t = document.createElement("p");
     t.className = "ds-empty-title";
@@ -112,6 +113,11 @@
     var c = current();
     var s = c.schedule;
     var view = pane();
+    // A re-render of the SAME schedule (a verb's aftermath, a run that ended) keeps an opened Dependencies
+    // section open; it then loads once for the revision now shown. Another schedule starts closed.
+    var shown = view.querySelector("[data-schedule-detail]");
+    var depsOpen = !!shown && shown.getAttribute("data-schedule-id") === s.id &&
+      !!(shown.querySelector("[data-sch-deps]") || {}).open;
     var content = S.clone("sch-tpl-detail");
     var names = M().splitName(s.name);
     S.text(content, "folder", names.folder).setAttribute("title", s.name);
@@ -123,10 +129,14 @@
     renderOverview(content, s, c);
     renderOccurrences(content, s, c.occurrences);
     renderParameters(content, s);
+    renderDependencies(content, s, depsOpen);
     renderRuns(content, c);
 
+    if (window.DependenciesMount) window.DependenciesMount.unmount(view);
     S.clear(view);
     view.appendChild(content);
+    // #876 G6 U2: bind the cloned pane (the page's own catalog mount scans main once; a clone arrives later).
+    if (window.DependenciesMount && window.DependenciesMount.scan) window.DependenciesMount.scan(content);
     resolvePipelineLink(content, s);
     schedulePoll();
   }
@@ -157,6 +167,13 @@
     latest: "The latest missed occurrence runs once, if it is less than a day old",
   };
 
+  // The off reason in plain words (#442b) — the delivery object never reads as "delivered".
+  var MAIL_OFF_TEXT = {
+    disabled: "mail not enabled on this deployment",
+    mail_unconfigured: "mail off — no mail server is configured",
+    no_allowlist: "mail off — no recipient domains are allowed on this development deployment",
+  };
+
   function renderOverview(root, s, c) {
     var cond = S.text(root, "condition", s.condition);
     cond.className = "ds-badge " + M().conditionBadge(s.condition);
@@ -165,12 +182,20 @@
     S.text(root, "revision", "revision " + s.revision);
     S.text(root, "pipeline-text", M().pipelineOf(s));
     var lastPrepared = (c.runs || []).filter(function (r) { return r.prepared && r.prepared.version !== undefined; })[0];
-    S.text(
+    // #786 D.4: the schedule's PIN — the exact version every run executes (payload schema 2). A
+    // schema-1 payload has no pin to show; it says so, since its runs are refused until edited.
+    var pinned = M().pinnedVersionOf(s);
+    var used = lastPrepared && lastPrepared.prepared.version !== pinned
+      ? " — the latest run used v" + lastPrepared.prepared.version +
+        (lastPrepared.prepared.version_status ? " (" + String(lastPrepared.prepared.version_status).toLowerCase() + ")" : "")
+      : "";
+    var version = S.text(
       root,
       "version",
-      "current version" + (lastPrepared ? " — the latest run used v" + lastPrepared.prepared.version +
-        (lastPrepared.prepared.version_status ? " (" + String(lastPrepared.prepared.version_status).toLowerCase() + ")" : "") : ""),
+      (pinned !== null ? "pinned to v" + pinned : "no exact version (saved in the older format — edit it to pick one)") + used,
     );
+    if (version && pinned !== null) version.setAttribute("data-pinned-version", String(pinned));
+    else if (version) version.removeAttribute("data-pinned-version");
     var preset = M().describeCron(s.cron);
     S.text(root, "when", preset.preset === "custom" ? "Custom pattern" : preset.label);
     S.text(root, "cron", s.cron);
@@ -179,7 +204,7 @@
     var notifications = s.notifications || { recipient_count: 0, events: [], delivery: { state: "off" } };
     var eventLabels = { start: "Started", success: "Succeeded", failure: "Failed", unknown: "Outcome unknown", blocked: "Schedule blocked" };
     var notificationText = notifications.recipient_count ? notifications.recipient_count + (notifications.recipient_count === 1 ? " recipient · " : " recipients · ") + (notifications.events.map(function (event) { return eventLabels[event]; }).join(", ") || "no events selected") : "Off — no recipients";
-    if (notifications.delivery.state === "off") notificationText += " · mail not enabled on this deployment";
+    if (notifications.delivery.state === "off") notificationText += " · " + (MAIL_OFF_TEXT[notifications.delivery.reason] || MAIL_OFF_TEXT.disabled);
     S.text(root, "notifications", notificationText);
     if (s.condition !== "enabled") {
       S.text(root, "next-due", s.condition === "paused" ? "— paused: nothing is recorded until it resumes" : "— blocked: nothing fires until it is unblocked");
@@ -246,6 +271,19 @@
       row.setAttribute("data-at", o.at);
       body.appendChild(row);
     });
+  }
+
+  /**
+   * #876 G6 U2 — the Dependencies section's pane (brief §A.6 selector table): the schedule's id is the only thing its
+   * request sends; the revision rides along for display. Attributes only, never markup.
+   */
+  function renderDependencies(root, s, open) {
+    var deps = root.querySelector("[data-dp-deps]");
+    if (!deps) return;
+    deps.setAttribute("data-id", s.id);
+    deps.setAttribute("data-revision", String(s.revision));
+    var section = root.querySelector("[data-sch-deps]");
+    if (section && open) section.open = true;
   }
 
   function renderParameters(root, s) {

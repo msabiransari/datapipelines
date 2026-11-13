@@ -20,7 +20,7 @@
   <!-- claim: docs/datasources.md §3 — read-only where you say so -->
   <!-- claim: docs/pipeline-contract.md §8 — write-back lands in Postgres if you like -->
   <!-- claim: docs/versioning.md §3 — the release step, by a person -->
-  <!-- claim: docs/rest-api.md §19 — the API partners ask for -->
+  <!-- claim: docs/rest-api.md §19 — a released pipeline served as a GET endpoint -->
 
   <section class="section page-hero" aria-labelledby="po-title">
     <div class="container">
@@ -44,7 +44,7 @@
     <div class="container">
       <p class="kicker">Said plainly</p>
       <h2 id="po-enough" class="ds-headline">Postgres as data warehouse: when Postgres alone is enough</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <p>
           One database, one team, questions the database itself can answer: that is Postgres doing its job, and it
           does it superbly. Postgres for analytics is a sound default, and Postgres analytics on a read replica
@@ -81,9 +81,9 @@
           <p>The question crosses engines now, orders in Postgres, events in MySQL, a lookup in SQLite, and no engine can see two. What is needed is a place for the join: a scratch database created for that one run, sources staged into it, dropped after. Not a warehouse; a per-run workbench.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/datasources.md §7 -->
+          <!-- claim: docs/datasources.md §7, docs/auth.md §7.5 -->
           <h3>The agent that needs access</h3>
-          <p>An AI coding agent is the newest member of the team and the one you least want holding a superuser password. The server-side shape: credentials encrypted at rest on the server, the agent holding a revocable key limited to its person's role, read-only flags where writes are out of bounds, and every call audited.</p>
+          <p>An AI coding agent is the newest member of the team and the one you least want holding a superuser password. The server-side shape: credentials encrypted at rest on the server, the agent holding a revocable key whose role, chosen at creation, never exceeds its creator's, read-only flags where writes are out of bounds, and every call audited.</p>
         </article>
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
@@ -103,7 +103,7 @@
     <div class="container">
       <p class="kicker">What this adds</p>
       <h2 id="po-adds" class="ds-headline">datapipelines adds the four without taking Postgres away</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/datasources.md §3 -->
         <p>
           Postgres stays exactly where it is, serving your application. It becomes a datasource: a named, governed
@@ -167,7 +167,7 @@
         <figcaption>The datasources screen: Postgres registered read-only, credentials encrypted, the agent's view of it bounded by the key it holds.</figcaption>
         <div th:replace="~{site/_demo-datasources :: datasources(${facts.demo})}"></div>
       </figure>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/deployment.md §Appendix B -->
         <p>
           The demo is the small case made real: <code>./app.sh --start --demo nyc</code> seeds Postgres trips,
@@ -196,7 +196,7 @@
   </section>
 
   <section class="section" aria-labelledby="po-next">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="po-next" class="ds-headline">Meet the arrivals on the demo, not in production</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">

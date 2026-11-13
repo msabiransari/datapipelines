@@ -16,6 +16,7 @@ import de.mkammerer.argon2.Argon2Factory
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.TestInfo
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -100,44 +101,74 @@ abstract class BrowserSuite {
     /**
      * Drives the local login form (auth.md §5A). Asserts nothing — the caller decides
      * what the outcome should be; this helper only types and clicks.
+     *
+     * #825: each step that can time out is [named]. The fields' step names the FIELDS, never
+     * what was typed into them.
      */
     protected fun login(
         email: String,
         password: String,
+    ) = login(page, email, password)
+
+    /**
+     * [login] on an explicit page (#831) — a fixture signing in a SECOND session (a promoter or
+     * a member beside the admin) drives the identical form, with the identical named steps,
+     * instead of a hand-rolled copy whose waits time out bare.
+     */
+    protected fun login(
+        on: Page,
+        email: String,
+        password: String,
     ) {
-        page.navigate("$baseUrl/login")
-        page.fill("#login-email", email)
-        page.fill("#login-password", password)
-        named(page, "the login form's submit button ('form button[type=submit]' on $baseUrl/login)") {
-            page.click("form button[type=submit]")
+        named(on, "the login page navigation ($baseUrl/login)") {
+            on.navigate("$baseUrl/login")
         }
+        named(on, "the login form's fields (#login-email, #login-password on $baseUrl/login)", ::shellInitFacts) {
+            on.fill("#login-email", email)
+            on.fill("#login-password", password)
+        }
+        named(on, "the login form's submit button ('form button[type=submit]' on $baseUrl/login)") {
+            on.click("form button[type=submit]")
+        }
+    }
+
+    /**
+     * #831: the redirect a successful [login] ends in, as the derived fixtures wait for it — [named],
+     * so a login that never lands reads as the landing step and the page it stayed on (the login
+     * form, typically), not as a bare timeout. The test classes' own copies of this wait are a
+     * separate sweep.
+     */
+    protected fun landOnDashboard(on: Page = page) {
+        named(on, "the post-login landing (**/dashboard)") { on.waitForURL("**/dashboard") }
     }
 
     /**
      * Runs [block]; a timeout becomes an AssertionError naming [what] and where the page was —
      * Playwright's bare `TimeoutError` named neither the element nor the document, and four of
      * these reds spent a gate each on setup waits nobody could attribute (#355).
+     *
+     * #825: [facts], when given, appends what the page itself held when the wait gave up (a
+     * render or init wait passes [shellInitFacts]). It is read defensively, so a probe that
+     * throws can never replace the named red. It sits BEFORE [block] on purpose: callers pass
+     * the block as a trailing lambda, which Kotlin binds to the LAST function-typed parameter.
+     *
+     * #831: the body is [namedWait], which the suite's support objects call directly.
      */
     protected fun named(
         on: Page,
         what: String,
+        facts: ((Page) -> String)? = null,
         block: () -> Unit,
-    ) {
-        try {
-            block()
-        } catch (e: com.microsoft.playwright.PlaywrightException) {
-            if (e.message?.contains("Timeout") == true) {
-                throw AssertionError("$what timed out — url=${on.url()}", e)
-            }
-            throw e
-        }
-    }
+    ) = namedWait(on, what, facts, block)
 
     /**
      * #554: shows [family]'s panel of the resource browser on [on] and waits for its root level.
      * The browser shows the family of the CURRENT page, so off a page of that family this follows
      * the menu's link (a boosted swap: the same document) or, with the menu off screen (a phone),
      * navigates to the catalog; on a phone it then opens the browser drawer.
+     *
+     * #825: the navigation, the drawer click and the root-level wait are each [named]; the
+     * root-level red also prints the tree as the wait left it ([treeFacts]).
      */
     protected fun openBrowserTree(
         family: String,
@@ -145,13 +176,53 @@ abstract class BrowserSuite {
     ) {
         if (!(on.evaluate("() => location.pathname") as String).startsWith("/$family")) {
             val link = on.locator(".app-nav-link[data-nav-section='/$family']")
-            if (link.isVisible) link.click() else on.navigate("$baseUrl/$family")
-            on.waitForURL("**/$family")
+            val viaLink = link.isVisible
+            val via = if (viaLink) "the menu's /$family section link" else "$baseUrl/$family"
+            named(on, "the $family page navigation ($via, waiting for **/$family)") {
+                if (viaLink) link.click() else on.navigate("$baseUrl/$family")
+                on.waitForURL("**/$family")
+            }
         }
         val closedDrawer =
             "() => matchMedia('(max-width: 760.98px)').matches && !document.documentElement.classList.contains('browser-open')"
-        if (on.evaluate(closedDrawer) == true) on.click("#browser-open")
-        on.waitForFunction("family => window.DatapipelinesSidebarTrees.get(family)?.state.levels.get(null)?.complete", family)
+        if (on.evaluate(closedDrawer) == true) {
+            named(on, "the phone browser drawer's open button (#browser-open, family $family)") { on.click("#browser-open") }
+        }
+        named(on, "the $family browser tree's root level (DatapipelinesSidebarTrees '$family', parent null)", { treeFacts(it, family) }) {
+            on.waitForFunction("family => window.DatapipelinesSidebarTrees.get(family)?.state.levels.get(null)?.complete", family)
+        }
+    }
+
+    /**
+     * #825: [family]'s browser tree as its root-level wait left it — whether it is mounted (and
+     * which families are), its level count, and the root level's status, completion, row count
+     * and the widget's own error sentence — then the document's facts. No DOM and no row content;
+     * read defensively like [shellInitFacts], because a page mid-navigation refuses evaluate.
+     */
+    private fun treeFacts(
+        on: Page,
+        family: String,
+    ): String {
+        val tree =
+            runCatching {
+                on.evaluate(
+                    """
+                    family => {
+                      const trees = window.DatapipelinesSidebarTrees;
+                      if (!trees) return 'tree=absent (no window.DatapipelinesSidebarTrees)';
+                      const tree = trees.get(family);
+                      if (!tree) return 'tree=absent (mounted: ' + (Array.from(trees.keys()).join(',') || 'none') + ')';
+                      const levels = tree.state.levels;
+                      const root = levels.get(null);
+                      if (!root) return 'tree=mounted levels=' + levels.size + ' rootLevel=absent';
+                      return 'tree=mounted levels=' + levels.size + ' rootLevel=' + root.status + ' complete=' + root.complete +
+                        ' rows=' + root.nodes.size + (root.error ? ' error=' + root.error.message : '');
+                    }
+                    """.trimIndent(),
+                    family,
+                ) as String
+            }.getOrElse { "the tree probe itself failed: $it" }
+        return "$tree, document: ${shellInitFacts(on)}"
     }
 
     /**
@@ -165,10 +236,37 @@ abstract class BrowserSuite {
      * [createWorkspace] on an explicit page — a test driving a SECOND session (a member beside
      * an admin) needs the identical flow, and a hand-rolled copy is how one of them quietly
      * stops waiting for the row and races the next navigation.
+     *
+     * [renderTimeoutMs] bounds the create form's first render (#825); it exists for
+     * BrowserSuiteSetupWaitsBrowserTest's planted render failure alone, which would otherwise
+     * wait the whole first-render bound. Every other caller keeps the default.
      */
     protected fun createWorkspaceOn(
         page: Page,
         name: String,
+        renderTimeoutMs: Double = FIRST_RENDER_TIMEOUT_MS,
+    ) {
+        submitWorkspaceCreate(page, name, renderTimeoutMs)
+        enterWorkspace(page, name)
+    }
+
+    /**
+     * [createWorkspaceOn] WITHOUT entering the new workspace — the raw product behaviour, for
+     * the one suite whose subject is the switcher itself. [renderTimeoutMs] as there.
+     */
+    protected fun createWorkspaceWithoutEntering(
+        name: String,
+        renderTimeoutMs: Double = FIRST_RENDER_TIMEOUT_MS,
+    ) = submitWorkspaceCreate(page, name, renderTimeoutMs)
+
+    /**
+     * The create flow both entry points share, up to the created row (#825 lifted it, so the two
+     * cannot drift): each step that can time out is [named].
+     */
+    private fun submitWorkspaceCreate(
+        page: Page,
+        name: String,
+        renderTimeoutMs: Double,
     ) {
         named(page, "the workspaces page navigation ($baseUrl/workspaces)") {
             page.navigate("$baseUrl/workspaces")
@@ -178,38 +276,23 @@ abstract class BrowserSuite {
         // wait the whole flow hangs on: under a loaded gate it has outrun the action default
         // three gates running (#327, and #283/#303 before it). Wait for THAT event with the
         // loaded-box bound, then fill — the input is present, so the fill keeps the default.
-        page
-            .locator("form[action*='/workspaces/create'] input[name=name]")
-            .waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
-        page.fill("form[action*='/workspaces/create'] input[name=name]", name)
+        val render = "the workspace create form's first render ($WORKSPACE_NAME_INPUT, bound ${renderTimeoutMs.toLong()}ms)"
+        named(page, render, ::shellInitFacts) {
+            page.locator(WORKSPACE_NAME_INPUT).waitFor(Locator.WaitForOptions().setTimeout(renderTimeoutMs))
+        }
+        named(page, "the workspace create form's name field ($WORKSPACE_NAME_INPUT)") {
+            page.fill(WORKSPACE_NAME_INPUT, name)
+        }
         // Wait for the form-submit navigation to settle, THEN the row — a selector wait
         // started before the submit can bind to the outgoing document. `?` is a glob
         // metacharacter, so the query is matched with plain wildcards.
-        page.click("form[action*='/workspaces/create'] button[type=submit]")
+        named(page, "the workspace create form's submit button ($WORKSPACE_CREATE_SUBMIT)") {
+            page.click(WORKSPACE_CREATE_SUBMIT)
+        }
         // The name appears in THREE places (the table cell, the switcher's hidden
         // <option>, the members heading) — a bare text= wait resolves to the first,
         // the hidden option, and waits for visibility forever. Wait for the visible
         // table cell.
-        named(page, "the created workspace's row (the visible table cell naming '$name')") {
-            page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
-        }
-        enterWorkspace(page, name)
-    }
-
-    /**
-     * [createWorkspaceOn] WITHOUT entering the new workspace — the raw product behaviour, for
-     * the one suite whose subject is the switcher itself.
-     */
-    protected fun createWorkspaceWithoutEntering(name: String) {
-        named(page, "the workspaces page navigation ($baseUrl/workspaces)") {
-            page.navigate("$baseUrl/workspaces")
-            page.waitForURL("**/workspaces")
-        }
-        page
-            .locator("form[action*='/workspaces/create'] input[name=name]")
-            .waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
-        page.fill("form[action*='/workspaces/create'] input[name=name]", name)
-        page.click("form[action*='/workspaces/create'] button[type=submit]")
         named(page, "the created workspace's row (the visible table cell naming '$name')") {
             page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
         }
@@ -222,38 +305,54 @@ abstract class BrowserSuite {
      * instance-wide, not a member who was just provisioned, so the session's active workspace
      * is still whatever it was. Nearly every fixture means "and work in it", and the switch is
      * also the only thing that re-stamps the session cookie's `active_workspace` claim.
+     *
+     * #761: a red out of here names the ONE [SwitchPhase] that did not finish and carries only
+     * the facts that phase can have, so a dead shell never reads as a refused switch. [initTimeoutMs]
+     * bounds the shell-init wait; it exists for WorkspaceSwitchOutcomeBrowserTest's planted init
+     * failure alone, which would otherwise wait the whole first-render bound. Every other caller
+     * keeps the default.
      */
     protected fun enterWorkspace(
         page: Page,
         name: String,
+        initTimeoutMs: Double = FIRST_RENDER_TIMEOUT_MS,
     ) {
-        // A full reload first: the create submit is hx-boosted, so only the main content was
-        // swapped and the rail still holds the switcher rendered BEFORE this workspace existed.
-        // The switcher's first render after the reload is a first-render wait too (#327): the
-        // loaded-box bound, then the select acts on a present element at the default patience.
-        page.reload()
-        page.locator("#workspace-switcher").waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
-        // `force`: the select is an invisible overlay on the switcher card (the label is the
-        // hit target), so Playwright's visibility precondition never clears on it.
-        val outcome = WorkspaceSwitchOutcome("$baseUrl/workspace/switch")
+        val outcome = WorkspaceSwitchOutcome("$baseUrl/workspace/switch", initTimeoutMs)
+        // Watched from BEFORE the reload: the render and init phases name the loads that failed.
+        val loadFailed = Consumer<Request> { outcome.recordFailedLoad(it) }
         val requested = Consumer<Request> { if (outcome.matches(it)) outcome.request = it }
         val responded = Consumer<Response> { if (outcome.matches(it.request())) outcome.response = it }
         val failed = Consumer<Request> { if (outcome.matches(it)) outcome.failure = it.failure() }
         val navigated = Consumer<Frame> { if (it == page.mainFrame()) outcome.navigationUrl = it.url() }
-        page.onRequest(requested)
-        page.onResponse(responded)
-        page.onRequestFailed(failed)
-        page.onFrameNavigated(navigated)
+        page.onRequestFailed(loadFailed)
         try {
+            // A full reload first: the create submit is hx-boosted, so only the main content was
+            // swapped and the rail still holds the switcher rendered BEFORE this workspace existed.
+            // The switcher's first render after the reload is a first-render wait too (#327): the
+            // loaded-box bound, then the select acts on a present element at the default patience.
+            page.reload()
+            page.locator("#workspace-switcher").waitFor(Locator.WaitForOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS))
+            // The switch's own transport is watched from here on, as before #761: the reload's
+            // navigation must never stand in for the switch's.
+            page.onRequest(requested)
+            page.onResponse(responded)
+            page.onRequestFailed(failed)
+            page.onFrameNavigated(navigated)
+            outcome.phase = SwitchPhase.SHELL_INIT
             // #629: the switch is submitted by shell.js's delegated change listener; select only
             // once its init ran, so a change can never fire into a page with no listener.
             page.waitForFunction(
                 "() => window.__dpShellInit === true",
                 null,
-                Page.WaitForFunctionOptions().setTimeout(FIRST_RENDER_TIMEOUT_MS),
+                Page.WaitForFunctionOptions().setTimeout(initTimeoutMs),
             )
+            outcome.phase = SwitchPhase.SELECT
+            // `force`: the select is an invisible overlay on the switcher card (the label is the
+            // hit target), so Playwright's visibility precondition never clears on it.
             page.selectOption("#workspace-switcher", arrayOf(name), Page.SelectOptionOptions().setForce(true))
+            outcome.phase = SwitchPhase.SWITCH_REQUEST
             awaitSwitchRequest(page, outcome)
+            outcome.phase = SwitchPhase.SWITCH_RESULT
             // Observe the POST itself: an abort has no response and must fail immediately;
             // an absent request must be distinguishable from a response redirecting elsewhere.
             page.waitForCondition { outcome.failure != null || (outcome.response != null && outcome.navigationUrl != null) }
@@ -261,11 +360,18 @@ abstract class BrowserSuite {
             if (outcome.failure != null || location !in setOf("/dashboard", "$baseUrl/dashboard")) {
                 outcome.fail(page, name)
             }
+            outcome.phase = SwitchPhase.DASHBOARD_LANDING
             page.waitForURL("$baseUrl/dashboard")
-            if (page.locator("#workspace-switcher").inputValue() != name) outcome.fail(page, name)
+            outcome.phase = SwitchPhase.SELECTED_VALUE
+            val selected = page.locator("#workspace-switcher").inputValue()
+            if (selected != name) {
+                outcome.selected = selected
+                outcome.fail(page, name)
+            }
         } catch (e: PlaywrightException) {
             outcome.fail(page, name, e)
         } finally {
+            page.offRequestFailed(loadFailed)
             page.offRequest(requested)
             page.offResponse(responded)
             page.offRequestFailed(failed)
@@ -284,17 +390,21 @@ abstract class BrowserSuite {
         page: Page,
         outcome: WorkspaceSwitchOutcome,
     ) {
+        val bound = "${SWITCH_REQUEST_TIMEOUT_MS.toLong()}ms"
         try {
             page.waitForCondition(
                 { outcome.request != null || outcome.failure != null },
                 Page.WaitForConditionOptions().setTimeout(SWITCH_REQUEST_TIMEOUT_MS),
             )
+            outcome.requestWait = "observed within $bound"
         } catch (_: TimeoutError) {
             outcome.pageState = switcherState(page)
             println("WARN #629 no switch POST after ${SWITCH_REQUEST_TIMEOUT_MS}ms; re-dispatching change once: ${outcome.pageState}")
+            outcome.requestWait = "none within $bound, re-dispatching the change once"
             page.evaluate(
                 "() => document.getElementById('workspace-switcher').dispatchEvent(new Event('change', { bubbles: true }))",
             )
+            outcome.requestWait = "none within $bound, the change re-dispatched once"
         }
     }
 
@@ -316,17 +426,61 @@ abstract class BrowserSuite {
                 """.trimIndent(),
             ).toString()
 
-    /** Only the switch's transport metadata; never cookies, headers containing tokens or bodies. */
-    private class WorkspaceSwitchOutcome(
-        private val url: String,
+    /**
+     * The in-document facts of a shell-init wait — url, document readiness, the flag — read
+     * defensively, because a page mid-navigation refuses evaluate. ONE probe for the suite:
+     * [enterWorkspace]'s render and init phases (#761) and AppShellBrowserTest's own waits (#717).
+     *
+     * #831: the body is [documentFacts], so the suite's support objects print the same facts.
+     */
+    protected fun shellInitFacts(on: Page): String = documentFacts(on)
+
+    /**
+     * #761: [enterWorkspace]'s steps, in order. A red names the phase that did not finish — [label]
+     * leads its message, [step] says what did not happen — and prints only what that phase can
+     * have observed.
+     */
+    private enum class SwitchPhase(
+        val label: String,
+        val step: String,
     ) {
+        SWITCHER_RENDER("switcher-render", "the reload and the switcher's first render did not finish"),
+        SHELL_INIT("shell-init", "the window.__dpShellInit wait did not finish"),
+        SELECT("select", "the forced selectOption did not finish"),
+        SWITCH_REQUEST("switch-request", "the wait for the switch request and its one re-dispatch did not finish"),
+        SWITCH_RESULT("switch-result", "the switch request's outcome was not a redirect to /dashboard"),
+        DASHBOARD_LANDING("dashboard-landing", "the navigation to /dashboard did not finish"),
+        SELECTED_VALUE("selected-value", "the switcher on /dashboard did not show the requested workspace"),
+    }
+
+    /**
+     * The switch's transport metadata and the document's own state only: never cookies, header
+     * values or bodies, and a failed load's URL without its query or fragment (#761).
+     */
+    private inner class WorkspaceSwitchOutcome(
+        private val url: String,
+        private val initTimeoutMs: Double,
+    ) {
+        var phase = SwitchPhase.SWITCHER_RENDER
         var request: Request? = null
         var response: Response? = null
         var failure: String? = null
         var navigationUrl: String? = null
         var pageState: String? = null
+        var requestWait: String? = null
+        var selected: String? = null
+        private val failedLoads = mutableListOf<String>()
+        private var failedLoadCount = 0
 
         fun matches(request: Request): Boolean = request.url() == url && request.method() == "POST"
+
+        /** Every failed load since the reload is counted; the first [FAILED_LOADS_KEPT] are kept. */
+        fun recordFailedLoad(request: Request) {
+            failedLoadCount++
+            if (failedLoads.size < FAILED_LOADS_KEPT) {
+                failedLoads += "${request.resourceType()} ${originAndPath(request.url())} ${request.failure()}"
+            }
+        }
 
         fun fail(
             page: Page,
@@ -339,11 +493,69 @@ abstract class BrowserSuite {
             name: String,
         ): String =
             "Workspace switch to '$name' did not reach /dashboard with the requested workspace: " +
-                "request=${request?.method() ?: "none"} $url, " +
-                "status=${response?.status() ?: "none"}, " +
-                "Location=${response?.headerValue("location") ?: "none"}, " +
-                "failure=${failure ?: "none"}, finalUrl=${page.url()}, " +
-                "pageState=${pageState ?: "not read (the POST arrived in time)"}"
+                "phase=${phase.label} (${phase.step}), " +
+                (facts(page) + "finalUrl=${page.url()}").joinToString(", ")
+
+        /** What [phase] can have observed — never a fact only a later phase would learn. */
+        private fun facts(page: Page): List<String> =
+            when (phase) {
+                SwitchPhase.SWITCHER_RENDER -> renderPhaseFacts(page)
+                SwitchPhase.SHELL_INIT -> documentPhaseFacts(page, initTimeoutMs, requestFact())
+                SwitchPhase.SELECT -> listOf(requestFact(), "switcher=${switcherFacts(page)}")
+                SwitchPhase.SWITCH_REQUEST -> listOf(requestFact(), requestWaitFact()) + pageStateFact()
+                SwitchPhase.SWITCH_RESULT -> listOf(requestFact(), requestWaitFact()) + pageStateFact() + transportFacts()
+                SwitchPhase.DASHBOARD_LANDING -> listOf(requestFact()) + transportFacts()
+                SwitchPhase.SELECTED_VALUE -> listOf("selected=${selected ?: "not read"}")
+            }
+
+        /** Reload uses the supplied page's navigation timeout; only the switcher's render has our explicit bound. */
+        private fun renderPhaseFacts(page: Page) =
+            listOf(
+                "reloadBound=page navigation timeout",
+                "switcherRenderBound=${FIRST_RENDER_TIMEOUT_MS.toLong()}ms",
+                "select=not run",
+                documentFact(page),
+                failedLoadsFact(),
+            )
+
+        /** The init phase: its bound, what the switch had done, the document, the failed loads. */
+        private fun documentPhaseFacts(
+            page: Page,
+            bound: Double,
+            switchFact: String,
+        ) = listOf("bound=${bound.toLong()}ms", switchFact, documentFact(page), failedLoadsFact())
+
+        private fun requestFact() = "request=${request?.let { "${it.method()} ${it.url()}" } ?: "none"}"
+
+        private fun requestWaitFact() = "requestWait=${requestWait ?: "did not finish"}"
+
+        /** Printed only when the request wait timed out and read it — never a stand-in claim. */
+        private fun pageStateFact() = listOfNotNull(pageState?.let { "pageState=$it" })
+
+        private fun transportFacts() =
+            listOf(
+                "status=${response?.status() ?: "none"}",
+                "Location=${response?.headerValue("location") ?: "none"}",
+                "failure=${failure ?: "none"}",
+            )
+
+        private fun documentFact(page: Page) = "document=${shellInitFacts(page)}"
+
+        private fun switcherFacts(page: Page) = runCatching { switcherState(page) }.getOrElse { "the switcher probe itself failed: $it" }
+
+        private fun failedLoadsFact(): String {
+            if (failedLoadCount == 0) return "failedLoads=none since the reload"
+            val shown = if (failedLoadCount > failedLoads.size) " (the first ${failedLoads.size} shown)" else ""
+            return "failedLoads=$failedLoadCount since the reload$shown [${failedLoads.joinToString("; ")}]"
+        }
+
+        /** Origin and path only: a query or a fragment can carry a capability. */
+        private fun originAndPath(raw: String): String =
+            runCatching {
+                val uri = java.net.URI(raw)
+                val port = if (uri.port == -1) "" else ":${uri.port}"
+                if (uri.isOpaque || uri.host == null) "${uri.scheme}:" else "${uri.scheme}://${uri.host}$port${uri.rawPath.orEmpty()}"
+            }.getOrElse { "(an unparseable URL)" }
     }
 
     /** A logged-out session — a fresh context+page pair the test must [Session.close]. */
@@ -455,14 +667,27 @@ abstract class BrowserSuite {
      * the completion signal. A no-op when the page already shows that mode. The deployment
      * default is `dark` (owner, 2026-09-11), so a test that photographs "light then dark" starts
      * by asking for light; it must not assume where the toggle begins.
+     *
+     * #825: the href read and the three waits are each [named] with the document's facts; the
+     * read is a wait too (the locator waits for `#theme-link` to exist).
      */
     protected fun ensureTheme(mode: String) {
         val wanted = "/themes/$mode.css"
-        val current = page.locator("#theme-link").first().getAttribute("href") ?: ""
+        var current = ""
+        named(page, "the #theme-link href read (wanted $wanted)", ::shellInitFacts) {
+            current = page.locator("#theme-link").first().getAttribute("href") ?: ""
+        }
         if (current.contains(wanted)) return
-        page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
-        page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
-        page.locator("html[data-theme='$mode']").waitFor()
+        val swap = "wanted $wanted, current href $current"
+        named(page, "the theme PATCH response ($swap)", ::shellInitFacts) {
+            page.waitForResponse("**/partials/profile/theme") { page.locator("#mode-toggle").click() }
+        }
+        named(page, "the #theme-link swap ($swap)", ::shellInitFacts) {
+            page.waitForFunction("() => document.getElementById('theme-link').getAttribute('href').includes('$wanted')")
+        }
+        named(page, "the html[data-theme='$mode'] update ($swap)", ::shellInitFacts) {
+            page.locator("html[data-theme='$mode']").waitFor()
+        }
     }
 
     /** Generates per-run secrets — no literal secret in any fixture (the HIGH-2 rule). */
@@ -518,6 +743,13 @@ abstract class BrowserSuite {
         private const val SECRET_BYTES = 32
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
         private val SECURE_RANDOM = SecureRandom()
+
+        /** #761: how many failed loads since the reload a render/init red prints (all are counted). */
+        private const val FAILED_LOADS_KEPT = 10
+
+        /** #825: the create form's name input and submit button, ONE spelling for the shared create flow. */
+        private const val WORKSPACE_NAME_INPUT = "form[action*='/workspaces/create'] input[name=name]"
+        private const val WORKSPACE_CREATE_SUBMIT = "form[action*='/workspaces/create'] button[type=submit]"
 
         private fun randomSecret(): String =
             Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { SECURE_RANDOM.nextBytes(it) })
@@ -623,6 +855,20 @@ abstract class BrowserSuite {
             playwright = null
         }
 
+        /**
+         * #933 — the connection budget's tripwire, once per class after its cases: the shared
+         * server's client count, printed into the class's own output, and a named failure of THIS
+         * class when it is above [SharedBrowserE2e.CONNECTION_BUDGET_THRESHOLD] (or the check is
+         * refused at the ceiling) — instead of dozens of unrelated-looking refusals in the classes
+         * that happen to run next. Not the repair: the demand is bounded where it is produced.
+         */
+        @JvmStatic
+        @AfterAll
+        fun checkConnectionBudget(testInfo: TestInfo) {
+            val className = testInfo.testClass.map { it.simpleName }.orElse(testInfo.displayName)
+            println(SharedBrowserE2e.checkConnectionBudget(className))
+        }
+
         @DynamicPropertySource
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
@@ -630,6 +876,13 @@ abstract class BrowserSuite {
             registry.add("spring.datasource.url") { SharedBrowserE2e.jdbcUrl }
             registry.add("spring.datasource.username") { SharedBrowserE2e.username }
             registry.add("spring.datasource.password") { SharedBrowserE2e.password }
+            // #933 (a): a context the cache keeps between its classes keeps an idle floor of 2 on the
+            // ONE shared server. A floor, not a cap: the pool can hold more, up to its maximum size,
+            // and an idle connection above the floor is retired only after the 10 s idle timeout
+            // (HikariCP's lowest), not at once. The product's maximum pool size stays, so a case
+            // under load keeps what production gives it.
+            registry.add("spring.datasource.hikari.minimum-idle") { 2 }
+            registry.add("spring.datasource.hikari.idle-timeout") { 10_000 }
             registry.add("datapipelines.redis.password") { "" }
             registry.add("datapipelines.redis.host") { SharedBrowserE2e.redisHost }
             registry.add("datapipelines.redis.port") { SharedBrowserE2e.redisPort }
@@ -649,3 +902,42 @@ abstract class BrowserSuite {
         }
     }
 }
+
+/**
+ * The body of [BrowserSuite.named] (#355, #825), lifted to the file's top level by #831 so the
+ * suite's support OBJECTS — which cannot call a protected member — raise the identical red: one
+ * implementation, no copy. Runs [block]; a Playwright timeout becomes an AssertionError reading
+ * `<what> timed out — url=<where the page was>`, plus ` — <facts>` when [facts] is given (read
+ * defensively, so a probe that throws never replaces the named red); anything else is rethrown.
+ * [facts] sits BEFORE [block]: callers pass the block as a trailing lambda.
+ */
+internal fun namedWait(
+    on: Page,
+    what: String,
+    facts: ((Page) -> String)? = null,
+    block: () -> Unit,
+) {
+    try {
+        block()
+    } catch (e: PlaywrightException) {
+        if (e.message?.contains("Timeout") == true) {
+            val held = facts?.let { probe -> " — " + runCatching { probe(on) }.getOrElse { "the facts probe itself failed: $it" } }
+            throw AssertionError("$what timed out — url=${on.url()}${held.orEmpty()}", e)
+        }
+        throw e
+    }
+}
+
+/**
+ * The body of [BrowserSuite.shellInitFacts] (#761), lifted by #831 beside [namedWait] so a support
+ * object's render or init wait carries the same document facts — url, document readiness, the
+ * shell's init flag — read defensively, because a page mid-navigation refuses evaluate.
+ */
+internal fun documentFacts(on: Page): String =
+    runCatching {
+        on.evaluate(
+            "() => 'url=' + location.href + " +
+                "' readyState=' + document.readyState + " +
+                "' __dpShellInit=' + String(window.__dpShellInit)",
+        ) as String
+    }.getOrElse { "the document probe itself failed: $it" }

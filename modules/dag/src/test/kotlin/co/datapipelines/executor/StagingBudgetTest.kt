@@ -9,6 +9,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import java.lang.management.ManagementFactory
 
 /**
  * The per-execution tempdb memory budget (B2, D6, staging §8.2) — clamping, and enforcement on
@@ -210,8 +211,7 @@ class StagingBudgetTest {
         fun usedKbAfterGc(): Long {
             @Suppress("ExplicitGarbageCollectionCall")
             System.gc()
-            val runtime = Runtime.getRuntime()
-            return (runtime.totalMemory() - runtime.freeMemory()) / 1024
+            return ManagementFactory.getMemoryMXBean().heapMemoryUsage.used / 1024
         }
     }
 }

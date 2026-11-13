@@ -11,6 +11,7 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:10000}
 
   # Flyway runs on startup against the metadata DB. Migrations live only in this
   # module (module-structure.md §3.1 rule 2); the DDL authority is metadata-db.md §4.
@@ -64,18 +65,20 @@ server:
     # also closes the Host-header-poisoned absolute redirect. Pinned by the redirect
     # assertions in LocalLoginE2eTest / LocalAdminSeedE2eTest / MailNoticesE2eTest.
     use-relative-redirects: true
-    # #279 (configuration.md §3.13): how much of a REFUSED request body Tomcat may drain
-    # before closing the connection. The request-body cap (`datapipelines.web.max-request-bytes`,
-    # §3.31) refuses an over-cap body without reading the rest; this bounds the swallow that
-    # keeps a keep-alive connection usable when the remainder is small and closes it when it
-    # is not — an abandoned over-cap upload costs the connection, never the server. The
-    # screenshot upload route drains its own refused declaration up to its cap + 2 MiB first
-    # (#467, RequestBodyCapFilter), so that connection closes after the client's last byte.
+    # #279 / #559 / #561 (configuration.md §3.13): Tomcat's refused-body swallow.
+    # The filter first drains screenshots up to 6 MiB, platform bodies up to their cap + 2 MiB,
+    # sharing eight permits and a 10 s budget. A blocking read can add the connector timeout
+    # (60 s default): 70 s per filter drain, 560 thread-seconds for eight. Fixed code bounds;
+    # this key does not move them. A context customizer fixes swallowAbortedUploads=false:
+    # EVERY 413 closes without swallowing, throwing, or dispatching /error. Saturated and
+    # above-bound bodies are unread (at most one connector timeout). Completed drains have
+    # no declared remainder; client_gone has already failed I/O. This key applies only to
+    # non-413 responses with unread bodies (including skipped GET/HEAD/OPTIONS and other 4xx).
     max-swallow-size: ${SERVER_TOMCAT_MAX_SWALLOW_SIZE:2MB}
 
 # Actuator: the HealthEndpoint bean backs the root-level /health, /ready and /info
 # controllers (observability.md §6). NO /actuator path is reachable on the
-# application port (§6.4); /actuator/prometheus arrives later on the SEPARATE
+# application port (§6.4); /actuator/prometheus is served on the SEPARATE
 # management port (§4.2), never here.
 management:
   # SEPARATE MANAGEMENT PORT (observability.md §4.2). This is the mechanism that
@@ -108,9 +111,12 @@ management:
   endpoints:
     web:
       exposure:
-        # On the management port only, reachable from the cluster-internal network.
-        # /actuator/prometheus joins this list with the metrics registry.
-        include: "health"
+        # On the management port only (loopback-bound above), where both are ANONYMOUS: the
+        # port is the boundary, not a credential (#231, observability.md §4.2; the permit is
+        # SecurityConfig's management-context matcher, never a PublicPaths entry). `prometheus`
+        # is the scrape of the Micrometer registry `modules/app` ships (#708).
+        # ApplicationSmokeTest asserts the actuator index lists exactly these two.
+        include: "health,prometheus"
   health:
     # observability.md §6.1: nothing in this architecture writes to local disk, so
     # a disk-space signal would restart a perfectly healthy pod.
@@ -375,8 +381,6 @@ datapipelines:
     retention-days: ${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}
 
   observability:
-    tracing:
-      enabled: ${DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED:false}
     logging:
       format: ${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}
 
@@ -476,6 +480,10 @@ datapipelines:
   # deployment's datasources carry their own longer query_timeout_seconds.
   datasources:
     retire-ceiling-seconds: ${DATAPIPELINES_DATASOURCES_RETIRE_CEILING_SECONDS:}
+    # #824 (owner ruling 2026-11-07): the same ceiling for a retired MANAGED lake reader generation
+    # only. EMPTY = DERIVED — node-query-timeout-max-seconds + 30 (930 shipped): a managed node may
+    # raise its statement timeout up to that maximum. The lake's reads rule counts this ceiling.
+    managed-retire-ceiling-seconds: ${DATAPIPELINES_DATASOURCES_MANAGED_RETIRE_CEILING_SECONDS:}
     # §3.26 (186): the declared roots a file-backed in-process datasource (H2 `file:`/bare
     # path, SQLite, DuckDB file) must live under. EMPTY = refused for everyone — no
     # file-backed datasource is registrable until the deployment declares where they live.
@@ -551,6 +559,16 @@ datapipelines:
     max-schedules-per-workspace: ${DATAPIPELINES_SCHEDULER_MAX_SCHEDULES_PER_WORKSPACE:100}
     notifications:
       max-recipients: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_MAX_RECIPIENTS:20}
+      # Scheduler mail is OFF unless true (owner ruling 2026-10-03, #442); true needs the shared
+      # transport (datapipelines.mail host + from) and datapipelines.auth.base-url, or startup refuses.
+      enabled: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_ENABLED:false}
+      # Comma-separated domains (example.com) or subdomain wildcards (*.example.com). Empty under the
+      # development posture = nothing sends; under hardened = no domain restriction.
+      recipient-domains: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_RECIPIENT_DOMAINS:}
+      max-attempts: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_MAX_ATTEMPTS:3}
+      retry-backoff-seconds: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_RETRY_BACKOFF_SECONDS:30,120,600}
+      batch-size: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_BATCH_SIZE:20}
+      backlog-max: ${DATAPIPELINES_SCHEDULER_NOTIFICATIONS_BACKLOG_MAX:1000}
   # The parameter engine (#194; configuration.md §3.30, the design record §11). Appended as the LAST child of
   # datapipelines: (the reparenting lesson — MISTAKES.md); ParametersConfigKeysSpecDriftTest pins its neighbours.
   parameters:
@@ -624,6 +642,67 @@ datapipelines:
       max-refresh-seconds: ${DATAPIPELINES_DASHBOARDS_MAX_REFRESH_SECONDS:900}
       parameter-lock-seconds: ${DATAPIPELINES_DASHBOARDS_PARAMETER_LOCK_SECONDS:30}
       render-seconds: ${DATAPIPELINES_DASHBOARDS_RENDER_SECONDS:20}
+  # Release dependencies (configuration.md §3.35, #517): the closure bounds a cascading release enumerates under,
+  # and the workspace mutation guard's lock wait.
+  release:
+    dependencies:
+      max-depth: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_DEPTH:32}
+      max-versions: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_VERSIONS:1024}
+      max-edges: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_EDGES:4096}
+      max-blockers: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_BLOCKERS:100}
+      max-wire-bytes: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_WIRE_BYTES:1048576}
+      lock-wait-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_LOCK_WAIT_SECONDS:5}
+      max-resolve-batch-size: ${DATAPIPELINES_RELEASE_DEPENDENCIES_MAX_RESOLVE_BATCH_SIZE:256}
+      metadata-timeout-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_METADATA_TIMEOUT_SECONDS:30}
+      statement-timeout-seconds: ${DATAPIPELINES_RELEASE_DEPENDENCIES_STATEMENT_TIMEOUT_SECONDS:5}
+  # The managed lake (configuration.md §3.36, #785 dp-lake P2; design record §6). Server configuration,
+  # never UI. Inert unless enabled. Appended after the whole datapipelines: tree (the reparenting lesson —
+  # MISTAKES.md); LakeConfigKeysSpecDriftTest pins every key, its default and its neighbours. Sizes use
+  # Spring's DataSize units, where GB is 1024³ bytes (the record's GiB). The four S3 credential values
+  # are secrets: environment only (deploy/secrets.env.example), never a committed value.
+  lake:
+    enabled: ${DATAPIPELINES_LAKE_ENABLED:false}
+    name: ${DATAPIPELINES_LAKE_NAME:lake}
+    mode: ${DATAPIPELINES_LAKE_MODE:normal}
+    storage:
+      kind: ${DATAPIPELINES_LAKE_STORAGE_KIND:s3}
+      bucket: ${DATAPIPELINES_LAKE_S3_BUCKET:}
+      prefix: ${DATAPIPELINES_LAKE_S3_PREFIX:lake/}
+      landing-prefix: ${DATAPIPELINES_LAKE_S3_LANDING_PREFIX:landing/}
+      region: ${DATAPIPELINES_LAKE_S3_REGION:}
+      endpoint: ${DATAPIPELINES_LAKE_S3_ENDPOINT:}
+      path-style: ${DATAPIPELINES_LAKE_S3_PATH_STYLE:false}
+      access-key: ${DATAPIPELINES_LAKE_S3_ACCESS_KEY:}
+      secret-key: ${DATAPIPELINES_LAKE_S3_SECRET_KEY:}
+      reader-access-key: ${DATAPIPELINES_LAKE_S3_READER_ACCESS_KEY:}
+      reader-secret-key: ${DATAPIPELINES_LAKE_S3_READER_SECRET_KEY:}
+    admission:
+      max-concurrent-ingestions: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_INGESTIONS:2}
+      max-concurrent-maintenance: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_MAINTENANCE:1}
+      max-delivery-bytes: ${DATAPIPELINES_LAKE_ADMISSION_MAX_DELIVERY_BYTES:2GB}
+      staging-expansion-factor: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_EXPANSION_FACTOR:3}
+      scratch-bytes: ${DATAPIPELINES_LAKE_ADMISSION_SCRATCH_BYTES:20GB}
+      staging-memory-limit: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_MEMORY_LIMIT:1GB}
+      max-open-partitions-per-append: ${DATAPIPELINES_LAKE_ADMISSION_MAX_OPEN_PARTITIONS_PER_APPEND:64}
+      job-timeout: ${DATAPIPELINES_LAKE_ADMISSION_JOB_TIMEOUT:2h}
+      lease-wait-seconds: ${DATAPIPELINES_LAKE_ADMISSION_LEASE_WAIT_SECONDS:60}
+    catalog:
+      lock-timeout-seconds: ${DATAPIPELINES_LAKE_CATALOG_LOCK_TIMEOUT_SECONDS:5}
+      statement-timeout-seconds: ${DATAPIPELINES_LAKE_CATALOG_STATEMENT_TIMEOUT_SECONDS:30}
+    reads:
+      max-generation-age-seconds: ${DATAPIPELINES_LAKE_READS_MAX_GENERATION_AGE_SECONDS:900}
+      freshness-tick-seconds: ${DATAPIPELINES_LAKE_READS_FRESHNESS_TICK_SECONDS:60}
+      memory-limit: ${DATAPIPELINES_LAKE_READS_MEMORY_LIMIT:512MB}
+      # #845: the egress proxy (host:port) the managed datasource's object-store traffic leaves through; empty = none.
+      # Compose and Helm ship one ON; its max-age is declared at /dp-egress and checked at boot (lake.boot.egress_proxy).
+      egress-proxy: ${DATAPIPELINES_LAKE_READS_EGRESS_PROXY:}
+      egress-max-age-seconds: ${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:960}
+    maintenance:
+      window: ${DATAPIPELINES_LAKE_MAINTENANCE_WINDOW:02:00-05:00}
+      max-bytes-rewritten-per-run: ${DATAPIPELINES_LAKE_MAINTENANCE_MAX_BYTES_REWRITTEN_PER_RUN:50GB}
+    retention:
+      protection-days: ${DATAPIPELINES_LAKE_RETENTION_PROTECTION_DAYS:7}
+      orphan-grace-hours: ${DATAPIPELINES_LAKE_RETENTION_ORPHAN_GRACE_HOURS:72}
 
 # db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
 # (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a

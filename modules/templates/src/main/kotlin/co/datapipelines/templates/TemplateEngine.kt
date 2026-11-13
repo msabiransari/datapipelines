@@ -168,8 +168,9 @@ class TemplateEngine(
         ref: TemplateRef,
         context: Map<String, Any?>,
         maxOutputChars: Long = this.maxOutputChars,
+        onReference: (TemplateRef, String) -> Unit = { _, _ -> },
     ): String =
-        when (val outcome = execute(ref, context, maxOutputChars)) {
+        when (val outcome = execute(ref, context, maxOutputChars, onReference)) {
             is RenderOutcome.Success -> {
                 outcome.sql
             }
@@ -198,6 +199,7 @@ class TemplateEngine(
         ref: TemplateRef,
         context: Map<String, Any?>,
         maxOutputChars: Long = this.maxOutputChars,
+        onReference: (TemplateRef, String) -> Unit = { _, _ -> },
     ): RenderOutcome {
         val normalized = RenderContextNormalizer.normalize(context)
         // #337 (observability §3.3): the render runs on a template-render-N thread; it carries the
@@ -206,7 +208,7 @@ class TemplateEngine(
         val submitted = MdcTask.capture()
         val future: Future<String> =
             try {
-                workers.submit(MdcTask.wrap(submitted, Callable { renderNow(ref, normalized, maxOutputChars) }))
+                workers.submit(MdcTask.wrap(submitted, Callable { renderNow(ref, normalized, maxOutputChars, onReference) }))
             } catch (e: RejectedExecutionException) {
                 return RenderOutcome.Failed(
                     "render capacity exhausted ($MAX_CONCURRENT_RENDERS concurrent, " +
@@ -230,6 +232,13 @@ class TemplateEngine(
         ref: TemplateRef,
         normalizedContext: Map<String, Any?>,
         maxOutputChars: Long,
+        onReference: (TemplateRef, String) -> Unit,
+    ): String = loader.withReferenceObserver(onReference) { renderResolved(ref, normalizedContext, maxOutputChars) }
+
+    private fun renderResolved(
+        ref: TemplateRef,
+        normalizedContext: Map<String, Any?>,
+        maxOutputChars: Long,
     ): String {
         // 046 §6: the version's type picks the configuration. The lookup rides the registry's
         // resolved-version LRU (one map hit once warm; a DRAFT is a row read, 132), and a null
@@ -245,37 +254,52 @@ class TemplateEngine(
         // identity check and (on a miss) the parse consume it rather than reading the row
         // again — one row read per draft render, none per released one (measured in 132).
         val pinned = version?.let { loader.sourceOf(ref.key, it) }
-        val template =
-            if (pinned == null) {
-                configuration.getTemplate(ref.key)
-            } else {
-                loader.withPinned(pinned) { configuration.getTemplate(ref.key) }
-            }
-        val buffer = BoundedWriter(StringBuilder(), maxOutputChars)
-        template.process(normalizedContext, buffer)
-        return buffer.output()
+        // #787 (§6.3): the declared closure is open for the whole render — the load AND the
+        // process — so a render-time load (`<#import>` resolution, the `.get_optional_template`
+        // special variable) resolves only the root and the keys its row's `imports` declare.
+        // Every other load the loader refuses; see RegistryTemplateLoader.
+        return loader.withDeclaredClosure(ref.key) {
+            val template =
+                if (pinned == null) {
+                    configuration.getTemplate(ref.key)
+                } else {
+                    loader.withPinned(pinned) { configuration.getTemplate(ref.key) }
+                }
+            val buffer = BoundedWriter(StringBuilder(), maxOutputChars)
+            template.process(normalizedContext, buffer)
+            buffer.output()
+        }
     }
 
     private fun classify(cause: Throwable): RenderOutcome =
-        when (cause) {
+        when {
             // Thrown by the loader when a "{id}@{version}" key resolves to nothing — either the
             // reference itself or a library in its closure (templates.md §8.2).
-            is TemplateNotFoundException -> {
+            cause is TemplateNotFoundException -> {
                 RenderOutcome.NotFound("template or imported library not found: ${cause.templateName.truncateForError()}")
             }
 
-            is InvalidReferenceException -> {
+            // #787 (§6.3): a load outside the declared import closure. FreeMarker wraps the
+            // loader's IOException when the load happens mid-process (`.get_optional_template`
+            // wraps it in an "I/O error when trying to load optional template" message that
+            // QUOTES the requested name), so walk the cause chain for the typed refusal and
+            // surface only its fixed, key-free message.
+            cause.findCause<UndeclaredTemplateLoadException>() != null -> {
+                RenderOutcome.Failed(UndeclaredTemplateLoadException.MESSAGE)
+            }
+
+            cause is InvalidReferenceException -> {
                 RenderOutcome.UndefinedVariable(
                     variable = cause.blamedExpressionString,
                     detail = "undefined variable: ${(cause.blamedExpressionString ?: "unknown").truncateForError()}",
                 )
             }
 
-            is OutputSizeExceededException -> {
+            cause is OutputSizeExceededException -> {
                 RenderOutcome.Failed("output exceeded the ${cause.limitChars}-character cap")
             }
 
-            is TemplateException -> {
+            cause is TemplateException -> {
                 RenderOutcome.Failed(cause.messageWithoutStackTop.truncateForError())
             }
 
@@ -283,6 +307,10 @@ class TemplateEngine(
                 RenderOutcome.Failed((cause.message ?: cause.javaClass.simpleName).truncateForError())
             }
         }
+
+    /** Closest [cause] in the chain matching [T], null when none — see the #787 classify arm. */
+    private inline fun <reified T : Throwable> Throwable.findCause(): T? =
+        generateSequence(this) { it.cause }.filterIsInstance<T>().firstOrNull()
 
     override fun close() {
         workers.shutdownNow()

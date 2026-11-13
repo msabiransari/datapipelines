@@ -292,8 +292,13 @@ class HikariConnectionPoolShutdownTest {
      * pinned 6.3.3 `PoolBase.setupConnection` order) when the pool closes. Hikari stops waiting
      * after the login timeout and closes its bag; when setup resumes, the bag refuses the handle
      * and HikariCP does not close what it refuses. The generation must: registration made the
-     * handle the owner's, so the owner's close — the last step of the pool's close — closes it
-     * BEFORE `close()` returns, and the resumed setup finds a dead connection.
+     * handle the owner's, so the generation closes it BEFORE `close()` returns, and the resumed
+     * setup finds a dead connection.
+     *
+     * #818d (record §10 RULING 4, second amendment, item 6): the generation's close now interrupts
+     * every handle registered to it BEFORE Hikari's shutdown, so this duplicate is closed by that
+     * first step (`lake.instance_readers_interrupted handles=1`), not by the release at the end, and
+     * the release finds nothing left to report (no `lake.instance_handles_closed`).
      */
     @Test
     fun `a duplicate held inside Hikari's setup when the pool closes is closed by the generation before close returns`() =
@@ -341,11 +346,12 @@ class HikariConnectionPoolShutdownTest {
             {
                 logged.count {
                     it.startsWith(
-                        "event=lake.instance_handles_closed datasource=lake_late_setup_$holdOn",
+                        "event=lake.instance_readers_interrupted datasource=lake_late_setup_$holdOn",
                     ) && " handles=1 " in it
                 } shouldBe
                     1
             },
+            { logged.count { it.startsWith("event=lake.instance_handles_closed") } shouldBe 0 },
             {
                 withClue("no unowned duplicate executes SQL") {
                     shouldThrow<SQLException> { gate.duplicate.createStatement().use { it.executeQuery("SELECT 42") } }
@@ -377,9 +383,9 @@ class HikariConnectionPoolShutdownTest {
     // ------------------------------------------------------------------ helpers
 
     /** The shared capture (#362): [waitUntil] polls the SAME appender [capturingLogs] writes — snapshot reads, no CME. */
-    private val appender = co.datapipelines.datasources.SnapshotListAppender()
+    private val appender = co.datapipelines.logcapture.SnapshotListAppender()
 
-    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(appender, block)
+    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.logcapture.capturingLogs(appender, block)
 
     /** Polls the live log capture until [condition] holds — synchronised on the event, never on a fixed sleep. */
     private fun waitUntil(condition: (List<String>) -> Boolean) {

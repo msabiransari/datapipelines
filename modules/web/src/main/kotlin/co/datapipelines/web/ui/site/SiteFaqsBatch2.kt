@@ -111,36 +111,41 @@ object SiteFaqsBatch2 {
             ),
         )
 
-    /** The Tableau roadmap page's four — every answer says roadmap, planned or later in as many words. */
+    /**
+     * The Tableau roadmap page's four. Since #699 the first answers "yes": dashboards ship. The
+     * extract and the alert still say later in as many words.
+     */
     val TABLEAU_ROADMAP: List<FaqEntry> =
         listOf(
             FaqEntry(
                 "Are the embedded dashboards available today?",
-                "No. They are planned, with no announced release date: dashboards created by your agent, " +
-                    "embedded in your own product, fed by released pipelines and APIs, filtered per viewer. What " +
-                    "ships today is the released pipeline and the GET endpoint a dashboard will consume. The " +
-                    "endpoint contract is docs/rest-api.md §19.",
-                "docs/rest-api.md §19",
+                "Yes. Your agent drafts visualizations and dashboards over pinned released pipelines, a person " +
+                    "reviews and releases them, and your product embeds one through its own backend, which holds the " +
+                    "dashboard key so it never reaches the browser. There is no drag-and-drop editor. The contracts " +
+                    "are docs/dashboards.md §1 and docs/dashboards.md §6.5.",
+                "docs/dashboards.md §1, docs/dashboards.md §6.5",
             ),
             FaqEntry(
                 "When do scheduled extracts to my own S3 bucket arrive?",
-                "Later, decided but not dated. The scheduler that would run them is the planned roadmap item; the " +
-                    "extract itself would land a Parquet file on your own bucket, which Tableau reads natively. " +
-                    "The scheduler design is docs/superpowers/specs/2026-09-07-scheduler-design.md.",
-                "docs/superpowers/specs/2026-09-07-scheduler-design.md",
+                "Later, decided but not dated. The scheduler that would run them ships, and a scheduled pipeline " +
+                    "can already write its result into a table Tableau connects to; the extract itself, a Parquet " +
+                    "file on your own bucket, waits on a write path to object storage. The contracts are " +
+                    "docs/ROADMAP.md §3 and docs/scheduler.md §1.",
+                "docs/ROADMAP.md §3, docs/scheduler.md §1",
             ),
             FaqEntry(
                 "Will there be Slack alerts?",
-                "No. The roadmap names email alerts and nothing beyond them: a scheduled pipeline, a condition, " +
-                    "an email. Later, not dated, and deliberately no Slack. The roadmap item is docs/ROADMAP.md §3.",
+                "No. The roadmap names email alerts and nothing beyond them: a scheduled pipeline, a condition, an " +
+                    "email. Later, not dated, and deliberately no Slack. The planned alerts are docs/ROADMAP.md §3.",
                 "docs/ROADMAP.md §3",
             ),
             FaqEntry(
                 "What does filtered per viewer mean?",
-                "That the same dashboard shows each viewer their own rows: a value bound from the viewer's request " +
-                    "becomes a declared parameter of the released pipeline, and the released SQL filters on it. " +
-                    "That binding mechanism ships in released pipelines today. Binding is docs/templates.md §4.5.",
-                "docs/templates.md §4.5",
+                "That each viewer sees their own rows because your backend decides which filter values a viewer " +
+                    "may submit. Every viewer behind one dashboard key shares that key, so the key alone separates " +
+                    "nobody; the allowed value binds as a declared parameter of the released pipeline and the SQL " +
+                    "filters on it. The contracts are docs/dashboards.md §6.5 and docs/templates.md §4.5.",
+                "docs/dashboards.md §6.5, docs/templates.md §4.5",
             ),
         )
 
@@ -149,10 +154,12 @@ object SiteFaqsBatch2 {
         listOf(
             FaqEntry(
                 "Can each client be kept separate from the others?",
-                "Yes, one workspace per client. A key is pinned to one workspace at issuance, so an agent or a " +
-                    "colleague working client A sees nothing of client B: the other workspace's pipelines, " +
-                    "datasources and executions are absent, not hidden. Key roles and pinning are docs/auth.md §7.5.",
-                "docs/auth.md §7.5",
+                "Yes, one workspace per client. A key is pinned to one workspace at issuance, so an agent " +
+                    "working for client A cannot switch that key to client B. A colleague without the super admin " +
+                    "role can switch their session only to workspaces they belong to; other workspaces' pipelines, " +
+                    "datasources and executions " +
+                    "are absent, not hidden. Workspace resolution is docs/auth.md §5.6.",
+                "docs/auth.md §5.6",
             ),
             FaqEntry(
                 "Can a client's key reach only that client's numbers?",
@@ -170,30 +177,34 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "What do we put in the client's portal today?",
-                "The API: a released pipeline published as a GET endpoint returns JSON with the query string bound " +
-                    "to its declared parameters, which is what a portal, a scheduled report or a white-label page " +
-                    "calls. Embedded dashboards are the planned roadmap item. The contract is docs/rest-api.md §19.",
-                "docs/rest-api.md §19",
+                "The API: a released pipeline published as a GET endpoint returns JSON with the query string " +
+                    "bound to its declared parameters, which is what a portal or a white-label page calls. A " +
+                    "dashboard can sit beside it, embedded through your backend with a dashboard key bound to that " +
+                    "client's dashboard folder. The contracts are docs/rest-api.md §19, docs/auth.md §7.7 and " +
+                    "docs/dashboards.md §6.5.",
+                "docs/rest-api.md §19, docs/auth.md §7.7, docs/dashboards.md §6.5",
             ),
         )
 
-    /** The SaaS page's five — the embedded-analytics story, split into what ships and what is roadmap. */
+    /** The SaaS page's five: the embedded-analytics story, the API and the dashboard (#699: both ship). */
     val FOR_SAAS_TEAMS: List<FaqEntry> =
         listOf(
             FaqEntry(
                 "Is this embedded analytics?",
-                "The API half of embedded analytics ships today: a released pipeline becomes a versioned GET " +
-                    "endpoint your application calls, with per-viewer values bound as parameters. The dashboard " +
-                    "half, created by your agent and embedded in your product, is the planned roadmap item. " +
-                    "Publishing is docs/rest-api.md §19.",
-                "docs/rest-api.md §19",
+                "Both halves ship. A released pipeline becomes a versioned GET endpoint your application calls, " +
+                    "with per-viewer values bound as parameters, and a dashboard over it, drafted by your agent and " +
+                    "released by a person, embeds in your product through your own backend. The contracts are " +
+                    "docs/rest-api.md §19 and docs/dashboards.md §6.5.",
+                "docs/rest-api.md §19, docs/dashboards.md §6.5",
             ),
             FaqEntry(
                 "How does each customer see only their own rows?",
-                "Every viewer's request carries a value, from the query string or the path, that binds to a " +
-                    "declared parameter of the released pipeline, and the released SQL filters on it. The value is " +
-                    "a bound scalar on a prepared statement, never pasted SQL. Binding is docs/templates.md §4.5.",
-                "docs/templates.md §4.5",
+                "Row-level authorisation stays your backend's job: it authorises the viewer and derives or limits " +
+                    "the customer value that viewer may submit. The published endpoint accepts declared parameters " +
+                    "from its path or query string (docs/rest-api.md §19.3), and the released SQL filters rows using " +
+                    "that value bound as a scalar on a prepared statement (docs/templates.md §4.5), never pasted SQL. " +
+                    "An endpoint key restricts published paths, not result rows (docs/auth.md §7.7).",
+                "docs/rest-api.md §19.3, docs/templates.md §4.5, docs/auth.md §7.7",
             ),
             FaqEntry(
                 "What can a customer-facing key reach?",

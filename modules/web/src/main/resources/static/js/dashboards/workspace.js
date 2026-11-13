@@ -32,7 +32,7 @@
    * (a restored document re-runs this file — the marker makes the second pass inert).
    */
 
-  var DASHBOARD_TABS = ["board", "overview", "refreshes", "versions", "keys"];
+  var DASHBOARD_TABS = ["board", "overview", "refreshes", "dependencies", "versions", "keys"];
   var DEFAULT_TAB = "board";
 
   /** The pure half: the tab set the RENDERED strip admits (Keys renders only for a caller

@@ -1,6 +1,7 @@
 package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.application.dashboards.Admission
+import co.datapipelines.application.dashboards.AdmissionResult
 import co.datapipelines.application.dashboards.InvocationSpec
 import co.datapipelines.application.dashboards.RefreshAdmission
 import co.datapipelines.application.dashboards.RefreshEngine
@@ -96,7 +97,7 @@ class DashboardRuntime internal constructor(
         principal: AuthenticatedPrincipal,
         id: UUID,
         version: Int? = null,
-    ): ObjectNode = RuntimeViews.config(resolve(principal, id, version), config)
+    ): ObjectNode = resolve(principal, id, version).let { RuntimeViews.config(it, config, resolver.chartColumns(it)) }
 
     // ---- POST /runtime/parameters -------------------------------------------------------------------------
 
@@ -151,7 +152,7 @@ class DashboardRuntime internal constructor(
         try {
             val values = evaluatedValues(principal, resolved, request)
             val plan = planner.plan(resolved.served.body, request.scope, request.targets, values)
-            val granted = admit(workspaceId, plan)
+            val granted = admit(workspaceId, resolved, plan)
             admitted = granted
             val job = job(principal, resolved, request, plan, granted)
             val started = refreshes.insertRunning(recordOf(principal, resolved, request, job))
@@ -228,17 +229,56 @@ class DashboardRuntime internal constructor(
 
     private fun admit(
         workspaceId: UUID,
+        resolved: ResolvedDashboard,
         plan: RefreshPlan,
     ): Admission =
-        runBlocking { admission.admit(workspaceId, plan.invocations.size) }
-            ?: throw refused()
+        when (val result = runBlocking { admission.admit(workspaceId, plan.invocations.size) }) {
+            is AdmissionResult.Admitted -> result.admission
+            AdmissionResult.Busy -> throw refused()
+            is AdmissionResult.NeverAdmissible -> throw neverAdmissible(workspaceId, resolved, result)
+        }
 
+    /** The instance is busy now — `details.reason = busy`; a retry after `Retry-After` may be admitted. */
     private fun refused(): ApiException {
         metrics.refused(DashboardMetrics.REASON_SATURATED)
         return ApiException(
             DashboardErrorCodes.REFRESH_SATURATED,
             "This instance has no room for another refresh right now. Try again shortly.",
-            mapOf("retry_after_seconds" to retryAfterSeconds()),
+            mapOf("retry_after_seconds" to retryAfterSeconds(), "reason" to REASON_BUSY),
+        )
+    }
+
+    /**
+     * #762 — the dashboard needs more distinct executions than a ceiling of this instance: no retry can admit it. The
+     * code, status and `Retry-After` stay the frozen saturated 429 (pipeline-contract §13.23, additive only); the
+     * `details` say `never_admissible` with the numbers and the key, and the server log says it once per attempt at
+     * WARN — the operator's signal that a configuration key, not load, refuses this board.
+     */
+    private fun neverAdmissible(
+        workspaceId: UUID,
+        resolved: ResolvedDashboard,
+        result: AdmissionResult.NeverAdmissible,
+    ): ApiException {
+        metrics.refused(DashboardMetrics.REASON_NEVER_ADMISSIBLE)
+        log.warn(
+            "event=dashboard.refresh_never_admissible workspace_id={} dashboard_id={} invocations={} ceiling={} key={}",
+            workspaceId,
+            resolved.served.record.id,
+            result.executions,
+            result.ceiling,
+            result.key,
+        )
+        return ApiException(
+            DashboardErrorCodes.REFRESH_SATURATED,
+            "This dashboard needs ${result.executions} distinct executions per refresh, and this instance admits at most " +
+                "${result.ceiling} (${result.key}). It is never admissible here until an operator raises that setting.",
+            mapOf(
+                "retry_after_seconds" to retryAfterSeconds(),
+                "reason" to REASON_NEVER_ADMISSIBLE,
+                "invocations" to result.executions,
+                "ceiling" to result.ceiling,
+                "key" to result.key,
+            ),
         )
     }
 
@@ -555,5 +595,9 @@ class DashboardRuntime internal constructor(
 
         /** How long past its refresh's longest deadline an abort flag may live — the poll's slack, no more. */
         const val FLAG_GRACE_SECONDS = 60
+
+        /** The saturated 429's `details.reason` (#762, pipeline-contract §13.23): busy now, or never on this instance. */
+        const val REASON_BUSY = "busy"
+        const val REASON_NEVER_ADMISSIBLE = "never_admissible"
     }
 }

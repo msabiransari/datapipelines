@@ -1,6 +1,7 @@
 package co.datapipelines.staging
 
 import kotlinx.coroutines.runBlocking
+import java.lang.management.ManagementFactory
 import java.sql.Connection
 import java.sql.DriverManager
 import java.util.UUID
@@ -84,8 +85,7 @@ internal fun tableCount(connection: Connection): Int =
 internal fun budgetMbAboveBaseline(headroomMb: Long): Long {
     @Suppress("ExplicitGarbageCollectionCall")
     System.gc()
-    val runtime = Runtime.getRuntime()
-    return (runtime.totalMemory() - runtime.freeMemory()) / (1024L * 1024L) + headroomMb
+    return ManagementFactory.getMemoryMXBean().heapMemoryUsage.used / (1024L * 1024L) + headroomMb
 }
 
 /** Reads a single-column `COUNT(*)`-style scalar long from [sql] against [connection]. */

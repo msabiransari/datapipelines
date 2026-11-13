@@ -574,10 +574,52 @@ class ArtifactLifecycleIntegrationTest {
     }
 
     @Test
+    fun `every listed dashboard across workspaces with its body - the pointer, else the draft, never a deleted workspace`() {
+        val dashboards = family(ArtifactKind.DASHBOARD)
+        val released = dashboards.released("acme/a/released")
+        // A v2 draft over a released v1: the listed version stays the pointer's.
+        dashboards.lifecycle.write(
+            WORKSPACE,
+            released.record.id,
+            released.record.name,
+            dashboards.edited,
+            released.detail.bodyHash,
+            AUTHOR,
+            WriteSurface.MCP,
+        )
+        val draft = dashboards.create("acme/b/draft", workspace = OTHER_WORKSPACE)
+        VisualizationTestDb.jdbc.update(
+            "INSERT INTO workspaces (id, name, display_name, is_personal, created_by, is_deleted) " +
+                "VALUES (:id, 'viz-gone', 'Gone', FALSE, NULL, TRUE) ON CONFLICT (id) DO NOTHING",
+            mapOf("id" to GONE_WORKSPACE),
+        )
+        dashboards.create("acme/c/gone", workspace = GONE_WORKSPACE)
+        val dashboard = DashboardRepository(VisualizationTestDb.jdbc)
+        val body = ValidatorFakes.dashboardDocument(DocumentFixtures.dashboard()).body
+
+        dashboard.findAllListed() shouldBe
+            listOf(
+                ListedDashboard("viz", "acme/a/released", 1, body),
+                ListedDashboard("viz-other", "acme/b/draft", 1, body),
+            )
+        // A stored body the codec no longer reads is listed without one — the boot scan skips it, never fails on it.
+        VisualizationTestDb.jdbc.update(
+            "UPDATE dashboard_versions SET body_json = '{}'::JSONB WHERE dashboard_id = :id",
+            mapOf("id" to draft.record.id),
+        )
+        dashboard.findAllListed().map { it.name to (it.body != null) } shouldBe listOf("acme/a/released" to true, "acme/b/draft" to false)
+    }
+
+    @Test
     fun `an artifact's lifecycle read under the everything lens is the working version - the draft, else the current`() {
         val dashboards = family(ArtifactKind.DASHBOARD)
         val v1 = dashboards.released()
         val working = dashboards.lifecycle.findWorking(WORKSPACE, ReadLens.Everything, v1.record.id)
         working.shouldBeInstanceOf<ArtifactVersion<*>>().detail.version shouldBe 1
+    }
+
+    private companion object {
+        /** #762: a soft-deleted workspace — its dashboards are not listed. Never seeded by [VisualizationTestDb.reset]. */
+        val GONE_WORKSPACE: UUID = UUID.fromString("0a4e0000-0000-0000-0000-000000000762")
     }
 }

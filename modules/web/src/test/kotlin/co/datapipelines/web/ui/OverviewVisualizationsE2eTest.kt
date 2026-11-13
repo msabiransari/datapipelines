@@ -200,11 +200,11 @@ class OverviewVisualizationsE2eTest {
                 now,
                 OverviewRenderSupport.ACTIVE_DAYS,
             )
-        val page = OverviewPage.of(OverviewPage.Family.VISUALIZATIONS, false, charts, RecentResult.Available(emptyList()), now)
+        val page = OverviewPage.of(OverviewFamily.VISUALIZATIONS, false, charts, RecentResult.Available(emptyList()), now)
         val doc = Jsoup.parse(OverviewRenderSupport.html(page))
 
         OverviewRenderSupport.assertStripSumsTo(doc, counted(ReadLens.Everything).objects)
-        OverviewRenderSupport.assertGuideWords(doc, OverviewPage.Family.VISUALIZATIONS, WORDS)
+        OverviewRenderSupport.assertGuideWords(doc, OverviewFamily.VISUALIZATIONS, WORDS)
     }
 
     private fun fixture() {

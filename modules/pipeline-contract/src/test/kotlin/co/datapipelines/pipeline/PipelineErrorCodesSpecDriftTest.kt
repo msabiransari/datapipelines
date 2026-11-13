@@ -157,6 +157,10 @@ class PipelineErrorCodesSpecDriftTest {
                 "visualization.version.",
                 "dashboard.validation.",
                 "dashboard.version.",
+                // #464 — the session-only navigation trees (§13.24).
+                "navigation.",
+                // #785 — the managed lake's catalog fence (§13.25).
+                "lake.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")
@@ -176,6 +180,10 @@ class PipelineErrorCodesSpecDriftTest {
                 // 123 — the introspector's table-level not-found/forbidden, same two-segment shape.
                 PipelineErrorCodes.Datasource.TABLE_NOT_FOUND,
                 PipelineErrorCodes.Datasource.TABLE_FORBIDDEN,
+                // #818 — "managed" is a property of the datasource row itself, no entity dimension under it.
+                PipelineErrorCodes.Datasource.MANAGED,
+                // #818 §13.25 — the managed lake as a whole is what is unavailable; its table sibling has three.
+                PipelineErrorCodes.Lake.UNAVAILABLE,
                 // #279 §13.21 — the body itself is the refused thing; no entity dimension.
                 PipelineErrorCodes.Request.BODY_TOO_LARGE,
                 // #504b §13.21 — the search term itself is the refused thing; no entity dimension.
@@ -262,6 +270,8 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE,
                 PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
                 PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
+                // #786 A.4 — the deployment's authoring posture is the refused thing, not an entity under the API.
+                PipelineErrorCodes.Endpoint.AUTHORING_DISABLED,
                 // 118 §13.15 — the `semantics` domain has no entity dimension either: every
                 // code is about one fact.
                 PipelineErrorCodes.Semantics.KIND_INVALID,

@@ -46,6 +46,20 @@ class DashboardRuntimeConfigKeysSpecDriftTest {
     }
 
     @Test
+    fun `the cross-module boot relation defaults remain the runtime binding defaults`() {
+        val rule = VisualizationTestFiles.read(RULE_FILE)
+        mapOf(
+            "DEFAULT_MAX_EXECUTIONS_PER_REFRESH" to DashboardRuntimeKey.MAX_EXECUTIONS_PER_REFRESH,
+            "DEFAULT_MAX_DASHBOARD_EXECUTIONS_PER_INSTANCE" to DashboardRuntimeKey.MAX_CONCURRENT_DASHBOARD_EXECUTIONS_PER_INSTANCE,
+        ).forEach { (constant, key) ->
+            withClue(constant) {
+                val declared = checkNotNull(Regex("""const val $constant = (\d+)L""").find(rule)) { "Missing boot default $constant" }
+                declared.groupValues[1].toLong() shouldBe key.default
+            }
+        }
+    }
+
+    @Test
     fun `the defaults agree - the enum, the doc table and application yml's placeholders`() {
         DashboardRuntimeKey.entries.forEach { key ->
             withClue(key.path) {

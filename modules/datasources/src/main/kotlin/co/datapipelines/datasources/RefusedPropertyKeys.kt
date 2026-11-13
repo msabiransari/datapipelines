@@ -281,6 +281,9 @@ internal object DialectRefusalSets {
             "autoload_known_extensions",
             "autoinstall_known_extensions",
             "enable_external_access",
+            // #816: the configuration lock the adapter sets at open — refused so properties.jdbc
+            // cannot set it back to `false`.
+            "lock_configuration",
             // Secret exposure.
             "allow_unredacted_secrets",
             // File paths the engine reads or writes.
@@ -291,6 +294,12 @@ internal object DialectRefusalSets {
             "file_search_path",
             "temp_directory",
             "allowed_paths",
+            // #845: the object-store egress path. The managed lake row's proxy is configuration's (its dialect key
+            // `egress_proxy`); no caller points any DuckDB or LAKE engine's httpfs traffic elsewhere, or supplies proxy
+            // credentials, through properties.jdbc.
+            "http_proxy",
+            "http_proxy_username",
+            "http_proxy_password",
         )
 
     /**

@@ -49,6 +49,12 @@ import kotlin.text.RegexOption.IGNORE_CASE
  *     constraint name, the migration tests' pre-state rows, the research snapshots.
  *   - **The sample-data fence** — `site/demo/manifest-*.json`'s `transform` key names a
  *     dataset's derivation step for the fenced `scripts/sample-data*` builds.
+ *   - **Iceberg partition transforms** — a managed lake table's partition intent names Apache
+ *     Iceberg's own transforms (identity, year/month/day/hour, bucket, truncate) under the body key
+ *     `partition[].transform` (dp-lake design record §5.1 and §8 step 4, #798): the lake
+ *     definitions package and `docs/lake.md`.
+ *   - **XSLT XML element** — the #461 source guard recognizes `xsl:transform`; only its
+ *     exact regex declaration is admitted, never the script-node noun beside it.
  */
 class ScriptVocabularyGuardTest {
     @Test
@@ -108,6 +114,7 @@ class ScriptVocabularyGuardTest {
             "datapipelines.transform.pool-size",
             "checkRemovedTransformKeys",
             "TRANSFORM_BINDING_INVALID",
+            "| `chart.transform.output_unknown` | several inputs",
             "TRANSFORM_STAGE",
             "TRANSFORMATION = \"AES/GCM/NoPadding\"",
             "visualizations whose `transform.template` pins the version",
@@ -198,6 +205,11 @@ class ScriptVocabularyGuardTest {
         /** The floor is the count of tracked text files the walk saw at the rename (2026-10-20). */
         private const val SCAN_FLOOR = 2_500
 
+        private const val XSLT_POLICY_PATH = "modules/app/src/test/kotlin/co/datapipelines/config/SpringAdvisoryPolicy.kt"
+        private const val XSLT_POLICY_LINE =
+            "private val XSLT = Regex(\"\"\"(?i)\\b(?:XsltView(?:Resolver)?|XSLT)\\b|" +
+                "<\\s*xsl:(?:stylesheet|transform)\\b|\\btext/xsl\\b\"\"\")"
+
         /** Line shapes admitted EVERYWHERE, each naming the sense it protects. */
         private val GLOBAL_EXEMPTIONS =
             listOf(
@@ -210,6 +222,7 @@ class ScriptVocabularyGuardTest {
                 Regex("datapipelines\\.transform"), // the removed-key refusal names the old tree
                 Regex("checkRemovedTransformKeys|REMOVED_TRANSFORM_KEY_SUFFIXES|transformLegacyKeysSet"),
                 Regex("TRANSFORM_BINDING_INVALID|transform_binding_invalid"), // the visualization code
+                Regex("chart\\.transform\\.output_unknown"), // the chart save rule's `details.reason` (#860)
                 Regex("`transform\\.(?:template|inputs)`"), // the visualization block's pin and inputs keys (#640)
                 Regex("TRANSFORM_STAGE|stage:\\s*\"transform\"|\"transform\\.failed\"|\"transform\\.status\""), // the refresh stage
                 Regex("^\\s*\\| 2026-"), // a docs ledger row records the vocabulary of its day (append-only history)
@@ -225,6 +238,11 @@ class ScriptVocabularyGuardTest {
                     Regex("ui/ScriptVocabularyGuardTest\\.kt$"),
                     Regex("transform", setOf(IGNORE_CASE)),
                     "the guard itself names every sense it protects",
+                ),
+                Triple(
+                    Regex("^${Regex.escape(XSLT_POLICY_PATH)}$"),
+                    Regex("^\\s*${Regex.escape(XSLT_POLICY_LINE)}$"),
+                    "the XSLT XML element in the #461 security guard's exact declaration",
                 ),
                 // Match the whole line so a property cannot hide a retired identifier beside it.
                 // Include text-transform and transition continuations; pin existing prose phrase by phrase.
@@ -249,6 +267,16 @@ class ScriptVocabularyGuardTest {
                     "the visualization block: a visualization pins a TEMPLATE through the `transform` key",
                 ),
                 Triple(
+                    Regex("^modules/lake/src/(?:main|test)/kotlin/co/datapipelines/lake/definitions/"),
+                    Regex("transform", setOf(IGNORE_CASE)),
+                    "Iceberg partition transforms: the lake definition body's partition[].transform (#798)",
+                ),
+                Triple(
+                    Regex("^docs/lake\\.md$"),
+                    Regex("transform", setOf(IGNORE_CASE)),
+                    "Iceberg partition transforms in the managed lake's definition body (#798)",
+                ),
+                Triple(
                     Regex("^docs/pipeline-editor\\.md$"),
                     Regex("transform", setOf(IGNORE_CASE)),
                     "the editor's pan/zoom CSS transform notes",
@@ -267,6 +295,78 @@ class ScriptVocabularyGuardTest {
                     Regex("^docs/pipeline-contract\\.md$"),
                     Regex("the transform|transform's|transform pin|transform template", setOf(IGNORE_CASE)),
                     "the visualization §13.21/§13.22 rows (the block pin) — a future node noun stays red here",
+                ),
+                Triple(
+                    Regex(
+                        "^modules/(?:dependency-contract/src/|application/src/test/(?:kotlin/co/datapipelines/application/" +
+                            "dependencies/|resources/dependencies/release-goldens/))",
+                    ),
+                    Regex("TRANSFORM_TEMPLATE|transform\\.template|/transform/template"),
+                    "the visualization block pin as the dependency-graph record's §6/§11.1 edge (#868): the TRANSFORM_TEMPLATE " +
+                        "token, the `transform.template` path and its JSON pointer — a node noun stays red here",
+                ),
+                Triple(
+                    Regex(
+                        "^(?:docs/rest-api\\.md$|modules/web/src/test/(?:kotlin/co/datapipelines/web/dependencies/|" +
+                            "resources/dependencies/goldens/)|tests/integration-tests/src/test/kotlin/co/datapipelines/" +
+                            "integration/DependenciesGoldenE2eTest\\.kt$)",
+                    ),
+                    Regex("TRANSFORM_TEMPLATE|transform\\.template|/transform/template|\"transform\":"),
+                    "the same edge on the dependency tree routes (#875 G4): REST §25's relationship list, the projection test, " +
+                        "the enveloped goldens and the visualization the golden fixture authors — a node noun stays red here",
+                ),
+                Triple(
+                    Regex("^modules/web/src/(?:main/resources/static/js/dependencies/|test/js/dependencies-)"),
+                    Regex("TRANSFORM_TEMPLATE|transform\\.template|\"Transform template\""),
+                    "the same edge in the Dependencies pane client (#876 G6): the §11.1 token and its label, worded as the " +
+                        "visualization release dialog words the block's pin (\"The transform template this release locks\")",
+                ),
+                Triple(
+                    Regex("^modules/application/src/main/kotlin/co/datapipelines/application/dependencies/visualization/"),
+                    Regex("transform", setOf(IGNORE_CASE)),
+                    "the visualization family's native release provider (#873 G2) reads the block's `transform` pin as its one edge",
+                ),
+                Triple(
+                    Regex(
+                        "^modules/application/src/test/kotlin/co/datapipelines/application/dependencies/" +
+                            "(?:ArtifactReleaseProvidersPostgresTest|ReleaseArtifactSeed)\\.kt$",
+                    ),
+                    Regex("transform(?: pin|s? template|-template|\\.template|-free| = |: Pair)|TransformBinding"),
+                    "the native release providers' database suite and its seed (#873 G2, moved beside the providers): the " +
+                        "block's pin, phrase by phrase — a node noun stays red here",
+                ),
+                Triple(
+                    Regex(
+                        "^modules/web/src/(?:main|test)/kotlin/co/datapipelines/web/release/" +
+                            "(?:VisualizationReleaseParticipant|ReleaseConfiguration|ReleaseArtifactSeed|" +
+                            "TemplateProviderParityPostgresTest|ArtifactRootGraph|ReleaseAliasParityTest|" +
+                            "ReleaseCoordinatorArtifactRootsTest)\\.kt$",
+                    ),
+                    Regex("transform(?: pin|s? template|-template|\\.template|-free| = |: Pair)|TransformBinding|_transform\\.sql"),
+                    "the visualization release participant, its provider's wiring and their fixtures (#873 G2): the block's pin, " +
+                        "phrase by phrase — a node noun stays red here",
+                ),
+                Triple(
+                    Regex(
+                        "^tests/integration-tests/src/test/kotlin/co/datapipelines/integration/" +
+                            "(?:FamilyRootsFixture|FamilyRootsReleaseCascadeE2eTest|FamilyRootsAuditE2eTest|" +
+                            "RestoreOutboundPinsE2eTest|TemplateImportClosureE2eTest)\\.kt$",
+                    ),
+                    Regex("transform\\.template|transform template|\"transform\":"),
+                    "the #873 release and restore closures over a visualization (G2): the block's pin, its wire path and its JSON " +
+                        "key — a node noun stays red here",
+                ),
+                Triple(
+                    Regex(
+                        "^modules/(?:application/src/test/kotlin/co/datapipelines/application/" +
+                            "(?:dependencies/Incoming(?:BoundedQuery|ConformancePostgres)Test|" +
+                            "templates/TemplateUsageTest)|mcp-server/src/test/kotlin/co/datapipelines/mcp/ScannedIncomingRows|" +
+                            "web/src/test/kotlin/co/datapipelines/web/incoming/(?:CompleteAnswerSeed|IncomingCompleteAnswerTest|" +
+                            "IncomingParityCorpus))\\.kt$",
+                    ),
+                    Regex("transform(?: pins| = |: Pair|\\.template)|TransformBinding"),
+                    "the #877 inverse arms' seeds and fixtures (G7): a visualization version's block pin, its stored path and " +
+                        "its binding class — a node noun stays red here",
                 ),
                 Triple(
                     Regex("^docs/rest-api\\.md$"),
@@ -356,10 +456,16 @@ class ScriptVocabularyGuardTest {
                 Triple(
                     Regex(
                         "browser/(?:DashboardFilters|DashboardFiltersShots|DashboardParametersPane|DataTable|" +
-                            "MobileShell|PipelineEditorStartMarker|ShellFeel)BrowserTest\\.kt$",
+                            "MobileShell|PipelineEditorStartMarker|ShellFeel|BrowserResourceRow)BrowserTest\\.kt$",
                     ),
                     Regex("transform", setOf(IGNORE_CASE)),
-                    "the drawer/panel CSS transform and the geometry notes",
+                    "the drawer/panel CSS transform, the geometry notes, and the row's never-rotating glyph reading (#701)",
+                ),
+                Triple(
+                    Regex("browser/(?:Dependencies(?:Dashboard|Visualization)BrowserTest|DependencyPaneBrowserSuite)\\.kt$"),
+                    Regex("\"transform\"|\"Transform template\"|chart with no transform"),
+                    "the Dependencies pane's browser classes (#876 G6): the pane's TRANSFORM_TEMPLATE label, a chart whose block " +
+                        "pins no template (the empty leaf) and the visualization body's `transform` key — a node noun stays red",
                 ),
                 Triple(
                     Regex("browser/DraftDashboardDependenciesBrowserTest\\.kt$"),
@@ -414,8 +520,8 @@ class ScriptVocabularyGuardTest {
                 ),
                 Triple(
                     Regex("^docs/versioning\\.md$"),
-                    Regex("its transform pin RELEASED|the transform pins of any pushed visualization"),
-                    "the visualization release gate and the transfer closure (the block's pin)",
+                    Regex("its transform pin RELEASED|the transform pins of any pushed visualization|visualization's transform template"),
+                    "the visualization release gate, the transfer closure and the #873 release/restore closures (the block's pin)",
                 ),
                 Triple(
                     Regex("^docs/ui-screens\\.md$"),
@@ -481,6 +587,13 @@ class ScriptVocabularyGuardTest {
         /** Restored kept-sense lines (#640, #663) a path entry must admit — path to line. */
         private val ADMITTED =
             listOf(
+                "modules/dependency-contract/src/main/kotlin/co/datapipelines/dependencies/Vocabularies.kt" to
+                    "    TRANSFORM_TEMPLATE(FamilyKey.VISUALIZATION, FamilyKey.TEMPLATE),",
+                "modules/web/src/main/resources/static/js/dependencies/tree-view.js" to
+                    "    TRANSFORM_TEMPLATE: \"Transform template\",",
+                "tests/browser-tests/src/test/kotlin/co/datapipelines/browser/DependenciesVisualizationBrowserTest.kt" to
+                    "    fun `a chart with no transform is the empty leaf`() {",
+                XSLT_POLICY_PATH to "    $XSLT_POLICY_LINE",
                 "guard.css" to "transform: translateX(0);",
                 "guard.css" to "text-transform: uppercase;",
                 "guard.css" to "    transform var(--duration-fast) var(--ease-out);",
@@ -515,6 +628,14 @@ class ScriptVocabularyGuardTest {
         /** The node noun in those same files stays red: the path entries admit the block, not the word. */
         private val NOT_ADMITTED =
             listOf(
+                "modules/dependency-contract/src/main/kotlin/co/datapipelines/dependencies/Families.kt" to
+                    "val TRANSFORM = FamilyKey(\"transform\")",
+                "modules/web/src/main/resources/static/js/dependencies/tree-view.js" to "    TRANSFORM: \"Transform\",",
+                "modules/web/src/main/resources/static/js/dependencies/tree-view.js" to "// a transform node's pane",
+                "tests/browser-tests/src/test/kotlin/co/datapipelines/browser/DependenciesDashboardBrowserTest.kt" to
+                    "        // the board's transform node",
+                XSLT_POLICY_PATH to "val transformNode = 1",
+                XSLT_POLICY_PATH to "$XSLT_POLICY_LINE // a TRANSFORM node",
                 "guard.css" to ".type-transform {",
                 "guard.css" to "--type-transform: …",
                 "guard.css" to "[data-transform]",

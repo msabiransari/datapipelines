@@ -1,8 +1,7 @@
 package co.datapipelines.integration
 
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.logcapture.capturingLogEvents
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -147,21 +146,225 @@ class LocalLoginE2eTest {
     fun `no line the login path logs contains the password`() {
         seedLocalUsers()
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        try {
-            postLogin(LOCAL_EMAIL, "a-wrong-password-attempt")
-            postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
-        } finally {
-            logger.detachAppender(appender)
-        }
-        val lines = appender.list.map { it.formattedMessage }
+        // A snapshot (#484): the booted application's threads log while the capture is attached.
+        val lines =
+            capturingLogEvents(logger) {
+                postLogin(LOCAL_EMAIL, "a-wrong-password-attempt")
+                postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+            }.map { it.formattedMessage }
 
         // Positive control first (the 021 pattern): the capture must contain the
         // expected event lines, or the negative below proves nothing.
         lines.any { it.contains("event=auth.login.local_outcome") } shouldBe true
         lines.forEach { it shouldNotContain LOCAL_PASSWORD }
     }
+
+    // ---------------------------------------------------- logout CSRF (#782)
+
+    /**
+     * The owner's option (a): a logout POSTED FROM THE APP'S OWN PAGE (the browser's
+     * `Sec-Fetch-Site: same-origin`) succeeds on ANY token state — a stale tab whose
+     * `dp_csrf` was re-minted logs out and lands on /login instead of a raw JSON 403.
+     * The exemption is [co.datapipelines.auth.LogoutSameOriginMatcher]; the falsification
+     * leg is removing it from the SecurityConfig call (the same-origin case then 403s).
+     */
+    @Test
+    fun `a stale-token logout posted from the app's own page still clears the session`() {
+        seedLocalUsers()
+        val login = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+        val dashboard = renderDashboard(login.sessionCookie())
+        val csrf = dashboard.csrf
+
+        // Rewrite the cookie half; the page's hidden token stays what it rendered. The
+        // posted pair no longer matches — the exact stale-tab shape the bug names.
+        val staleCookies = dashboard.cookies + ("dp_csrf" to "stale-${java.util.UUID.randomUUID()}")
+        val logout = postLogout(csrf, staleCookies, fetchSite = "same-origin")
+
+        logout.statusCode shouldBe 302
+        logout.headers.getValue("Location") shouldBe "/login"
+        clearsSession(logout) shouldBe true
+    }
+
+    /**
+     * A logout whose attestation says the page was NOT the app's own (same-site subdomain,
+     * cross-site) keeps the refusal — and the refusal must clear NOTHING. This guard pins
+     * the HTTP outcome independently of filter dispatch registration: a refusal of a logout
+     * must never expire dp_session.
+     */
+    @Test
+    fun `a logout that is not from the app's own page is refused and clears nothing`() {
+        seedLocalUsers()
+        val login = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+        val dashboard = renderDashboard(login.sessionCookie())
+        val csrf = dashboard.csrf
+        val staleCookies = dashboard.cookies + ("dp_csrf" to "stale-${java.util.UUID.randomUUID()}")
+
+        for (fetchSite in listOf("same-site", "cross-site")) {
+            val refused = postLogout(csrf, staleCookies, fetchSite = fetchSite)
+
+            refused.statusCode shouldBe 403
+            refused.getHeader("Location") shouldBe null
+            // The page, not the §13.7 envelope: a browser form navigation gets HTML.
+            refused.contentType().contains("text/html") shouldBe true
+            refused.asString() shouldContain "Your page is out of date. Reload it and try again."
+            refused.asString() shouldNotContain "\"auth.csrf.invalid\""
+            clearsSession(refused) shouldBe false
+        }
+    }
+
+    @Test
+    fun `GET logout clears nothing`() {
+        seedLocalUsers()
+        val login = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+
+        val response =
+            given()
+                .port(port)
+                .cookies(mapOf("dp_session" to login.sessionCookie()))
+                .redirects()
+                .follow(false)
+                .`when`()
+                .get("/logout")
+
+        // GET is navigation only; it must not expire the session cookie.
+        clearsSession(response) shouldBe false
+    }
+
+    @Test
+    fun `a stale workspace switch renders the refusal with the response correlation id`() {
+        seedLocalUsers()
+        val dashboard = renderDashboard(postLogin(LOCAL_EMAIL, LOCAL_PASSWORD).sessionCookie())
+        val response =
+            given()
+                .port(port)
+                .cookies(dashboard.cookies + ("dp_csrf" to "stale-${java.util.UUID.randomUUID()}"))
+                .contentType(ContentType.URLENC)
+                .formParam("_csrf", dashboard.csrf)
+                .header("Accept", "text/html")
+                .redirects()
+                .follow(false)
+                .`when`()
+                .post("/workspace/switch")
+
+        response.statusCode shouldBe 403
+        response.contentType() shouldContain "text/html"
+        response.asString() shouldContain "Your page is out of date. Reload it and try again."
+        val correlation = checkNotNull(response.getHeader("DP-Correlation-Id"))
+        java.util.UUID.fromString(correlation)
+        response.asString() shouldContain correlation
+        response.getHeader("Location") shouldBe null
+        clearsSession(response) shouldBe false
+    }
+
+    // ---------------------------------------------------- logout audit identity (#802)
+
+    /**
+     * A person's own logout carries that person's `user_id` in the `auth.logout` row
+     * (auth.md §6.5, §10.1). Pre-#802 the `LogoutFilter` ended the chain before any
+     * credential filter had run, so the row was the anonymous marker — measured by
+     * lane 782's A.0; this case pins the fix at the wire.
+     */
+    @Test
+    fun `a person's own logout audits auth-logout with their user id`() {
+        seedLocalUsers()
+        val userId = userIdOf(LOCAL_EMAIL)
+
+        val login = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+        val dashboard = renderDashboard(login.sessionCookie())
+        val logout = postLogout(dashboard.csrf, dashboard.cookies, fetchSite = "same-origin")
+
+        logout.statusCode shouldBe 302
+        logout.headers.getValue("Location") shouldBe "/login"
+        val (rowUserId, rowKeyId) = freshestLogoutAuditRow()
+        rowUserId shouldBe userId
+        rowKeyId shouldBe null
+    }
+
+    /**
+     * What the #802 reorder adds: a logout whose `dp_session` is already invalid passes
+     * the session filter's rejection (`dp_session rejected … path=/logout`, cookie
+     * cleared) before `LogoutFilter` ends it anonymously — the row stays the anonymous
+     * marker and the log names why (auth.md §6.5).
+     */
+    @Test
+    fun `a logout with an invalid session is rejected by the session filter and audited anonymously`() {
+        seedLocalUsers()
+        val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
+        val page =
+            given()
+                .port(port)
+                .`when`()
+                .get("/login")
+                .then()
+                .statusCode(200)
+                .extract()
+        val csrf =
+            checkNotNull(CSRF_FIELD.find(page.asString())) { "no _csrf hidden input on the login page" }.groupValues[1]
+        val cookies =
+            page.detailedCookies().asList().associate { it.name to it.value } +
+                mapOf("dp_session" to "not-a-token-${java.util.UUID.randomUUID()}")
+
+        val responses = mutableListOf<io.restassured.response.Response>()
+        val lines =
+            capturingLogEvents(logger) {
+                responses += postLogout(csrf, cookies, fetchSite = "same-origin")
+            }
+        val logout = responses.single()
+
+        logout.statusCode shouldBe 302
+        logout.headers.getValue("Location") shouldBe "/login"
+        clearsSession(logout) shouldBe true
+        freshestLogoutAuditRow().first shouldBe null
+        lines
+            .map { it.formattedMessage }
+            .any { it.contains("dp_session rejected") && it.contains("path=/logout") } shouldBe true
+    }
+
+    /** True only when the response explicitly EXPIRES dp_session (Max-Age=0), never for a mint. */
+    private fun clearsSession(response: io.restassured.response.Response): Boolean =
+        response.detailedCookies().asList().any { it.name == "dp_session" && it.maxAge == 0L }
+
+    private class DashboardRender(
+        val csrf: String,
+        val cookies: Map<String, String>,
+    )
+
+    private fun renderDashboard(session: String): DashboardRender {
+        val dashboard =
+            given()
+                .port(port)
+                .cookies(mapOf("dp_session" to session))
+                .`when`()
+                .get("/dashboard")
+                .then()
+                .statusCode(200)
+                .extract()
+        val csrf =
+            checkNotNull(CSRF_FIELD.find(dashboard.asString())) { "no _csrf hidden input on the dashboard" }
+                .groupValues[1]
+        return DashboardRender(
+            csrf = csrf,
+            cookies = mapOf("dp_session" to session) + dashboard.detailedCookies().asList().associate { it.name to it.value },
+        )
+    }
+
+    private fun postLogout(
+        csrf: String,
+        cookies: Map<String, String>,
+        fetchSite: String?,
+    ): io.restassured.response.Response =
+        given()
+            .port(port)
+            .cookies(cookies)
+            .contentType(ContentType.URLENC)
+            .formParam("_csrf", csrf)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("User-Agent", "Mozilla/5.0 (lane-782 integration)")
+            .let { request -> fetchSite?.let { request.header("Sec-Fetch-Site", it) } ?: request }
+            .redirects()
+            .follow(false)
+            .`when`()
+            .post("/logout")
 
     // ------------------------------------------------------------------ helpers
 
@@ -297,6 +500,33 @@ class LocalLoginE2eTest {
                     ps.executeQuery().use { rs ->
                         rs.next()
                         rs.getInt(1)
+                    }
+                }
+        }
+
+    private fun userIdOf(email: String): String =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection
+                .prepareStatement("SELECT id::TEXT FROM users WHERE email = ?")
+                .use { ps ->
+                    ps.setString(1, email)
+                    ps.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getString(1)
+                    }
+                }
+        }
+
+    /** The freshest `auth.logout` row as (user_id, key_id) TEXTs — nulls preserved (§6.5, #802). */
+    private fun freshestLogoutAuditRow(): Pair<String?, String?> =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT user_id::TEXT, key_id::TEXT FROM audit_log WHERE event = 'auth.logout' ORDER BY id DESC LIMIT 1",
+                ).use { ps ->
+                    ps.executeQuery().use { rs ->
+                        check(rs.next()) { "no auth.logout row in audit_log" }
+                        rs.getString(1) to rs.getString(2)
                     }
                 }
         }

@@ -19,6 +19,10 @@ dependencies {
     // The scheduler's counters and gauge (observability.md §4). Micrometer-core only — `app`
     // supplies the exporting registry, and SchedulerMetrics falls back to an in-memory one.
     implementation(libs.micrometer.core)
+    // #442b — the notice templates (scheduler-mail-templates/), rendered by an engine of this
+    // module's own exactly as auth renders its notices: the Spring integration artifact, not bare
+    // Thymeleaf (whose OGNL would join the runtime; see the catalog note). No MVC, no view layer.
+    implementation(libs.thymeleaf.spring6)
 
     // The scheduler's integration suites run against a real Postgres with the shipped migrations
     // applied through plain JDBC (§7.4; Flyway stays in `app`, §3.1 rule 2).

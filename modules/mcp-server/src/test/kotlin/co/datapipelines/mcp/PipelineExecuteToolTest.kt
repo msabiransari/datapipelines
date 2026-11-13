@@ -1,5 +1,8 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.auth.ApiKeyKind
+import co.datapipelines.auth.KeyRole
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
@@ -13,7 +16,9 @@ import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.executor.StoredResultView
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineExecutionSnapshot
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.ColumnSchema
@@ -57,7 +62,49 @@ class PipelineExecuteToolTest {
         // D56: with no `version` argument the tool resolves the WORKING version, so it asks for a
         // draft first. This fixture is a released pipeline with none.
         every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
-        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findExecutionSnapshot(any(), McpFixtures.PIPELINE_ID, 1) } returns
+            PipelineExecutionSnapshot(McpFixtures.pipelineBody(), "snapshot-hash", PipelineVersionStatus.RELEASED, false)
+    }
+
+    private fun lakeTool(): PipelineExecuteTool {
+        val validator = mockk<PipelineValidator>()
+        every { validator.writesManagedLake(any(), any()) } returns true
+        return PipelineExecuteTool(McpFixtures.pipelineService(pipelines, validator), executor, executions, resultStore, resultUrls)
+    }
+
+    @Test
+    fun `a lake-writing execution uses the MCP key role even when its owner is a viewer`() {
+        storedPipeline()
+        val request = slot<ExecuteRequest>()
+        coEvery { executor.execute(capture(request)) } returns result(resultRef = null)
+        val principal =
+            ctx.principal.copy(
+                keyRole = KeyRole.AUTHOR,
+                keyKind = ApiKeyKind.MCP,
+                workspace = McpFixtures.WORKSPACE.copy(role = WorkspaceRole.VIEWER),
+            )
+
+        lakeTool().call(args, ctx.copy(principal = principal))
+
+        val grant = requireNotNull(request.captured.lakeAppendGrant)
+        grant.grantedBy shouldBe principal.userId
+        grant.principalKind shouldBe "mcp"
+    }
+
+    @Test
+    fun `a lake-writing execution refuses a promoter key despite the owners admin authority`() {
+        storedPipeline()
+        val principal =
+            ctx.principal.copy(
+                keyRole = KeyRole.PROMOTER,
+                keyKind = ApiKeyKind.MCP,
+                superAdmin = true,
+                workspace = McpFixtures.WORKSPACE_ADMIN,
+            )
+
+        shouldThrow<DatapipelinesException> { lakeTool().call(args, ctx.copy(principal = principal)) }
+            .code shouldBe PipelineErrorCodes.Lake.APPEND_FORBIDDEN
+        coVerify(exactly = 0) { executor.execute(any()) }
     }
 
     private fun result(
@@ -222,7 +269,13 @@ class PipelineExecuteToolTest {
     fun `an explicit version executes that version's stored snapshot`() {
         every { pipelines.findById(any(), McpFixtures.PIPELINE_ID) } returns McpFixtures.pipelineRecord(version = 7)
         every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns null
-        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 3) } returns McpFixtures.pipelineBody(name = "v3_snapshot")
+        every { pipelines.findExecutionSnapshot(any(), McpFixtures.PIPELINE_ID, 3) } returns
+            PipelineExecutionSnapshot(
+                McpFixtures.pipelineBody(name = "v3_snapshot"),
+                "snapshot-hash",
+                PipelineVersionStatus.RELEASED,
+                false,
+            )
         val request = slot<ExecuteRequest>()
         coEvery { executor.execute(capture(request)) } returns result(resultRef = null)
 
@@ -251,7 +304,8 @@ class PipelineExecuteToolTest {
                 createdAt = Instant.EPOCH,
                 createdBy = McpFixtures.USER,
             )
-        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 2) } returns McpFixtures.pipelineBody(name = "draft_body")
+        every { pipelines.findExecutionSnapshot(any(), McpFixtures.PIPELINE_ID, 2) } returns
+            PipelineExecutionSnapshot(McpFixtures.pipelineBody(name = "draft_body"), "snapshot-hash", PipelineVersionStatus.DRAFT, false)
         val request = slot<ExecuteRequest>()
         coEvery { executor.execute(capture(request)) } returns result(resultRef = null)
 
@@ -279,7 +333,8 @@ class PipelineExecuteToolTest {
                 createdAt = Instant.EPOCH,
                 createdBy = McpFixtures.USER,
             )
-        every { pipelines.findVersionBody(any(), McpFixtures.PIPELINE_ID, 1) } returns McpFixtures.pipelineBody()
+        every { pipelines.findExecutionSnapshot(any(), McpFixtures.PIPELINE_ID, 1) } returns
+            PipelineExecutionSnapshot(McpFixtures.pipelineBody(), "snapshot-hash", PipelineVersionStatus.DRAFT, false)
         val request = slot<ExecuteRequest>()
         coEvery { executor.execute(capture(request)) } returns result(resultRef = null)
 

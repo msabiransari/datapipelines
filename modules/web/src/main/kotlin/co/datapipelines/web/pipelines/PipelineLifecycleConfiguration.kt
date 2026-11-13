@@ -12,14 +12,16 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionConsumers
 import co.datapipelines.pipeline.ReleaseCheckGate
+import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.pipeline.release.PipelineReleaseCoordination
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.templates.TemplateRepository
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.transaction.PlatformTransactionManager
-import org.springframework.transaction.support.TransactionTemplate
 
 /**
  * The pipeline aggregate's service and the version-lifecycle collaborators it composes
@@ -55,10 +57,21 @@ class PipelineLifecycleConfiguration {
         }
 
     /**
+     * #733 — a restore tells a missing template from a missing version by the ENTITY row, as the port
+     * `pipeline-contract` declares: the [templateVersionStatuses] arrangement, over `templates.existsId`.
+     */
+    @Bean
+    fun templateIds(templates: TemplateRepository): TemplateIds =
+        TemplateIds { workspaceId, templateId ->
+            templates.existsId(workspaceId, templateId)
+        }
+
+    /**
      * The release cascade's write (versioning §5.3 precondition 2, 142), as the port
      * `pipeline-contract` declares — the same module-arrow arrangement as
-     * [templateVersionStatuses], now for the one WRITE the pipeline aggregate asks of
-     * `templates`. It rides [TemplateReleaseService.releasePinned], i.e. the template's own
+     * [templateVersionStatuses], now for the one WRITE the parameter-set and visualization
+     * releases ask of `templates` (the pipeline's own release cascades through the release
+     * coordinator's template participant since #877 §E.3). It rides [TemplateReleaseService.releasePinned], i.e. the template's own
      * release path: one implementation of "release a template", so the direct verb
      * (`POST /api/v1/templates/release`, the template dialog) and the cascaded one cannot
      * drift. Wrapped here rather than moved down to `application`: that module is for
@@ -88,25 +101,24 @@ class PipelineLifecycleConfiguration {
     @Suppress("LongParameterList") // one collaborator per release precondition and port
     fun pipelineReleaseService(
         pipelines: PipelineRepository,
-        templates: TemplateVersionStatuses,
         validator: PipelineValidator,
         authoring: AuthoringGuard,
-        metadataTransactionManager: PlatformTransactionManager,
         checkGate: ReleaseCheckGate,
-        templateReleaser: TemplateReleaser,
         reviewMarks: TemplateReviewMarks,
         dashboards: PipelineVersionConsumers,
+        // #786 B.4 — the live API versions and schedules that pin a draft refuse its purge (record §14, A39).
+        endpointVersions: co.datapipelines.pipeline.EndpointVersionConsumers,
+        schedules: co.datapipelines.pipeline.ScheduleConsumers,
     ): PipelineReleaseService =
         PipelineReleaseService(
             pipelines,
-            templates,
             validator,
             authoring,
             checkGate = checkGate,
-            templateReleaser = templateReleaser,
-            transactions = TransactionTemplate(metadataTransactionManager),
             reviewMarks = reviewMarks,
             dashboards = dashboards,
+            endpointVersions = endpointVersions,
+            schedules = schedules,
         )
 
     /**
@@ -124,7 +136,8 @@ class PipelineLifecycleConfiguration {
              * The templates module's statement answers "no OTHER PIPELINE pins it" (R12: every stored version of
              * every other pipeline). A parameter set or a visualization that pins the draft template is an inbound
              * edge that statement cannot see — #320 found the offer deleting a set's template — so the candidates
-             * are judged here, over the whole workspace, by the same [TemplateUsage] evidence every other guard reads.
+             * are judged here, over the whole workspace, by the same [TemplateUsage] evidence every other guard reads —
+             * since #877 §D the importing templates' arm as well.
              */
             private fun blockers(
                 workspaceId: java.util.UUID,
@@ -143,6 +156,14 @@ class PipelineLifecycleConfiguration {
                         .distinct()
                         .takeIf { it.isNotEmpty() }
                         ?.let { put("referencing_visualizations", it) }
+                    // #877 §D: a template version that imports ANY version of the draft is an inbound edge too (rule 3,
+                    // a discarded importer included — a restore would dangle its import).
+                    usage
+                        .importedBy(workspaceId, templateId, null, co.datapipelines.pipeline.inverse.InverseScope.ANY)
+                        .map { it.importerName }
+                        .distinct()
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { put("referencing_templates", it) }
                 }
 
             override fun exclusiveIds(
@@ -187,6 +208,7 @@ class PipelineLifecycleConfiguration {
         }
 
     @Bean
+    @Suppress("LongParameterList") // one collaborator per seam; #517 added the release coordinator and the writer guard
     fun pipelineService(
         pipelines: PipelineRepository,
         validator: PipelineValidator,
@@ -196,5 +218,35 @@ class PipelineLifecycleConfiguration {
         draftTemplates: ExclusiveDraftTemplates,
         // #320 — the dashboards that pin a release: `pipeline.version.pinned`'s `referencing_dashboards`.
         dashboards: PipelineVersionConsumers,
-    ): PipelineService = PipelineService(pipelines, validator, drafts, releases, authoring, draftTemplates, dashboards)
+        // #786 B.4 — the live API versions and schedules that pin a version refuse its discard or purge (record §14, A39).
+        endpointVersions: co.datapipelines.pipeline.EndpointVersionConsumers,
+        schedules: co.datapipelines.pipeline.ScheduleConsumers,
+        // #517 — every release through the one coordinator; every pin-affecting verb under the workspace writer guard.
+        coordination: PipelineReleaseCoordination,
+        guard: ReleaseMutationGuard,
+        // #517 round three — a restore rechecks its outbound pins under the guard: template statuses uncached, the bound.
+        templateStatuses: TemplateVersionStatuses,
+        // #733 — the entity row, to tell a missing template from a missing version.
+        templateIds: TemplateIds,
+        bounds: ReleaseBounds,
+        // #873 §D.3 — the restore recheck walks below every live pin (the shared port, bound in ReleaseConfiguration).
+        restoreGuard: co.datapipelines.pipeline.release.RestoreDependencyGuard,
+    ): PipelineService =
+        PipelineService(
+            pipelines,
+            validator,
+            drafts,
+            releases,
+            authoring,
+            draftTemplates,
+            dashboards,
+            endpointVersions = endpointVersions,
+            schedules = schedules,
+            coordination = coordination,
+            guard = guard,
+            templateStatuses = templateStatuses,
+            templateIds = templateIds,
+            maxBlockers = bounds.maxBlockers,
+            restoreGuard = restoreGuard,
+        )
 }

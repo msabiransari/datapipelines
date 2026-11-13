@@ -6,7 +6,6 @@ import co.datapipelines.application.endpoints.EndpointRow
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.ui.ApiConsoleController
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -35,7 +34,7 @@ class LegacyEndpointEchoBoundTest {
             id = UUID.randomUUID(),
             workspaceId = workspaceId,
             pathPattern = long,
-            pipelineId = UUID.randomUUID(),
+            pipelineName = "test/pipeline",
             reason = "Path is ${long.length} characters; the limit is ${EndpointPath.MAX_LENGTH} (§4.1).",
             enabled = false,
         )
@@ -52,11 +51,9 @@ class LegacyEndpointEchoBoundTest {
                 emptyList(),
             )
         val publishing = mockk<EndpointPublishService>()
-        val pipelines = mockk<PipelineRepository>()
         every { publishing.list(any()) } returns emptyList()
         every { publishing.listLegacy(any()) } returns listOf(legacy)
-        every { pipelines.findById(workspaceId, legacy.pipelineId) } returns null
-        val controller = EndpointsController(publishing, mockk(), mockk(), mockk(), pipelines)
+        val controller = EndpointsController(publishing, mockk(), mockk(), mockk())
 
         @Suppress("UNCHECKED_CAST")
         val row = (controller.list(path = null).data as List<Map<String, Any?>>).single()

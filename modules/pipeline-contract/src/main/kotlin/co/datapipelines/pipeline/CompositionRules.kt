@@ -28,11 +28,12 @@ import com.fasterxml.jackson.databind.JsonNode
  *
  * ## Distinguishing `pipeline_not_found` from `pipeline_version_not_found`
  *
- * [PipelineResolver.resolve] answers null for both, so on a null answer the name is probed at
- * version 1: every registered pipeline has a version 1 (create assigns it; versions are
- * immutable and never individually deleted — soft-delete is pipeline-level), so a non-null
- * answer there means the NAME is registered and the pinned VERSION is what is missing. The
- * probe runs only on the failure path, never for a resolvable reference.
+ * [PipelineResolver.resolve] answers null for both, so on a null answer [PipelineNames] asks the
+ * ENTITY: a registered name means the pinned VERSION is what is missing. No version number can
+ * stand in for that question (#723) — a preserved-number import lands an entity at the version
+ * it carries, gaps expected (versioning §9.2), and purging a never-released draft v1 beneath an
+ * imported release leaves the entity without version 1 (§3.3, §5.4). The question is asked
+ * only on the failure path, never for a resolvable reference.
  *
  * ## Iterative depth walk, and the bound is the backstop
  *
@@ -46,6 +47,7 @@ internal object CompositionRules {
     fun check(
         pipeline: Pipeline,
         pipelines: PipelineResolver,
+        names: PipelineNames,
         maxDepth: Int,
         workspaceId: java.util.UUID,
         org: OrgContext,
@@ -54,7 +56,7 @@ internal object CompositionRules {
     ) {
         pipeline.nodes.forEachIndexed { index, node ->
             if (node.type == NodeType.PIPELINE) {
-                checkNode(pipeline, index, node, pipelines, workspaceId, org, into, allowDraftPipelineReferences)
+                checkNode(pipeline, index, node, pipelines, names, workspaceId, org, into, allowDraftPipelineReferences)
             }
         }
         checkDepth(pipeline, pipelines, maxDepth, workspaceId, into)
@@ -66,6 +68,7 @@ internal object CompositionRules {
         index: Int,
         node: Node,
         pipelines: PipelineResolver,
+        names: PipelineNames,
         workspaceId: java.util.UUID,
         org: OrgContext,
         into: FailureCollector,
@@ -106,7 +109,7 @@ internal object CompositionRules {
                 mapOf("node" to node.id.truncateForError(), "pipeline" to ref.name.truncateForError()),
             )
         }
-        val resolved = resolve(ref, pipelines, workspaceId, index, into) ?: return
+        val resolved = resolve(ref, pipelines, names, workspaceId, index, into) ?: return
         checkReferenceLifecycle(index, node, ref, resolved, into, allowDraftPipelineReferences)
         checkParameters(pipeline, index, node, resolved.pipeline, org, into)
         checkOutput(index, node, resolved.pipeline, into)
@@ -186,18 +189,18 @@ internal object CompositionRules {
     /**
      * Resolves the pinned reference, reporting `pipeline_not_found` /
      * `pipeline_version_not_found` and returning null when it does not resolve. See the class
-     * KDoc for the version-1 probe that tells the two codes apart.
+     * KDoc for the entity question that tells the two codes apart.
      */
     private fun resolve(
         ref: PipelineNodeRef,
         pipelines: PipelineResolver,
+        names: PipelineNames,
         workspaceId: java.util.UUID,
         index: Int,
         into: FailureCollector,
     ): ResolvedPipeline? {
         pipelines.resolve(workspaceId, ref.name, ref.version)?.let { return it }
-        val nameKnown = ref.version != 1 && pipelines.resolve(workspaceId, ref.name, 1) != null
-        if (nameKnown) {
+        if (names.isRegistered(workspaceId, ref.name)) {
             into.add(
                 Validation.PIPELINE_VERSION_NOT_FOUND,
                 "nodes[$index].pipeline",
@@ -217,12 +220,12 @@ internal object CompositionRules {
 
     /**
      * §12.9's parameter-mapping rules against the child's declared `parameters` **and** its
-     * calculator output keys (078 A5-composition, owner ruling 2026-09-05).
+     * calculator and value-mode SCRIPT output keys (078 A5-composition, extended by 7c).
      *
      * A supplied key names either a child declared parameter or one of the pinned child's
-     * CALCULATOR `context_key`s (`calculatorOutputs()` — a key supplied this way skips the
+     * CALCULATOR or value-mode SCRIPT `context_key`s (a key supplied this way skips the
      * child's node exactly as a direct execute-time supply does). Anything else is
-     * `pipeline_parameter_unknown`. A child calculator key is OPTIONAL, never required, so
+     * `pipeline_parameter_unknown`. A child calculator or SCRIPT key is OPTIONAL, never required, so
      * `pipeline_parameter_unmapped` keeps reading only declared parameters.
      *
      * A supplied value is either a typed literal obeying the target's §6.3 wire encoding —
@@ -244,7 +247,7 @@ internal object CompositionRules {
         // 7c (#7): a value-mode SCRIPT's `context_key` is an implicit optional input on the
         // same rule as a calculator key — suppliable here, typed by the pinned contract the
         // body does not carry, so null (ANY) in this map exactly like an ANY-output kind.
-        val childCalculatorKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
+        val childOutputKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
         child.parameters
             .filterValues { it.required && !it.hasDefault }
             .keys
@@ -265,14 +268,14 @@ internal object CompositionRules {
                     checkValue(pipeline, index, node, key, value, Target.parameter(declared), org, into)
                 }
 
-                key in childCalculatorKeys -> {
+                key in childOutputKeys -> {
                     checkValue(
                         pipeline,
                         index,
                         node,
                         key,
                         value,
-                        Target.calculatorOutput(childCalculatorKeys.getValue(key)),
+                        Target.contextOutput(childOutputKeys.getValue(key)),
                         org,
                         into,
                     )
@@ -284,7 +287,7 @@ internal object CompositionRules {
                         "nodes[$index].parameters.${key.truncateForError()}",
                         "Node '${node.id.truncateForError()}' supplies '${key.truncateForError()}', " +
                             "which the child pipeline neither declares as a parameter nor computes as a " +
-                            "calculator context_key.",
+                            "calculator or value-mode script context_key.",
                         mapOf("node" to node.id.truncateForError(), "parameter" to key.truncateForError()),
                     )
                 }
@@ -293,8 +296,9 @@ internal object CompositionRules {
     }
 
     /**
-     * The mapping target on the child side: a declared parameter or a CALCULATOR `context_key`
-     * (078 A5-composition). [type] is null for an ANY-output kind — the value is typed only by
+     * The mapping target on the child side: a declared parameter, CALCULATOR or value-mode SCRIPT
+     * `context_key` (078 A5-composition, extended by 7c). [type] is null for an ANY-output kind
+     * or SCRIPT key — the value is typed only by
      * the run, so the save-time check skips rather than guesses (the A6 convention). A declared
      * parameter also carries its WHOLE declaration (#264): the literal a node supplies is judged
      * by the same rules the child's binder will apply at run, not by the type alone.
@@ -310,7 +314,7 @@ internal object CompositionRules {
         companion object {
             fun parameter(declared: Parameter): Target = Target(declared.type, declared.declaration, "child parameter")
 
-            fun calculatorOutput(type: LogicalType?): Target = Target(type, null, "child calculator output")
+            fun contextOutput(type: LogicalType?): Target = Target(type, null, "child calculator or script output")
         }
     }
 

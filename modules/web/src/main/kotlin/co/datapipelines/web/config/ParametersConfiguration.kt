@@ -12,6 +12,7 @@ import co.datapipelines.parameters.SelectorPool
 import co.datapipelines.parameters.SelectorRunner
 import co.datapipelines.parameters.StoredParameterEvaluationRecorder
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
@@ -73,9 +74,12 @@ class ParametersConfiguration {
         statuses: TemplateVersionStatuses,
         datasources: co.datapipelines.pipeline.DatasourceRegistry,
         probe: SelectorRunner,
-    ): ParameterSetValidator = ParameterSetValidator(config, registry, statuses, datasources, probe)
+        // #737 — the restore recheck's entity question: PipelineLifecycleConfiguration's templateIds bean, by type.
+        templateIds: TemplateIds,
+    ): ParameterSetValidator = ParameterSetValidator(config, registry, statuses, datasources, probe, templateIds = templateIds)
 
     @Bean
+    @Suppress("LongParameterList") // one collaborator per seam; #517 added the writer guard
     fun parameterSetService(
         repository: ParameterSetRepository,
         validator: ParameterSetValidator,
@@ -85,6 +89,16 @@ class ParametersConfiguration {
         consumers: co.datapipelines.parameters.ParameterSetConsumers,
         releaser: TemplateReleaser,
         transactionManager: PlatformTransactionManager,
+        // #517 — every pin-affecting set write under the workspace writer guard (release-dependencies §4.3).
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+        // #517 round three — the blockers one restore refusal lists.
+        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
+        // #778 — the lake reference scanner, told of each RELEASED version inside its transaction (seam ruling 2026-11-02).
+        observer: co.datapipelines.pipeline.release.ReleasedVersionObserver,
+        // #873 §C.1 — the shared release planner, read per release (it holds this service's participant: no cycle).
+        coordinator: org.springframework.beans.factory.ObjectProvider<co.datapipelines.web.release.ReleaseCoordinator>,
+        // #873 §D.3 — the restore recheck walks below every live selector pin (the shared port).
+        restoreGuard: co.datapipelines.pipeline.release.RestoreDependencyGuard,
     ): ParameterSetService =
         ParameterSetService(
             repository,
@@ -97,6 +111,13 @@ class ParametersConfiguration {
             // cascade and the import are all-or-nothing over the same rows the template
             // import writes (the PromotionReceiveService precedent).
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
+            guard = guard,
+            maxBlockers = bounds.maxBlockers,
+            observer = observer,
+            coordination =
+                co.datapipelines.web.release.ParameterSetReleaseParticipant
+                    .coordination { coordinator.getObject() },
+            restoreGuard = restoreGuard,
         )
 
     /** #376 — the durable evaluation history's tables (V48), read by the History tab and the hourly housekeeping. */
@@ -134,8 +155,8 @@ class ParametersConfiguration {
             .ParameterSetTransferService(sets, repository, templates, templateImport)
 
     /**
-     * `parameters.selectors.abandoned` (record §11) — the pool's abandoned-statement count as a
-     * gauge, the `script.evaluations.abandoned` shape. The scrape ALSO calls
+     * `datapipelines.parameters.selectors.abandoned` (record §11) — the pool's abandoned-statement count as a
+     * gauge, the `datapipelines.script.evaluations.abandoned` shape. The scrape ALSO calls
      * [SelectorPool.abandonedThreadsAlive] (the 194c security pass, observation 4): the prune
      * runs with every scrape, so an abandoned worker's dead `Thread` object is released by the
      * next metrics read instead of accumulating for the process's life.
@@ -152,7 +173,7 @@ class ParametersConfiguration {
         meters: MeterRegistry,
     ): Gauge =
         Gauge
-            .builder("parameters.selectors.abandoned") {
+            .builder("datapipelines.parameters.selectors.abandoned") {
                 pool.abandonedThreadsAlive() // prune the dead worker threads with the scrape
                 pool.abandoned.sum().toDouble()
             }.description(GAUGE_DESCRIPTION)

@@ -6,8 +6,17 @@ import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreRechecks
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
@@ -16,6 +25,38 @@ import java.util.UUID
 data class VisualizationReleased(
     val version: ArtifactVersion<VisualizationBody>,
     val templatesReleased: List<TemplateRef>,
+)
+
+/**
+ * The port [VisualizationService.release] delegates to when the assembling layer wires one (#873 §C.1; the
+ * `PipelineReleaseCoordination` mold): every visualization release — the REST route's and the dialog's — then runs
+ * through the shared release planner and its ONE metadata transaction. A directly constructed service leaves it unset.
+ */
+fun interface VisualizationReleaseCoordination {
+    fun release(request: ArtifactReleaseRequest): VisualizationReleased
+}
+
+/**
+ * A visualization or dashboard release as the surfaces ask for it (#873 §C.1): the legacy alias — the family's
+ * `release_pinned_templates` / `release_pinned_visualizations` — or a plan (record §6).
+ */
+data class ArtifactReleaseRequest(
+    val workspaceId: UUID,
+    val id: UUID,
+    val expectedHash: String,
+    val actor: UUID,
+    val releasePinned: Boolean = false,
+    val plan: ReleasePlanRequest? = null,
+)
+
+/**
+ * What a visualization save (create or draft write) produced — the stored version, and the save's [warnings]
+ * (design record 2026-11-06 §4.4, D-A outcome 1: a chart field the library honours only in part). Recomputed by the
+ * rules on every save and never stored in the body; empty for a clean save and for every kind but `chart`.
+ */
+data class VisualizationSaved(
+    val version: ArtifactVersion<VisualizationBody>,
+    val warnings: List<ArtifactWarning>,
 )
 
 /**
@@ -32,6 +73,9 @@ data class VisualizationReleased(
  *   (`version.pinned`, `details.pinned_by`); the whole artifact is never purged while any of its versions is pinned.
  * - **Import** (§12): the rules against THIS deployment; a transform pin it lacks is `import.missing_template`
  *   (templates are promoted first); then the lifecycle's landing (id kept, C29).
+ * - **The writer guard** (#517, release-dependencies record §4.3): every write runs in one metadata transaction that
+ *   acquires the workspace writer [guard] first, so the pin checks above answer under it and no dashboard pin can land
+ *   between their read and the write. The validator's pin reads (metadata only, no egress) run under it too.
  */
 @Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount") // one façade over the verb table; each throw is its own refusal
 class VisualizationService(
@@ -47,6 +91,19 @@ class VisualizationService(
     private val evidence: ReleaseEvidence = ReleaseEvidence.NOT_INSTALLED,
     transactions: TransactionOperations = ArtifactLifecycle.DIRECT,
     newId: () -> UUID = UUID::randomUUID,
+    /** #517 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /**
+     * #873 §C.1 — the shared release planner; when set, [release] delegates every request to it and the planner's
+     * participant calls [releaseTarget], [prepareRelease] and [commitRelease]. Null in a directly constructed test.
+     */
+    private val coordination: VisualizationReleaseCoordination? = null,
+    /**
+     * #873 §D.1 — the transitive restore recheck ([RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test)
+     * and the blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14).
+     */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     /** Repository-owned, lens-filtered navigation metadata only. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
@@ -54,21 +111,38 @@ class VisualizationService(
 
     private val lifecycle = ArtifactLifecycle(repository, authoring, transactions, newId)
 
+    /**
+     * The `columns` a chart occurrence is served with (design record 2026-11-06 §4.1 "Types at render"): `{field:
+     * LogicalType}` of the encoded fields, from the contract the save rules read ([ChartColumns]); empty otherwise.
+     */
+    fun chartColumns(
+        workspaceId: UUID,
+        body: VisualizationBody,
+    ): Map<String, co.datapipelines.typesystem.LogicalType> = validator.chartColumns(workspaceId, body)
+
+    /** [block] in one metadata transaction, the workspace writer guard acquired first (#517); the lifecycle's transactions join it. */
+    private fun <T> guarded(
+        workspaceId: UUID,
+        block: () -> T,
+    ): T = GuardedTransaction.run(lifecycle.transactions, guard, workspaceId, ReleaseFamily.VISUALIZATION, block)
+
     // ---- writes ---------------------------------------------------------------------------------------
 
-    /** Creates the visualization as version 1 DRAFT, validated in full. */
+    /** Creates the visualization as version 1 DRAFT, validated in full; the save's warnings beside it. */
     fun create(
         workspaceId: UUID,
         document: VisualizationDocument,
         actor: UUID,
         via: WriteSurface,
-    ): ArtifactVersion<VisualizationBody> {
+    ): VisualizationSaved {
         lifecycle.requireAuthoring()
-        val valid = validated(workspaceId, document)
-        return lifecycle.create(workspaceId, valid.name, valid.body, actor, via)
+        return guarded(workspaceId) {
+            val valid = validatedWithWarnings(workspaceId, document)
+            VisualizationSaved(lifecycle.create(workspaceId, valid.document.name, valid.document.body, actor, via), valid.warnings)
+        }
     }
 
-    /** The draft write (copy-on-write, or in place) at [expectedHash]; never a rename. */
+    /** The draft write (copy-on-write, or in place) at [expectedHash]; never a rename. The save's warnings beside it. */
     fun write(
         workspaceId: UUID,
         id: UUID,
@@ -76,21 +150,34 @@ class VisualizationService(
         expectedHash: String,
         actor: UUID,
         via: WriteSurface,
-    ): ArtifactVersion<VisualizationBody> {
+    ): VisualizationSaved {
         lifecycle.requireAuthoring()
-        val valid = validated(workspaceId, document)
-        return lifecycle.write(workspaceId, id, valid.name, valid.body, expectedHash, actor, via)
+        return guarded(workspaceId) {
+            val valid = validatedWithWarnings(workspaceId, document)
+            val name = valid.document.name
+            VisualizationSaved(lifecycle.write(workspaceId, id, name, valid.document.body, expectedHash, actor, via), valid.warnings)
+        }
     }
 
-    /** Release the DRAFT at [expectedHash] (see the class KDoc for the order of the checks). */
+    /**
+     * Release the DRAFT at [expectedHash] (see the class KDoc for the order of the checks). Since #873 a wired
+     * [coordination] owns the release after the authoring check: the alias consents to exactly the DRAFT transform
+     * template, a [plan] to its own selection; the native body is the directly constructed service's.
+     */
+    @Suppress("LongParameterList") // the request's fields
     fun release(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
         actor: UUID,
         releasePinnedTemplates: Boolean = false,
+        plan: ReleasePlanRequest? = null,
     ): VisualizationReleased {
         lifecycle.requireAuthoring()
+        coordination?.let {
+            return it.release(ArtifactReleaseRequest(workspaceId, id, expectedHash, actor, releasePinnedTemplates, plan))
+        }
+        check(plan?.present != true) { "a release plan needs the release coordinator, and none is wired" }
         val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
         val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
         val body = checkNotNull(repository.findVersion(workspaceId, id, draft.version)).body
@@ -101,6 +188,7 @@ class VisualizationService(
         val released =
             checkNotNull(
                 lifecycle.transactions.execute {
+                    guard.acquire(workspaceId, ReleaseFamily.VISUALIZATION)
                     when (val verdict = evidence.verdict(workspaceId, candidate)) {
                         EvidenceVerdict.Pass -> Unit
                         is EvidenceVerdict.Refused -> throw DatapipelinesException(verdict.code, verdict.message, verdict.details)
@@ -112,15 +200,73 @@ class VisualizationService(
         return VisualizationReleased(checkNotNull(repository.findVersion(workspaceId, id, released.first.version)), released.second)
     }
 
+    // ---- the release planner's seams (#873 §B.2) -------------------------------------------------------
+
+    /** The visualization's working DRAFT as a release names it — the record and the draft — or the native refusal. */
+    fun releaseTarget(
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<ArtifactRecord, ArtifactVersionDetail> {
+        val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
+        val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
+        return record to draft
+    }
+
+    /**
+     * The planner's PREPARE, outside every transaction (record §4.1 step 4): the DRAFT that is [version] at [expectedHash]
+     * must declare a test case (`release.tests_missing` / `no_cases`) and pass the rules against its pin as it is now;
+     * answers the evidence gate's [ReleaseCandidate]. Null when that DRAFT is no longer the planned one.
+     */
+    fun prepareRelease(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+        expectedHash: String,
+    ): ReleaseCandidate? {
+        val record = repository.findRecord(workspaceId, id) ?: return null
+        val draft = repository.findDraft(workspaceId, id)?.takeIf { it.version == version && it.bodyHash == expectedHash } ?: return null
+        val body = repository.findVersion(workspaceId, id, draft.version)?.body ?: return null
+        if (body.tests?.cases.isNullOrEmpty()) throw noCases(record.name)
+        validated(workspaceId, VisualizationDocument(record.name, body))
+        return ReleaseCandidate(id, record.name, draft.version, draft.bodyHash, body)
+    }
+
+    /**
+     * The planner's COMMIT, inside its guarded transaction (record §4.1 step 6; brief A12): the [ReleaseEvidence] verdict
+     * for [candidate] — every `tests_*` / `mechanical_failed` refusal with its reason; the mechanical re-run is the
+     * visualization's own script, never a customer probe, so it runs here as it did in the native transaction — then the
+     * one exact-hash flip. Null when no DRAFT matched [expectedHash] (the caller's refusal).
+     */
+    fun commitRelease(
+        workspaceId: UUID,
+        candidate: ReleaseCandidate,
+        expectedHash: String,
+        actor: UUID,
+    ): ArtifactVersion<VisualizationBody>? {
+        when (val verdict = evidence.verdict(workspaceId, candidate)) {
+            EvidenceVerdict.Pass -> Unit
+            is EvidenceVerdict.Refused -> throw DatapipelinesException(verdict.code, verdict.message, verdict.details)
+        }
+        val flipped = repository.releaseDraft(workspaceId, candidate.visualizationId, expectedHash, actor) ?: return null
+        return checkNotNull(repository.findVersion(workspaceId, candidate.visualizationId, flipped.version))
+    }
+
+    /** The native stale-hash refusal for [id] — the planner's answer when the root's `If-Match` no longer matches. */
+    fun staleRelease(
+        workspaceId: UUID,
+        id: UUID,
+    ): DatapipelinesException = lifecycle.staleBase(workspaceId, id)
+
     /** Purge the DRAFT at [expectedHash] — refused while a live dashboard version pins it. */
     fun purgeDraft(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
-    ): Purged {
-        repository.findDraft(workspaceId, id)?.let { unpinned(workspaceId, id, it.version) }
-        return lifecycle.purgeDraft(workspaceId, id, expectedHash)
-    }
+    ): Purged =
+        guarded(workspaceId) {
+            repository.findDraft(workspaceId, id)?.let { unpinned(workspaceId, id, it.version) }
+            lifecycle.purgeDraft(workspaceId, id, expectedHash)
+        }
 
     /** Purge version [version] — drafts only, and never a pinned one. */
     fun purgeVersion(
@@ -128,19 +274,21 @@ class VisualizationService(
         id: UUID,
         version: Int,
         expectedHash: String? = null,
-    ): Purged {
-        unpinned(workspaceId, id, version)
-        return lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
-    }
+    ): Purged =
+        guarded(workspaceId) {
+            unpinned(workspaceId, id, version)
+            lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
+        }
 
     /** Purge the whole visualization — only a draft-only one that no live dashboard version pins at any version. */
     fun purgeEntity(
         workspaceId: UUID,
         id: UUID,
-    ): Purged {
-        unpinned(workspaceId, id, null)
-        return lifecycle.purgeEntity(workspaceId, id)
-    }
+    ): Purged =
+        guarded(workspaceId) {
+            unpinned(workspaceId, id, null)
+            lifecycle.purgeEntity(workspaceId, id)
+        }
 
     /** Discard RELEASED version [version] — never a pinned one. */
     fun discardVersion(
@@ -148,10 +296,11 @@ class VisualizationService(
         id: UUID,
         version: Int,
         actor: UUID,
-    ): VersionMoved {
-        unpinned(workspaceId, id, version)
-        return lifecycle.discardVersion(workspaceId, id, version, actor)
-    }
+    ): VersionMoved =
+        guarded(workspaceId) {
+            unpinned(workspaceId, id, version)
+            lifecycle.discardVersion(workspaceId, id, version, actor)
+        }
 
     /**
      * Restore DISCARDED version [version] — after its script template pin is judged against today's state (#320, D7).
@@ -166,9 +315,48 @@ class VisualizationService(
         version: Int,
     ): VersionMoved {
         lifecycle.requireAuthoring()
-        val stored = repository.findVersion(workspaceId, id, version)
-        if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPin(workspaceId, id, stored.body)
-        return lifecycle.restoreVersion(workspaceId, id, version)
+        return guarded(workspaceId) {
+            val stored = repository.findVersion(workspaceId, id, version)
+            if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) {
+                refuseDanglingPin(workspaceId, id, stored.body)
+                refuseUnreleasedClosure(workspaceId, id, version)
+            }
+            lifecycle.restoreVersion(workspaceId, id, version)
+        }
+    }
+
+    /**
+     * #873 §D.1 — the stored body's closure through the shared restore walk (record §25.2 row G2, §25.4 D15): a missing
+     * or DISCARDED node anywhere below the transform pin is the native 400 `transform_binding_invalid` at that pin
+     * (`reason: template_version_not_found`, plus the full `path` and the intermediate nodes as `via`); a present DRAFT —
+     * the pin itself or a node beneath a RELEASED template — is `visualization.release.dependency_not_released` (409,
+     * `reason: not_released`).
+     */
+    private fun refuseUnreleasedClosure(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ) {
+        val record = repository.findRecord(workspaceId, id) ?: return
+        val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.VISUALIZATION, record.name, version)
+        val reaches = restoreGuard.recheck(root)
+        val dangling =
+            reaches.filter { it.dangling }.map { reach ->
+                ValidationFailure(
+                    VisualizationErrorCodes.TRANSFORM_BINDING_INVALID,
+                    reach.directPath,
+                    "Template '${reach.identity.entityId.safeEcho()}' version ${reach.identity.version}, reached through " +
+                        "'${reach.path}', has no live version; a restore lands RELEASED and everything below it must be live.",
+                    mapOf(
+                        "reason" to "template_version_not_found",
+                        "template" to reach.identity.entityId.safeEcho(),
+                        "template_version" to reach.identity.version,
+                        "status" to reach.status.name,
+                    ) + if (reach.transitive) mapOf("path" to reach.path, "via" to reach.viaDetails()) else emptyMap(),
+                )
+            }
+        if (dangling.isNotEmpty()) throw ArtifactValidationException(ValidationResult(dangling), VisualizationErrorCodes.BODY_INVALID)
+        RestoreRechecks.notReleased(root, record.name, reaches, maxBlockers)?.let { throw it }
     }
 
     private fun refuseDanglingPin(
@@ -189,7 +377,7 @@ class VisualizationService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Switched = lifecycle.switchCurrent(workspaceId, id, version)
+    ): Switched = guarded(workspaceId) { lifecycle.switchCurrent(workspaceId, id, version) }
 
     /** Import (§12, versioning §9.2): [validateForImport] then the lifecycle's landing. Not an authoring write. */
     fun import(
@@ -197,11 +385,10 @@ class VisualizationService(
         export: ArtifactExport<VisualizationBody>,
         actor: UUID,
     ): ArtifactImported =
-        lifecycle.importValidated(
-            workspaceId,
-            export.copy(body = validateForImport(workspaceId, VisualizationDocument(export.name, export.body)).body),
-            actor,
-        )
+        guarded(workspaceId) {
+            val validated = export.copy(body = validateForImport(workspaceId, VisualizationDocument(export.name, export.body)).body)
+            lifecycle.importValidated(workspaceId, validated, actor)
+        }
 
     /** The rules against THIS deployment with the import lens: a transform pin it lacks is `import.missing_template`. */
     fun validateForImport(
@@ -325,7 +512,17 @@ class VisualizationService(
     private fun validated(
         workspaceId: UUID,
         document: VisualizationDocument,
-    ): VisualizationDocument = validator.validate(workspaceId, document).orThrow(VisualizationErrorCodes.BODY_INVALID)
+    ): VisualizationDocument = validatedWithWarnings(workspaceId, document).document
+
+    /** The rules' [ArtifactValidation.Valid] — the canonical document and its warnings — or every refusal thrown. */
+    private fun validatedWithWarnings(
+        workspaceId: UUID,
+        document: VisualizationDocument,
+    ): ArtifactValidation.Valid<VisualizationDocument> =
+        when (val validation = validator.validate(workspaceId, document)) {
+            is ArtifactValidation.Valid -> validation
+            is ArtifactValidation.Invalid -> throw ArtifactValidationException(validation.result, VisualizationErrorCodes.BODY_INVALID)
+        }
 
     /** The 142 guard and the cascade's worklist: the transform pin, unless RELEASED; refused unless a consented DRAFT. */
     private fun templatesToRelease(

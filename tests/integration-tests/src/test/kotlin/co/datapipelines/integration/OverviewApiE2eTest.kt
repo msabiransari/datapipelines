@@ -12,8 +12,10 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.ApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.test.context.TestConstructor
 import java.net.InetSocketAddress
 import java.sql.DriverManager
 import java.util.UUID
@@ -47,13 +49,20 @@ import java.util.UUID
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
-class OverviewApiE2eTest {
+@TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
+class OverviewApiE2eTest(
+    private val applicationContext: ApplicationContext,
+) {
     @LocalServerPort
     private var port: Int = 0
 
     @Test
     fun `per role the home's totals are the console's rows and the Keys page's rows, and nothing of another workspace`() {
         ensureSeeded()
+        // A revoked key remains inventory only while history still references its identity.
+        // Run the real purge explicitly: the fixture must not depend on beating its scheduler tick.
+        val purge = applicationContext.getBean("keyRetentionPurge")
+        purge.javaClass.getMethod("purgeOnce").invoke(purge)
         EXPECTED.forEach { (role, expected) ->
             withClue("as $role") {
                 val home = page("/overview/api-console", role)
@@ -288,6 +297,20 @@ class OverviewApiE2eTest {
                     "('${UUID.randomUUID()}', '$WS_ID', '$LEGACY_ENDPOINT', '$PIPE_ADMITTED', 30, '', '$owner'), " +
                     "('${UUID.randomUUID()}', '$OTHER_WS_ID', '$OTHER_ENDPOINT', '$PIPE_OTHER', 30, '', '$OTHER_ADMIN')",
             )
+            // #786: an API serves, and is counted by, its OWN current version. These rows are seeded after boot, so the
+            // startup conversion never sees them: write the v1 a native create of a released pipeline's API leaves
+            // (RELEASED, the exact pin of the pipeline's current version, the V58 hash expression) and point at it —
+            // the legacy path included, which keeps its grammar-refused path and is still listed as legacy.
+            statement.execute(
+                "INSERT INTO published_endpoint_versions (endpoint_id, version, status, pipeline_name, pipeline_version, " +
+                    "timeout_seconds, description, body_hash, released_at, released_by, created_by) " +
+                    "SELECT e.id, 1, 'RELEASED', p.name, p.current_version, e.timeout_seconds, e.description, " +
+                    "encode(sha256(convert_to((jsonb_build_object('pipeline', p.name, 'pipeline_version', p.current_version, " +
+                    "'timeout_seconds', e.timeout_seconds, 'description', e.description))::text, 'UTF8')), 'hex'), " +
+                    "NOW(), e.created_by, e.created_by FROM published_endpoints e JOIN pipelines p ON p.id = e.pipeline_id " +
+                    "WHERE e.workspace_id IN ('$WS_ID', '$OTHER_WS_ID')",
+            )
+            statement.execute("UPDATE published_endpoints SET current_version = 1 WHERE workspace_id IN ('$WS_ID', '$OTHER_WS_ID')")
         }
 
         /** Each key's own `service` identity FIRST (the row FKs to it — keys v2 A13), then the row. */
@@ -300,6 +323,15 @@ class OverviewApiE2eTest {
                             "'${key.seeded.id}', TRUE, FALSE, 'service')",
                     )
                 }
+            }
+            // Publish identity history before any revoked key can be seen by the purge.
+            connection.prepareStatement("INSERT INTO audit_log (event, user_id) VALUES (?, ?)").use { audit ->
+                KEYS.filter { it.revoked }.forEach { key ->
+                    audit.setString(1, "auth.api_key.revoked")
+                    audit.setObject(2, UUID.fromString(key.seeded.ownerId))
+                    audit.addBatch()
+                }
+                audit.executeBatch()
             }
             connection
                 .prepareStatement(

@@ -8,11 +8,11 @@ import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
- * The header's Product navigation (148, #115 reopened): the seven feature pages are reachable
+ * The header's Product navigation (148, #115 reopened): the ten feature pages are reachable
  * from the header again — a `<details>` disclosure in the wide row and a labelled group in
  * the phone menu — and the two menus cannot drift apart.
  *
- *  1. **The seven are the seven, in order, and every one is a registry page.** The wide
+ *  1. **The ten are the ten, in order, and every one is a registry page.** The wide
  *     disclosure's links equal [PRODUCT_PATHS]; each path is in `SitePages.ALL`, so a page
  *     dropped from the registry (and therefore from the sitemap) is named here, not found by
  *     a visitor as a dead link.
@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test
  *     (usable without JavaScript, like the phone menu); the phone group is a `role="group"`
  *     labelled by its visible heading.
  *
- * Non-vacuity: the list is asserted to be exactly seven, and the layout source must reference
+ * Non-vacuity: the list is asserted to be exactly ten, and the layout source must reference
  * the fragment exactly twice. Falsified at birth by removing one link from the fragment (arm 1
  * names the missing path; arm 2's source count stays at two, so the render check is the one
  * that catches a link typed into only one menu).
@@ -41,11 +41,11 @@ class SiteProductNavigationTest {
     private val featurePage = SitePageRenderer.render(SitePages.SEMANTIC_LAYER)
 
     @Test
-    fun `the wide disclosure links the seven feature pages in order and each is a registry page`() {
+    fun `the wide disclosure links the ten feature pages in order and each is a registry page`() {
         val panel = anchors(section(home, WIDE_PANEL))
         withClue("the disclosure's links, in order") { panel.map { it.href } shouldBe PRODUCT_PATHS }
         panel.size shouldBe PRODUCT_PATHS.size
-        PRODUCT_PATHS.size shouldBe SEVEN
+        PRODUCT_PATHS.size shouldBe TEN
         val registry = SitePages.ALL.map { it.path }
         withClue("every Product link is a registry page (the sitemap's source)") { registry shouldContainAll PRODUCT_PATHS }
         panel.forEach { link -> withClue("${link.href} has a label") { link.label.isNotBlank() shouldBe true } }
@@ -128,10 +128,22 @@ class SiteProductNavigationTest {
         checkNotNull(javaClass.classLoader.getResource("templates/site/_layout.html")) { "the site layout is on the classpath" }.readText()
 
     private companion object {
-        /** The seven, in the header's order — 130's list, restored by 148. */
+        /** The ten, in the header's order — 130's list, restored by 148, then #699's three. */
         val PRODUCT_PATHS =
-            listOf("/semantic-layer", "/dp-lake", "/federated-query", "/text-to-sql-agent", "/mcp-tools", "/demo-data", "/security")
-        const val SEVEN = 7
+            listOf(
+                "/semantic-layer",
+                "/dp-lake",
+                "/federated-query",
+                "/text-to-sql-agent",
+                "/mcp-tools",
+                "/demo-data",
+                "/security",
+                // #699: the three capability pages, after the owner's seven.
+                "/pipeline-scheduling",
+                "/sql-dashboards",
+                "/reusable-parameter-sets",
+            )
+        const val TEN = 10
 
         /** The primary pages and the docs, in the header's order (145 §2), then the application entry. */
         val PRIMARY_PATHS = listOf("/how-it-works", "/use-cases", "/pricing", "/explore", "/docs")

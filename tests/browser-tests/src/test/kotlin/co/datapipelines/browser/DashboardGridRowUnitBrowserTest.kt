@@ -30,8 +30,9 @@ import java.nio.file.StandardOpenOption
  * Plotly's own `_fullLayout._size.h` (the `nsewdrag` rect beside it in the record).
  *
  * The 640 px breakpoint is measured on the board: the 728 px board at the 760 px phone viewport holds
- * its 6/6/3/9 grid, while the ~730 px board at 1280 px beside the 202 px menu and the 300 px resource
- * browser (#554; the History lives in the bottom dock since #473) holds it under the default and
+ * its 6/6/3/9 grid, while the ~710 px board at 1280 px beside the 202 px menu and the resource browser
+ * at its band default (#554; app.css's `--app-browser-default`; the History lives in the bottom dock
+ * since #473) holds it under the default and
  * collapses under an explicit 1024 px threshold. A live host-width
  * crossing proves the slots re-place AND the figure re-measures to its new width.
  */
@@ -43,7 +44,8 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         val board = seedBoardWithGrid(root)
         for (width in listOf(DESKTOP_WIDTH_PX, TABLET_WIDTH_PX, INVERTED_VIEWPORT_PX)) {
             page.setViewportSize(width, VIEWPORT_HEIGHT_PX)
-            // #554: at 768 (the 761–1100 band) the 64 px menu and the 270 px browser leave a board below
+            // #554: at 768 (the 761–1100 band) the 64 px menu and the band's narrower browser
+            // default (app.css's `--app-browser-default` override) leave a board below
             // 640; the reader's Hide (a per-workspace preference, applied before the first paint)
             // returns the browser's width, and the board (768 - 64 less padding) holds the grid again.
             page.evaluate(
@@ -62,6 +64,42 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
                 assertPlotAreaFloor(measured, SMALL_SLOT)
             }
         }
+        drainCspViolations().shouldBeEmpty()
+    }
+
+    /**
+     * #870 — the 2-row chart drawn with the record's DEFAULT axis titles (`x`, `Sum of y`): each title is a
+     * second line beside its ticks, so this chart is held to [TITLED_PLOT_AREA_FLOOR], not #386's half. The
+     * seed's `slowchart` is re-authored with both titles (the suite seeds it `title: null`), and the titles
+     * are asserted EXACTLY, in the resolved layout and in the drawn text nodes: for a `null` title Plotly fills
+     * `_fullLayout` with its non-blank placeholder, so a non-blank check would pass on the untitled chart.
+     * Each theme is recorded on its own, so one red run shows both themes' outcomes.
+     */
+    @Test
+    fun `a default chart with both axis titles keeps the titled plot-area floor in a 2-row slot, in both themes`() {
+        startTrace()
+        val root = ready("dprowt")
+        val board = seedBoardWithGrid(root)
+        val titled = ChartBrowserFixtures.barBody("x", "INTEGER", "y").replace("'", "''")
+        sql(
+            "UPDATE visualization_versions SET body_json = '$titled'::jsonb WHERE visualization_id = " +
+                "(SELECT id FROM visualizations WHERE name = '$root/visualizations/$SMALL_SLOT')",
+        )
+        page.setViewportSize(DESKTOP_WIDTH_PX, VIEWPORT_HEIGHT_PX)
+        val failures = mutableListOf<String>()
+        for (theme in THEMES) {
+            runCatching {
+                openBoard(board, theme)
+                val measured = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "titled/$theme")
+                val titles = page.evaluate(TITLES_JS, mapOf("scope" to BOARD_SCOPE, "slot" to SMALL_SLOT)) as Map<*, *>
+                record("titled/$theme titles[$SMALL_SLOT]=$titles")
+                withClue("the '$SMALL_SLOT' chart resolves and draws the default axis titles: $titles") {
+                    titles shouldBe EXPECTED_TITLES
+                }
+                assertPlotAreaFloor(measured, SMALL_SLOT, TITLED_PLOT_AREA_FLOOR)
+            }.onFailure { failures += "$theme: ${it.message}" }
+        }
+        failures shouldBe emptyList()
         drainCspViolations().shouldBeEmpty()
     }
 
@@ -139,9 +177,10 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         openBoard(board, THEMES.first())
 
         // The reader's browser width is the board host's narrowing cause (#554: the separator on the
-        // browser/content boundary; #460's rail separator before it). End takes the browser to its
-        // 480 px maximum, main to 1280 - 202 - 480 = 598 and the board below the 640 default; Home
-        // takes it to its 240 px floor, main to 838.
+        // browser/content boundary; #460's rail separator before it). End takes the browser to the
+        // range's ceiling (`--app-browser-max`), main to `1280 - 202 - ceiling` — 598 today — and the
+        // board below the 640 default; Home takes it to the range's floor (`--app-browser-min`, #784),
+        // main to 798. #788: the ceiling and floor live in app.css and are read computed.
         val separator = page.locator("#browser-boundary")
         separator.focus()
         page.keyboard().press("End")
@@ -405,16 +444,18 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
      * because what a compact frame leaves outside the plot — one line of x tick labels below (an axis
      * title adds a second), a title line above when the figure has one — fits in the other half of a
      * 176 px slot at the default font; Plotly's own margins (≈100 top + 80 bottom) left a sliver.
+     * A chart with both axis titles passes [TITLED_PLOT_AREA_FLOOR] as [floor] (#870).
      */
     private fun assertPlotAreaFloor(
         m: Measured,
         name: String,
+        floor: Double = PLOT_AREA_FLOOR,
     ) {
         val slotHeight = m.slot(name, "height")
         val plot = m.slot(name, "plot")
-        record("${m.label} plotArea[$name]=${plot}px of slot ${slotHeight}px (drag ${m.slot(name, "drag")}px)")
-        withClue("the '$name' plot area ($plot px) is at least ${PLOT_AREA_FLOOR * slotHeight} px ($PLOT_AREA_FLOOR of the slot): $m") {
-            (plot >= PLOT_AREA_FLOOR * slotHeight) shouldBe true
+        record("${m.label} plotArea[$name]=${plot}px of slot ${slotHeight}px ratio=${plot / slotHeight} (drag ${m.slot(name, "drag")}px)")
+        withClue("the '$name' plot area ($plot px) is at least ${floor * slotHeight} px ($floor of the slot): $m") {
+            (plot >= floor * slotHeight) shouldBe true
         }
     }
 
@@ -482,20 +523,14 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     private fun visualization(name: String): String =
-        """
-        {"name": "$name", "display_name": "Row unit", "description": "",
-         "renderer": {"kind": "plotly", "version": "4"},
-         "inputs": {"sales": {"columns": [{"name": "month", "type": "STRING", "nullable": false},
-                                          {"name": "units", "type": "INTEGER", "nullable": false}]}},
-         "config": {"data": [{"type": "bar", "x": [], "y": []}], "layout": {"title": {"text": "Units"}}},
-         "bindings": {"data[0].x": "month", "data[0].y": "units"},
-         "presentation": {"title": "Units"},
-         "tests": {"cases": [
-            {"name": "three months", "fixtures": {"sales": [{"month": "Jan", "units": 3},
-                                                           {"month": "Feb", "units": 5},
-                                                           {"month": "Mar", "units": 2}]},
-             "assertions": [{"kind": "rendered"}]}]}}
-        """.trimIndent()
+        ChartBrowserFixtures.barDocument(
+            name,
+            "Row unit",
+            "month" to "STRING",
+            "units" to "INTEGER",
+            title = "Units",
+            cases = listOf(ChartBrowserFixtures.WORKSPACE_DATA_CASE to ChartBrowserFixtures.THREE_MONTHS),
+        )
 
     private companion object {
         val THEMES = listOf("light", "dark")
@@ -553,6 +588,30 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         const val HALF_LOW = 0.35
         const val HALF_HIGH = 0.65
         const val PLOT_AREA_FLOOR = 0.5
+
+        /**
+         * #870's floor for a 2-row chart with BOTH default axis titles, each a second line beside its ticks.
+         * Measured 2026-11-12 at 1280 px: plot 79 px of the 176 px slot in both themes, r = 0.449; the floor is
+         * the largest multiple of 0.05 at or under r - 0.03 (70.4 px), so a few pixels of font drift pass and a
+         * frame that takes another line does not.
+         */
+        const val TITLED_PLOT_AREA_FLOOR = 0.40
+
+        /**
+         * The default titles `titles()` derives for `barBody("x", "INTEGER", "y")` (datapipelines-dashboard-chart.js):
+         * the band's field name and `Sum of` the value's — resolved (`xResolved`/`yResolved`) and drawn (the svg's text).
+         */
+        val EXPECTED_TITLES = mapOf("xResolved" to "x", "yResolved" to "Sum of y", "xDrawn" to "x", "yDrawn" to "Sum of y")
+
+        /** One graph's resolved axis titles and the text of Plotly's drawn `.xtitle` / `.ytitle` nodes (absent: null). */
+        const val TITLES_JS =
+            """(args) => {
+              var graph = document.querySelector(args.scope + " [data-dp-slot='" + args.slot + "'] .js-plotly-plot");
+              var layout = graph && graph._fullLayout;
+              function resolved(axis) { return layout && layout[axis] && layout[axis].title ? layout[axis].title.text : null; }
+              function drawn(cls) { var node = graph && graph.querySelector('text.' + cls); return node ? node.textContent : null; }
+              return { xResolved: resolved('xaxis'), yResolved: resolved('yaxis'), xDrawn: drawn('xtitle'), yDrawn: drawn('ytitle') };
+            }"""
         const val EXCERPT = 600
         val HTTP_OK_RANGE = 200..299
         val REPORT: Path = Paths.get("build", "reports", "dashboard-grid-row-unit", "measurements.txt")

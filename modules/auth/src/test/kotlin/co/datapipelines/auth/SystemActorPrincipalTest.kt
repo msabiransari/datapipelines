@@ -23,7 +23,7 @@ class SystemActorPrincipalTest {
     fun restore() = PermissionResolution.install(RolePermissionsResolver)
 
     @Test
-    fun `the system identity holds exactly pipeline execute, pipeline read and execution read - in any workspace`() {
+    fun `the system identity holds exactly pipeline execute, pipeline read, execution read and lake append - in any workspace`() {
         heldBy(principal(WORKSPACE_A)) shouldBe EXPECTED
         heldBy(principal(WORKSPACE_B)) shouldBe EXPECTED
     }
@@ -122,7 +122,7 @@ class SystemActorPrincipalTest {
 
     private companion object {
         /** THE fixed set, written out (R2: execute pipelines, and the reads the reconciler needs). */
-        val EXPECTED = setOf(Permission.PIPELINE_EXECUTE, Permission.PIPELINE_READ, Permission.EXECUTION_READ)
+        val EXPECTED = setOf(Permission.PIPELINE_EXECUTE, Permission.PIPELINE_READ, Permission.EXECUTION_READ, Permission.LAKE_APPEND)
         val SYSTEM_ID: UUID = UUID.fromString("5a570000-0000-0000-0000-000000000001")
         val WORKSPACE_A: UUID = UUID.fromString("a0000000-0000-0000-0000-00000000000a")
         val WORKSPACE_B: UUID = UUID.fromString("b0000000-0000-0000-0000-00000000000b")

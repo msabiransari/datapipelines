@@ -81,6 +81,12 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/UiRules.kt",
                 // #655 — the §3.4 provider-protocol rule, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/AuthProviderRules.kt",
+                // #442b — the §3.29 scheduler-notification rule, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/SchedulerNotificationRules.kt",
+                // #785 — the §3.36 managed-lake rules, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt",
+                // #325 — the §3.2 lifecycle-write ceiling, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/ExecutorRules.kt",
             )
     }
 }

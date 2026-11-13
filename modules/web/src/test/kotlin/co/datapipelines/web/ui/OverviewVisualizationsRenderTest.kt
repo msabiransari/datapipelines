@@ -138,7 +138,7 @@ class OverviewVisualizationsRenderTest {
     /** #599: the lifecycle home reads a chart group; an unknown inventory is the same reason as an unknown chart group. */
     private fun page(inventory: InventoryResult) =
         OverviewPage.of(
-            OverviewPage.Family.VISUALIZATIONS,
+            OverviewFamily.VISUALIZATIONS,
             false,
             when (inventory) {
                 is InventoryResult.Available -> {

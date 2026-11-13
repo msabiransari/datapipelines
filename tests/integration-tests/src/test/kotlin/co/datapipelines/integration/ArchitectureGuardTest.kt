@@ -420,8 +420,6 @@ class ArchitectureGuardTest {
                 "DatasourceOverviewController → DatasourceRepository",
                 "EndpointsController → ApiKeyRepository",
                 "EndpointsController → EndpointKeyBindingRepository",
-                "EndpointsController → PipelineRepository",
-                "EndpointsTools → PipelineRepository",
                 "EntryPointChecks → TemplateRepository",
                 "ExecutionDetailController → ExecutionEventRepository",
                 "ExecutionDetailController → ExecutionRepository",
@@ -476,13 +474,16 @@ class ArchitectureGuardTest {
         /**
          * The `@Scheduled` homes (auth.md §8.6's scheduled rows): the stale-execution sweep, the pool reaper, event retention
          * and — #10 L2 — the stale dashboard-refresh sweep (`DashboardRuntimeConfiguration.kt`, metadata-db §8.4).
+         * #799 adds the lake-enabled delivery settlement adapter (lake.md §8); default-profile runtime inventory stays unchanged.
          */
         val APPROVED_SCHEDULING_FILES =
             setOf(
                 "SweepSchedulingConfiguration.kt",
                 "PoolReaperSchedulingConfiguration.kt",
+                "PoolReaderLeaseConfiguration.kt",
                 "RetentionSchedulingConfiguration.kt",
                 "DashboardRuntimeConfiguration.kt",
+                "LakeSettlementSchedulingConfiguration.kt", // #799: conditional, bounded, non-request delivery recovery.
             )
 
         /** 100 transport files on the inventory base; a scan that finds far fewer is looking in the wrong place. */
@@ -509,13 +510,17 @@ class ArchitectureGuardTest {
          * `ScheduleService` only, which is deliberately NOT in this list. #376: the evaluation history's
          * stale sweep and retention (steps of the retention tick) — the History tab READS the records, never
          * the jobs that close and delete them.
+         * #799's conditional lake recovery, its runtime aggregate and its metadata read are internal jobs too.
+         * #818 adds the managed lake freshness tick, reader keeper and registry refresh pass.
          */
         val JOB_SERVICE =
             Regex(
                 "\\b(StaleExecutionSweeper|ExecutionEventRetention|reapRetiredPools|StaleExecutionSweepScheduler|" +
                     "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|AuditLogRetention|" +
-                    "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|SchedulerTasks|SchedulerAdmission|" +
-                    "ParameterEvaluationSweeper|ParameterEvaluationRetention)\\b",
+                    "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|ScheduleNotifier|SchedulerTasks|SchedulerAdmission|" +
+                    "ParameterEvaluationSweeper|ParameterEvaluationRetention|ManagedLakeFreshnessScheduler|" +
+                    "ReaderLeaseKeeper|refreshManagedGenerations|" +
+                    "LakeSettlementScheduler|LakeSettlementSweep|LakeMetadataReads|LakeAppendRuntime)\\b",
             )
 
         /** The ordinary evaluate's call sites (spec §4.5) — the REST route, the dashboard runtime, the MCP tool. */

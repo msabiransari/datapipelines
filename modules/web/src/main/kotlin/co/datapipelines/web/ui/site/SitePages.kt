@@ -74,7 +74,7 @@ const val RELEASE_STAGE_CTA: String = "Report what breaks."
 const val SITE_SUMMARY: String =
     "Open-source, self-hosted data pipelines for small and medium-sized organisations: an AI agent authors " +
         "reusable SQL pipelines over your existing databases and S3 data, a person reviews and releases them, " +
-        "and the released version serves an API or a dataset for your BI tool."
+        "and the released version serves an API, a dashboard or a dataset for your BI tool."
 
 /** The host of [SITE_ORIGIN], without the scheme — what a request's server name is compared against. */
 val SITE_ORIGIN_HOST: String = SITE_ORIGIN.removePrefix("https://")
@@ -314,7 +314,8 @@ object SitePages {
      * dp-lake (089 §G) — the product page written from the thesis note
      * (`notes/2026-09-07-dp-lake-thesis.md`): the headline IS the note's marketing line.
      * It states exactly what ships — Parquet/Iceberg on S3 read in place, read-only, DuckDB
-     * as the engine, our own catalog — and nothing more: no dashboards, no scheduler.
+     * as the engine, our own catalog — and nothing more: it reads, it never writes the bucket
+     * (#699 retired the "no scheduler, no dashboards" line once both shipped).
      */
     val DP_LAKE =
         SitePage(
@@ -341,14 +342,17 @@ object SitePages {
             path = "/roadmap",
             title = "Roadmap: shipped, planned, and later | datapipelines.co",
             description =
-                "Shipped: MCP server, ${facts.engineCountWord} engines, published APIs. Planned: scheduler, embedded dashboards, " +
-                    "JSONata and JavaScript nodes. Later: lake extracts, alerts.",
+                "Shipped: MCP server, ${facts.engineCountWord} engines, APIs, scheduler, dashboards, JSONata " +
+                    "and JavaScript nodes. Planned: reports. Later: extracts and alerts.",
             view = "site/roadmap",
         )
     val SECURITY =
         SitePage(
             path = "/security",
-            title = "AI agent database access, made safe: keys by role, read-only, audited",
+            // 700b (2026-10-27): "mcp server security" (140/mo, Google Ads US window 2025-10..2026-09)
+            // leads the title; its live results ask how an MCP server is secured, which the page's
+            // first H2 answers. "AI agent database access" had no estimate (2026-09-18) and stays after it.
+            title = "MCP server security: AI agent database access, read-only, audited",
             description =
                 "How an AI agent reaches your databases without a password: keys with roles, read-only datasources, " +
                     "encrypted credentials, human release, a full audit log.",
@@ -357,8 +361,11 @@ object SitePages {
     val PUBLISHED_API =
         SitePage(
             path = "/published-api",
-            // "data api" is the measured head term (SEO addendum 4) — it leads the title and the H1.
-            title = "A data API from a SQL query: published endpoints | datapipelines.co",
+            // 700b (2026-10-27): "data api" (390/mo) no longer leads the title — its live results are
+            // directories of free public APIs, a reader after someone else's data. "rest api from
+            // database" (30/mo, same Ads window 2025-10..2026-09) returns how-to-build guides, this
+            // page's job, so it leads the title; "data API" stays in the H1 as plain description.
+            title = "Create a REST API from database queries: published SQL endpoints",
             description =
                 "A released pipeline becomes a versioned GET endpoint with bound parameters and " +
                     "path-scoped keys. Data to API in a day, nothing to deploy.",
@@ -369,8 +376,8 @@ object SitePages {
             path = "/mcp-tools",
             title = "The MCP tools: what an agent can do against your databases",
             description =
-                "Every tool the MCP server exposes, generated from its own catalogue: schema reads, catalogue " +
-                    "statistics, the SQL probe, drafts, execution, results.",
+                "Every tool the MCP server exposes, generated from its catalogue: schema reads, the SQL probe, " +
+                    "pipeline and dashboard drafts, execution, results.",
             view = "site/mcp-tools",
         )
     val TABLEAU =
@@ -429,15 +436,16 @@ object SitePages {
 
     /**
      * "scheduled extract to s3" + "data driven alerts from sql" + "embedded dashboards row level
-     * security" — a ROADMAP page: every roadmap item on it says roadmap, planned or later.
+     * security" — a ROADMAP page: every roadmap item on it says roadmap, planned or later. Since
+     * #699 the embedded dashboards ship; extracts and alerts remain later.
      */
     val TABLEAU_ROADMAP =
         SitePage(
             path = "/tableau/extracts-alerts-dashboards",
-            title = "Embedded dashboards, extracts to S3, alerts: the roadmap",
+            title = "Embedded dashboards today; extracts to S3 and alerts later",
             description =
-                "Embedded dashboards, scheduled extracts to your own bucket, email alerts: what the roadmap " +
-                    "dates, what ships today, and what is not planned.",
+                "Embedded dashboards ship today; scheduled extracts to your own bucket and email alerts " +
+                    "come later. What ships, what is planned, and what is not.",
             view = "site/tableau-extracts-alerts-dashboards",
         )
 
@@ -456,7 +464,7 @@ object SitePages {
     val FOR_SAAS_TEAMS =
         SitePage(
             path = "/for/saas-teams",
-            title = "Embedded analytics without a warehouse: the API ships today",
+            title = "Embedded analytics without a warehouse: APIs and dashboards",
             description =
                 "Show customers their own numbers in your app: an agent authors the pipeline, a person " +
                     "releases it, a versioned endpoint serves each viewer.",
@@ -509,8 +517,10 @@ object SitePages {
         SitePage(
             path = "/demo-data",
             // 116 §B's title is 72 chars against the 70 pin, so "and" tightens away; the
-            // search phrases (NYC taxi, rideshare, trade, weather) all stay.
-            title = "Demo data: NYC taxi, rideshare, US trade, weather | datapipelines.co",
+            // search phrases (NYC taxi, rideshare, trade, weather) all stay. 700b (2026-10-27):
+            // "sample sql database" (320/mo, Ads 2025-10..2026-09; results are sample databases to
+            // practise on) replaces the unmeasured "Demo data" lead, as the page's first H2 offers.
+            title = "Sample SQL databases: NYC taxi, rideshare, US trade, weather",
             // 116 §B's description is 159 chars against the 155 pin; the same sentence with
             // the two words its tail does not need.
             description =
@@ -544,8 +554,11 @@ object SitePages {
         SitePage(
             path = "/semantic-layer",
             // The brief's description is 174 chars against the 155 pin (SiteSeoMetaTest) —
-            // trimmed from the end as the brief sanctions; every key phrase stays.
-            title = "Semantic layer, learned by the agent: open source | datapipelines.co",
+            // trimmed from the end as the brief sanctions; every key phrase stays. 700b
+            // (2026-10-27): "semantic layer for ai" and its close variants measure 90–110/mo each
+            // (Ads 2025-10..2026-09, never summed) and their results ask why AI agents need a
+            // semantic layer, the page's subject; "for AI agents" replaces "learned by the agent".
+            title = "Semantic layer for AI agents: learned, open source | datapipelines.co",
             description =
                 "An open-source semantic layer your agent builds from your data, recording what it learned with " +
                     "the query that proved it. Drift is detected, never guessed.",
@@ -580,6 +593,61 @@ object SitePages {
                 "Every page on the site, generated from its registry: product pages, the SQL MCP server " +
                     "and each engine, comparisons and Tableau, and the packaged docs.",
             view = "site/explore",
+        )
+
+    // ---- #699: the three capability pages (design record §5). Public marketing routes, distinct
+    // from the protected application pages /schedules, /dashboards and /parameter-sets.
+
+    /**
+     * The scheduler as docs/scheduler.md states it. #735 (owner correction, 2026-10-25): the
+     * product is a generic job scheduler and the pipeline is the job type it runs today, so the
+     * title leads with the category, not with a pipeline dialect. The earlier rationale — that
+     * "sql scheduler" (20/mo) was the one numeric scheduler phrase in the 2026-10-24
+     * measurement — was wrong: "workflow scheduler" (40/mo) was measured too, and product truth
+     * overrides keyword volume, so the SQL-only title is retired. #763 (owner ruling,
+     * 2026-10-28): the phrase itself is retired from the site — the FAQ asks the question
+     * without naming it, and `SiteCapabilitiesContentTest` bans it from every rendered page and
+     * packaged doc, so no later rewrite can bring it back.
+     */
+    val PIPELINE_SCHEDULING =
+        SitePage(
+            path = "/pipeline-scheduling",
+            title = "Job scheduler for pipelines: cron, time zones and run history",
+            description =
+                "A built-in job scheduler for pipelines. Choose cron patterns and time zones, preview runs, " +
+                    "pause schedules and review run history.",
+            view = "site/pipeline-scheduling",
+        )
+
+    /**
+     * "sql dashboard" (140) + "self hosted dashboard" (140) + "open source dashboard" (140) +
+     * "embedded dashboards" (90), measured 2026-10-24; "embedded analytics" (260) stays with
+     * /for/saas-teams. #700: the description is the design record's suggestion.
+     */
+    val SQL_DASHBOARDS =
+        SitePage(
+            path = "/sql-dashboards",
+            title = "Open-source, self-hosted SQL dashboards you can embed",
+            description =
+                "Build self-hosted SQL dashboards from reviewed pipelines. Reuse charts, tables and KPI cards with " +
+                    "parameter controls and a backend embedding proxy.",
+            view = "site/sql-dashboards",
+        )
+
+    /**
+     * "parameter sets" + "dashboard filters" (90) + "cascading filters" (320/mo, Ads 2025-10..2026-09,
+     * read 2026-10-27: BI vendors' dependent-filter docs, the country → state cascade the page shows).
+     * 700b corrected the earlier rationale: "parameterized sql queries" (260) is programming and
+     * SQL-injection guidance in its results, so it is not this page's target.
+     */
+    val REUSABLE_PARAMETER_SETS =
+        SitePage(
+            path = "/reusable-parameter-sets",
+            title = "Reusable parameter sets: typed inputs and dashboard filters",
+            description =
+                "Typed inputs and dropdowns defined once: defaults, validation, SQL-fed options and cascading " +
+                    "filters, versioned like a pipeline and reused by dashboards.",
+            view = "site/reusable-parameter-sets",
         )
 
     /** The route prefix the engine pages share. */
@@ -729,6 +797,9 @@ object SitePages {
                 ROADMAP,
                 SECURITY,
                 PUBLISHED_API,
+                PIPELINE_SCHEDULING,
+                SQL_DASHBOARDS,
+                REUSABLE_PARAMETER_SETS,
                 MCP_TOOLS,
                 TABLEAU,
                 TABLEAU_GOVERNED_DATASET,

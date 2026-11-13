@@ -1,5 +1,7 @@
 package co.datapipelines.web.api
 
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseRefusal
 import co.datapipelines.scheduler.ScheduleErrorCodes
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
@@ -18,6 +20,17 @@ import org.junit.jupiter.api.Test
  * the field end to end (the slot's text flows catalogue → envelope → DOM).
  */
 class ApiErrorCatalogUserMessageTest {
+    @Test
+    fun `lake recipe refusals explain storage or investigation rather than pipeline validation`() {
+        val family = ApiErrorCatalog.userMessageFor("lake.append.no_such_code_probe")
+        val conflict = ApiErrorCatalog.userMessageFor(co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS)
+        val unavailable = ApiErrorCatalog.userMessageFor(co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED)
+        conflict shouldNotBe family
+        unavailable shouldNotBe family
+        conflict shouldContain "investigation"
+        unavailable shouldContain "storage"
+    }
+
     @Test
     fun `every schedule code the form places at a field resolves to an override, not the family line`() {
         val fieldCodes =
@@ -60,5 +73,33 @@ class ApiErrorCatalogUserMessageTest {
         val message = ApiErrorCatalog.userMessageFor(co.datapipelines.pipeline.PipelineErrorCodes.Request.QUERY_TOO_LONG)
         message shouldNotBe family
         message shouldContain "${co.datapipelines.pipeline.SearchNeedle.MAX_LENGTH} characters"
+    }
+
+    @Test
+    fun `the three navigation refusals speak about the tree - never the generic our-side line (#464)`() {
+        val generic = ApiErrorCatalog.userMessageFor("no_such_family.no_such_code_probe")
+        val navigation = co.datapipelines.pipeline.PipelineErrorCodes.Navigation
+        val messages =
+            listOf(navigation.REQUEST_INVALID, navigation.VIEW_UNAVAILABLE, navigation.METADATA_TOO_LARGE)
+                .associateWith { ApiErrorCatalog.userMessageFor(it) }
+
+        messages.forEach { (code, message) -> withClue(code) { message shouldNotBe generic } }
+        // Three refusals, three remedies: reload, wait, report — one shared line would merge two of them.
+        messages.values.toSet().size shouldBe messages.size
+        messages.getValue(navigation.REQUEST_INVALID) shouldContain "Reload"
+        messages.getValue(navigation.VIEW_UNAVAILABLE) shouldContain "Try again"
+    }
+
+    @Test
+    fun `every family's release-plan refusal speaks the family's release line - never the generic our-side line`() {
+        val generic = ApiErrorCatalog.userMessageFor("no_such_family.no_such_code_probe")
+        val codes = ReleaseFamily.entries.flatMap { family -> ReleaseRefusal.entries.map { family.code(it) } }
+
+        codes.size shouldBe ReleaseFamily.entries.size * ReleaseRefusal.entries.size
+        codes.forEach { code ->
+            withClue("$code is a client refusal answering the generic our-side line — add its family's release line") {
+                ApiErrorCatalog.userMessageFor(code) shouldNotBe generic
+            }
+        }
     }
 }

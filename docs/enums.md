@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.36 (living document — updated as enums evolve)
+**Status:** v1.50 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -177,15 +177,15 @@ Fixed at template **create** and identical on every version of a template (`temp
 ## 7. `StagingEngine` — tempdb engine
 
 **Source:** [Pipeline Contract §5](pipeline-contract.md#5-settings)
+**Declared in:** `typesystem` (`co.datapipelines.typesystem.StagingEngine`) — the one declaration all three users import.
 **Used by:** pipeline-contract (`settings.tempdb.engine`), staging (factory dispatch), dag-executor (instantiation).
 
 | Value | Description |
 |---|---|
-| `H2` | In-memory H2 database. Default. Only supported engine in v1. |
+| `H2` | In-memory H2 database. Default when `settings.tempdb` is omitted ([Staging §3](staging.md#3-lifecycle)). |
+| `DUCKDB` | A file-backed DuckDB database per execution — bounded by DuckDB's `memory_limit`, its spill bounded by a scratch reservation, its configuration locked before author SQL runs ([Staging §8.5](staging.md#85-the-duckdb-engine); dp-lake P1, #795). Templates on `source: tempdb` are then written in the `DUCKDB` dialect. |
 
-**Reserved for future:** `DUCKDB` (in-memory DuckDB — better for analytical workloads; see [ROADMAP](ROADMAP.md)).
-
-> **Declaration reality (2026-08-08).** The frozen module dependency graph ([module-structure §4.2](module-structure.md#42-the-dependency-rule-machine-checkable)) makes the "pipeline-contract authors, staging consumes" line above impossible: `staging` depends only on `typesystem`, so it cannot see a type declared in `pipeline-contract`. In v1 the enum has a single value (`H2`), so `pipeline-contract` declares it (for the `settings.tempdb.engine` wire value, with `@JsonValue`) and `staging` declares an identical local `enum class StagingEngine { H2 }` for `StagingFactory` dispatch; `dag` (which depends on both) maps between them — trivial while there is one value. **Consolidation is a P4/dag decision:** when a second engine (`DUCKDB`) lands, move `StagingEngine` into `typesystem` (the shared lower layer, exactly as `Dialect` resolved the same class of problem) so there is one authority. Until then the duplication is bounded to a single constant and dag owns the mapping.
+> **Declaration (2026-11-03, #795).** Until the second engine, `pipeline-contract` declared this enum for the wire value and `staging` declared an identical local copy, because the frozen dependency graph ([module-structure §4.2](module-structure.md#42-the-dependency-rule-machine-checkable)) forbids `staging` from depending on `pipeline-contract`; `dag` mapped between the two. This section's earlier rule — when `DUCKDB` lands, move the enum into `typesystem`, the shared lower layer, exactly as `Dialect` resolved the same problem — is now done: one declaration in `typesystem`, no mapping. `StagingEngine.dialect` derives the tempdb dialect (`H2 → H2`, `DUCKDB → DUCKDB`); `StagingEngineSpecDriftTest` (typesystem) holds this table and the enum together.
 
 ---
 
@@ -422,8 +422,14 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `endpoint.key_unbound` | An API key's binding to a node was removed |
 | `dashboard.key_bound` (L5, #367) | A `dashboard` key was bound to a folder of the dashboard name space; `details.name_prefix` and `workspace_id` |
 | `dashboard.key_unbound` (L5, #367) | A `dashboard` key's folder binding was removed; `details.name_prefix` |
-| `endpoint.published` | An endpoint was published over a released pipeline |
+| `endpoint.published` | An endpoint was published over a released pipeline. **Retired from new writes by #786** (an API is created as its v1 DRAFT, `endpoint.draft_saved`); kept for the history rows written before it |
 | `endpoint.unpublished` | An endpoint was deleted |
+| `endpoint.draft_saved` (#786) | An API version DRAFT was saved — the create's v1 included; `details` carry the path, the version, the pinned `pipeline` and `pipeline_version` and the body hash |
+| `endpoint.released` (#786) | An API version was released, by its own release or as the root of a release cascade (strict audit: the release rolls back if this row cannot be written) |
+| `endpoint.version_discarded` (#786) | A RELEASED API version was discarded (reversible) |
+| `endpoint.version_restored` (#786) | A DISCARDED API version was restored after its pin was rechecked |
+| `endpoint.version_purged` (#786) | An API DRAFT version was purged |
+| `endpoint.current_switched` (#786) | The API's runtime current version was switched; `details.from` and `details.to` carry both numbers |
 
 > Password and lockout events exist only for the optional local accounts ([Auth §5A](auth.md#5a-local-password-accounts-optional)); an OIDC-only deployment never writes them. No event in this table ever carries credential material.
 
@@ -461,8 +467,8 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `pipeline.version.purged` | A DRAFT pipeline version was purged — the row and its executions deleted, irreversible. `details` carries the execution-row count that went with it ([Versioning §3.1](versioning.md#31-statuses-and-verbs)) |
 | `pipeline.purged` | A pipeline ENTITY was purged (only-draft, no inbound edges) — the entity row went with its draft. `details` carries `exclusive_draft_templates` offered/purged and, since #320, `kept_draft_templates` — the ids of the draft-only templates the offer skipped because a parameter set or a visualization also pins them ([Versioning §3.2](versioning.md#32-entity-status-is-derived-names-are-unique-forever), [§3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)) |
 | `pipeline.current_switched` | The sticky pointer was moved by the manual switch verb (`POST /pipelines/{id}/current`) — including on a promotion receiver, where this is the rollout/rollback lever. `details` carries from/to versions ([Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) |
-| `pipeline.version.released` | A DRAFT pipeline version was RELEASED — the D4 human step, on every surface that offers it (REST `POST /pipelines/{id}/release`, the explorer dialog, the editor). `details` carries `pipeline_id`, `pipeline_name`, `version`, and `via` (`session` or `api_key`; `key_id` is on the row) — the record of WHO released and THROUGH WHAT ([Versioning D4](versioning.md#2-decision-log)). Added at T187 (2026-09-10): releases were the one lifecycle verb 101 left unaudited. Since 140, a release past failing checks also carries `checks_overridden: [check ids]` and `override_reason` — the escape hatch is on the record, never silent. Since 142 it always carries `templates_released: [{template_id, version}]` — the DRAFT template versions the release cascaded to with the promoter's consent (versioning §5.3), an empty list when none |
-| `template.version.released` | The template twin of `pipeline.version.released`: `template_id`, `version`, `via`. Since 142 a release the PIPELINE cascade made (versioning §5.3) carries the same shape plus `cascade_from_pipeline_id` and `cascade_from_version` — "who released template X v2 and why" reads off this one event. |
+| `pipeline.version.released` | A DRAFT pipeline version was RELEASED — the D4 human step, on every surface that offers it (REST `POST /pipelines/{id}/release`, the explorer dialog, the editor). `details` carries `pipeline_id`, `pipeline_name`, `version`, and `via` (`session` or `api_key`; `key_id` is on the row) — the record of WHO released and THROUGH WHAT ([Versioning D4](versioning.md#2-decision-log)). Added at T187 (2026-09-10): releases were the one lifecycle verb 101 left unaudited. Since 140, a release past failing checks also carries `checks_overridden: [check ids]` and `override_reason` — the escape hatch is on the record, never silent. Since 142 it always carries `templates_released: [{template_id, version}]` — the DRAFT template versions the release cascaded to with the promoter's consent (versioning §5.3), an empty list when none. **Since #517 one row per actual flip**: a release that flips dependencies writes one `*.version.released` row per flipped version — dependencies first in release order, the root last — strictly, in the release's own transaction (auth §10.1A). Three detail keys join every such row: `scope` (the word `version`: the row records one version's flip), `release_id` (one id shared by every row of the same release) and, on a cascaded dependency's row, `cascade_root: {family, id, version}` (the release's root); the root's row adds `dependencies_released: [{family, name, version}]` (an empty list when nothing cascaded). A child pipeline the release flipped writes its own `pipeline.version.released` with these keys |
+| `template.version.released` | The template twin of `pipeline.version.released`: `template_id`, `version`, `via`. Since 142 a release the PIPELINE cascade made (versioning §5.3) carries the same shape plus `cascade_from_pipeline_id` and `cascade_from_version` — "who released template X v2 and why" reads off this one event. Since #517 a cascaded row also carries `scope`, `release_id` and `cascade_root` (the `pipeline.version.released` row above). Since #894 a release the API cascade made (`cascade_root.family` = `api_endpoint`) carries `cascade_from_api_endpoint_id` and `cascade_from_version` — the API's id and version — and no `cascade_from_pipeline_id` (release-dependencies record §11, amended 2026-11-11); a row written before #894 under an API root carries `cascade_from_pipeline_id` holding the API's id, and `cascade_root.family` tells the two apart. |
 | `visualization.exported` / `dashboard.exported` | A visualization or dashboard CURRENT release was exported (`GET /api/v1/visualizations|dashboards/{id}/export`, #10 L1c). `details` carry the artifact id and the exported version — ids and versions only, like every lifecycle event |
 | `visualization.imported` / `dashboard.imported` | A visualization or dashboard import LANDED (`POST /api/v1/visualizations|dashboards/import`, #10 L1c). `details` carry the artifact id, the landed version, the dashboard twin's bundled-visualization count, and `imported_with_evidence` — the envelope manifest's evidence summary recorded VERBATIM (`false` until the test sessions land, L4; the manifest says `evidence: null`) — the D56 question on the record |
 | `visualization.test.screenshot_uploaded` | The visualization test workflow's ONE screenshot was stored (`POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot`, #353; audited by #164, the one write an agent makes over REST). The route reads no principal — its only credential is the single-use upload capability — so `user_id` is the run's STARTER (`started_by`) and `key_id` is null; the source IP is on the row. `details` carry `workspace_id`, `visualization_id`, `run_id`, `media_type`, `size_bytes` and, when the upload named one, `case` — never the token, its hash or the image bytes. A refused upload (a wrong, consumed or expired capability, an invalid image) stores nothing and writes no row |
@@ -497,12 +503,32 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `schedule.unblocked` | A block was cleared after the saved payload re-validated. Same `details` |
 | `schedule.deleted` | Soft-deleted. `details` carries `schedule_id` |
 | `schedule.run_requested` | Run now recorded a manual run (a replay writes no second row). `details` carries `schedule_id`, `run_id` |
+| `schedule.notification_resent` | A person queued one of a run's `failed` or `uncertain` notifications again (#442b, [REST API §20.13](rest-api.md#2013-resend-a-notification)). `details` carries `schedule_id`, `run_id`, `delivery_id` and `prior_state` — never the recipient address. The sends themselves are the run's trail (`notification_sent` / `_failed` / `_uncertain`), not audit rows: nobody acted |
 
 **Dashboard audit events** (same `audit_log` table; emitted by the dashboard runtime's refresh, [Dashboards §5](dashboards.md#5-the-runtime), #10 L2). ONE row per refresh, AWAITED (audit rows are authorization inputs — never the fire-and-forget path) and written at the refresh's END whatever its ending, the client gone or the process stopping included. `user_id` is the refreshing person. `details` carries `refresh_id`, `dashboard_id`, `dashboard_version`, `workspace_id`, `instance_id`, `scope`, `status` (a [`RefreshStatus`](#38-refreshstatus--a-dashboard-refreshs-state-10)), `targets` (name → outcome) and `execution_ids` — never a selection, a row or a driver message. A refresh refused at admission (`429`) writes no row and so no event.
 
 | Value | Trigger |
 |---|---|
 | `dashboard.refresh` | A dashboard refresh ended — COMPLETED, PARTIAL, FAILED, ABORTED or TIMED_OUT |
+
+**Lake definition audit events** (same `audit_log` table; emitted by the managed lake's table definitions, [Lake §2](lake.md#2-lifecycle) and [§3](lake.md#3-apply-states), #798). Each row is written INSIDE the transaction of the state change it records (strict: a refused audit insert rolls the change back). `user_id` is the acting person, or NULL when the system applies a definition (a promotion landing, a settle pass). `details` carries `table_id`, `namespace`, `table` and `version`; never a definition body, a column name list, a storage location or a credential.
+
+| Value | Trigger |
+|---|---|
+| `lake.definition.released` | A table definition's DRAFT became RELEASED and the table's current definition. `details` also carries `via` (`session` \| `api_key` \| `mcp`) |
+| `lake.definition.applied` | An apply attempt stamped the table `applied`: the Iceberg table holds the current definition (committed by this attempt, or found already there after a crash). `details` also carries `operation_id` |
+| `lake.definition.apply_failed` | An apply attempt stamped the table `failed`: a reviewed or breaking change, drift, or a change Iceberg refused. `details` also carries `operation_id` and `code` (a `lake.definition.*` code, [Pipeline Contract §13.25](pipeline-contract.md#1325-managed-lake)). A retryable give-up (`pending`) writes no row |
+| `lake.definition.discarded` | A RELEASED definition version became DISCARDED (#814). `details` also carries `via` (`session` \| `api_key` \| `mcp`) and `current_version`: the table's current definition after the discard, the highest version still RELEASED, or null when none is left. A refused discard writes no row |
+| `lake.definition.draft_purged` | A table's DRAFT was deleted (#814). `version` is the draft's; `details` also carries `via` and `table_deleted`: true when the table was never released and its row went with the draft (its namespace row too, when that was its last table). A refused purge writes no row |
+
+**Lake delivery audit events** (same `audit_log` table, #799). Each event is written inside the transaction of its conditional delivery and attempt stamps. `user_id` is the execution's actor, or NULL for settlement. Details contain identifiers and outcomes only.
+
+| Value | Trigger |
+|---|---|
+| `lake.delivery.published` | Conditional delivery and attempt stamps recorded a committed publication. Details: `table_id`, `delivery_id`, `operation_id`, `outcome`; no row data, SQL or credentials. |
+| `lake.delivery.failed` | Conditional delivery and attempt stamps recorded a definite failure. The delivery row records its phase and safe failure code. Same details as `lake.delivery.published`. |
+| `lake.delivery.unknown` | Publication has no confirmed verdict and remains eligible for settlement. Same details as `lake.delivery.published`. |
+| `lake.delivery.settled` | A takeover and fresh revision observation, or an ended execution before publication, established a terminal delivery outcome. Written with the outcome's audit event in the same transaction. Same details as `lake.delivery.published`. |
 
 ---
 
@@ -539,7 +565,12 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `visualization.*` (`visualization.validation.*`, `visualization.version.*`, `visualization.release.*`, `visualization.import.*`, `visualization.authoring.*`, `visualization.test.*`, `visualization.not_found`) | The visualization artifact (#10): save-time validation, the lifecycle, the D56 release gate, the test sessions | pipeline-contract §13.22 (defined in [Dashboards](dashboards.md)) |
 | `dashboard.*` (`dashboard.validation.*`, `dashboard.version.*`, `dashboard.release.*`, `dashboard.import.*`, `dashboard.authoring.*`, `dashboard.runtime.*`, `dashboard.refresh.*`, `dashboard.key.*`, `dashboard.not_found`) | The dashboard artifact (#10): save-time validation, the lifecycle, the runtime and the `dashboard` key kind | pipeline-contract §13.23 (defined in [Dashboards](dashboards.md)) |
 | `schedule.*` (incl. `schedule.validation.*`, `schedule.run.*`, `schedule.limit.*`) | Schedule save-time validation, state conflicts and not-found (#9) — never raised while a schedule fires; a run that could not start is a `not_started` run (§24) | pipeline-contract §13.19 (defined in [Scheduler](scheduler.md)) |
-| `request.*` | The platform's transport-level request refusals (#279): the body-cap filter's 413 on `/api/v1` and `/mcp`, before any handler or parser | pipeline-contract §13.21 |
+| `request.*` | The platform's request refusals: `413 request.body_too_large` from the body-cap filter on `/api/v1` and `/mcp`, before any handler or parser (#279); and `400 request.query_too_long` from the search-owning services for a search term over 200 characters after the trim (#504b) | pipeline-contract §13.21 |
+| `navigation.*` (`navigation.request.*`, `navigation.view.*`, `navigation.metadata.*`) | The session-only navigation trees (#464): a malformed, foreign or stale tree request or continuation (400), an unavailable promotion view (503, `Retry-After`), one node over the page budget (503) | pipeline-contract §13.24 (defined in [REST API §24](rest-api.md#24-first-party-navigation-trees)) |
+| `lake.catalog.*` | The managed lake's catalog refusals (#785): a write the lease fence refused (`lake.catalog.fenced`), a catalog in restore (`lake.catalog.restoring`), and a commit whose outcome the connection lost (`lake.catalog.outcome_unknown` — never retried blind) | pipeline-contract §13.25 |
+| `lake.delivery.*` | Delivery structure and landing refusals | pipeline-contract §13.25 |
+| `lake.append.*` | Managed append structure, barrier and publication refusals | pipeline-contract §13.25 |
+| `lake.definition.*` | The managed lake's table definitions (#798): an unknown table or version, a lifecycle refusal (`not_draft`, `not_released`, `version_conflict`, `applied_version`, `name_taken`), an invalid body, a change the supported-change policy will not apply (`reviewed_change`, `breaking_change`), a table changed outside DP (`drift`), a table another operation holds (`table_busy`), and authoring off in this environment (`authoring_disabled`) | pipeline-contract §13.25 (defined in [Lake §4](lake.md#4-the-supported-change-policy)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 
@@ -732,6 +763,10 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `unknown` | The outcome is unknown; the schedule blocks |
 | `updated_after_unknown` | A real terminal arrived after `unknown` — the same run, updated; the block stays |
 | `unblocked` | A person unblocked the schedule this run had blocked |
+| `notification_enqueued` | The outbox queued a notice for this run's transition (V51, #442b); `details` carry the notice id, its outcome and the queued/refused counts — never an address |
+| `notification_sent` | The relay accepted one delivery ([§44](#44-deliverystate--one-recipients-copy-of-a-notice-442b) `accepted`) |
+| `notification_failed` | One delivery ended `failed`; `details.code` says why |
+| `notification_uncertain` | One delivery may have been sent and is not retried automatically (`uncertain`) |
 
 **Append-only.** A trail row is never changed or removed; the run row is the projection of its latest row.
 
@@ -820,18 +855,18 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 
 ## 31. `RendererKind` — what a visualization's configuration targets (#10)
 
-**Source:** the [dashboard implementation spec §3.1](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (D4, D12, D13); the Kotlin enum is `RendererKind` (`visualization`, `VisualizationModel.kt`), `renderer.kind` of a visualization ([Dashboards §2.1](dashboards.md)).
+**Source:** the [dashboard implementation spec §3.1](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (D4, D13) and, for `chart`, the neutral chart grammar design record (2026-11-06, §4.2 and §5.1; issue #860); the Kotlin enum is `RendererKind` (`visualization`, `VisualizationModel.kt`), `renderer.kind` of a visualization ([Dashboards §2.1](dashboards.md)).
 **Used by:** the visualization module; the client runtime's adapters (L3).
 
 | Value | Meaning |
 |---|---|
-| `plotly` | A Plotly figure (`data` traces, `layout`, Plotly's own `config`) — the preferred chart renderer (D12) |
+| `chart` | A chart document v1 (`renderer.version` `"1"`): a library-neutral `mark` + `encoding`, judged by the JSON Schema served at `/schemas/chart/1/` and drawn by the runtime's converter; v1 has the bar family |
 | `table` | A table of labelled columns ([Dashboards §2.1.2](dashboards.md)) |
 | `kpi` | A single value with no label of its own, titled by its card heading; optional format and comparison (`comparison.label` names the comparison line) |
 | `html` | RESERVED — authored HTML (D13, D46); refused in round one |
 | `svg` | RESERVED — authored SVG (D13, D46); refused in round one |
 
-**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`.
+**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`. The `plotly` kind is **retired** (#860): a body naming it is refused the same way, with a message that names `chart`.
 
 ---
 
@@ -843,10 +878,10 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | Value | Argument | Meaning |
 |---|---|---|
 | `rendered` | — | The renderer reported completion |
-| `trace_count` | `equals` (≥ 0) | The rendered trace count |
+| `mark_count` | `equals` (≥ 0) | A chart's drawn marks — the distinct category × series cells with a non-null value; the mechanical check judges it over the case's rows |
 | `no_console_errors` | — | No console error while rendering |
-| `text_visible` | `text` | A title, legend or cell string is visible |
-| `no_data` | — | The case expects the empty state |
+| `text_visible` | `text` | A title, legend or cell string is visible; on a chart the mechanical check proves it from the document and the model or leaves it unjudged for the browser, never refusing it |
+| `no_data` | — | The case expects the empty state (a chart: no mark to draw) |
 | `value_visible` | `text` | A KPI value is visible |
 
 **Closed.** An unknown kind, a missing argument or an argument the kind does not take is `visualization.validation.test_case_invalid`.
@@ -1035,6 +1070,8 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `ParameterKind`, `SelectorSourceKind`, `PresentationControl`, `NumericFormatKind` | the [parameter-engine record §3](superpowers/specs/2026-09-21-parameter-engine-design.md) (`parameters` declares them; §27–§30 here are the wire tables) | rest-api, mcp-server (#194 lane D) |
 | `RefreshStatus` | [Dashboards §5](dashboards.md#5-the-runtime) (`visualization` declares it; §38 here is the wire table) | metadata-db (the V43 CHECK), rest-api §23.3, the dashboard runtime |
 | `EvaluationCaller`, `ParameterEvaluationStatus`, `QueryAttemptOutcome` | the [parameter-set workspace spec §2](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) (`parameters` declares them; §39–§41 here are the wire tables) | metadata-db (the V48 CHECKs), the History tab (ui-screens §4.23) |
+| `LakeTableStatus`, `LakeApplyState`, `LakeChangeClass` | [lake.md](lake.md) (`lake` declares them; §46–§48 here are the wire tables) | metadata-db (the V54 CHECKs), the lake surfaces (P8) |
+| `LakeDeliveryState`, `LakeDeliveryFailurePhase`, `LakeDeliveryAttemptOutcome` | metadata-db §4.53–§4.54 (`lake` declares them; §49–§51 here are the wire tables) | delivery landing, publication and settlement (the V55 CHECKs) |
 | `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
 
 ---
@@ -1056,7 +1093,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 ## 42. `NotificationEvent` — a schedule's notification choices (#442)
 
-Stored in `schedules.notification_events` (Metadata DB §4.22), serialized in declaration order by REST §20. These settings select part b's delivery policy; part a sends nothing (Scheduler §2.3).
+Stored in `schedules.notification_events` (Metadata DB §4.22), serialized in declaration order by REST §20. These settings select which transitions mail is sent for (#442 part b): each outcome of [§43](#43-notificationoutcome--what-one-notice-reports-442b) belongs to one event (Scheduler §2.3).
 
 | Enum | Wire value | Meaning | Default |
 |---|---|---|---|
@@ -1070,10 +1107,166 @@ No mail for skipped ticks or pause/resume. Empty recipients means off; recipient
 
 ---
 
+## 43. `NotificationOutcome` — what one notice reports (#442b)
+
+Stored in `schedule_notification_events.outcome` ([Metadata DB §4.39](metadata-db.md#439-schedule_notification_events)), the `notice` of a delivery in REST §20.11, and the trail rows' `reason` for the notification kinds (§25). Each outcome belongs to one §42 event — the schedule's choice of that event decides whether the notice is written — and fixes the subject's state words; the subject is `<schedule name> — <state words>`, with control characters stripped from the name.
+
+| Enum | Wire value | Event (§42) | Subject state words | Written when |
+|---|---|---|---|---|
+| `STARTED` | `started` | `start` | Started | The run reached `running` |
+| `COMPLETED` | `completed` | `success` | Completed | The run `succeeded` |
+| `FAILED` | `failed` | `failure` | Failed | The run `failed` |
+| `COULD_NOT_START` | `could_not_start` | `failure` | Could not start | The run is `not_started` |
+| `CANCELLED` | `cancelled` | `failure` | Stopped — cancelled | The run was `cancelled` |
+| `ABORTED` | `aborted` | `failure` | Stopped — instance shut down | The run was `aborted` |
+| `UNKNOWN` | `unknown` | `unknown` | Outcome unknown — action required | The run's outcome is `unknown` |
+| `UNKNOWN_UPDATE` | `unknown_update` | `unknown` | Update on an unknown run | A real terminal arrived after `unknown` (`updated_after_unknown`) |
+| `BLOCKED` | `blocked` | `blocked` | Schedule blocked | The schedule moved to blocked |
+
+No notice for `queued`, `starting` or `skipped`. One notice per (run, outcome) — a duplicate callback writes none.
+
+---
+
+## 44. `DeliveryState` — one recipient's copy of a notice (#442b)
+
+Stored in `schedule_notification_deliveries.state` ([Metadata DB §4.40](metadata-db.md#440-schedule_notification_deliveries)), shown in REST §20.11's `deliveries`. Never "delivered": the product knows only what the relay said.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `PENDING` | `pending` | Queued, or due again after a send that provably never reached the relay |
+| `ACCEPTED` | `accepted` | The SMTP relay accepted the message — not proof it reached an inbox |
+| `FAILED` | `failed` | Never sent, refused, or out of tries; `last_error_code` says which |
+| `UNCERTAIN` | `uncertain` | The send may have reached the relay; never retried automatically — a `schedule.update` holder may resend it (REST §20.13), which may duplicate |
+
+A resend (REST §20.13) returns a `failed` or `uncertain` delivery to `pending` under the same Message-ID; nothing else moves a settled delivery.
+
+**`last_error_code`** — sanitized, never transport text or an address:
+
+| Code | Meaning | Retried automatically |
+|---|---|---|
+| `domain_not_allowed` | The recipient's domain is outside the allowlist (at enqueue, or re-checked at send) | No |
+| `backlog_full` | At least `backlog-max` deliveries were pending; never queued for sending | No — admission is serialized across the deployment; resend at the hard cap is refused with `409 schedule.notification.backlog_full` |
+| `invalid_address` | The address fails strict parsing at send | No |
+| `connect_failed` | The relay could not be reached; nothing was sent | Yes, until `max-attempts` |
+| `smtp_transient` | The relay answered 4xx; nothing was accepted | Yes, until `max-attempts` |
+| `auth_failed` | The relay refused the credentials; nothing was sent | Yes, until `max-attempts` |
+| `smtp_refused` | The relay refused the message (5xx) | No |
+| `io_after_connect` | The connection failed after the message may have been submitted (`uncertain`) | No |
+| `interrupted` | A claimed send never reported back — the instance stopped mid-send (`uncertain`) | No |
+| `render_failed` | The notice could not be rendered; nothing was sent | No |
+| `disabled` / `mail_unconfigured` / `no_allowlist` | Mail was off when the delivery was due (the deployment's off reason, Scheduler §2.3) | No |
+
+---
+
+## 45. `LakeScanStatus` — what the lake reference index can say about one version (#778)
+
+Stored in `lake_reference_scans.status` ([Metadata DB §4.41](metadata-db.md#441-lake_reference_scans)). The scan's verdict for one RELEASED pipeline or parameter-set version is that of its weakest LAKE site ([Datasources §8C.9](datasources.md#8c9-which-versions-read-which-table--the-lake-reference-index)).
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `EXACT` | `exact` | Every LAKE site's template body prints the same text whatever the values, so the one render shows every table position it can produce. A version with no LAKE site is `exact`, with no references |
+| `PARTIAL` | `partial` | At least one site's body has a construct that can change its text: an interpolation, `if`, `switch`, `list`, `include`, macro call, imported library or other directive. The stored references are those of the sample render; other branches are not seen |
+| `UNSCANNABLE` | `unscannable` | At least one site could not be rendered, its template version is missing, or the engine's parser refused the rendered SQL. That site has no references |
+
+`reasons_json` names each site's findings `{site, kind, detail}`: `site` is `node:<id>` or `selector:<name>`. `kind` is a classifier word (`interpolation`, `if`, `switch`, `list`, `include`, `macro_call`, `import`, `syntax_error`, `directive:<type>`) or a scanner word (`render_failed`, `template_missing`, `unparseable`). `detail` is a bounded construct spelling, a template reference or the parser's error TYPE, never the rendered SQL. A promotion receiver refuses on a resolved reference to an unregistered table, whatever the status, and admits what the status says it could not see (pipeline-contract §13.13 `pipeline.promotion.lake_table_unavailable`).
+
+---
+
+## 46. `LakeTableStatus` — a managed lake table's lifecycle
+
+Stored in `lake_tables_managed.status` and, without `purged`, `lake_namespaces.status` ([Metadata DB §4.48](metadata-db.md#448-lake_namespaces), [§4.49](metadata-db.md#449-lake_tables_managed)). #798 writes `active` only; the transitions (super admin only) belong to the lake surfaces (P8) and the purge sequence (dp-lake record §9).
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `ACTIVE` | `active` | In use: readable, open to ingestion appends, and its definition can change |
+| `DEPRECATED` | `deprecated` | Still readable; ingestion appends are refused and maintenance continues (dp-lake record D5; the refusal code lands with the phase that builds the refusal) |
+| `ARCHIVED` | `archived` | Off the read surface (a query naming it fails; the code lands with that phase); can be restored, or purged after its cooling-off window |
+| `PURGED` | `purged` | The Iceberg pointer was dropped; the row stays so its name and history can be explained. Tables only |
+
+---
+
+## 47. `LakeApplyState` — a managed table's apply state
+
+Stored in `lake_tables_managed.apply_state` ([Metadata DB §4.49](metadata-db.md#449-lake_tables_managed)): whether THIS environment's Iceberg table holds the table's current definition. NULL before the first release. The transitions are [Lake §3](lake.md#3-apply-states).
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `PENDING` | `pending` | A released definition waits to be applied, or a retryable attempt gave up (another operation held the table, the catalog fenced or restored, the attempt's commit did not happen) |
+| `APPLYING` | `applying` | An attempt owns the row (`apply_operation_id`); only that attempt, or a verify of it, moves the row on |
+| `APPLIED` | `applied` | The Iceberg table holds the current definition (`applied_version_here = current_definition_version`) |
+| `FAILED` | `failed` | The apply refused: a reviewed or breaking change, drift, or a change Iceberg refused. `apply_error_json` carries the code and the changes; a new release supersedes it |
+
+---
+
+## 48. `LakeChangeClass` — the supported-change policy's classes
+
+Computed, never stored on its own: the class of the change from the Iceberg table's shape to a definition's ([Lake §4](lake.md#4-the-supported-change-policy)). It appears in `apply_error_json.change_class` of a refused apply.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `COMPATIBLE` | `compatible` | Applied: an optional column added, a type widened (int→long, float→double, decimal precision), a doc or tags changed, a partition field added, a required column added to an empty table |
+| `REVIEWED` | `reviewed` | Refused in the first release (`lake.definition.reviewed_change`, dp-lake record R2): a drop, rename, reorder, a column made optional, a partition field removed or reordered |
+| `BREAKING` | `breaking` | Refused (`lake.definition.breaking_change`); the remedy is a replacement table and deprecating the old one: a narrowing or incompatible type change, a decimal scale change, a column made required, a required column added to a table with rows, the identifier fields changed |
+
+---
+
+## 49. `LakeDeliveryState` — a permanent managed delivery
+
+Stored in `lake_deliveries.state` ([Metadata DB §4.53](metadata-db.md#453-lake_deliveries)). State changes are conditional on the previous state and the current operation id.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `RECEIVED` | `RECEIVED` | Listed and claimed; publication has not started |
+| `PUBLISHING` | `PUBLISHING` | The append attempt has started under its table lease |
+| `PUBLISHED` | `PUBLISHED` | Commit returned normally or the permanent revision log proves publication |
+| `FAILED` | `FAILED` | A definite failure, with its phase; retry requires a fresh operation id |
+| `UNKNOWN` | `UNKNOWN` | Commit may have happened; settlement must establish the verdict before retry |
+
+---
+
+## 50. `LakeDeliveryFailurePhase` — where a delivery failed
+
+Stored in `lake_deliveries.failure_phase` ([Metadata DB §4.53](metadata-db.md#453-lake_deliveries)); NULL without a definite failure.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `LISTING` | `listing` | Trusted manifest acquisition or target admission |
+| `STAGING` | `staging` | Delivery materialization, delivery SQL or post-read manifest comparison |
+| `VALIDATION` | `validation` | A later pipeline node failed before the publication barrier |
+| `PUBLISH` | `publish` | A definite negative publication verdict |
+
+---
+
+## 51. `LakeDeliveryAttemptOutcome` — one permanent publication attempt
+
+Stored in `lake_delivery_attempts.outcome` ([Metadata DB §4.54](metadata-db.md#454-lake_delivery_attempts)); NULL before an outcome is recorded. An UNKNOWN attempt may later be settled as PUBLISHED or FAILED; a concluded attempt is retained when the delivery is retried.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `PUBLISHED` | `PUBLISHED` | This attempt committed |
+| `FAILED` | `FAILED` | This attempt definitely failed or was superseded before publication |
+| `UNKNOWN` | `UNKNOWN` | Its commit outcome awaits durable evidence and lease takeover |
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.50 | 814 (#814) | **§15 lake definition audit events:** `lake.definition.discarded` (`via`, `current_version`) and `lake.definition.draft_purged` (`via`, `table_deleted`), each written inside its write's transaction (dp-lake record §12, erratum 2026-11-12); held to `LakeAuditEvents` by `LakeAuditEventsSpecDriftTest`, which now counts five events. |
+| 2026-11-11 | v1.49 | #894 endpoint-root audit provenance | **§15 `template.version.released`:** under an API root the cascaded row names the API — `cascade_from_api_endpoint_id` + the API's `cascade_from_version`, no `cascade_from_pipeline_id` (the owner's 2026-11-11 exception to the frozen release-dependencies record §11). Pipeline-root rows and every other event unchanged; rows written before #894 are not rewritten (`cascade_root.family` tells them apart). |
+| 2026-11-08 | v1.48 | 860 (#860) | **§31 `RendererKind`:** `chart` (the chart document v1, judged by the schema served at `/schemas/chart/1/`) replaces `plotly`, which is retired and refused as `visualization.validation.renderer_unsupported` with a message naming `chart`. **§32 `AssertionKind`:** `mark_count` replaces `trace_count`; `text_visible` on a chart is proven by the mechanical check or left unjudged, never refused. |
+| 2026-11-05 | v1.47 | 799 (#799) | New §49 delivery states, §50 failure phases and §51 attempt outcomes, matching V55's CHECKs and the Kotlin vocabularies; §15 gains the four strict delivery audit events. |
+| 2026-11-04 | v1.46 | 799 (#799) | §16 registers `lake.delivery.*` and `lake.append.*` domains for delivery and managed append structure/publication. |
+| 2026-11-04 | v1.45 | 798 (#798) | New **§46 `LakeTableStatus`**, **§47 `LakeApplyState`** and **§48 `LakeChangeClass`** (V54's two CHECKs and the supported-change policy's classes, held to their Kotlin enums by `LakeDefinitionEnumsSpecDriftTest`); **§15** gains the three lake definition audit events (`lake.definition.released` / `applied` / `apply_failed`, held by `LakeAuditEventsSpecDriftTest`); **§16** registers the `lake.definition.*` domain (pipeline-contract §13.25). Section numbers follow #778's §45; a lane merging after this one with its own §46 renumbers. |
+| 2026-11-02 | v1.42 | 778 (#778) | New **§45 `LakeScanStatus`** (`exact` / `partial` / `unscannable`, `lake_reference_scans.status`, V52) with the `reasons_json` kind words. |
+| 2026-11-02 | v1.43 | 785 (#785) | **§16** (row renumbered at merge after #778's v1.42): registers the `lake.catalog.*` domain (pipeline-contract §13.25), the managed lake's three catalog refusals. |
+| 2026-11-03 | v1.44 | 795 (#795) | **§7 `StagingEngine`** gains `DUCKDB` (dp-lake P1: a file-backed, memory-bounded, scratch-reserved, configuration-locked DuckDB staging database per execution) and is consolidated into `typesystem` per this section's own rule for the second engine — `staging`'s local copy and `dag`'s mapping are gone; new `StagingEngineSpecDriftTest`. |
+| 2026-11-01 | v1.41 | 759 (#759) | **§16:** the `request.*` domain names both the 413 body-cap refusal and the 400 search-term length refusal. |
+| 2026-10-27 | v1.40 | 464 (#464) | **§16:** registers the `navigation.*` domain (pipeline-contract §13.24): the three refusals of the session-only navigation trees. |
+| 2026-10-24 | v1.39 | #517 release dependencies, core (S1) | **§15:** `pipeline.version.released` and its twins: one row per actual flip, dependencies first, root last; the detail keys `scope`, `release_id`, `cascade_root` and the root's `dependencies_released`. No new event name. |
+| 2026-10-25 | v1.38 | 442c (#442) | §44: backlog_full is decided by serialized deployment admission; explicit resend at the hard cap is refused. |
+| 2026-10-24 | v1.37 | 442b (#442) | **§25 `TrailKind`** gains the four V51 notification kinds; new **§43 `NotificationOutcome`** and **§44 `DeliveryState`** with the sanitized `last_error_code` set; §42 no longer says nothing is sent; §15 gains `schedule.notification_resent`. |
 | 2026-10-22 | v1.36 | 8b (#8) | The JavaScript type is enabled with the isolate and stores main(input) statements. |
 | 2026-10-21 | v1.35 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The `node_type` row `TRANSFORM` is `SCRIPT`**; the template-type rows say "the script types" / "a script"; the error-prefix row is `pipeline.script.*`; the JavaScript save refusal is `script.js.unavailable`; the 503 example names `pipeline.script.pool_exhausted`. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-09 | v1.34 | 487 (#487) | The HTTP status table moves `result.storage_unavailable` from 500 to 503 ([Pipeline Contract §13.10](pipeline-contract.md#1310-result-retrieval) v1.56) and names `pipeline.transform.pool_exhausted` beside it, the 503 the catalog already carried. |

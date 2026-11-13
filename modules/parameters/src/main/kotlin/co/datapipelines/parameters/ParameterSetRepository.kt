@@ -6,6 +6,11 @@ import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseRow
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
+import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
@@ -127,6 +132,97 @@ class ParameterSetRepository(
                 mapOf("id" to id, "workspaceId" to workspaceId, "version" to version),
                 VERSION,
             ).singleOrNull()
+
+    /**
+     * #873 (dependency-graph record §7.1, brief R1-8) — the exact versions [keys] name, `(set name, version)` pairs, any
+     * status, in ONE `IN`-list statement: the parameter-set dependency provider's batch read. A key with no stored row is
+     * absent from the answer. Empty [keys] issues nothing (`IN ()` would not prepare).
+     */
+    fun findVersionsByName(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<ParameterSetVersion> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "$SELECT_VERSION WHERE s.workspace_id = :workspaceId AND (s.name, v.version) IN (:keys)",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
+            VERSION,
+        )
+    }
+
+    /**
+     * #873 §F.3 e — the name lock's parameter-set scan: every selector of every stored version (DRAFT, RELEASED and
+     * DISCARDED alike) of every live set in [workspaceId] whose `source.datasource` is [datasourceName], one row per
+     * selector occurrence, in set name, newest version, parameter order. The ANY-VERSION rule the pipeline scan keeps
+     * (061/T79): a stored version is restorable and executable by number, so its selector is a live use of the name. One
+     * parameterized statement; the name is compared as text, never spliced.
+     */
+    fun findAnyVersionDatasourceRefs(
+        workspaceId: UUID,
+        datasourceName: String,
+    ): List<ParameterSetDatasourceRef> =
+        InverseSql
+            .exhaust(InverseSql.EXHAUST_PAGE) { after ->
+                findDatasourceOccurrences(
+                    InverseRequest(workspaceId, datasourceName, null, InverseScope.ANY, after, InverseSql.EXHAUST_PAGE),
+                )
+            }.let(::datasourceRefsOf)
+
+    /**
+     * #877 §B.3 — ONE page of the stored selector-template pins (`parameters[i].source.template`, `{id, version}`) of
+     * this workspace's set versions the [InverseRequest.scope] selects, naming template [InverseRequest.targetKey] at
+     * [InverseRequest.targetVersion] or at any version: at most `limit + 1` rows, ONE statement, in the inverse total
+     * order; the row's element id is the parameter's name. The same stored field `ParameterSetReleaseProvider
+     * .templatePins` extracts. The template family's parameter-set arm and [ParameterSetTemplatePins] read it.
+     */
+    fun findTemplatePinOccurrences(request: InverseRequest): List<InverseRow> {
+        val stored = InverseSql.jsonInt("param.value->'source'->'template'->'version'")
+        val exact = if (request.targetVersion == null) "" else "AND $stored = :targetVersion"
+        return InverseSql.page(
+            jdbc,
+            selectorOccurrences(request.scope, ".source.template", stored, "param.value->'source'->'template'->>'id' = :targetKey $exact"),
+            inverseBinds(request),
+            request,
+        )
+    }
+
+    /**
+     * #877 §B.3 — ONE page of the stored selector datasources (`parameters[i].source.datasource`) naming datasource
+     * [InverseRequest.targetKey] (an entity-wide request only — a datasource is referenced by name); see
+     * [findTemplatePinOccurrences]. The datasource family's parameter-set arm and [findAnyVersionDatasourceRefs] read it.
+     */
+    fun findDatasourceOccurrences(request: InverseRequest): List<InverseRow> {
+        require(request.targetVersion == null) { "a datasource is referenced by name, never at a version" }
+        return InverseSql.page(
+            jdbc,
+            selectorOccurrences(request.scope, ".source.datasource", "NULL::int", "param.value->'source'->>'datasource' = :targetKey"),
+            inverseBinds(request),
+            request,
+        )
+    }
+
+    /** The occurrence SELECT over every parameter of the scoped set versions, filtered by [match]. */
+    private fun selectorOccurrences(
+        scope: InverseScope,
+        suffix: String,
+        stored: String,
+        match: String,
+    ): String =
+        """
+        SELECT s.id::text AS dependent_id, s.name AS dependent_name, v.version AS dependent_version,
+               v.status AS dependent_status, ${InverseSql.path("parameters", "param.ordinality", suffix)} AS source_path,
+               $stored AS stored_version, param.value->>'name' AS element_id
+          FROM parameter_sets s
+          JOIN parameter_set_versions v ON v.parameter_set_id = s.id
+         CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(v.body_json->'parameters') = 'array' THEN v.body_json->'parameters' ELSE '[]'::jsonb END
+             ) WITH ORDINALITY AS param(value, ordinality)
+         WHERE s.workspace_id = :workspaceId AND ${InverseSql.scope(scope, "parameter_set_versions", "parameter_set_id")}
+           AND $match
+        """.trimIndent()
+
+    private fun inverseBinds(request: InverseRequest): Map<String, Any?> =
+        mapOf("workspaceId" to request.workspaceId, "targetKey" to request.targetKey, "targetVersion" to request.targetVersion)
 
     /** The version the pointer names, or null (never released, or every release discarded). */
     fun findCurrent(
@@ -739,6 +835,8 @@ class ParameterSetRepository(
      * version PRIMARY KEY before it reaches the one-draft index (Postgres checks unique indexes in
      * creation order) — found by the forced race, which the index-only mapping answered with a raw
      * `DuplicateKeyException`. Either constraint is the same race.
+     *
+     * Inside the writer guard's transaction (#517) the statement runs under a savepoint, so the winner read still answers.
      */
     private fun <T> mappingDraftRace(
         workspaceId: UUID,
@@ -746,7 +844,7 @@ class ParameterSetRepository(
         block: () -> T,
     ): T =
         try {
-            block()
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: DuplicateKeyException) {
             val cause = e.mostSpecificCause.message.orEmpty()
             if (DRAFT_INDEX !in cause && VERSION_PK !in cause) throw e
@@ -777,12 +875,43 @@ class ParameterSetRepository(
                 "updated_at" to (current?.updatedAt?.toString() ?: ""),
             )
 
+        /**
+         * #877 §C — selector-datasource rows as the name lock's [ParameterSetDatasourceRef]s, set name, newest version,
+         * parameter order: ONE mapping, read by [findAnyVersionDatasourceRefs] (which pages the native query in place)
+         * and by the delete guard's adapter over `findIncoming` (which receives the same rows).
+         */
+        fun datasourceRefsOf(rows: List<InverseRow>): List<ParameterSetDatasourceRef> =
+            rows
+                .map { row ->
+                    ParameterSetDatasourceRef(
+                        row.dependentName,
+                        row.dependentVersion,
+                        checkNotNull(row.status) { "a set version has a status" },
+                        parameterIndex(row),
+                    )
+                }.sortedWith(
+                    compareBy<ParameterSetDatasourceRef> { it.parameterSetName }
+                        .thenByDescending { it.version }
+                        .thenBy { it.parameterIndex },
+                )
+
+        private fun parameterIndex(row: InverseRow): Int =
+            checkNotNull(
+                PARAMETER_INDEX
+                    .find(row.sourcePath)
+                    ?.groupValues
+                    ?.get(1)
+                    ?.toInt(),
+            ) { "a selector path names its parameter" }
+
         private fun escapeLike(term: String): String = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
         /** The canonical hash of the `:bodyJson` bind — one expression in every write (versioning §4.1). */
         private const val HASH_EXPR = "encode(sha256(convert_to(CAST(:bodyJson AS jsonb)::text, 'UTF8')), 'hex')"
 
         /** The derived ACTIVE status (versioning §3.2), `s`-aliased. */
+        private val PARAMETER_INDEX = Regex("^parameters\\[(\\d+)]")
+
         private const val LIVE_S =
             "EXISTS (SELECT 1 FROM parameter_set_versions lv WHERE lv.parameter_set_id = s.id" +
                 " AND lv.status IN ('DRAFT','RELEASED'))"
@@ -1110,4 +1239,15 @@ class ParameterSetRepository(
 
         private fun ResultSet.instant(column: String): Instant? = getObject(column, OffsetDateTime::class.java)?.toInstant()
     }
+}
+
+/** One selector of one stored set version that names a datasource (#873 §F.3 e): the set, the version, its status, the index. */
+data class ParameterSetDatasourceRef(
+    val parameterSetName: String,
+    val version: Int,
+    val status: PipelineVersionStatus,
+    val parameterIndex: Int,
+) {
+    /** The selector's field path, as every set refusal spells it. */
+    val path: String get() = "parameters[$parameterIndex].source.datasource"
 }

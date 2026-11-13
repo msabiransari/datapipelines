@@ -127,12 +127,15 @@
   /**
    * §20.1, every page: the list reads `has_more` until it is false (a subtree is bounded by the
    * per-workspace cap, scheduler.md §3 — 100 by default, so one page at the 200 maximum is the
-   * usual answer).
+   * usual answer). #641: a [condition] word narrows the read server-side, before the lens, so the
+   * filtered list is the set the Schedules home counts. #725: an [outcome] word (a Last run
+   * bucket) narrows it the same way, and composes with [condition].
    */
-  function listAll(prefix) {
+  function listAll(prefix, condition, outcome) {
     var items = [];
     function page(offset) {
-      return request("GET", BASE + q({ prefix: prefix, offset: offset, limit: 200 })).then(function (r) {
+      var query = q({ prefix: prefix, offset: offset, limit: 200, condition: condition, outcome: outcome });
+      return request("GET", BASE + query).then(function (r) {
         var data = r.data || {};
         items = items.concat(data.items || []);
         var more = data.pagination && data.pagination.has_more;
@@ -152,6 +155,10 @@
     preview: function (cron, timezone, count) { return request("GET", BASE + "/preview" + q({ cron: cron, timezone: timezone, count: count || 5 })); },
     runs: function (scheduleId, offset, limit) { return request("GET", BASE + "/" + id(scheduleId) + "/runs" + q({ offset: offset || 0, limit: limit || 20 })); },
     run: function (scheduleId, runId) { return request("GET", BASE + "/" + id(scheduleId) + "/runs/" + id(runId)); },
+    // §20.13 (#442b) — re-queue one failed or uncertain delivery of a run; schedule.update.
+    resend: function (scheduleId, runId, deliveryId) {
+      return request("POST", BASE + "/" + id(scheduleId) + "/runs/" + id(runId) + "/deliveries/" + id(deliveryId) + "/resend");
+    },
     create: function (body, key) { return request("POST", BASE, { body: body, idempotencyKey: key }); },
     update: function (scheduleId, body, etag) { return request("PUT", BASE + "/" + id(scheduleId), { body: body, ifMatch: etag }); },
     remove: function (scheduleId, etag) { return request("DELETE", BASE + "/" + id(scheduleId), { ifMatch: etag }); },
@@ -162,6 +169,7 @@
     // §5.7 — the picker's search, the caller's own view (the promoter lens applies server-side).
     findPipelines: function (text) { return request("GET", "/api/v1/pipelines" + q({ q: text, limit: 20 })); },
     pipeline: function (pipelineId) { return request("GET", "/api/v1/pipelines/" + id(pipelineId)); },
+    pipelineVersions: function (pipelineId) { return request("GET", "/api/v1/pipelines/" + id(pipelineId) + "/versions"); },
     pipelineVersion: function (pipelineId, version) { return request("GET", "/api/v1/pipelines/" + id(pipelineId) + "/versions/" + id(version)); },
     // §10.2 — one execution's metadata (its own duration_ms, status); execution.read, R3.
     execution: function (executionId) { return request("GET", "/api/v1/executions/" + id(executionId)); },

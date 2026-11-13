@@ -1,0 +1,70 @@
+{
+ "variant": "numeric-shortest-digits",
+ "note": "860b R4: a float-wired category's text is the browser's shortest round-tripping digits - the smallest subnormal is 5e-324 (the JDK's Double.toString prints 4.9E-324), 1.0 is 1, 1e21 is 1e+21.",
+ "spec": {
+  "display_name": "Shortest digits",
+  "description": "A float-wired category draws the browser's shortest round-tripping digits (lane 860b R4).",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "n",
+      "type": "DECIMAL"
+     },
+     {
+      "name": "amount",
+      "type": "INTEGER"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "n",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "N"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    }
+   },
+   "title": {
+    "text": "Shortest digits"
+   }
+  }
+ },
+ "bindings": {
+  "n": [
+   1e21,
+   1.0,
+   0.30000000000000004,
+   5e-324
+  ],
+  "amount": [
+   1,
+   1,
+   1,
+   1
+  ]
+ },
+ "expect": {
+  "categories_full": [
+   "5e-324",
+   "0.30000000000000004",
+   "1",
+   "1e+21"
+  ]
+ }
+}

@@ -335,9 +335,18 @@ grep -q 'omission conditional' "$T/preview" || fail 'preview hid conditional gua
 run_fixture "$P" || fail 'plan execution'
 rd="$(run_dir "$P")"
 cmp "$T/preview" "$rd/PLAN.txt" || fail 'preview and execution plans differ'
-sed -n 's/^stage=[^ ]* command=//p' "$T/preview" > "$T/planned"
+# The Gradle stages against the Gradle stand-in's record; stage 0 is not Gradle (#797) and
+# this fixture changes no dependency file, so its planned command is (none).
+grep -qx 'stage=0 command=(none)' "$T/preview" || fail 'unchanged dependencies planned a scan'
+sed -n -e '/^stage=0 /d' -e 's/^stage=[^ ]* command=//p' "$T/preview" > "$T/planned"
 cmp "$T/planned" "$P/pregate-quoted.log" || fail 'planned and actual commands differ'
 ok 'preview is read-only; exact planned and actual argv match'
+
+# #857: the lake-enabled half of the entry inventory must survive a deferred stage 2b.
+grep -F 'co.datapipelines.integration.ArchitectureGuardTest' "$P/pregate-argv.log" > "$T/conditional-guards"
+grep -qF 'co.datapipelines.integration.LakeEnabledEntryInventoryE2eTest' "$T/conditional-guards" \
+  || fail 'lake-enabled entry inventory missing from stage-3 guards'
+ok 'stage-3 guards include the lake-enabled entry inventory'
 
 # Invalid refs and arguments refuse before locks, evidence or processes.
 I="$T/invalid"; pgres::_fixture "$I"
@@ -357,31 +366,82 @@ grep -q '^modules/auth/src/main/kotlin/co/x/Auth.kt$' "$T/staged" || fail 'stage
 grep -q 'current-main comparison=different' "$T/inherited" || fail 'inherited base breadth hidden'
 ok 'staged edits and inherited breadth remain visible'
 
-for stage in 1 2 2b 3 4; do
+# #757/#752: a lane is cut from the local main, which runs ahead of origin/main while a landed
+# batch waits for CI on next. A bare run plans the lane's own diff; an explicit origin/main
+# still plans the batch (the old default), so one fixture proves both directions.
+A="$T/ahead-of-origin"; pgres::_fixture "$A"
+mkdir -p "$A/tests/browser-tests/src/test/kotlin/co/x" "$A/docs"
+printf '// fixture\n' > "$A/tests/browser-tests/build.gradle.kts"
+printf '# guide\n' > "$A/docs/guide.md"
+(cd "$A" && git add -A && git commit -qm 'fixture tree' && git branch -M main && git update-ref refs/remotes/origin/main HEAD)
+batch='tests/browser-tests/src/test/kotlin/co/x/BatchBrowserTest.kt'
+printf 'package co.x\nclass BatchBrowserTest {\n    @org.junit.jupiter.api.Test\n    fun run() {}\n}\n' > "$A/$batch"
+(cd "$A" && git add -A && git commit -qm 'landed batch, not on origin yet' && git checkout -qb lane)
+printf 'lane edit\n' >> "$A/docs/guide.md"
+(cd "$A" && git commit -qam 'lane: docs only')
+(cd "$A" && bash scripts/pregate.sh --plan) > "$T/ahead-bare" || fail 'bare plan ahead of origin'
+changed="$(sed -n '/^changed files /,/^current-main comparison=/p' "$T/ahead-bare" | sed '1d;$d')"
+[ "$changed" = docs/guide.md ] || fail "bare plan is not the lane's own diff: [$(printf '%s' "$changed" | tr '\n' ' ')]"
+! grep -q '^selection tests/browser-tests:' "$T/ahead-bare" || fail "bare plan selected the batch's browser class: $batch"
+grep -q '^base=main (default:main; origin/main is 1 behind) ' "$T/ahead-bare" || fail "bare base: $(head -1 "$T/ahead-bare")"
+(cd "$A" && bash scripts/pregate.sh --plan origin/main) > "$T/ahead-origin" || fail 'explicit origin/main plan'
+grep -q '^base=origin/main (explicit) ' "$T/ahead-origin" || fail "explicit base overridden: $(head -1 "$T/ahead-origin")"
+grep -qxF "$batch" "$T/ahead-origin" || fail 'explicit origin/main no longer plans the batch file'
+sed -n '/^selection tests\/browser-tests:$/,/^deferred=/p' "$T/ahead-origin" | grep -qx 'co.x.BatchBrowserTest' || fail 'explicit origin/main no longer selects the batch class'
+(cd "$A" && XDG_CACHE_HOME="$A/.fixture-cache" bash scripts/pregate.sh > pregate.out 2>&1) || fail "bare run: $(tail -3 "$A/pregate.out")"
+grep -q '^Pre-gate base=main (default:main; origin/main is 1 behind) ' "$A/pregate.out" || fail 'bare run console base'
+grep -q '^PRE-GATE PASS base=main ' "$A/.pregate-logs/0-verdict.log" || fail 'bare run verdict base'
+! grep -qE ':tests:browser-tests:|co\.x\.BatchBrowserTest' "$A/pregate-argv.log" || fail 'bare run launched browser work'
+ok 'bare base is the local main ahead of origin/main; explicit origin/main still plans the batch (#757)'
+
+# CI's checkout carries origin/main and no local main: the default falls back, and with neither
+# ref the run refuses before any mutation instead of guessing a base.
+O="$T/origin-only"; pgres::_fixture "$O"
+(cd "$O" && git add -A && git commit -qm 'fixture tree' && git update-ref refs/remotes/origin/main HEAD && git branch -M trunk)
+! git -C "$O" show-ref --verify --quiet refs/heads/main || fail 'origin-only fixture still has a local main'
+printf '// lane\n' >> "$O/modules/auth/src/main/kotlin/co/x/Auth.kt"
+(cd "$O" && bash scripts/pregate.sh --plan) > "$T/origin-only.plan" || fail 'bare plan without a local main'
+grep -q '^base=origin/main (default:origin/main) ' "$T/origin-only.plan" || fail "fallback base: $(head -1 "$T/origin-only.plan")"
+grep -qx 'modules/auth/src/main/kotlin/co/x/Auth.kt' "$T/origin-only.plan" || fail 'fallback plan lost the lane diff'
+grep -qx 'current-main comparison=unavailable' "$T/origin-only.plan" || fail 'fallback claimed a local-main comparison'
+git -C "$O" update-ref -d refs/remotes/origin/main
+rc=0; (cd "$O" && XDG_CACHE_HOME="$O/.fixture-cache" bash scripts/pregate.sh > "$T/no-base.out" 2>&1) || rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$O/.pregate-logs" ] && [ ! -e "$O/pregate-argv.log" ] || fail "no base ref: exit=$rc or state mutated"
+ok 'without a local main the default is origin/main; with neither ref the run refuses (#757)'
+
+# Gradle invocations the stand-in recorded; a run that stopped before any has no log.
+argv_lines() { if [ -f "$1" ]; then wc -l < "$1"; else echo 0; fi; }
+for stage in 0 1 2 2b 3 4; do
   X="$T/failure-$stage"; pgres::_fixture "$X" "fail-$stage"
+  # Stage 0 fails on known vulnerabilities behind a changed dependency file (#797).
+  [ "$stage" != 0 ] || pgres::_fixture_deps "$X" findings gradle/libs.versions.toml
   rc=0; run_fixture "$X" || rc=$?
   [ "$rc" -eq 1 ] || fail "failure-$stage did not FAIL"
   rd="$(run_dir "$X")"
   expected=0; seen=0
-  for later in 1 2 2b 3 4; do
-    expected=$((expected + 1))
+  for later in 0 1 2 2b 3 4; do
+    [ "$later" = 0 ] || expected=$((expected + 1)) # stage 0 is not a Gradle invocation
     if [ "$later" = "$stage" ]; then seen=1; break; fi
   done
   [ "$seen" -eq 1 ] || fail 'fixture stage missing'
-  [ "$(wc -l < "$X/pregate-argv.log")" -eq "$expected" ] || fail "fail-fast scheduled after $stage"
-  for later in 1 2 2b 3 4; do
+  [ "$(argv_lines "$X/pregate-argv.log")" -eq "$expected" ] || fail "fail-fast scheduled after $stage"
+  for later in 0 1 2 2b 3 4; do
     if [ "$seen" -eq 2 ]; then
       grep -q "stage=stage-$later status=not-run exit=125 reason=after-$stage" "$rd/MANIFEST.txt" || fail "later stage $later not marked after $stage"
     fi
     [ "$later" != "$stage" ] || seen=2
   done
   grep -q '^PRE-GATE FAIL' "$X/.pregate-logs/0-verdict.log" || fail 'failed verdict missing'
-  test -f "$rd/$(case "$stage" in 1) echo 1-lint.log;; 2) echo 2-touched-modules.log;; 2b) echo 2b-tests-modules.log;; 3) echo 3-guards.log;; 4) echo 4-compile-all-tests.log;; esac)" || fail 'failed log not retained'
-  grep -q "stage=stage-$stage status=executed exit=8" "$rd/MANIFEST.txt" || fail 'original stage exit lost'
+  test -f "$rd/$(case "$stage" in 0) echo 0-deps-scan.log;; 1) echo 1-lint.log;; 2) echo 2-touched-modules.log;; 2b) echo 2b-tests-modules.log;; 3) echo 3-guards.log;; 4) echo 4-compile-all-tests.log;; esac)" || fail 'failed log not retained'
+  case "$stage" in
+    0) grep -q '^stage=stage-0 status=executed exit=1 reason=findings$' "$rd/MANIFEST.txt" || fail 'original stage exit lost' ;;
+    *) grep -q "stage=stage-$stage status=executed exit=8" "$rd/MANIFEST.txt" || fail 'original stage exit lost' ;;
+  esac
   ok "failure at stage $stage preserves evidence and stops scheduling"
   D="$T/diagnostic-$stage"; pgres::_fixture "$D" "fail-$stage"
+  [ "$stage" != 0 ] || pgres::_fixture_deps "$D" findings gradle/libs.versions.toml
   rc=0; run_fixture "$D" --continue-on-failure || rc=$?
-  [ "$rc" -eq 1 ] && [ "$(wc -l < "$D/pregate-argv.log")" -eq 5 ] || fail "diagnostic continuation after $stage"
+  [ "$rc" -eq 1 ] && [ "$(argv_lines "$D/pregate-argv.log")" -eq 5 ] || fail "diagnostic continuation after $stage"
   grep -q '^PRE-GATE FAIL.*diagnostic=1' "$D/.pregate-logs/0-verdict.log" || fail 'diagnostic promoted to PASS'
   ok "diagnostic stage $stage attempts later stages and stays FAIL"
 done
@@ -394,7 +454,7 @@ grep -q 'SNAPSHOT-FAILED' "$rd/MANIFEST.txt" || fail 'snapshot failure missing'
 grep -q '^PRE-GATE FAIL.*mod=0.*snap=1' "$X/.pregate-logs/0-verdict.log" || fail 'snapshot failure overwrote Gradle exit'
 ok 'snapshot failure refuses PASS and stops later stages'
 
-# Exact provenance + complete live guard cases save four auth selections (31 → 27).
+# Exact provenance + complete live guard cases save four auth selections (33 → 29).
 for mode in covered cached helper missing-xml missing-line ambiguous skipped covered-fail malformed partial failed-xml; do
   X="$T/guards-$mode"; pgres::_fixture "$X" "$mode"
   rc=0; run_fixture "$X" --continue-on-failure || rc=$?
@@ -406,7 +466,7 @@ for mode in covered cached helper missing-xml missing-line ambiguous skipped cov
     [[ "$guard_cmd" != *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail 'covered auth guards repeated'
     grep -q 'covered module=:modules:auth.*stage=2 evidence=2/modules/auth/' "$rd/GUARD-COVERAGE.txt" || fail 'covering evidence missing'
     count="$(printf '%s\n' "$guard_cmd" | awk '{for(i=1;i<=NF;i++)if($i=="--tests")n++}END{print n}')"
-    [ "$count" -eq 27 ] || fail 'unexpected guard count after covering auth'
+    [ "$count" -eq 29 ] || fail 'unexpected guard count after covering auth'
     # Compare against an observed baseline recording from the identical fixture.
     B="$T/guards-baseline"; pgres::_fixture "$B" "$mode"
     cat >> "$B/scripts/pregate-results-lib.sh" <<'BASELINE'
@@ -414,7 +474,7 @@ pgres::guards_covered() { return 1; }
 BASELINE
     run_fixture "$B" || fail 'recording baseline red'
     baseline="$(sed -n '/co.datapipelines.integration.ArchitectureGuardTest/p' "$B/pregate-argv.log" | awk '{for(i=1;i<=NF;i++)if($i=="--tests")n++}END{print n}')"
-    [ "$baseline" -eq 31 ] || fail 'baseline inventory not 31'
+    [ "$baseline" -eq 33 ] || fail 'baseline inventory not 33'
     echo "  guard selections observed: baseline=$baseline optimized=$count (same stage-2 coverage)"
   else
     [[ "$guard_cmd" == *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail "unsafe guard omission: $mode"
@@ -443,7 +503,8 @@ grep -q '^stage=stage-3 status=covered exit=0 reason=covered-by-stage-2' "$rd/MA
 grep -q '^stage=3 command=(none)' "$rd/COMMANDS.txt" || fail 'empty actual command missing'
 ok 'all-covered stage records coverage and launches no Gradle'
 
-# Function-level clock injection only in copied fixture source: 12 deterministic ticks.
+# Function-level clock injection only in copied fixture source: 14 deterministic ticks
+# (start, two per stage for the six stages 0 1 2 2b 3 4, finish).
 X="$T/timing"; pgres::_fixture "$X"
 cat >> "$X/scripts/pregate-results-lib.sh" <<'CLOCK'
 pgres::now_ms() {
@@ -454,9 +515,9 @@ pgres::now_ms() {
 CLOCK
 run_fixture "$X" || fail 'timing fixture'
 rd="$(run_dir "$X")"
-[ "$(grep -c '^timing stage=.* elapsed_ms=100$' "$rd/MANIFEST.txt")" -eq 5 ] || fail 'stage timing accounting'
-grep -q '^timing stage=total elapsed_ms=1100$' "$rd/MANIFEST.txt" || fail 'total elapsed accounting'
-grep -q '^PRE-GATE PASS.*elapsed_ms=1100' "$X/.pregate-logs/0-verdict.log" || fail 'verdict total timing'
+[ "$(grep -c '^timing stage=.* elapsed_ms=100$' "$rd/MANIFEST.txt")" -eq 6 ] || fail 'stage timing accounting'
+grep -q '^timing stage=total elapsed_ms=1300$' "$rd/MANIFEST.txt" || fail 'total elapsed accounting'
+grep -q '^PRE-GATE PASS.*elapsed_ms=1300' "$X/.pregate-logs/0-verdict.log" || fail 'verdict total timing'
 ok 'deterministic stage and total timing includes bookkeeping overhead'
 
 X="$T/final-write-failure"; pgres::_fixture "$X"
@@ -496,3 +557,328 @@ guard_cmd="$(sed -n '/co.datapipelines.integration.ArchitectureGuardTest/p' "$X/
 [[ "$guard_cmd" == *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail 'guard accounting failure still omitted guards'
 ok 'failed covering-record write retains guards in diagnostics and refuses PASS'
 echo '  pregate efficiency self-test: PASS'
+
+# ---- #797: stage 0, the dependency scan, in both directions --------------------------------
+# The scanner is the fixture's recording stand-in (pgres::_write_scan_standin): never the real
+# scripts/vuln-scan.sh, never the network. vuln-scan-calls.log is its invocation marker.
+verdict() { tail -n 1 "$1/.pregate-logs/0-verdict.log"; }
+skip_line='deps-scan: skip — no dependency file changed (gradle.lockfile, gradle/libs.versions.toml, gradle/verification-metadata.xml)'
+
+# (i) no dependency file changed: skipped with its line, scan=0, PASS, the scanner never invoked.
+X="$T/deps-none"; pgres::_fixture "$X"
+run_fixture "$X" || fail "deps (i): an unchanged dependency set did not PASS: $(tail -n 3 "$X/pregate.out")"
+rd="$(run_dir "$X")"
+grep -qx 'stage=stage-0 status=skipped exit=0 reason=no-dependency-change' "$rd/MANIFEST.txt" || fail 'deps (i): manifest is not skipped/no-dependency-change'
+[[ "$(verdict "$X")" == 'PRE-GATE PASS '*' scan=0 lint=0 '* ]] || fail "deps (i): verdict $(verdict "$X")"
+grep -qF '  0 deps-scan skipped — no dependency file changed' "$X/pregate.out" || fail 'deps (i): no explicit skip line'
+grep -qxF "$skip_line" "$rd/PLAN.txt" || fail 'deps (i): plan lacks the skip decision'
+[ ! -e "$X/vuln-scan-calls.log" ] || fail 'deps (i): the scanner ran with no dependency change'
+ok 'deps (i): no dependency change → stage 0 skipped with its line, scan=0, PASS, scanner not invoked'
+
+# (ii) the catalog and a lockfile changed, scan clean: executed once, scan=0, PASS. The trigger
+# names BOTH files, so a trigger that ignores either one fails this case by name.
+X="$T/deps-clean"; pgres::_fixture "$X"
+pgres::_fixture_deps "$X" clean gradle/libs.versions.toml modules/auth/gradle.lockfile
+run_fixture "$X" || fail "deps (ii): a clean scan did not PASS: $(tail -n 3 "$X/pregate.out")"
+rd="$(run_dir "$X")"
+grep -qxF 'deps-scan: run — gradle/libs.versions.toml, modules/auth/gradle.lockfile' "$rd/PLAN.txt" \
+  || fail "deps (ii): trigger decision: $(grep '^deps-scan:' "$rd/PLAN.txt")"
+grep -qx 'stage=stage-0 status=executed exit=0 reason=completed' "$rd/MANIFEST.txt" || fail 'deps (ii): manifest'
+[[ "$(verdict "$X")" == 'PRE-GATE PASS '*' scan=0 lint=0 '* ]] || fail "deps (ii): verdict $(verdict "$X")"
+[ "$(argv_lines "$X/vuln-scan-calls.log")" -eq 1 ] || fail 'deps (ii): the scanner did not run exactly once'
+[ "$(sed -n 's/^stage=0 command=//p' "$rd/COMMANDS.txt")" = "$(cat "$X/vuln-scan-calls.log")" ] \
+  || fail 'deps (ii): recorded and actual scan commands differ'
+grep -qF 'No issues found' "$rd/0-deps-scan.log" || fail 'deps (ii): stage log not retained in the run directory'
+grep -qF '  0 deps-scan PASS' "$X/pregate.out" || fail 'deps (ii): no PASS line'
+[ "$(argv_lines "$X/pregate-argv.log")" -eq 5 ] || fail 'deps (ii): the Gradle stages did not all run after a clean scan'
+ok 'deps (ii): catalog + lockfile changed, clean → executed once before lint, scan=0, PASS'
+
+# (iii) known vulnerabilities: scan=1, FAIL, the OSV table in the run directory, nothing after.
+X="$T/deps-findings"; pgres::_fixture "$X"
+pgres::_fixture_deps "$X" findings modules/auth/gradle.lockfile
+rc=0; run_fixture "$X" || rc=$?
+[ "$rc" -eq 1 ] || fail "deps (iii): findings exit $rc"
+rd="$(run_dir "$X")"
+[[ "$(verdict "$X")" == 'PRE-GATE FAIL '*' scan=1 lint=125 mod=125 '* ]] || fail "deps (iii): verdict $(verdict "$X")"
+grep -qx 'stage=stage-0 status=executed exit=1 reason=findings' "$rd/MANIFEST.txt" || fail 'deps (iii): manifest'
+grep -qF 'GHSA-fixt-ure0-0001' "$rd/0-deps-scan.log" || fail 'deps (iii): the OSV table is not in the run directory stage log'
+grep -qF "  0 deps-scan FAIL — known vulnerabilities; the OSV table is in the stage log: $rd/0-deps-scan.log" "$X/pregate.out" \
+  || fail 'deps (iii): console does not name the table'
+for later in 1 2 2b 3 4; do
+  grep -qx "stage=stage-$later status=not-run exit=125 reason=after-0 elapsed_ms=0" "$rd/MANIFEST.txt" || fail "deps (iii): stage $later not marked after 0"
+done
+[ ! -e "$X/pregate-argv.log" ] || fail 'deps (iii): Gradle launched after a scan FAIL'
+ok 'deps (iii): findings → scan=1, FAIL, OSV table in the run directory, later stages not-run after-0'
+
+# (iv) no verdict (scanner error / broken environment): scan=2, FAIL — never a pass.
+X="$T/deps-error"; pgres::_fixture "$X"
+pgres::_fixture_deps "$X" error gradle/verification-metadata.xml
+rc=0; run_fixture "$X" || rc=$?
+[ "$rc" -eq 1 ] || fail "deps (iv): error exit $rc"
+rd="$(run_dir "$X")"
+[[ "$(verdict "$X")" == 'PRE-GATE FAIL '*' scan=2 lint=125 '* ]] || fail "deps (iv): verdict $(verdict "$X")"
+grep -qx 'stage=stage-0 status=executed exit=2 reason=no-verdict' "$rd/MANIFEST.txt" || fail 'deps (iv): manifest'
+grep -qF '  0 deps-scan FAIL — no verdict: scanner error or broken environment (exit 2; never a pass)' "$X/pregate.out" || fail 'deps (iv): console'
+ok 'deps (iv): scanner error → scan=2, FAIL (verification metadata alone triggers)'
+
+# (v) offline: the gate's fail-soft skip — scan=200, skipped/offline, PASS, the WARNING echoed.
+X="$T/deps-offline"; pgres::_fixture "$X"
+pgres::_fixture_deps "$X" offline gradle/libs.versions.toml
+run_fixture "$X" || fail "deps (v): offline did not PASS: $(tail -n 3 "$X/pregate.out")"
+rd="$(run_dir "$X")"
+[[ "$(verdict "$X")" == 'PRE-GATE PASS '*' scan=200 lint=0 '* ]] || fail "deps (v): verdict $(verdict "$X")"
+grep -qx 'stage=stage-0 status=skipped exit=200 reason=offline' "$rd/MANIFEST.txt" || fail 'deps (v): manifest'
+grep -qF '  0 deps-scan !! SKIPPED — offline (fail-soft by design; NOT a clean result' "$X/pregate.out" || fail 'deps (v): skip line'
+grep -qF '      vuln-scan: WARNING — osv.dev unreachable (fixture stand-in)' "$X/pregate.out" || fail 'deps (v): WARNING not echoed'
+[ "$(argv_lines "$X/pregate-argv.log")" -eq 5 ] || fail 'deps (v): an offline skip stopped later stages'
+ok 'deps (v): offline → scan=200, skipped reason=offline, PASS, WARNING echoed'
+
+# (vi) --plan prints the trigger decision with and without a dependency change, runs nothing.
+X="$T/deps-plan"; pgres::_fixture "$X"
+# Look-alikes the anchors must refuse: neither is a dependency file.
+printf 'x\n' > "$X/gradle/libs.versions.toml.orig"; printf 'x\n' > "$X/modules/auth/old.gradle.lockfile"
+(cd "$X" && bash scripts/pregate.sh --plan HEAD) > "$T/deps-plan-none" || fail 'deps (vi): plan without a change'
+grep -qxF "$skip_line" "$T/deps-plan-none" || fail "deps (vi): look-alikes triggered: $(grep '^deps-scan:' "$T/deps-plan-none")"
+grep -qx 'stage=0 command=(none)' "$T/deps-plan-none" || fail 'deps (vi): planned a scan with no change'
+pgres::_fixture_deps "$X" findings gradle/libs.versions.toml
+(cd "$X" && bash scripts/pregate.sh --plan HEAD) > "$T/deps-plan-catalog" || fail 'deps (vi): plan with a change'
+grep -qxF 'deps-scan: run — gradle/libs.versions.toml' "$T/deps-plan-catalog" \
+  || fail "deps (vi): catalog trigger: $(grep '^deps-scan:' "$T/deps-plan-catalog")"
+grep -qx 'stage order: 0 1 2 2b 3 4' "$T/deps-plan-catalog" || fail 'deps (vi): stage order'
+grep -qx 'stage=0 command=./scripts/vuln-scan.sh ' "$T/deps-plan-catalog" || fail 'deps (vi): planned scan command'
+[ ! -e "$X/vuln-scan-calls.log" ] && [ ! -e "$X/.pregate-logs" ] && [ ! -e "$X/pregate-argv.log" ] || fail 'deps (vi): --plan ran something'
+ok 'deps (vi): --plan names the trigger decision both ways and runs nothing; look-alike paths do not trigger'
+echo '  dependency-scan stage self-test: PASS'
+
+# ---- #773: a failed stage names its crashed test JVM's HotSpot report ------------------------
+crash_free() { # the output carries none of the crash lines
+  ! grep -qE 'CRASHED|crash report|older reports exist|no HotSpot report' "$1"
+}
+
+# 134: HotSpot's handler wrote the report; the stage output names module, path, both lines.
+X="$T/crash-134"; pgres::_fixture "$X" crash
+rc=0; run_fixture "$X" || rc=$?
+[ "$rc" -eq 1 ] || fail "crash (134): exit $rc"
+rd="$(run_dir "$X")"
+grep -qF '    a test worker CRASHED (exit value 134) — not a test failure (see DEVELOPMENT.md §9.4)' "$X/pregate.out" || fail 'crash (134): CRASHED sentence'
+grep -qF '    crash report  module=auth  path=modules/auth/build/hs_err/hs_err_pid4242.log' "$X/pregate.out" || fail 'crash (134): module and path'
+grep -qF '      #  SIGSEGV (0xb) at pc=0x00007f3a1c2d3e4f, pid=4242, tid=4243' "$X/pregate.out" || fail 'crash (134): signal line'
+grep -qF '      # C  [libduckdb_java.so+0x1234]' "$X/pregate.out" || fail 'crash (134): frame line'
+! grep -q 'FIXTURE_ENV_SENTINEL' "$X/pregate.out" || fail 'crash (134): printed the report beyond its bounded lines'
+! grep -q 'no HotSpot report' "$X/pregate.out" || fail 'crash (134): claimed no report'
+grep -qF 'path=modules/auth/build/hs_err/hs_err_pid4242.log' "$rd/stage-2.crash-reports.txt" || fail 'crash (134): run directory lacks the crash lines'
+[[ "$(verdict "$X")" == 'PRE-GATE FAIL '*' mod=1 '* ]] || fail "crash (134): verdict $(verdict "$X")"
+ok 'crash (134): the failure names module auth, the report path, its signal and frame lines, and CRASHED'
+
+# 139: an unhandled SIGSEGV leaves no report, and the stage says so.
+X="$T/crash-139"; pgres::_fixture "$X" crash-139
+rc=0; run_fixture "$X" || rc=$?
+[ "$rc" -eq 1 ] || fail "crash (139): exit $rc"
+grep -qF '    a test worker CRASHED (exit value 139) — not a test failure' "$X/pregate.out" || fail 'crash (139): CRASHED sentence'
+grep -qF '    no HotSpot report — an unhandled SIGSEGV (exit 139) leaves none; DEVELOPMENT.md §9.4' "$X/pregate.out" || fail 'crash (139): §9.4 sentence'
+! grep -q 'crash report  module=' "$X/pregate.out" || fail 'crash (139): attributed a report'
+ok 'crash (139): no report → the §9.4 sentence'
+
+# A report older than the step is counted, never attributed, never deleted.
+X="$T/crash-stale"; pgres::_fixture "$X" fail
+stale="$X/modules/auth/build/hs_err/hs_err_pid1111.log"
+mkdir -p "$(dirname "$stale")"
+printf '#  SIGSEGV (0xb) at pc=0x1, pid=1111, tid=1112\n# Problematic frame:\n# C  [libstale.so+0x1]\n' > "$stale"
+touch -d '2026-01-01 00:00:00' "$stale"
+rc=0; run_fixture "$X" || rc=$?
+[ "$rc" -eq 1 ] || fail "crash (stale): exit $rc"
+grep -qF '    older reports exist, not from this step: 1' "$X/pregate.out" || fail 'crash (stale): older count'
+! grep -qE 'hs_err_pid1111|libstale|CRASHED|no HotSpot report' "$X/pregate.out" || fail 'crash (stale): the earlier report was attributed'
+[ -f "$stale" ] || fail 'crash (stale): the earlier report was deleted'
+ok 'crash (stale): a report from before the step is counted, not attributed, and kept'
+
+# A genuine failure and a green run with no report print nothing extra.
+X="$T/crash-none"; pgres::_fixture "$X" fail
+rc=0; run_fixture "$X" || rc=$?
+[ "$rc" -eq 1 ] && crash_free "$X/pregate.out" || fail 'crash (none): a plain test failure printed crash lines'
+rd="$(run_dir "$X")"; [ ! -e "$rd/stage-2.crash-reports.txt" ] || fail 'crash (none): wrote a crash record'
+crash_free "$T/deps-none/pregate.out" || fail 'crash (none): a green run printed crash lines'
+ok 'crash (none): a failure without a report, and a green run, print nothing extra'
+
+# The helper itself (the one definition gate.sh calls too): an EQUAL mtime is the step's —
+# find -newer is strict and drops a report written in the marker's clock tick; tests/* modules
+# are searched; a symlinked report is never read; a missing marker attributes nothing.
+source "$ROOT/scripts/lib/gate-stages.sh"
+H="$T/crash-helper"; mkdir -p "$H/modules/web/build/hs_err" "$H/tests/integration-tests/build/hs_err"
+: > "$H/start"
+printf '#  Internal Error (fixture.cpp:1), pid=7, tid=8\n# Problematic frame:\n# V  [libjvm.so+0x7]\n' > "$H/tests/integration-tests/build/hs_err/hs_err_pid7.log"
+touch -r "$H/start" "$H/tests/integration-tests/build/hs_err/hs_err_pid7.log"
+# Creating a report can leave its directory newer than the marker; force that case (#853).
+touch -d '+1 second' "$H/tests/integration-tests/build/hs_err"
+printf '#  SIGBUS (0x7) at pc=0x2\nLINKED_REPORT_SENTINEL\n' > "$T/outside-report.log"
+ln -s "$T/outside-report.log" "$H/modules/web/build/hs_err/hs_err_pid9.log"
+helper_out="$(gate_crash_reports "$H/start" "$H")" || fail 'helper: an equal-mtime report was not attributed'
+[ -z "$(find "$H/tests/integration-tests/build/hs_err" -type f -newer "$H/start")" ] || fail 'helper: the equal-mtime premise did not hold'
+[[ "$helper_out" == *'module=integration-tests  path=tests/integration-tests/build/hs_err/hs_err_pid7.log'* ]] || fail "helper: tests/* report: $helper_out"
+[[ "$helper_out" == *'#  Internal Error (fixture.cpp:1), pid=7, tid=8'* && "$helper_out" == *'# V  [libjvm.so+0x7]'* ]] || fail 'helper: Internal Error lines'
+[[ "$helper_out" != *SIGBUS* && "$helper_out" != *hs_err_pid9* ]] || fail 'helper: followed a symlinked report'
+rc=0; helper_out="$(gate_crash_reports "$H/no-such-marker" "$H")" || rc=$?
+[ "$rc" -eq 1 ] && [[ "$helper_out" == *'start marker'*'missing — no report attributed'* ]] || fail 'helper: a missing marker attributed reports'
+ok 'crash helper: equal mtime attributed (find -newer would not), tests/* searched, symlinks and missing markers refused'
+
+# ---- #132: gate_crashed: tests that print a crash word are not tooling crashes ---------------
+# A weak token (NoSuchFileException, EOFException, OutOfMemoryError) is a crash UNLESS a fresh
+# (not older than the step's marker), parseable JUnit XML of the step carries it in a
+# <failure>/<error>; a strong token (worker exit value, daemon disappeared) is always a crash.
+# Every case runs; the block fails at its end on any RED or when fewer than 23 cases ran.
+G="$T/crash-word"; mkdir -p "$G"
+gc_ids=''; gc_red=0
+gc_check() { # gc_check <case> <expected> <actual>
+  gc_ids="$gc_ids ${1%%[a-z]}"
+  if [ "$2" = "$3" ]; then ok "#132 $1: $2"; else echo "  RED  #132 $1: expected $2, got $3" >&2; gc_red=$((gc_red + 1)); fi
+}
+gc_rc() { # prints crash | nocrash from a gate_crashed-style exit
+  if "$@"; then echo crash; else echo nocrash; fi
+}
+gc_log() { # gc_log <file> <token-line>... — a Gradle failing-test log carrying the lines
+  local f="$1"; shift
+  {
+    printf '> Task :modules:web:test\n\nFooTest > reads body FAILED\n'
+    printf '    %s\n' "$@"
+    printf '\n1 test completed, 1 failed\n\n> Task :modules:web:test FAILED\n\nFAILURE: Build failed with an exception.\n\n'
+    printf "* What went wrong:\nExecution failed for task ':modules:web:test'.\n> There were failing tests. See the report at: file:///x/modules/web/build/reports/tests/test/index.html\n\nBUILD FAILED in 12s\n"
+  } > "$f"
+}
+gc_xml() { # gc_xml <file> <failure|error|none> [<message> <text>] — one JUnit result file
+  local f="$1" kind="$2" msg="${3:-}" text="${4:-}" fails=0 errs=0 body=''
+  mkdir -p "$(dirname "$f")"
+  case "$kind" in
+    failure) fails=1; body="<failure message=\"$msg\" type=\"java.lang.AssertionError\">$text</failure>" ;;
+    error) errs=1; body="<error message=\"$msg\" type=\"java.lang.Exception\">$text</error>" ;;
+  esac
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="co.x.FooTest" tests="1" skipped="0" failures="%s" errors="%s">\n  <testcase name="reads body" classname="co.x.FooTest" time="0.1">%s</testcase>\n</testsuite>\n' \
+    "$fails" "$errs" "$body" > "$f"
+}
+gc_case() { # gc_case <name> → prints the case dir; marker <dir>/step.log.started touched FIRST
+  local d="$G/$1"; mkdir -p "$d"; : > "$d/step.log.started"; echo "$d"
+}
+gc_res() { echo "$1/modules/web/build/test-results/test/TEST-co.x.FooTest.xml"; }
+EOF_MSG='java.io.EOFException: unexpected end of stream'
+EOF_TEXT='java.io.EOFException: unexpected end of stream
+	at co.x.FooTest.readsBody(FooTest.kt:42)'
+gc_crashed() { local d="$1"; shift; gc_rc gate_crashed "$d/step.log" "$d/step.log.started" "$d/modules" "$d/tests" "$d/buildSrc" "$@"; }
+
+d="$(gc_case c1)"; printf 'java.io.EOFException\n' > "$d/step.log"
+gc_check C1 crash "$(gc_rc gate_crashed "$d/step.log")"
+
+d="$(gc_case c2)"; gc_log "$d/step.log" 'java.io.EOFException at FooTest.kt:42'
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C2 nocrash "$(gc_crashed "$d")"
+c2="$d"
+
+d="$(gc_case c3)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"; touch -d '-1 hour' "$(gc_res "$d")"
+gc_check C3 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c4)"; cp "$c2/step.log" "$d/step.log"; gc_xml "$(gc_res "$d")" none
+gc_check C4 crash "$(gc_crashed "$d")"
+c4="$d"
+
+d="$(gc_case c5)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$(gc_res "$d")" failure 'expected 200 but was 500' 'org.opentest4j.AssertionFailedError: expected 200 but was 500'
+gc_check C5 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c6)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$T/c6-whole.xml" failure "$EOF_MSG" "$EOF_TEXT"
+mkdir -p "$(dirname "$(gc_res "$d")")"; head -c 230 "$T/c6-whole.xml" > "$(gc_res "$d")"
+grep -qF 'EOFException' "$(gc_res "$d")" || fail '#132 C6: the truncated XML lost the token (fixture premise)'
+gc_check C6 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c7)"; cp "$c2/step.log" "$d/step.log"; printf 'Process worker finished with non-zero exit value 134\n' >> "$d/step.log"
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C7 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c8)"; cp "$c2/step.log" "$d/step.log"; printf 'Gradle build daemon disappeared unexpectedly\n' >> "$d/step.log"
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C8 crash "$(gc_crashed "$d")"
+
+d="$(gc_case c9)"; gc_log "$d/step.log" 'java.io.EOFException at FooTest.kt:42' 'java.lang.OutOfMemoryError: Java heap space'
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C9 crash "$(gc_crashed "$d")"
+
+nopy="$T/c10-bin"; mkdir -p "$nopy"; ln -s "$(command -v grep)" "$nopy/grep"
+gc_check C10 crash "$( (PATH="$nopy"; gc_crashed "$c2") )"
+
+out="$(gate_crash_explain "$c2/step.log" "$c2/step.log.started" "$c2")"
+gc_check C11a empty "${out:-empty}"
+out="$(gate_crash_explain "$c4/step.log" "$c4/step.log.started" "$c4")"
+case "$out" in *'not a test-JVM abort'*) out=abort-line ;; esac
+gc_check C11b abort-line "$out"
+
+d="$(gc_case c12a)"; cp "$c2/step.log" "$d/step.log"; : > "$d/step.log.started"
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" failure "$EOF_MSG" "$EOF_TEXT"
+gc_check C12a fail "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" online)"
+d="$(gc_case c12b)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" none
+gc_check C12b crash "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" online)"
+
+GET_MSG='Could not GET resource: java.io.EOFException'
+d="$(gc_case c13)"; gc_log "$d/step.log" 'Could not GET resource' 'java.io.EOFException'
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" failure "$GET_MSG" "$GET_MSG"
+gc_check C13 fail "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" offline)"
+
+d="$(gc_case c14)"; gc_log "$d/step.log" 'Could not GET resource' 'java.io.EOFException'
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" failure "$GET_MSG" "$GET_MSG"
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.BarTest.xml" failure 'expected 1 but was 2' 'org.opentest4j.AssertionFailedError: expected 1 but was 2'
+gc_check C14 fail "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" offline)"
+
+d="$(gc_case c15)"; gc_log "$d/step.log" 'Could not resolve org.example:probe:1.0'
+gc_xml "$d/buildSrc/build/test-results/test/TEST-co.x.FooTest.xml" failure 'Could not resolve org.example:probe:1.0' 'Could not resolve org.example:probe:1.0'
+gc_check C15 skip "$(gate_classify_buildsrc 1 "$d/step.log" "$d/buildSrc/build/test-results/test" offline)"
+
+# C16/C17: the gate classifies each invocation before the next one rewrites the result files.
+d="$G/c16"; mkdir -p "$d"
+: > "$d/one.log.started"; cp "$c2/step.log" "$d/one.log"; gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gate_after_invocation 1 "$d/one.log" "$d/modules" "$d/tests" "$d/buildSrc" || true
+: > "$d/two.log.started"; printf 'BUILD SUCCESSFUL in 3s\n' > "$d/two.log"; gc_xml "$(gc_res "$d")" none
+gate_after_invocation 0 "$d/two.log" "$d/modules" "$d/tests" "$d/buildSrc" || true
+gc_check C16 nocrash "$(gc_rc gate_crashed "$d/one.log")"
+
+d="$G/c17"; mkdir -p "$d"
+: > "$d/one.log.started"; printf 'java.io.EOFException\nBUILD FAILED in 1s\n' > "$d/one.log"
+gate_after_invocation 1 "$d/one.log" "$d/modules" "$d/tests" "$d/buildSrc" || true
+: > "$d/two.log.started"; cp "$c2/step.log" "$d/two.log"; gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"
+gate_after_invocation 1 "$d/two.log" "$d/modules" "$d/tests" "$d/buildSrc" || true
+gc_check C17a crash "$(gc_rc gate_crashed "$d/one.log")"
+gc_check C17b nocrash "$(gc_rc gate_crashed "$d/two.log")"
+
+# C18: gate.sh's run() classifies right after its ./gradlew line, output discarded, before
+# the echo that IS run()'s stdout.
+wiring="$(sed -n '/^run() {/,/^}/p' "$ROOT/scripts/gate.sh" | awk '
+  /^[[:space:]]*\.\/gradlew / { g = NR }
+  /^[[:space:]]*gate_after_invocation .*> \/dev\/null 2>&1/ { a = NR }
+  /^[[:space:]]*echo / { e = NR }
+  END { print ((g && a && e && g < a && a < e) ? "wired" : "unwired") }')"
+gc_check C18 wired "$wiring"
+
+d="$(gc_case c19)"; gc_log "$d/step.log" 'java.nio.file.NoSuchFileException at FooTest.kt:42'
+gc_xml "$(gc_res "$d")" error 'fixture file missing' 'java.nio.file.NoSuchFileException: /tmp/fixture.csv
+	at co.x.FooTest.readsBody(FooTest.kt:42)'
+gc_check C19 nocrash "$(gc_crashed "$d")"
+
+d="$(gc_case c20)"; gc_log "$d/step.log" 'java.lang.OutOfMemoryError at FooTest.kt:42'
+gc_xml "$(gc_res "$d")" error 'java.lang.OutOfMemoryError: Java heap space' 'boom'
+gc_check C20 nocrash "$(gc_crashed "$d")"
+
+d="$(gc_case c21)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$(gc_res "$d")" failure 'boom' "$EOF_TEXT"
+gc_check C21 nocrash "$(gc_crashed "$d")"
+
+d="$(gc_case c22)"; cp "$c2/step.log" "$d/step.log"
+gc_xml "$(gc_res "$d")" failure "$EOF_MSG" "$EOF_TEXT"; touch -r "$d/step.log.started" "$(gc_res "$d")"
+gc_check C22 nocrash "$(gc_crashed "$d")"
+
+d="$(gc_case c23)"; gc_log "$d/step.log" 'org.opentest4j.AssertionFailedError at FooTest.kt:42'
+gc_check C23a nocrash "$(gc_rc gate_crashed "$d/step.log")"
+gc_check C23b nocrash "$(gc_crashed "$d")"
+
+gc_ran="$(printf '%s\n' $gc_ids | sort -u | wc -l | tr -d ' ')"
+[ "$gc_red" -eq 0 ] || fail "#132: $gc_red case(s) RED"
+[ "$gc_ran" -ge 23 ] || fail "#132: only $gc_ran of 23 cases ran"
+ok "#132: $gc_ran cases — a crash word a fresh failed JUnit XML carries is a test failure; anything else stays a crash"
+echo '  crash-report self-test: PASS'

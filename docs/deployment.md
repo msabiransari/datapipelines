@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.49
+**Status:** v1.71
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-10-22
+**Last updated:** 2026-11-13
 
 ---
 
@@ -30,18 +30,80 @@ This is **lighter than the core specs** — most operational concerns are the op
 
 ### 3.1 Docker image
 
-Published to `ghcr.io/datapipelines/datapipelines:{version}` and `docker.io/datapipelines/datapipelines:{version}` (mirror).
+**Distribution.** This repository does not publish the image to a registry: its workflows are read-only and no script pushes. Build it from a checkout (`./app.sh --start`, or `./gradlew :modules:app:bootJar` and `docker build -t datapipelines:local .`) and point `deploy/compose.local-build.yml` (`IMAGE_TAG`) or the chart's `image.repository` and `image.tag` at it. The reference `deploy/compose.yml` and the chart default to `ghcr.io/datapipelines/datapipelines:1.0.0`, a name nothing in this repository produces.
 
-- **Base image**: `eclipse-temurin:21-jre-jammy` (LTS JDK 21, Ubuntu Jammy).
-- **Layers**: multi-stage build (`gradle:8.7-jdk21` builder → `eclipse-temurin:21-jre-jammy` runtime).
-- **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.5, pre-populated under `/opt/duckdb/extensions/v1.5.5/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build).
+- **Base image**: `eclipse-temurin:21-jre` (the Ubuntu glibc JRE 21 image, chosen over a smaller alpine base because argon2-jvm loads its native library through JNA, which ships glibc binaries).
+- **Layers**: single stage: the boot jar is built on the host (`./gradlew :modules:app:bootJar`) and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate with its pre-installed resource cache, and the third-party notices file.
+- **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.5, pre-populated under `/opt/duckdb/extensions/v1.5.5/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build). The eight decompressed binaries (four per platform) are pinned in `deploy/duckdb-extensions.sha256`; the extension build layer runs `sha256sum -c --ignore-missing --strict` before `USER` and refuses a mismatch. `/app/THIRD-PARTY-NOTICES` includes the extensions at their footer commits, their copyrights and licences, and their pinned linked closure: direct and transitive vcpkg ports, the DuckDB core `third_party` components, and code bundled inside ports (the committed closure files and re-pin procedure are described below).
 - **Size target**: < 250 MB compressed.
-- **User**: non-root (`datapipelines` user, UID 1000).
-- **Entrypoint**: `java $JAVA_OPTS -Duser.timezone=UTC -jar /app/app.jar`.
+- **User**: non-root `datapipelines`, a system account with fixed ids: UID 999, GID 999 (`groupadd --system --gid 999`, `useradd --system --uid 999`, Dockerfile); the reference chart's application Deployment pins `runAsUser`/`runAsGroup`/`fsGroup` to 999 (`ImageUserPinSpecDriftTest` holds the three equal), and a pod that runs the application under its own numeric user names 999; Compose sets no `user:` and inherits the image account (the egress renderer's no-override rule, §4.3, is unchanged); the chart's `egress-config-render` init container is the one deliberate exception — it runs this image as 65532 with an `fsGroup`-backed `emptyDir`.
+- **Entrypoint**: `["java", "-Dpolyglot.engine.userResourceCache=/opt/graaljs/resources", "-jar", "/app/datapipelines.jar"]` (exec form). The image defines no JVM-flags hook: a JVM option variable (`JAVA_TOOL_OPTIONS` and friends) would reach the JVM without one, which is why the shipped deploy files refuse those names (§6.4, §9).
 
-**`-Duser.timezone=UTC` is normative, not a suggestion.** The type system assumes a UTC JVM: ingest normalizes timezone-aware source values to UTC and treats naive source timestamps as already-UTC ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)), and every internal `TIMESTAMPTZ` is stored and rendered in UTC. A container whose JVM default zone is anything else silently shifts rendered timestamps. The flag is baked into the image entrypoint; bare-JVM and JAR deployments (§3.2, §6.5) MUST pass it themselves.
+**Bumping DuckDB (the runbook, #781).** The version catalog's `duckdb-jdbc`
+(`gradle/libs.versions.toml`) declares the bundled driver version. The runtime token
+reads the resolved version; build checks and the drift guard cover the related pins
+and detected statements described below. A bump follows these steps in order:
+
+1. **Catalog.** Edit `duckdb-jdbc`. Dependency locking is strict, so the next resolution
+   refuses the edit until step 2 has run.
+2. **Locks and verification metadata.** Regenerate every `gradle.lockfile` and
+   `gradle/verification-metadata.xml` from a cold `GRADLE_USER_HOME` with CI's cold
+   command, as DEVELOPMENT.md §6.2 and §6.3 describe, and review the added checksums.
+   What the jar states about the driver follows the resolution with no edit: the
+   datasources jar's generated `duckdb-version.properties`, the site's version token and
+   `DuckDbVersionTest`'s `PRAGMA version` oracle.
+3. **Core ARG and checksums.** Set the Dockerfile's `DUCKDB_CORE_VERSION` to the catalog
+   version's first three components: the core the driver reports as `PRAGMA version`
+   (`v<core>`), which keys the extension repository (the JDBC patch version 404s there).
+   In a temporary directory, for each of `linux_amd64` and `linux_arm64` and each of
+   `httpfs`, `aws`, `iceberg`, `avro`, fetch
+   `https://extensions.duckdb.org/v<core>/<platform>/<name>.duckdb_extension.gz`,
+   decompress with `gunzip`, and run `sha256sum` on the **decompressed** file. Write
+   sorted `sha256sum -c` lines relative to `/opt/duckdb/extensions` into
+   `deploy/duckdb-extensions.sha256`; inspect each binary's final 512 bytes
+   (`tail -c 512 <file> | strings`) for its extension repository commit, core and
+   platform, and write the four `# <name> commit=<hash>` annotations. Both platforms
+   must report the same commit per extension.
+4. **Closures.** Refresh each extension's linked closure,
+   `deploy/duckdb-extension-ports/<name>.tsv`, at those commits and the core version, as
+   DEVELOPMENT.md's third-party notices section describes (#692, #747): the vcpkg port
+   closure, direct and transitive, plus the DuckDB core `third_party` code and
+   port-vendored code that both binaries' symbols witness.
+5. **`CORE` review.** `CORE` in `buildSrc/src/main/kotlin/DuckDbExtensionLicenses.kt` is
+   the core tag the inventory's licences were reviewed at, and stays hand-declared: a
+   derived tag would claim a review nobody did. Review every new component's `LICENSE`,
+   update its licence and the tag, and vendor any new SPDX text from the snapshot named
+   in the allowlist. The notices build refuses an ARG that is not the catalog version's
+   core, a reviewed core tag other than `v<ARG>`, and a `duckdb` or `duckdb/*` closure
+   row naming another core (DEVELOPMENT.md's message list).
+6. **The guard's lists and inventory.** Run `DriverVersionSpecDriftTest` — it tracks all three driver rows (DuckDB, H2, SQLite), one procedure each. Its red list
+   contains detected, non-allowlisted literals that name an old version without dated
+   provenance: move each to the new version, or re-word it when the old version was
+   the point. Its re-probe list names detected provenance notes and source locations
+   that render the version token: rerun each probe on the new version and record the
+   result with its new date, or leave the note describing the version it measured.
+   Review the tracked-file literal inventory as well: the guard skips binary files
+   and files of 4 MB or more, and cannot discover a bare obsolete version unless a
+   non-allowlisted DuckDB context names that version somewhere in the tree. Review
+   its reasoned ownership exclusions, including generated files, frozen snapshots,
+   and the sample-data CLI pins and manifests; those have separate update procedures.
+7. **Posture evidence.** Rerun the dp-lake read-posture evidence harness (spike E9,
+   #775) against the new driver and extensions. A changed result is a finding to resolve
+   before the bump lands.
+8. **Prove it.** Run `:modules:app:generateThirdPartyNotices`, the buildSrc licence
+   fixtures, `DockerfileDuckDbExtensionPinTest` and `DriverVersionSpecDriftTest`, rebuild
+   the jar, and prove one bad sum refuses the image build before building the restored
+   pins successfully.
+
+**`-Duser.timezone=UTC` is normative, not a suggestion.** The type system assumes a UTC JVM: ingest normalizes timezone-aware source values to UTC and treats naive source timestamps as already-UTC ([Type System §8.4](type-system.md#84-timestamp-timezone-normalization)), and every internal `TIMESTAMPTZ` is stored and rendered in UTC. A container whose JVM default zone is anything else silently shifts rendered timestamps. No image entrypoint sets it: every deployment — container, bare JVM or JAR (§3.2, §6.5) — MUST pass `-Duser.timezone=UTC` itself.
 
 Heap and container-memory sizing: §6.6.
+
+**Native thread stacks.** The image sets `GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0` before its build-time
+and application JVMs start (#685). This disables reuse of native thread-stack mappings when the JVM hosts the
+script isolate. An operator-supplied `GLIBC_TUNABLES` replaces the image value: retain
+`glibc.pthread.stack_cache_size=0` when adding other colon-separated tunables. `DockerfileGraalJsPinTest` pins
+the declaration and its position before the JVM launches.
 
 ### 3.2 JAR distribution
 
@@ -140,6 +202,46 @@ The app must reach:
 - The metadata Postgres.
 - Redis.
 - (Optional) OTLP collector, Sentry, KMS — if those features are configured.
+- **The managed lake's egress proxy (#845)**, when the lake is enabled and `datapipelines.lake.reads.egress-proxy` is
+  set: the managed lake datasource's object-store requests leave through it (DuckDB's `http_proxy`), and the PROXY,
+  not the app, reaches the store for them. The app's own S3 client (the boot check's HEADs and PUTs, the writer)
+  still reaches the store directly. The reference compose file and Helm chart ship the proxy ON: an Envoy container
+  that resets every object-store stream at `datapipelines.lake.reads.egress-max-age-seconds`, so a store that
+  trickles cannot hold a reader forever ([Lake §9](lake.md#9-reads); keys in
+  [Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)). Since #862 the shipped proxy's config is
+  an ALLOWLIST, not just a cap: it forwards only to ONE store authority — the exact `host[:port]` DuckDB puts on
+  the wire for the five non-secret lake values the app reads (`EgressStoreTarget`, the same derivation the managed
+  datasource's engine settings and the boot probe use). In virtual-host style the bucket prefixes the host (a
+  dotted bucket included); an `https://` store is `host:443` (the CONNECT line always carries the port); a
+  declared default port is dropped as the engine drops it (`http://minio:80` is the bare `minio`); a blank endpoint
+  is the regional `s3.<region>.<partition DNS suffix>` of the aws, aws-cn (`amazonaws.com.cn`) or aws-us-gov
+  partition, and any other region is refused rather than guessed. Every other authority — another host, a
+  suffix or prefix of the store's name, the store's host on another port, an IP literal, a trailing dot, a
+  leading-zero port, CONNECT or absolute-form GET alike — gets the proxy's own 403, stamped
+  `x-dp-egress-refused: store-allowlist`, before any DNS lookup or connect (a form Envoy's HTTP parser refuses
+  outright — a port past 65535, a percent-encoded host, CONNECT without a port or with userinfo — gets a 400
+  instead, equally unforwarded); the proxy strips that header from every store answer, so the app's boot check
+  tells the two 403s apart. `ManagedLakeEgressAllowlistE2eTest` runs this matrix against the shipped image with
+  recording destinations: no forbidden destination accepts a connection. The absolute-form URL decides the
+  destination: a conflicting or duplicated `Host` header or a destination-override header (`X-Forwarded-Host`,
+  `Forwarded`, `x-envoy-original-dst-host`) cannot redirect a request, a store's redirect is passed back to the client, never
+  followed, and the `/dp-egress` declaration is answered by the proxy itself on any authority, never forwarded.
+  Two forms reach the SAME store and are therefore admitted: a different letter case of the store's name, and
+  userinfo on the store's own authority (Envoy drops it). Both compose and the chart render that config with one
+  deterministic JVM main (`EgressProxyConfigMain`) reading exactly those five `DATAPIPELINES_LAKE_*` env names plus
+  the max-age — the renderer refuses to emit a config on a missing or invalid input (fail-closed), and with the
+  lake disabled it renders a deny-only config. The chart's app deployment refuses the four
+  `DATAPIPELINES_LAKE_STORAGE_*` alias names while the proxy is enabled: one spelling, one reader. Mechanics: §6.3
+  (compose) and §6.4 (chart). An allowlist names a HOST, not an address: the proxy resolves the store's name
+  itself, so it trusts the DNS answer for that one name — restrict the proxy pod's sockets with the chart's
+  `storeEgress` (§6.4) or your own network policy; the allowlist does not replace it. The proxy writes no access
+  log (a request's SigV4 headers never land in one). It publishes no port and holds no
+  credential: S3 signing stays in DuckDB. For an `https://` store it sees `CONNECT host:443`; for a plain-`http://`
+  endpoint (a MinIO inside your network) it sees the signed requests in clear, which is acceptable only inside the
+  deployment's network. Boot refuses with `lake.boot.egress_proxy` when the proxy does not answer, declares another
+  max-age, cannot reach the store, or refuses the store itself (its stamped 403: the proxy's allowlist names another
+  authority than the app's — a lake value changed on one side only). A temporary accommodation until
+  [duckdb-httpfs#519](https://github.com/duckdb/duckdb-httpfs/issues/519) lands.
 
 The app **does not** require inbound network access beyond the HTTP/MCP ports it serves.
 
@@ -149,7 +251,7 @@ The app **does not** require inbound network access beyond the HTTP/MCP ports it
 
 **[configuration.md](configuration.md) is the single authority for every configuration key** — YAML path, env var name, default, and description. This spec deliberately does **not** restate key names or defaults: a duplicated default is a default that drifts. What follows is only the operator's startup checklist and the file-mounting mechanics.
 
-Env var names are derivable, never memorized: `datapipelines.` → `DATAPIPELINES_`, remaining YAML path upper-snake-cased ([Configuration §1](configuration.md#1-purpose)).
+Use the exact environment placeholders in [Configuration §5](configuration.md#5-full-applicationyml-template). Most names use upper snake case, but provider, bootstrap, promotion and dashboard settings have explicit exceptions; deriving a name from the YAML path can leave a setting unchanged.
 
 **Before any of this, two variables:** `DATAPIPELINES_ENV` is your organisation's name for this deployment and `DATAPIPELINES_POSTURE` is `development` or `hardened`. A named environment with no posture does not start. [Environments](environments.md) is the page for that decision; [Configuration §3.23](configuration.md#323-environment-and-posture) is the key reference.
 
@@ -165,7 +267,7 @@ The app **fail-fasts** on startup if any of the following is missing. Full defin
 
    **The operator's first-admin story with local accounts** (no IdP): set `datapipelines.auth.bootstrap-admin-email` to the admin address, enable `datapipelines.auth.local.enabled`, and seed the one-time credential — preferably as a pre-computed hash from `./gradlew :modules:auth:hashPassword` into `datapipelines.auth.local.bootstrap-password-hash` (the plaintext form exists for demos). Hand the password to the admin out-of-band; the app forces a change at first login ([Auth §5A.2](auth.md#5a2-seeding-the-first-admin)), and a deployment still running the seeded credential announces itself with a startup WARN. Every account after the first is created by an admin on the user-administration screen — there is no self-registration and no self-service email reset: a forgotten password means an admin resets it there, which issues a new one-time credential under the same forced-change rule. **With outbound mail configured** (`DATAPIPELINES_MAIL_HOST` + `DATAPIPELINES_MAIL_FROM` — any SMTP server, Postmark's included; the nine variables are [Configuration §3.27](configuration.md#327-mail) and `deploy/secrets.env.example` names them) that credential is **emailed to the user** and sys-ops (`DATAPIPELINES_MAIL_OPS_TO`) hears about every new user, local or first social login ([Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)); the admin screen then shows where the password went, not what it was. Mail is on exactly when those two are set — there is no flag — and it then also requires `DATAPIPELINES_AUTH_BASE_URL` (the login URL in the mail).
 
-Everything else has a default and is optional.
+Everything else has a default and is optional. One optional key adds a startup requirement of its own: `datapipelines.scheduler.notifications.enabled=true` (scheduler notification mail, off by default — [Scheduler §2.3](scheduler.md#23-notification-settings-442), #442b) refuses to start, naming the keys, unless the shared mail transport (`datapipelines.mail.host` and `.from`, [Configuration §3.27](configuration.md#327-mail)) and `datapipelines.auth.base-url` (the link every notice carries) are set; under the `development` posture it also sends nothing until `datapipelines.scheduler.notifications.recipient-domains` lists a domain.
 
 ### 5.2 Everything else
 
@@ -332,6 +434,8 @@ pinned by the audit tests (`VendoredAlpineAuditTest`, `VendoredHtmxAuditTest`,
 and so is a manifest entry nobody serves. The manifest also carries the FIRST-PARTY client runtime and
 its adapters (`js/datapipelines-dashboard*.js`, the same sha256 discipline — a hand edit must move the
 manifest in the same commit).
+`generateVendoredAssetNotices` (`:modules:web:generateVendoredAssetNotices`) generates the offline
+licence inventory and full texts served at `/vendor/THIRD-PARTY-NOTICES.txt` and copied beside the website export assets.
 
 **Plotly 4.1.1** ships as two custom bundles built with the package's own procedure (its
 `CUSTOM_BUNDLE.md`), from the pinned tag, plus source patches (`patches/0001-colorbar-style-reset-without-attribute.patch`:
@@ -342,6 +446,9 @@ The build is path-independent since `patches/0003-inline-css-id-independent-of-c
 (#571): the inline-CSS plugin hashed the clone's absolute path (#530); the in-tree plugin hashes the
 root-relative CSS path under the historical directory as a constant salt, keeping the committed bytes unchanged.
 The salt is historical; the next Plotly upgrade may keep or drop it, since the pins move then anyway.
+Patch `patches/0004-drop-unreachable-maplibre-css-require.patch` removes the maplibre-gl stylesheet
+require from the registry: neither custom trace list includes a `map` trace, so the stylesheet is
+unreachable; drop this patch when a `map` trace joins a trace list.
 To rebuild any bundle — a trace added, a security fix adopted — run exactly this and commit the
 OUTPUTS with their new hashes. The #531 rebuild used Node 24.21.0 + npm 11.19.0 + `npm ci`
 (the earlier #525 build also matched Node 22.23.3 + `npm ci` and Node 24.21.0 + `npm i`).
@@ -350,7 +457,7 @@ OUTPUTS with their new hashes. The #531 rebuild used Node 24.21.0 + npm 11.19.0 
 cd "$(mktemp -d)"
 git clone --depth 1 --branch v4.1.1 https://github.com/plotly/plotly.js.git plotly.js
 cd plotly.js
-# the numbered vendor patches 0001–0003, applied in order; a new patch is a new file here
+# the numbered vendor patches, applied in order; a new patch is a new file here
 git apply <repo>/modules/web/src/main/resources/static/vendor/plotly/patches/*.patch
 npm ci --no-audit --no-fund
 # the 2D bundle (the default): scatter, bar, pie, histogram, box, heatmap
@@ -372,8 +479,8 @@ same rules the bundle would inject at runtime. It is part of the CSP DESIGN-AROU
 §6.6](dashboards.md#66-the-states-notifications-and-the-csp)): each host pre-places the empty
 `<template id="plotly.js-style-global" class="no-inline-styles">` marker Plotly checks (the runtime's
 fallback creates the same template for a host without one), the page loads this file instead, and `style-src` stays `'self'` plus Cytoscape's one hash — no policy change, no
-`'unsafe-hashes'`, no `'unsafe-eval'`. Sizes (4.1.1 with the #525 and #531 patches): 2D 1,254,487 B (418,262 gz), 3D
-1,831,532 B (588,221 gz), plotly.css 7,467 B; gzip uses zlib deflate level 9, gzip framing, mtime 0
+`'unsafe-hashes'`, no `'unsafe-eval'`. Sizes (4.1.1 with patches 0001–0004, #525, #531, #571 and #570): 2D 1,170,988 B (406,683 gz), 3D
+1,748,030 B (576,983 gz), plotly.css 7,467 B; gzip uses zlib deflate level 9, gzip framing, mtime 0
 (no filename), as reproduced by the JDK's `GZIPOutputStream` with `Deflater.BEST_COMPRESSION`; the npm tarball's sha1
 `f797e8f2d54603fd9d11b08aae8eb31147200b67` verifies the source against the tag. Node 22+ per
 Plotly's own build matrix (the manifest's `build` field records the exact versions). After ANY rebuild: update the manifest's `sha256` map, the `sizes`, and the
@@ -403,6 +510,29 @@ on **every `./gradlew build`**, not when someone remembers to run it.
 It also inventories every app-container environment name, refuses JVM code-loading names,
 and requires a reasoned allowlist for names outside `DATAPIPELINES_*`, rejecting stale entries.
 
+The compose file also runs `egress-proxy` (#845, §4.3): Envoy pinned by digest, its image's non-root user, all
+capabilities dropped, no privilege escalation, no published port, root filesystem read-only. Since #862 its config
+is not shipped as text: an `egress-config` RENDERER service — the same app image, started through the same
+`PropertiesLauncher` main as the chart's renderer — runs once, reads the six `x-lake-render-env` names (the five
+non-secret `DATAPIPELINES_LAKE_*` store keys plus `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`, passed
+through with the same defaults the app receives — the audit's check 10 refuses a diverged default and check 11
+pins the renderer's inputs to exactly those six), writes `/dp-egress-config/envoy.yaml` into a shared
+`egress-config` volume and exits; a missing or invalid input leaves the file unwritten and the renderer failing.
+The renderer runs as the app image's own non-root user (no `user:` override; the audit's check 12 refuses one, and
+requires the renderer's image to be the app's in both `compose.yml` and `compose.local-build.yml`): the image ships
+`/dp-egress-config` owned by that user, so a FRESH volume takes that ownership when the renderer first mounts it.
+`egress-proxy` mounts the volume read-only at `/etc/envoy` with `nocopy: true` (check 11 pins the long form) —
+without it, a proxy that happened to mount the empty volume first would copy its image's own root-owned
+`envoy.yaml` into it and the renderer could not overwrite it. A renderer that cannot write its file refuses with
+one `egress_config: cannot write /dp-egress-config/envoy.yaml (...)` line and exit 1; the volume was created by
+something else (a pre-release build that rendered as root, or a proxy mount without `nocopy`), and the recovery is to
+drop it — it holds nothing but the rendered file: `docker compose down`, `docker volume rm <project>_egress-config`,
+`docker compose up -d`. `egress-proxy` is gated
+`depends_on: service_completed_successfully`, so a failed render never reaches a running proxy. `helm-check.sh` pins the renderer wiring on both sides. The proxy
+still publishes no port and holds no credential, and the app is pointed at it
+with the literal `egress-proxy:3128`. The app waits for it to START, not to be healthy: the distroless image has no
+shell or HTTP client to run a healthcheck with, so the app's boot check is the readiness gate.
+
 ### 6.3A Promotion: a receiver deployment (055)
 
 A second deployment that receives released content from the first ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)). Both sides are the same image in different postures — there is no separate build.
@@ -424,7 +554,7 @@ DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL=https://uat.example.com
 DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY=<the same shared secret>
 ```
 
-`DATAPIPELINES_ENV` is **your** name for each deployment and nothing branches on it; the receiver records the sender's label as the `source_env` of what it received. `DATAPIPELINES_POSTURE` is what actually changes behaviour — `hardened` defaults `authoring-enabled` to `false`, which is the receiver's whole configuration. Set `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED` explicitly if this one box must do both ([Environments §1](environments.md#1-why-two-variables)).
+`DATAPIPELINES_ENV` is **your** name for each deployment and nothing branches on it; the receiver records the sender's label as the `source_env` of what it received. `DATAPIPELINES_POSTURE` is what actually changes behaviour — `hardened` defaults `authoring-enabled` to `false`, which is the receiver's whole configuration. A hardened box does not author: setting `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=true` there **refuses startup** ([Configuration §3.23](configuration.md#323-environment-and-posture)), so a box that must author runs the `development` posture ([Environments §2](environments.md#a-hardened-deployment-does-not-author-786)).
 
 Generate the secret the way every other one here is generated — `openssl rand -base64 32` — and set the identical value on both sides. It is a **bearer credential**: it belongs in `deploy/secrets.env` with the rest of the secrets, never inline in a compose file or a chart's values.
 
@@ -439,7 +569,7 @@ What each setting buys, and what goes wrong without it:
 | The datasources the promoted pipelines reference, registered on the receiver | Pre-validated before anything is pushed; a missing one fails the whole batch with `pipeline.promotion.missing_datasources` and leaves the receiver untouched. **Register them with the receiver's own credentials** — a pipeline body never carries environment-specific connection details |
 | The RECEIVER's request-body cap, `datapipelines.web.max-request-bytes` (default 2 MiB, at most 64 MiB — [Configuration §3.31](configuration.md#331-web-request-limits)) | A promotion is ONE push body (`POST /api/v1/promotion/push`); over the receiver's cap it is refused `413 request.body_too_large` (`details.limit_bytes`) before anything applies — atomic, nothing lands — and the sender reports the receiver's refusal verbatim. Measured 2026-09-28 (#291): the product's whole shipped example content — 40 templates and pipelines across the nyc, trade and lake families — is 73 KiB, 3.6% of the default; its largest document is 5.6 KiB. A single template may hold up to 256K characters (`datapipelines.templates.max-body-chars`), so a batch of several near-maximum templates can pass 2 MiB: raise the RECEIVER's key (the sender's cap is not involved) rather than splitting the promotion. |
 
-**Minting the receiver's key** (091; the page is `/api-keys` since 179): on the RECEIVER, sign in as a super admin → the avatar menu's **API keys** → New API key → kind **Server** → name it after the sender (`dev → uat`) → copy the plaintext, shown once. Paste it into the SENDER's `DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY`. **Rotation** is then receiver-side and needs no restart anywhere: mint a second `server` key, set it on the sender, revoke the first. (With the deprecated config value instead: set the new value on both sides and restart both.) No user account is involved either way, so offboarding a human can never break production promotion, and revoking the key revokes nothing else.
+**Minting the receiver's key** (091; the page is `/api-keys` since 179): on the RECEIVER, sign in as a super admin → the avatar menu's **API keys** → New API key → kind **Server** → name it after the sender (`dev → uat`) → copy the plaintext, shown once. Paste it into the SENDER's `DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY`. **Rotation:** mint a second `server` key on the receiver, set it in the sender configuration, restart the sender to bind the new credential, then revoke the first key. The receiver does not need a restart for stored-key issuance or revocation. (With the deprecated config value instead: set the new value on both sides and restart both.) The stored credential authenticates as its key identity rather than a human account; offboarding a human does not revoke that promotion credential.
 
 **Direction is one-way by construction.** The receiver validates; it never calls the sender. A compromised receiver cannot reach back into the authoring environment.
 
@@ -460,6 +590,180 @@ Reference Helm chart in `deploy/helm/`. Includes:
 - Externalized Redis (managed recommended).
 - `HorizontalPodAutoscaler` (scales on CPU).
 - `PodDisruptionBudget` (availability during node drains).
+- Management port exposure, all of it OFF by default (the render is unchanged
+  until you opt in — [Configuration §3.14](configuration.md#314-framework-wiring-keys)):
+  `management.expose` adds the management `containerPort` (from `management.port`, default 9090)
+  and pins both `MANAGEMENT_SERVER_*` env entries — including the address opt-open `0.0.0.0` —
+  and a headless `Service` (`clusterIP: None`: the scraper targets pod IPs, not a cluster VIP);
+  `management.networkPolicy.enabled` adds the chart's one ingress `NetworkPolicy` for the app
+  pods — the scraper peers on the management port AND your declared peers on the app port
+  (below); `management.serviceMonitor.enabled` adds a `ServiceMonitor` for the headless
+  `Service`. Any `extraEnv.MANAGEMENT_SERVER_ADDRESS` / `_PORT` double mapping is refused
+  (Kubernetes honours the last duplicate env name silently).
+- The managed lake reads' egress proxy (#845, §4.3), ON by default (`lake.egressProxy.enabled`):
+  a `Deployment` and `Service` named `<release>-datapipelines-egress-proxy`, with
+  their own `app.kubernetes.io/name` (`datapipelines-egress-proxy`), so no selector of the app's
+  selects a proxy pod and none of the proxy's selects an app pod; and its own `NetworkPolicy`
+  (below). The image is `lake.egressProxy.image` (repository, tag and a required `sha256:`
+  digest, the compose file's). Since #862 the pod renders its own config: an init container
+  (`egress-config-render`) — the same app image, run once through `PropertiesLauncher` with
+  `-Dloader.main=...EgressProxyConfigMain` — writes the Envoy config into a shared `emptyDir`
+  volume, and the Envoy container mounts it read-only at `/etc/envoy`. The renderer's inputs are
+  `lake.egressProxy.maxAgeSeconds` and the five `DATAPIPELINES_LAKE_*` names, resolved the way the
+  app's own environment resolves them: each name is taken from `extraEnv` when set there, else
+  from the key of the same name in `existingSecret` (one optional `secretKeyRef` per name — never
+  the whole Secret, so no credential reaches the renderer), else left unset (the renderer's
+  default or refusal). The app reads `existingSecret` through `envFrom` and `extraEnv` as `env`,
+  which wins, so both pods see the same five values; `helm-check.sh` simulates that resolution
+  for a Secret-only, an override, a partial and an empty case and, given the renderer jar, runs
+  the real renderer on both sides. Exact names only: the four `DATAPIPELINES_LAKE_STORAGE_*`
+  aliases and the two egress env names are refused in `extraEnv` while the proxy is enabled; an
+  alias held in the Secret reaches only the app, whose boot check then refuses the mismatch. A
+  changed render VALUE rolls BOTH pods: the proxy pod template carries a
+  `checksum/egress-render-inputs` annotation over the same values the app Deployment reads,
+  `existingSecret`'s NAME included. Helm cannot see a Secret's CONTENT: after changing a lake key
+  in the Secret, restart both (`kubectl rollout restart deployment/<release>-datapipelines
+  deployment/<release>-datapipelines-egress-proxy`). A missing or invalid input fails the init container with a named
+  cause (`egress_config: ...` in its log), so the pod never starts Envoy on a partial config —
+  fail-closed. With the lake disabled the renderer emits a deny-only config (the proxy still
+  caps and refuses everything else), and the app's two env entries
+  (`DATAPIPELINES_LAKE_READS_EGRESS_PROXY` = the Service's `name:3128`,
+  `DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS`) come from the same values. While enabled,
+  both egress names are refused in `extraEnv`;
+  disabled, nothing renders and `extraEnv` may point the app at your own proxy. The proxy pod is
+  ready once `GET /dp-egress` (with the `x-dp-egress-check` header) answers. With the lake
+  enabled, an app pod that boots before the proxy is ready is refused (`lake.boot.egress_proxy`)
+  and restarted by Kubernetes until it is.
+
+**The management `NetworkPolicy` is a complete ingress policy for the app pods** (#712). A
+NetworkPolicy that selects a pod isolates that pod for **every** ingress, not only for the ports
+its rules name, and the allow rules of all policies selecting the pod are unioned
+([Kubernetes: Network Policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/#the-two-sorts-of-pod-isolation)).
+A policy that admitted only the scraper would therefore cut the app port off — so the chart's
+policy, rendered only with both `management.expose` and `management.networkPolicy.enabled`,
+carries two rules, and the render refuses to enable it without either:
+
+1. **Scraper → management port:** one peer per non-empty scraper selector
+   (`scraperNamespaceSelector`, `scraperPodSelector`). The two are separate peers, OR'd: a pod in a
+   matching namespace OR a matching pod in the app's own namespace. (One peer carrying both a
+   `namespaceSelector` and a `podSelector` would be their AND — the Kubernetes rule.) Both empty
+   is refused: an empty `from:` admits every source.
+2. **Declared peers → app port (8080):** `appIngress.from`, a list of `NetworkPolicyPeer` objects
+   (`namespaceSelector` / `podSelector` / `ipBlock`) copied verbatim — typically your ingress
+   controller's namespace. Instead of a list, `appIngress.allowAll: true` is the explicit
+   acknowledgement that every source may reach the app port; it renders the rule without a
+   `from` and prints the acknowledgement as a comment in the rendered policy. Neither set is
+   refused; both set is refused as a contradiction. An `ipBlock` of `0.0.0.0/0` is allow-all
+   by another name.
+
+Every selector is a full `LabelSelector` object (`matchLabels` / `matchExpressions`), copied
+verbatim. A bare label map is refused at render time: it is not a selector, the API schema
+rejects it, and an apply path that drops unknown fields would leave an empty selector, which
+selects every namespace.
+
+```yaml
+management:
+  expose: true
+  networkPolicy:
+    enabled: true
+    scraperNamespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: monitoring
+    appIngress:
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+```
+
+**With policies you already own.** Policies are additive. If your own policies already select
+these pods, they keep every allowance they grant, and the chart's policy adds exactly its
+declared peers to that union. It never narrows your policy, and it widens it by precisely
+what you declare. To leave an existing stricter app-port policy unwidened, declare no peer it
+does not already admit. `allowAll: true` widens the app port to every source. Egress is not
+touched (`policyTypes: [Ingress]`): §9's egress policy stays yours. With
+`management.networkPolicy.enabled` off (the default) the chart renders no policy for the app
+pods; the egress proxy's own policy, below, is a separate object.
+
+**The egress proxy's `NetworkPolicy`** (#845, `lake.egressProxy.networkPolicy.enabled`, ON by
+default) selects only the proxy pods and leaves the app's policies untouched. Ingress: only the
+app pods (the app `Deployment`'s selector), only on TCP 3128 — the proxy holds no credential,
+so this rule is what limits who can use it. Since #862 the config itself is an allowlist — the
+proxy 403s every authority but the one derived store authority before contacting any upstream —
+so this policy is the second layer on the same premise: the config decides which authorities
+are answered at all, and the policy decides which sockets the proxy may open. Declare the
+store here too: `storeEgress.to` (a list of `NetworkPolicyPeer` objects, typically an `ipBlock` for the
+object store's CIDR) and/or `storeEgress.ports` (a list of `NetworkPolicyPort` objects, e.g.
+TCP 443), copied verbatim; the policy then also admits DNS (UDP and TCP 53, to `dnsTo`, empty =
+any destination), because the proxy resolves each store host itself. With neither declared,
+the proxy's egress is the cluster's (`policyTypes: [Ingress]`). Either way, the app's boot
+probe through the proxy to the store proves the path. Peers are refused at render time the way
+the management policy's are (a bare label map, an unknown key, an empty peer, a non-list). If
+your own egress policy selects the app pods, it must admit TCP 3128 to the proxy pods.
+
+```yaml
+lake:
+  egressProxy:
+    networkPolicy:
+      storeEgress:
+        to:
+          - ipBlock:
+              cidr: 10.20.0.0/16
+        ports:
+          - protocol: TCP
+            port: 443
+```
+
+**The egress proxy's availability** (#863, `lake.egressProxy.podDisruptionBudget` and
+`lake.egressProxy.topologySpreadConstraints`, both OFF by default). The one-replica default renders
+exactly what a chart without them renders; raising availability is an operator decision for a
+multi-node cluster. Both settings touch only the proxy's pods — the app's own
+`podDisruptionBudget` (above) and its pod template are untouched, and the render refuses nothing
+about the app.
+
+`podDisruptionBudget.enabled: true` renders one `policy/v1` `PodDisruptionBudget` selecting only the
+proxy pods — its selector is the proxy Deployment's own labels, never a value you supply, so it
+cannot count or protect an app pod. A budget governs **voluntary evictions through the Eviction
+API** (`kubectl drain`, node upgrades), never an involuntary node failure or direct pod deletion.
+Deployment rolling updates use the Deployment's update strategy rather than the PDB.
+`minAvailable` must be a whole number
+at least 1 and **strictly below** `lake.egressProxy.replicaCount`; the render refuses anything else.
+The strictness is the deadlock guard: a budget that demands every replica stay up can never be
+honoured during the very disruption it exists for, so an enabled `minAvailable: 1` budget on the
+one-replica default would refuse every drain of the only node — exactly the single-node upgrade you
+least want deadlocked. With two replicas, `minAvailable: 1` keeps one proxy serving through each
+drain (§8.3 states what a replaced pod costs a managed read).
+
+`topologySpreadConstraints.enabled: true` adds one constraint to the proxy pod template: across the
+`topologyKey` domain (`kubernetes.io/hostname` = one node). With `DoNotSchedule`, `maxSkew` limits
+the new pod's domain count relative to the least-populated eligible domain; with `ScheduleAnyway`,
+it influences placement preference rather than imposing a hard limit. The constraint's
+`labelSelector` is always the proxy's own selector — an
+operator-supplied selector is not a chart value, and one naming the app's labels would spread the
+wrong workload. `whenUnsatisfiable` decides a cluster too small to satisfy the spread:
+`ScheduleAnyway` (the example's choice) places pods anyway — capacity wins over skew;
+`DoNotSchedule` leaves the pod Pending when placement would violate the skew. This chart does not
+set `minDomains`: one eligible node can hold both replicas even with `DoNotSchedule`. Two pods on
+one node provide no node-failure tolerance either way; spread does not require two eligible nodes.
+`replicaCount` and `maxSkew` must not exceed 2147483647, their Kubernetes signed 32-bit limit.
+
+```yaml
+lake:
+  egressProxy:
+    replicaCount: 2
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+    topologySpreadConstraints:
+      enabled: true
+      maxSkew: 1
+      whenUnsatisfiable: ScheduleAnyway
+      topologyKey: kubernetes.io/hostname
+```
+
+Both blocks are render-validated only while enabled: a disabled budget or spread with nonsense
+fields renders nothing and is inert, the way the chart's other flags behave. `replicaCount` itself
+is validated whenever the proxy is enabled (a whole number of replicas greater than 0, unquoted).
 
 The pod keeps its root filesystem read-only and mounts a disk-backed `emptyDir` at `/tmp`.
 This supports JVM native libraries and the default LAKE spill directories. Set
@@ -478,6 +782,19 @@ unset, `LOADER_PATH` environment list (the image: `/app/lib,/opt/graaljs`). Star
 configured directory outside that list or without `js-isolate.jar`; the check never adds a
 class-path entry. A bare jar without the isolate starts with JavaScript disabled, said once
 at INFO; a JavaScript save/evaluate refuses `script.js.unavailable`, while JSONata works.
+
+The nine JavaScript runtime keys (configuration.md §3.28) are named chart values under
+`script.js`: `isolateDir`, `maxHeapMb`, `isolateMemoryMb`, `maxStatements`, `maxAstDepth`,
+`maxStackFrames`, `maxOutputBytes`, `maxResultMb`, `maxInputMb` (env
+`DATAPIPELINES_SCRIPT_JS_*`, the mechanical camelCase map). All nine default to empty, and an
+empty or null value renders NO env entry — the image's own isolate directory and the app's derived
+isolate memory stay in force, exactly like the DuckDB pair below; a rendered `""` would override
+the image's `ENV` and fail the startup agreement above. `script.js.isolateDir` is not an
+arbitrary path: the chart refuses, at render time, any value outside the image's launcher-path
+entries (`/app/lib`, `/opt/graaljs`) — the same entries the startup rule admits — and an
+`extraEnv` double mapping of any of the nine fails `helm template` like the DuckDB keys do. The
+remaining eight keys are operator sizing: the chart renders them verbatim and does not validate
+numbers — explicitly supplied zero values render as quoted "0", and an out-of-bound value fails the pod's startup, by name (configuration.md §3.28, §7).
 
 The image pre-installs native resources in the root-owned, read-only
 `/opt/graaljs/resources` cache and passes
@@ -507,12 +824,33 @@ through `extraEnv`; an `extraEnv` key that double-maps either DuckDB key fails `
 because Kubernetes does not reject duplicate `env` names and would silently honor the last one.
 CI renders the chart on every push and pull request: the `gate` job runs `scripts/helm-check.sh`,
 a pinned `helm` (version and checksum pin bumped together per DEVELOPMENT.md §10.2) running
-`helm lint --strict` plus six template cases — defaults render no `env:` block or driver volume, both
-DuckDB values render exactly their two quoted entries, each `extraEnv` double mapping is refused
-with the template's own message, a missing `existingSecret`, `extraEnv.LOADER_PATH` and the three JVM option variables are refused,
-and an enabled driver volume renders its read-only mount (with additional PVC/source checks) — exiting 0 when
-every case passes, 1 when a chart check fails, and 2 on a tooling failure (a download or
-checksum-pin mismatch, never a chart verdict).
+`helm lint --strict` plus one hundred forty-one verdicts — defaults render only the managed-egress
+environment entries and renderer inputs, with no DuckDB/JavaScript entry or driver volume; both
+DuckDB values render exactly their two quoted entries, all nine `script.js` values render exactly their
+nine quoted entries (each sizing key alone also renders its explicit zero; null renders no entry), each `extraEnv` double mapping
+(the two DuckDB keys, the nine JavaScript keys and the two `MANAGEMENT_SERVER_*` keys) is refused
+with the template's own message, a missing `existingSecret`, `extraEnv.LOADER_PATH`, the three JVM option variables and a
+`script.js.isolateDir` outside the image's launcher-path entries are refused,
+an enabled driver volume renders its read-only mount (with additional PVC/source checks),
+and the management block renders nothing by default (no 9090, no `MANAGEMENT_*` env entry, no
+`NetworkPolicy`, no `ServiceMonitor`) while `management.expose` renders the four objects — the
+management `containerPort`, both `MANAGEMENT_SERVER_*` entries (`0.0.0.0` opt-open), the headless
+`Service` and the `NetworkPolicy`, whose parsed rules must admit the scraper peers on the
+management port AND the declared peers (or, under `allowAll`, every source) on the app port —
+with `management.serviceMonitor.enabled` adding exactly one `ServiceMonitor`, and each of the
+policy's refusals (both scraper selectors empty, no app-port declaration, `allowAll` with a
+`from`, a bare label map, an unknown or empty peer, a quoted `allowAll`) exercised with its own
+message. The egress proxy has its own parsed contract and render cases — defaults, store/DNS
+peers, its policy off, the proxy off, the renderer inputs resolved the kubelet's way, and #863's
+availability (the two-replica example renders a PDB and a spread whose selectors are the proxy
+Deployment's own; signed 32-bit boundaries and disabled-field inertness are pinned; each invalid
+availability value is refused with its message) — described under
+the proxy bullet above.
+Every successful render is also validated `-strict` against the Kubernetes 1.35.0 API
+schema (and the CRDs-catalog schema for the `ServiceMonitor`) by a pinned `kubeconform`
+(DEVELOPMENT.md §10.2), with every object accounted for. It exits 0 when every case passes,
+1 when a chart check fails, and 2 on a tooling failure (a download, a checksum-pin mismatch, a
+schema fetch, or a missing python3/PyYAML — never a chart verdict).
 
 The `lib/` driver drop-in (§3.5) is opt-in: set `libVolume.enabled: true` and supply exactly one Kubernetes volume source in `libVolume.source` (for example, `{configMap: {name: drivers}}`); the chart mounts it at `/app/lib` with `readOnly: true`, and a `persistentVolumeClaim` source must itself set `readOnly: true`. Populate the source only through a trusted image, init container or CI-written ConfigMap, never through the app (§9). The default is disabled; an `extraEnv` key naming the launcher path in any spelling the launcher reads (`LOADER_PATH`, `loader_path`, `loader.path`) is refused at render time, and so are `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS` and `_JAVA_OPTIONS` (the JVM reads `-D` options from them, and a system property would win over the image's value), so the image's launcher path stays in force against `extraEnv`. Keys inside the `existingSecret` reach the container through `envFrom` and cannot be checked at render time: the Secret holds the §5.1 startup contract and never the launcher path or a JVM option variable.
 
@@ -522,13 +860,18 @@ No sticky session affinity needed. Standard `ClusterIP` service with round-robin
 
 For development:
 ```
+GLIBC_TUNABLES="${GLIBC_TUNABLES:+${GLIBC_TUNABLES}:}glibc.pthread.stack_cache_size=0" \
 java -Duser.timezone=UTC -jar datapipelines-app.jar \
   --spring.datasource.url=jdbc:postgresql://localhost:5434/datapipelines \
   --datapipelines.redis.host=localhost \
   --datapipelines.redis.port=6381
 ```
 
-`-Duser.timezone=UTC` is required here too (§3.1) — the image sets it for you, a bare JVM does not.
+`-Duser.timezone=UTC` is required here too (§3.1): every deployment — container, bare JVM or JAR — must pass the flag explicitly.
+
+On glibc, also set the native thread-stack policy from §3.1 before starting Java; setting an environment value
+inside an already-running JVM is too late. Keep other required tunables and replace any conflicting stack-cache
+entry with `glibc.pthread.stack_cache_size=0`.
 
 Not recommended for production.
 
@@ -637,6 +980,44 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
 - Applied automatically on app startup.
 - Forward-only; no rollback (restore from backup if needed).
 
+**Upgrading to API versions (#786).** This upgrade converts every existing API in place: stop the one server, apply
+the new version, and start it. After Flyway and before it serves a request, the server gives each API that has no
+version a v1 pinning its pipeline's current version — RELEASED when that pipeline version is released, DRAFT
+otherwise — and logs one `event=endpoint.conversion.converted` line per API and an `event=endpoint.conversion.summary`
+total. A restart converts nothing twice. If any API's pipeline has no current version to pin (it was never released,
+or its current version was discarded), the server **refuses to start** and writes nothing: one
+`event=endpoint.conversion.refused` ERROR line per API (path, pipeline, `reason=no_current|no_versions|missing_pipeline`)
+and an `event=endpoint.conversion.refused_summary` line with the fix — on the previous version, release that pipeline
+or delete the API, then upgrade again. There is no version floor, no `Recreate` step and no other runbook.
+
+**Schedules join the same conversion (#786 U2).** In the same startup step, before the scheduler dispatches anything,
+every live pipeline schedule still following its pipeline's current version (payload schema 1,
+`"version": "current"`) is pinned to the exact version CURRENT names at that moment (schema 2). Only the payload's
+`version` and its schema number change — bindings, parameters, cron, timezone, missed-run policy and notification
+settings are untouched. Each of the schedule's queued runs is pinned from its OWN payload copy: a run queued before an
+edit of the schedule's target still names the old pipeline, and is pinned to the version THAT pipeline's current
+version names — never the schedule's — in the same transaction as its schedule. One
+`event=scheduler.conversion.converted` line per schedule, one `event=scheduler.conversion.converted_run` line per queued
+run (its own pipeline and version) and an `event=scheduler.conversion.summary` total; a restart converts nothing twice.
+A schedule — or a queued run — whose pipeline is missing or has no current version refuses the start exactly as an API
+does: one `event=scheduler.conversion.refused` ERROR line each (`kind=schedule`, or `kind=run` naming the run and its
+schedule; pipeline, `reason=missing_pipeline|no_versions|no_current`) and an `event=scheduler.conversion.refused_summary`
+line — on the previous version, release that pipeline or delete the schedule, then upgrade again. Every API, schedule
+and queued run is checked before anything is written, so a refusal leaves all of them unconverted. A current version
+that is a DRAFT the deployment does not run converts to that draft pin and keeps refusing at run, as before.
+
+**One rollback boundary for the whole conversion (#895).** The APIs and the schedules convert in ONE transaction — the
+APIs first, then the schedules and their queued runs. A conversion that is refused or fails part-way — a target that
+loses its current version while the start converts, or any write that fails — rolls back everything that start
+converted: every API, schedule and queued run is left exactly as it was, nothing half converted, and the server refuses
+to start with the refusal lines above (or the failure's own error). Fix the cause and start again: the restart converts
+everything, in one piece. The migrations Flyway applied in that start are already committed and are **not** rolled
+back — only the conversion, which runs after them, is undone. If another writer touches the same rows during the start
+(for example a second instance on the same database), the whole conversion rolls back and is retried from fresh rows,
+at most three times, each retry logged as an `event=upgrade.conversion.retry` WARN line; a third loss refuses the start
+with the instruction to stop every other instance on the database. The success lines (`…converted`, `…converted_run`,
+`…summary`) are logged only after the conversion commits; a start that rolls back logs none of them.
+
 ### 8.3 Upgrade procedure (recommended)
 
 1. Review release notes for breaking changes.
@@ -713,6 +1094,55 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
 
 For k8s: rolling update via `kubectl rollout`. Each terminated pod flips its readiness and cancels its in-flight executions on the way out (§8.3.1); the `preStop` and `terminationGracePeriodSeconds` settings in §8.3.2 keep that orderly.
 
+**Managed lake egress proxy (#845).** The first boot of a build that sets
+`datapipelines.lake.reads.egress-proxy` (the reference compose file and Helm chart do) rewrites
+the managed lake datasource row with its `egress_proxy` key, and the next lease builds a new
+generation through the proxy; later boots leave the row unchanged. Bring the proxy up with the
+app: `./app.sh` starts the compose services (on the first `up`, compose runs the `egress-config`
+renderer to completion before `egress-proxy` starts — and a renderer that exits nonzero leaves
+`up` failing with `didn't complete successfully` and no proxy), and the chart renders it
+by default. With the lake
+enabled, a new instance whose proxy is not yet answering is refused at boot
+(`lake.boot.egress_proxy`) rather than serving uncapped reads. During a rolling update an
+older instance still reads directly until it is replaced: its connection setup ignores the key
+it does not know. An older instance that RESTARTS mid-rollout rewrites the row without the key;
+the next new instance's boot puts it back, so finish the rollout rather than pausing it. To opt
+out, set the key empty (compose) or `lake.egressProxy.enabled=false` (Helm); the next boot
+removes the key from the row. Upgrading a deployment that predates #862: the chart's proxy
+`ConfigMap` is gone — the config now lives in a volume rendered by the pod's init container,
+and `helm upgrade` replaces the proxy Deployment when any render input changes (the
+`checksum/egress-render-inputs` annotation rolls both pods, so the allowlist and the reader
+never disagree); compose's inline `configs:` block is replaced by
+the `egress-config` renderer service and a shared volume. Under COMPOSE, changing a lake value
+needs one extra step: `docker compose up -d` reruns the renderer and rolls the app, but the
+RUNNING proxy keeps its previous config in memory — compose does not cascade a dependency's
+recreation to its dependents (observed: `render` recreated and rerun while `egress-proxy`
+stayed up). Finish the change with `docker compose up -d --force-recreate egress-proxy` (or
+`--force-recreate` across all three services), and until then expect the boot check to refuse
+a changed max-age the proxy does not declare, or a changed store the proxy's allowlist does not
+name (its stamped 403) — fail-closed. Under the CHART, a lake key changed inside `existingSecret`
+is invisible to Helm (no checksum moves): restart both deployments (§6.4).
+
+**Proxy availability settings (#863).** The §6.4 availability blocks are off by default and an
+upgrade that leaves them off changes nothing: one replica renders, runs and drains exactly as
+before. A PDB constrains Eviction API requests during drains; it does not constrain Deployment
+rolling updates, which follow the Deployment's update strategy. A drain or a rolling upgrade may
+replace a proxy pod. An in-flight
+managed read through that pod fails, and httpfs retries it on a fresh connection to a healthy
+replica — the same bounded retry budget that carries every read (two retries after the first
+attempt, on I/O errors; §4.3's bounds); a read whose budget is exhausted fails its query, and the
+datasource recovers on the next lease. These settings reduce eviction and placement risks: a
+reader lease already protects its snapshot independently of the proxy's lifetime, so a replaced
+proxy never loses or corrupts a snapshot — worst case is a failed and retried read. On the
+single-node default keep the budget off: an enabled `minAvailable: 1` budget on one replica can
+never be honoured, and every voluntary disruption of that node — the upgrade itself — would
+deadlock (the render refuses exactly that configuration, §6.4).
+
+**Scheduler notification kinds (V51).**
+
+1. Keep `datapipelines.scheduler.notifications.enabled=false` (the default) throughout the first rollout containing V51; with mail off this is the ordinary rolling update.
+2. Enable notifications only after **every instance** runs the new image. A new sender writes `notification_*` trail kinds which an older image cannot read: its strict `TrailKind.fromWire` throws when `ScheduleRunRepository` reads that run's detail. Widening the database CHECK is not reader compatibility. Do not enable during the mixed-version fleet.
+
 #### 8.3.1 Graceful shutdown mechanism
 
 Shutdown is a defined sequence, not "stop the process and hope". On `SIGTERM` the instance, in this order:
@@ -742,6 +1172,8 @@ lifecycle:
 
 ### 8.4 Rollback
 
+**Scheduler notifications (V51): older-image boundary.** Before downgrading to an image older than V51, disable notifications on every instance and let the current sender settle the backlog: `SELECT count(*) FROM schedule_notification_deliveries WHERE state = 'pending'` must be zero. Disabling stops new enqueue; the current sender settles existing rows as failed/disabled, so this drain is not a promise to send them. Already recorded kinds remain: `SELECT DISTINCT run_id FROM schedule_run_events WHERE kind LIKE 'notification\_%'` identifies runs whose detail is unreadable by the older image until it is upgraded again. The reader stays strict ([Enums](enums.md) additive-only wire convention); this feature promises no rolling reader compatibility, and an additive CHECK alone does not make an old artifact safe. Do not delete historical trail rows to hide the boundary.
+
 - App rollback: redeploy previous image. Schema migrations are forward-only — if a migration was applied, you can't run the old app version against the new schema.
 - **For MINOR upgrades**: schema changes are additive; rollback usually works.
 - **For MAJOR upgrades**: take a DB backup before upgrade; restore it to roll back.
@@ -760,12 +1192,13 @@ lifecycle:
 - [ ] Redis `maxmemory-policy noeviction` (§4.2.1) — correctness, not tuning.
 - [ ] OIDC client secrets from a secret manager, not a plaintext env file; at least one provider configured (§5.1).
 - [ ] NetworkPolicy restricts app's egress.
+- [ ] With the managed lake: only the app reaches the egress proxy (the chart's proxy policy does this), the proxy's config forwards only to the derived store authority (§4.3), and the proxy's network egress is limited to the object store (`lake.egressProxy.networkPolicy.storeEgress`, §6.4). A plain-`http://` store endpoint is reachable only inside the deployment's network (the proxy sees its signed requests in clear).
 - [ ] Service account / IAM role has least privilege.
 - [ ] Container runs as non-root user (enforced in Dockerfile).
 - [ ] Container filesystem read-only except for configured volume mounts.
 - [ ] Resource limits set (CPU + memory) per deployment.
 - [ ] Audit log retained per compliance policy.
-- [ ] No `/actuator/*` path reachable on the application port; `/actuator/prometheus` on the management port (`management.server.port`), cluster-internal only ([Observability §4.2](observability.md#42-exposure)). The management port is never published to a host or load balancer; `MANAGEMENT_SERVER_ADDRESS` defaults to loopback — setting it to `0.0.0.0` (required for k8s scraping) demands an accompanying NetworkPolicy confining the port to the monitoring namespace.
+- [ ] No `/actuator/*` path reachable on the application port; `/actuator/prometheus` on the management port (`management.server.port`), cluster-internal only ([Observability §4.2](observability.md#42-exposure)). The management port is never published to a host or load balancer; `MANAGEMENT_SERVER_ADDRESS` defaults to loopback — setting it to `0.0.0.0` (required for k8s scraping) demands an accompanying NetworkPolicy that admits only the scraper to the management port. Because that policy selects the app pods, it isolates their app port too, so it must also carry the app-port rule you declare. The reference chart implements this check as the `management` block: `management.expose` is the opt-open switch (it pins `0.0.0.0` and renders the port and headless `Service`), and `management.networkPolicy.enabled` renders the policy. That policy carries the scraper rule on the management port plus the app-port rule from `appIngress.from`, or every source under the explicit `appIngress.allowAll: true`. The render refuses both scraper selectors empty, no app-port declaration, and a bare label map in place of a `LabelSelector`. Everything stays OFF by default ([§6.4](#64-kubernetes-recommended-for-production)).
 - [ ] Internet-exposed deployments may prefer to omit `-Pdatapipelines.commit` at build time — a public `/info` commit hash maps the instance to exact source revisions.
 - [ ] The `lib/` driver drop-in mount is **read-only** in the container, populated at image build or by a trusted init container, never writable by the app user; `LOADER_PATH`, if set, comes from the image — never inherited from the deployment environment (a writable `lib/` is code-execution-by-file-drop).
 - [ ] Production Redis requires `requirepass` (or ACLs) **and** TLS, or is confined to a private network segment with a NetworkPolicy — it holds fully materialized caller results for up to an hour (D9). The app logs a structured WARN at startup when the Redis password is empty and the host is not loopback under `development`, and refuses to start under `hardened` ([Configuration §7](configuration.md#7-config-validation)).
@@ -775,9 +1208,26 @@ lifecycle:
 ## 10. Distribution License
 
 - **Code**: AGPL-3.0 (see [LICENSE](../LICENSE); contributions under the [CLA](../CLA.md)).
-- **Dependencies**: only those with compatible licenses bundled by default. Oracle and MySQL drivers optional via Gradle profile (operator's responsibility to accept their licenses).
-
-LICENSE and NOTICE files at repo root.
+- **Third-party runtime notices**: `:modules:app:generateThirdPartyNotices` reads the
+  resolved `productionRuntimeClasspath` POMs (walking parents for inherited licences),
+  plus Spring Boot's packaged jar-mode tools and both Linux GraalJS isolate POMs.
+  The isolate versions come from the Dockerfile's `GRAALJS_VERSION` ARG. The generated
+  file lists artifact coordinates, POM licence names, SPDX identifiers and vendored
+  licence texts; unknown, missing or stale licence mappings fail the build.
+- **Distribution locations**: the boot jar contains `META-INF/THIRD-PARTY-NOTICES`;
+  the image also contains `/app/THIRD-PARTY-NOTICES`, readable by the application user.
+  `LICENSE` at the repository root covers the product's own code. The generated
+  notices are build outputs, not a hand-maintained root `NOTICE` file.
+- **Optional drivers**: `-Pmysql` and `-Poracle` include their drivers and corresponding
+  notices only in those builds. MySQL declares GPL-2.0-only with the Universal FOSS
+  exception; Oracle's FUTC is identified as `LicenseRef-Oracle-FUTC` (no SPDX-listed
+  identifier). Operators remain responsible for their use and redistribution terms,
+  including drivers added through `lib/` after the build.
+- **Coverage boundary**: these notices cover Maven runtime components and the isolate,
+  not the base operating system, separately downloaded DuckDB extensions
+  ([#692](https://github.com/msabiransari/datapipelines/issues/692)), or vendored browser
+  assets ([#693](https://github.com/msabiransari/datapipelines/issues/693)).
+  See [Development §10.2](../DEVELOPMENT.md#102-quality-tooling) for the generation and update procedure.
 
 ---
 
@@ -932,9 +1382,26 @@ section, and an outsider can call any demo endpoint with it and no account
 60 requests per 60 s per key, `429 rate_limit.exceeded` — and the lake family's
 gate: the lake endpoint pays S3 egress per call, so it is published only while a
 budget stands behind it). Blank the setting in `deploy/secrets.env` and the next
-boot retracts the public API — no key, no demo endpoints, no page section; change
-the value and the next boot rotates the key. Nothing changes for keys real users
-mint on the `/api-keys` page.
+boot revokes the managed demo key and removes the page section; where authoring is enabled,
+it also retires the demo APIs so they stop serving. Change the value and the next boot
+rotates the key. Retraction, like a manifest that no longer
+names a path, goes through the API lifecycle (#889), and what it achieves depends on the
+authoring capability (`datapipelines.deployment.authoring-enabled`, configuration.md §3.19):
+
+- **Authoring enabled (the default):** a demo API that was released is retired, never
+  deleted — its draft is purged and every released version discarded, so the row and its
+  history stay and nothing serves. The revoked demo key gets `401`; any other caller whose
+  key is still valid and bound to the path gets `503 endpoint.pipeline_not_released`.
+  Setting a key (or naming the path) again releases a new version of the same API.
+- **Authoring disabled — a known limitation (#897):** the version verbs refuse there, so a
+  demo API that was released is **not** retired. Blanking the key still revokes
+  `demo-public-key`, but the API keeps its released versions and **keeps serving to any
+  other valid key bound to it**; each boot logs one INFO line,
+  `event=demo.endpoint_retire_deferred path=… pipeline=…`, per such API. Until #897 lands,
+  an operator who needs those paths dark revokes every other key bound to them on the
+  `/api-keys` page, or retires the API on a boot with authoring enabled.
+
+Nothing changes for keys real users mint on the `/api-keys` page.
 
 The **lake** family is different in kind from the other two and the difference is
 worth stating before the commands: it has a compose profile and a `--demo` flag
@@ -1012,9 +1479,15 @@ or drop the jar into `lib/`. `./app.sh --start --demo nyc[,trade[,lake]]` does t
    `demo` workspace — workspaces are created by super admins, not provisioned per
    user ([Auth §4.2](auth.md#42-user-provisioning) step 4, D-R11) — which is where
    the example pipelines are seeded.
-2. **Copy your MCP key** from the top bar. It is created when you sign in to the
-   workspace, one per person per workspace, and the chip's Copy button puts it on your
-   clipboard (`GET /api/v1/auth/api-keys/mine` reads it; there is no endpoint that creates one).
+2. **Create your MCP key** after signing in: open the [Keys page
+   (UI Screens §4.19)](ui-screens.md#419-api-keys-keys-v2--the-one-creation-path-for-every-kind)
+   at `/api-keys`, choose **New API key**, select kind `mcp`, and choose a role the
+   creator may give under the subset rule. The demo's bootstrap super admin may
+   choose any offered MCP role; authors, promoters and workspace admins may also
+   create MCP keys, but viewers cannot. Copy the plaintext from the one-time reveal.
+   To rotate a key, revoke it on the Keys page and create another. REST clients can
+   create one with `POST /api/v1/auth/api-keys` ([Auth §7.4](auth.md#74-issuance),
+   [REST API §16.1](rest-api.md#161-api-keys-creation-is-on-the-keys-page--keys-v2)).
 3. **Give the agent the MCP endpoint** `http://localhost:8080/mcp` and that key.
    It can list the seeded pipelines, read the three sample datasources' schemas,
    and execute `nyc/mobility/revenue_by_borough` or `nyc/mobility/rainy_vs_dry_ridership` immediately —
@@ -1095,8 +1568,10 @@ the same query to **~0.95 s cold / 0.09 s warm** (index-only scan, 196 buffer hi
 
 `sample-data/lake/<version>/` is different in kind from the two above and the
 difference is the point: **it is read in place**. Nothing is downloaded at demo
-start, nothing is restored into an engine, and there is no one-shot loader
-service. The query engine reads the Parquet objects over HTTPS and fetches only
+start and nothing is restored into an engine. The `sample-data-lake` one-shot
+service runs `deploy/sample-data/place-lake.sh` to place the repository's bootstrap
+and example files on the shared volume; it does not download the dataset.
+The query engine reads the Parquet objects over HTTPS and fetches only
 the ones a query's predicates name.
 
 What is published (build runbook:
@@ -1222,6 +1697,28 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.71 | #753/#754 image account ids and distribution — renumbered at final sync after dependency-graph | **§3.1:** the image's `datapipelines` account has fixed ids, UID/GID 999 (the id the unpinned system account already received), and the reference chart's application pod `securityContext` pins `runAsUser`/`runAsGroup`/`fsGroup` to the same 999 instead of 1000, an id the image never had; `ImageUserPinSpecDriftTest` holds the Dockerfile, the chart and this bullet equal. Chart 0.4.0 → 0.4.1. The section no longer claims a registry publish: nothing in this repository pushes the image; build it from a checkout and point Compose or the chart at it. |
+| 2026-11-11 | v1.70 | #895 upgrade conversion, one rollback boundary | **§8.2:** the APIs and the schedules convert in ONE transaction, APIs first — a refused or failed conversion leaves every API, schedule and queued run as it was, and a restart after the fix converts everything; the migrations Flyway applied stay applied; a concurrent writer rolls the conversion back and it is retried from fresh rows up to three times (`event=upgrade.conversion.retry`); success lines are logged only after the commit. Replaces the schedules-only "ONE transaction" sentence of v1.68. |
+| 2026-11-11 | v1.69 | #889 demo API retirement through the lifecycle | **Appendix B, the demo API:** where authoring is enabled, blanking the key (or a manifest that drops a path) retires a released demo API through the API version verbs — draft purged, every released version discarded, the row kept; the revoked demo key gets `401`, another valid bound key `503 endpoint.pipeline_not_released` — instead of deleting it; a key set again releases a new version of the same API. Where authoring is disabled the managed key is revoked but the API is not retired and keeps serving to other valid bound keys — a known limitation tracked by #897, with the operator's workaround. |
+| 2026-11-11 | v1.68 | #786 schedules pin exact versions (U2) | **§8.2:** schedules join the upgrade's in-place conversion — each live schema-1 schedule (and its queued runs) is pinned to the version CURRENT names, only the version selector changing; a schedule whose pipeline has no current version refuses the start with `kind=schedule` lines; both kinds are checked before anything is written. |
+| 2026-11-10 | v1.67 | #786 API versions, exact pins (U1) | **§8.2:** the upgrade to API versions — stop the one server, apply, read the conversion report, or the refusal list with its fix (release the pipeline or delete the API on the previous version, then upgrade). No floor, no `Recreate`. Schedules join the same step in #786's second unit. |
+| 2026-11-09 | v1.66 | #863 merge follow-up | **§6.4/§8.3:** clarify Eviction API versus Deployment-rollout protection, soft versus hard skew, and single-domain scheduling without `minDomains`; document signed 32-bit availability limits. Correct the default-environment description and render verdict count (141), including upper-bound and disabled-field checks. |
+| 2026-11-08 | v1.65 | #863 egress proxy availability | **§6.4:** the proxy's optional availability blocks, both OFF by default (the one-replica default render unchanged): `lake.egressProxy.replicaCount` is render-validated (whole, > 0, unquoted); `podDisruptionBudget` renders a `policy/v1` PDB selecting only the proxy pods (the Deployment's own selector, never a value), with `minAvailable` ≥ 1 and strictly below `replicaCount` — `minAvailable = replicaCount` deadlocks every voluntary eviction and is refused, enabled on the one-replica default included; `topologySpreadConstraints` renders one best-effort constraint whose `labelSelector` is always the proxy's own (`maxSkew` whole > 0; `whenUnsatisfiable` `ScheduleAnyway`/`DoNotSchedule`; non-empty `topologyKey`); disabled blocks are inert. Chart 0.3.0 → 0.4.0. **§8.3:** the availability upgrade note — a replaced proxy pod fails in-flight managed reads, retried by httpfs on a fresh connection within the bounded budget; leases protect snapshots independently; keep the budget off on one node. CI paragraph: the verdict count is re-measured (133) and the egress/availability cases named. `helm-check.sh` gains `(j)`/`(j2)` renders and ten `(j-r)` refusals. |
+| 2026-11-07 | v1.64 | #845 managed reads egress proxy | **§4.3:** the managed lake datasource's object-store requests leave through the egress proxy; what it sees, holds and refuses at boot; a temporary accommodation until duckdb-httpfs#519. **§6.3:** the compose `egress-proxy` service and why the app waits for it to start, not be healthy. **§6.4:** the chart's proxy `Deployment`/`Service`/`ConfigMap` (`lake.egressProxy.*`, ON by default; chart 0.2.1 → 0.3.0), the app env entries and `extraEnv` refusals, and the proxy's own `NetworkPolicy` (ingress from the app pods on 3128 only; egress restricted when the store is declared, plus DNS). **§8.3:** the upgrade note (the managed row is rewritten on the first boot; boot refused until the proxy answers; older instances read directly). **§9:** a checklist line for the proxy's fence. `helm-check.sh` gains the parsed egress contract (`(a-off)`, `(i)`–`(i6)`). |
+| 2026-11-04 | v1.63 | #781 merge follow-up | **§3.1:** state the version guard's detected-literal scope, ownership exclusions and uncaptured-bare-version limit; require reviewing the tracked-file inventory during a bump. |
+| 2026-11-04 | v1.62 | #781 | **§3.1:** the three-input DuckDB re-pin paragraph becomes the bump runbook: the version catalog's `duckdb-jdbc` is the one hand-edited DuckDB version, then cold locks and verification metadata, the core ARG and checksums, closures, the hand-declared `CORE` review, `DuckDbVersionSpecDriftTest`'s red and re-probe lists, and the E9 read-posture harness rerun. The notices build now refuses an ARG, reviewed core tag or core closure row that disagrees with the catalog. No version changes. |
+| 2026-11-01 | v1.61 | #685 merge follow-up | **§3.1 / §6.5:** the image disables glibc's native thread-stack cache before its JVMs start; overrides retain that entry, and bare JVM launches set it before Java starts. The Dockerfile drift guard pins the declaration and launch order. |
+| 2026-10-28 | v1.60 | #747 | **§3.1:** the DuckDB re-pin recipe refreshes each extension's linked closure, `deploy/duckdb-extension-ports/<name>.tsv` (the vcpkg port closure, direct and transitive, plus the DuckDB core `third_party` code and port-vendored code both binaries' symbols witness), before reviewing every new component's licence; the generator refuses a closure bound to another commit, a closure entry without a reviewed licence and a reviewed component missing from the closure. |
+| 2026-10-27 | v1.59 | #743 — renumbered at merge after #692’s v1.58 | **§3.1:** the four image bullets state what the Dockerfile builds — base image `eclipse-temurin:21-jre` (Ubuntu glibc; argon2-jvm loads its native library through JNA), a single-stage build (the boot jar is built on the host and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate + resource cache and the third-party notices file), the `useradd --system` account with no fixed UID, and the exec-form entrypoint naming the GraalJS resource cache and `/app/datapipelines.jar`; the timezone paragraph no longer claims the entrypoint bakes the UTC flag in — every deployment passes `-Duser.timezone=UTC` itself. `DeploymentImageBulletsSpecDriftTest` pins the bullets to the Dockerfile (one `FROM` tag, the `ENTRYPOINT` array verbatim, the `USER`/`useradd --system` account) and refuses the retired claims — the base tag, the builder-stage build, the builder-image pin, the JVM-flags variable, the fixed UID, the wrong jar path and the baked-in-UTC claim — described here rather than quoted, so the retired-words grep over this file stays empty. The Dockerfile's healthcheck comment now names the Ubuntu base, not alpine. |
+| 2026-10-26 | v1.58 | #692 | §3.1: checksum-pin all eight decompressed DuckDB extension binaries, include commit-bound extension and direct vcpkg component notices, and document the three-input re-pin procedure. |
+| 2026-10-26 | v1.57 | #693 — renumbered at merge after #570’s v1.56 vendored browser-asset notices | **§6.2A:** the offline `:modules:web:generateVendoredAssetNotices` task renders the vendor manifest and upstream licence files to `/vendor/THIRD-PARTY-NOTICES.txt`, packaged in the web jar and website export. Missing coverage, unknown or mismatched licences and stale allowances fail the build. |
+| 2026-10-26 | v1.56 | #570 unused MapLibre CSS | **§6.2A:** patch 0004 drops the unreachable maplibre-gl stylesheet require from the non-map custom bundles; both bundles rebuilt and hashes and sizes re-pinned, with the rule to drop the patch when a `map` trace joins a trace list. |
+| 2026-10-25 | v1.55 | #702 | **Appendix B step 2:** replaced the top-bar chip, login mint and `GET /api/v1/auth/api-keys/mine` flow retired by keys v2 (#233, Auth v3.5) with the Keys page / `POST /api/v1/auth/api-keys`, the role chosen under the subset rule and the one-time reveal. The v1.28 row remains as history. Prose only. |
+| 2026-10-25 | v1.54 | #712 — renumbered at merge after #442’s v1.52/v1.53 | **§6.4:** the management port's chart exposure (configuration.md §3.14) — a `management` values block, everything OFF by default (byte-identical default render): `management.expose` adds the management `containerPort` (from `management.port`), pins both `MANAGEMENT_SERVER_*` env entries (address `0.0.0.0` — the opt-open switch) and a headless `Service` (`clusterIP: None`); `management.networkPolicy.enabled` adds the chart's one ingress `NetworkPolicy` for the app pods, which carries two rules: the scraper peers on the management port, and the app-port rule from `appIngress.from` (`NetworkPolicyPeer`s, verbatim) or every source under the explicit `appIngress.allowAll: true`. Every selector is a full `LabelSelector`. The render refuses both scraper selectors empty, no app-port declaration, `allowAll` with a `from`, a bare label map, an unknown or empty peer and a quoted `allowAll`; the isolation and union semantics, and how the policy combines with operator-owned ones, are stated. `management.serviceMonitor.enabled` adds a `ServiceMonitor`. Any `extraEnv.MANAGEMENT_SERVER_*` double mapping is refused (Kubernetes honours the last duplicate env name silently). Chart 0.2.0 → 0.2.1. `helm-check.sh` grows to lint plus eighty-nine verdicts (`(h)`–`(h5h)`), with a pinned `kubeconform` validating every successful render against the Kubernetes 1.35.0 schema and a parsed NetworkPolicy contract. **§9:** the management-port sentence names the app-port rule. `HelmManagementValuesSpecDriftTest` pins the values, the expose guards, the refusals, the three templates' flag lines, the shared app port, the `matchLabels` example and the configuration.md §3.14 row. |
+| 2026-10-25 | v1.53 | 442c (#442) | §8.3: keep scheduler mail off until every instance understands V51 notification trail kinds. §8.4: disable, drain and account for old readers refusing historical notification kinds before downgrade. |
+| 2026-10-24 | v1.52 | 442b (#442) | §5.1: the one optional key with a startup requirement of its own — `datapipelines.scheduler.notifications.enabled=true` needs the mail transport and `auth.base-url` or startup refuses; under `development` nothing sends until the recipient-domain allowlist names a domain. |
+| 2026-10-24 | v1.51 | #688 (Helm portion) — renumbered at merge after #677’s v1.50 | **§6.4:** the nine JavaScript runtime keys (configuration.md §3.28) are named chart values under `script.js`, all empty by default — an empty value renders no env entry, inheriting the image's own isolate directory and the app's derived isolate memory. `script.js.isolateDir` is refused at render time outside the image's launcher-path entries (`/app/lib`, `/opt/graaljs`), and an `extraEnv` double mapping of any of the nine is refused like the DuckDB keys. Number validation stays the app's (startup, by name). Chart 0.2.0; `helm-check.sh` grows to lint plus ten template cases (all-nine render, the single-key or-clause proof, the nine double-mapping refusals, the isolateDir refusal and its two admitted entries); `HelmScriptJsValuesSpecDriftTest` pins doc, chart, values and the Dockerfile's launcher-path list together. |
+| 2026-10-24 | v1.50 | #677 third-party notices | §10 documents generated Maven/isolate notices in the jar and image, the unresolved/stale licence guards, optional-driver terms and the remaining distribution boundaries. |
 | 2026-10-22 | v1.49 | 8b (#8) | Documents the isolate directory/loader agreement, pre-installed resources on read-only roots, shared-isolate failure mode and memory sizing. |
 | 2026-10-21 | v1.48 | #8 lane 8a the JavaScript isolate (owner ruling 2026-10-21) | **§3.5** the `lib/` drop-in paragraph quotes the image's value as it now is, `ENV LOADER_PATH=/app/lib,/opt/graaljs`: the drop-in directory, then `/opt/graaljs`, where the image fetches its platform's SHA-256-pinned GraalJS isolate jar. One list in one `ENV` because `PropertiesLauncher` reads a `-Dloader.path` before the variable — an ENTRYPOINT `-Dloader.path=/opt/graaljs` would have silently dropped the drop-in (measured in lane 8a). The mount point, its mode and the never-from-the-environment rule are unchanged. `ImageLoaderPathSpecDriftTest` pins the new value. Renumbered at merge after #666's v1.47. The engine's operator-facing configuration and the rest of the image's JavaScript story are lane 8b's. |
 | JavaScript isolate | `js-isolate.jar` is in `datapipelines.script.js.isolate-dir`, which is one loader-path entry; the native resource cache is pre-installed and read-only; startup logs one isolate-loaded line |

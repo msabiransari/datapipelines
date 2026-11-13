@@ -146,7 +146,7 @@ class OverviewDashboardsRenderTest {
         val inventory = UiConfig().familyInventory(mockk(), mockk(), dashboards, mockk(), mockk())
         val recent = UiConfig().familyRecent(mockk(), mockk(), dashboards, mockk(), mockk())
         return OverviewPage.of(
-            OverviewPage.Family.DASHBOARDS,
+            OverviewFamily.DASHBOARDS,
             false,
             inventory.chartsFor(NavigationFamily.DASHBOARDS, workspace, LensedView.EVERYTHING, NOW, OverviewRenderSupport.ACTIVE_DAYS),
             recent.forFamily(NavigationFamily.DASHBOARDS, workspace, LensedView.EVERYTHING),
@@ -156,7 +156,7 @@ class OverviewDashboardsRenderTest {
 
     private fun page(inventory: Inventory): OverviewPage =
         OverviewPage.of(
-            OverviewPage.Family.DASHBOARDS,
+            OverviewFamily.DASHBOARDS,
             false,
             ChartsResult.Available(OverviewRenderSupport.chartsOf(inventory, Activity.empty(NOW, OverviewRenderSupport.ACTIVE_DAYS))),
             RecentResult.Available(emptyList()),

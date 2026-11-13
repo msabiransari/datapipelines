@@ -1,6 +1,7 @@
 package co.datapipelines.scripting
 
 import co.datapipelines.scripting.ScriptingTestSupport.engine
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -44,12 +45,63 @@ import java.util.concurrent.atomic.AtomicReference
  * module's `test`. On CI run 36365034218 (2026-09-28, a 2-vCPU runner) an `OutOfMemoryError`
  * reached the test thread outside the old guard — at the evidence string of the OOM branch
  * itself — JUnit rethrew it (the one error it treats as unrecoverable), the Gradle test worker
- * died, and the module's 62 other tests lost their verdict with it. The two rules that keep a
+ * died, and the module's 62 other tests lost their verdict with it. The rules that keep a
  * heap event a ROW rather than a dead worker — the `OutOfMemoryError` guard around everything
- * after the bomb, and the headroom check at every case's start — live in [BreachHarness], which
+ * after the bomb, the preload before either corpus, the OOM-caused linkage backstop, and the
+ * headroom check at every case's start — live in [BreachHarness], which
  * the JavaScript suite shares (#8 lane 8a).
  */
 class JsonataBreachTest {
+    @Test
+    fun `OOM linkage backstop records a row and later cases still run`() {
+        BreachHarness.requireCalibratedHeap()
+        val initialisers = listOf({ HeapInitialiser.value }, { MissingHeapInitialiser.value })
+        initialisers.forEach { initialise ->
+            val row =
+                BreachHarness.measure("class-init-oom") { _, _ ->
+                    initialise()
+                    error("the fixture must fail initialisation")
+                }
+            row.outcome shouldBe BreachOutcome.UNBOUNDED
+            row.evidence.startsWith("OutOfMemoryError on the test thread") shouldBe true
+            println("class-init backstop: $row")
+        }
+        val later =
+            BreachHarness.measure("later-timeout") { _, _ ->
+                val timeout = ScriptTimeoutException(Duration.ZERO, "later")
+                BreachRow("later-timeout", BreachOutcome.BOUNDED, timeout.code, 0, 0)
+            }
+        later.outcome shouldBe BreachOutcome.BOUNDED
+        println("later case: $later")
+    }
+
+    @Test
+    fun `non-OOM initialisation and missing classes remain loud`() {
+        BreachHarness.requireCalibratedHeap()
+        val first = shouldThrow<ExceptionInInitializerError> { BrokenInitialiser.value }
+        val later = shouldThrow<NoClassDefFoundError> { BrokenInitialiser.value }
+        listOf(first, later, NoClassDefFoundError("missing dependency")).forEach { error ->
+            val thrown =
+                shouldThrow<LinkageError> {
+                    BreachHarness.measure("unrelated-linkage") { _, _ -> throw error }
+                }
+            (thrown === error) shouldBe true
+            println("unrelated linkage rethrown: $thrown")
+        }
+    }
+
+    private object HeapInitialiser {
+        val value: String = throw ExceptionInInitializerError(OutOfMemoryError("fixture initialiser"))
+    }
+
+    private object MissingHeapInitialiser {
+        val value: String = throw NoClassDefFoundError("fixture initialiser").apply { initCause(OutOfMemoryError("fixture")) }
+    }
+
+    private object BrokenInitialiser {
+        val value: String = error("fixture initialiser")
+    }
+
     /** Body, the outcome §4.5's table predicts, and what "completed" would mean. */
     private data class Case(
         val name: String,
@@ -167,7 +219,7 @@ class JsonataBreachTest {
      *
      * The heap blowout on the TEST thread (#289) is the guard around all of it: whatever the
      * classification or the bookkeeping allocates after the bomb — the evidence strings, the
-     * heap delta, the row — an `OutOfMemoryError` there is the case's heap event, recorded
+     * heap delta, the row — an `OutOfMemoryError` or OOM-caused linkage error there is the case's heap event, recorded
      * UNBOUNDED once [BreachHarness.measure] has drained the heap. No case starts with more than
      * [BreachHarness.MAX_HELD_AT_START_MB] held.
      */

@@ -1,12 +1,14 @@
 package co.datapipelines.scheduler
 
 import co.datapipelines.pipeline.PipelineNameGrammar
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.transaction.support.TransactionTemplate
 import java.security.MessageDigest
 import java.time.Clock
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -36,6 +38,18 @@ class ScheduleService(
     private val mapper: ObjectMapper,
     /** #259 — the by-target read, in its own file while the follow-ups lane is in flight. */
     private val targetReads: ScheduleTargetReads,
+    /** #442 — the deployment's notification decision: the save-time allowlist check and the delivery state readers see. */
+    private val notificationPolicy: NotificationPolicy,
+    /** #442b — the outbox: a run's deliveries for its detail, and the explicit resend. */
+    private val notifications: NotificationRepository,
+    /**
+     * #841 (G0, dependency-graph record §15.1) — the metadata writer guard. A create, and an edit that changes the
+     * target reference, acquire the schedule's workspace FIRST in one metadata transaction, validate the reference
+     * through the executor UNDER it, then write (insert / revision CAS): revision CAS alone sees other schedule edits,
+     * never a pipeline discard or purge. Production wires the JDBC guard; [MetadataWriterGuard.NONE] is the directly
+     * constructed test default.
+     */
+    private val writeGuard: MetadataWriterGuard = MetadataWriterGuard.NONE,
     /**
      * The system identity's user id (R2) — every run's `actor_user_id`. LAST on purpose: a
      * call site may pass it as a trailing lambda, which binds to the final parameter (#250
@@ -55,7 +69,8 @@ class ScheduleService(
         request: ScheduleRequest,
         idempotencyKey: String?,
     ): Written<Schedule> {
-        val notifications = NotificationSettings.resolve(request.notifications, null, properties.notifications.maxRecipients)
+        val notifications =
+            NotificationSettings.resolve(request.notifications, null, properties.notifications.maxRecipients, notificationPolicy)
         val key = idempotencyKey?.let(::checkedKey)
         val hash = key?.let { hashOf(request, notifications) }
         // Pre-V49 keys hashed the same request without notification fields. Only the old defaults
@@ -65,9 +80,13 @@ class ScheduleService(
                 ?.takeIf { notifications.recipients.isEmpty() && notifications.events == NotificationEvent.DEFAULT }
                 ?.let { hashOf(request, null) }
         key?.let { replayCreate(workspaceId, actor, it, hash!!, legacyHash) }?.let { return it }
-        val validated = validate(workspaceId, request)
         return try {
             transactions.execute {
+                // #841: the writer guard first, then the reference's validation under it, then the insert — one
+                // transaction, so a pipeline writer (which takes the same workspace guard) can neither interleave
+                // between the target's validation and the insert nor be overtaken by it.
+                writeGuard.workspaces(listOf(workspaceId), ScheduleErrorCodes.WRITE_BUSY)
+                val validated = validate(workspaceId, request)
                 // The workspace row's lock serialises the cap's count with every concurrent insert
                 // (#253): count-then-insert under read committed alone lets N creates at the cap
                 // all pass the count and overshoot. One row, one workspace, held to the commit.
@@ -86,7 +105,7 @@ class ScheduleService(
                             workspaceId = workspaceId,
                             name = validated.name,
                             executorId = validated.executor.id,
-                            payloadSchemaVersion = validated.executor.payloadSchemaVersion,
+                            payloadSchemaVersion = validated.payloadSchemaVersion,
                             payload = request.payload,
                             parameters = validated.parameters,
                             targetRef = validated.targetRef,
@@ -121,14 +140,48 @@ class ScheduleService(
     ): Schedule {
         val current = schedules.findLive(workspaceId, id) ?: throw notFound(id)
         if (current.revision != expectedRevision) throw revisionConflict(current)
-        val validated = validate(workspaceId, request)
-        val notifications = NotificationSettings.resolve(request.notifications, current, properties.notifications.maxRecipients)
+        // #841 (record §15.1): an edit that leaves the executor and its payload — the reference — unchanged keeps
+        // revision CAS alone; one that sets or changes the reference joins the writer protocol: guard, validate the
+        // reference under it, revision-CAS write, all in one metadata transaction.
+        //
+        // #786 D.2: a payload stored in a schema its executor no longer writes is NOT unchanged even when its JSON is:
+        // saving it again writes it in the executor's schema, so it is that schema's save — guarded and validated in
+        // full as the executor's own payload (a resent schema-1 `"current"` is refused by the exact-pin grammar). Only
+        // a payload already in the executor's schema keeps the revision-CAS-only path.
+        val storedInExecutorSchema = executors.find(current.executorId)?.payloadSchemaVersion == current.payloadSchemaVersion
+        if (request.executor == current.executorId && request.payload == current.payload && storedInExecutorSchema) {
+            return edit(workspaceId, id, actor, expectedRevision, request, current, current.payloadSchemaVersion)
+        }
+        return checkNotNull(
+            transactions.execute {
+                writeGuard.workspaces(listOf(workspaceId), ScheduleErrorCodes.WRITE_BUSY)
+                edit(workspaceId, id, actor, expectedRevision, request, current, storedSchema = null)
+            },
+        )
+    }
+
+    /**
+     * [update]'s validate-then-write: the caller decides whether it runs under the writer guard. [storedSchema] is the
+     * schema of a payload the edit keeps (null: the request's payload is new, so it is in the executor's own schema).
+     */
+    private fun edit(
+        workspaceId: UUID,
+        id: UUID,
+        actor: UUID,
+        expectedRevision: Int,
+        request: ScheduleRequest,
+        current: Schedule,
+        storedSchema: Int?,
+    ): Schedule {
+        val validated = validate(workspaceId, request, storedSchema)
+        val notifications =
+            NotificationSettings.resolve(request.notifications, current, properties.notifications.maxRecipients, notificationPolicy)
         val timingChanged = validated.pattern.pattern != current.cron || validated.zone.id != current.timezone
         val edit =
             ScheduleEdit(
                 name = validated.name,
                 executorId = validated.executor.id,
-                payloadSchemaVersion = validated.executor.payloadSchemaVersion,
+                payloadSchemaVersion = validated.payloadSchemaVersion,
                 payload = request.payload,
                 parameters = validated.parameters,
                 targetRef = validated.targetRef,
@@ -213,7 +266,7 @@ class ScheduleService(
                 mapOf("schedule_id" to id.toString()),
             )
         }
-        executors.require(current.executorId).validate(workspaceId, current.payload, current.parameters)
+        executors.require(current.executorId).validate(workspaceId, current.payload, current.parameters, current.payloadSchemaVersion)
         val next =
             OccurrenceFunction.next(
                 OccurrenceFunction.parse(current.cron),
@@ -279,6 +332,13 @@ class ScheduleService(
                 mapOf("schedule_id" to id.toString()),
             )
         }
+        // #786 D.2: a payload stored under a schema its executor no longer writes is read-checked BEFORE a run is
+        // recorded — the executor refuses it (its catalogued code), so Run now queues nothing it would only refuse.
+        // A payload in the executor's own schema queues as before; the run's preparation decides the rest.
+        executors
+            .find(schedule.executorId)
+            ?.takeIf { it.payloadSchemaVersion != schedule.payloadSchemaVersion }
+            ?.validate(workspaceId, schedule.payload, schedule.parameters, schedule.payloadSchemaVersion)
         val now = clock.instant()
         val run =
             NewRun(
@@ -289,6 +349,7 @@ class ScheduleService(
                 scheduledAt = null,
                 referenceAt = now,
                 referenceTimezone = schedule.timezone,
+                targetRef = schedule.targetRef,
                 admitBy = now.plus(properties.lateness),
                 scheduleRevision = schedule.revision,
                 executorId = schedule.executorId,
@@ -334,6 +395,15 @@ class ScheduleService(
      * No transaction spans the walk: the lens may read the promotion target's inventory, and a
      * snapshot held across that call would hold a metadata connection with it. The across-request
      * `offset` a client pages by remains an offset, as for every list reader.
+     *
+     * #641: [condition] (`enabled` | `paused` | `blocked`, the [Schedule.condition] words; null or
+     * empty = all) narrows BOTH reads in SQL, before the lens — so a lensed reader's windows hold
+     * only rows of that condition, and the filtered list is the admitted set's rows of that word.
+     *
+     * #725: [outcome] (a [LastRunOutcome] wire word — `succeeded`, `failed`, `in-progress`,
+     * `did-not-run`, `never-ran`; null or empty = all) narrows both reads the same way, by each
+     * schedule's NEWEST run — the bucket [summary] counts it in, so a filtered list is exactly the
+     * set the home's Last run bar counts. It composes with [condition] and [prefix].
      */
     fun list(
         workspaceId: UUID,
@@ -341,18 +411,28 @@ class ScheduleService(
         limit: Int,
         offset: Int,
         viewer: TargetViewer,
+        condition: String? = null,
+        outcome: String? = null,
     ): List<Schedule> {
         prefix?.takeIf { it.isNotEmpty() }?.let {
             if (!PipelineNameGrammar.matchesPrefix(it)) {
                 throw requestInvalid("prefix", "a folder path: 1 to 9 lower-case segments separated by `/`")
             }
         }
-        if (!viewer.narrowed) return schedules.listLive(workspaceId, prefix, limit, offset)
+        val only =
+            condition?.takeIf { it.isNotEmpty() }?.let {
+                ScheduleCondition.fromWire(it) ?: throw requestInvalid("condition", CONDITION_WORDS)
+            }
+        val lastRun =
+            outcome?.takeIf { it.isNotEmpty() }?.let {
+                LastRunOutcome.fromWire(it) ?: throw requestInvalid("outcome", OUTCOME_WORDS)
+            }
+        if (!viewer.narrowed) return schedules.listLive(workspaceId, prefix, limit, offset, only, lastRun)
         val admitted = ArrayList<Schedule>()
         var after: String? = null
         var scanned = 0
         while (admitted.size < offset + limit && scanned < LENS_SCAN_LIMIT) {
-            val window = schedules.listLiveAfter(workspaceId, prefix, after, LENS_WINDOW)
+            val window = schedules.listLiveAfter(workspaceId, prefix, after, LENS_WINDOW, only, lastRun)
             admitted += admittedOf(window, workspaceId, viewer)
             if (window.size < LENS_WINDOW) break
             after = window.last().name
@@ -427,14 +507,67 @@ class ScheduleService(
         viewer: TargetViewer,
     ): RunDetail {
         visible(workspaceId, scheduleId, viewer)
-        val run =
-            runs.findInSchedule(workspaceId, scheduleId, runId)
-                ?: throw ScheduleException(
-                    ScheduleErrorCodes.RUN_NOT_FOUND,
-                    "No run '$runId' under schedule '$scheduleId'.",
-                    mapOf("schedule_id" to scheduleId.toString(), "run_id" to runId.toString()),
+        val run = runs.findInSchedule(workspaceId, scheduleId, runId) ?: throw runNotFound(scheduleId, runId)
+        return RunDetail(run, runs.trail(runId), notifications.deliveriesOfRun(runId))
+    }
+
+    /**
+     * #442b — queues one of a run's notifications again (rest-api §20.13): only a `failed` or
+     * `uncertain` delivery, which becomes `pending` and due now, its attempts kept. The sender
+     * re-checks the flag and the allowlist when it sends, and reuses the delivery's Message-ID, so
+     * a resend of an `uncertain` one may arrive as a second copy of the same message —
+     * [Resent.mayDuplicate] says so.
+     */
+    fun resendDelivery(
+        workspaceId: UUID,
+        scheduleId: UUID,
+        runId: UUID,
+        deliveryId: UUID,
+    ): Resent {
+        schedules.findLive(workspaceId, scheduleId) ?: throw notFound(scheduleId)
+        runs.findInSchedule(workspaceId, scheduleId, runId) ?: throw runNotFound(scheduleId, runId)
+        val resent =
+            transactions.execute {
+                val found =
+                    notifications.lockOfRun(runId, deliveryId)
+                        ?: throw ScheduleException(
+                            ScheduleErrorCodes.NOTIFICATION_NOT_FOUND,
+                            "No notification '$deliveryId' on run '$runId'.",
+                            mapOf("run_id" to runId.toString(), "delivery_id" to deliveryId.toString()),
+                        )
+                val prior = found.delivery
+                if (prior.state !in RESENDABLE) {
+                    throw ScheduleException(
+                        ScheduleErrorCodes.NOTIFICATION_NOT_RESENDABLE,
+                        "Notification '$deliveryId' is ${prior.state.wire}; only a failed or uncertain notification can be resent.",
+                        mapOf("delivery_id" to deliveryId.toString(), "state" to prior.state.wire),
+                    )
+                }
+                notifications.lockAdmission()
+                val pending = notifications.pendingCount()
+                if (pending >= properties.notifications.backlogMax) {
+                    throw ScheduleException(
+                        ScheduleErrorCodes.NOTIFICATION_BACKLOG_FULL,
+                        "The notification backlog is full; try resending after pending mail settles.",
+                        mapOf("pending" to pending, "backlog_max" to properties.notifications.backlogMax),
+                    )
+                }
+                val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
+                check(notifications.requeue(deliveryId, now)) { "the locked delivery $deliveryId was not re-queued" }
+                Resent(
+                    found.copy(
+                        delivery =
+                            prior.copy(
+                                state = DeliveryState.PENDING,
+                                nextAttemptAt = now,
+                                resendCount = prior.resendCount + 1,
+                                updatedAt = now,
+                            ),
+                    ),
+                    prior.state,
                 )
-        return RunDetail(run, runs.trail(runId))
+            }
+        return checkNotNull(resent)
     }
 
     /**
@@ -452,6 +585,9 @@ class ScheduleService(
         val admitted = read.take(cap)
         return ScheduleSummary.of(admitted, runs.latestStates(workspaceId, admitted.map { it.id }), complete = read.size <= cap)
     }
+
+    /** #442 — whether scheduler mail is on for this deployment, and if not, why (rest-api §20's `delivery`). */
+    fun notificationDelivery(): NotificationDeliveryState = notificationPolicy.state
 
     /** Live schedules in [workspaceId] — the workspace delete's content count. */
     fun countLive(workspaceId: UUID): Int = schedules.countLive(workspaceId)
@@ -472,10 +608,14 @@ class ScheduleService(
         return schedule
     }
 
-    /** Everything a create or an edit must satisfy before a row is written (record §3, §5, §6). */
+    /**
+     * Everything a create or an edit must satisfy before a row is written (record §3, §5, §6). [storedSchema] is the
+     * schema of a stored payload the write keeps; null means the request's payload is new, in the executor's schema.
+     */
     private fun validate(
         workspaceId: UUID,
         request: ScheduleRequest,
+        storedSchema: Int? = null,
     ): Validated {
         val name = request.name.trim()
         if (!PipelineNameGrammar.matches(name)) {
@@ -505,8 +645,9 @@ class ScheduleService(
         val policy =
             MissedRunPolicy.fromWire(request.missedRunPolicy)
                 ?: throw requestInvalid("missed_run_policy", "one of ${MissedRunPolicy.entries.map { it.wire }}")
-        val targetRef = executor.validate(workspaceId, request.payload, request.parameters)
-        return Validated(name, executor, request.parameters, targetRef, pattern, zone, policy)
+        val schema = storedSchema ?: executor.payloadSchemaVersion
+        val targetRef = executor.validate(workspaceId, request.payload, request.parameters, schema)
+        return Validated(name, executor, schema, request.parameters, targetRef, pattern, zone, policy)
     }
 
     /** The generic limits a payload honours whatever its executor (record §5): an object, 16 KiB, depth 8. */
@@ -611,6 +752,15 @@ class ScheduleService(
         return trimmed
     }
 
+    private fun runNotFound(
+        scheduleId: UUID,
+        runId: UUID,
+    ) = ScheduleException(
+        ScheduleErrorCodes.RUN_NOT_FOUND,
+        "No run '$runId' under schedule '$scheduleId'.",
+        mapOf("schedule_id" to scheduleId.toString(), "run_id" to runId.toString()),
+    )
+
     private fun notFound(id: UUID) =
         ScheduleException(ScheduleErrorCodes.NOT_FOUND, "No schedule '$id' in this workspace.", mapOf("schedule_id" to id.toString()))
 
@@ -658,6 +808,15 @@ class ScheduleService(
         private const val MAX_KEY_CHARS = 255
         private const val MAX_ECHO = 64
 
+        /** #641 — the `condition` refusal's `expected`: the three wire words, in [ScheduleCondition]'s order. */
+        private val CONDITION_WORDS = "one of " + ScheduleCondition.entries.joinToString(", ") { it.wire }
+
+        /** #725 — the `outcome` refusal's `expected`: the five wire words, in [LastRunOutcome]'s order. */
+        private val OUTCOME_WORDS = "one of " + LastRunOutcome.entries.joinToString(", ") { it.wire }
+
+        /** The states an explicit resend may queue again (#442b): never `pending` or `accepted`. */
+        private val RESENDABLE = setOf(DeliveryState.FAILED, DeliveryState.UNCERTAIN)
+
         private fun requestInvalid(
             field: String,
             expected: String,
@@ -697,11 +856,15 @@ data class Written<T>(
 data class RunDetail(
     val run: ScheduleRun,
     val trail: List<TrailEvent>,
+    /** #442b — the run's notification deliveries, in transition then recipient order. */
+    val deliveries: List<RunDelivery> = emptyList(),
 )
 
 private data class Validated(
     val name: String,
     val executor: JobExecutor,
+    /** The schema the validated payload is in — the one the write stores (#786 D.2). */
+    val payloadSchemaVersion: Int,
     val parameters: JsonNode,
     val targetRef: String,
     val pattern: CronPattern,

@@ -1,25 +1,42 @@
 package co.datapipelines
 
 import co.datapipelines.config.SharedRedis
+import co.datapipelines.metrics.MeterCatalogue
+import co.datapipelines.web.health.ScratchPathKind
+import co.datapipelines.web.health.ScratchSpaceReader
 import co.datapipelines.web.ratelimit.RateLimiter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldNotBeBlank
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.micrometer.core.instrument.MeterRegistry
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.client.TestRestTemplate
+import org.springframework.boot.test.web.server.LocalManagementPort
 import org.springframework.context.ApplicationContext
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
+import org.springframework.context.annotation.Primary
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.file.Path
 import java.security.SecureRandom
 import java.util.Base64
 
@@ -45,17 +62,40 @@ import java.util.Base64
  * values would be the back door through which literal secrets returned to the repository
  * after the 2026-08-07 HIGH-2 finding. The secrets below are generated per-run and never
  * written down. [ApplicationHardenedSmokeTest] is the other posture's boot.
+ *
+ * `@AutoConfigureObservability(tracing = false)`: a Spring Boot test switches metrics export
+ * OFF by default (`management.defaults.metrics.export.enabled=false`), which would leave the
+ * Prometheus registry and its scrape endpoint unbuilt. Production keeps Boot's default (on), so
+ * the smoke boot re-enables export to boot the shipped registry shape (#708). Tracing stays off:
+ * the application ships no tracer (observability.md §5).
  */
+@AutoConfigureObservability(tracing = false)
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
+@Import(ApplicationSmokeTest.PinnedScratchSpace::class)
 class ApplicationSmokeTest {
     @Autowired
     private lateinit var rest: TestRestTemplate
 
     @Autowired
     private lateinit var applicationContext: ApplicationContext
+
+    @Autowired
+    private lateinit var meterRegistry: MeterRegistry
+
+    @LocalManagementPort
+    private var managementPort: Int = 0
+
+    private val http: HttpClient = HttpClient.newHttpClient()
+
+    /** A plain anonymous GET on loopback — no session, no TestRestTemplate defaults. */
+    private fun get(
+        port: Int,
+        path: String,
+    ): HttpResponse<String> =
+        http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).GET().build(), HttpResponse.BodyHandlers.ofString())
 
     private val mapper = ObjectMapper()
 
@@ -184,6 +224,198 @@ class ApplicationSmokeTest {
     }
 
     /**
+     * #708 / #231 item 1 (failure-flow record §17 row 11): the MANAGEMENT port serves the Prometheus scrape and
+     * health ANONYMOUSLY — the port is the boundary, not a credential (observability.md §4.2) — while the
+     * application port keeps every `/actuator` path closed (the case above). Read over plain HTTP with no
+     * session, from the port Boot reports for the management child context (`@LocalManagementPort`).
+     *
+     * The index is pinned to exactly `health` and `prometheus` (the `-path` template links are the same
+     * endpoints, as in `EntryInventoryE2eTest`), so widening `exposure.include` is a red here, not a silent
+     * change. `datapipelines_executions_concurrent` is the execution-slot gauge registered at boot (#569);
+     * the two abandoned gauges prove A.3's prefix on the wire.
+     */
+    @Test
+    fun `the management port serves prometheus and health anonymously - and only those two endpoints`() {
+        val index = get(managementPort, "/actuator")
+        withClue("anonymous GET /actuator on the management port: ${index.body()}") { index.statusCode() shouldBe 200 }
+        println("event=scrape.evidence management_index=${index.body()}")
+        val links =
+            mapper
+                .readTree(index.body())["_links"]
+                .fieldNames()
+                .asSequence()
+                .filterNot { it.endsWith("-path") }
+                .toSortedSet()
+        links shouldBe sortedSetOf("self", "health", "prometheus")
+
+        get(managementPort, "/actuator/health").statusCode() shouldBe 200
+
+        val scrape = get(managementPort, "/actuator/prometheus")
+        scrape.statusCode() shouldBe 200
+        scrape.headers().firstValue("Content-Type").orElse("") shouldStartWith "text/plain"
+        val series = scrape.body().lines().filterNot { it.startsWith("#") }
+        println(
+            "event=scrape.evidence head=\n" +
+                scrape
+                    .body()
+                    .lines()
+                    .take(SCRAPE_EVIDENCE_LINES)
+                    .joinToString("\n"),
+        )
+        listOf(
+            "datapipelines_executions_concurrent",
+            "datapipelines_script_evaluations_abandoned",
+            "datapipelines_parameters_selectors_abandoned",
+        ).forEach { family ->
+            withClue("a `$family` series in the anonymous scrape") {
+                series.any { it.startsWith("$family ") || it.startsWith("$family{") } shouldBe true
+            }
+        }
+
+        // An endpoint the index does not list is refused anonymously on the management port, and the
+        // application port answers neither the scrape nor the index (status recorded in the evidence).
+        val appScrape = rest.getForEntity("/actuator/prometheus", String::class.java).statusCode
+        val managementEnv = get(managementPort, "/actuator/env").statusCode()
+        println("event=scrape.evidence app_port_actuator_prometheus=${appScrape.value()} management_env=$managementEnv")
+        appScrape.is2xxSuccessful shouldBe false
+        managementEnv shouldBe 401
+    }
+
+    /**
+     * #806 (owner ruling 2026-11-12): the `duckdb_scratch` indicator joins the management port's aggregate, status
+     * only — the body is `{"status":"UP"}`, no component, no path, no number — and the four scratch gauges are on
+     * the anonymous scrape. The space reader is pinned ([PinnedScratchSpace]), so the case never depends on the
+     * host's free disk; the pinned usable figure on the wire proves the gauge reads that bean. No DuckDB execution
+     * runs in this class, so the leftover sweep has not run and `leftover` is `NaN`, never `0`. The public `/health`
+     * keeping exactly three components is the first case above.
+     */
+    @Test
+    fun `806 - the management health stays status only and the scratch gauges are on the anonymous scrape`() {
+        val health = get(managementPort, "/actuator/health")
+        withClue("anonymous GET /actuator/health on the management port: ${health.body()}") {
+            health.statusCode() shouldBe 200
+            mapper
+                .readTree(health.body())
+                .fieldNames()
+                .asSequence()
+                .toList() shouldContainExactly listOf("status")
+            mapper.readTree(health.body())["status"].asText() shouldBe "UP"
+            health.body() shouldNotContain "dp-staging"
+            health.body().any(Char::isDigit) shouldBe false
+        }
+
+        val series = get(managementPort, "/actuator/prometheus").body().lines().filterNot { it.startsWith("#") }
+
+        fun value(family: String): Double {
+            val line = series.singleOrNull { it.startsWith("$family ") }
+            withClue("exactly one untagged `$family` series in the scrape") { line shouldNotBe null }
+            return checkNotNull(line).substringAfter(' ').trim().toDouble()
+        }
+        println("event=scrape.evidence scratch=" + series.filter { it.startsWith("datapipelines_staging_scratch_") })
+        value("datapipelines_staging_scratch_capacity_bytes") shouldBe (20L shl 30).toDouble()
+        value("datapipelines_staging_scratch_reserved_bytes") shouldBe 0.0
+        value("datapipelines_staging_scratch_leftover_bytes").isNaN() shouldBe true
+        value("datapipelines_staging_scratch_usable_bytes") shouldBe PinnedScratchSpace.USABLE.toDouble()
+    }
+
+    /** #806: the scratch readings pinned to a healthy directory with a fixed, ample usable figure. */
+    @TestConfiguration
+    class PinnedScratchSpace {
+        @Bean
+        @Primary
+        fun pinnedScratchSpaceReader(): ScratchSpaceReader =
+            object : ScratchSpaceReader {
+                override fun kind(path: Path): ScratchPathKind = ScratchPathKind.DIRECTORY
+
+                override fun canWrite(directory: Path): Boolean = true
+
+                override fun usableBytes(path: Path): Long = USABLE
+            }
+
+        companion object {
+            /** 1 TiB: above one default reservation (3 GiB) on any configuration this class boots. */
+            const val USABLE = 1L shl 40
+        }
+    }
+
+    /**
+     * #708 (failure-flow record §13): the booted registry is the second reader of `MeterCatalogueParityTest`'s
+     * static sweep. Every `datapipelines.*` meter the running application holds must be in the swept set — a
+     * registration form the sweep does not recognise is red here as soon as its meter is eager — and so has an
+     * observability.md §4.1 row.
+     */
+    @Test
+    fun `every datapipelines meter the booted registry holds is in the swept catalogue`() {
+        val runtime =
+            meterRegistry.meters
+                .map { it.id.name }
+                .filter { it.startsWith(MeterCatalogue.PREFIX) }
+                .toSortedSet()
+        val swept = MeterCatalogue.codedSites().mapNotNull { it.name }.toSet()
+        println("event=meter.catalogue runtime=${runtime.size} ${runtime.joinToString(",")}")
+        withClue("meters registered at runtime that the static sweep did not find") { (runtime - swept).toList() shouldBe emptyList() }
+        runtime.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
+    }
+
+    /**
+     * #715: every `datapipelines.*` meter the booted application holds carries a description, read twice — at
+     * the registry (`id.description`) and on the wire, where the exporter OMITS the `# HELP` line of an
+     * undescribed family. Both lists are collected before the one assertion, so neither half hides the other.
+     * Eager meters only: a meter created on its first event is not in a freshly booted registry. Also prints
+     * the context's registry beans (#716 evidence).
+     */
+    @Test
+    fun `every datapipelines meter the booted registry holds carries a description - registry and scrape`() {
+        println("event=meter.registries shape=production ${meterRegistryShape(applicationContext)}")
+        val runtime = meterRegistry.meters.filter { it.id.name.startsWith(MeterCatalogue.PREFIX) }
+        val undescribed =
+            runtime
+                .filter { it.id.description.isNullOrBlank() }
+                .map { it.id.name }
+                .toSortedSet()
+        val (typed, withoutHelp) = scrapeFamilies()
+        println("event=meter.undescribed registry=${undescribed.size} ${undescribed.joinToString(",")}")
+        println("event=meter.scrape type_families=${typed.size} without_help=${withoutHelp.size} ${withoutHelp.joinToString(",")}")
+        withClue("registry undescribed: ${undescribed.toList()}; scrape families without HELP: ${withoutHelp.toList()}") {
+            (undescribed.toList() to withoutHelp.toList()) shouldBe (emptyList<String>() to emptyList())
+        }
+        runtime.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
+        typed.size shouldBeGreaterThanOrEqual RUNTIME_METER_FLOOR
+    }
+
+    /**
+     * #716: the production shape holds ONE meter registry — Boot's Prometheus registry, the one the scrape
+     * reads — and no composite. A second registry bean (the user `SimpleMeterRegistry` `EngineConfiguration`
+     * declared until #716) makes Boot wrap both in a `@Primary` composite, so every meter is held twice and
+     * the in-memory copy is read by nobody.
+     */
+    @Test
+    fun `the booted application holds exactly one meter registry`() {
+        val beans = applicationContext.getBeansOfType(MeterRegistry::class.java)
+        withClue("MeterRegistry beans: ${beans.mapValues { it.value::class.java.name }}") {
+            beans.values.map { it::class.java.name } shouldBe listOf(PROMETHEUS_REGISTRY)
+        }
+    }
+
+    /**
+     * The `datapipelines_*` families of the management scrape, taken from their `# TYPE` lines, and the
+     * subset with no `# HELP` line or a blank one. The exporter OMITS the HELP line of an undescribed
+     * family rather than writing a blank one, so the families come from TYPE, independently of HELP.
+     */
+    private fun scrapeFamilies(): Pair<Set<String>, Set<String>> {
+        val lines = get(managementPort, "/actuator/prometheus").body().lines()
+
+        fun families(kind: String) =
+            lines
+                .filter { it.startsWith("# $kind $SCRAPE_PREFIX") }
+                .map { it.removePrefix("# $kind ").split(' ', limit = 2) }
+
+        val typed = families("TYPE").map { it[0] }.toSortedSet()
+        val helped = families("HELP").filter { it.size == 2 && it[1].isNotBlank() }.map { it[0] }.toSet()
+        return typed to (typed - helped).toSortedSet()
+    }
+
+    /**
      * The composition wiring (design 2026-08-13-pipeline-node-type §4.1), asserted at the bean
      * graph the assembled app actually boots: the `SubPipelineRunner` port and the
      * repository-backed `PipelineResolver` must both exist, or a PIPELINE node would fail closed
@@ -219,6 +451,18 @@ class ApplicationSmokeTest {
         const val STRING_REDIS_TEMPLATE = "org.springframework.data.redis.core.StringRedisTemplate"
 
         private const val SECRET_BYTES = 32
+
+        /** The scrape's first lines printed as lane evidence (#708). */
+        private const val SCRAPE_EVIDENCE_LINES = 20
+
+        /** Named, not imported: the Prometheus registry is a runtime-only dependency of `app` (#708). */
+        const val PROMETHEUS_REGISTRY = "io.micrometer.prometheusmetrics.PrometheusMeterRegistry"
+
+        /** `MeterCatalogue.PREFIX` as the Prometheus exporter spells a family name. */
+        private const val SCRAPE_PREFIX = "datapipelines_"
+
+        /** The eagerly-registered `datapipelines.*` meters a booted app holds (gauges and eager counters). */
+        private const val RUNTIME_METER_FLOOR = 10
 
         /**
          * In-process OIDC discovery (auth.md §5.2) for the configured providers — the

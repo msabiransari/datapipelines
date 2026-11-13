@@ -1,0 +1,65 @@
+{
+ "variant": "numeric-beyond-2-53",
+ "note": "BIGINTEGER categories past 2^53 keep their identity and order exactly: ...992 before ...993",
+ "spec": {
+  "display_name": "Beyond two to the fifty-three",
+  "description": "A hand-written numeric case of design record 2026-11-06 section 4.1 (lane 860 A.2b).",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "n",
+      "type": "BIGINTEGER"
+     },
+     {
+      "name": "amount",
+      "type": "INTEGER"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar",
+    "labels": "values"
+   },
+   "encoding": {
+    "x": {
+     "field": "n",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "N"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    }
+   },
+   "title": {
+    "text": "Beyond two to the fifty-three"
+   }
+  }
+ },
+ "bindings": {
+  "n": [
+   "9007199254740993",
+   "9007199254740992"
+  ],
+  "amount": [
+   1,
+   2
+  ]
+ },
+ "expect": {
+  "categories_full": [
+   "9007199254740992",
+   "9007199254740993"
+  ]
+ }
+}

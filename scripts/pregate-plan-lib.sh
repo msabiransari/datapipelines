@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Read-only plan shared by preview and execution. Commands are arrays, never eval'd.
 # Requires pregate-2b-lib.sh; callers cd to the checkout root first.
+# The stage order, ONE list: the plan prints it and pregate.sh executes it.
+PG_STAGES=(0 1 2 2b 3 4)
 pgplan::build() {
   local base="$1" m cf plan argv main_mb all main_files
   PG_COVERED=()
@@ -27,14 +29,25 @@ pgplan::build() {
     fi
   fi
   PG_MODULES=(); PG_TEST_MODULES=(); PG_DEFERRED=(); PG_ROOTS2=(); PG_ROOTS2B=()
-  PG_1=(ktlintCheck detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs --continue)
+  # Stage 0 (#797): a diff that changes the resolved dependency set — any gradle.lockfile, the
+  # version catalog or the verification metadata — runs Gate A's OSV scan before lint, so a
+  # vulnerable transitive the lane introduced fails here and not at the batch gate. The scan
+  # itself reads every committed lockfile; these paths only decide WHETHER it runs.
+  mapfile -t PG_DEPS_FILES < <(printf '%s\n' "$PG_FILES" \
+    | sed -nE '/(^|\/)gradle\.lockfile$|^gradle\/libs\.versions\.toml$|^gradle\/verification-metadata\.xml$/p')
+  PG_0=()
+  [ "${#PG_DEPS_FILES[@]}" -eq 0 ] || PG_0=(./scripts/vuln-scan.sh)
+  # buildSrc is its own build, which the bare ktlintCheck/detekt never reach (#724): its lint
+  # rides this invocation by task path, under the root's dependency verification.
+  PG_1=(ktlintCheck detekt :buildSrc:ktlintCheck :buildSrc:detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs --continue)
   PG_2=(); PG_2B=(); PG_4=(compileTestKotlin --continue)
   # The sequences knob bounds VersionLifecycleModelTest's random sweep in the pregate
   # only (#483, DEVELOPMENT.md §9.5); Gate A and CI keep the 2000 default and stay the bank.
-  # --build-cache (#480, DEVELOPMENT.md §9.4): compile and lint outputs another worktree
-  # built from identical inputs come FROM-CACHE; test, Kover and verifyTestsExecuted never
-  # do (buildSrc CommonConventionsPlugin). The pregate only: gate.sh and CI stay cold, and
-  # pregate-safety-test.sh asserts every stage carries it and gate.sh/gradle.properties do not.
+  # --build-cache (#480, DEVELOPMENT.md §9.4): compile and detekt outputs another worktree
+  # built from identical inputs come FROM-CACHE; ktlint worker outputs (#689), test, Kover and
+  # verifyTestsExecuted never do (buildSrc CommonConventionsPlugin). The pregate only: gate.sh
+  # and CI stay cold. pregate-safety-test.sh asserts every stage carries it and
+  # gate.sh/gradle.properties do not.
   # Both appended AFTER the serial quartet: pregate-safety-test.sh pins that substring contiguous.
   PG_COMMON=(-Pdp.browser.ciPatience=true --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 -PversionLifecycle.sequences=200 --build-cache)
   declare -gA PG_SELECTIONS=()
@@ -98,7 +111,7 @@ GUARDS[":modules:web"]="co.datapipelines.web.api.ApiErrorCatalogSpecDriftTest co
 # 2026-10-02: 328's batch gate went red on the shipped-migrations pin; no lane pregate selects it
 # from a migration diff (FlywayMigrationIntegrationTest pins the exact V-list a lane adding a
 # migration must extend).
-GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest co.datapipelines.integration.EntryInventoryE2eTest co.datapipelines.integration.PublicContractE2eTest co.datapipelines.integration.RequestNestingDepthE2eTest co.datapipelines.integration.DependencyGuardsE2eTest co.datapipelines.integration.FlywayMigrationIntegrationTest"
+GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest co.datapipelines.integration.EntryInventoryE2eTest co.datapipelines.integration.LakeEnabledEntryInventoryE2eTest co.datapipelines.integration.PublicContractE2eTest co.datapipelines.integration.RequestNestingDepthE2eTest co.datapipelines.integration.DependencyGuardsE2eTest co.datapipelines.integration.FlywayMigrationIntegrationTest co.datapipelines.integration.ElvisBoundMatcherGuardTest"
 
 # Only runtime retained evidence can populate PG_COVERED; preview passes none.
 pgplan::guard_args() {
@@ -119,6 +132,7 @@ declare -A PG_COVERED=()
 pgplan::args() {
   local -n dest="$2"
   case "$1" in
+    0) dest=("${PG_0[@]}"); return 0 ;; # not Gradle: no PG_COMMON
     1) dest=("${PG_1[@]}") ;; 2) dest=("${PG_2[@]}") ;;
     2b) dest=("${PG_2B[@]}") ;; 3) dest=("${PG_3[@]}") ;;
     4) dest=("${PG_4[@]}") ;; *) return 2 ;;
@@ -128,11 +142,22 @@ pgplan::args() {
 pgplan::command() {
   local stage="$1"; shift
   printf 'stage=%s command=' "$stage"
-  if [ "$#" -eq 0 ]; then printf '(none)'; else printf '%q ' ./gradlew "$@"; fi
+  if [ "$#" -eq 0 ]; then printf '(none)'
+  elif [ "$stage" = 0 ]; then printf '%q ' "$@"
+  else printf '%q ' ./gradlew "$@"; fi
   printf '\n'
 }
+# The stage-0 trigger decision, one line, shared by --plan and the run's PLAN.txt.
+pgplan::deps_decision() {
+  if [ "${#PG_DEPS_FILES[@]}" -eq 0 ]; then
+    printf 'deps-scan: skip — no dependency file changed (gradle.lockfile, gradle/libs.versions.toml, gradle/verification-metadata.xml)\n'
+  else
+    local joined; joined="$(printf '%s, ' "${PG_DEPS_FILES[@]}")"
+    printf 'deps-scan: run — %s\n' "${joined%, }"
+  fi
+}
 pgplan::print() {
-  printf 'base=%s resolved-base=%s merge-base=%s head=%s\n' "$PG_BASE" "$PG_BASE_SHA" "$PG_MB" "$PG_HEAD"
+  printf 'base=%s%s resolved-base=%s merge-base=%s head=%s\n' "$PG_BASE" "${PG_BASE_SOURCE:+ ($PG_BASE_SOURCE)}" "$PG_BASE_SHA" "$PG_MB" "$PG_HEAD"
   printf 'changed files (selected base plus staged/unstaged/untracked):\n%s\n' "${PG_FILES:-none}"
   printf 'current-main comparison=%s\nselected-base-only:\n%s\ncurrent-main-only:\n%s\n' "$PG_MAIN_DIFF" "${PG_BASE_ONLY:-none}" "${PG_MAIN_ONLY:-none}"
   printf 'touched modules: %s\n' "${PG_MODULES[*]:-none}"
@@ -141,6 +166,7 @@ pgplan::print() {
   printf 'deferred=%s\n' "${PG_DEFERRED[*]:-none}"
   printf 'guards (omission conditional on successful fresh unfiltered stage-2 retained XML):\n'
   for m in "${PG_GUARD_MODULES[@]}"; do printf '%s %s\n' "$m" "${GUARDS[$m]}"; done
-  printf 'stage order: 1 2 2b 3 4\n'
-  for stage in 1 2 2b 3 4; do pgplan::args "$stage" args; pgplan::command "$stage" "${args[@]}"; done
+  pgplan::deps_decision
+  printf 'stage order: %s\n' "${PG_STAGES[*]}"
+  for stage in "${PG_STAGES[@]}"; do pgplan::args "$stage" args; pgplan::command "$stage" "${args[@]}"; done
 }

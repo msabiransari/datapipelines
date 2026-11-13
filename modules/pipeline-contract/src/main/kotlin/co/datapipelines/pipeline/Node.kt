@@ -114,6 +114,9 @@ data class Node(
      */
     @field:JsonProperty("strict") @get:JsonProperty("strict") @param:JsonProperty("strict")
     val strict: Boolean? = null,
+    /** Trusted landing manifest materialised before this DQL node runs. */
+    @field:JsonProperty("delivery") @get:JsonProperty("delivery") @param:JsonProperty("delivery")
+    val delivery: DeliveryRef? = null,
 ) {
     /** The resolved execution target (§4.8) — a registered datasource, or the tempdb literal. */
     @get:JsonIgnore
@@ -159,6 +162,7 @@ data class Node(
             @JsonProperty("context_keys") contextKeys: Map<String, String>?,
             @JsonProperty("settings") settings: NodeSettings?,
             @JsonProperty("strict") strict: Boolean?,
+            @JsonProperty("delivery") delivery: DeliveryRef? = null,
         ): Node =
             Node(
                 id = id.orEmpty(),
@@ -188,6 +192,7 @@ data class Node(
                 // Absent stays absent, same body-hash rule: a non-strict (or non-SCRIPT) node
                 // serializes back with no `strict` key at all.
                 strict = strict,
+                delivery = delivery,
             )
     }
 }

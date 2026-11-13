@@ -1,0 +1,18 @@
+<!-- #786 B.3 — the API switch dialog. The GET pre-reads the version; the POST re-runs the service's guard. -->
+<div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="endpoint-switch">
+  <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="axswitch-title">
+    <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
+            aria-label="Close" data-lifecycle-close>
+      <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+    </button>
+    <h2 class="ds-title u-m0 u-mb-md" id="axswitch-title" th:text="'Make current v' + ${dlg.version} + '?'">Make current v2?</h2>
+    <p class="u-text-sm">Pins <span class="u-mono" th:text="${dlg.pinLabel}">finance/revenue@3</span>.</p>
+    <p class="u-secondary u-text-sm">The API will serve this version, at its own pinned pipeline version. Nothing is released or repinned.</p>
+    <form th:attr="hx-post=@{'/partials/endpoints/{id}/lifecycle/switch'(id=${dlg.id},version=${dlg.version})}" hx-swap="none">
+      <div class="app-page-actions">
+        <button type="button" class="ds-button ds-button-ghost" data-lifecycle-close>Cancel</button>
+        <button type="submit" class="ds-button ds-button-primary" data-api-submit>Make current</button>
+      </div>
+    </form>
+  </div>
+</div>

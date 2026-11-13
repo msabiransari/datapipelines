@@ -110,7 +110,7 @@ internal object ExplainPlanParser {
      * H2: EXPLAIN emits the rewritten statement whose access path rides in `/* ... */`
      * comments — `/* PUBLIC.TRIPS.tableScan */` for a full scan, `/* PUBLIC.IDX_CITY: CITY = 'x'
      * */` for an index lookup (the condition follows the colon), `/* PUBLIC.IDX_CITY */` for an
-     * index-ordered scan (verified against h2 2.3.232). H2's EXPLAIN carries no row estimate.
+     * index-ordered scan (verified against h2 2.3.232, 2026-09-09). H2's EXPLAIN carries no row estimate.
      */
     private fun h2(raw: String): ExplainPlanSummary {
         val comment =
@@ -159,7 +159,7 @@ internal object ExplainPlanParser {
     /**
      * SQLite: `EXPLAIN QUERY PLAN` rows carry a `detail` column — `SCAN trips` is the full
      * scan, `SEARCH trips USING [COVERING] INDEX <name> (...)` an index read (verified against
-     * sqlite-jdbc 3.49.1.0). No row estimates.
+     * sqlite-jdbc 3.49.1.0, 2026-09-09). No row estimates.
      */
     private fun sqlite(
         columnLabels: List<String>,

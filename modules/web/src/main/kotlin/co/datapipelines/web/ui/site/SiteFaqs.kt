@@ -75,18 +75,19 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "What can an agent do, and what can it never do?",
-                "It can read schemas, catalogue statistics and indexes, probe a SELECT, create and iterate a draft pipeline, " +
-                    "run it, read the result, and cancel its own runs. It can never release a version, never read a " +
-                    "credential, and never touch a datasource marked read-only with a write. Its key holds your role, capped " +
-                    "at author, and the permission catalog is docs/auth.md §7.6.",
-                "docs/auth.md §7.6",
+                "It can read schemas, catalogue statistics and indexes, probe a SELECT, create and iterate a " +
+                    "draft pipeline, run it, read the result, and cancel its own runs. It can never release a " +
+                    "version, never read a credential, and never touch a datasource marked read-only with a write. " +
+                    "Its key is an identity of its own holding the role its creator chose, never more than the " +
+                    "creator's own (docs/auth.md §7.5), and the permission catalog is docs/auth.md §7.6.",
+                "docs/auth.md §7.5, docs/auth.md §7.6",
             ),
             FaqEntry(
                 "Is every agent action logged?",
                 "Yes. Every MCP tool call is written to the audit log with the key that made it and the tool, never the " +
                     "SQL text, row data or parameter values, which are your data; every lifecycle verb records who did it " +
                     "and through which channel it came, being session, API key or MCP. The audit log is docs/auth.md §10 and the MCP " +
-                    "events docs/mcp-server.md §10.",
+                    "events in docs/auth.md §10.1.",
                 "docs/auth.md §10",
             ),
             FaqEntry(
@@ -110,11 +111,12 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "From data to an API in a day: is that real?",
-                "For the API half, today: an agent authors the pipeline against your databases, runs it, fixes what fails, " +
-                    "you review and release, and the endpoint exists. No deployment, no service to write, no gateway to " +
-                    "configure. Dashboards your agent creates and you embed in your own product are a planned roadmap item; the " +
-                    "roadmap page says so. Publishing is docs/rest-api.md §19.",
-                "docs/rest-api.md §19",
+                "For the API half, today: an agent authors the pipeline against your databases, runs it, fixes what " +
+                    "fails, you review and release, and the endpoint exists. No deployment, no service to write, no " +
+                    "gateway to configure. The same released pipeline can also feed a dashboard your agent drafts and a " +
+                    "person releases, embedded in your product through your own backend (docs/dashboards.md §6.5). " +
+                    "Publishing is docs/rest-api.md §19.",
+                "docs/dashboards.md §6.5, docs/rest-api.md §19",
             ),
             FaqEntry(
                 "Where does it run?",
@@ -132,11 +134,13 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Is it a Tableau or dbt replacement?",
-                "Not today. It sits beside them: it can feed Tableau a governed dataset through an API or as Parquet on " +
-                    "your own bucket, and it replaces the warehouse-plus-dbt step for teams that never wanted one. " +
-                    "Dashboards, scheduling and alerts are on the roadmap page, undated. The comparison pages cite " +
-                    "docs/versioning.md §3 for what is versioned.",
-                "docs/versioning.md §3",
+                "Not today. It sits beside them: it can feed Tableau a governed dataset through an API or a " +
+                    "datasource table Tableau connects to, and it replaces the warehouse-plus-dbt step for teams that " +
+                    "never wanted one (docs/pipeline-contract.md §8). It has SQL dashboards over released pipelines " +
+                    "(docs/dashboards.md §1) and schedules that run pipelines (docs/scheduler.md §1), without a BI " +
+                    "tool's drag-and-drop authoring; alerts are not built. The draft and release lifecycle is " +
+                    "docs/versioning.md §3.",
+                "docs/pipeline-contract.md §8, docs/dashboards.md §1, docs/scheduler.md §1, docs/versioning.md §3",
             ),
         )
 
@@ -148,7 +152,7 @@ object SiteFaqs {
                 "A way to query Parquet and Apache Iceberg tables on S3 or S3-compatible object storage in place: no " +
                     "warehouse, no load step, read-only. DuckDB is the engine, and the catalog is the server's own " +
                     "registry, dp-catalog, because the engine cannot list a bucket. Tables are registered by REST or " +
-                    "over MCP. See docs/datasources.md section 8C.",
+                    "over MCP. See docs/datasources.md §8C.",
                 "docs/datasources.md §8C",
             ),
             FaqEntry(
@@ -156,14 +160,14 @@ object SiteFaqs {
                 "No. Every registered table becomes a view at connect over the objects in your bucket, and the engine " +
                     "reads only what a query's predicates name; a filter on the partition column reads only the " +
                     "matching partitions. Nothing is downloaded at registration or at demo start; reads are in place, " +
-                    "at query time. See docs/datasources.md section 8C.2.",
+                    "at query time. See docs/datasources.md §8C.2.",
                 "docs/datasources.md §8C.2",
             ),
             FaqEntry(
                 "How do I register an Iceberg table in dp-lake?",
                 "By its current metadata file, s3://bucket/table/metadata/00042-<uuid>.metadata.json, not by the " +
-                    "table root: DuckDB 1.5.5.1 cannot resolve a pyiceberg table's root, so the registry row names the " +
-                    "file, and you re-register when the table commits. See docs/datasources.md section 8C.7.",
+                    "table root: DuckDB ${facts.duckdbVersion} cannot resolve a pyiceberg table's root, so the registry row names the " +
+                    "file, and you re-register when the table commits. See docs/datasources.md §8C.7.",
                 "docs/datasources.md §8C.7",
             ),
         )
@@ -181,19 +185,21 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Is this a Tableau alternative?",
-                "Not today, and the page does not claim it. Tableau draws; datapipelines gets the data there, across " +
-                    "Postgres, MySQL, SQL Server, Oracle, SQLite and S3, without a warehouse, authored by an agent and " +
-                    "released by a person. Embedded dashboards created by your agent are planned; the " +
-                    "roadmap page carries the status. What is versioned today is docs/versioning.md §3.",
-                "docs/versioning.md §3",
+                "Not today, and the page does not claim it. Tableau draws; datapipelines gets the data there, " +
+                    "across Postgres, MySQL, SQL Server, Oracle, SQLite and S3, without a warehouse, authored by an " +
+                    "agent and released by a person. Its own SQL dashboards are drafted by an agent and laid out in a " +
+                    "document, with no drag-and-drop editor (docs/dashboards.md §2.2). What is versioned today is " +
+                    "docs/versioning.md §3.",
+                "docs/dashboards.md §2.2, docs/versioning.md §3",
             ),
             FaqEntry(
                 "Why not just build the dashboard in Tableau?",
                 "Because the dashboard usually is not the expensive part. Getting a trustworthy, joined, refreshed " +
-                    "dataset into it is, and embedding the result in your own product is a second project. datapipelines " +
-                    "makes the dataset a versioned pipeline an agent can author and an API you can call from your app " +
-                    "today; the dashboards you embed are planned. Publishing is docs/rest-api.md §19.",
-                "docs/rest-api.md §19",
+                    "dataset into it is, and embedding the result in your own product is a second project. " +
+                    "datapipelines makes the dataset a versioned pipeline an agent can author and an API you can call " +
+                    "from your app, and a dashboard over it can be embedded through your own backend " +
+                    "(docs/dashboards.md §6.5). Publishing is docs/rest-api.md §19.",
+                "docs/dashboards.md §6.5, docs/rest-api.md §19",
             ),
             FaqEntry(
                 "Does datapipelines replace Tableau Prep?",
@@ -242,10 +248,11 @@ object SiteFaqs {
             FaqEntry(
                 "What do I get today, and what is planned?",
                 "Today: pipelines authored with an AI agent, reviewed and released by a person, a published API " +
-                    "for each released one, and datasets your Tableau workbook or your own application reads. " +
-                    "Planned, without a date on this page: native dashboards, scheduled refresh, reports and " +
-                    "alerts. The roadmap page carries the current order (docs/ROADMAP.md §2).",
-                "docs/ROADMAP.md §2",
+                    "for each released one, datasets your Tableau workbook or application reads, schedules that run " +
+                    "pipelines and SQL dashboards with reusable parameter sets. Planned, without a date on this page: " +
+                    "schedule mail, report delivery and alerts. The roadmap page carries the current order. The " +
+                    "contracts are docs/scheduler.md §1, docs/dashboards.md §1 and docs/ROADMAP.md §2.",
+                "docs/scheduler.md §1, docs/dashboards.md §1, docs/ROADMAP.md §2",
             ),
             FaqEntry(
                 "How do I know the numbers are right?",
@@ -259,9 +266,10 @@ object SiteFaqs {
                 "Can each customer see only their own rows?",
                 "Through your application: it supplies the customer's id as a declared parameter and holds the " +
                     "key. An endpoint key restricts which published paths it may call, not which rows a caller may " +
-                    "see. Row-level authorisation stays your backend's job (docs/rest-api.md §19.3, docs/auth.md " +
-                    "§7.7). Per-viewer filtering for native dashboards is planned with the dashboards.",
-                "docs/rest-api.md §19.3, docs/auth.md §7.7",
+                    "see. Row-level authorisation stays your backend's job. An embedded dashboard works the same way: " +
+                    "viewers behind one dashboard key share it, so your backend decides which values each viewer may " +
+                    "submit. The contracts are docs/rest-api.md §19.3, docs/auth.md §7.7 and docs/dashboards.md §6.5.",
+                "docs/rest-api.md §19.3, docs/auth.md §7.7, docs/dashboards.md §6.5",
             ),
             FaqEntry(
                 "Do I have to use an AI agent?",
@@ -460,8 +468,8 @@ object SiteFaqs {
                 "Privately, never as a public issue: open a private security advisory at $ADVISORY_URL, or " +
                     "email the contact address in the footer if the advisory flow is not an option. What is in " +
                     "scope and what reporters are asked is SECURITY.md in the repository, and the security " +
-                    "model a report is checked against is docs/auth.md.",
-                "docs/auth.md §8",
+                    "model a report is checked against is docs/auth.md §1.",
+                "docs/auth.md §1",
             ),
         )
 

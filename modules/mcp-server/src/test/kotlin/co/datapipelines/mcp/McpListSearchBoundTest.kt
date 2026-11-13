@@ -12,6 +12,7 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionConsumers
 import co.datapipelines.pipeline.SearchNeedle
+import co.datapipelines.pipeline.release.PipelineReleaseCoordination
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
 import io.kotest.assertions.throwables.shouldThrow
@@ -50,6 +51,9 @@ class McpListSearchBoundTest {
             mockk<AuthoringGuard>(),
             mockk<ExclusiveDraftTemplates>(),
             mockk<PipelineVersionConsumers>(),
+            mockk<co.datapipelines.pipeline.EndpointVersionConsumers>(),
+            mockk<co.datapipelines.pipeline.ScheduleConsumers>(),
+            coordination = PipelineReleaseCoordination { error("this test never releases") },
         )
     private val templates = TemplateService(TemplateRepository(jdbc))
 

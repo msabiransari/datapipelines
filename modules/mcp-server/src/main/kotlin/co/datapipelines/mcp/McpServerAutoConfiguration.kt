@@ -177,18 +177,13 @@ class McpServerAutoConfiguration {
         // pattern.
         visualizationTestSessions: co.datapipelines.visualization.VisualizationTestSessionService,
         visualizationTestLinks: co.datapipelines.visualization.TestSessionLinks,
+        // #877 §C — the ONE combined reverse arrow (`web`'s TemplateLifecycleConfiguration bean, an adapter over the
+        // template family's inverse arms): every guard and listing here reads the same answer REST and the UI read, a
+        // set-only or visualization-only pin included. Never constructed here.
+        usage: co.datapipelines.application.templates.TemplateUsage,
     ): List<McpTool> {
         val runtime =
             inlineRuntime(pipelines, templates, templateEngines, datasources, introspector, jdbc)
-        // 040's used-by service COMPOSED with the parameter-set scanner (the record's §8.4):
-        // a set-only pin is a real reference to every guard and listing here.
-        val usage =
-            co.datapipelines.application.templates.TemplateUsage(
-                runtime.usage,
-                co.datapipelines.parameters.ParameterSetTemplatePins(jdbc),
-                pipelines,
-                co.datapipelines.visualization.ArtifactDependents(jdbc),
-            )
         // The authoring capability (versioning §5.5), read from the same property web's guard
         // bean reads — immutable config, so two instances cannot disagree. The template tools
         // still take it, until slice B.
@@ -236,7 +231,7 @@ class McpServerAutoConfiguration {
                 cancellationService,
                 mcpCallAudit,
             ) +
-            EndpointsTools.all(endpointPublishService, pipelines) +
+            EndpointsTools.all(endpointPublishService) +
             LakeTableTools.all(datasources, lakeTableRegistryService) +
             SemanticsTools.all(datasources, semanticsService, introspector, lens) +
             DocsTools.all { docSet.getObject() } +
@@ -392,7 +387,8 @@ class McpServerAutoConfiguration {
             // route calls, a plain parameter by the 068/074 pattern.
             TemplatesEvaluateTool(templateEvaluateService),
             // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
-            TemplatesPurgeDraftTool(templates, usage, authoring, lens),
+            // #841 — the purge runs on the draft service's guarded transaction (the shared template writer seam).
+            TemplatesPurgeDraftTool(templates, usage, authoring, lens, templateDrafts),
         )
 
     /** The two pipeline read tools, extracted at 194d when the list passed detekt's length. */
@@ -433,19 +429,22 @@ class McpServerAutoConfiguration {
      * narrative resources from the jar, the boot configuration through [DocContext], and the
      * shipped catalogs through the same tool instances the dispatcher serves and the
      * [DocErrorCatalog] port (`web` declares the implementation — the 068/074 pattern: wherever
-     * the MCP surface is wired, the assembled application has declared it too).
+     * the MCP surface is wired, the assembled application has declared it too). The script
+     * budgets (780) come through [ScriptDocValues] as a REQUIRED parameter the same way — no
+     * silent default: `web`'s `ScriptDocsConfiguration` declares it from `ScriptProperties`.
      */
     @Bean
     @ConditionalOnMissingBean
     fun docSet(
         executorConfig: ExecutorConfig,
+        scriptValues: co.datapipelines.mcp.docs.ScriptDocValues,
         mcpTools: List<McpTool>,
         errorCatalog: co.datapipelines.mcp.docs.DocErrorCatalog,
     ): co.datapipelines.mcp.docs.DocSet =
         co.datapipelines.mcp.docs
             .DocRenderer(
                 co.datapipelines.mcp.docs.DocContext
-                    .of(executorConfig),
+                    .of(executorConfig, scriptValues),
                 errorCatalog,
                 mcpTools,
             ).render()

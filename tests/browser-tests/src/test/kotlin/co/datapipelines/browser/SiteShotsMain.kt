@@ -10,6 +10,7 @@ import com.microsoft.playwright.options.ColorScheme
 import com.microsoft.playwright.options.ReducedMotion
 import com.microsoft.playwright.options.ScreenshotScale
 import com.microsoft.playwright.options.WaitForSelectorState
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -71,12 +72,46 @@ import java.nio.file.StandardCopyOption
  * ## The `app` set (076 §E)
  *
  * `-PshotsSet=app` skips the marketing list and instead photographs every top-level screen
- * (/dashboard through /admin/users) at BOTH 1440x900 and 2560x1440, in light AND dark — the
- * dark pass driven through the settings theme select (the control a user has), never an
- * emulation, and the account put back on light afterwards so a later `site` run's assertion
- * still holds. One Playwright video of a full boosted-navigation click-through is recorded
- * alongside (app/boost-navigation.webm), from its own context so the still-shot contexts
- * stay clean. Everything lands in an `app/` subfolder of the same output directory.
+ * at BOTH 1440x900 and 2560x1440, in light AND dark — the dark pass driven through the
+ * settings theme select (the control a user has), never an emulation, and the account put
+ * back on light on every exit of the dark pass ([Shots.withTheme], #546) — a later `site` run
+ * would heal a stray dark preference anyway ([Shots.ensureLightTheme]). One Playwright
+ * video of a full boosted-navigation click-through is recorded alongside
+ * (app/boost-navigation.webm), from its own context so the still-shot contexts stay clean.
+ * Everything lands in an `app/` subfolder of the same output directory.
+ *
+ * The shot list follows the menu (#602). Since #556/#579–#585 a family's rail item links
+ * its OVERVIEW, so each of the eight families is photographed twice — the overview the
+ * menu leads to (`app/overview-<family>-<W>x<H>-<theme>.png`) and the flat catalog behind
+ * its View all (`app/<family>-<W>x<H>-<theme>.png`, where the catalog route still exists;
+ * every route in the table answered 200 on a `--demo nyc` instance when the table was
+ * written, 2026-10-25). Rows in rail order:
+ *
+ * | section (rail order) | overview shot         | catalog shot    |
+ * |----------------------|-----------------------|-----------------|
+ * | /dashboard           | —                     | dashboard       |
+ * | /pipelines           | overview-pipelines    | pipelines       |
+ * | /templates           | overview-templates    | templates       |
+ * | /datasources         | overview-datasources  | datasources     |
+ * | /dashboards          | overview-dashboards   | dashboards      |
+ * | /visualizations      | overview-visualizations | visualizations |
+ * | /parameter-sets      | overview-parameter-sets | parameter-sets |
+ * | /executions          | —                     | executions      |
+ * | /schedules           | overview-schedules    | schedules       |
+ * | /api-console         | overview-api-console  | api-console     |
+ * | /promotion           | —                     | promotion       |
+ * | /workspaces          | —                     | workspaces      |
+ * | /admin               | —                     | admin-users     |
+ * | /docs                | —                     | docs            |
+ * | (off-rail)           | —                     | settings        |
+ *
+ * The direct screens (dashboard, executions, promotion, workspaces, admin users, docs)
+ * keep one shot each, and settings — off-rail since 079 §B, an avatar-menu item — is
+ * photographed but has no rail link to click. The click-through itself walks the rail by
+ * `data-nav-section` in the order of `AppNav.ITEMS` (modules/web, …/web/ui/AppNav.kt) and
+ * waits on each anchor's own `href`, so a menu re-route cannot strand it (#602); the order
+ * is held in [APP_SHOT_SECTIONS] and pinned against `AppNav.ITEMS` by `SiteShotsRailOrderTest`
+ * (#721) — see that table's KDoc.
  *
  * ## The `home` set (175, #175)
  *
@@ -237,29 +272,57 @@ object SiteShotsMain {
     /** The subfolder of the output dir the `app` set lands in. */
     private const val APP_DIR = "app"
 
-    /** Every top-level screen, in nav order — the `app` set's pages and the video's click path. */
-    private val APP_PAGES =
-        listOf(
-            "/dashboard",
-            "/pipelines",
-            "/datasources",
-            "/templates",
-            "/executions",
-            // 079 §C: the API section joins the shot list — it is a top-level screen now.
-            "/api-console",
-            "/workspaces",
-            "/promotion",
-            "/settings",
-            "/docs",
-            "/admin/users",
-        )
+    /**
+     * One `(section, routes…)` row of the `app` set's shot list — see [APP_SHOT_SECTIONS].
+     */
+    internal data class AppSectionShots(
+        val section: String?,
+        val routes: List<String>,
+    )
 
     /**
-     * The routes the RAIL links to — APP_PAGES minus `/settings`, which 079 §B moved into the
-     * avatar menu. The still-shot list keeps /settings (it is a screen); the click-through
-     * cannot, because there is no rail link to click.
+     * The `app` set's shot list (#602): one row per nav section, in rail order — the order
+     * of `AppNav.ITEMS` (modules/web, …/web/ui/AppNav.kt). The table stays a table — it
+     * carries each section's ROUTES, which `AppNav` does not know — and `SiteShotsRailOrderTest`
+     * (#721) fails the build when its sections differ from `AppNav.ITEMS` in membership or
+     * order; `ShellRenderTest` keeps the template's rendered sections honest against `AppNav`.
+     *
+     * A family row photographs BOTH the overview its rail item links and the flat catalog;
+     * every route below answered 200 on a `--demo nyc` instance when the table was written
+     * (2026-10-25). `/settings` is off-rail (079 §B, the avatar menu): photographed by the
+     * still pass, never clicked.
      */
-    private val RAIL_ROUTES = APP_PAGES.filterNot { it == "/settings" }
+    internal val APP_SHOT_SECTIONS: List<AppSectionShots> =
+        listOf(
+            AppSectionShots("/dashboard", listOf("/dashboard")),
+            AppSectionShots("/pipelines", listOf("/overview/pipelines", "/pipelines")),
+            AppSectionShots("/templates", listOf("/overview/templates", "/templates")),
+            AppSectionShots("/datasources", listOf("/overview/datasources", "/datasources")),
+            AppSectionShots("/dashboards", listOf("/overview/dashboards", "/dashboards")),
+            AppSectionShots("/visualizations", listOf("/overview/visualizations", "/visualizations")),
+            AppSectionShots("/parameter-sets", listOf("/overview/parameter-sets", "/parameter-sets")),
+            AppSectionShots("/executions", listOf("/executions")),
+            AppSectionShots("/schedules", listOf("/overview/schedules", "/schedules")),
+            AppSectionShots("/api-console", listOf("/overview/api-console", "/api-console")),
+            AppSectionShots("/promotion", listOf("/promotion")),
+            AppSectionShots("/workspaces", listOf("/workspaces")),
+            AppSectionShots("/admin", listOf("/admin/users")),
+            AppSectionShots("/docs", listOf("/docs")),
+            AppSectionShots(null, listOf("/settings")),
+        )
+
+    /** Every screen the `app` set photographs, in table order. */
+    private val APP_PAGES: List<String> = APP_SHOT_SECTIONS.flatMap { it.routes }
+
+    /** The rail sections the click-through walks, in rail order — the table's named rows. */
+    internal val RAIL_SECTIONS: List<String> = APP_SHOT_SECTIONS.mapNotNull { it.section }
+
+    /**
+     * Non-vacuity floor for the recorded walk (#602): a demo admin's rail draws most of the
+     * sections (the `th:if` items depend on role), so a run that clicked fewer than this
+     * many did not walk the menu — it skipped it.
+     */
+    internal const val MIN_CLICKED_SECTIONS = 10
 
     /** The two review widths the `app` set captures every screen at. */
     private val APP_VIEWPORTS = listOf(1440 to 900, 2560 to 1440)
@@ -325,10 +388,8 @@ object SiteShotsMain {
                 }
 
                 else -> {
-                    withSignedInPage(email, password) { page ->
-                        assertLightTheme(page)
-                        Shots(page).captureAll()
-                    } + heroExtras(email, password)
+                    withSignedInPage(email, password) { page -> Shots(page).captureSite() } +
+                        heroExtras(email, password)
                 }
             }
         println("siteShots: wrote ${taken.size} artifacts to ${outDir.toAbsolutePath()}")
@@ -338,8 +399,9 @@ object SiteShotsMain {
     /**
      * Owns the whole browser session — Playwright, the browser, the context — so [main] reads as
      * the six steps it is and each resource still closes in reverse order on any exit path.
-     * The theme assertion is the CALLER's business: the `site` list specifies light and asserts
-     * it; the `app` list drives both themes on purpose.
+     * The theme is the CALLER's business: the `site` list specifies light, heals a stored dark
+     * theme to it and asserts it ([Shots.captureSite], #546); the `app` list drives both themes
+     * on purpose.
      */
     private fun <T> withSignedInPage(
         email: String,
@@ -422,18 +484,6 @@ object SiteShotsMain {
     }
 
     /**
-     * The shots are specified as LIGHT theme. The theme is a user preference falling back to
-     * `datapipelines.ui.theme`, so it is a property of the deployment and the account, not of
-     * this driver — assert it rather than fight it.
-     */
-    private fun assertLightTheme(page: Page) {
-        page.navigate("$baseUrl/dashboard")
-        val href = page.locator("#theme-link").getAttribute("href") ?: ""
-        val dark = href.contains("dark")
-        check(!dark) { "the account's theme resolves to $href — the shot list specifies light" }
-    }
-
-    /**
      * The two extra copies of the hero (093 §B) — the poster's and the OG image's — written to
      * `-PshotsHeroOut=<dir>` and skipped entirely when that property is absent, because they do
      * not ship with the app and must not land in `static/site/img`.
@@ -499,6 +549,35 @@ object SiteShotsMain {
     }
 
     /**
+     * One click-through step (#602): click the rail link whose `data-nav-section` is
+     * [section] and wait for the URL THAT ANCHOR LINKS — read from the DOM before the
+     * click, so the wait can never name a URL the menu does not link, however the routes
+     * move (#556, #579–#585). The comparison is on the path with any `#fragment` stripped
+     * (the Admin members link carries one). Returns false — printing, never hanging —
+     * when this account's rail draws no such link (the `th:if` items).
+     */
+    private fun clickNavSection(
+        page: Page,
+        section: String,
+    ): Boolean {
+        val links = page.locator(".app-nav-link[data-nav-section='$section']")
+        if (links.count() == 0) {
+            println("  SKIP $section (not in this account's rail)")
+            return false
+        }
+        val link = links.first()
+        val href =
+            requireNotNull(link.getAttribute("href")) {
+                "the $section rail link renders without an href — the walk has nothing to wait on"
+            }
+        val destinationPath = URI(page.url()).resolve(href).path
+        link.click()
+        page.waitForURL({ url -> URI(url).path == destinationPath })
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        return true
+    }
+
+    /**
      * One boosted-navigation pass, recorded (076 §E): the point of the video is that the nav
      * NEVER re-renders across the click-through — hx-boost swaps only #app-main, so per click
      * the waits are the URL change and network idle, never a fixed sleep. Its own context, so
@@ -520,13 +599,20 @@ object SiteShotsMain {
         withBrowser(options) { page ->
             signIn(page, email, password)
 
-            // 079: the walk uses RAIL_ROUTES, not APP_PAGES. /settings is still a screen and
-            // is still photographed, but it has no rail link any more — it moved into the
-            // avatar menu (§B) — so clicking `nav.app-nav a[href='/settings']` waits forever.
-            RAIL_ROUTES.forEach { route ->
-                page.locator("nav.app-nav a[href='$route']").first().click()
-                page.waitForURL({ url -> url.endsWith(route) })
-                page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+            // #602: the walk follows the menu AS IT IS — every section in rail order,
+            // clicked by data-nav-section, waited on that anchor's own destination.
+            // /settings is still a screen and is still photographed, but it has no rail
+            // link any more — it moved into the avatar menu (079 §B) — so it is not a
+            // section here at all. The floor below is the walk's non-vacuity: a run that
+            // clicked fewer sections skipped the menu rather than walking it.
+            val clicked = mutableListOf<String>()
+            RAIL_SECTIONS.forEach { section ->
+                if (clickNavSection(page, section)) clicked += section
+            }
+            println("  walk: clicked ${clicked.size} rail sections (${clicked.joinToString(", ")})")
+            check(clicked.size >= MIN_CLICKED_SECTIONS) {
+                "the click-through clicked only ${clicked.size} of ${RAIL_SECTIONS.size} rail sections " +
+                    "(${clicked.joinToString(", ")}) — the demo admin's rail should draw at least $MIN_CLICKED_SECTIONS"
             }
 
             // 079 §A/§B: the four interactions the round asks a reviewer to watch, after the
@@ -551,11 +637,10 @@ object SiteShotsMain {
             )
             page.keyboard().press("Escape")
 
-            // Three sections in the restored theme, so the film ends where a reader starts.
-            listOf("/pipelines", "/api-console", "/executions").forEach { route ->
-                page.locator("nav.app-nav a[href='$route']").first().click()
-                page.waitForURL({ url -> url.endsWith(route) })
-                page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+            // Three sections in the restored theme, so the film ends where a reader starts
+            // — through the same helper, so their waits follow their anchors too (#602).
+            listOf("/pipelines", "/api-console", "/executions").forEach { section ->
+                clickNavSection(page, section)
             }
         }
         val produced =
@@ -624,17 +709,68 @@ object SiteShotsMain {
         /**
          * The `app` set (076 §E): every top-level screen at BOTH review widths in BOTH
          * themes. The theme is the account's preference, driven through the settings UI —
-         * the control a user has, never a stylesheet hack — and put back on light at the
-         * end so a later `site` run's light-theme assertion still holds.
+         * the control a user has, never a stylesheet hack — and the dark pass runs inside
+         * [withTheme], so the account is put back on light on EVERY exit, a failed capture
+         * included (#546: a dark pass that threw used to leave the account dark).
          */
         fun captureApp(): List<String> {
             Files.createDirectories(outDir.resolve(APP_DIR))
-            setTheme("light")
-            captureAppPasses("light")
-            setTheme("dark")
-            captureAppPasses("dark")
-            setTheme("light")
+            setTheme(THEME_LIGHT)
+            captureAppPasses(THEME_LIGHT)
+            withTheme(THEME_DARK) { captureAppPasses(THEME_DARK) }
             return written
+        }
+
+        /**
+         * The `site` set (#546): heal the account's theme to light FIRST, then the list. The
+         * list is specified as light; a stored dark preference — left by an interrupted dark
+         * pass, or set by hand — is the driver's own state to repair, never a reason to refuse.
+         */
+        fun captureSite(): List<String> {
+            ensureLightTheme()
+            return captureAll()
+        }
+
+        /**
+         * Puts the account on light when it is not, printing the write so the run log says
+         * what it changed, then asserts the resolved theme on a fresh page. Idempotent: an
+         * account already on light issues no preference write (the [setTheme] early return).
+         */
+        internal fun ensureLightTheme() {
+            if (currentTheme() != THEME_LIGHT) {
+                println("  theme: the account was on $THEME_DARK — setting $THEME_LIGHT through the settings select")
+            }
+            setTheme(THEME_LIGHT)
+            assertTheme(THEME_LIGHT)
+        }
+
+        /**
+         * Runs [block] with the account on [theme], restoring [restore] on EVERY exit (#546).
+         * The block's own exception stays the primary one; a restore that then fails is
+         * attached to it as suppressed, never swallowed. After a block that returned normally,
+         * a failed restore is THE error — the account was left on the wrong theme. The first
+         * [setTheme] sits inside the guarded region too: a switch that half-happened (the
+         * preference written, the stylesheet swap never observed) is restored like any other.
+         */
+        internal fun <T> withTheme(
+            theme: String,
+            restore: String = THEME_LIGHT,
+            block: () -> T,
+        ): T {
+            val result =
+                try {
+                    setTheme(theme)
+                    block()
+                } catch (primary: Throwable) {
+                    try {
+                        setTheme(restore)
+                    } catch (restoreFailure: Throwable) {
+                        primary.addSuppressed(restoreFailure)
+                    }
+                    throw primary
+                }
+            setTheme(restore)
+            return result
         }
 
         private fun captureAppPasses(theme: String) {
@@ -766,31 +902,79 @@ object SiteShotsMain {
          * write, and this set runs against prod. Cards a run never touched show their idle
          * state; the per-node run numbers are `home-run-result`'s story.
          *
-         * Room to read the names: the dock is collapsed to its tab bar and the settings
-         * sidebar parked at its floor — both through the user controls (the dock's toggle,
-         * the splitter's Home key), both restored before the run's other editor capture,
-         * which reads the dock. A fresh browser context means localStorage remembers none of
-         * it past the run.
+         * Room to read the names: the dock is collapsed to its tab bar through the user control
+         * (the dock's toggle) and restored before the run's other editor capture, which reads
+         * the dock. The settings sidebar and its splitter were withdrawn in #349
+         * (ui-screens.md, "No duplicate full description/settings sidebar"), so the graph
+         * already owns the width; the two splitter steps that outlived them are gone (#549).
+         * A fresh browser context means localStorage remembers none of it past the run.
          */
         private fun homeAgentBuilds() {
-            setRailCollapsed(true)
             try {
-                openEditor(showcase)
-                page.locator(".pe-dock-toggle:visible").first().click()
-                page.locator(".pe-dock-collapsed").waitFor()
-                val splitter = page.locator(".pe-sidebar-splitter")
-                splitter.focus()
-                splitter.press("Home")
-                fitGraph()
+                frameAgentBuilds()
                 if (canvasPaintsSanely("home-agent-builds.png")) shoot("home-agent-builds.png")
             } finally {
-                if (page.locator(".pe-dock-collapsed").count() > 0) {
-                    page.locator(".pe-dock-toggle:visible").first().click()
-                    page.locator(".pe-dock:not(.pe-dock-collapsed)").waitFor()
-                }
-                page.locator(".pe-sidebar-splitter").dblclick()
-                setRailCollapsed(false)
+                unframeAgentBuilds()
             }
+        }
+
+        /**
+         * The dock's state before [frameAgentBuilds] first touched it — written BEFORE that
+         * first click, so a frame that throws half-way is still undone by [unframeAgentBuilds];
+         * null when no frame is outstanding.
+         */
+        private var dockWasOpenBeforeFrame: Boolean? = null
+
+        /**
+         * The `home-agent-builds` framing (#549): rail collapsed, editor open on [pipeline],
+         * dock collapsed, graph fitted. There is no "start-up settled" signal to wait for: on a
+         * short window the workspace COLLAPSES the dock by default (init.js applyDockDefault,
+         * #615) and keeps re-deciding on every resize of `.pe-panes` until the dock is
+         * touched. So the first click on the ONE visible toggle — whichever direction — is the
+         * gesture that makes the dock the person's and ends the automatic default; after it the
+         * state is stable, and a second click collapses it when the first one opened it.
+         * [afterCollapse] is a test seam (a no-op in production) that runs once the dock is
+         * collapsed, before the fit.
+         */
+        internal fun frameAgentBuilds(
+            pipeline: String = showcase,
+            afterCollapse: () -> Unit = {},
+        ) {
+            setRailCollapsed(true)
+            openEditor(pipeline)
+            dockWasOpenBeforeFrame = page.locator(".pe-dock.pe-dock-collapsed").count() == 0
+            page.locator(".pe-dock-toggle:visible").first().click()
+            if (page.locator(".pe-dock.pe-dock-collapsed").count() == 0) {
+                page.locator(DOCK_COLLAPSE).click()
+            }
+            page.locator(".pe-dock.pe-dock-collapsed").waitFor()
+            afterCollapse()
+            fitGraph()
+            val collapsed = page.locator(".pe-dock-collapsed").count()
+            check(collapsed == 1) { "home-agent-builds framed with $collapsed collapsed docks — expected exactly one" }
+        }
+
+        /**
+         * Undoes [frameAgentBuilds] ON THE EDITOR PAGE (#549): the dock goes back to open only
+         * when it was open before the frame touched it, then the rail is restored through the
+         * CURRENT page's own toggle — [setRailCollapsed] would navigate away first. A page with
+         * no rail toggle (an [openEditor] that failed) falls back to [setRailCollapsed].
+         */
+        internal fun unframeAgentBuilds() {
+            val restoreDock = dockWasOpenBeforeFrame == true
+            dockWasOpenBeforeFrame = null
+            if (restoreDock && page.locator(".pe-dock.pe-dock-collapsed").count() > 0) {
+                page.locator(DOCK_RESTORE).click()
+                page.locator(".pe-dock:not(.pe-dock-collapsed)").waitFor()
+            }
+            if (page.locator("#rail-collapse").count() == 0) {
+                setRailCollapsed(false)
+                return
+            }
+            if (page.locator("html.rail-collapsed").count() > 0) {
+                page.locator("#rail-collapse").click()
+            }
+            page.locator("html:not(.rail-collapsed)").waitFor()
         }
 
         /**
@@ -833,14 +1017,65 @@ object SiteShotsMain {
         private fun datasources() {
             page.navigate("$baseUrl/datasources")
             waitFor(".ds-table")
-            // "last-test outcome visible" means the probe has actually run — click every Test
-            // and wait for its response, never a sleep.
-            page.locator("button:has-text('Test')").all().forEach { button ->
-                page.waitForResponse({ it.url().contains("/test") }) { button.click() }
-            }
+            probeAndReloadDatasources()
             settle()
             shoot("datasources.png")
         }
+
+        /**
+         * "Latest connection test outcomes" (how-it-works.html) means every probe has run AND
+         * the table shows it (#545). Per row that renders the Test verb, the click is awaited
+         * on THAT button's own `hx-post` (POST, its exact path, [rowTimeoutMs]) — a row that
+         * never answers fails by name instead of as one anonymous 30 s wait. The verb answers
+         * with a toast only; the Last-test cell is server-rendered and nothing re-renders it,
+         * so the list is navigated again and every probed row must have left `never tested`.
+         * Returns the probed datasource names, in table order.
+         */
+        internal fun probeAndReloadDatasources(rowTimeoutMs: Double = EXECUTION_TIMEOUT_MS): List<String> {
+            val probed = mutableListOf<String>()
+            page.locator(".ds-table tbody tr:has($DATASOURCE_TEST)").all().forEach { row ->
+                val name = rowName(row)
+                val button = row.locator(DATASOURCE_TEST)
+                val path =
+                    requireNotNull(button.getAttribute("hx-post")) {
+                        "datasource '$name': its Test button renders without an hx-post"
+                    }
+                try {
+                    page.waitForResponse(
+                        { it.request().method() == "POST" && URI(it.url()).rawPath == path },
+                        Page.WaitForResponseOptions().setTimeout(rowTimeoutMs),
+                    ) { button.click() }
+                } catch (timeout: com.microsoft.playwright.TimeoutError) {
+                    throw IllegalStateException(
+                        "datasource '$name': no response to its Test (POST $path) within ${rowTimeoutMs.toLong()} ms",
+                        timeout,
+                    )
+                }
+                probed += name
+            }
+            check(probed.isNotEmpty()) { "the datasource list rendered no row with a Test verb — nothing was probed" }
+            page.navigate("$baseUrl/datasources")
+            waitFor(".ds-table")
+            val cells =
+                page.locator(".ds-table tbody tr").all().associate { row ->
+                    rowName(row) to row.locator("td:nth-child(6)").innerText().trim()
+                }
+            probed.forEach { name ->
+                val cell = cells[name] ?: error("datasource '$name' was probed but has no row after the reload")
+                check(!cell.contains(NEVER_TESTED)) {
+                    "datasource '$name' was probed but its Last-test cell still reads '$cell' after the reload"
+                }
+            }
+            return probed
+        }
+
+        /** A datasource row's name: the first span of its first cell (partials/datasources.html). */
+        private fun rowName(row: com.microsoft.playwright.Locator): String =
+            row
+                .locator("td:first-child > span")
+                .first()
+                .innerText()
+                .trim()
 
         private fun templateExplorer() {
             // #398: the catalog at rest, then the SIDEBAR tree's expanded folder — the page
@@ -912,31 +1147,27 @@ object SiteShotsMain {
         }
 
         /**
-         * 179 (D16): the key shot is the TOP BAR, not a modal — your MCP key is minted by
-         * the sign-in itself (this driver's included) and the chip carries its prefix, the
-         * Copy button and delete-to-rotate. The clip keeps the bar and a little air under
-         * it: the chip IS the claim, and a full 1440x900 of dashboard would bury it.
+         * Keys v2 (233, A15) retired the top-bar chip, so the shot is the `/api-keys` page
+         * itself: the keys table with each key's kind, the role it carries, the identity it
+         * acts as and its creator, beside the New API key button. Two fixed-name keys make
+         * the table read like a real one — the `mcp` key an agent would carry, at the role
+         * the dialog's subset rule offers, and the `endpoint` key [apiConsole]'s association
+         * column needs.
          *
-         * The `endpoint`-kind key is still minted first because [apiConsole]'s association
-         * column needs it — on the `/api-keys` page, where key management moved (D17).
+         * Idempotent: the table arrives with the page but the EMPTY state is a different
+         * element — wait for whichever landed before counting rows, or every run mints
+         * duplicates (it minted five before that wait was here). Fixed names, not timestamped
+         * ones: two runs of this command must produce the same pixels, and
+         * "agent-2026-09-04" in a table cell would differ tomorrow. The create's OOB swap
+         * refreshes the table in place, so no reload is needed before the shutter.
          */
         private fun keys() {
             page.navigate("$baseUrl/api-keys")
-            // The table arrives with the page but the EMPTY state is a different element —
-            // wait for whichever landed. Counting rows before either exists reports zero, and
-            // this method would mint a fresh key on every run (it minted five before this
-            // wait was here) until the shot was a wall of duplicates.
             waitFor(".ds-table, .ds-empty")
-            // Fixed names, not timestamped ones: two runs of this command must produce the
-            // same pixels, and "agent-2026-09-04" in a table cell would differ tomorrow.
+            mintKeyIfAbsent("agent-key", kind = "mcp", binding = null, role = "author")
             mintKeyIfAbsent("reporting-endpoint", kind = "endpoint", binding = DEMO_ENDPOINT_PATH)
-            page.navigate("$baseUrl/dashboard")
-            // Keys v2 (233, A15) retired the top-bar chip this shot framed (`#app-mcpkey`); the
-            // top bar is what remains to wait for. The shot and its alt text are stale until the
-            // #244 retake reframes them on the Keys page.
-            waitFor(".app-topbar")
             refuseVisibleSecret()
-            shoot("keys.png", clipHeight = 176.0)
+            shoot("keys.png")
         }
 
         /**
@@ -956,9 +1187,11 @@ object SiteShotsMain {
 
         /**
          * The create-key modal, driven the way a person drives it: Kind first (it decides what
-         * the rest of the form MEANS), then scope or bindings, then the name. `check()` on the
-         * radio dispatches the change event `keyKindChanged()` listens for — a `.click()` on the
-         * label would too, but the radio is what the handler is bound to.
+         * the rest of the form MEANS), then — keys v2 (A14) — the role the `mcp` kind carries,
+         * its options already subset-filtered for the signed-in member, then scope or bindings,
+         * then the name. `check()` on the radio dispatches the change event `keyKindChanged()`
+         * listens for — a `.click()` on the label would too, but the radio is what the handler
+         * is bound to.
          *
          * The name lives in a SPAN inside the cell (a revoked key adds a badge beside it), so an
          * exact-text match on the `td` misses and this method mints a duplicate on every run —
@@ -968,11 +1201,18 @@ object SiteShotsMain {
             name: String,
             kind: String,
             binding: String?,
+            role: String? = null,
         ) {
             if (page.locator("#keys-table-body span:text-is('$name')").count() > 0) return
             page.click("button:has-text('New API key')")
             page.locator("#key-modal").waitFor()
             page.locator("#key-modal input[name=kind][value=$kind]").check()
+            if (role != null) {
+                // The role field only exists for the `mcp` kind, revealed by the same change
+                // handler — wait for the field, never for a clock.
+                page.locator("#key-role-field:not(.u-hidden)").waitFor()
+                page.selectOption("#key-role", role)
+            }
             if (binding != null) {
                 // The bindings picker only exists for the `endpoint` kind, and only after the
                 // kind's change handler has run — wait for the field, never for a clock.
@@ -1145,12 +1385,13 @@ object SiteShotsMain {
 
         /**
          * The theme toggle is a feature; show it once (093 §C). Driven through the settings
-         * select — the control a user has, never an emulation or a stylesheet hack — and put
-         * back on light immediately, so the `site` set's light-theme assertion still holds on
-         * the next run and every other shot in THIS run has already been taken.
+         * select — the control a user has, never an emulation or a stylesheet hack — inside
+         * [withTheme], so the account is back on light on EVERY exit, a failed capture
+         * included (#546); every other shot in THIS run has already been taken.
          */
-        private fun shellDark() {
-            setTheme("dark")
+        private fun shellDark() = withTheme(THEME_DARK) { shellDarkCapture() }
+
+        private fun shellDarkCapture() {
             page.navigate("$baseUrl/pipelines")
             waitFor("#pipeline-list-wrapper")
             // #350: the pipeline tree is the resource browser's (#554), which a Pipelines page
@@ -1160,7 +1401,6 @@ object SiteShotsMain {
             folderPrefixes(showcase).forEach { expandTreeFolder("pipelines", it) }
             page.locator("#nav-tree-pipelines a[title='$showcase']").waitFor()
             shoot("shell-dark.png")
-            setTheme("light")
         }
 
         private fun editorRunAndGraph() {
@@ -1592,25 +1832,17 @@ object SiteShotsMain {
             }
         }
 
-        private fun shoot(
-            file: String,
-            clipHeight: Double? = null,
-        ) {
+        private fun shoot(file: String) {
             settle()
             val target = outDir.resolve(file)
-            // Clip to the CURRENT viewport, not a constant: the `app` set resizes the page
-            // between passes, and a hard-coded 1440x900 clip would crop the 2560x1440 pass.
             // The scale is the set's ([shotScale]) — DEVICE on a DPR-2 context is what makes
             // the `home` set's PNGs 2880x1800 rather than a CSS-sized bitmap.
-            // [clipHeight] (179's top-bar chip) shortens the shot from the top: the bar is at
-            // the top of every page, and a full-height capture would bury it in chrome-free
-            // dashboard.
             val viewport = page.viewportSize()
             page.screenshot(
                 Page
                     .ScreenshotOptions()
                     .setPath(target)
-                    .setClip(0.0, 0.0, viewport.width.toDouble(), clipHeight ?: viewport.height.toDouble())
+                    .setClip(0.0, 0.0, viewport.width.toDouble(), viewport.height.toDouble())
                     .setAnimations(com.microsoft.playwright.options.ScreenshotAnimations.DISABLED)
                     .setScale(shotScale),
             )
@@ -1626,6 +1858,14 @@ object SiteShotsMain {
     private val THEME_HREF = Regex("""/themes/([a-z]+)\.css""")
 
     private const val FIT_SETTLE_MS = 400.0
+
+    /** The dock's one control, by the label each direction carries (editor.html). */
+    private const val DOCK_COLLAPSE = "button.pe-dock-toggle[aria-label='Collapse dock']"
+    private const val DOCK_RESTORE = "button.pe-dock-toggle[aria-label='Restore dock']"
+
+    /** A datasource row's connection-test verb, and the badge of a row never probed (partials/datasources.html). */
+    private const val DATASOURCE_TEST = "button[data-verb='datasource-test']"
+    private const val NEVER_TESTED = "never tested"
 
     private const val WAIT_MS = 30_000.0
     private const val EXECUTION_TIMEOUT_MS = 180_000.0

@@ -77,5 +77,31 @@
        same rows as the list's Facts dialog (partials/datasource-facts), so the two never drift. -->
   <h2 class="ds-title u-mt-lg u-mb-sm">Learned facts</h2>
   <div th:replace="~{partials/datasource-facts :: table}"></div>
+
+  <!-- #876 G6 U2 (record §13) — the datasource's own node in the shared Dependencies pane, in a section closed by
+       default and loaded the first time it is opened (dependencies/mount.js, `toggle`). The request sends the name
+       alone (a datasource has no version). A datasource depends on nothing, so the pane's honest answer is its own
+       leaf and "No dependencies"; what NAMES this datasource is reverse usage, not built here (G7). -->
+  <details class="dp-deps-section u-mt-lg" data-ds-deps>
+    <summary class="dp-deps-summary">
+      <h2 class="ds-title"><svg class="ds-icon ds-icon-sm dp-deps-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>Dependencies</h2>
+    </summary>
+    <div class="dp-deps" data-dp-deps data-family="datasource" data-dp-deps-state="idle" th:attr="data-name=${datasource.name}">
+      <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this section is opened.</p>
+    </div>
+  </details>
+
+  <!-- #876 G6 U2 — the pane's renderer and mount through the shell's page-script loader (page-assets.mjs): this page
+       has no script of its own; the catalog runs once per document and its mount scans main. -->
+  <template data-page-assets>
+    <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+    <script th:src="@{/js/dependencies/renderer.js}"></script>
+    <script th:src="@{/js/dependencies/tree-view.js}"></script>
+    <script th:src="@{/js/dependencies/list.js}"></script>
+    <script th:src="@{/js/dependencies/source.js}"></script>
+    <script data-page-mount th:src="@{/js/dependencies/mount.js}"></script>
+  </template>
 </th:block>
 </html>

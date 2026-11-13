@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.LifecycleVerbs
@@ -14,6 +15,8 @@ import co.datapipelines.web.schedules.PrincipalTargetViewer
 import jakarta.servlet.http.HttpSession
 import org.springframework.http.ResponseEntity
 import org.springframework.ui.Model
+import org.springframework.util.LinkedMultiValueMap
+import org.springframework.util.MultiValueMap
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -45,6 +48,8 @@ class PipelineLifecycleDialogController(
     private val audit: AuditEventSink,
     /** #407 — the one-shot, session-held cascade names the workspace's release flash renders. */
     private val releaseFlash: ReleaseFlash,
+    /** #876 §F.2 — the release dialog's plan: the session plan and its prerequisites, one planning read. */
+    private val previews: ReleasePreviews,
 ) : ShellPage {
     // ------------------------------------------------------------------ release
 
@@ -54,8 +59,20 @@ class PipelineLifecycleDialogController(
         model: Model,
         @PathVariable id: UUID,
     ): String {
-        LifecycleVerbs.requireSession()
-        model.addAttribute("dlg", dialogs.release(currentPrincipal().requireWorkspace().id, id))
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val dlg = dialogs.release(workspaceId, id)
+        model.addAttribute("dlg", dlg)
+        // #876 §F.2 — the plan the dialog renders and posts back (tree_hash + the ticked drafts); a draft template
+        // other draft pipelines also pin keeps its 142 remark on its row.
+        if (dlg.refusal == null) {
+            model.addAttribute(
+                "rd",
+                previews.dialog(ReleaseFamily.PIPELINE, workspaceId, dlg.name, dlg.version, principal.userId) { node ->
+                    PipelineReleaseNotes.otherPinners(dlg, node)
+                },
+            )
+        }
         // #401 — the editor surface is the only one; the `from` the Versions tab's
         // links still send is ignored, and the dialog always renders the editor shape.
         model.addAttribute("from", FROM_EDITOR)
@@ -72,14 +89,18 @@ class PipelineLifecycleDialogController(
         @PathVariable id: UUID,
         @RequestParam bodyHash: String,
         @RequestParam(required = false) overrideChecksReason: String?,
-        @RequestParam(required = false, defaultValue = "false") releasePinnedTemplates: Boolean,
+        @RequestParam(name = "tree_hash", required = false) treeHash: String?,
+        @RequestParam(name = "include_dependencies", required = false) includeDependencies: List<String>?,
+        /** #876 §F.2 — the optional per-node check overrides, read raw (ReleaseDialogPost pairs them by index). */
+        @RequestParam form: MultiValueMap<String, String> = LinkedMultiValueMap(),
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        // #416 — [bodyHash] is the hash the DIALOG read (§4.2: you release what you tested). The
-        // draft is read here only to refuse the no-draft case; its CURRENT hash is never the one
-        // released, so a draft that changed after the dialog opened is a stale hash and the
-        // service answers pipeline.version.conflict.
+        // #416 — [bodyHash] is the hash the DIALOG read (§4.2: you release what you tested). The draft is read here
+        // only to refuse the no-draft case; its CURRENT hash is never the one released. A draft that changed after the
+        // dialog opened is refused before anything flips: the plan's tree_hash covers the root's draft, so the planner
+        // answers pipeline.release.plan_conflict first; the service's own pipeline.version.conflict still answers a
+        // current plan posted with a stale bodyHash.
         pipelines.findDraft(workspaceId, ReadLens.Everything, id)
             ?: throw DatapipelinesException(
                 code = PipelineErrorCodes.Versioning.NOT_DRAFT,
@@ -88,11 +109,20 @@ class PipelineLifecycleDialogController(
             )
         // 140: a failing check run refuses with pipeline.check.failed unless the dialog's
         // override disclosure supplied the reason — it arrives audited on the release event.
-        // 142: the consent checkbox ("Also release these N draft templates") posts
-        // releasePinnedTemplates; without it a DRAFT pin refuses template_not_released as
-        // it always has, and the server — never the checkbox — is the guard.
+        // #876 §F.2: the dialog posts the plan its GET rendered — tree_hash and one include_dependencies per ticked
+        // draft — into the SAME plan object the REST route parses; a stale hash or an unticked draft is refused by the
+        // planner under the guard (A11), and the server — never the checkbox — is the guard.
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.PIPELINE, treeHash, includeDependencies, form)
         val released =
-            pipelines.release(workspaceId, id, bodyHash, principal.userId, overrideChecksReason, releasePinnedTemplates)
+            pipelines.release(
+                workspaceId,
+                id,
+                bodyHash,
+                principal.userId,
+                overrideChecksReason,
+                releasePinnedTemplates = false,
+                plan = plan,
+            )
         // T187 — the release is the D4 human step; it is audited on every surface that offers
         // it — one event per cascaded template first, then the pipeline's (142).
         LifecycleVerbs.auditRelease(audit, principal, workspaceId, id, released)

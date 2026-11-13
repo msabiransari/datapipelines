@@ -111,7 +111,7 @@ class ShellPageGuardTest {
     ) {
         val lines = candidate.sourceLines
         when (candidate.name) {
-            "SkillController", "SitemapController", "LlmsTxtController" -> {
+            "SkillController", "SitemapController", "LlmsTxtController", "ChartSchemaController" -> {
                 assertEveryHandlerIsResponseBody(candidate, lines, violations)
             }
 
@@ -266,6 +266,8 @@ class ShellPageGuardTest {
                 "SkillController" to "text-only: every handler @ResponseBody",
                 "SitemapController" to "text-only: every handler @ResponseBody",
                 "LlmsTxtController" to "text-only: every handler @ResponseBody",
+                // #860: the chart document v1 schemas, served as bytes beside the skill manual's route.
+                "ChartSchemaController" to "text-only: every handler @ResponseBody",
                 "VisualizationPreviewController" to "standalone page: session-less, capability-authenticated, self-supplied activeTheme",
             )
     }

@@ -512,6 +512,10 @@ class ApiKeyServiceTest {
         // A perfectly valid MCP key is not a promotion credential — refused with the same
         // exception an unknown key gets, so the route cannot classify a stolen key.
         shouldThrow<ApiKeyInvalidException> { service.validateServerKey(mcp) }
+        // #847 fixture: the relaxed repository used to answer the unknown id with a mock row whose
+        // stored hash is "" — a verify against a hash that does not decode, which now (rightly) throws
+        // SecretVerificationUnavailableException. An unknown key is a repository miss.
+        every { repo.findById("dpk_UNKNOWNKEYID") } returns null
         shouldThrow<ApiKeyInvalidException> { service.validateServerKey("dpk_UNKNOWNKEYID.AAAAAAAAAAAAAAAAAAAAAAAA") }
     }
 

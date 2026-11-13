@@ -16,6 +16,7 @@ import co.datapipelines.web.ui.OverviewPage.RecentItem
 import co.datapipelines.web.ui.OverviewPage.RecentPanel
 import co.datapipelines.web.ui.OverviewPage.RecentSection
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
@@ -100,7 +101,8 @@ class OverviewSchedulesRenderTest {
         doc.select("[data-overview-panel] [data-open]").map { it.attr("data-open") } shouldContainExactly listOf("condition", "last-run")
         doc.selectFirst("[data-dialog-section=condition]")!!.text() shouldContain "blocked wins"
         doc.selectFirst("[data-dialog-section=last-run]")!!.text() shouldContain "Not a history"
-        doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("next")
+        // #641: one blocked schedule puts Unblock first (its own case below pins the row).
+        doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("unblock", "next")
         val task = doc.selectFirst("[data-task=next] a").shouldNotBeNull()
         task.attr("href") shouldBe "/schedules"
         task.selectFirst("b")!!.text() shouldBe "See what runs next"
@@ -108,16 +110,66 @@ class OverviewSchedulesRenderTest {
             listOf("Up next", "Recently changed")
         doc.selectFirst(".app-overview-subtitle").shouldNotBeNull()
         doc.select("[data-overview-create] .app-overview-steps li b").map { it.text() } shouldContainExactly
-            listOf("Pick the pipeline.", "Set when it runs.", "Choose who is told.")
+            listOf("Pick the pipeline and its version.", "Set when it runs.", "Choose who is told.")
         doc.selectFirst(".app-overview-actions [data-overview-new-schedule]").shouldNotBeNull()
     }
 
-    /** No explorer filter selects the blocked schedules, so no Unblock row is offered for them (§4.20a). */
+    /**
+     * #641 — the explorer filters by condition, so a blocked workspace gets its next step first:
+     * Unblock N schedules, linking the blocked explorer, N worded from the one summary read.
+     */
     @Test
-    fun `a blocked schedule adds no row the explorer cannot filter for`() {
+    fun `blocked schedules put Unblock first - linking the explorer filtered to blocked, the count worded`() {
         val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 2))
+        doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("unblock", "next")
+        doc.select("[data-task=unblock] .app-overview-task-icon[data-tone=danger]").size shouldBe 1
+        doc.select("[data-task=next] .app-overview-task-icon[data-tone=released]").size shouldBe 1
+        val unblock = doc.selectFirst("[data-task=unblock] a").shouldNotBeNull()
+        unblock.attr("href") shouldBe "/schedules?condition=blocked"
+        unblock.selectFirst("b")!!.text() shouldBe "Unblock 2 schedules"
+        unblock.selectFirst("small")!!.text() shouldBe "2 schedules are stopped by a failure until someone unblocks them."
+        unblock.selectFirst(".app-overview-task-icon use")!!.attr("href") shouldBe "/vendor/icons/lucide-sprite.svg#octagon-alert"
+
+        val one = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 1)).selectFirst("[data-task=unblock] a").shouldNotBeNull()
+        one.selectFirst("b")!!.text() shouldBe "Unblock 1 schedule"
+        one.selectFirst("small")!!.text() shouldBe "1 schedule is stopped by a failure until someone unblocks it."
+    }
+
+    @Test
+    fun `no blocked schedule - no Unblock row and no blocked link in the recent panel`() {
+        val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 0))
         doc.select("[data-overview-recent] [data-task]").map { it.attr("data-task") } shouldContainExactly listOf("next")
         doc.select("[data-overview-recent] a[href*=blocked]").shouldBeEmpty()
+    }
+
+    /**
+     * #641 — the condition tiles and bars open the explorer filtered to their bucket; the Schedules
+     * total stays unlinked. #725 — each Last run bar opens the explorer filtered to its last run.
+     */
+    @Test
+    fun `the condition tiles and bars and the last-run bars link the filtered explorer - the total does not`() {
+        val doc = Jsoup.parse(controllerHtml(WorkspaceRole.AUTHOR, blocked = 1))
+        listOf("enabled", "paused", "blocked").forEach { key ->
+            doc.selectFirst("[data-overview-summary] [data-count=$key] a")!!.attr("href") shouldBe "/schedules?condition=$key"
+            doc.selectFirst("[data-chart=condition] [data-bar=$key] a")!!.attr("href") shouldBe "/schedules?condition=$key"
+        }
+        doc.select("[data-overview-summary] [data-count=schedules] a").shouldBeEmpty()
+        listOf("succeeded", "failed", "in-progress", "did-not-run", "never-ran").forEach { key ->
+            withClue("the Last run bar $key") {
+                doc.select("[data-chart=last-run] [data-bar=$key] a").map { it.attr("href") } shouldContainExactly
+                    listOf("/schedules?outcome=$key")
+            }
+        }
+        doc
+            .select("[data-chart=last-run] a")
+            .map { it.attr("href") }
+            .distinct()
+            .size shouldBe 5
+        val dialog = doc.selectFirst("[data-dialog-section=condition]")!!.text()
+        dialog shouldContain
+            "Each bar and each condition tile opens the explorer filtered to that condition; " +
+            "each Last run bar opens it filtered to that last run."
+        dialog shouldNotContain "not filters"
     }
 
     /** The New schedule action is the canAuthor set's: a viewer and a promoter read the steps and no button. */
@@ -137,7 +189,7 @@ class OverviewSchedulesRenderTest {
 
         doc.selectFirst("h1")!!.text() shouldBe "Schedules"
         doc.selectFirst("[data-overview-intro]")!!.text() shouldContain
-            "A schedule runs a pipeline's current version at the times a cron pattern names"
+            "A schedule runs one exact version of a pipeline at the times a cron pattern names"
         val create = doc.selectFirst("[data-overview-create]").shouldNotBeNull()
         create.select(".app-overview-steps li").size shouldBe 3
         create.text() shouldContain "nothing sends"

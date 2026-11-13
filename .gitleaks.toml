@@ -15,8 +15,12 @@
 #    path match skips the whole file before scanning (detect.go
 #    checkCommitOrPathAllowed), and --no-git/directory scans skip
 #    path-matched files unconditionally (sources/common.go shouldSkipPath).
-#    condition = "AND" + a secret regex keeps the check at finding level:
-#    path AND extracted secret must both match to suppress.
+#    For the canonical wrapper's git scans, condition = "AND" + a secret
+#    regex keeps the check at finding level: path AND extracted secret must
+#    both match. Directory scans can skip a matching path before checking
+#    the secret even with AND (reproduced on 8.30.1, 2026-10-24); these entries
+#    are not a safe directory-scan boundary. Use an exact .gitleaksignore
+#    fingerprint for a single historical finding instead of a new path entry.
 #
 # Baseline: full-history scan on 2026-08-15 found 5 hits, all rule
 # `generic-api-key`, all triaged as false positives below. For every hit the

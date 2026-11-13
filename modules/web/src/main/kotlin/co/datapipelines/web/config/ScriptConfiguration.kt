@@ -99,7 +99,7 @@ class ScriptConfiguration {
         )
 
     /**
-     * `script.evaluations.abandoned` (record §9.5): the pool's abandoned-evaluation count
+     * `datapipelines.script.evaluations.abandoned` (record §9.5): the pool's abandoned-evaluation count
      * as a gauge, so a runaway that outlived its budget and grace is visible rather than only
      * logged.
      */
@@ -109,7 +109,7 @@ class ScriptConfiguration {
         meters: MeterRegistry,
     ): Gauge =
         Gauge
-            .builder("script.evaluations.abandoned") { pool.abandoned.sum().toDouble() }
+            .builder("datapipelines.script.evaluations.abandoned") { pool.abandoned.sum().toDouble() }
             .description(
                 "Script evaluations abandoned past their wall clock plus grace (the pool's bulkhead holds the thread's slot until it ends)",
             ).register(meters)
@@ -152,6 +152,7 @@ class ScriptConfiguration {
                                 version.contract
                                     ?: error("script version ${ref.key} has no contract (chk_script_blocks)"),
                             invariants = version.invariants.orEmpty(),
+                            bodyHash = version.bodyHash,
                         )
                     }
                 },

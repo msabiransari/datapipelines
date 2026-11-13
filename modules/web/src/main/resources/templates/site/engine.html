@@ -55,7 +55,7 @@
         </tbody>
       </table>
       <!-- claim: docs/deployment.md §3.5 -->
-      <p th:if="${!engine.bundled}">
+      <p class="section-note" th:if="${!engine.bundled}">
         The driver is not redistributed in the image for license reasons. Supplying it is the operator's
         act of accepting that license. Registering a datasource for a dialect whose driver is absent
         fails at save time with <code>datasource.driver_not_loaded</code>, a packaging error that says so.
@@ -172,7 +172,8 @@
           <a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a>
         </li>
       </ul>
-      <p><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;
+      <p class="section-note"><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;
+         <a th:href="@{/how-it-works}">The step-by-step MCP server tutorial &rarr;</a> &middot;
          <a th:href="@{/docs/datasources}">Datasources specification &rarr;</a></p>
     </div>
   </section>
@@ -189,11 +190,11 @@
   </section>
 
   <section class="section" aria-labelledby="cta-title">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="cta-title" class="ds-headline">Connect an agent to this engine today</h2>
-      <!-- claim: docs/deployment.md Appendix B -->
+      <!-- claim: docs/deployment.md Appendix B (the demo stack), docs/auth.md §7.4 (the key is created on the Keys page) -->
       <p class="section-lede">
-        Register the datasource, copy your key from the top bar, paste one config block. The setup page walks
+        Register the datasource, create your key on the Keys page, paste one config block. The setup page walks
         through all of it, and the demo stack gives you a safe place to try the whole loop first.
       </p>
       <div class="btn-row">

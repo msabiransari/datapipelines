@@ -6,6 +6,11 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.SearchNeedle
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseRow
+import co.datapipelines.pipeline.inverse.InverseSql
+import co.datapipelines.pipeline.inverse.PinNodeRules
+import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -192,6 +197,29 @@ class TemplateRepository(
             ?.let { findVersion(workspaceId, id, it.version) }
             ?: findLatest(workspaceId, id)
 
+    /**
+     * #873 (dependency-graph record §7.1, brief R1-8) — the exact versions [keys] name, `(template id, version)` pairs, any
+     * status, in ONE `IN`-list statement: the template dependency provider's batch read. Each row carries the entity's
+     * surrogate id and its current pointer as [findCurrentVersions] reports it (live entities only, NULL never
+     * released). A key with no stored row is absent. Empty [keys] issues nothing (`IN ()` would not prepare).
+     */
+    fun findReleaseVersions(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<TemplateReleaseRow> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "$SELECT_RELEASE_ROW WHERE t.workspace_id = :workspaceId AND (t.name, v.version) IN (:keys)",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (id, version) -> arrayOf<Any>(id, version) }),
+        ) { rs, rowNum ->
+            TemplateReleaseRow(
+                entityUuid = rs.getObject("entity_uuid", UUID::class.java),
+                currentVersion = rs.getObject("live_current_version") as Int?,
+                template = checkNotNull(MAPPER.mapRow(rs, rowNum)),
+            )
+        }
+    }
+
     /** A specific stored version's full record, including of a soft-deleted template (§5.1). */
     fun findVersion(
         workspaceId: UUID,
@@ -234,6 +262,29 @@ class TemplateRepository(
             mapOf("name" to id, "workspaceId" to workspaceId),
             Boolean::class.java,
         ) == true
+
+    /**
+     * #883 — the template's **established type** (046 §5.3), read from its RETAINED versions: any status, DISCARDED
+     * included, workspace-scoped. Null exactly when [existsId] is false — no version of [id] in [workspaceId]; another
+     * workspace's template of the same name is not read.
+     *
+     * The working-version reads ([findWorking], [findLatest]) answer nothing for a template whose every version is
+     * DISCARDED, yet that template is registered (versioning §3.2) and an import onto it versions it (§9.2, D60). The type
+     * is identical across a template's versions by rule, so the highest-numbered row is as authoritative as any and
+     * makes the answer one deterministic row. The unknown-wire fallback is the row mappers' own, so this read and
+     * [findWorking] can never disagree on a template that has a working version.
+     */
+    fun findEstablishedType(
+        workspaceId: UUID,
+        id: String,
+    ): TemplateType? =
+        jdbc
+            .query(
+                "SELECT v.type FROM template_versions v JOIN templates t ON t.id = v.template_id" +
+                    " WHERE t.name = :name AND t.workspace_id = :workspaceId ORDER BY v.version DESC LIMIT 1",
+                mapOf("name" to id, "workspaceId" to workspaceId),
+            ) { rs, _ -> TemplateType.fromWire(rs.getString("type")) ?: TemplateType.SQL }
+            .singleOrNull()
 
     /**
      * The `GET /templates?dialect=&q=&offset=&limit=` page (templates.md §9, rest-api §8.5).
@@ -603,7 +654,8 @@ class TemplateRepository(
         block: () -> T,
     ): T =
         try {
-            block()
+            // #841 (G0): inside the writer guard's transaction the losing statement rolls back to a savepoint only.
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: org.springframework.dao.DuplicateKeyException) {
             if (e.mostSpecificCause.message?.contains(NAME_CONSTRAINT) != true) throw e
             throw co.datapipelines.typesystem.DatapipelinesException(
@@ -625,6 +677,9 @@ class TemplateRepository(
      * order. Measured by the forced race in `TemplateRepositoryIntegrationTest`; the index-only
      * mapping answered it with a raw `DuplicateKeyException`. `PipelineRepository` and
      * `ParameterSetRepository` map the same pair.
+     *
+     * Inside the writer guard's transaction (#841 G0, the #517 precedent) the statement runs under a savepoint, so the
+     * winner read below still answers instead of failing on an aborted transaction.
      */
     private fun <T> mappingDraftRace(
         workspaceId: UUID,
@@ -632,7 +687,7 @@ class TemplateRepository(
         block: () -> T,
     ): T =
         try {
-            block()
+            RaceSavepoint.attempt(jdbc.jdbcTemplate, block)
         } catch (e: org.springframework.dao.DuplicateKeyException) {
             val violated = e.mostSpecificCause.message.orEmpty()
             if (DRAFT_INDEX !in violated && DRAFT_PK !in violated) throw e
@@ -657,6 +712,33 @@ class TemplateRepository(
     // ---------------------------------------------------------------------------------------------
     // Lifecycle reads (versioning §4/§7)
     // ---------------------------------------------------------------------------------------------
+
+    /** The resolved surrogate identity of a workspace-local template name. */
+    fun findEntityUuid(
+        workspaceId: UUID,
+        name: String,
+    ): UUID? =
+        jdbc
+            .query(
+                "SELECT id FROM templates WHERE workspace_id = :workspaceId AND name = :name",
+                mapOf("workspaceId" to workspaceId, "name" to name),
+            ) { rs, _ -> rs.getObject("id", UUID::class.java) }
+            .singleOrNull()
+
+    /**
+     * The template name (its authored id) behind surrogate [entityUuid] in [workspaceId] — the inverse of [findEntityUuid],
+     * for a release root named by its entity id (#873 §C.1, `RootReleaseRequest`). Null when no such template is here.
+     */
+    fun findNameByEntityUuid(
+        workspaceId: UUID,
+        entityUuid: UUID,
+    ): String? =
+        jdbc
+            .query(
+                "SELECT name FROM templates WHERE workspace_id = :workspaceId AND id = :id",
+                mapOf("workspaceId" to workspaceId, "id" to entityUuid),
+            ) { rs, _ -> rs.getString("name") }
+            .singleOrNull()
 
     /** One version's lifecycle detail, or null when the template/version does not exist in the workspace. */
     fun findVersionDetail(
@@ -1002,6 +1084,32 @@ class TemplateRepository(
             mapOf("name" to id, "workspaceId" to workspaceId),
         ) > 0
 
+    /**
+     * #877 §B.2 — ONE page of the stored IMPORT pins (`imports[i]`, the `imports_json` `{id, version, alias}` array) of
+     * this workspace's template versions the [InverseRequest.scope] selects, naming template [InverseRequest.targetKey] at
+     * [InverseRequest.targetVersion] or at any version: at most `limit + 1` rows, ONE statement, in the inverse total
+     * order. The same stored field `TemplateReleaseProvider.importsOf` extracts; the row's element id is the import's
+     * declared alias. The template family's importer arm reads it.
+     */
+    fun findImportPinOccurrences(request: InverseRequest): List<InverseRow> {
+        val stored = InverseSql.jsonInt("i.ref->'version'")
+        val exact = if (request.targetVersion == null) "" else "AND $stored = :targetVersion"
+        val occurrences =
+            """
+            SELECT t.id::text AS dependent_id, t.name AS dependent_name, v.version AS dependent_version,
+                   v.status AS dependent_status, 'imports[' || (i.ord - 1) || ']' AS source_path,
+                   $stored AS stored_version, i.ref->>'alias' AS element_id
+              FROM templates t
+              JOIN template_versions v ON v.template_id = t.id
+             CROSS JOIN LATERAL jsonb_array_elements(COALESCE(v.imports_json, '[]'::jsonb)) WITH ORDINALITY AS i(ref, ord)
+             WHERE t.workspace_id = :workspaceId AND ${InverseSql.scope(request.scope, "template_versions", "template_id", entity = "t")}
+               AND i.ref->>'id' = :targetKey
+               $exact
+            """.trimIndent()
+        val binds = mapOf("workspaceId" to request.workspaceId, "targetKey" to request.targetKey, "targetVersion" to request.targetVersion)
+        return InverseSql.page(jdbc, occurrences, binds, request)
+    }
+
     /** True when the template entity is LIVE (ACTIVE) — the §3.2 derivation read directly. */
     fun hasLiveVersion(
         workspaceId: UUID,
@@ -1209,17 +1317,22 @@ class TemplateRepository(
               JOIN template_versions v ON v.template_id = t.id
             """.trimIndent()
 
+        /** [SELECT_JOINED] plus the entity's surrogate id and its live current pointer — [findReleaseVersions]' row. */
+        private val SELECT_RELEASE_ROW =
+            SELECT_JOINED.replaceFirst(
+                "SELECT ",
+                "SELECT t.id AS entity_uuid, CASE WHEN $TEMPLATE_LIVE_T THEN t.current_version END AS live_current_version, ",
+            )
+
         /**
          * The working-version page predicate of [list], shared with [count] (034 E3)
          *
-         * **The COALESCE is D55.** `current_version` is NULL until a human releases, so a plain
-         * `v.version = t.current_version` made every freshly created template INVISIBLE — absent
-         * from the explorer, from `templates_list` and from its own count. The pointer still wins
-         * whenever there IS a release (a template with a draft over a release lists its RELEASED
-         * projection, and the `drafts` badge is what says a draft exists); the draft fills the gap
-         * only where nothing has been released at all, because there it is the only version the
-         * template has.
-         * so the page and its total can never disagree. Every optional filter is CAST in the
+         * **The COALESCE is D55.** Without [lifecycle] or [releasedOnly], the pointer row wins;
+         * it may name a development-posture draft. A null pointer falls back to the newest draft,
+         * keeping a never-released template visible in authoring lists and their counts.
+         * With [releasedOnly] and no lifecycle bucket, #575 instead requires the pointer row
+         * itself to be RELEASED, with no draft fallback. Both [list] and [count] use this rule,
+         * so the page and its total cannot disagree. Every optional filter is CAST in the
          * SQL: a bare `? IS NULL` gives Postgres no type to infer and the statement will not
          * even prepare.
          *
@@ -1229,7 +1342,7 @@ class TemplateRepository(
          * versions only when [releasedOnly] (a narrowed lens). The joined row is then the
          * template's LATEST version, whatever its status — a discarded-only template has no
          * working version (D55's COALESCE is empty for it), and the bucket's semantics live
-         * entirely in the membership subquery. The unfiltered predicate is the one it always was.
+         * entirely in the membership subquery. This bucket branch retains its existing rule.
          */
         private fun listWhere(
             lifecycle: co.datapipelines.pipeline.LifecycleBucket?,
@@ -1243,7 +1356,9 @@ class TemplateRepository(
                     }
                     ?: TEMPLATE_LIVE_T
             val version =
-                if (lifecycle == null) {
+                if (lifecycle == null && releasedOnly) {
+                    "v.version = t.current_version AND v.status = 'RELEASED'"
+                } else if (lifecycle == null) {
                     """
                     v.version = COALESCE(
                           t.current_version,
@@ -1356,6 +1471,18 @@ class TemplateRepository(
                 " v.created_via, v.updated_via" +
                 " FROM template_versions v JOIN templates t ON t.id = v.template_id" +
                 " WHERE t.workspace_id = :workspaceId"
+
+        /**
+         * #877 §B.1 — the pipeline node-type rule for a template pin ([PinNodeRules.TEMPLATE], shared with the pipeline
+         * family's inverse and its outgoing extractor) over a lateral node alias `pnode`: the statements below that embed
+         * a pin predicate read it, never a copy.
+         */
+        private val TEMPLATE_PIN_NODE_P = PinNodeRules.typeIn("pnode", PinNodeRules.TEMPLATE)
+
+        /** The discard statement's embedded pin guard: a template-bearing node pinning `:name@:version`. */
+        private val DISCARD_TEMPLATE_PIN_P =
+            "$TEMPLATE_PIN_NODE_P AND pnode->'template'->>'id' = :name" +
+                " AND ${InverseSql.jsonInt("pnode->'template'->'version'")} = :version"
 
         /**
          * The derived entity status (versioning §3.2, since V19 retired `is_deleted`): a
@@ -1497,13 +1624,13 @@ class TemplateRepository(
                    draft.created_at, draft.created_by, draft.released_at, draft.released_by, draft.discarded_at, draft.discarded_by,
                    draft.updated_by, draft.updated_at, draft.created_via, draft.updated_via
               FROM draft, guard, meta
-              JOIN templates t ON t.name = :name
+              JOIN templates t ON t.name = :name AND t.workspace_id = :workspaceId
             UNION ALL
             SELECT t.name AS template_id, noop.version, noop.status, noop.body_hash,
                    noop.created_at, noop.created_by, noop.released_at, noop.released_by, noop.discarded_at, noop.discarded_by,
                    noop.updated_by, noop.updated_at, noop.created_via, noop.updated_via
               FROM noop, meta
-              JOIN templates t ON t.name = :name
+              JOIN templates t ON t.name = :name AND t.workspace_id = :workspaceId
             """.trimIndent()
 
         /** versioning §5.2 — in-place draft write; index metadata moves at save time. */
@@ -1712,8 +1839,7 @@ class TemplateRepository(
                        CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
                         WHERE pp.workspace_id = :workspaceId
                           AND pv.status IN ('DRAFT','RELEASED')
-                          AND pnode->'template'->>'id' = :name
-                          AND (pnode->'template'->>'version')::int = :version
+                          AND $DISCARD_TEMPLATE_PIN_P
                    )
                 RETURNING v.template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
                           v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
@@ -1804,14 +1930,14 @@ class TemplateRepository(
                    SELECT 1 FROM pipeline_versions pv
                    CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
                     WHERE pv.pipeline_id = :pipelineId AND pv.status IN ('DRAFT','RELEASED')
-                      AND pnode->'template'->>'id' = t.name
+                      AND $TEMPLATE_PIN_NODE_P AND pnode->'template'->>'id' = t.name
                )
                AND NOT EXISTS (
                    SELECT 1 FROM pipeline_versions pv JOIN pipelines pp ON pp.id = pv.pipeline_id
                    CROSS JOIN LATERAL jsonb_array_elements(pv.body_json->'nodes') AS pnode
                     WHERE pv.pipeline_id <> :pipelineId
                       AND pp.workspace_id = :workspaceId
-                      AND pnode->'template'->>'id' = t.name
+                      AND $TEMPLATE_PIN_NODE_P AND pnode->'template'->>'id' = t.name
                )
              ORDER BY t.name
             """.trimIndent()
@@ -1891,3 +2017,13 @@ class TemplateRepository(
             }
     }
 }
+
+/**
+ * One stored template version as the dependency provider reads it (#873, [TemplateRepository.findReleaseVersions]): the
+ * full version, the entity's surrogate id, and its current pointer — null when never released or no longer live.
+ */
+data class TemplateReleaseRow(
+    val entityUuid: UUID,
+    val currentVersion: Int?,
+    val template: Template,
+)

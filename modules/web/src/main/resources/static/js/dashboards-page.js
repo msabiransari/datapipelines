@@ -20,7 +20,8 @@
  *     summaries land in the activity dock (events-dock.js's log); everything else is ignored.
  *   - the #473 filters DRAWER at narrow widths (open/close/Escape, aria-expanded, focus in
  *     and back; closed when the Board tab is left) and the #473 activity DOCK (tabs, filters,
- *     clear, collapse, splitter).
+ *     clear, collapse). The dock's height is splitter.js's since #783 (`board-dock`, the
+ *     editor's shared splitter), not this file's.
  *   - window.__dpPage is the page's test seam (window.__dp is the conformance host's): ready,
  *     error, code, notifications, instance, dock — the same shape, so a reader knows one.
  *
@@ -28,7 +29,7 @@
  * inert shell markup; the persistent host replays this page mount against singleton libraries.
  * ONE history listener disposes the live instance and retains the runtime's refresh cancellation.
  * #473: the persistent shell never unloads the document, so every listener a mount puts on
- * `document` or `window` (the drawer's Escape, the splitter's drag, the tab-leave observer) is
+ * `document` or `window` (the drawer's Escape, the drawer's resize close, the tab-leave observer) is
  * registered through that mount's `listen` and removed by its `teardown`, which the same
  * history listener runs — a board revisited in-shell holds exactly one set, never one per visit.
  * Listeners on the board's own elements leave with the swapped-out markup.
@@ -65,7 +66,7 @@
   window.__dpPage = pageState;
 
   // Registers a listener this mount owns; `teardown` removes it. Returns its own remover for a
-  // listener that ends earlier (a drag ends on pointerup).
+  // listener that ends earlier.
   function listen(target, type, handler) {
     target.addEventListener(type, handler);
     var removed = false;
@@ -270,6 +271,72 @@
     var severitySelect = dock.querySelector('[data-dp-dock-filter="severity"]');
     var kindSelect = dock.querySelector('[data-dp-dock-filter="kind"]');
     var stick = true;
+    var touched = false;
+    var autoCollapsed = false;
+    var collapseButton = dock.querySelector("[data-dp-dock-collapse]");
+    var collapseLabel = collapseButton ? collapseButton.querySelector("[data-dp-dock-collapse-label]") : null;
+    var defaultObserver = null;
+
+    function touchDock() {
+      touched = true;
+      autoCollapsed = false;
+      if (defaultObserver) defaultObserver.disconnect();
+    }
+
+    function setCollapsed(collapsed) {
+      if (collapsed) dock.setAttribute("data-dp-dock-collapsed", "");
+      else dock.removeAttribute("data-dp-dock-collapsed");
+      if (collapseButton) collapseButton.setAttribute("aria-expanded", String(!collapsed));
+      // #842: the toggle names the action it performs; every caller passes through here.
+      if (collapseLabel) collapseLabel.textContent = collapseButton.getAttribute(collapsed ? "data-dp-dock-label-collapsed" : "data-dp-dock-label-open");
+    }
+
+    function applyDockDefault() {
+      var splitter = window.DpSplitter;
+      var layout = scope.querySelector(".dp-board-layout");
+      var head = dock.querySelector(".dp-board-dock-head");
+      if (touched || !splitter || !boardPage || !layout || !head) return;
+      // The region shared by board and dock is stable when the body folds. Subtract the
+      // measured head (it wraps on short widths), border, gap and DEFAULT body height.
+      // Never subtract the default from the board row alone: collapse has already grown it.
+      if (boardPage.getBoundingClientRect().height <= 0) return;
+      var css = window.getComputedStyle(boardPage);
+      var dockCss = window.getComputedStyle(dock);
+      var gap = parseFloat(css.rowGap);
+      var sharedHeight = dock.getBoundingClientRect().bottom - layout.getBoundingClientRect().top;
+      var boardIfOpen = sharedHeight - head.getBoundingClientRect().height - gap
+        - parseFloat(dockCss.borderTopWidth) - parseFloat(dockCss.borderBottomWidth)
+        - parseFloat(css.getPropertyValue("--dp-dock-pane-h"));
+      var remembered = splitter.readStored(splitter.KEYS.boardDock);
+      var state = splitter.dockDefault(boardIfOpen, parseFloat(css.getPropertyValue("--dp-board-auto-collapse-below")), remembered);
+      if (state === splitter.COLLAPSED) {
+        autoCollapsed = true;
+        setCollapsed(true);
+      } else if (autoCollapsed) {
+        autoCollapsed = false;
+        setCollapsed(false);
+      } else if (!dock.hasAttribute("data-dp-dock-collapsed")) {
+        setCollapsed(false);
+      }
+    }
+
+    listen(dock, "dp:dock-resize", touchDock);
+    // A deliberate board action is the editor's Run gesture: surface an automatic fold
+    // so its outcome/refusal is readable, while preserving a fold the person chose.
+    if (filtersPanel) listen(filtersPanel, "click", function (event) {
+      var target = event.target;
+      if (!target || typeof target.closest !== "function" || !target.closest(".dp-dashboard-action-control")) return;
+      if (autoCollapsed) setCollapsed(false);
+      touchDock();
+    });
+    applyDockDefault();
+    if (boardPage && typeof window.ResizeObserver === "function") {
+      defaultObserver = new window.ResizeObserver(applyDockDefault);
+      defaultObserver.observe(boardPage);
+      defaultObserver.observe(dock.querySelector(".dp-board-dock-head"));
+      defaultObserver.observe(boardPage.querySelector(".dp-board-toolbar"));
+      cleanups.push(function () { defaultObserver.disconnect(); });
+    }
 
     function timeText(at) {
       var d = new Date(Number(at) || 0);
@@ -362,6 +429,8 @@
     for (var t = 0; t < tabs.length; t++) {
       (function (tab) {
         tab.addEventListener("click", function () {
+          touchDock();
+          setCollapsed(false);
           switchTab(tab.getAttribute("data-dp-dock-tab"));
         });
       })(tabs[t]);
@@ -380,50 +449,16 @@
       });
     }
 
-    var collapseButton = dock.querySelector("[data-dp-dock-collapse]");
     if (collapseButton) {
       collapseButton.addEventListener("click", function () {
-        var collapsed = dock.hasAttribute("data-dp-dock-collapsed");
-        if (collapsed) dock.removeAttribute("data-dp-dock-collapsed");
-        else dock.setAttribute("data-dp-dock-collapsed", "");
-        collapseButton.setAttribute("aria-expanded", String(!collapsed));
+        touchDock();
+        setCollapsed(!dock.hasAttribute("data-dp-dock-collapsed"));
       });
     }
 
-    var splitter = dock.querySelector("[data-dp-dock-resize]");
-    if (splitter && body && typeof window.addEventListener === "function") {
-      // One drag at a time: its two window listeners belong to this mount (`listen`), so a
-      // navigation in the middle of a drag cannot leave them behind.
-      var endDrag = null;
-      splitter.addEventListener("pointerdown", function (e) {
-        if (endDrag) endDrag();
-        var startY = e.clientY;
-        var startHeight = body.getBoundingClientRect().height;
-        dock.removeAttribute("data-dp-dock-collapsed");
-        collapseButton && collapseButton.setAttribute("aria-expanded", "true");
-        var removeMove = listen(window, "pointermove", function (ev) {
-          // Drag UP grows the pane; the bounds keep the dock a dock.
-          var height = Math.min(480, Math.max(96, startHeight + (startY - ev.clientY)));
-          dock.style.setProperty("--dp-dock-pane-h", Math.round(height) + "px");
-        });
-        var removeUp = listen(window, "pointerup", function () {
-          if (endDrag) endDrag();
-        });
-        endDrag = function () {
-          removeMove();
-          removeUp();
-          endDrag = null;
-        };
-        e.preventDefault();
-      });
-    }
-
-    // The drag writes the pane height through the CSSOM; a history snapshot would serialise it
-    // as a `style` attribute the CSP refuses on Back (#287), so the teardown strips it first.
-    cleanups.push(function () {
-      dock.style.removeProperty("--dp-dock-pane-h");
-      if (dock.getAttribute("style") === "") dock.removeAttribute("style");
-    });
+    // #783: the dock's HEIGHT is no longer this page's — splitter.js sizes it (the editor's ONE
+    // mechanism: `board-dock`, the root's `--dp-dock-pane-h`, remembered across navigation),
+    // so the page-local drag, its 96–480 clamp and its teardown strip are gone.
 
     if (body && typeof body.addEventListener === "function") {
       body.addEventListener("scroll", function () {
@@ -513,6 +548,9 @@
         // the drawer's content at narrow widths.
         parametersContainer: filtersPanel,
       }),
+      // Record 2026-11-06 §5.2: the page declares the chart library it loaded. Without the vendored bundle the
+      // declaration is absent, so a board with a chart fails chart.library_undeclared and a board without one mounts.
+      charts: window.Plotly ? { library: "plotly", instance: window.Plotly } : undefined,
       options: {
         onNotification: function (n) {
           pageState.notifications.push(n);

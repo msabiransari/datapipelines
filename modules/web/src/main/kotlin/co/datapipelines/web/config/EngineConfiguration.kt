@@ -29,11 +29,9 @@ import co.datapipelines.executor.pipelineExecutor
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import io.micrometer.core.instrument.MeterRegistry
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.core.StringRedisTemplate
@@ -140,10 +138,6 @@ class EngineConfiguration {
         ).also { metrics.bindConcurrency(it) }
 
     @Bean
-    @ConditionalOnMissingBean(MeterRegistry::class)
-    fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
-
-    @Bean
     fun executorMetrics(registry: MeterRegistry): ExecutorMetrics = ExecutorMetrics(registry)
 
     @Bean
@@ -220,6 +214,7 @@ class EngineConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun pipelineExecutorBean(
+        lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
@@ -265,6 +260,7 @@ class EngineConfiguration {
             subPipelineRunner = subPipelineRunner,
             progress = progress,
             scripts = scriptSupport,
+            lakeAppendPort = lakeAppendPort,
         )
 
     /**

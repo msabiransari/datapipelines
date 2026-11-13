@@ -2,6 +2,7 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.EndpointPromotionImport
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.auth.ApiKeyRepository
@@ -29,9 +30,19 @@ import java.util.UUID
  * promotion must never mint one — minting a credential as a side effect of a deploy is not a
  * thing this system does. So a binding names the key the target is expected to already have, and
  * a target missing it refuses the WHOLE batch before anything is pushed.
+ *
+ * ## #786 — what an entry is now
+ *
+ * An API is versioned: the sender reads each API's CURRENT version body (pipeline name, timeout, description) and the
+ * wire is unchanged (owner ruling 2026-11-08 (3); exact-pin promotion is follow-up #879). The receiver creates an
+ * absent API through [EndpointPromotionImport] — the receiver-only import that pins the target pipeline's CURRENT and
+ * needs no authoring capability — never through the native authoring creation, which a receiver refuses by
+ * construction.
  */
 class EndpointPromotion(
     private val publishing: EndpointPublishService,
+    /** #786 F.2 — the receiver-only import; constructed for this one collaborator, never a bean. */
+    private val importer: EndpointPromotionImport,
     private val keys: EndpointKeyService,
     private val endpoints: PublishedEndpointRepository,
     private val bindings: EndpointKeyBindingRepository,
@@ -67,8 +78,8 @@ class EndpointPromotion(
         workspaceId: UUID,
         promotedPipelineNames: List<String>,
     ): List<PromotionWire.EndpointEntry> {
-        val promotedIds = promotedPipelineNames.mapNotNull { pipelines.findByName(workspaceId, it)?.id }.toSet()
-        val omitted = endpoints.findLegacy(workspaceId).count { it.pipelineId in promotedIds }
+        val promoted = promotedPipelineNames.filter { pipelines.findByName(workspaceId, it) != null }.toSet()
+        val omitted = endpoints.findLegacy(workspaceId).count { it.pipelineName in promoted }
         if (omitted > 0) {
             log.warn(
                 "event=endpoint.promotion_legacy_omitted count={} message=\"legacy endpoint rows over the promoted " +
@@ -80,14 +91,14 @@ class EndpointPromotion(
         val allBindings = bindings.findByWorkspace(workspaceId)
         return endpoints
             .findByWorkspace(workspaceId)
-            .filter { it.pipelineId in promotedIds }
             .mapNotNull { endpoint ->
-                val pipelineName = pipelines.findById(workspaceId, endpoint.pipelineId)?.name ?: return@mapNotNull null
+                // #786: the API's CURRENT version is what travels; an API with none has nothing to promote.
+                val body = endpoint.current?.body?.takeIf { it.pipelineName in promoted } ?: return@mapNotNull null
                 PromotionWire.EndpointEntry(
                     path = endpoint.pathPattern,
-                    pipeline = pipelineName,
-                    timeoutSeconds = endpoint.timeoutSeconds,
-                    description = endpoint.description,
+                    pipeline = body.pipelineName,
+                    timeoutSeconds = body.timeoutSeconds,
+                    description = body.description,
                     bindings =
                         allBindings
                             .filter { it.pathPrefix == endpoint.pathPattern }
@@ -130,25 +141,28 @@ class EndpointPromotion(
     }
 
     /**
-     * Publishes one promoted endpoint and binds its keys.
+     * Creates one promoted endpoint when its path is absent, and binds its keys.
      *
-     * Republishing an unchanged endpoint is a no-op rather than a conflict, so a re-push is
-     * idempotent like every other entry in the batch.
+     * An existing path is skipped rather than refused, so a re-push is idempotent like every
+     * other entry in the batch. An absent one is created by the receiver-only import (#786 F.2):
+     * v1 pins the target pipeline's CURRENT, RELEASED iff that version is — in the receiver's
+     * one transaction, so a later failure rolls the entity and v1 back with the batch.
      */
     fun apply(
         entry: PromotionWire.EndpointEntry,
         promoter: AuthenticatedPrincipal,
     ) {
+        val workspaceId = promoter.requireWorkspace().id
         if (publishing.get(promoter, entry.path) == null) {
-            publishing.publish(
-                principal = promoter,
+            importer.importPromoted(
+                workspaceId = workspaceId,
+                actor = promoter.userId,
                 pathPattern = entry.path,
                 pipelineName = entry.pipeline,
                 timeoutSeconds = entry.timeoutSeconds,
                 description = entry.description,
             )
         }
-        val workspaceId = promoter.requireWorkspace().id
         entry.bindings.forEach { keyName ->
             // Proven to exist by refuseIfKeysMissing. An ambiguous name — several keys of that
             // name in one workspace, which the schema permits — binds ALL of them: the batch

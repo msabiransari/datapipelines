@@ -15,5 +15,8 @@ object ScheduleAuditEvents {
     const val DELETED = "schedule.deleted"
     const val RUN_REQUESTED = "schedule.run_requested"
 
-    val ALL: Set<String> = setOf(CREATED, UPDATED, PAUSED, RESUMED, UNBLOCKED, DELETED, RUN_REQUESTED)
+    /** #442b — a person queued a failed or uncertain notification again; ids and the prior state, never an address. */
+    const val NOTIFICATION_RESENT = "schedule.notification_resent"
+
+    val ALL: Set<String> = setOf(CREATED, UPDATED, PAUSED, RESUMED, UNBLOCKED, DELETED, RUN_REQUESTED, NOTIFICATION_RESENT)
 }

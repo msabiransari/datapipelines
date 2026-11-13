@@ -3,10 +3,16 @@ package co.datapipelines.web.pipelines
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.web.api.ApiException
+import com.fasterxml.jackson.core.JsonProcessingException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.ints.shouldBeGreaterThan
+import io.kotest.matchers.ints.shouldBeLessThanOrEqual
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -44,15 +50,18 @@ class PipelineExecuteControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate() {
+    private fun authenticate(
+        role: co.datapipelines.auth.WorkspaceRole = co.datapipelines.auth.WorkspaceRole.VIEWER,
+        authMethod: AuthMethod = AuthMethod.API_KEY,
+    ) {
         val principal =
             AuthenticatedPrincipal(
                 userId,
                 "a@b.c",
                 "A",
-                AuthMethod.API_KEY,
-                "dpk_x",
-                workspace = WorkspaceContext(workspaceId, "acme"),
+                authMethod,
+                if (authMethod == AuthMethod.API_KEY) "dpk_x" else null,
+                workspace = WorkspaceContext(workspaceId, "acme", role),
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
@@ -84,7 +93,7 @@ class PipelineExecuteControllerTest {
         every { pipelines.findById(any(), pipelineId) } returns record
         // D56: no version ⇒ the WORKING version, so the draft is looked up first. Released only here.
         every { pipelines.findDraftDetail(any(), pipelineId) } returns null
-        every { pipelines.findVersionBody(any(), pipelineId, 5) } returns bodyJson
+        every { pipelines.findExecutionSnapshot(any(), pipelineId, 5) } returns snapshot()
         val launch = slot<ExecuteLaunch>()
         every { launcher.launch(capture(launch)) } returns SseEmitter(0L)
 
@@ -103,7 +112,8 @@ class PipelineExecuteControllerTest {
         authenticate()
         every { pipelines.findById(any(), pipelineId) } returns record
         every { pipelines.findDraftDetail(any(), pipelineId) } returns draftDetail(version = 6)
-        every { pipelines.findVersionBody(any(), pipelineId, 6) } returns bodyJson
+        every { pipelines.findExecutionSnapshot(any(), pipelineId, 6) } returns
+            snapshot(co.datapipelines.pipeline.PipelineVersionStatus.DRAFT)
         val launch = slot<ExecuteLaunch>()
         every { launcher.launch(capture(launch)) } returns SseEmitter(0L)
 
@@ -112,7 +122,8 @@ class PipelineExecuteControllerTest {
 
         every { pipelines.findById(any(), pipelineId) } returns record.copy(currentVersion = null)
         every { pipelines.findDraftDetail(any(), pipelineId) } returns draftDetail(version = 1)
-        every { pipelines.findVersionBody(any(), pipelineId, 1) } returns bodyJson
+        every { pipelines.findExecutionSnapshot(any(), pipelineId, 1) } returns
+            snapshot(co.datapipelines.pipeline.PipelineVersionStatus.DRAFT)
 
         controller.execute(pipelineId, "{}", request())
         launch.captured.pipelineVersion shouldBe 1
@@ -141,11 +152,57 @@ class PipelineExecuteControllerTest {
             createdBy = userId,
         )
 
+    private fun snapshot(
+        status: co.datapipelines.pipeline.PipelineVersionStatus = co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+    ) = co.datapipelines.pipeline.PipelineExecutionSnapshot(bodyJson, "b".repeat(64), status, false)
+
+    @Test
+    fun `viewer is refused from the server write fact before launch even with a forged client grant`() {
+        authenticate(authMethod = AuthMethod.OIDC)
+        val backend = managedBackend()
+        val subject = PipelineExecuteController(backend, launcher)
+        // A missing permission check must launch successfully and fail this test's refusal assertion.
+        every { launcher.launch(any()) } returns SseEmitter(0L)
+        val refusal =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                subject.execute(pipelineId, """{"version":5,"lake_append_grant":{"granted_by":"$userId"}}""", request())
+            }
+        refusal.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_FORBIDDEN
+        verify(exactly = 0) { launcher.launch(any()) }
+    }
+
+    @Test
+    fun `author launch carries the checked member identity instead of the client grant`() {
+        authenticate(co.datapipelines.auth.WorkspaceRole.AUTHOR, AuthMethod.OIDC)
+        val subject = PipelineExecuteController(managedBackend(), launcher)
+        val captured = slot<ExecuteLaunch>()
+        every { launcher.launch(capture(captured)) } returns SseEmitter(0L)
+        subject.execute(pipelineId, """{"version":5,"lake_append_grant":{"granted_by":"${UUID.randomUUID()}"}}""", request())
+        val grant = requireNotNull(captured.captured.lakeAppendGrant)
+        grant.grantedBy shouldBe userId
+        grant.principalKind shouldBe "session"
+    }
+
+    private fun managedBackend(): co.datapipelines.pipeline.PipelineService =
+        mockk {
+            every { findRecord(workspaceId, any(), pipelineId) } returns record
+            every { findExecutable(workspaceId, any(), record, 5) } returns
+                co.datapipelines.pipeline.PipelineService.ExecutablePipeline(
+                    record,
+                    5,
+                    bodyJson,
+                    co.datapipelines.pipeline
+                        .PipelineDeserializer()
+                        .readOrThrow(bodyJson),
+                    writesManagedLake = true,
+                )
+        }
+
     @Test
     fun `a pinned version is used, and a non-positive version is a 400`() {
         authenticate()
         every { pipelines.findById(any(), pipelineId) } returns record
-        every { pipelines.findVersionBody(any(), pipelineId, 2) } returns bodyJson
+        every { pipelines.findExecutionSnapshot(any(), pipelineId, 2) } returns snapshot()
         val launch = slot<ExecuteLaunch>()
         every { launcher.launch(capture(launch)) } returns SseEmitter(0L)
 
@@ -161,7 +218,7 @@ class PipelineExecuteControllerTest {
     fun `an unknown pinned version is the version 404`() {
         authenticate()
         every { pipelines.findById(any(), pipelineId) } returns record
-        every { pipelines.findVersionBody(any(), pipelineId, 9) } returns null
+        every { pipelines.findExecutionSnapshot(any(), pipelineId, 9) } returns null
 
         shouldThrow<ApiException> { controller.execute(pipelineId, """{"version":9}""", request()) }
             .code shouldBe "pipeline.execution.not_found"
@@ -209,10 +266,36 @@ class PipelineExecuteControllerTest {
     }
 
     @Test
+    fun `the malformed-body 400 quotes the parser's reason cut to its 200-character bound (#304)`() {
+        authenticate()
+        every { pipelines.findById(any(), pipelineId) } returns record
+        val body = "{\"parameters\": " + "x".repeat(LONG_TOKEN_CHARS)
+        // The input must make the parser's own reason longer than the bound, or the bound is
+        // never exercised: read it with the route's request mapper, untruncated.
+        val unbounded =
+            shouldThrow<JsonProcessingException> { RequestLimits.requestMapper(ExecutorJson.mapper).readTree(body) }
+        unbounded.originalMessage.length shouldBeGreaterThan MAX_READ_ERROR_CHARS
+        val refusal = shouldThrow<ApiException> { controller.execute(pipelineId, body, request()) }
+        refusal.message.shouldNotBeNull().length shouldBeLessThanOrEqual
+            "The execute request body could not be read: ".length + MAX_READ_ERROR_CHARS
+        refusal.code shouldBe "pipeline.execution.invalid_parameter_type"
+        refusal.details["reason"] shouldBe "malformed_json"
+        verify(exactly = 0) { launcher.launch(any()) }
+    }
+
+    @Test
     fun `the body is read before the pipeline is looked up - a malformed one costs no query (#291)`() {
         authenticate()
         shouldThrow<ApiException> { controller.execute(UUID.randomUUID(), "{", request()) }
             .details["reason"] shouldBe "malformed_json"
         verify(exactly = 0) { pipelines.findById(any(), any()) }
+    }
+
+    private companion object {
+        /** `PipelineExecuteController.MAX_READ_ERROR_CHARS` (private there): the parser reason's bound. */
+        const val MAX_READ_ERROR_CHARS = 200
+
+        /** A bad token long enough that the parser's reason outruns the bound. */
+        const val LONG_TOKEN_CHARS = 1000
     }
 }

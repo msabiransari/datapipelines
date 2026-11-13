@@ -1,5 +1,6 @@
 package co.datapipelines.templates
 
+import co.datapipelines.pipeline.TemplateRef
 import freemarker.cache.TemplateLoader
 import java.io.IOException
 import java.io.Reader
@@ -14,6 +15,22 @@ import java.io.StringReader
  * ([FreemarkerConfigFactory]), so there is no template name a body could reference to escape
  * the registry — which is exactly why templates.md §4.2 forbids a literal `<#import>` /
  * `<#include>` in a body: the only imports are the ones this loader synthesizes.
+ *
+ * ## The declared import closure (since #787, templates.md §6.3)
+ *
+ * Every production load funnels through [TemplateEngine.renderNow], which opens a
+ * [withDeclaredClosure] scope seeded with the rendered key. A load inside that scope resolves
+ * only keys the closure DECLARES: the root itself, plus — as each source resolves — the parsed
+ * `imports` of its row ([Source.importKeys]), so the synthesized prologue's own imports load
+ * transitively. Anything else is refused with [UndeclaredTemplateLoadException] before the
+ * registry is consulted. With NO scope active the loader refuses too: a load that bypasses the
+ * engine would otherwise run with no closure at all, which is the one shape this gate must not
+ * admit. The refusal message echoes no author-controlled string.
+ *
+ * The refusal is the render layer of the `.get_optional_template` rule (§4.2): that special
+ * variable loads a template BY KEY at render time, outside the declared closure — the save-time
+ * scan ([ForbiddenConstructScanner]) is the independent first layer; this is the second, and
+ * they are tested separately (§12.3).
  *
  * ## Synthesized import prologue
  *
@@ -57,8 +74,10 @@ class RegistryTemplateLoader(
 ) : TemplateLoader {
     /**
      * One resolved source: the [key] Freemarker asked for, the effective FTL
-     * ([prologue][synthesizePrologue] + body) it will parse, and the row's content [identity]
-     * (`body_hash`, blank when the row carries none) with its [lastModified] stamp.
+     * ([prologue][synthesizePrologue] + body) it will parse, the row's content [identity]
+     * (`body_hash`, blank when the row carries none) with its [lastModified] stamp, and the
+     * row's parsed [importKeys] — the closure edges this source DECLARES, added to the
+     * thread's scope the moment the source resolves (see the class KDoc).
      */
     internal data class Source(
         val key: String,
@@ -66,21 +85,83 @@ class RegistryTemplateLoader(
         val effectiveSource: String,
         val identity: String,
         val lastModified: Long,
+        val importKeys: Set<Pair<String, Int>>,
     )
 
     private val pinned = ThreadLocal<Source?>()
+    private val referenceObserver = ThreadLocal<((TemplateRef, String) -> Unit)?>()
+
+    /** Restored on pooled workers, so one execution's lineage never captures another render. */
+    internal fun <T> withReferenceObserver(
+        observer: (TemplateRef, String) -> Unit,
+        block: () -> T,
+    ): T {
+        val previous = referenceObserver.get()
+        referenceObserver.set(observer)
+        try {
+            return block()
+        } finally {
+            if (previous == null) referenceObserver.remove() else referenceObserver.set(previous)
+        }
+    }
+
+    /**
+     * The thread's currently declared closure — the set of `{id, version}` keys a load may
+     * resolve — null when no render is in flight on this thread. Same restore-on-exit
+     * discipline as [pinned]: worker threads are pooled, so the previous scope is restored
+     * (removed when it was the outermost) rather than cleared blindly.
+     */
+    private val declaredClosure = ThreadLocal<MutableSet<Pair<String, Int>>?>()
 
     override fun findTemplateSource(name: String): Any? = source(name)
 
     /**
      * The typed resolution behind [findTemplateSource]: the [pinned] source when it names this
      * key (see the class KDoc), else one registry lookup.
+     *
+     * The key must sit inside the thread's [declaredClosure] before anything resolves: the
+     * check runs BEFORE the [pinned] shortcut and the registry lookup, so neither a cached
+     * tree nor a warm row can serve a load the render never declared. A name that is not a
+     * well-formed key ([parseKey]) still returns null first — shape refusal stays ahead of
+     * closure logic, and an unscooped caller cannot even probe the grammar.
      */
     internal fun source(name: String): Source? {
         val key = parseKey(name) ?: return null
-        pinned.get()?.takeIf { it.parsedKey == key }?.let { return it }
+        val scope =
+            declaredClosure.get()
+                ?: throw UndeclaredTemplateLoadException()
+        if (key !in scope) throw UndeclaredTemplateLoadException()
+        pinned.get()?.takeIf { it.parsedKey == key }?.let { source ->
+            scope += source.importKeys
+            return source
+        }
         val stored = registry.lookup(key.first, key.second) ?: return null
-        return sourceOf(name, key, stored)
+        val result = sourceOf(name, key, stored)
+        scope += result.importKeys
+        return result
+    }
+
+    /**
+     * Runs [block] with the thread's declared closure seeded by [rootKey] — the key
+     * [TemplateEngine.renderNow] is about to render. The root resolves (its parsed key joins
+     * the scope even before the registry lookup), and every source resolving inside the block
+     * adds its own [Source.importKeys], so the closure grows exactly along the declared
+     * `imports` graph and along nothing else. Nests; the previous scope is restored on exit,
+     * exceptional or not.
+     */
+    internal fun <T> withDeclaredClosure(
+        rootKey: String,
+        block: () -> T,
+    ): T {
+        val scope: MutableSet<Pair<String, Int>> = mutableSetOf()
+        parseKey(rootKey)?.let { scope += it }
+        val previous = declaredClosure.get()
+        declaredClosure.set(scope)
+        try {
+            return block()
+        } finally {
+            if (previous == null) declaredClosure.remove() else declaredClosure.set(previous)
+        }
     }
 
     /**
@@ -108,7 +189,8 @@ class RegistryTemplateLoader(
             effectiveSource = synthesizePrologue(stored.imports) + stored.body,
             identity = stored.bodyHash,
             lastModified = stored.lastModified.toEpochMilli(),
-        )
+            importKeys = stored.imports.mapNotNull { parseKey(it.key) }.toSet(),
+        ).also { referenceObserver.get()?.invoke(TemplateRef(stored.id, stored.version), stored.bodyHash) }
 
     /**
      * Runs [block] with [source] as THE answer for its key on this thread — so a parse the
@@ -189,5 +271,25 @@ class RegistryTemplateLoader(
                 }
                 "<#import \"/${it.key}\" as ${it.alias}>\n"
             }
+    }
+}
+
+/**
+ * Thrown by [RegistryTemplateLoader.source] when a load lands outside the thread's declared
+ * import closure (templates.md §6.3, #787) — a distinct type rather than a bare [IOException]
+ * so [TemplateEngine]'s classification can surface the fixed message even when Freemarker
+ * wraps the load failure (e.g. `.get_optional_template` wraps loader I/O errors in its own
+ * "I/O error when trying to load optional template" text, which quotes the requested name;
+ * walking the cause chain for this type keeps the author-supplied name out of the outcome).
+ *
+ * The message echoes no author-controlled string — the same discipline as the prologue
+ * refusal — and [TemplateEngine] reuses [message] verbatim as the `Failed` detail.
+ */
+internal class UndeclaredTemplateLoadException : IOException() {
+    override val message: String = MESSAGE
+
+    companion object {
+        /** The fixed, key-free refusal text — defined once, surfaced verbatim. */
+        const val MESSAGE = "Refusing to load a template outside the declared import closure."
     }
 }

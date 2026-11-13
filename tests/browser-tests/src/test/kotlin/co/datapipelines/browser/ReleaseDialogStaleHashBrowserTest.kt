@@ -79,7 +79,8 @@ class ReleaseDialogStaleHashBrowserTest : VisualizationBrowserSuite() {
                     refused.status() shouldBe 409
                 }
                 page.locator("#toast .ds-toast").first().waitFor()
-                page.locator("#toast .ds-toast").first().innerText() shouldContain "$family.version.conflict"
+                // #876: the plan's tree_hash covers the root's draft, so the planner refuses first (it was $family.version.conflict).
+                page.locator("#toast .ds-toast").first().innerText() shouldContain "$family.release.plan_conflict"
                 fixture.state() shouldBe changed
                 println("event=release453.stale family=$family status=${refused.status()} state=$changed")
             }
@@ -156,7 +157,11 @@ class ReleaseDialogStaleHashBrowserTest : VisualizationBrowserSuite() {
                 .locator("section[data-dp-case='one month'] .plotly .main-svg")
                 .first()
                 .waitFor()
-            preview.page.evaluate("() => document.querySelector('.js-plotly-plot')._fullData.length") shouldBe 1
+            // #860: the one month's bar, read off the drawn paths.
+            preview.page.evaluate(
+                "() => Array.from(document.querySelectorAll(\"section[data-dp-case='one month'] .barlayer .point path\"))" +
+                    ".filter(p => p.getAttribute('d') && p.getAttribute('d') !== 'M0,0Z').length",
+            ) shouldBe 1
         } finally {
             preview.close()
         }

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.util.UUID
 
 /**
  * Configuration-time proofs for the coverage-floor guard in
@@ -37,6 +38,31 @@ import java.io.File
  * the second time (the cache was really on), while its test task and every
  * Kover report/verify task execute both times and are never FROM_CACHE.
  *
+ * Cases (f) and (g) prove the repository-tree test input (#718): a test that
+ * reads `docs/probe.md` through the repo-root walk re-runs when that file's
+ * CONTENT changes and stays UP-TO-DATE when nothing (or only its mtime)
+ * changed; `deploy/secrets.env` and a sample-data work directory never
+ * re-run it and never appear in `--info`, while the tracked
+ * `deploy/secrets.env.example` does re-run it.
+ *
+ * Cases (h), (i) and (j) prove the existence-only input (#728): `deploy/env/secrets.env.example` is a
+ * path a guard asserts ABSENT that the secret exclusions hide, so creating it after a green run
+ * must still re-run the guard (h), while its content — edited, touched, never — re-runs nothing
+ * and reaches no build output (i); removing it re-runs the guard again.
+ *
+ * The probe in (h) asserts the path absent, the shape of `PostureDefaultsSpecDriftTest`; the
+ * probe in (i) only records whether it exists, so it passes while the content is edited. Case (j)
+ * repeats the creation under `--configuration-cache`, where an input frozen at store time would stay stale.
+ *
+ * Case (k) proves the crash-file path (#685): the probe test JVM receives exactly one
+ * `-XX:ErrorFile=` under its module's `build/hs_err/`, the directory exists before the JVM starts,
+ * the task stays UP-TO-DATE under a reused configuration cache entry, and a JVM the probe crashes
+ * leaves its HotSpot error report in that directory — not in the module directory, the default.
+ *
+ * Case (l) proves the stack-cache tunable (#685): the probe test JVM's `GLIBC_TUNABLES` turns
+ * glibc's thread-stack cache off, and a tunable the build's environment already carries survives
+ * while a conflicting stack-cache value is replaced.
+ *
  * The probe projects reuse the repo's real version catalog — the plugin
  * resolves catalog aliases at apply time. Tests (a) and (b) stop at
  * configuration ("help"), but test (c) writes real sources and runs
@@ -45,25 +71,29 @@ import java.io.File
  * `mavenCentral()`. Network truth (013/F6 — this KDoc previously claimed
  * "no network, no repositories", which was false): the tests need either
  * NETWORK or a warm Gradle TestKit cache. TestKit's default testKitDir
- * (`.gradle-test-kit-<user>` under the test JVM's temp dir, which Gradle
- * forks into `buildSrc/build/tmp/test/work`) is a CACHE, not a checkout
+ * (`buildSrc/build/tmp/test/work/.gradle-test-kit` under Gradle 9.7;
+ * observed 2026-10-27, lane 742) is a CACHE, not a checkout
  * artifact — a fresh worktree or a cleaned buildSrc starts COLD and
  * re-downloads the probe dependencies on first run. `gate.sh` therefore
  * preflights the network before this stage and skips it fail-soft with the
  * cause named when offline. No TOOLCHAIN download ever happens: the probes
- * run on the pre-resolved JDK 21 handed in via `probe.jdk21`.
+ * run on the pre-resolved JDK 21 handed in via `probe.jdk21`. Every probe
+ * root carries the repo's `gradle/verification-metadata.xml` (#742,
+ * [installRepoVerification]), so what the probes download is checked against
+ * the same committed checksums as the modules.
  */
 class CommonConventionsPluginTest {
-
     @TempDir
     lateinit var probeDir: File
 
     private val catalogPath: String
-        get() = System.getProperty("repo.catalog")
-            ?: error("repo.catalog system property not set — run via buildSrc's test task")
+        get() =
+            System.getProperty("repo.catalog")
+                ?: error("repo.catalog system property not set — run via buildSrc's test task")
 
-    /** Probe settings reusing the repo catalog; optionally including subprojects. */
+    /** Probe settings reusing the repo catalog and dependency checksums; optionally including subprojects. */
     private fun writeSettings(vararg includes: String) {
+        installRepoVerification(probeDir)
         probeDir.resolve("settings.gradle.kts").writeText(
             """
             dependencyResolutionManagement {
@@ -96,21 +126,24 @@ class CommonConventionsPluginTest {
     }
 
     private val jdk21Home: String
-        get() = System.getProperty("probe.jdk21")
-            ?: error("probe.jdk21 system property not set — run via buildSrc's test task")
+        get() =
+            System.getProperty("probe.jdk21")
+                ?: error("probe.jdk21 system property not set — run via buildSrc's test task")
 
-    private fun runner(vararg args: String) = GradleRunner.create()
-        .withPluginClasspath()
-        .withProjectDir(probeDir)
-        .withArguments(
-            *args,
-            // The probe's Kotlin compilation wants the JDK 21 toolchain; hand it
-            // the installation the build resolved (see build.gradle.kts) instead
-            // of relying on the probe settings' foojay resolver — the probes
-            // never download a toolchain. (Dependency resolution is separate:
-            // compile-bearing probes resolve from Maven Central — see KDoc.)
-            "-Porg.gradle.java.installations.paths=$jdk21Home",
-        )
+    private fun runner(vararg args: String) =
+        GradleRunner
+            .create()
+            .withPluginClasspath()
+            .withProjectDir(probeDir)
+            .withArguments(
+                *args,
+                // The probe's Kotlin compilation wants the JDK 21 toolchain; hand it
+                // the installation the build resolved (see build.gradle.kts) instead
+                // of relying on the probe settings' foojay resolver — the probes
+                // never download a toolchain. (Dependency resolution is separate:
+                // compile-bearing probes resolve from Maven Central — see KDoc.)
+                "-Porg.gradle.java.installations.paths=$jdk21Home",
+            )
 
     @Test
     fun `a project missing from floors and allowlist fails configuration with the documented message`() {
@@ -168,9 +201,10 @@ class CommonConventionsPluginTest {
             """.trimIndent(),
         )
 
-        val floorsEngage = runCatching {
-            runner(":modules:web:koverVerify").build()
-        }.exceptionOrNull()
+        val floorsEngage =
+            runCatching {
+                runner(":modules:web:koverVerify").build()
+            }.exceptionOrNull()
         assertTrue(floorsEngage is UnexpectedBuildFailure, "expected the floor rule to fail at ~0% coverage, got success")
         val floorOutput = (floorsEngage as UnexpectedBuildFailure).message.orEmpty()
         assertTrue(
@@ -267,5 +301,351 @@ class CommonConventionsPluginTest {
             val cached = kover.filter { it.outcome == TaskOutcome.FROM_CACHE }
             assertTrue(cached.isEmpty(), "Kover tasks served from the build cache: $cached\n${build.output}")
         }
+    }
+
+    /** A probe test that reads `docs/probe.md` the way the repo's drift tests do: walking up to settings.gradle.kts. */
+    private fun writeRepoDocReadingTest() {
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            package co.datapipelines.probe
+            import org.junit.jupiter.api.Test
+            import java.io.File
+            class ProbeTest {
+                @Test fun readsTheRepoDoc() {
+                    var dir = File(".").absoluteFile
+                    while (!File(dir, "settings.gradle.kts").isFile) dir = dir.parentFile ?: error("no settings.gradle.kts")
+                    val text = File(dir, "docs/probe.md").readText().trim()
+                    check(text.startsWith("probe ")) { text }
+                    println("docs-probe=" + text)
+                }
+            }
+            """.trimIndent(),
+        )
+    }
+
+    /** The docs-probe line the last executed test run wrote to its XML report. */
+    private fun docsProbeSeen(): String = probeLineSeen("docs-probe=")
+
+    /** The value after [key] on the line the last executed test run wrote to its XML report. */
+    private fun probeLineSeen(key: String): String {
+        val results = probeDir.resolve("modules/web/build/test-results/test")
+        val files = requireNotNull(results.listFiles()) { "no test-result directory at ${results.path}" }
+        val xml = files.single { it.name.startsWith("TEST-") && it.extension == "xml" }
+        return xml
+            .readLines()
+            .single { key in it }
+            .substringAfter(key)
+            .substringBefore('<')
+            .trim()
+    }
+
+    @Test
+    fun `a repo doc a test reads re-runs the test task when its content changes and only then`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRepoDocReadingTest()
+        val doc = probeDir.resolve("docs/probe.md").apply { parentFile.mkdirs() }
+        doc.writeText("probe one\n")
+        val test = ":modules:web:test"
+
+        val first = runner(test).build()
+        assertEquals(TaskOutcome.SUCCESS, first.task(test)?.outcome, first.output)
+        assertEquals("probe one", docsProbeSeen())
+
+        val unchanged = runner(test).build()
+        assertEquals(TaskOutcome.UP_TO_DATE, unchanged.task(test)?.outcome, "no change must leave the task UP-TO-DATE\n${unchanged.output}")
+
+        // Content hashing, not mtime: a touch alone changes nothing.
+        assertTrue(doc.setLastModified(doc.lastModified() + 60_000), "could not touch ${doc.path}")
+        val touched = runner(test).build()
+        assertEquals(TaskOutcome.UP_TO_DATE, touched.task(test)?.outcome, "an mtime-only change re-ran the task\n${touched.output}")
+
+        // The #712 silence: a docs-only edit must EXECUTE the guard that reads the doc.
+        doc.writeText("probe two\n")
+        val edited = runner(test).build()
+        assertEquals(
+            TaskOutcome.SUCCESS,
+            edited.task(test)?.outcome,
+            "editing docs/probe.md left $test ${edited.task(test)?.outcome}: the repo-tree input is missing\n${edited.output}",
+        )
+        assertEquals("probe two", docsProbeSeen(), "the re-run did not read the edited doc")
+    }
+
+    @Test
+    fun `secrets and local data never re-run a test task or reach its input listing while the tracked template does`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRepoDocReadingTest()
+        probeDir.resolve("docs/probe.md").apply { parentFile.mkdirs() }.writeText("probe one\n")
+        val secrets = probeDir.resolve("deploy/secrets.env").apply { parentFile.mkdirs() }
+        secrets.writeText("DATAPIPELINES_SECRET=one\n")
+        val gateLog = probeDir.resolve("gate.log").apply { writeText("gate started\n") }
+        val lakeData = probeDir.resolve("scripts/sample-data-lake/work/trips.parquet").apply { parentFile.mkdirs() }
+        lakeData.writeText("one\n")
+        val template = probeDir.resolve("deploy/secrets.env.example")
+        template.writeText("DATAPIPELINES_SECRET=\n")
+        val test = ":modules:web:test"
+        // A secret's NAME is the leak marker: the template's name contains it, so match the bare name only.
+        val secretMention = Regex("""secrets\.env(?!\.example)""")
+
+        val first = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, first.task(test)?.outcome, first.output)
+
+        secrets.writeText("DATAPIPELINES_SECRET=two\n")
+        lakeData.writeText("two\n")
+        gateLog.writeText("gate advanced\n")
+        val excludedOnly = runner(test, "--info").build()
+        assertEquals(
+            TaskOutcome.UP_TO_DATE,
+            excludedOnly.task(test)?.outcome,
+            "a change to secrets, local data or gate.log re-ran the task\n${excludedOnly.output}",
+        )
+
+        template.writeText("DATAPIPELINES_SECRET=\nDATAPIPELINES_OTHER=\n")
+        val templateEdited = runner(test, "--info").build()
+        assertEquals(
+            TaskOutcome.SUCCESS,
+            templateEdited.task(test)?.outcome,
+            "the tracked template is content tests read\n${templateEdited.output}",
+        )
+        // Non-vacuity: --info does list changed input files by path, so the absence below means something.
+        assertTrue("secrets.env.example" in templateEdited.output, "--info named no changed input file\n${templateEdited.output}")
+
+        for (build in listOf(first, excludedOnly, templateEdited)) {
+            val leaks = build.output.lines().filter { secretMention.containsMatchIn(it) }
+            assertEquals(emptyList<String>(), leaks, "deploy/secrets.env reached Gradle's output")
+        }
+    }
+
+    /**
+     * A probe test about [RETIRED_PATH], walking up to settings.gradle.kts the way the repo's drift
+     * tests do. [asGuard] true asserts the path absent (the PostureDefaultsSpecDriftTest shape);
+     * false only records whether it exists, so the probe passes either way.
+     */
+    private fun writeRetiredPathProbe(asGuard: Boolean) {
+        val body =
+            if (asGuard) {
+                """check(!File(dir, "$RETIRED_PATH").exists()) { "retired-path-is-back" }"""
+            } else {
+                """println("retired-exists=" + File(dir, "$RETIRED_PATH").exists())"""
+            }
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            package co.datapipelines.probe
+            import org.junit.jupiter.api.Test
+            import java.io.File
+            class ProbeTest {
+                @Test fun probesTheRetiredPath() {
+                    var dir = File(".").absoluteFile
+                    while (!File(dir, "settings.gradle.kts").isFile) dir = dir.parentFile ?: error("no settings.gradle.kts")
+                    $body
+                }
+            }
+            """.trimIndent(),
+        )
+    }
+
+    /**
+     * The retired path's directory as the repo has it: `deploy/env/` holds the tracked `defaults.env`. Without
+     * a file there, creating the path would add a DIRECTORY to the tree input and re-run the task for that reason.
+     */
+    private fun writeEnvDirectory(): File =
+        probeDir.resolve("deploy/env/defaults.env").apply {
+            parentFile.mkdirs()
+            writeText("DATAPIPELINES_POSTURE=development\n")
+        }
+
+    private fun assertNeverMentions(
+        marker: String,
+        builds: List<String>,
+    ) {
+        val leaks = builds.flatMap { output -> output.lines().filter { marker in it } }
+        assertEquals(emptyList<String>(), leaks, "the content of $RETIRED_PATH reached Gradle's output")
+    }
+
+    @Test
+    fun `a path a guard asserts absent re-runs the guard when it appears or disappears though the path is a secret exclusion`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRetiredPathProbe(asGuard = true)
+        writeEnvDirectory()
+        val retired = probeDir.resolve(RETIRED_PATH)
+        val marker = "RETIRED_CONTENT_${UUID.randomUUID()}"
+        val test = ":modules:web:test"
+
+        val first = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, first.task(test)?.outcome, first.output)
+        val unchanged = runner(test, "--info").build()
+        assertEquals(TaskOutcome.UP_TO_DATE, unchanged.task(test)?.outcome, "no change must leave the task UP-TO-DATE\n${unchanged.output}")
+
+        // The #728 silence: the path matches the secret exclusions, so no content input sees it appear.
+        retired.writeText("$marker\n")
+        // run(), not buildAndFail(): without the input the build SUCCEEDS and the outcome below is what reads red.
+        val created = runner(test, "--info").run()
+        assertEquals(
+            TaskOutcome.FAILED,
+            created.task(test)?.outcome,
+            "creating $RETIRED_PATH left $test ${created.task(test)?.outcome}: the guard did not run\n${created.output}",
+        )
+        assertTrue("retired-path-is-back" in created.output, "the guard ran but did not report the path\n${created.output}")
+        assertTrue("repoPathsCheckedForExistence" in created.output, "--info does not name the existence input\n${created.output}")
+
+        assertTrue(retired.delete(), "could not delete ${retired.path}")
+        val removed = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, removed.task(test)?.outcome, "removing $RETIRED_PATH did not re-run the guard\n${removed.output}")
+        val settled = runner(test, "--info").build()
+        assertEquals(TaskOutcome.UP_TO_DATE, settled.task(test)?.outcome, "no change must leave the task UP-TO-DATE\n${settled.output}")
+
+        assertNeverMentions(marker, listOf(first, unchanged, created, removed, settled).map { it.output })
+    }
+
+    @Test
+    fun `the content of an existence-only path never re-runs a test task or reaches Gradle's output`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRetiredPathProbe(asGuard = false)
+        writeEnvDirectory()
+        val retired = probeDir.resolve(RETIRED_PATH)
+        val marker = "RETIRED_CONTENT_${UUID.randomUUID()}"
+        val test = ":modules:web:test"
+
+        val absent = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, absent.task(test)?.outcome, absent.output)
+        assertEquals("false", probeLineSeen("retired-exists="))
+
+        retired.writeText("$marker one\n")
+        val created = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, created.task(test)?.outcome, "creating $RETIRED_PATH did not re-run $test\n${created.output}")
+        assertEquals("true", probeLineSeen("retired-exists="), "the re-run did not see the created path")
+
+        // Existence is the whole input: content, size and mtime of the present path change nothing.
+        retired.writeText("$marker two, longer than one\n")
+        val edited = runner(test, "--info").build()
+        assertEquals(TaskOutcome.UP_TO_DATE, edited.task(test)?.outcome, "a content edit re-ran the task\n${edited.output}")
+        assertTrue(retired.setLastModified(retired.lastModified() + 60_000), "could not touch ${retired.path}")
+        val touched = runner(test, "--info").build()
+        assertEquals(TaskOutcome.UP_TO_DATE, touched.task(test)?.outcome, "an mtime change re-ran the task\n${touched.output}")
+
+        assertTrue(retired.delete(), "could not delete ${retired.path}")
+        val removed = runner(test, "--info").build()
+        assertEquals(TaskOutcome.SUCCESS, removed.task(test)?.outcome, "removing $RETIRED_PATH did not re-run $test\n${removed.output}")
+        assertEquals("false", probeLineSeen("retired-exists="), "the re-run did not see the removal")
+
+        assertNeverMentions(marker, listOf(absent, created, edited, touched, removed).map { it.output })
+    }
+
+    @Test
+    fun `under the configuration cache a path created between two builds re-runs the guard`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeRetiredPathProbe(asGuard = false)
+        writeEnvDirectory()
+        val retired = probeDir.resolve(RETIRED_PATH)
+        val test = ":modules:web:test"
+        val args = arrayOf(test, "--configuration-cache")
+
+        val stored = runner(*args).build()
+        assertEquals(TaskOutcome.SUCCESS, stored.task(test)?.outcome, stored.output)
+        assertTrue("Configuration cache entry stored" in stored.output, "the cache was not on\n${stored.output}")
+
+        // Nothing relevant changed: the entry is reused and the task stays UP-TO-DATE.
+        val reused = runner(*args).build()
+        assertTrue("Reusing configuration cache" in reused.output, "the entry was not reused\n${reused.output}")
+        assertEquals(TaskOutcome.UP_TO_DATE, reused.task(test)?.outcome, reused.output)
+
+        // A value frozen when the entry was stored would leave this build UP-TO-DATE.
+        retired.writeText("created between two builds\n")
+        val created = runner(*args).build()
+        assertEquals(TaskOutcome.SUCCESS, created.task(test)?.outcome, "a path created between builds was not seen\n${created.output}")
+        assertEquals("true", probeLineSeen("retired-exists="), "the re-run did not see the created path")
+    }
+
+    @Test
+    fun `a test JVM HotSpot kills leaves its error report in the task's build hs_err directory`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        // The probe records the ErrorFile argument its own JVM received, then — only when the
+        // marker file exists — crashes that JVM with a write to address 0, a fault HotSpot does
+        // not survive (it writes the error report and aborts: exit 134, never 139).
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            import java.lang.management.ManagementFactory
+            import org.junit.jupiter.api.Test
+            class ProbeTest {
+                @Test fun recordsTheErrorFileThenCrashesOnRequest() {
+                    val args = ManagementFactory.getRuntimeMXBean().inputArguments.filter { it.startsWith("-XX:ErrorFile=") }
+                    println("error-file-args=" + args.joinToString("|"))
+                    if (java.io.File("crash-now").exists()) {
+                        val field = sun.misc.Unsafe::class.java.getDeclaredField("theUnsafe")
+                        field.isAccessible = true
+                        (field.get(null) as sun.misc.Unsafe).putAddress(0L, 0L)
+                    }
+                }
+            }
+            """.trimIndent(),
+        )
+        val test = ":modules:web:test"
+        val args = arrayOf(test, "--configuration-cache")
+        val crashDirectory = probeDir.resolve("modules/web/build/hs_err")
+
+        val stored = runner(*args).build()
+        assertEquals(TaskOutcome.SUCCESS, stored.task(test)?.outcome, stored.output)
+        val received = probeLineSeen("error-file-args=")
+        assertTrue(received.startsWith("-XX:ErrorFile=") && "|" !in received, "expected exactly one ErrorFile argument: $received")
+        assertEquals(
+            crashDirectory.resolve("hs_err_pid%p.log").canonicalPath,
+            File(received.removePrefix("-XX:ErrorFile=")).canonicalPath,
+            "the test JVM's ErrorFile is not under the module's build/hs_err",
+        )
+        assertTrue(crashDirectory.isDirectory, "HotSpot does not create the directory; the task must, before the JVM starts")
+
+        // The provider is CC-safe and keeps the task fingerprintable: reused entry, UP-TO-DATE.
+        val reused = runner(*args).build()
+        assertTrue("Reusing configuration cache" in reused.output, "the entry was not reused\n${reused.output}")
+        assertEquals(TaskOutcome.UP_TO_DATE, reused.task(test)?.outcome, reused.output)
+
+        probeDir.resolve("modules/web/crash-now").writeText("crash\n")
+        val crashed = runner(*args, "--rerun-tasks").buildAndFail()
+        assertTrue("exit value 134" in crashed.output, "the probe JVM did not die through HotSpot's handler\n${crashed.output}")
+        val reports = crashDirectory.listFiles { file -> file.name.matches(Regex("hs_err_pid\\d+\\.log")) }.orEmpty()
+        assertEquals(1, reports.size, "expected one error report in ${crashDirectory.path}: ${crashDirectory.list()?.toList()}")
+        val report = reports.single().readText()
+        assertTrue("A fatal error has been detected by the Java Runtime Environment" in report, report.take(2_000))
+        assertTrue("SIGSEGV" in report, report.take(2_000))
+        val moduleDirectory = probeDir.resolve("modules/web")
+        assertTrue(moduleDirectory.list().orEmpty().none { it.startsWith("hs_err_pid") }, "a report landed in the JVM's cwd")
+    }
+
+    @Test
+    fun `every test JVM starts with glibc's thread-stack cache off and keeps the environment's other tunables`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            import org.junit.jupiter.api.Test
+            class ProbeTest {
+                @Test fun recordsTheTunables() { println("glibc-tunables=" + System.getenv("GLIBC_TUNABLES")) }
+            }
+            """.trimIndent(),
+        )
+        val test = ":modules:web:test"
+
+        val plain = runner(test, "--rerun-tasks").withEnvironment(System.getenv() - "GLIBC_TUNABLES").build()
+        assertEquals(TaskOutcome.SUCCESS, plain.task(test)?.outcome, plain.output)
+        assertEquals("glibc.pthread.stack_cache_size=0", probeLineSeen("glibc-tunables="))
+
+        val inherited = System.getenv() + ("GLIBC_TUNABLES" to "glibc.malloc.tcache_count=0:glibc.pthread.stack_cache_size=40960")
+        val merged = runner(test, "--rerun-tasks").withEnvironment(inherited).build()
+        assertEquals(TaskOutcome.SUCCESS, merged.task(test)?.outcome, merged.output)
+        assertEquals(
+            "glibc.malloc.tcache_count=0:glibc.pthread.stack_cache_size=0",
+            probeLineSeen("glibc-tunables="),
+            "the environment's other tunable must survive and its stack-cache value must be replaced",
+        )
+    }
+
+    private companion object {
+        /** A path PostureDefaultsSpecDriftTest asserts absent that the secret exclusions hide (#728). */
+        const val RETIRED_PATH = "deploy/env/secrets.env.example"
     }
 }

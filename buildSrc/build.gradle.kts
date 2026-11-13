@@ -1,9 +1,17 @@
+import io.gitlab.arturbosch.detekt.Detekt
 import org.gradle.api.artifacts.dsl.LockMode
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+import org.jlleitschuh.gradle.ktlint.tasks.BaseKtLintCheckTask
 
 plugins {
     `kotlin-dsl`
+    // buildSrc is linted like every module (#724): the same plugin versions, from the
+    // catalog, on buildSrc's OWN build-script classpath. The `implementation` entries below
+    // put the same jars on the plugin's compile classpath, so it can apply them to modules;
+    // that never lints buildSrc itself.
+    alias(libs.plugins.ktlint)
+    alias(libs.plugins.detekt)
 }
 
 repositories {
@@ -62,6 +70,43 @@ tasks.test {
     val repoCatalog = rootProject.file("../gradle/libs.versions.toml")
     inputs.file(repoCatalog).withPathSensitivity(PathSensitivity.NONE)
     systemProperty("repo.catalog", repoCatalog.absolutePath)
+    // #742: every TestKit probe root gets a copy of the repo's dependency checksums (ProbeVerification.kt),
+    // so a checksum change re-runs the probes that verify against them.
+    val repoVerification = rootProject.file("../gradle/verification-metadata.xml")
+    inputs.file(repoVerification).withPathSensitivity(PathSensitivity.NONE)
+    systemProperty("repo.verification", repoVerification.absolutePath)
+    // The other repo files these tests open beside the catalog (#718 — the convention's
+    // repo-tree input reaches the modules' test tasks, never this one): the Dockerfile
+    // (ThirdPartyNoticesTest's GraalJS pin) and .gitignore (RepoTestInputsTest's mirror).
+    inputs.files(
+        rootProject.file("../Dockerfile"),
+        rootProject.file("../.gitignore"),
+        rootProject.file("../deploy/duckdb-extensions.sha256"),
+        // #747: the extension closure files the notices test parses.
+        rootProject.file("../deploy/duckdb-extension-ports"),
+    )
+        .withPathSensitivity(PathSensitivity.NAME_ONLY)
+        .withPropertyName("repoFilesReadByBuildSrcTests")
+    // The module and integration test sources RepoTestInputsTest scans for absent-path assertions
+    // (#728): a guard added there must re-run that witness, which sees them only as text. The same
+    // tree feeds RawListAppenderGuardTest, which since #756 also scans the shared log-capture module's
+    // MAIN sources: without that include a raw appender added there would leave the guard UP-TO-DATE.
+    // Its duplicate-copy check walks every src tree: matching names there must also invalidate this task.
+    inputs.files(
+        fileTree(rootProject.file("..")) {
+            include(
+                "modules/*/src/test/kotlin/**/*.kt",
+                "tests/*/src/test/kotlin/**/*.kt",
+                "modules/log-capture/src/main/kotlin/**/*.kt",
+                "modules/*/src/**/SnapshotListAppender.kt",
+                "modules/*/src/**/SnapshotListAppenderTest.kt",
+                "tests/*/src/**/SnapshotListAppender.kt",
+                "tests/*/src/**/SnapshotListAppenderTest.kt",
+            )
+        },
+    )
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("testSourcesScannedByRepoTestInputsTest")
     // The probes apply the same JDK 21 toolchain the modules get; hand the
     // tests a RESOLVED installation (detection finds the daemon JDK /
     // ~/.gradle/jdks / any auto-provisioned install) so the probe builds need
@@ -71,6 +116,59 @@ tasks.test {
     // The test JVM itself may be any JDK the daemon picked (26 here), so
     // java.home is NOT a valid substitute.
     systemProperty("probe.jdk21", probeJdk21.get())
+}
+
+// The lint CommonConventionsPlugin applies to every module, mirrored for buildSrc (#724),
+// which cannot apply its own plugin. The engine version is read from the plugin's
+// KTLINT_VERSION constant, so the modules and buildSrc share one source; a missing
+// constant fails configuration instead of falling back to the plugin's default engine.
+val conventionPluginSource = layout.projectDirectory.file("src/main/kotlin/CommonConventionsPlugin.kt")
+val houseKtlintVersion = providers.fileContents(conventionPluginSource).asText.map { text ->
+    Regex("""const val KTLINT_VERSION = "([^"]+)"""").find(text)?.groupValues?.get(1)
+        ?: throw GradleException("${conventionPluginSource.asFile} declares no KTLINT_VERSION; buildSrc's ktlint reads it (#724)")
+}
+
+ktlint {
+    version.set(houseKtlintVersion)
+    // kotlin-dsl generates accessors under build/; only checked-in sources are linted.
+    filter {
+        exclude { it.file.path.contains("${layout.buildDirectory.get()}") }
+    }
+}
+
+// The module-side #689 / #703 boundary, for the same reasons: the pregate's stage 1 runs
+// this build's ktlint with --build-cache, and a worker's stored findings are its last
+// incremental execution's, not a function of its inputs. The source inventory makes a
+// removed file re-lint the whole source set.
+tasks.withType<BaseKtLintCheckTask>().configureEach {
+    outputs.cacheIf("ktlint worker outputs stay out of the build cache; stored findings reflect incremental history, not only the inputs (#689)") {
+        false
+    }
+    val projectDirectory = layout.projectDirectory.asFile
+    inputs.property(
+        "ktlintSourceInventory",
+        provider { source.files.map { it.relativeTo(projectDirectory).invariantSeparatorsPath }.sorted() },
+    )
+}
+
+// The repo's detekt config, as the modules get it. No baseline, deliberately: buildSrc's
+// findings are fixed, not baselined (#724), so a future config/detekt/baseline.xml does
+// not reach this build.
+detekt {
+    buildUponDefaultConfig = true
+    allRules = false
+    config.setFrom(rootProject.file("../config/detekt/detekt.yml"))
+}
+
+tasks.withType<Detekt>().configureEach {
+    jvmTarget = "21"
+    reports {
+        html.required.set(true)
+        xml.required.set(false)
+        txt.required.set(false)
+        sarif.required.set(false)
+        md.required.set(false)
+    }
 }
 
 gradlePlugin {

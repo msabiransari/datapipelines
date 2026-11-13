@@ -1,0 +1,11 @@
+{
+  "case" : "unresolved-root",
+  "bounds" : {
+    "max_depth" : 32,
+    "max_versions" : 1024,
+    "max_edges" : 4096,
+    "max_blockers" : 100,
+    "max_wire_bytes" : 1048576
+  },
+  "outcome" : "unresolved_root"
+}

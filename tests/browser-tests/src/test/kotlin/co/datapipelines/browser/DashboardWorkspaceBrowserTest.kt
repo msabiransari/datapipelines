@@ -9,6 +9,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import java.net.URI
 import java.nio.file.Files
@@ -52,6 +54,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
                   const dock = document.getElementById('dp-board-dock').getBoundingClientRect();
                   return { overflow: main.scrollHeight - main.clientHeight,
                     dockBottom: dock.bottom, dockHeight: dock.height,
+                    body: document.querySelector('[data-dp-dock-body]').getBoundingClientRect().height,
                     mainBottom: main.getBoundingClientRect().bottom };
                 }""",
             ) as Map<*, *>
@@ -61,7 +64,8 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         page.screenshot(Page.ScreenshotOptions().setPath(shots.resolve("612-board-$width.png")))
         withClue("Board at $width: $readings") {
             (readings["overflow"] as Number).toInt() shouldBe 0
-            (readings["dockHeight"] as Number).toInt() shouldBeGreaterThan 0
+            // #783: `dockHeight > 0` passed a dock crushed to its two borders; the pane keeps its floor.
+            (readings["body"] as Number).toDouble() shouldBeGreaterThanOrEqual DOCK_MIN
             (readings["dockBottom"] as Number).toDouble() shouldBeLessThanOrEqual
                 (readings["mainBottom"] as Number).toDouble()
         }
@@ -69,6 +73,113 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         page.waitForSelector("#dp-pane-versions:not([hidden]) table")
         page.locator("#dp-pane-versions").isVisible shouldBe true
         page.locator("#dp-pane-board").getAttribute("hidden") shouldBe "hidden"
+    }
+
+    /**
+     * #783 — the owner's report: on a dashboard with many charts the activity dock fell below the
+     * fold. The case above builds a six-row grid that fits; this one builds a [TALL_ROWS]-row grid
+     * taller than any board region and reads every filters state the issue lists: the filters
+     * COLUMN, the DRAWER (1280 px with the resource browser at its default leaves the region under
+     * 820 container px), no visible parameter (`data-dp-filters="none"`), and a short window. In
+     * each the BOARD region scrolls and `<main>` does not; the dock's bottom edge stays inside main.
+     */
+    @ParameterizedTest
+    @CsvSource("none,1512,982", "column,1512,982", "drawer,1280,800", "drawer,1280,720", "none,1280,720")
+    fun `#783 - a board taller than its region scrolls inside it and the dock stays in main`(
+        filters: String,
+        width: Int,
+        height: Int,
+    ) {
+        startTrace()
+        val root = ready("dp783")
+        val board = seedTallBoard(root, withParameters = filters != "none")
+        page.setViewportSize(width, height)
+        page.navigate("$baseUrl/dashboards/$board")
+        page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
+        page.locator("#dp-board .dp-dashboard-card").first().waitFor()
+        if (filters != "none") page.waitForSelector(".dp-board-page:not([data-dp-filters='none'])")
+        page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+        val readings =
+            page.evaluate(
+                """() => {
+                  const main = document.getElementById('app-main');
+                  const rect = (el) => { const r = el.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.bottom)]; };
+                  const region = document.getElementById('dp-board');
+                  const dock = document.getElementById('dp-board-dock');
+                  return { overflow: main.scrollHeight - main.clientHeight,
+                    documentOverflow: document.documentElement.scrollHeight - window.innerHeight,
+                    regionOverflow: region.scrollHeight - region.clientHeight,
+                    dockBottom: dock.getBoundingClientRect().bottom, dockHeight: dock.getBoundingClientRect().height,
+                    mainBottom: main.getBoundingClientRect().bottom,
+                    dock: rect(dock), region: rect(region), main: rect(main),
+                    body: document.querySelector('[data-dp-dock-body]').getBoundingClientRect().height,
+                    layout: document.querySelector('.dp-board-layout').getBoundingClientRect().height,
+                    collapsed: dock.hasAttribute('data-dp-dock-collapsed'),
+                    threshold: parseFloat(getComputedStyle(document.querySelector('.dp-board-page')).getPropertyValue('--dp-board-auto-collapse-below')),
+                    drawer: getComputedStyle(document.querySelector('.dp-board-toolbar')).display !== 'none',
+                    filtersState: document.querySelector('.dp-board-page').getAttribute('data-dp-filters') };
+                }""",
+            ) as Map<*, *>
+        println("783-measure|$filters|${width}x$height|$readings")
+        val shots = Paths.get("build", "browser-evidence")
+        Files.createDirectories(shots)
+        page.screenshot(Page.ScreenshotOptions().setPath(shots.resolve("783-board-$filters-${width}x$height.png")))
+        withClue("the cell is not in the state it names: $readings") {
+            (readings["drawer"] as Boolean) shouldBe (filters == "drawer")
+            ((readings["filtersState"] as String) == "none") shouldBe (filters == "none")
+        }
+        withClue("the board is not taller than its region, so the cell proves nothing: $readings") {
+            (readings["regionOverflow"] as Number).toInt() shouldBeGreaterThan 0
+        }
+        withClue("Tall board, $filters at ${width}x$height: $readings") {
+            (readings["overflow"] as Number).toInt() shouldBe 0
+            (readings["documentOverflow"] as Number).toInt() shouldBe 0
+            (readings["dockBottom"] as Number).toDouble() shouldBeLessThanOrEqual
+                (readings["mainBottom"] as Number).toDouble()
+        }
+        // A dock crushed to its two borders (2 px) is "visible" to a height > 0 check; the pane the
+        // person reads must keep the splitter's floor, and the board row its own (splitter.js).
+        assertDockDefault(readings, shortWindow = height <= 800)
+        withClue("the board row is under its floor: $readings") {
+            (readings["layout"] as Number).toDouble() shouldBeGreaterThanOrEqual BOARD_FLOOR
+        }
+    }
+
+    private fun assertDockDefault(
+        readings: Map<*, *>,
+        shortWindow: Boolean,
+    ) {
+        if (shortWindow) {
+            withClue("the short-window default did not protect the board: $readings") {
+                readings["collapsed"] shouldBe true
+                (readings["body"] as Number).toDouble() shouldBe 0.0
+                (readings["layout"] as Number).toDouble() shouldBeGreaterThanOrEqual
+                    (readings["threshold"] as Number).toDouble()
+            }
+        } else {
+            withClue("the dock's pane is under its floor: $readings") {
+                (readings["body"] as Number).toDouble() shouldBeGreaterThanOrEqual DOCK_MIN
+            }
+        }
+    }
+
+    /** [seedBoard] or [seedParameterisedBoard] with its occurrences stacked full-width to [TALL_ROWS] grid rows. */
+    private fun seedTallBoard(
+        root: String,
+        withParameters: Boolean,
+    ): String {
+        val board = if (withParameters) seedParameterisedBoard(root) else seedBoard(root)
+        val names = if (withParameters) listOf("countrychart") else listOf("revenue", "cells", "total", "slowchart")
+        val rows = TALL_ROWS / names.size
+        val grid =
+            names
+                .mapIndexed { i, name -> """{"name":"$name","x":0,"y":${i * rows},"w":12,"h":$rows}""" }
+                .joinToString(",", "[", "]")
+        sql(
+            "UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb) " +
+                "WHERE dashboard_id = '$board'::uuid",
+        )
+        return board
     }
 
     @Test
@@ -237,7 +348,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(4)
-    fun `the release dialog opens into the dialog container - the D61 rows name the pins`() {
+    fun `the release dialog opens into the dialog container - the plan rows name the pins`() {
         startTrace()
         val root = ready("dpdlg")
         val board = seedBoardWithGrid(root)
@@ -249,8 +360,12 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         page.waitForSelector("#dp-dialog [data-lifecycle-dialog='dashboard-release']")
         val dialog = page.locator("#dp-dialog .app-modal")
         dialog.innerText() shouldContain "Release v2?"
-        // The released pins render as locked rows; no draft pin, so no cascade consent group.
-        dialog.innerText() shouldContain "Dependencies this release locks"
+        // #876: the shared release plan replaces D61's "locks" group — the released pins (four pipelines, four
+        // visualizations) are RELEASED text rows with no input; only a DRAFT row carries a box.
+        dialog.innerText() shouldContain "This release covers:"
+        val released = page.locator("#dp-dialog [data-release-row='released']")
+        released.count() shouldBe 8
+        released.locator("input").count() shouldBe 0
         // Close is emptying the container: the dialog leaves without a navigation.
         page.click("#dp-dialog [data-lifecycle-close]")
         page.waitForTimeout(250.0)
@@ -337,7 +452,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         seedDraftVersion(board)
 
         ensureTheme("light")
-        listOf("board", "overview", "refreshes", "versions").forEach { tab ->
+        listOf("board", "overview", "refreshes", "dependencies", "versions").forEach { tab ->
             page.navigate("$baseUrl/dashboards/$board?tab=$tab")
             page.waitForSelector("#dp-pane-" + tab + ":not([hidden])")
             page.waitForTimeout(300.0)
@@ -548,13 +663,13 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
     }
 
     /**
-     * #422 — the four tabs at the phone width too, Versions included: no sideways scroll, and the Versions
+     * #422 — the five tabs (#876: Dependencies) at the phone width too, Versions included: no sideways scroll, and the Versions
      * cells read relative with the absolute UTC stamp on `title`, never a raw ISO instant. Restores the viewport.
      */
     private fun assertVersionsAtPhoneAndDesktop(board: String) {
         val desktop = page.viewportSize()
         page.setViewportSize(PHONE_W, PHONE_H)
-        listOf("board", "overview", "refreshes", "versions").forEach { tab ->
+        listOf("board", "overview", "refreshes", "dependencies", "versions").forEach { tab ->
             page.navigate("$baseUrl/dashboards/$board?tab=$tab")
             page.waitForSelector("#dp-pane-" + tab + ":not([hidden])")
             if (tab == "versions") page.waitForSelector("#dp-pane-versions .ds-table")
@@ -775,6 +890,13 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         const val NANOS_PER_MS = 1_000_000
         const val PHONE_W = 390
         const val PHONE_H = 844
+
+        /** #783: a grid taller than any supported board region (16 x the 80 px row unit). */
+        const val TALL_ROWS = 16
+
+        /** splitter.js `DOCK_MIN` and `BOARD_FLOOR` (2 x `--dashboard-row-unit`). */
+        const val DOCK_MIN = 120.0
+        const val BOARD_FLOOR = 160.0
 
         /** A raw ISO-8601 instant (`2026-10-01T09:00:00Z`) — the text #422 retired from the Versions cells. */
         val ISO_INSTANT = Regex("""\d{4}-\d\d-\d\dT\d\d:\d\d""")

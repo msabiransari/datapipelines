@@ -154,6 +154,10 @@ class LakeDialectAdapterTest {
                 "CREATE OR REPLACE SECRET dp_lake (TYPE s3, PROVIDER credential_chain, REGION 'us-east-1')",
                 "SET memory_limit = '2048MB'",
                 "SET preserve_insertion_order = false",
+                "SET http_timeout = 10",
+                "SET http_retries = 2",
+                "SET http_retry_wait_ms = 100",
+                "SET http_retry_backoff = 4",
             )
     }
 
@@ -177,6 +181,10 @@ class LakeDialectAdapterTest {
                 "LOAD aws",
                 "SET memory_limit = '2048MB'",
                 "SET preserve_insertion_order = false",
+                "SET http_timeout = 10",
+                "SET http_retries = 2",
+                "SET http_retry_wait_ms = 100",
+                "SET http_retry_backoff = 4",
             )
     }
 
@@ -235,6 +243,10 @@ class LakeDialectAdapterTest {
                 "CREATE OR REPLACE SECRET dp_lake (TYPE s3, PROVIDER credential_chain, REGION 'us-east-1')",
                 "SET memory_limit = '2048MB'",
                 "SET preserve_insertion_order = false",
+                "SET http_timeout = 10",
+                "SET http_retries = 2",
+                "SET http_retry_wait_ms = 100",
+                "SET http_retry_backoff = 4",
             )
     }
 
@@ -254,6 +266,105 @@ class LakeDialectAdapterTest {
         init.filter { it.startsWith("LOAD") } shouldContainExactly
             listOf("LOAD httpfs", "LOAD aws", "LOAD avro", "LOAD iceberg")
         init.none { it.startsWith("INSTALL") } shouldBe true
+    }
+
+    /**
+     * #818d (record §10 item 7) — every engine that loads `httpfs` ends its setup with the object-store request bounds,
+     * literally these four, in this order, after the engine limits; one that loads nothing gets none (the settings do
+     * not exist before `httpfs`). Literal text on purpose: a change to a `LakeHttpBounds` constant must go red here
+     * and in the stalled-store integration test, never pass silently through a shared reference.
+     */
+    @Test
+    fun `an engine that loads httpfs ends its setup with the HTTP request bounds - every catalog kind, and only then`() {
+        val bounds =
+            listOf("SET http_timeout = 10", "SET http_retries = 2", "SET http_retry_wait_ms = 100", "SET http_retry_backoff = 4")
+        listOf("s3", "glue", "s3_tables", "rest").forEach { kind ->
+            withClue(kind) {
+                val init =
+                    lake.connectionInit(
+                        lakeDatasource(credentialKind = CredentialKind.NONE, dialectProperties = mapOf("catalog.kind" to kind)),
+                    )
+                init.takeLast(bounds.size) shouldContainExactly bounds
+                init[init.size - bounds.size - 1] shouldBe "SET preserve_insertion_order = false"
+            }
+        }
+        lake.connectionInit(attachLake()).none { it.startsWith("SET http_") } shouldBe true
+        LakeHttpBounds.STATEMENTS shouldContainExactly bounds
+    }
+
+    /**
+     * #845 (D2) — the managed row's whole setup, literal and in order, without and with the egress proxy: the proxy
+     * `SET` is the LAST adapter statement, after the HTTP bounds, so it precedes the §15a lockdown the managed
+     * generation runs after this init (ManagedLakeGeneration.LOCKDOWN_STATEMENTS). Literal text on purpose, like the
+     * bounds test above.
+     */
+    @Test
+    fun `845 - the managed row's full setup without and with the egress proxy, the proxy SET last`() {
+        val withoutProxy =
+            listOf(
+                "SET extension_directory = '/opt/duckdb/extensions'",
+                "LOAD httpfs",
+                "LOAD aws",
+                "CREATE OR REPLACE SECRET dp_lake (TYPE s3, KEY_ID 'minioadmin', SECRET 'minio-secret', REGION 'us-east-1', " +
+                    "ENDPOINT 'minio:9000', URL_STYLE 'path', USE_SSL false)",
+                "SET memory_limit = '512MB'",
+                "SET preserve_insertion_order = false",
+                "SET http_timeout = 10",
+                "SET http_retries = 2",
+                "SET http_retry_wait_ms = 100",
+                "SET http_retry_backoff = 4",
+            )
+        assertAll(
+            { lakeBundled.connectionInit(managedRow(egressProxy = null)).withoutGeneratedSpill() shouldContainExactly withoutProxy },
+            {
+                lakeBundled.connectionInit(managedRow(egressProxy = "egress-proxy:3128")).withoutGeneratedSpill() shouldContainExactly
+                    withoutProxy + "SET http_proxy = 'egress-proxy:3128'"
+            },
+        )
+    }
+
+    @Test
+    fun `845 - egress_proxy is accepted only on a managed catalog row and only as host-colon-port`() {
+        val validator = DatasourceValidator()
+        val key = "properties.dialect.egress_proxy"
+
+        fun errorsFor(dialect: Map<String, Any?>) = validator.validate(lakeDatasource(dialectProperties = dialect), isCreate = true).errors
+
+        val managedCatalog = mapOf("catalog.kind" to "s3", "managed" to "true")
+        listOf("egress-proxy:3128", "10.0.0.5:3128", "a:1", "proxy.dp.svc.cluster.local:65535").forEach { good ->
+            withClue("'$good' is a host:port") { errorsFor(managedCatalog + ("egress_proxy" to good)) shouldBe emptyList() }
+        }
+        listOf(
+            "egress-proxy",
+            "egress-proxy:0",
+            "egress-proxy:65536",
+            "egress-proxy:123456",
+            "http://egress-proxy:3128",
+            "egress-proxy:3128/x",
+            "user@egress-proxy:3128",
+            "[::1]:3128",
+            "-egress:3128",
+            "egress-:3128",
+            "egress proxy:3128",
+            "e'x:3128",
+            ":3128",
+            "a".repeat(254) + ":3128",
+        ).forEach { bad ->
+            withClue("'$bad' is refused") {
+                errorsFor(managedCatalog + ("egress_proxy" to bad)).single { it.field == key }.message shouldContain "host:port"
+            }
+        }
+        // A blank value is refused ONCE, by the generic empty rule, not twice.
+        errorsFor(managedCatalog + ("egress_proxy" to " ")).single { it.field == key }.code shouldBe DatasourceErrorCodes.PROPERTY_EMPTY
+        // Not the managed row: refused whatever the value's shape.
+        listOf(mapOf("catalog.kind" to "s3"), mapOf("catalog.kind" to "s3", "managed" to "false")).forEach { row ->
+            withClue(row) {
+                errorsFor(row + ("egress_proxy" to "egress-proxy:3128")).single { it.field == key }.message shouldContain "managed: true"
+            }
+        }
+        // Managed, but no object-store client to apply it to.
+        errorsFor(mapOf("managed" to "true", "egress_proxy" to "egress-proxy:3128")).single { it.field == key }.message shouldContain
+            "catalog.kind"
     }
 
     @Test
@@ -354,6 +465,36 @@ class LakeDialectAdapterTest {
             // plain HTTP in every deployment of it that exists.
             { secret shouldContain "USE_SSL false" },
             { secret shouldNotContain "credential_chain" },
+        )
+    }
+
+    @Test
+    fun `the endpoint's scheme decides USE_SSL and DuckDB receives host and port only (dp-lake call 24)`() {
+        fun secretFor(endpoint: String): String =
+            lake
+                .connectionInit(
+                    lakeDatasource(
+                        credentialKind = CredentialKind.PASSWORD,
+                        username = "AKIAEXAMPLE",
+                        secret = "s3cr3t",
+                        dialectProperties = mapOf("catalog.kind" to "s3", "endpoint" to endpoint),
+                    ),
+                ).single { it.startsWith("CREATE OR REPLACE SECRET") }
+
+        val https = secretFor("https://s3.eu-central-1.example.com/")
+        val http = secretFor("http://minio:9000")
+        val bare = secretFor("minio:9000")
+        assertAll(
+            { https shouldContain "ENDPOINT 's3.eu-central-1.example.com'" },
+            { https shouldContain "USE_SSL true" },
+            { https shouldNotContain "USE_SSL false" },
+            { https shouldNotContain "https://" },
+            { http shouldContain "ENDPOINT 'minio:9000'" },
+            { http shouldContain "USE_SSL false" },
+            { http shouldNotContain "http://" },
+            // Scheme-less keeps the pre-#785 reading: a declared non-AWS endpoint is plain HTTP.
+            { bare shouldContain "ENDPOINT 'minio:9000'" },
+            { bare shouldContain "USE_SSL false" },
         )
     }
 
@@ -541,6 +682,24 @@ class LakeDialectAdapterTest {
         lakeDatasource(
             dialectProperties =
                 mapOf("attach" to "a1=${tempDir.resolve("one.db")}, a2=${tempDir.resolve("two.db")}"),
+        )
+
+    /** The registrar's managed row (`ManagedLakeDatasourceRegistrar.desiredDatasource`'s shape), with an optional proxy. */
+    private fun managedRow(egressProxy: String?): Datasource =
+        lakeDatasource(
+            credentialKind = CredentialKind.PASSWORD,
+            username = "minioadmin",
+            secret = "minio-secret",
+            dialectProperties =
+                buildMap {
+                    put("catalog.kind", "s3")
+                    put("managed", "true")
+                    put("region", "us-east-1")
+                    put("endpoint", "http://minio:9000")
+                    put("url_style", "path")
+                    put("memory_limit", "512MB")
+                    egressProxy?.let { put(LakeHttpBounds.EGRESS_PROXY_KEY, it) }
+                },
         )
 
     private fun lakeDatasource(

@@ -29,7 +29,7 @@ import kotlin.io.path.writeText
  * surface, so reverting the factory to `sa` — or granting the exec user admin, or a driver
  * upgrade that un-gates one of these functions for non-admin users — turns the refusals into
  * successes and fails the test rather than silently reopening the escalation. The SQLState
- * asserted (`90040`, "Admin rights are required") was read off the pinned driver (2.3.232), not
+ * asserted (`90040`, "Admin rights are required") was read off the pinned driver (2.3.232, verified 2026-08-09), not
  * recalled.
  */
 class H2StagingPrivilegeTest {
@@ -235,7 +235,7 @@ class H2StagingPrivilegeTest {
         }
 
     private companion object {
-        /** H2 2.3.232's SQLState for "Admin rights are required for this operation". */
+        /** H2 2.3.232's SQLState (verified 2026-08-09) for "Admin rights are required for this operation". */
         const val ADMIN_RIGHTS_REQUIRED = "90040"
 
         /** Stand-in for the real prize — the env file holding the encryption key and JWT secret. */

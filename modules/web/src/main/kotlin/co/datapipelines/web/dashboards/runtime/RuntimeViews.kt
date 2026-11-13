@@ -2,13 +2,13 @@ package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.parameters.EvaluateResponse
 import co.datapipelines.parameters.EvaluateResponseJson
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.visualization.RefreshExecutionLink
 import co.datapipelines.visualization.RefreshRecord
-import co.datapipelines.visualization.RendererConfigValidators
 import co.datapipelines.visualization.RendererKind
 import co.datapipelines.visualization.StateSetting
 import co.datapipelines.visualization.VisualizationBody
@@ -25,15 +25,20 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 internal object RuntimeViews {
     private val nodes = JsonNodeFactory.instance
 
+    /** The light Plotly bundle (`plotly-2d.min.js`, a vendored custom build, D63): all a v1 chart family needs. */
+    private const val BUNDLE_2D = "2d"
+
     /**
      * `GET /runtime/config` (spec §8.1). `bindings` ride BESIDE each `config` — the renderer configuration is stored
      * verbatim and the bindings (a config path → a column) are what the client fills from `visualization_data`.
      * `timeouts.render_seconds` is an addition to the spec's list: the client's render allowance is a server number
-     * (§9.6) and this is the one place a client learns it.
+     * (§9.6) and this is the one place a client learns it. [columns] is occurrence name → a chart's `{field: LogicalType}`
+     * ([DashboardRuntimeResolver.chartColumns]), served as `columns` on each `chart` occurrence (#860).
      */
     fun config(
         resolved: ResolvedDashboard,
         runtime: DashboardRuntimeConfig,
+        columns: Map<String, Map<String, LogicalType>>,
     ): ObjectNode {
         val served = resolved.served
         val body = served.body
@@ -52,7 +57,9 @@ internal object RuntimeViews {
             out.set<JsonNode>("layout", mapper.valueToTree(body.layout))
             out.set<JsonNode>("parameter_set", body.parameterSet?.let { mapper.valueToTree(it) } ?: nodes.nullNode())
             val visualizations = out.putArray("visualizations")
-            body.visualizations.forEach { occurrence -> visualizations.add(visualization(resolved, occurrence, runtime)) }
+            body.visualizations.forEach { occurrence ->
+                visualizations.add(visualization(resolved, occurrence, runtime, columns[occurrence.name].orEmpty()))
+            }
             out.set<JsonNode>("groups", mapper.valueToTree(body.groups))
             out.set<JsonNode>("actions", mapper.valueToTree(body.actions))
             out.set<JsonNode>("action_controls", mapper.valueToTree(body.actionControls))
@@ -75,6 +82,7 @@ internal object RuntimeViews {
         resolved: ResolvedDashboard,
         occurrence: VisualizationOccurrence,
         runtime: DashboardRuntimeConfig,
+        columns: Map<String, LogicalType>,
     ): ObjectNode {
         val body = resolved.served.body
         val mapper = ArtifactJson.mapper
@@ -98,10 +106,20 @@ internal object RuntimeViews {
             }
             v.set<JsonNode>("config", pinned.body.config)
             v.set<JsonNode>("bindings", mapper.valueToTree(pinned.body.bindings))
+            if (pinned.body.renderer.kind == RendererKind.CHART) {
+                v.set<JsonNode>("columns", chartColumns(columns))
+            }
             v.set<JsonNode>("presentation", pinned.body.presentation?.let { mapper.valueToTree(it) } ?: nodes.nullNode())
             v.put("timeout_seconds", minOf(occurrence.timeoutSeconds ?: refresh, refresh))
         }
     }
+
+    /**
+     * A chart occurrence's `columns` (#860, design record §4.1 "Types at render"): `{field: LogicalType}` of its encoded
+     * fields, which the runtime merges into the spec its converter receives. One writer for the board and the preview.
+     */
+    fun chartColumns(columns: Map<String, LogicalType>): ObjectNode =
+        nodes.objectNode().also { out -> columns.forEach { (field, type) -> out.put(field, type.wire) } }
 
     /** The refresh deadline: the dashboard's own `timeouts.refresh_seconds`, else the default; never above the cap. */
     fun refreshSeconds(
@@ -110,22 +128,12 @@ internal object RuntimeViews {
     ): Int = minOf(body.timeouts?.refreshSeconds ?: runtime.defaultRefreshSeconds, runtime.maxRefreshSeconds)
 
     /**
-     * The Plotly bundle the host page loads (the implementation spec's §10.4, D63): `"3d"` when ANY pinned
-     * visualization is a Plotly renderer whose traces name a 3D type (WebGL), else `"2d"` — the default. One
-     * dashboard, exactly one bundle: the two are never on one page, so the derivation is dashboard-level and a
-     * single 3D trace loads the heavier bundle for the whole board. Trace types are the validator's closed list
-     * at save; anything else here is `"2d"` by the same reading that makes the page default light.
+     * The Plotly bundle the host page loads (the implementation spec's §10.4, D63): always `"2d"` since the `plotly`
+     * kind retired (design record 2026-11-06 §5.1) — every `chart` family the converter draws in v1 is a 2D trace,
+     * and the `"3d"` bundle stays vendored for the family that will need it. One dashboard, exactly one bundle.
      */
-    fun rendererBundle(visualizations: Collection<ArtifactVersion<VisualizationBody>>): String {
-        val threeD =
-            visualizations.any { pinned ->
-                pinned.body.renderer.kind == RendererKind.PLOTLY &&
-                    pinned.body.config
-                        .path("data")
-                        .any { trace -> trace.path("type").asText("") in RendererConfigValidators.PLOTLY_3D_TRACES }
-            }
-        return if (threeD) "3d" else "2d"
-    }
+    @Suppress("UNUSED_PARAMETER", "UnusedParameter", "FunctionOnlyReturningConstant") // the seam the next family reads
+    fun rendererBundle(visualizations: Collection<ArtifactVersion<VisualizationBody>>): String = BUNDLE_2D
 
     /**
      * `POST /runtime/parameters` (spec §8.2): the engine's [EvaluateResponseJson] UNCHANGED plus

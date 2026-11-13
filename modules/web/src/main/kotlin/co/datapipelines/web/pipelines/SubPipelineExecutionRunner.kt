@@ -141,6 +141,7 @@ class SubPipelineExecutionRunner(
      * [ExecutionStreamLauncher]; null only in module-slice wiring.
      */
     private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
+    private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
@@ -159,7 +160,8 @@ class SubPipelineExecutionRunner(
         // The child resolves in the PARENT execution's workspace (design §3: cross-workspace
         // references do not exist) — carried down on the context since 025 A5, so no lookup.
         val workspaceId = ctx.workspaceId
-        val (record, child) = loadChild(node, ref, workspaceId)
+        val (record, child, metadata) = loadChild(node, ref, workspaceId)
+        ctx.lakeLineage?.childPipelineUsed(ref, metadata, child.parameters)
         ctx.pipelineAdmission?.invoke(child, record.id, ref.version)
 
         // Minted before execution starts: the parent's node stats and any failure detail must be
@@ -169,9 +171,10 @@ class SubPipelineExecutionRunner(
         // and the sinks below report the parent's own output write onto it.
         ctx.operations.tracker(node.id)?.childExecution(childExecutionId)
         val outcome = SinkOutcome()
-        val request = childRequest(node, ctx, ref, record, child, childExecutionId, outcome)
-        val result = executeChild(node, record, request, workspaceId)
-        recordResultColumns(result)
+        val request = childRequest(node, ctx, ref, record, child, metadata, childExecutionId, outcome)
+        val emitter = childEmitter(record, request, workspaceId)
+        val result = executeChild(node, request, workspaceId, emitter)
+        recordResultColumns(result, emitter)
         ensureOutputDelivered(node, request.executionId, outcome)
 
         return NodeResult.of(
@@ -249,10 +252,10 @@ class SubPipelineExecutionRunner(
         node: ExecutableNode,
         ref: PipelineNodeRef,
         workspaceId: UUID,
-    ): Pair<PipelineRecord, Pipeline> {
+    ): Triple<PipelineRecord, Pipeline, co.datapipelines.pipeline.LakeExecutionMetadata> {
         val record = pipelines.findByNameAnyStatus(workspaceId, ref.name)
-        val body = record?.let { pipelines.findVersionBody(workspaceId, it.id, ref.version) }
-        if (record == null || body == null) {
+        val snapshot = record?.let { pipelines.findExecutionSnapshot(workspaceId, it.id, ref.version) }
+        if (record == null || snapshot == null) {
             throw childFailure(
                 node,
                 childExecutionId = null,
@@ -262,7 +265,15 @@ class SubPipelineExecutionRunner(
                 cause = null,
             )
         }
-        return record to deserializer.readOrThrow(body)
+        return Triple(
+            record,
+            deserializer.readOrThrow(snapshot.bodyJson),
+            co.datapipelines.pipeline.LakeExecutionMetadata(
+                snapshot.bodyJson,
+                snapshot.bodyHash,
+                snapshot.status == co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+            ),
+        )
     }
 
     /** The child request: parent's principal (D9), lineage, PIPELINE trigger, depth + 1, sink. */
@@ -272,12 +283,15 @@ class SubPipelineExecutionRunner(
         ref: PipelineNodeRef,
         record: PipelineRecord,
         child: Pipeline,
+        metadata: co.datapipelines.pipeline.LakeExecutionMetadata,
         childExecutionId: UUID,
         outcome: SinkOutcome,
     ) = ExecuteRequest(
         pipelineId = record.id,
         pipelineVersion = ref.version,
         pipeline = child,
+        lakeExecutionMetadata = metadata,
+        inheritedLakeLineage = ctx.lakeLineage,
         userId = ctx.userId,
         executedByKeyKind = ctx.executedByKeyKind,
         // Composition inherits the parent's workspace (design §5.3): the child runs where
@@ -300,48 +314,61 @@ class SubPipelineExecutionRunner(
         // scheduled composition resolves its bindings (TODAY / YESTERDAY) on the parent's
         // logical time, never on the child's own start instant.
         reference = ctx.reference,
+        lakeAppendGrant = ctx.lakeAppendGrant,
+        // #463: a read-only parent's children read only too; a writable parent's stay writable.
+        readOnly = ctx.readOnly,
         pipelineAdmission = ctx.pipelineAdmission,
     )
 
     /**
-     * Runs the child through a per-run executor with a recording emitter (no SSE stream — the
-     * McpRecordingExecutionRunner shape), and maps a child failure onto the parent node's
-     * catalogued code. Cancellation propagates untouched (design §4.3, D8).
+     * The child run's recording emitter (no SSE stream — the McpRecordingExecutionRunner shape). Built
+     * here rather than inside [executeChild] because the child's result-history write goes through it
+     * too (#905: ordered behind an unconfirmed RUNNING insert).
      */
-    private suspend fun executeChild(
-        node: ExecutableNode,
+    private fun childEmitter(
         record: PipelineRecord,
         request: ExecuteRequest,
         workspaceId: UUID,
-    ): ExecutionResult {
-        val emitter =
-            WebEventEmitter(
-                context =
-                    ExecutionContext(
-                        pipelineId = record.id,
-                        pipelineVersion = request.pipelineVersion,
-                        userId = request.userId,
-                        executedByKeyKind = request.executedByKeyKind,
-                        // Non-null by `childRequest`; the elvis is the type's, not a second policy.
-                        correlationId = request.correlationId ?: UUID.randomUUID(),
-                        triggeredVia = ExecutionTrigger.PIPELINE,
-                        parametersJson = ExecutorJson.mapper.writeValueAsString(request.parameters),
-                        workspaceId = workspaceId,
-                        parentExecutionId = request.parentExecutionId,
-                        parentNodeId = request.parentNodeId,
-                        rootExecutionId = request.rootExecutionId,
-                    ),
-                stream = null,
-                streams = streams,
-                eventLog = eventLog,
-                eventRepository = eventRepository,
-                executionRepository = executionRepository,
-                persistenceDispatcher = persistenceDispatcher,
-                lifecycleWriteTimeout = java.time.Duration.ofSeconds(executorConfig.lifecycleWriteTimeoutSeconds.toLong()),
-                metrics = executorMetrics,
-                eventRecorder = eventRecorder,
-            )
-        return try {
+    ): WebEventEmitter =
+        WebEventEmitter(
+            context =
+                ExecutionContext(
+                    pipelineId = record.id,
+                    pipelineVersion = request.pipelineVersion,
+                    userId = request.userId,
+                    executedByKeyKind = request.executedByKeyKind,
+                    // Non-null by `childRequest`; the elvis is the type's, not a second policy.
+                    correlationId = request.correlationId ?: UUID.randomUUID(),
+                    triggeredVia = ExecutionTrigger.PIPELINE,
+                    parametersJson = ExecutorJson.mapper.writeValueAsString(request.parameters),
+                    workspaceId = workspaceId,
+                    parentExecutionId = request.parentExecutionId,
+                    parentNodeId = request.parentNodeId,
+                    rootExecutionId = request.rootExecutionId,
+                ),
+            stream = null,
+            streams = streams,
+            eventLog = eventLog,
+            eventRepository = eventRepository,
+            executionRepository = executionRepository,
+            persistenceDispatcher = persistenceDispatcher,
+            lifecycleWriteTimeout = java.time.Duration.ofSeconds(executorConfig.lifecycleWriteTimeoutSeconds.toLong()),
+            metrics = executorMetrics,
+            eventRecorder = eventRecorder,
+        )
+
+    /**
+     * Runs the child through a per-run executor with its recording [emitter], and maps a child
+     * failure onto the parent node's catalogued code. Cancellation propagates untouched (design
+     * §4.3, D8).
+     */
+    private suspend fun executeChild(
+        node: ExecutableNode,
+        request: ExecuteRequest,
+        workspaceId: UUID,
+        emitter: WebEventEmitter,
+    ): ExecutionResult =
+        try {
             (executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId)).execute(request)
         } catch (e: CancellationException) {
             // Family cancellation (design §4.3, D8) — never relabelled as a node failure.
@@ -351,7 +378,6 @@ class SubPipelineExecutionRunner(
         ) {
             throw childFailure(node, request.executionId, e)
         }
-    }
 
     /**
      * §12.9 makes a missing delivery unreachable (output is only legal on a child WITH a caller
@@ -389,8 +415,8 @@ class SubPipelineExecutionRunner(
      * calculator output written upstream, an org or platform key — and is re-encoded to the
      * child target's §6.3 wire form.
      *
-     * The target is a child declared parameter OR one of the pinned child's CALCULATOR
-     * `context_key`s (078 A5-composition): supplying the key skips the child's node exactly as
+     * The target is a child declared parameter OR one of the pinned child's CALCULATOR or
+     * value-mode SCRIPT `context_key`s (078 A5-composition): supplying the key skips the child's node exactly as
      * a direct execute-time supply does. An ANY-output target takes the referenced value as any
      * JSON scalar ([encodeScalar]). Nothing else crosses: only the keys the node explicitly
      * maps are passed — a parent and child calculator key spelled the same are NOT forwarded
@@ -402,12 +428,12 @@ class SubPipelineExecutionRunner(
         child: Pipeline,
         ctx: NodeExecutionContext,
     ): Map<String, JsonNode> {
-        val childCalculatorKeys = child.calculatorOutputs()
+        val childOutputKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
         return node.parameters.orEmpty().mapValues { (key, value) ->
             val reference =
                 value.takeIf { it.isTextual }?.asText()?.let(PARAMETER_REFERENCE::matchEntire)
                     ?: return@mapValues value
-            val targetType = targetType(node, child, key, childCalculatorKeys)
+            val targetType = targetType(node, child, key, childOutputKeys)
             val resolved = ctx.values[reference.groupValues[1]]
             if (targetType == null) {
                 encodeScalar(node, key, resolved)
@@ -437,24 +463,25 @@ class SubPipelineExecutionRunner(
     }
 
     /**
-     * The target's wire type: the child parameter's, or the child calculator key's kind output
-     * — null for an ANY-output kind, which takes any scalar. An unknown key is unreachable per
-     * §12.9; the guard fails with the catalogued code rather than an NPE, as [requireRef] does.
+     * The target's wire type: the child parameter's, or the child calculator key's kind output.
+     * An ANY-output calculator or value-mode SCRIPT key takes any scalar (null type here);
+     * the child's pinned script contract gates a supplied SCRIPT value. Unknown targets are
+     * refused by §12.9; this runtime backstop uses the catalogued code, as [requireRef] does.
      */
     private fun targetType(
         node: ExecutableNode,
         child: Pipeline,
         key: String,
-        childCalculatorKeys: Map<String, LogicalType?>,
+        childOutputKeys: Map<String, LogicalType?>,
     ): LogicalType? {
         child.parameters[key]?.let { return it.type }
-        if (key in childCalculatorKeys) return childCalculatorKeys.getValue(key)
+        if (key in childOutputKeys) return childOutputKeys.getValue(key)
         throw childFailure(
             node,
             childExecutionId = null,
             message =
                 "Node '${node.id}' supplies parameter '$key', which the pinned child pipeline " +
-                    "neither declares nor computes as a calculator context_key; save-time validation " +
+                    "neither declares nor computes as a calculator or value-mode script context_key; save-time validation " +
                     "should have rejected this (§12.9).",
             cause = null,
         )
@@ -462,9 +489,10 @@ class SubPipelineExecutionRunner(
 
     /**
      * The §6.3 reading of a bound Context value whose target declares no type (an ANY-output
-     * child calculator key — 078 A5-composition). The child's binder reads an ANY-output key
-     * through `CalculatorInputResolver.natural` — String, Boolean, BigDecimal for every number —
-     * so every bound scalar is encoded by its own type's wire form and re-read canonically.
+     * child calculator or value-mode SCRIPT key — 078 A5-composition). Each scalar is encoded
+     * by its own type's wire form. The child's binder re-reads it canonically, and a SCRIPT's
+     * caller-supplied skip gates it against the pinned output contract. Objects and lists have
+     * no scalar wire form and remain refused here.
      */
     private fun encodeScalar(
         node: ExecutableNode,
@@ -518,7 +546,7 @@ class SubPipelineExecutionRunner(
                     childExecutionId = null,
                     message =
                         "Node '${node.id}' maps a Context value of type ${value.javaClass.simpleName} onto " +
-                            "child calculator input '$key', which takes any JSON scalar; this value has no " +
+                            "child calculator or script input '$key', which takes any JSON scalar; this value has no " +
                             "canonical reading.",
                     cause = null,
                 )
@@ -664,13 +692,19 @@ class SubPipelineExecutionRunner(
      * The §10.2 result-history columns, as [McpRecordingExecutionRunner] records them: a child
      * whose result streamed `direct` has no stored result (early return); a side-effect child's
      * own materialized result lands here. Bookkeeping only — a failure is logged, never fails
-     * the completed child.
+     * the completed child. #905: the write goes through the child's [emitter], ordered behind an
+     * unconfirmed RUNNING insert.
      */
-    private fun recordResultColumns(result: ExecutionResult) {
+    private fun recordResultColumns(
+        result: ExecutionResult,
+        emitter: WebEventEmitter,
+    ) {
         val ref = result.resultRef ?: return
         runCatching {
             val view = resultStore.describe(ref) ?: return
-            executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            emitter.writeBehindUnconfirmedInsert(result.executionId, RESULT_COLUMNS_WRITE) {
+                executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            }
         }.onFailure { log.warn("Result columns for child execution {} not recorded.", result.executionId, it) }
     }
 
@@ -700,6 +734,7 @@ class SubPipelineExecutionRunner(
             progress = executionProgress,
             subPipelineRunner = this,
             scripts = scriptSupport,
+            lakeAppendPort = lakeAppendPort,
         )
 
     /** What the sink delivered — written by the child's caller node, read after `execute` returns. */

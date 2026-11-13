@@ -27,11 +27,30 @@
   <script th:src="@{/js/schedules/run.js}" defer></script>
   <script th:src="@{/js/schedules/form.js}" defer></script>
   <script th:src="@{/js/schedules/page.js}" defer></script>
+  <!-- #876 G6 U2 — the Dependencies section's renderer and mount through the shell's page-script loader
+       (page-assets.mjs): a catalog runs once per document after the bare scripts above, and its mount scans main;
+       detail.js scans each detail it clones. -->
+  <template data-page-assets>
+    <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+    <script th:src="@{/js/dependencies/renderer.js}"></script>
+    <script th:src="@{/js/dependencies/tree-view.js}"></script>
+    <script th:src="@{/js/dependencies/list.js}"></script>
+    <script th:src="@{/js/dependencies/source.js}"></script>
+    <script data-page-mount th:src="@{/js/dependencies/mount.js}"></script>
+  </template>
 
+  <!-- #641: the condition stamp below is the PARSED deep-link word (the controller refused any
+       other value with a 400), absent when the list is unfiltered; the script reads it first.
+       #725: the outcome stamp is the same, for the last-run filter. -->
   <div class="tplx-page sch-page app-canvas" data-schedules-root
        th:attr="data-can-author=${canAuthor == true},
                 data-can-read-executions=${canReadExecutions == true},
-                data-can-execute=${canExecute == true}">
+                data-can-execute=${canExecute == true},
+                data-drafts-eligible=${draftsEligible == true}"
+       th:data-schedule-condition="${#strings.isEmpty(condition) ? null : condition}"
+       th:data-schedule-outcome="${#strings.isEmpty(outcome) ? null : outcome}">
 
     <!-- ONE grid child for the heading row (the `.tplx-page` three-row grid — pipelines/list.html). -->
     <div class="app-page-h">
@@ -39,7 +58,7 @@
         <h1 class="ds-headline">Schedules</h1>
         <p class="app-page-sub">
           Run a pipeline on a timetable. A schedule fires as the system identity, never as the
-          person who created it, and follows the pipeline's current version.
+          person who created it, and runs the exact pipeline version it names.
         </p>
       </div>
       <div class="app-page-actions">
@@ -53,10 +72,27 @@
 
     <!-- Search: a flat list of full paths while the box holds text, the tree when it is empty
          (the explorers' browse-vs-search rule, §4.3). It matches every column the list
-         renders — the name, the pipeline, the pattern and the condition (§5.1 Search). -->
+         renders — the name, the pipeline, the pattern and the condition (§5.1 Search).
+         #641: the condition select beside it is the pipelines catalog's lifecycle select
+         without htmx — its change re-reads §20.1 with `condition` (explorer.js), and while a
+         condition is chosen the list is flat, like a search; the two include each other.
+         #725: the last-run select is its twin over §20.1's `outcome` (the newest run's bucket, the
+         Schedules home's Last run bars); both filters and the search compose. -->
     <div class="u-row-md tplx-search-row">
       <input type="search" id="schedule-filter-q" name="q" placeholder="Search schedules..."
              class="ds-input app-search-input" autocomplete="off" aria-controls="schedule-list">
+      <select id="schedule-filter-condition" name="condition" class="ds-input app-select-auto"
+              aria-label="Filter by condition" aria-controls="schedule-list">
+        <option value="" th:selected="${#strings.isEmpty(condition)}">All conditions</option>
+        <option th:each="o : ${conditionOptions}" th:value="${o.value}" th:text="${o.label}"
+                th:selected="${o.value == condition}">Blocked</option>
+      </select>
+      <select id="schedule-filter-outcome" name="outcome" class="ds-input app-select-auto"
+              aria-label="Filter by last run" aria-controls="schedule-list">
+        <option value="" th:selected="${#strings.isEmpty(outcome)}">All outcomes</option>
+        <option th:each="o : ${outcomeOptions}" th:value="${o.value}" th:text="${o.label}"
+                th:selected="${o.value == outcome}">Failed</option>
+      </select>
     </div>
 
     <div class="tplx-body">

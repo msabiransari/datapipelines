@@ -3,8 +3,9 @@ package co.datapipelines.web.api
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.web.capturingLogEvents
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.kotest.assertions.withClue
@@ -26,6 +27,7 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -83,6 +85,30 @@ class ApiExceptionHandlerTest {
         tree["error"]["message"].asText() shouldContain "nesting depth"
         mapper.writeValueAsString(response.body).contains("987654321") shouldBe false
         mapper.readTree("[[\"sentinel987654321\"]]").isArray shouldBe true
+    }
+
+    /**
+     * #847 — the native verification fault answers its own 503 envelope through the auth advice:
+     * the fixed message and user message, empty details, and never the library's text or code.
+     */
+    @Test
+    fun `a native verification fault is a 503 envelope free of the native cause`() {
+        val error =
+            co.datapipelines.auth.SecretVerificationUnavailableException(
+                -22,
+                IllegalStateException("argon2id_verify failed: Memory allocation error (-22)"),
+            )
+
+        val response = ApiExceptionHandler().onAuth(error, MockHttpServletRequest("POST", "/api/v1/auth/password"))
+
+        response.statusCode.value() shouldBe 503
+        val tree = jacksonObjectMapper().valueToTree<JsonNode>(response.body)
+        tree["error"]["code"].asText() shouldBe co.datapipelines.auth.AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
+        tree["error"]["message"].asText() shouldBe "Secret verification is temporarily unavailable"
+        tree["error"]["details"].size() shouldBe 0
+        val json = jacksonObjectMapper().writeValueAsString(response.body)
+        json.contains("emory") shouldBe false
+        json.contains("-22") shouldBe false
     }
 
     @Test
@@ -217,6 +243,12 @@ class ApiExceptionHandlerTest {
                 details = mapOf("datasource" to "pg-prod"),
                 cause = java.sql.SQLException("Pool init failed", java.io.IOException("HTTP 403 Forbidden on listing")),
             )
+
+        /** #464 — the tree's refusals, thrown the way `TreeController` and `TreeProjection` throw them. */
+        @GetMapping("/probe/navigation/{code}")
+        fun navigation(
+            @PathVariable code: String,
+        ): Nothing = throw co.datapipelines.typesystem.DatapipelinesException(code, "Navigation refusal")
 
         /**
          * 098 §C, request shape 1 — `POST /api/v1/endpoints` with the required `path` omitted.
@@ -509,9 +541,8 @@ class ApiExceptionHandlerTest {
         // caller's own downstream is down" (datasource_unreachable,
         // datasource_connection_failed) earn WARN — a 502 status alone proves nothing.
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — standalone MockMvc dispatches on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
@@ -532,14 +563,41 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
+    fun `the navigation view 503 carries Retry-After and logs one WARN line without a stack - the 400 carries neither (#464)`() {
+        val unavailable = PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE
+        val invalid = PipelineErrorCodes.Navigation.REQUEST_INVALID
+        val events =
+            loggedAtDebug {
+                mvc
+                    .perform(get("/probe/navigation/$unavailable"))
+                    .andExpect(status().isServiceUnavailable)
+                    .andExpect(header().string("Retry-After", "5"))
+                    .andExpect(jsonPath("$.error.code").value(unavailable))
+                    .andExpect(jsonPath("$.error.user_message").exists())
+                    .andExpect(jsonPath("$.error.doc_url").exists())
+                    .andExpect(jsonPath("$.correlation_id").exists())
+            }
+        withClue("log events ${events.map { "${it.level} ${it.formattedMessage}" }}") {
+            events.map { it.level } shouldBe listOf(Level.WARN)
+            events.single().throwableProxy shouldBe null
+            events.single().formattedMessage shouldBe "503 GET /probe/navigation/$unavailable: Navigation refusal"
+        }
+
+        mvc
+            .perform(get("/probe/navigation/$invalid"))
+            .andExpect(status().isBadRequest)
+            .andExpect(header().doesNotExist("Retry-After"))
+            .andExpect(jsonPath("$.error.code").value(invalid))
+    }
+
+    @Test
     fun `a 502 status outside the allowlist logs ERROR with the stack`() {
         // query_execution_failed also maps to 502, but it can be OUR bug (the rendered SQL we
         // produced) — keying the demotion on the status would bury it. It must log ERROR with
         // the throwable attached.
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — standalone MockMvc dispatches on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
@@ -613,9 +671,8 @@ class ApiExceptionHandlerTest {
     @Test
     fun `neither malformed body logs ERROR or attaches a stack`() {
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — standalone MockMvc dispatches on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
@@ -643,9 +700,8 @@ class ApiExceptionHandlerTest {
         val probe = PlainProbeController()
         val plainMvc = MockMvcBuilders.standaloneSetup(probe).setControllerAdvice(ApiExceptionHandler()).build()
         val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
-        val appender =
-            ch.qos.logback.core.read
-                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        // raw-list-appender: synchronous — standalone MockMvc dispatches on the test thread
+        val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {

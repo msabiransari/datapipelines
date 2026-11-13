@@ -1,5 +1,6 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.typesystem.jdbc.DuckDbAuthorSqlRefusal
 import java.sql.SQLException
 import java.sql.SQLTimeoutException
 
@@ -89,6 +90,10 @@ private const val QUERY_CANCELED_STATE = "57014"
  *   ever listed), which is exactly the intent: the refusal means "the engine refused this
  *   statement on privilege grounds", and the probe's not-permitted envelope is the right answer.
  *
+ * Not [DuckDbAuthorSqlRefusal] (#816, datasources.md §5.8): the author-SQL guard answers `42501`
+ * too, but it refused the statement's TEXT before the engine saw it — no table was read and no
+ * credential is at fault, so it stays on the `query_execution_failed` path with its own message.
+ *
  * Public (unlike [isStatementTimeout]) because the classification lives in this module while
  * two of the boundaries that apply it — the `sql_probe` and preview-rows error mappings —
  * live in `mcp-server`.
@@ -100,6 +105,7 @@ fun SQLException.isPermissionDenied(): Boolean {
     while (queue.isNotEmpty() && seen.size < ConnectionLease.CHAIN_WALK_LIMIT) {
         val current = queue.removeFirst()
         if (seen.put(current, true) != null) continue
+        if (current is DuckDbAuthorSqlRefusal) return false
         if (current is SQLException && current.isPermissionDeniedShape()) return true
         (current as? SQLException)?.nextException?.let { queue.add(it) }
         current.cause?.let { queue.add(it) }

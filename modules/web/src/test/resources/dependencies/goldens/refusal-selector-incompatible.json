@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "correlation_id": "00000000-0000-4000-8000-000000000000",
+  "error": {
+    "code": "dependencies.request.invalid",
+    "message": "The dependency tree request is invalid.",
+    "user_message": "That dependency view link isn't valid. Open the object again and retry.",
+    "details": {
+      "field": "version",
+      "reason": "selector_incompatible"
+    },
+    "doc_url": "https://datapipelines.co/docs/pipeline-contract#1326-dependency-trees"
+  }
+}

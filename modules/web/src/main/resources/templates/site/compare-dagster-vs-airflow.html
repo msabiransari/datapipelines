@@ -109,7 +109,7 @@
     <div class="container">
       <p class="kicker">A search phrase, answered</p>
       <h2 id="alt-title" class="ds-headline">Looking for a Dagster alternative?</h2>
-      <p class="section-lede">
+      <p class="section-lede text-columns">
         The honest candidates are the two above. Airflow if you want the standard and its ecosystem; Prefect if
         you want the least ceremony around Python you already have. There are other orchestrators, and each has a
         case, but a team leaving Dagster is almost always choosing between "more platform", meaning Airflow, and "less
@@ -122,16 +122,18 @@
   <section class="section" aria-labelledby="fits-title">
     <div class="container">
       <h2 id="fits-title" class="ds-headline">Where datapipelines fits, said once</h2>
-      <!-- claim: docs/dag-executor.md §5 — on-demand execution, no scheduler; docs/rest-api.md §6 — the execution endpoint and SSE stream any orchestrator can call -->
+      <!-- claim: docs/dag-executor.md §5 — on-demand execution; docs/scheduler.md §1 — a schedule runs one pipeline, not a task graph; docs/rest-api.md §6 — the execution endpoint and SSE stream any orchestrator can call -->
       <p class="section-lede">
         Whichever you choose, it will orchestrate <em>work</em>. When the work is SQL across several operational
         databases, authored by an agent and run under governed, read-only-by-default credentials, that part can
         live here: a versioned pipeline the orchestrator triggers through one endpoint and follows to completion.
-        datapipelines has no scheduler and wants none. It composes with Dagster, Airflow or Prefect rather than
+        Its <a th:href="@{/pipeline-scheduling}">built-in schedules</a> run one pipeline at a cron pattern's times, which covers a nightly dataset and stops
+        well short of an orchestrator: no dependencies between schedules, no range backfills, no sensors. It
+        composes with Dagster, Airflow or Prefect rather than
         competing with any of them. <a th:href="@{/compare/airflow}">The Airflow comparison</a> spells out the
         boundary; <a th:href="@{/compare/dbt}">the dbt comparison</a> covers the modelling side of the same question.
       </p>
-      <p><a th:href="@{/compare/airflow}">datapipelines vs Airflow &rarr;</a> &middot;
+      <p class="section-note"><a th:href="@{/compare/airflow}">datapipelines vs Airflow &rarr;</a> &middot;
          <a th:href="@{/compare/dbt}">datapipelines vs dbt &rarr;</a> &middot;
          <a th:href="@{/docs/rest-api}">REST API specification &rarr;</a></p>
     </div>
@@ -140,15 +142,15 @@
   <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <!-- claim: docs/dag-executor.md §5 — do I need an orchestrator to run pipelines here -->
-      <!-- claim: docs/rest-api.md §6 — can any of the three trigger a run -->
-      <!-- claim: docs/mcp-server.md §6.1 — is this an alternative to either -->
+      <!-- claim: docs/dag-executor.md §5 — execution starts with an ExecuteRequest, then walks the pipeline DAG -->
+      <!-- claim: docs/rest-api.md §6 — POST execution endpoint and SSE events for an external orchestrator -->
+      <!-- claim: docs/mcp-server.md §2 — MCP tools are a thin adapter over REST actions -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Dagster, Airflow and Prefect, in questions')}"></div>
     </div>
   </section>
 
   <section class="section" aria-labelledby="cta-title">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="cta-title" class="ds-headline">Keep your orchestrator. See what it would trigger.</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">

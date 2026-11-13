@@ -78,6 +78,11 @@ class RecordingSourceStarter(
                 directSink = launch.sink,
                 slotLease = launch.slot,
                 executedByKeyKind = launch.executedByKeyKind,
+                // Admission above refuses datasource writebacks transitively. A dashboard's
+                // delegated read-only execution grants no lake mutation authority.
+                lakeAppendGrant = null,
+                // #463: refresh and draft preview alike — the database refuses a write where the dialect can.
+                readOnly = true,
                 pipelineAdmission = admission,
             )
         return try {

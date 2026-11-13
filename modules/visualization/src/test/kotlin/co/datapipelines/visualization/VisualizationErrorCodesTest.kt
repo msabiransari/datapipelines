@@ -34,7 +34,7 @@ class VisualizationErrorCodesTest {
     }
 
     private companion object {
-        /** §13.22's rows — the spec's 21 plus the nine lifecycle rows L1a added (pipeline-contract v1.44). */
-        const val EXPECTED_VISUALIZATION_CODES = 30
+        /** §13.22's rows — the spec's 21, L1a's nine lifecycle rows (v1.44), #517's seven release-plan codes and #786's 503. */
+        const val EXPECTED_VISUALIZATION_CODES = 38
     }
 }

@@ -61,22 +61,22 @@ class PublishedEndpointRepository(
     fun findAll(): List<PublishedEndpoint> = queryRows(SELECT_COLUMNS, emptyMap()).validEndpoints()
 
     /** Every valid ENABLED endpoint — what the per-instance registry cache holds. */
-    fun findAllEnabled(): List<PublishedEndpoint> = queryRows("$SELECT_COLUMNS WHERE is_enabled = TRUE", emptyMap()).validEndpoints()
+    fun findAllEnabled(): List<PublishedEndpoint> = queryRows("$SELECT_COLUMNS WHERE e.is_enabled = TRUE", emptyMap()).validEndpoints()
 
     /** The valid endpoints of one workspace — the management listing (§6). */
     fun findByWorkspace(workspaceId: UUID): List<PublishedEndpoint> =
-        queryRows("$SELECT_COLUMNS WHERE workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId)).validEndpoints()
+        queryRows("$SELECT_COLUMNS WHERE e.workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId)).validEndpoints()
 
     /** One valid endpoint by its path — the single-form addressing `?path=` the REST surface uses (§6). */
     fun findByPath(pathPattern: String): PublishedEndpoint? =
-        queryRows("$SELECT_COLUMNS WHERE path_pattern = :path", mapOf("path" to pathPattern)).validEndpoints().singleOrNull()
+        queryRows("$SELECT_COLUMNS WHERE e.path_pattern = :path", mapOf("path" to pathPattern)).validEndpoints().singleOrNull()
 
     /**
      * The row at [pathPattern], valid or legacy — what unpublishing needs: the fix for a legacy
      * row IS an unpublish, so the write path must see the row every other read skips.
      */
     fun findRowByPath(pathPattern: String): EndpointRow? =
-        queryRows("$SELECT_COLUMNS WHERE path_pattern = :path", mapOf("path" to pathPattern)).singleOrNull()
+        queryRows("$SELECT_COLUMNS WHERE e.path_pattern = :path", mapOf("path" to pathPattern)).singleOrNull()
 
     /**
      * The legacy rows of one workspace. A legacy row is listed, flagged with its reason, and
@@ -85,12 +85,39 @@ class PublishedEndpointRepository(
      * away from listing every workspace's rows.
      */
     fun findLegacy(workspaceId: UUID): List<EndpointRow.Legacy> =
-        queryRows("$SELECT_COLUMNS WHERE workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId))
+        queryRows("$SELECT_COLUMNS WHERE e.workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId))
             .filterIsInstance<EndpointRow.Legacy>()
 
-    /** Whether any endpoint publishes [pipelineId] — what a pipeline delete has to know. */
+    /** One valid endpoint by id. */
+    fun findById(id: UUID): PublishedEndpoint? =
+        queryRows("$SELECT_COLUMNS WHERE e.id = :id", mapOf("id" to id)).validEndpoints().singleOrNull()
+
+    /** One valid endpoint in the selected workspace; management reads filter before materializing its body. */
+    fun findById(
+        workspaceId: UUID,
+        id: UUID,
+    ): PublishedEndpoint? =
+        queryRows(
+            "$SELECT_COLUMNS WHERE e.workspace_id = :workspaceId AND e.id = :id",
+            mapOf("workspaceId" to workspaceId, "id" to id),
+        ).validEndpoints().singleOrNull()
+
+    /**
+     * The endpoints with a LIVE (DRAFT or RELEASED) version pinning any version of the pipeline [pipelineId] — the
+     * pipeline page's usage evidence (#786: by the exact pins, by name in the entity's workspace, never by the legacy
+     * `pipeline_id` column).
+     */
     fun findByPipeline(pipelineId: UUID): List<PublishedEndpoint> =
-        queryRows("$SELECT_COLUMNS WHERE pipeline_id = :pipelineId", mapOf("pipelineId" to pipelineId)).validEndpoints()
+        queryRows(
+            """
+            $SELECT_COLUMNS
+             WHERE EXISTS (
+                SELECT 1 FROM published_endpoint_versions pv
+                  JOIN pipelines p ON p.workspace_id = e.workspace_id AND p.name = pv.pipeline_name
+                 WHERE pv.endpoint_id = e.id AND pv.status IN ('DRAFT', 'RELEASED') AND p.id = :pipelineId)
+            """.trimIndent(),
+            mapOf("pipelineId" to pipelineId),
+        ).validEndpoints()
 
     /**
      * Publishes [endpoint], refusing a pattern that could match the same URL as an existing one.
@@ -101,7 +128,10 @@ class PublishedEndpointRepository(
      *
      * @throws DatapipelinesException `endpoint.path_conflict`, naming the other path.
      */
-    fun insert(endpoint: PublishedEndpoint): PublishedEndpoint {
+    fun insert(
+        endpoint: PublishedEndpoint,
+        legacy: LegacyEndpointColumns,
+    ): PublishedEndpoint {
         // `pg_advisory_xact_lock` returns void, so the row is consumed and discarded — the
         // point is the side effect, which lasts until this transaction ends (commit OR rollback).
         jdbc.query("SELECT pg_advisory_xact_lock(:key)", mapOf("key" to REGISTRY_LOCK_KEY), RowCallbackHandler { })
@@ -109,7 +139,7 @@ class PublishedEndpointRepository(
             throw pathConflict(endpoint.pathPattern, other.pathPattern)
         }
         try {
-            jdbc.update(INSERT_SQL, params(endpoint))
+            jdbc.update(INSERT_SQL, params(endpoint, legacy))
         } catch (e: DuplicateKeyException) {
             // Only reachable if a caller published without the lock; translated so the client
             // cannot tell the two paths apart.
@@ -134,6 +164,9 @@ class PublishedEndpointRepository(
     fun deleteByPath(pathPattern: String): Boolean =
         jdbc.update("DELETE FROM published_endpoints WHERE path_pattern = :path", mapOf("path" to pathPattern)) > 0
 
+    /** Deletes one entity by id (its versions cascade) — the sole-draft purge. Whether a row was removed. */
+    fun deleteById(id: UUID): Boolean = jdbc.update("DELETE FROM published_endpoints WHERE id = :id", mapOf("id" to id)) > 0
+
     /** Enables or disables an endpoint; a disabled one answers `404` exactly like an unknown path (§5.6). */
     fun setEnabled(
         pathPattern: String,
@@ -144,14 +177,17 @@ class PublishedEndpointRepository(
             mapOf("path" to pathPattern, "enabled" to enabled),
         ) > 0
 
-    private fun params(endpoint: PublishedEndpoint): Map<String, Any?> =
+    private fun params(
+        endpoint: PublishedEndpoint,
+        legacy: LegacyEndpointColumns,
+    ): Map<String, Any?> =
         mapOf(
             "id" to endpoint.id,
             "workspaceId" to endpoint.workspaceId,
             "path" to endpoint.pathPattern,
-            "pipelineId" to endpoint.pipelineId,
-            "timeoutSeconds" to endpoint.timeoutSeconds,
-            "description" to endpoint.description,
+            "pipelineId" to legacy.pipelineId,
+            "timeoutSeconds" to legacy.timeoutSeconds,
+            "description" to legacy.description,
             "isEnabled" to endpoint.isEnabled,
             "createdBy" to endpoint.createdBy,
         )
@@ -172,15 +208,23 @@ class PublishedEndpointRepository(
     private companion object {
         /**
          * The advisory-lock key the registry serialises publishes on. An arbitrary constant, but
-         * a NAMED one: any other advisory lock this application takes must not reuse it.
+         * a NAMED one: any other advisory lock this application takes must not reuse it. Shared
+         * with the writer guard's class-3 acquisition (#841), so both name the same lock.
          */
-        const val REGISTRY_LOCK_KEY = 74_0001L
+        const val REGISTRY_LOCK_KEY = co.datapipelines.typesystem.guard.EndpointRegistryLock.KEY
 
+        /**
+         * The entity and the version its pointer names (LEFT JOIN: an entity may have no current version). The legacy
+         * `pipeline_id` / `timeout_seconds` / `description` columns are not read (#786: they are the conversion's
+         * source only).
+         */
         val SELECT_COLUMNS =
             """
-            SELECT id, workspace_id, path_pattern, pipeline_id, timeout_seconds,
-                   description, is_enabled, created_by, created_at, updated_at
-              FROM published_endpoints
+            SELECT e.id, e.workspace_id, e.path_pattern, e.is_enabled, e.created_by, e.created_at, e.updated_at,
+                   e.current_version, v.status AS current_status, v.pipeline_name, v.pipeline_version,
+                   v.timeout_seconds, v.description
+              FROM published_endpoints e
+              LEFT JOIN published_endpoint_versions v ON v.endpoint_id = e.id AND v.version = e.current_version
             """.trimIndent()
 
         val INSERT_SQL =
@@ -207,7 +251,7 @@ class PublishedEndpointRepository(
                                 id = rs.getObject("id", UUID::class.java),
                                 workspaceId = rs.getObject("workspace_id", UUID::class.java),
                                 pathPattern = pathPattern,
-                                pipelineId = rs.getObject("pipeline_id", UUID::class.java),
+                                pipelineName = rs.getString("pipeline_name"),
                                 reason =
                                     boundedReason(
                                         EndpointPath.legacyReason(pathPattern, failure.message ?: "path is not a legal path (§4.1)"),
@@ -220,17 +264,34 @@ class PublishedEndpointRepository(
                         id = rs.getObject("id", UUID::class.java),
                         workspaceId = rs.getObject("workspace_id", UUID::class.java),
                         pathPattern = pathPattern,
-                        pipelineId = rs.getObject("pipeline_id", UUID::class.java),
-                        timeoutSeconds = rs.getInt("timeout_seconds"),
-                        description = rs.getString("description"),
                         isEnabled = rs.getBoolean("is_enabled"),
                         createdBy = rs.getObject("created_by", UUID::class.java),
                         createdAt = rs.getTimestamp("created_at").toInstant(),
                         updatedAt = rs.getTimestamp("updated_at").toInstant(),
                         parsed = parsed,
+                        current = currentOf(rs),
                     ),
                 )
             }
+
+        /** The joined current version, or null when the pointer is NULL. */
+        private fun currentOf(rs: ResultSet): CurrentVersion? {
+            val version = rs.getInt("current_version").takeUnless { rs.wasNull() } ?: return null
+            val status = rs.getString("current_status") ?: return null
+            return CurrentVersion(
+                version = version,
+                status =
+                    co.datapipelines.pipeline.PipelineVersionStatus
+                        .valueOf(status),
+                body =
+                    EndpointVersionBody(
+                        pipelineName = rs.getString("pipeline_name"),
+                        pipelineVersion = rs.getInt("pipeline_version"),
+                        timeoutSeconds = rs.getInt("timeout_seconds"),
+                        description = rs.getString("description"),
+                    ),
+            )
+        }
 
         /** The reason a legacy row carries: the grammar's own sentence, bounded to a label. */
         fun boundedReason(message: String): String = message.take(REASON_MAX_LENGTH)
@@ -293,14 +354,14 @@ sealed interface EndpointRow {
         override val enabled: Boolean get() = endpoint.isEnabled
     }
 
-    /** A row saved before a later grammar; retired, never fatal (#274). [pipelineId] is the
-     * row's own column, carried so the promoter lens can hide the row the same way it hides a
-     * valid endpoint whose pipeline is out of view. */
+    /** A row saved before a later grammar; retired, never fatal (#274). [pipelineName] is the
+     * current version's pin (#786), carried so the promoter lens can hide the row the same way it
+     * hides a valid endpoint whose pipeline is out of view; null when it has no current version. */
     data class Legacy(
         override val id: UUID,
         override val workspaceId: UUID,
         override val pathPattern: String,
-        val pipelineId: UUID,
+        val pipelineName: String?,
         val reason: String,
         override val enabled: Boolean,
     ) : EndpointRow

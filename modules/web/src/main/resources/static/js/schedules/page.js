@@ -1,7 +1,8 @@
 /*
  * #9 slice 2 — the Schedules page's wiring: one delegated click listener for every
- * `data-sch-action`, the search box, the folder toggle, Escape and the backdrop for dialogs,
- * and the deep link (`?id=<schedule>&run=<run>`) on arrival.
+ * `data-sch-action`, the search box, the condition select (#641), the last-run select (#725),
+ * the folder toggle, Escape and the backdrop for dialogs, and the deep link
+ * (`?condition=<word>&outcome=<word>&id=<schedule>&run=<run>`) on arrival.
  *
  * Under hx-boost this file re-executes on every visit to /schedules (its tag rides inside
  * #app-main — 076 §B). The page ROOT is a fresh element each visit and gets fresh state and
@@ -74,6 +75,9 @@
       case "open-blocking-run":
         if (current) call("run", "open", current.schedule.id, action.getAttribute("data-run-id"));
         break;
+      case "resend-delivery":
+        call("run", "resend", action);
+        break;
       case "close-dialog":
         S.closeDialog();
         break;
@@ -84,6 +88,21 @@
           box.focus();
         }
         S.explorer.setQuery("");
+        break;
+      case "clear-filters":
+        // #641/#725 — every control back to all: the search text, the condition and the last run
+        // (one §20.1 re-read).
+        var q = document.getElementById("schedule-filter-q");
+        var select = document.getElementById("schedule-filter-condition");
+        var outcomeSelect = document.getElementById("schedule-filter-outcome");
+        if (q) q.value = "";
+        if (outcomeSelect) outcomeSelect.value = "";
+        if (select) {
+          select.value = "";
+          select.focus();
+        }
+        S.state.query = "";
+        S.explorer.clearFilters();
         break;
       case "retry":
         S.explorer.load();
@@ -104,6 +123,14 @@
     }, 150);
   }
 
+  function onCondition(event) {
+    if (S.live()) S.explorer.setCondition(event.target.value);
+  }
+
+  function onOutcome(event) {
+    if (S.live()) S.explorer.setOutcome(event.target.value);
+  }
+
   var docWired = false;
 
   function init() {
@@ -111,7 +138,14 @@
     if (!root || root.__schWired) return;
     root.__schWired = true;
     if (S.state && S.state.pollTimer) clearTimeout(S.state.pollTimer);
-    S.state = { root: root, all: null, query: "", openFolders: {}, selectedId: null };
+    // #641 — the condition: the server's stamp (the controller parsed the deep link and refused
+    // any other word), else the address bar's word if it is one of the three; anything else is
+    // ignored and never written anywhere.
+    var params = new URLSearchParams(window.location.search);
+    var condition = window.DpSchedulesModel.conditionFilter(root.getAttribute("data-schedule-condition") || params.get("condition"));
+    // #725 — the last run, the same way: the stamp, else the address bar's word if it is one of the five.
+    var outcome = window.DpSchedulesModel.outcomeFilter(root.getAttribute("data-schedule-outcome") || params.get("outcome"));
+    S.state = { root: root, all: null, query: "", condition: condition, outcome: outcome, openFolders: {}, selectedId: null };
 
     // The root, its detail pane and the dialog host are the three regions a click can land in.
     root.addEventListener("click", onClick);
@@ -127,6 +161,16 @@
       box.addEventListener("input", onSearch);
       box.addEventListener("search", onSearch);
     }
+    var select = document.getElementById("schedule-filter-condition");
+    if (select) {
+      select.value = condition;
+      select.addEventListener("change", onCondition);
+    }
+    var outcomeSelect = document.getElementById("schedule-filter-outcome");
+    if (outcomeSelect) {
+      outcomeSelect.value = outcome;
+      outcomeSelect.addEventListener("change", onOutcome);
+    }
     if (!docWired) {
       docWired = true;
       document.addEventListener("keydown", function (event) {
@@ -137,7 +181,6 @@
       });
     }
 
-    var params = new URLSearchParams(window.location.search);
     var id = params.get("id");
     var run = params.get("run");
     S.explorer.load().then(function () {

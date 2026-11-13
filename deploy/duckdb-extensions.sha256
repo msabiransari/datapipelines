@@ -1,0 +1,14 @@
+# DuckDB core v1.5.5; SHA-256 of decompressed distributed bytes.
+# Re-derive: curl -fsSL https://extensions.duckdb.org/<path>.gz | gunzip | sha256sum
+# httpfs commit=827222f
+# aws commit=efa54a9
+# iceberg commit=45163a28
+# avro commit=f9d5902
+f9c59d9735863896fb10c78f2d6e23132cc9ede4a4fb8c10a6f523b6d0793c77  v1.5.5/linux_amd64/avro.duckdb_extension
+1bbf923fb64efd33a6ae69fb96d74cbd474fd003cfd3d5127c06f9a9a6901156  v1.5.5/linux_amd64/aws.duckdb_extension
+887c392b1e49128d11667c81e3698d8b00dfdeb456771acf66d05a0f74f7b7d8  v1.5.5/linux_amd64/httpfs.duckdb_extension
+ebc4993903de0d71d42fe3027b6691b8d5e5936ed366e98bdb9eab5aeedeb422  v1.5.5/linux_amd64/iceberg.duckdb_extension
+3b914e31ca60e6866090a14a9fd8198574eef4898a3840547e2d2b660f7666fe  v1.5.5/linux_arm64/avro.duckdb_extension
+4c891b0833524e00db01269033dfafcbe6acea8c8fed7afd23874664ee7d1545  v1.5.5/linux_arm64/aws.duckdb_extension
+eba6e263e395a83966090f1f11ade63630b1b21422f0f2813858d179d42ea1e9  v1.5.5/linux_arm64/httpfs.duckdb_extension
+84e53979bccccf99cb0ffb389a5d4396092660750e571d34dea8ed38ba58dc60  v1.5.5/linux_arm64/iceberg.duckdb_extension

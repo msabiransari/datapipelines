@@ -1,6 +1,7 @@
 package co.datapipelines.web.dashboards.runtime
 
 import co.datapipelines.application.dashboards.Admission
+import co.datapipelines.application.dashboards.AdmissionResult
 import co.datapipelines.application.dashboards.RefreshAdmission
 import co.datapipelines.application.dashboards.RefreshEngine
 import co.datapipelines.application.dashboards.RefreshPlan
@@ -28,6 +29,8 @@ import co.datapipelines.visualization.RefreshRecord
 import co.datapipelines.visualization.RefreshStatus
 import co.datapipelines.web.api.ApiException
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -65,6 +68,12 @@ class DashboardRuntimeAbortTest {
     private val planner = mockk<RefreshPlanner>()
     private val config = DashboardRuntimeConfig()
 
+    // A REAL metrics instance (#772): the 429 cases read the reason tag each refusal counted
+    // under — a relaxed mockk would make a missing or mis-tagged count unobservable. JUnit's
+    // per-method lifecycle gives every test a fresh registry.
+    private val registry = SimpleMeterRegistry()
+    private val metrics = DashboardMetrics(registry)
+
     private val runtime =
         DashboardRuntime(
             resolver,
@@ -84,7 +93,7 @@ class DashboardRuntimeAbortTest {
             config,
             CoroutineScope(Dispatchers.Default),
             mockk(),
-            mockk(relaxed = true),
+            metrics,
             planner,
         )
 
@@ -129,7 +138,7 @@ class DashboardRuntimeAbortTest {
         every { startMarkers.register(any(), ttlSeconds = any(), perPrincipalLimit = MARKER_BOUND) } returns
             StartMarkerRegistration.REGISTERED
         every { planner.plan(any(), any(), any(), any()) } returns mockk<RefreshPlan> { every { invocations } returns emptyList() }
-        coEvery { admission.admit(workspaceId, 0) } returns mockk<Admission>()
+        coEvery { admission.admit(workspaceId, 0) } returns AdmissionResult.Admitted(mockk<Admission>())
     }
 
     @Test
@@ -251,12 +260,41 @@ class DashboardRuntimeAbortTest {
         stubStart()
         every { startMarkers.register(any(), ttlSeconds = any(), perPrincipalLimit = MARKER_BOUND) } returns
             StartMarkerRegistration.REGISTERED
-        coEvery { admission.admit(workspaceId, 0) } returns null
+        coEvery { admission.admit(workspaceId, 0) } returns AdmissionResult.Busy
 
         val thrown = assertThrows<ApiException> { runtime.startRefresh(principal(), dashboardId, request()) }
 
         thrown.code shouldBe DashboardErrorCodes.REFRESH_SATURATED
+        thrown.details shouldBe mapOf("retry_after_seconds" to config.maxWaitSeconds, "reason" to "busy") // #762
         verify { startMarkers.clear(workspaceId, userId, refreshId) }
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "saturated").count() shouldBe 1.0
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "never_admissible").count() shouldBe 0.0
+    }
+
+    @Test
+    fun `a refresh this instance can never admit is the saturated 429 saying never_admissible with the numbers and the key`() {
+        // #762: the code and status stay frozen (§13.23, additive only); the details tell a board it must not offer a
+        // retry, and the operator which key refuses it. Nothing is written and the marker is still removed.
+        stubStart()
+        coEvery { admission.admit(workspaceId, 0) } returns AdmissionResult.NeverAdmissible(executions = 7, ceiling = 3, key = EXECUTOR_KEY)
+
+        val thrown = assertThrows<ApiException> { runtime.startRefresh(principal(), dashboardId, request()) }
+
+        thrown.code shouldBe DashboardErrorCodes.REFRESH_SATURATED
+        thrown.details shouldBe
+            mapOf(
+                "retry_after_seconds" to config.maxWaitSeconds,
+                "reason" to "never_admissible",
+                "invocations" to 7,
+                "ceiling" to 3,
+                "key" to EXECUTOR_KEY,
+            )
+        thrown.message shouldContain "never admissible"
+        thrown.message shouldContain EXECUTOR_KEY
+        verify(exactly = 0) { refreshes.insertRunning(any()) }
+        verify { startMarkers.clear(workspaceId, userId, refreshId) }
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "never_admissible").count() shouldBe 1.0
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "saturated").count() shouldBe 0.0
     }
 
     @Test
@@ -265,7 +303,7 @@ class DashboardRuntimeAbortTest {
         // follow-up): the place is the scarce thing, the marker is TTL'd.
         stubStart()
         val granted = mockk<Admission>(relaxed = true)
-        coEvery { admission.admit(workspaceId, 0) } returns granted
+        coEvery { admission.admit(workspaceId, 0) } returns AdmissionResult.Admitted(granted)
         every { refreshes.insertRunning(any()) } returns false
         every { startMarkers.clear(workspaceId, userId, refreshId) } throws IllegalStateException("connection factory closed")
 
@@ -283,7 +321,10 @@ class DashboardRuntimeAbortTest {
         val thrown = assertThrows<ApiException> { runtime.startRefresh(principal(), dashboardId, request()) }
 
         thrown.code shouldBe DashboardErrorCodes.REFRESH_SATURATED
+        thrown.details["reason"] shouldBe "busy" // #762: the marker bound is load, not configuration
         verify(exactly = 0) { startMarkers.clear(any(), any(), any()) }
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "saturated").count() shouldBe 1.0
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "never_admissible").count() shouldBe 0.0
     }
 
     @Test
@@ -333,5 +374,6 @@ class DashboardRuntimeAbortTest {
     private companion object {
         const val CONFIGURATION_ID = "cid"
         const val MARKER_BOUND = 4
+        const val EXECUTOR_KEY = "datapipelines.executor.max-concurrent-executions-per-instance"
     }
 }

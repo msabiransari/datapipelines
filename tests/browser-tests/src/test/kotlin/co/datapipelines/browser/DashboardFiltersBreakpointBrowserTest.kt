@@ -6,9 +6,10 @@ import org.junit.jupiter.api.Test
 
 /**
  * #492 — the filters presentation follows the board region while the viewport stays fixed. #554: the
- * region is narrowed by the resource browser's separator (240–480 in 16 px steps) at a 1470 px
- * viewport, where 202 + 384 leaves main 884 and, less `--app-main-pad` (32 px in this band since
- * #573) on both sides, the region exactly 820.
+ * region is narrowed by the resource browser's separator (app.css's `--app-browser-min`–
+ * `--app-browser-max` range, in 16 px steps) at a 1470 px viewport, one region step per key until it
+ * crosses the 820 container query. #788: the crossed region widths derive from the range the page
+ * reports; the step count from the floor to the crossing stays pinned (TO_820).
  */
 class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
     @Test
@@ -60,13 +61,18 @@ class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
         page.navigate("$baseUrl/dashboards/${seedParameterisedBoard(root)}")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready")
         resizeBrowser("Home")
+        val range = browserRange(page)
         repeat(TO_820) { resizeBrowser("ArrowRight") }
-        regionWidth() shouldBe 820.0
+        regionWidth() shouldBe regionAt(range.min + TO_820 * 16).toDouble()
         assertPresentation("drawer")
         resizeBrowser("ArrowLeft")
-        regionWidth() shouldBe 836.0
+        regionWidth() shouldBe regionAt(range.min + (TO_820 - 1) * 16).toDouble()
         assertPresentation("column")
     }
+
+    /** The board region's width at a browser width: the viewport less the expanded menu, the
+     *  browser column and this band's `--app-main-pad` on both sides. */
+    private fun regionAt(browserWidth: Int): Int = VIEWPORT - 202 - browserWidth - 2 * 32
 
     private fun regionWidth(): Double =
         (page.evaluate("() => document.querySelector('.dp-board-layout').getBoundingClientRect().width") as Number).toDouble()
@@ -112,7 +118,9 @@ class DashboardFiltersBreakpointBrowserTest : DashboardBrowserSuite() {
     private companion object {
         const val VIEWPORT = 1470
 
-        /** Nine 16 px steps from the 240 floor: a 384 px browser, main 1470 - 202 - 384 = 884, the region 884 - 2 × 32 = 820 (#573). */
-        const val TO_820 = 9
+        /** The drawer query (820) pins the STEP COUNT from the range's floor — seven 16 px keys
+         *  today, the first count that puts the region under 820; the region widths it implies
+         *  derive from the page's range in the test (#788). */
+        const val TO_820 = 7
     }
 }

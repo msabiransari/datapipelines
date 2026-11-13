@@ -27,6 +27,8 @@ import org.springframework.mock.env.MockEnvironment
 class FormatSwitchingEncoderTest {
     private val context = LoggerFactory.getILoggerFactory() as LoggerContext
     private val probe = context.getLogger("format-switching-probe")
+
+    // raw-list-appender: synchronous — only the test thread logs to the private probe logger
     private val appender = ListAppender<ILoggingEvent>().apply { start() }
 
     @BeforeEach

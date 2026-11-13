@@ -21,8 +21,12 @@ internal object EditorRunFixtures {
         baseUrl: String,
         name: String,
     ): List<String> {
-        page.navigate("$baseUrl/datasources")
-        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        namedWait(page, "the datasources page navigation ($baseUrl/datasources)") {
+            page.navigate("$baseUrl/datasources")
+        }
+        namedWait(page, "the datasources page's network idle ($baseUrl/datasources)", ::documentFacts) {
+            page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        }
         return page.evaluate(
             """async (args) => {
               const headers = JSON.parse(document.body.getAttribute('hx-headers') || '{}');
@@ -30,6 +34,7 @@ internal object EditorRunFixtures {
                 name: args.name, displayName: 'Arrow clarity source', dialect: 'POSTGRES',
                 jdbcUrl: args.url, credentialKind: 'password', username: args.user, password: args.password,
                 description: 'generate_series source for the 151 browser proof',
+                ...args.pool,
               });
               const res = await fetch('/partials/datasources', {
                 method: 'POST', credentials: 'same-origin',
@@ -42,6 +47,7 @@ internal object EditorRunFixtures {
                 "url" to SharedBrowserE2e.jdbcUrl.substringBefore("?"),
                 "user" to SharedBrowserE2e.username,
                 "password" to SharedBrowserE2e.password,
+                "pool" to SharedBrowserE2e.SOURCE_DATASOURCE_POOL_FIELDS,
             ),
         ) as List<String>
     }

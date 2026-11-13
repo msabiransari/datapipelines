@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "entity_id": "d86b260d-d1e2-5438-a934-b7f83ba82b0d",
+      "family": "pipeline",
+      "name": "test_widget/report",
+      "display_name": "Report",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "422e7cac3262ec9493294e377829fc06f7adda0ed2273670b0f495d2a50d5273",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "entity_id": "test_widget_warehouse",
+      "family": "datasource",
+      "name": "test_widget_warehouse",
+      "display_name": "Test Widget Warehouse",
+      "subtype": null,
+      "version": {
+        "kind": "unversioned",
+        "number": null
+      },
+      "resolution": "resolved",
+      "lifecycle": null,
+      "operational": {
+        "readonly": true
+      },
+      "current_version": null,
+      "body_hash": null,
+      "capabilities": {
+        "release": "NONE",
+        "promotion": "NONE"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "DATASOURCE",
+      "source_path": "/nodes/0/datasource",
+      "requested_selector": {
+        "kind": "entity",
+        "number": null
+      },
+      "resolved_version": null,
+      "constraints": [
+        {
+          "kind": "datasource_access",
+          "mode": "read"
+        }
+      ]
+    }
+  ],
+  "diagnostics": [],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

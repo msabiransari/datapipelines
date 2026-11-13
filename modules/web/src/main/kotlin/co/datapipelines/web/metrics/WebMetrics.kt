@@ -3,8 +3,11 @@ package co.datapipelines.web.metrics
 import co.datapipelines.persistence.BatchingHooks
 import co.datapipelines.persistence.BatchingWriter
 import co.datapipelines.persistence.FallbackReason
+import co.datapipelines.staging.ScratchBudget
+import co.datapipelines.web.health.ScratchSpace
 import co.datapipelines.web.sse.ExecutionStream
 import co.datapipelines.web.sse.ExecutionStreamRegistry
+import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.DistributionSummary
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -83,15 +86,30 @@ class WebMetrics(
                 .description("Items per committed batch")
                 .tag(TAG_STORE, store)
                 .register(registry)
-        val batchDuration = Timer.builder(PERSISTENCE_BATCH_DURATION).tag(TAG_STORE, store).register(registry)
+        val batchDuration =
+            Timer
+                .builder(PERSISTENCE_BATCH_DURATION)
+                .description("The store's time to commit one batch")
+                .tag(TAG_STORE, store)
+                .register(registry)
         val lag =
             Timer
                 .builder(PERSISTENCE_LAG)
                 .description("Enqueue to durable, per item")
                 .tag(TAG_STORE, store)
                 .register(registry)
-        val retried = registry.counter(PERSISTENCE_BATCHES_RETRIED, TAG_STORE, store)
-        val dropped = registry.counter(PERSISTENCE_DROPPED, TAG_STORE, store)
+        val retried =
+            Counter
+                .builder(PERSISTENCE_BATCHES_RETRIED)
+                .description("Batches that threw and were retried one item at a time")
+                .tag(TAG_STORE, store)
+                .register(registry)
+        val dropped =
+            Counter
+                .builder(PERSISTENCE_DROPPED)
+                .description("submit calls refused (queue full or stopped)")
+                .tag(TAG_STORE, store)
+                .register(registry)
         writer.hooks =
             object : BatchingHooks {
                 override fun onBatch(
@@ -119,6 +137,50 @@ class WebMetrics(
             }
     }
 
+    /**
+     * #806 — the DuckDB staging scratch figures, four untagged function gauges in bytes, bound once at startup and
+     * each read at every scrape (never through a health probe): the aggregate's capacity, what running
+     * reservations hold, what the leftover sweep counted (`NaN` until it has counted — #803's
+     * [ScratchBudget.leftoverBytes] is `null` until then) and the usable bytes of the scratch directory's file
+     * store (`NaN` when the reading throws; the next good scrape reports the number again). Never `0` for unknown,
+     * never a stale value. Strong references: the budget and the space are held by the gauges, not only by beans.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    fun bindScratch(
+        budget: ScratchBudget,
+        space: ScratchSpace,
+    ) {
+        Gauge
+            .builder(SCRATCH_CAPACITY, budget) { it.capacityBytes.toDouble() }
+            .description("The DuckDB staging scratch aggregate (scratch-bytes)")
+            .baseUnit(BYTES)
+            .strongReference(true)
+            .register(registry)
+        Gauge
+            .builder(SCRATCH_RESERVED, budget) { it.reservedBytes.toDouble() }
+            .description("Scratch bytes held by running DuckDB staging reservations; leftovers excluded")
+            .baseUnit(BYTES)
+            .strongReference(true)
+            .register(registry)
+        Gauge
+            .builder(SCRATCH_LEFTOVER, budget) { it.leftoverBytes?.toDouble() ?: Double.NaN }
+            .description("Scratch bytes of leftover files the startup sweep counted; NaN until it has counted")
+            .baseUnit(BYTES)
+            .strongReference(true)
+            .register(registry)
+        Gauge
+            .builder(SCRATCH_USABLE, space) {
+                try {
+                    it.usableBytes().toDouble()
+                } catch (e: Exception) {
+                    Double.NaN
+                }
+            }.description("Usable bytes of the scratch directory's file store; NaN when it cannot be read")
+            .baseUnit(BYTES)
+            .strongReference(true)
+            .register(registry)
+    }
+
     /** A request served from a stored idempotency reservation instead of executing. */
     fun idempotencyHit() {
         registry.counter(IDEMPOTENCY_HITS).increment()
@@ -143,6 +205,12 @@ class WebMetrics(
         const val IDEMPOTENCY_HITS = "datapipelines.idempotency.cache.hits"
         const val IDEMPOTENCY_CONFLICTS = "datapipelines.idempotency.conflicts"
         const val CURSOR_READS = "datapipelines.result.cursor.reads"
+
+        const val SCRATCH_CAPACITY = "datapipelines.staging.scratch.capacity"
+        const val SCRATCH_RESERVED = "datapipelines.staging.scratch.reserved"
+        const val SCRATCH_LEFTOVER = "datapipelines.staging.scratch.leftover"
+        const val SCRATCH_USABLE = "datapipelines.staging.scratch.usable"
+        private const val BYTES = "bytes"
 
         const val PERSISTENCE_QUEUE_DEPTH = "datapipelines.persistence.queue.depth"
         const val PERSISTENCE_QUEUE_BYTES = "datapipelines.persistence.queue.bytes"

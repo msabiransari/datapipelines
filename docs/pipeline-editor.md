@@ -1,6 +1,6 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.29 (revised — see Change Log)
+**Status:** v1.30 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
 **Last updated:** 2026-10-19
@@ -32,7 +32,7 @@ Graph **authoring** is out of scope: v1 pipelines are authored by LLMs via MCP o
 2. **Graceful degradation, stated honestly.** The editor **requires JavaScript for its core function.** Without JS the server-rendered shell still shows pipeline metadata (name, version, settings, parameters) and a plain `<ul>` of node ids with their declared type, source, template and `dependsOn` — the same list §14 renders for assistive technology. There is **no graph** (Cytoscape draws to a `<canvas>`), no execution, no result panel, no error modal. A `<noscript>` block states this. We do not claim the page "works without JavaScript".
 3. **No CDN, no build step.** All JS libraries (Cytoscape.js, cytoscape-dagre, Alpine.js) and the design system CSS vendored as static files under `/vendor/`. Per the project's no-CDN rule.
 4. **Design system is the styling foundation.** All colors, spacing, typography, shadows, and radii come from `@acme/design-tokens`. No hardcoded hex values anywhere — not in CSS, not in Cytoscape styles, not in Thymeleaf templates. The design system's semantic tokens (`--surface-*`, `--text-*`, `--accent-*`, etc.) are the single source of truth. See §3.4.
-5. **One page, the workspace composition (#349).** Six tabs — Flow (the graph + the bottom dock, the default), Overview, Parameters, Runs, Usage, Versions. Node Details lives IN the bottom dock beside Results, Errors and Events; there is no right inspector and no settings sidebar (its content is Overview's and the Parameters tab's).
+5. **One page, the workspace composition (#349).** Seven tabs — Flow (the graph + the bottom dock, the default), Overview, Parameters, Runs, Usage, Dependencies (#876: what the viewed version pins, transitively — the opposite of Usage), Versions. Node Details lives IN the bottom dock beside Results, Errors and Events; there is no right inspector and no settings sidebar (its content is Overview's and the Parameters tab's).
 6. **SSE drives the graph.** When the user clicks Execute, the page opens an SSE connection. Every event updates the graph in real-time. No polling.
 7. **Cytoscape's class-based styling is the status mechanism.** Adding/removing CSS classes on nodes (`running`, `success`, `failed`, `aborted`) drives all visual state changes. No manual style manipulation.
 8. **Readable identifiers everywhere.** Node IDs in the graph match node IDs in the pipeline JSON (`fetch_orders`, not `node_1`). Users can correlate graph ↔ JSON ↔ logs.
@@ -160,7 +160,7 @@ When the theme changes at runtime, the graph re-reads tokens and re-applies the 
 ### 4.1 URL
 
 ```
-GET /pipelines/{id}?version=N&tab=flow|overview|parameters|runs|usage|versions   (canonical, #348)
+GET /pipelines/{id}?version=N&tab=flow|overview|parameters|runs|usage|dependencies|versions   (canonical, #348; dependencies #876)
 GET /pipelines/{id}/editor                                       (compatibility redirect)
 ```
 
@@ -2037,6 +2037,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.30 | #876 the Dependencies tab | **§1 principle 5, §4.1**: a seventh tab, Dependencies, between Usage and Versions — the viewed version's exact pins drawn as a graph and a list by the shared Dependencies pane (one `GET /api/v1/dependencies/pipeline` per activation or version change); the URL's `tab` set gains `dependencies`. UI Screens §4.4 v1.234 carries the detail. Tests: `tabs.test.mjs`, `DependenciesPipelineBrowserTest`, `PipelineWorkspaceTabsBrowserTest`. |
 | 2026-10-19 | v1.29 | #615 editor canvas on a short window | **§4.3 Layout dimensions**: the open dock's pane row gives way to the canvas floor (180px, from 160); a new **Dock, at start** row — collapsed under 320px of canvas unless a pane height is remembered, and a start-up collapse opens on a run's first results. ui-screens §4.4 v1.168 carries the reasoning. |
 | 2026-10-15 | v1.28 | #433 the template link names the workspace | **§8.2**: "Open template →" and the SQL section's reference link the canonical workspace `/templates/{name}` directly (segments as path, each encoded) instead of the `/templates/editor?name=` compatibility 302; the dangling "§9.6" pointer (this document has no §9.6) now points at UI Screens §4.7. No version pin — unchanged behaviour, the link opens the current resolution. The 302 stays for old bookmarks with its tests. Tests: `PipelineNodeSqlRenderTest`, `TemplateTreeRenderTest`, `template-ref-text.test.mjs` (the `selectedTemplateHref` getter). |
 | 2026-10-11 | v1.27 | #494 one page-script loader | **§3.2**: the editor's catalog becomes `<template id="pe-runtime-scripts" data-page-assets="on-mount">` and loads through the shell's ONE loader, `page-assets.mjs` (fetched while a navigation prepares, executed once the page is in place, once per document across pages that share a source); `runtime.js` is no longer a loader or a bare tag but the catalog's last entry and `data-page-mount`, called once per catalog node (arrival, swap, cached restore) after the page's re-created bare tags have executed, keeping its activation, generation counter, before-save cleanup and `PEPipelineRuntime` identity. A cached restore now replays no editor script. Tests: `page-assets.test.mjs` (order, once per document, allow-list, singleton gate moved from `runtime-activation.test.mjs`), `PersistentChartNavigationBrowserTest` (per-source evaluation counts across all six pages). |

@@ -54,6 +54,33 @@ class DockerfileGraalJsPinTest {
     }
 
     @Test
+    fun `the image disables native thread-stack caching before its build and runtime JVMs start`() {
+        val instructions =
+            dockerfile
+                .replace(Regex("""\\\r?\n"""), " ")
+                .lineSequence()
+                .map(String::trim)
+                .filterNot { it.startsWith("#") || it.isBlank() }
+                .toList()
+        val settings = instructions.filter { it.startsWith("ENV ") && Regex("""\bGLIBC_TUNABLES(?:=|\s)""").containsMatchIn(it) }
+        withClue("exactly one image declaration owns the native stack-cache policy") { settings shouldHaveSize 1 }
+        val setting = settings.single()
+        val values = setting.removePrefix("ENV GLIBC_TUNABLES=").split(':')
+        withClue("other tunables may coexist, but the stack-cache entry must be unambiguous and disabled") {
+            values.filter { it.startsWith("glibc.pthread.stack_cache_size=") } shouldBe listOf("glibc.pthread.stack_cache_size=0")
+        }
+        val policy = instructions.indexOf(setting)
+        withClue("the setting applies to the final image stage and both Java launches") {
+            (policy > instructions.indexOfLast { it.startsWith("FROM ") }) shouldBe true
+            val launches = instructions.filter { it.startsWith("RUN java ") || it.startsWith("ENTRYPOINT ") }
+            launches shouldHaveSize 2
+            launches.forEach { launch ->
+                (instructions.indexOf(launch) > policy) shouldBe true
+            }
+        }
+    }
+
+    @Test
     fun `the fetch checks the sum and the resources are installed before USER`() {
         dockerfile.contains("""echo "${'$'}sum  /opt/graaljs/js-isolate.jar" | sha256sum -c -""") shouldBe true
         val resources = dockerfile.indexOf("co.datapipelines.scripting.JavaScriptResourcesMain")

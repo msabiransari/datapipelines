@@ -1,6 +1,7 @@
 package co.datapipelines.config
 
 import co.datapipelines.web.config.DeploymentEnv
+import org.springframework.core.env.Environment
 
 /**
  * The §3.27 mail rules (137), in their own file for the reason [PostureRules] has one: the
@@ -26,6 +27,26 @@ internal object MailRules {
     private const val KEY_BASE_URL = "datapipelines.auth.base-url"
 
     private const val MAX_PORT = 65_535
+
+    /**
+     * §3.27 (137) — the mail block, read for [ConfigValidator]'s snapshot (moved here from its
+     * companion by #442b, which was at the size the build allows). Raw strings so a bad port or a
+     * `starttls` typo becomes a NAMED violation; the password is PRESENCE only. `auth.base-url`
+     * rides along for the cross-key rules (the welcome mail's login URL, every schedule notice's
+     * link) — auth owns its semantics — and the scheduler's notification flag for its rule (§3.29).
+     */
+    fun snapshot(environment: Environment): MailSnapshot =
+        MailSnapshot(
+            authBaseUrl = environment.getProperty(KEY_BASE_URL),
+            host = environment.getProperty(KEY_HOST),
+            port = environment.getProperty(KEY_PORT),
+            username = environment.getProperty(KEY_USERNAME),
+            passwordSet = !environment.getProperty(KEY_PASSWORD).isNullOrBlank(),
+            starttls = environment.getProperty(KEY_STARTTLS),
+            from = environment.getProperty(KEY_FROM),
+            opsTo = environment.getProperty(KEY_OPS_TO),
+            schedulerNotificationsEnabled = environment.getProperty(SchedulerNotificationRules.KEY_ENABLED),
+        )
 
     /**
      * §7 / §3.27 — the shape rules. Mail is on exactly when `host` and `from` are both set

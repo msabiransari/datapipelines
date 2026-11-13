@@ -66,8 +66,8 @@ class OverviewRenderTest {
      * family's draft and released filters in its words.
      */
     @ParameterizedTest
-    @EnumSource(OverviewPage.Family::class)
-    fun `every family's strip sums to Total and links its own catalog in its own words`(family: OverviewPage.Family) {
+    @EnumSource(OverviewFamily::class)
+    fun `every family's strip sums to Total and links its own catalog in its own words`(family: OverviewFamily) {
         val doc =
             render(
                 page(
@@ -112,8 +112,8 @@ class OverviewRenderTest {
 
     /** Amendment 1: the Unavailable case runs on every family, one fixture each. */
     @ParameterizedTest
-    @EnumSource(OverviewPage.Family::class)
-    fun `an unknown inventory says why and shows no number in the inventory area`(family: OverviewPage.Family) {
+    @EnumSource(OverviewFamily::class)
+    fun `an unknown inventory says why and shows no number in the inventory area`(family: OverviewFamily) {
         val doc = render(page(InventoryResult.Unavailable("Inventory could not be read."), family = family))
 
         val area = doc.selectFirst("[data-overview-inventory]").shouldNotBeNull()
@@ -420,8 +420,8 @@ class OverviewRenderTest {
     }
 
     @ParameterizedTest
-    @EnumSource(OverviewPage.Family::class)
-    fun `an empty workspace draws all-zero panels, not a divide by zero`(family: OverviewPage.Family) {
+    @EnumSource(OverviewFamily::class)
+    fun `an empty workspace draws all-zero panels, not a divide by zero`(family: OverviewFamily) {
         val doc =
             render(
                 OverviewPage.of(
@@ -503,7 +503,7 @@ class OverviewRenderTest {
     @Test
     fun `a lensed strip is admitted as a whole and an unlensed one is not`() {
         val lensed =
-            render(OverviewPage.of(OverviewPage.Family.PIPELINES, true, ChartsResult.Available(charts(Inventory(0, 1, 0, 0))), null, NOW))
+            render(OverviewPage.of(OverviewFamily.PIPELINES, true, ChartsResult.Available(charts(Inventory(0, 1, 0, 0))), null, NOW))
         lensed.selectFirst("#overview-inventory-h")!!.text() shouldBe "Admitted inventory"
         lensed.selectFirst("[data-overview-context] .app-overview-lens")!!.text() shouldContain "only what your promotion view shows"
         lensed.select(".app-overview-count-lens").shouldBeEmpty()
@@ -559,8 +559,8 @@ class OverviewRenderTest {
      * regardless, since the dialog exists on every family (#638).
      */
     @ParameterizedTest
-    @EnumSource(OverviewPage.Family::class)
-    fun `a family without a guide renders the framework and no placeholder prose`(family: OverviewPage.Family) {
+    @EnumSource(OverviewFamily::class)
+    fun `a family without a guide renders the framework and no placeholder prose`(family: OverviewFamily) {
         val doc = render(page(InventoryResult.Available(Inventory(1, 2, 3, 4)), recent = null, family = family).copy(guided = false))
 
         doc.selectFirst("h1")!!.text() shouldBe family.title
@@ -602,7 +602,7 @@ class OverviewRenderTest {
     @Test
     fun `a lensed caller reads admitted inventory`() {
         val charts = ChartsResult.Available(charts(Inventory(0, 1, 0, 0)))
-        val doc = render(OverviewPage.of(OverviewPage.Family.PIPELINES, true, charts, null, NOW))
+        val doc = render(OverviewPage.of(OverviewFamily.PIPELINES, true, charts, null, NOW))
 
         doc.selectFirst("#overview-inventory-h")!!.text() shouldBe "Admitted inventory"
         doc.selectFirst("[data-overview-context]")!!.text() shouldContain "only what your promotion view shows"
@@ -629,14 +629,14 @@ class OverviewRenderTest {
     private fun page(
         inventory: Inventory,
         recent: RecentResult? = RecentResult.Available(emptyList()),
-        family: OverviewPage.Family = OverviewPage.Family.PIPELINES,
+        family: OverviewFamily = OverviewFamily.PIPELINES,
     ): OverviewPage = page(InventoryResult.Available(inventory), recent, family)
 
     /** One inventory result for any family, read as its chart group ([charts]): every family is a lifecycle home (#599). */
     private fun page(
         inventory: InventoryResult,
         recent: RecentResult? = RecentResult.Available(emptyList()),
-        family: OverviewPage.Family = OverviewPage.Family.PIPELINES,
+        family: OverviewFamily = OverviewFamily.PIPELINES,
     ): OverviewPage {
         val charts =
             when (inventory) {
@@ -647,7 +647,7 @@ class OverviewRenderTest {
     }
 
     private fun pipelines(charts: ChartInventory): OverviewPage =
-        OverviewPage.of(OverviewPage.Family.PIPELINES, false, ChartsResult.Available(charts), RecentResult.Available(emptyList()), NOW)
+        OverviewPage.of(OverviewFamily.PIPELINES, false, ChartsResult.Available(charts), RecentResult.Available(emptyList()), NOW)
 
     /** A consistent chart group for [inventory]: never released objects in bin 0, every other in bin 1. */
     private fun charts(

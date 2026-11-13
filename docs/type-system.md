@@ -1,9 +1,9 @@
 # Type System Specification
 
-**Status:** v1.4 (frozen contract — additive-only changes after this point)
+**Status:** v1.5 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** none (foundational spec — other specs depend on this)
-**Last updated:** 2026-08-07
+**Last updated:** 2026-11-03
 
 ---
 
@@ -114,7 +114,7 @@ These rules fix the exact bytes a client receives. They apply to every egress pa
 
 - The envelope never reports a synthetic ceiling for this case — neither PostgreSQL's internal maximum digit count nor another dialect's storage maximum may be substituted. A fabricated bound would be a lie about the source column and would break clients that size their local decimal buffers from it. (Oracle's 38 digits for a bare `NUMBER` is Oracle's *storage maximum*, not a declared bound — and ojdbc reports scale `−127` for that column, its scale-unspecified marker, while typmod-less Oracle expressions report scale `0`; both mean *unknown*. Measured 2026-09-08, Oracle 21c XE.)
 - **`scale` is omitted, not `0` (adjudicated 2026-09-08, defect 100).** The driver reports scale `0` for *unknown* when the typmod is gone — pgjdbc reports `precision=0 scale=0` for `SUM(fare)` over a `NUMERIC(10,2)` column. Declaring `scale: 0` asserts "integer", and the first exact store enforced that lie: H2 staged the column as `DECIMAL(100000, 0)` and every fractional cent was truncated on insert (the live `nyc/mobility` `borough_od_matrix`, `airport_access_by_borough` and `weather_sensitivity_by_borough` pipelines returned whole-dollar totals until this fix — and `mobility_briefing`, which composes `borough_od_matrix`, inherited the truncation). The BIGDECIMAL wire contract — a JSON string carrying the exact decimal — is unchanged: each value renders with its own scale.
-- Clients that need a bound must impose their own (or `CAST` in the source query — the readable contract, e.g. `SUM(x)::NUMERIC(14,2)`). Staging applies its own ceiling separately: see the H2 overflow policy in [§6](#6-h2-staging-type-mapping-canonical--h2).
+- Clients that need a bound must impose their own (or `CAST` in the source query — the readable contract, e.g. `SUM(x)::NUMERIC(14,2)`). Staging applies its own ceiling separately: see the H2 overflow policy in [§6](#6-h2-staging-type-mapping-canonical--h2) and the DuckDB one in [§6a](#6a-duckdb-staging-type-mapping-canonical--duckdb), which refuses an unsized numeric outright.
 - **Defensive generalization (2026-08-08):** ANY driver reporting precision ≤ 0 on an exact numeric takes this same unbounded encoding (`BIGDECIMAL`, precision omitted) — a `DECIMAL(0)` descriptor would violate §7.1's `minimum: 1`, and throwing on a driver quirk would violate §8.2's never-fail rule. Written for PG; applies everywhere the situation arises.
 
 ### 4.1 Why scale is omitted for approximate numerics
@@ -363,6 +363,31 @@ When the executor stages data from a source into H2 (`CREATE TABLE staging.x ...
 | `TIMESTAMP` | `TIMESTAMP WITH TIME ZONE` | H2 stores in UTC; egress reads back as UTC ISO 8601 |
 
 **Overflow policy:** H2 2.x supports `DECIMAL` precision up to **100000**. Every bounded precision any supported dialect can declare fits well inside that. If a staged value's precision exceeds **100000** digits — only reachable from an unbounded source numeric (§4) carrying an extreme value — the staging step fails with error code `pipeline.staging.precision_overflow`. Pipeline authors should reduce precision in the source query (`CAST` to a smaller type) or restructure. The same threshold is stated in [Staging §5.2](staging.md#52-precision-overflow-handling); the two MUST stay identical.
+
+---
+
+## 6a. DuckDB Staging Type Mapping (Canonical → DuckDB)
+
+When a pipeline declares `settings.tempdb.engine: DUCKDB` ([Enums §7](enums.md#7-stagingengine--tempdb-engine)), the executor stages into a file-backed DuckDB database ([Staging §8.5](staging.md#85-the-duckdb-engine)) and each canonical type maps to the DuckDB column type below. Staged tables are read back through the §5.6 table, so every row is chosen to read back as the canonical type it came from.
+
+| Canonical | DuckDB type | Notes |
+|---|---|---|
+| `NULL` | `VARCHAR` | DuckDB requires a type; all values will be NULL. Reads back as `STRING`, as on H2 |
+| `BOOLEAN` | `BOOLEAN` | |
+| `INTEGER` | `INTEGER` | |
+| `BIGINTEGER` | `BIGINT` | DuckDB `BIGINT` = int64, exactly §3's range. Not `HUGEINT`: §5.6 reads a 128-bit integer back as `BIGDECIMAL(38, 0)` |
+| `DECIMAL(p, s?)` (exact, scale declared) | `DECIMAL(p, s)` | |
+| `DECIMAL(p)` (approximate, no scale) | `DOUBLE` | preserves the IEEE 754 representation; widens to `DECIMAL(15)` on read, as on H2 (§4.2) |
+| `BIGDECIMAL(p, s)`, p ≤ 38 | `DECIMAL(p, s)` | |
+| `BIGDECIMAL(p, s)`, p > 38 | — | refused: `pipeline.staging.precision_overflow` (overflow policy below) |
+| `BIGDECIMAL` (exact-unsized, precision and scale omitted) | — | refused: `pipeline.staging.precision_overflow` (overflow policy below) |
+| `STRING` | `VARCHAR` | length unbounded |
+| `BINARY` | `BLOB` | |
+| `DATE` | `DATE` | |
+| `TIME` | `TIME` | microsecond resolution, §3.5's six digits |
+| `TIMESTAMP` | `TIMESTAMP WITH TIME ZONE` | DuckDB's `TIMESTAMPTZ`: an instant. The pinned driver reads it back at the JVM zone's offset whatever the session's `TimeZone`, the instant unchanged, and egress normalizes it to UTC (§8.4). The staging session's `TimeZone` is `UTC`, so SQL-side date arithmetic (`CAST(ts AS DATE)`, `strftime`) is in UTC |
+
+**Overflow policy (owner ruling 2026-11-03, #795):** DuckDB's `DECIMAL` holds at most **38** digits and DuckDB has no exact arbitrary-precision type — there is no counterpart to H2's `DECFLOAT(100000)`. A column declaring a precision above 38, and an exact-unsized `BIGDECIMAL` (§4: unbounded precision, unknown scale), are therefore refused with `pipeline.staging.precision_overflow` naming the column, before any table is created. Staging the unsized case as `DOUBLE` would round exact values, and as `DECIMAL(38, s)` would invent the scale §4 forbids (defect 100). The author makes the bound explicit in the source query — `CAST(SUM(fare) AS DECIMAL(14, 2))` — which is the readable contract §4 already recommends. A **value** wider than its staged column (more integer digits than `p − s`) fails as `pipeline.staging.value_overflow`, checked before the value is appended: measured on the pinned driver, a `BigDecimal` of more than 38 digits otherwise binds as NULL without an error through `setObject` ([Staging §8.5](staging.md#85-the-duckdb-engine)). The same threshold is stated in Staging §8.5; the two MUST stay identical.
 
 ---
 
@@ -647,6 +672,8 @@ The type system is implemented in the `typesystem` Gradle module:
 - `IngressTypeMapper` interface + per-dialect implementations (`PostgresTypeMapper`, `OracleTypeMapper`, `MssqlTypeMapper`, `MysqlTypeMapper`, `H2IngressMapper`, `DuckDbTypeMapper`, `SqliteTypeMapper`)
 - `FallbackTypeMapper` (unknown dialect / unrecognized JDBC type → `STRING` + warning, per §8.2)
 - `H2EgressMapper` (canonical → H2 column type). Note the split: `H2IngressMapper` reads H2 JDBC metadata back into canonical types, `H2EgressMapper` produces the H2 DDL type for a canonical type. There is no `H2TypeMapper` — see [Staging §5.3](staging.md#53-mappers-and-helper-signatures).
+- `DuckDbEgressMapper` (canonical → DuckDB column type, §6a) — the DuckDB staging engine's twin of `H2EgressMapper`. Its ingress half is the existing `DuckDbTypeMapper`; it has no `java.sql.Types` half, because DuckDB staging binds values untyped ([Staging §8.5](staging.md#85-the-duckdb-engine)).
+- `StagingEngine` (the tempdb engines, [Enums §7](enums.md#7-stagingengine--tempdb-engine)) — declared here for the reason `Dialect` is: `pipeline-contract`, `staging` and `dag` all need it and share only this module.
 - `JsonEncoder` (canonical → wire representation)
 - `SchemaEnvelope` data class (schema_version + schema array)
 - `ParameterCoercion` / `ParameterWireEncoder` — one parameter value from its §3.1 wire form to its typed value and back ([Pipeline Contract §6.3](pipeline-contract.md#63-wire-encoding-of-input-parameter-values)); strict, nothing trimmed
@@ -700,6 +727,8 @@ object FallbackTypeMapper : IngressTypeMapper {
 
 **Fallback contract (§8.2 restated for implementers):** unrecognized input never fails an execution. Both fallback paths — unknown `Dialect` at dispatch, and unknown JDBC type code inside a per-dialect mapper — resolve to canonical `STRING`, serialize values via `toString()`, and emit exactly one `type_mapping.unknown_source_type` warning naming the column and the source type.
 
+**Egress dispatch is by staging engine, not by dialect.** The canonical → storage direction exists only for the tempdb, so it is chosen by `settings.tempdb.engine`: `H2` stages through `H2EgressMapper` (§6), `DUCKDB` through `DuckDbEgressMapper` (§6a). Each staging implementation names its own mapper rather than looking one up — there is exactly one per engine and no fallback, because an unstageable type must fail at `CREATE TABLE` with a catalogued code, never degrade to `STRING`. Staged tables read back through the ingress table of the engine's dialect (`StagingEngine.dialect`: `H2IngressMapper`, `DuckDbTypeMapper`).
+
 > **The block above is illustrative, not compilable (2026-08-08).** A `when` over the enum is exhaustive, so Kotlin flags the `else` as redundant — a hard error under §7.1's `allWarningsAsErrors`. Implementations use any equivalent total dispatch (v1 ships a map lookup with an elvis fallback); since neither form gets compile-time exhaustiveness back, a test must assert every `Dialect` resolves to a non-fallback mapper — that test is the guard when a dialect is added. Additionally, `IngressTypeMapper` carries a `mapColumn(...)` overload alongside `map(...)`: §8.2's warning must name the affected column, which `map`'s signature cannot do.
 
 ### 11.3 Testing the type system
@@ -741,3 +770,4 @@ These are explicitly **out of scope for v1** but tracked for future versions. Li
 | 2026-09-07 | v1.2 | 087 connector seams | New **§5.8 LAKE**: the dialect's ingress mapping is §5.6's verbatim — DuckDB is the engine, and `TypeMappers.forDialect(LAKE)` returns `DuckDbTypeMapper` rather than a second table to drift. §11.2's dispatch sketch gains the row. Nested Parquet/Iceberg types (`STRUCT`, `LIST`, `MAP`) fall under §8.2's unknown-type policy today, exactly as on an embedded DuckDB file. |
 | 2026-09-08 | v1.3 | defect 100 (unsized-numeric truncation) | An exact numeric whose driver reports `precision ≤ 0` now maps to `BIGDECIMAL` with **both precision and scale omitted** — the driver reports scale 0 for *unknown*, and declaring `scale: 0` asserted "integer", so H2 staged the column as `DECIMAL(100000, 0)` and truncated every fraction on insert (measured: `SUM(fare)` over `NUMERIC(10,2)` values 5.09 + 10.99 returned `16`). §4's unbounded row and bullets, §5.1's unsized row, §7.1's scale description and BIGDECIMAL `allOf` (now scoped to declared precision), §7.2's example and §7.3's scale rule aligned. §5.2's unsized-`NUMBER` row joins the same encoding: measured on ojdbc, a bare `NUMBER` reports scale `−127` (scale-unspecified, not a binary float) and typmod-less Oracle expressions report `0` — the old `BIGDECIMAL(38, 0)` had the same truncation; the 38-digit figure is a storage maximum, not a declared bound. §6: exact-unsized storage becomes `DECFLOAT(100000)` (exact, arbitrary-scale; reads back as `NUMERIC` at the ceiling, so the round-trip rule recovers the unsized encoding); §5.5 gains the `DECFLOAT` ingress row. Live impact: `nyc/mobility`'s `borough_od_matrix`, `airport_access_by_borough` and `weather_sensitivity_by_borough` returned whole-dollar totals until this fix, and `mobility_briefing` inherited the truncation by composing `borough_od_matrix`; all four baselines were re-recorded with the cents. |
 | 2026-09-26 | v1.4 | 194a (#194) parameter engine lane A | §11.1: `ParameterCoercion` and `ParameterWireEncoder` moved here from `pipeline-contract` (strict — nothing trimmed), and the shared `ParameterValueValidator` with its declaration model and the §6.4 widening rule (`TypeWidening`) joins them; the paragraph under §11.1 says why they live in this module. Non-normative; no type, mapping or wire rule changed. |
+| 2026-11-03 | v1.5 | 795 (#795) dp-lake P1 DuckDB staging | New **§6a DuckDB Staging Type Mapping**: the canonical → DuckDB table for `settings.tempdb.engine: DUCKDB` — `BIGINTEGER` as int64 `BIGINT` (not `HUGEINT`, which §5.6 reads back as `BIGDECIMAL(38, 0)`), approximate `DECIMAL` as `DOUBLE`, `BINARY` as `BLOB`, `TIMESTAMP` as `TIMESTAMP WITH TIME ZONE`; DuckDB's 38-digit ceiling refuses a wider declared precision **and** an exact-unsized `BIGDECIMAL` with `pipeline.staging.precision_overflow` (owner ruling 2026-11-03 — the author CASTs; DuckDB has no exact unbounded decimal), and a value wider than its column is `value_overflow`, checked before binding. §4's staging-ceiling pointer names §6a. §11.1 lists `DuckDbEgressMapper` and `StagingEngine` (moved here from `staging`/`pipeline-contract`); §11.2 states egress dispatch is by staging engine. Additive: no ingress mapping, wire rule or H2 row changed. |

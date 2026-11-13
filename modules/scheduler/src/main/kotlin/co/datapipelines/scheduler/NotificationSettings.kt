@@ -33,12 +33,20 @@ data class NotificationSettings(
                     """(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*${'$'}""",
             )
 
+        /**
+         * The settings a create or edit stores. Recipients the request SUPPLIES are checked against
+         * the deployment's allowlist ([policy], "checked at save and again at send" — #442): an address
+         * outside a non-empty allowlist is refused `domain_not_allowed`, by index. Stored recipients an
+         * edit leaves alone are not re-judged here — a narrowed allowlist must not lock a schedule's
+         * other fields — and the sender refuses them at send.
+         */
         fun resolve(
             request: NotificationSettingsRequest?,
             current: Schedule?,
             limit: Int,
+            policy: NotificationPolicy,
         ): NotificationSettings {
-            val recipients = request?.recipients?.let { recipients(it, limit) } ?: current?.notificationRecipients.orEmpty()
+            val recipients = request?.recipients?.let { recipients(it, limit, policy) } ?: current?.notificationRecipients.orEmpty()
             val events = request?.events?.let(::events) ?: current?.notificationEvents ?: NotificationEvent.DEFAULT
             return NotificationSettings(recipients, events)
         }
@@ -46,6 +54,7 @@ data class NotificationSettings(
         private fun recipients(
             node: JsonNode,
             limit: Int,
+            policy: NotificationPolicy,
         ): List<String> {
             if (!node.isArray) invalid("notifications.recipients", "not_a_list")
             val seen = mutableSetOf<String>()
@@ -57,6 +66,7 @@ data class NotificationSettings(
                     if (address.length > MAX_ADDRESS_CHARS) invalid(field, "too_long")
                     if (!ADDRESS.matches(address)) invalid(field, "syntax")
                     val normalized = address.substringBefore('@') + "@" + address.substringAfter('@').lowercase(Locale.ROOT)
+                    if (policy.refusesAtSave(normalized)) invalid(field, "domain_not_allowed")
                     normalized.takeIf { seen.add(it.lowercase(Locale.ROOT)) }
                 }
             if (normalized.size > limit) invalid("notifications.recipients", "too_many")
@@ -83,9 +93,4 @@ data class NotificationSettings(
                 mapOf("field" to field, "reason" to reason),
             )
     }
-}
-
-/** Slice 4 part b computes this from the enable flag and mail transport; until then nothing sends. */
-object NotificationDelivery {
-    val CURRENT: Map<String, String> = mapOf("state" to "off", "reason" to "disabled")
 }

@@ -73,10 +73,28 @@ internal class VisualizationReleaseCascadeFixtures(
             "1"
     }
 
+    /**
+     * Releases the visualization at the If-Match [expected]. With [plan] the body is a release plan ticking the one DRAFT
+     * template (`n1`), its `tree_hash` computed by [FamilyRootsFixture.treeHash]'s independent oracle over the committed
+     * rows; without it the body is empty (no flag, no plan: only the visualization could flip).
+     */
     fun release(
         expected: String,
-        consent: Boolean,
-    ): Response = request("POST", "/api/v1/visualizations/$id/release?release_pinned_templates=$consent", "", expected)
+        plan: Boolean,
+    ): Response = request("POST", "/api/v1/visualizations/$id/release", if (plan) planBody() else "", expected)
+
+    /** The retired alias: `release_pinned_templates=true`, no plan — refused `plan_required` since #876 round 3. */
+    fun releaseWithLegacyFlag(expected: String): Response =
+        request("POST", "/api/v1/visualizations/$id/release?release_pinned_templates=true", "", expected)
+
+    private fun planBody(): String {
+        val oracle = FamilyRootsFixture(port, session, workspaceId, datasource = "")
+        val chart = FamilyRootsFixture.Node("visualization", "$workspace/chart")
+        val shape = FamilyRootsFixture.Node("template", template)
+        val edges = listOf(FamilyRootsFixture.Edge(chart, shape, "transform.template"))
+        val ticked = oracle.nodeIds(chart, edges).getValue(shape)
+        return """{"tree_hash": "${oracle.treeHash(chart, edges)}", "include_dependencies": ["$ticked"]}"""
+    }
 
     fun templateState(): List<String?> = state("templates", "template_versions", "template_id", template, workspaceId)
 
@@ -167,15 +185,16 @@ internal class VisualizationReleaseCascadeFixtures(
     private fun document(title: String): String =
         """
         {"name":"$workspace/chart","display_name":"Cascade","description":"453",
-         "renderer":{"kind":"plotly","version":"4"},
+         "renderer":{"kind":"chart","version":"1"},
          "inputs":{"revenue":{"columns":[{"name":"month","type":"DATE","nullable":false},
                                             {"name":"amount","type":"DECIMAL","nullable":false}]}},
          "transform":{"template":{"name":"$template","version":1},"inputs":{"rows":"revenue"}},
-         "config":{"data":[{"type":"bar","x":[],"y":[]}]},
-         "bindings":{"data[0].x":"month_labels","data[0].y":"amounts"},
-         "presentation":{"title":"$title"},
+         "config":{"title":{"text":"$title"},"mark":{"type":"bar"},
+                   "encoding":{"x":{"field":"month_labels","type":"nominal","sort":"ascending"},
+                               "y":{"field":"amounts","type":"quantitative","aggregate":"sum"}}},
+         "bindings":{"amounts":"amounts","month_labels":"month_labels"},
          "tests":{"cases":[{"name":"one month","fixtures":{"revenue":[{"month":"2026-01-01","amount":10.5}]},
-                              "assertions":[{"kind":"rendered"},{"kind":"trace_count","equals":1}]}]}}
+                              "assertions":[{"kind":"rendered"},{"kind":"mark_count","equals":1}]}]}}
         """.trimIndent()
 
     private fun templateDocument(): String =

@@ -19,12 +19,10 @@ import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
 import org.springframework.http.CacheControl
-import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
@@ -149,7 +147,11 @@ class TreeController(
         }
         val workspace = principal.requireWorkspace().id
         val view = lens.viewFor(principal)
-        if (view.unavailable != null) throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Navigation view is unavailable; retry")
+        // #464 §13.24: the catalogued, retryable 503 (Retry-After, WARN). No details: the view's target
+        // address and transport reason are operator facts, never the client's.
+        if (view.unavailable != null) {
+            throw DatapipelinesException(PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE, "Navigation view is unavailable; retry")
+        }
         val admitted =
             when (family) {
                 NavigationFamily.PIPELINES -> view.pipelines

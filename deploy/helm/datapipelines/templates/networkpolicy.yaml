@@ -1,0 +1,75 @@
+{{- if and .Values.management.expose .Values.management.networkPolicy.enabled }}
+{{- $np := .Values.management.networkPolicy }}
+{{- $app := $np.appIngress | default dict }}
+{{- if and (empty $np.scraperNamespaceSelector) (empty $np.scraperPodSelector) }}{{ fail "management.networkPolicy needs at least one scraper selector — an empty from: admits every source (deployment.md §9)" }}{{- end }}
+{{- include "datapipelines.requireLabelSelector" (list "management.networkPolicy.scraperNamespaceSelector" $np.scraperNamespaceSelector) }}
+{{- include "datapipelines.requireLabelSelector" (list "management.networkPolicy.scraperPodSelector" $np.scraperPodSelector) }}
+{{- if and (hasKey $app "allowAll") (not (kindIs "bool" $app.allowAll)) }}{{ fail "management.networkPolicy.appIngress.allowAll must be true or false, unquoted (deployment.md §6.4)" }}{{- end }}
+{{- if and $app.from (not (kindIs "slice" $app.from)) }}{{ fail "management.networkPolicy.appIngress.from must be a list of NetworkPolicyPeer objects (deployment.md §6.4)" }}{{- end }}
+{{- if and $app.allowAll $app.from }}{{ fail "management.networkPolicy.appIngress sets allowAll: true AND a non-empty from — a contradiction; keep one (deployment.md §6.4)" }}{{- end }}
+{{- if and (not $app.allowAll) (empty $app.from) }}{{ fail "management.networkPolicy isolates every ingress of the app pods — declare management.networkPolicy.appIngress.from or acknowledge management.networkPolicy.appIngress.allowAll: true (deployment.md §6.4)" }}{{- end }}
+{{- range $i, $peer := $app.from }}
+{{- $at := printf "management.networkPolicy.appIngress.from[%d]" $i }}
+{{- if or (not (kindIs "map" $peer)) (empty $peer) }}{{ fail (printf "%s must be a NetworkPolicyPeer object — namespaceSelector / podSelector / ipBlock (deployment.md §6.4)" $at) }}{{- end }}
+{{- range $key, $value := $peer }}
+{{- if not (has $key (list "namespaceSelector" "podSelector" "ipBlock")) }}{{ fail (printf "%s carries %q — a NetworkPolicyPeer has only namespaceSelector / podSelector / ipBlock (deployment.md §6.4)" $at $key) }}{{- end }}
+{{- if ne $key "ipBlock" }}{{- include "datapipelines.requireLabelSelector" (list (printf "%s.%s" $at $key) $value) }}{{- end }}
+{{- end }}
+{{- end }}
+{{/* The chart's ONE ingress policy for the app pods (values.yaml, management
+     block; deployment.md §6.4). A NetworkPolicy that selects a pod ISOLATES it
+     for EVERY ingress, not only for the ports its rules name, and the allow
+     rules of every policy selecting the pod are UNIONED (#712 lander finding
+     2). So this policy carries two rules:
+       1. the scraper peers → the management port;
+       2. the operator's declared app-port peers (appIngress.from, copied
+          verbatim) → the app port — or every source, under the explicit
+          appIngress.allowAll: true acknowledgement (printed below).
+     Without rule 2 the app port would be cut off, so enabling the policy with
+     neither is refused above. Union, not override: another policy selecting
+     these pods keeps its own allowances, and this one adds exactly its
+     declared peers to them — declare no more than the operator's own policy
+     admits to leave it unwidened; allowAll widens it to every source.
+     Peers in one from list are OR'd: the two scraper selectors render as two
+     SEPARATE peers (one entry carrying both a namespaceSelector and a
+     podSelector would be their AND — the Kubernetes rule). Egress is not
+     touched (policyTypes: [Ingress]) — §9's egress policy stays the
+     operator's. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "datapipelines.fullname" . }}-management
+  labels:
+    {{- include "datapipelines.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "datapipelines.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- with $np.scraperNamespaceSelector }}
+        - namespaceSelector:
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
+        {{- with $np.scraperPodSelector }}
+        - podSelector:
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.management.port }}
+    {{- if $app.allowAll }}
+    # appIngress.allowAll: true — the operator's explicit acknowledgement: every source may reach the app port
+    - ports:
+        - protocol: TCP
+          port: {{ include "datapipelines.appPort" . }}
+    {{- else }}
+    - from:
+        {{- toYaml $app.from | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ include "datapipelines.appPort" . }}
+    {{- end }}
+{{- end }}

@@ -8,7 +8,9 @@ import org.junit.jupiter.api.Test
  * #9 slice 2, A.4 — a run's dialog (`schedules/run.html`) by role: every member reads it (the run,
  * its frozen job, the Messages pane); the execution link and the unknown callout's "Open the
  * execution" are `canReadExecutions`' (a promoter reads the scheduler's trail only), and the
- * callout's Unblock is `canAuthor`'s — a reader's callout names who can unblock instead.
+ * callout's Unblock is `canAuthor`'s — a reader's callout names who can unblock instead. #442b:
+ * the Notifications table renders for every member; its row's Resend is `canAuthor`'s
+ * (`schedule.update`, rest-api §20.13).
  */
 class SchedulesRunRenderTest {
     @Test
@@ -38,5 +40,23 @@ class SchedulesRunRenderTest {
         dialog shouldNotContain "data-slot=\"execution\""
         dialog shouldNotContain "data-slot=\"unknown-execution\""
         html shouldContain "id=\"sch-tpl-message\""
+    }
+
+    @Test
+    fun `an author's delivery row carries the resend verb`() {
+        val html = SchedulesRender.page(SchedulesRender.AUTHOR)
+        SchedulesRender.skeleton(html, "sch-tpl-run-dialog") shouldContain "data-slot=\"deliveries\""
+        SchedulesRender.skeleton(html, "sch-tpl-delivery") shouldContain "data-verb=\"schedule-notification-resend\""
+    }
+
+    @Test
+    fun `a viewer's and a promoter's delivery rows have no resend`() {
+        listOf(SchedulesRender.VIEWER, SchedulesRender.PROMOTER).forEach { role ->
+            val html = SchedulesRender.page(role)
+            SchedulesRender.skeleton(html, "sch-tpl-run-dialog") shouldContain "data-slot=\"deliveries\""
+            val row = SchedulesRender.skeleton(html, "sch-tpl-delivery")
+            row shouldContain "data-slot=\"delivery-state\"" // non-vacuity: the row template rendered
+            row shouldNotContain "schedule-notification-resend"
+        }
     }
 }

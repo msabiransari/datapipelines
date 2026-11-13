@@ -16,8 +16,8 @@ otherwise save refuses with `script.js.unavailable`.
 A JSONata body is one expression. A JavaScript body is the **statements of `main(input)`**:
 `input` is in scope, `return` the result, and define helpers as nested functions; never write
 `function main` or its outer braces yourself — the engine supplies that immutable frame.
-Both are pure: no modules, `require` or `export`; `Date.now()` reads the pinned run time,
-and `Math.random()` is refused.
+Both are pure: no modules, `require` or `export`; `Date.now()`/`$now()` read the pinned run time;
+`Math.random()`, `$random()` and `$shuffle()` are refused.
 
 Numbers cross by logical type: BIGINTEGER and BIGDECIMAL use their normal decimal-string
 wire form; other integers beyond ±2^53 and DECIMALs whose double would lose digits arrive as

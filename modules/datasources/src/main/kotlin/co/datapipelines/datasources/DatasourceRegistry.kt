@@ -1,8 +1,10 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
+import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.typesystem.Dialect
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -142,6 +144,8 @@ interface DatasourceRegistry {
      * - neither authenticates → [CredentialResync.BOTH_FAILED]; the row is left alone. There
      *   is nothing to resync to, and overwriting a broken credential with another broken one
      *   would destroy the operator's value for nothing.
+     * - the row is the managed lake datasource (#818) → [CredentialResync.MANAGED_ROW] before
+     *   any probe; configuration owns its credential, so nothing is written.
      *
      * Every branch that probed records the outcome on the row (§8.1B), so the datasources
      * screen shows what happened without an execution having to fail first.
@@ -259,6 +263,31 @@ interface DatasourceRegistry {
      * registry with no lake catalog has no broken tables to report.
      */
     fun lakeBrokenTables(datasourceName: String): List<LakeBrokenTable> = emptyList()
+
+    /**
+     * #818 A1 — the boot registrar's privileged create-or-re-sync of the managed lake datasource
+     * ([Datasource.isManagedLake]); the only write path that may touch that row. Defaulted so fakes
+     * compile; only the production registry backs it.
+     */
+    fun syncManagedLake(
+        datasource: Datasource,
+        actor: UUID,
+    ): ManagedLakeSync = error("this registry cannot write the managed lake datasource")
+
+    /**
+     * #818 RULING 4 item 2 — the freshness tick: retire every live managed generation whose catalog
+     * moved since it was built, as read through [catalog]. The caller passes the read it can bound: the
+     * scheduled tick hands in a catalog over its own statement-bounded template (#818b A), so a catalog
+     * statement queued behind a lock ends at that bound instead of holding the scheduler thread the pool
+     * reaper shares. Returns how many were retired. Default 0.
+     */
+    fun refreshManagedGenerations(catalog: ManagedLakeCatalog): Int = 0
+
+    /** #818 — the instant [name]'s live pool was built (read before its factory call), or null when none is live. */
+    fun generationBuiltAt(name: String): Instant? = null
+
+    /** #818 — the catalog snapshot [name]'s live managed generation was built from, or null. */
+    fun liveManagedGeneration(name: String): ManagedLakeGeneration? = null
 }
 
 /**
@@ -275,12 +304,34 @@ interface DatasourceRegistry {
  * `RELEASED` / `DISCARDED`); it is a String rather than the `pipeline-contract` enum because
  * `datasources` may depend on `typesystem` alone (module-structure §5.4) — the same layering
  * that makes [DatasourceReferences] an inverted port in the first place.
+ *
+ * [workspaceId] is the workspace the referencing pipeline lives in. The lock counts every workspace's references, but a
+ * refusal names only those its caller may read ([ReferenceVisibility], #873 §F.3 e): the field is how the scan's
+ * evidence is scoped, and it never reaches a wire.
  */
 data class DatasourceReference(
     val pipelineName: String,
     val pipelineVersion: Int,
     val versionStatus: String,
     val nodeId: String,
+    val workspaceId: UUID,
+)
+
+/**
+ * The parameter-set arm of the name lock (#873 §F.3 e, record erratum (7)): one selector of one stored parameter-set
+ * version that names a datasource at `parameters[i].source.datasource` ([path]). A datasource has no version, so release
+ * consent over it is its NAME; a set version — DRAFT, RELEASED or DISCARDED alike, because a version is restorable and its
+ * selector re-runs against that name — keeps the name locked exactly as a pipeline version does.
+ *
+ * [versionStatus] is the set version's status as its wire string, for the layering reason [DatasourceReference] gives;
+ * [workspaceId] is the set's workspace, for the scoping reason it gives.
+ */
+data class ParameterSetDatasourceReference(
+    val parameterSetName: String,
+    val parameterSetVersion: Int,
+    val versionStatus: String,
+    val path: String,
+    val workspaceId: UUID,
 )
 
 /**
@@ -304,9 +355,16 @@ fun interface DatasourceReferences {
     /**
      * Every node of every stored version of every non-deleted pipeline that references
      * [datasourceName]; empty when none. One entry per referencing node, not per pipeline —
-     * [DeleteResult.referencingPipelines] distinct-ifies for the message.
+     * [DatasourceUsages.referencingPipelines] distinct-ifies for the message.
      */
     fun referencesTo(datasourceName: String): List<DatasourceReference>
+
+    /**
+     * #873 §F.3 e — every selector of every stored version of every non-deleted parameter set that names [datasourceName]
+     * (the same any-version rule); empty when none. Defaulted so a pipeline-only fake keeps compiling; production wires
+     * the parameter-set repository's scan beside the pipeline one.
+     */
+    fun parameterSetReferencesTo(datasourceName: String): List<ParameterSetDatasourceReference> = emptyList()
 
     companion object {
         val NONE = DatasourceReferences { emptyList() }

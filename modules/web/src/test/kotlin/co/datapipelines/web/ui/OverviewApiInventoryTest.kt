@@ -32,8 +32,8 @@ class OverviewApiInventoryTest {
                 legacyCount = 2,
                 served =
                     mapOf(
-                        released.pipelineId to ServedVersion(3, draft = false),
-                        drafted.pipelineId to ServedVersion(1, draft = true),
+                        released.id to ServedVersion(3, draft = false),
+                        drafted.id to ServedVersion(1, draft = true),
                     ),
                 names = emptyMap(),
             )
@@ -102,9 +102,6 @@ class OverviewApiInventoryTest {
             id = UUID.randomUUID(),
             workspaceId = WORKSPACE,
             pathPattern = path,
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 30,
-            description = "",
             isEnabled = true,
             createdBy = UUID.randomUUID(),
             createdAt = NOW,

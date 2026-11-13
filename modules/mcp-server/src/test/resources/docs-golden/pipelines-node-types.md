@@ -12,17 +12,20 @@
   `jsonata` template as a pure function over staged data — `inputs`, `output`,
   `strict`, never `source`; see `scripts-evaluation`)
 - `source` — a registered datasource name, or the reserved literal `"tempdb"` for the
-  per-execution in-memory H2
+  per-execution staging engine (H2 by default, DuckDB when selected)
 - `template` — `{"id": "...sql", "version": N}` (immutable pin)
 - `output` — where a DQL node's rows go (see below); forbidden on DML/DDL
-- `depends_on` — parent node ids; must exist, no cycles. Data flow, nothing else
+- `delivery` — one DQL/tempdb node may name `{feed, id}` to read an immutable managed-lake delivery;
+  requires DuckDB and reads `FROM delivery`. See the `lake` guide.
+- `depends_on` — parent node ids; must exist, no cycles. Data flow and the managed-lake publication barrier
   (`pipelines-dag`).
 
 **Output targets (DQL only):**
 - omitted → `{"target": "caller"}` — the pipeline's result. **At most one caller node per
   pipeline; zero is legal** (pure write-back: stats only, no rows)
-- `{"target": "tempdb", "table": "stg_x"}` — stage into H2 for downstream nodes
-  (`source: "tempdb"`); keep table names lower_snake_case (H2 lower-folds unquoted
-  identifiers)
+- `{"target": "tempdb", "table": "stg_x"}` — stage into the selected engine for downstream nodes
+  (`source: "tempdb"`); keep table names lower_snake_case
 - `{"target": "datasource", "datasource": "...", "table": "...", "mode": "replace"|"append"}`
-  — write-back to an external table (must exist, or be created by a preceding DDL node)
+  — write-back to an external table (must exist, or be created by a preceding DDL node).
+  The configured managed lake supports only append to an ACTIVE `namespace.table`, under a delivery and its
+  publication barrier; external LAKE datasources stay read-only. See the `lake` guide.

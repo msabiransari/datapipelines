@@ -1,0 +1,405 @@
+package co.datapipelines.config
+
+import co.datapipelines.web.config.ReaperDelay
+import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
+import org.junit.jupiter.api.Test
+import java.io.File
+
+/**
+ * §7 / §3.36 (#785) — the managed lake's keys at boot. A disabled lake is never judged; an enabled one with the
+ * shipped defaults needs exactly a bucket and a region or an endpoint; each record rule (§6 `LakeRules`) refuses
+ * at its boundary, naming the key; no violation and no snapshot ever carries a credential's value.
+ */
+class LakeRulesTest {
+    /** The shipped template, from [ConfigSnapshots.lakeDefaults] — one source for both suites. */
+    private val shipped: Map<String, String?> by lazy { ConfigSnapshots.lakeDefaults() }
+
+    private fun violations(overrides: Map<String, String?>): List<String> =
+        ConfigValidator.validate(ConfigSnapshots.valid().copy(lake = shipped + overrides)).violations
+
+    private fun enabled(vararg overrides: Pair<String, String?>): List<String> =
+        violations(mapOf(LakeRules.ENABLED to "true", LakeRules.BUCKET to "dp-lake", LakeRules.REGION to "eu-west-1") + overrides)
+
+    @Test
+    fun `every key has a shipped default, and a disabled lake is never judged`() {
+        shipped.filterValues { it == null }.keys shouldContainExactly emptyList()
+        violations(emptyMap()) shouldContainExactly emptyList()
+        // Disabled with nonsense everywhere: still nothing — a deployment without a lake is not refused for its
+        // keys. The three DuckDB staging inputs are the #804 exception (staging consumes them with or without a
+        // lake), so they keep their shipped defaults here and have their own cases below.
+        val unconsumed = LakeRules.KEYS.filter { it !in LakeRules.STAGING_ADMISSION_KEYS && it != LakeRules.ENABLED }
+        violations(unconsumed.associateWith { "nonsense" }) shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `enabled with the shipped defaults needs a bucket and a region or an endpoint`() {
+        enabled() shouldContainExactly emptyList()
+        enabled(LakeRules.REGION to "", LakeRules.ENDPOINT to "http://minio:9000") shouldContainExactly emptyList()
+        enabled(LakeRules.BUCKET to "").single() shouldStartWith LakeRules.BUCKET
+        enabled(LakeRules.REGION to "").single() shouldStartWith "${LakeRules.REGION} or ${LakeRules.ENDPOINT}"
+    }
+
+    @Test
+    fun `kind, mode, name and endpoint are refused outside their values`() {
+        enabled(LakeRules.STORAGE_KIND to "file").single() shouldStartWith LakeRules.STORAGE_KIND
+        enabled(LakeRules.MODE to "paused").single() shouldStartWith LakeRules.MODE
+        enabled(LakeRules.MODE to "restoring") shouldContainExactly emptyList()
+        enabled(LakeRules.NAME to "My-Lake").single() shouldStartWith LakeRules.NAME
+        enabled(LakeRules.ENDPOINT to "minio:9000").single() shouldStartWith LakeRules.ENDPOINT
+        enabled(LakeRules.ENDPOINT to "ftp://minio:9000").single() shouldStartWith LakeRules.ENDPOINT
+        // A credential, query or fragment in the URL is refused: the endpoint is a host, never a place for a secret.
+        enabled(LakeRules.ENDPOINT to "https://user:pw@minio:9000").single() shouldStartWith LakeRules.ENDPOINT
+        enabled(LakeRules.ENDPOINT to "http://minio:9000/?x=1").single() shouldStartWith LakeRules.ENDPOINT
+        enabled(LakeRules.ENDPOINT to "http://minio:9000/#frag").single() shouldStartWith LakeRules.ENDPOINT
+        enabled(LakeRules.ENDPOINT to "https://s3.example.net/") shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `a credential pair is whole or absent, and no violation or snapshot carries its value`() {
+        val secret = "s3cr3t-value-never-printed"
+        val half = enabled(LakeRules.SECRET_KEY to LakeRules.carried(LakeRules.SECRET_KEY, secret))
+        half.single() shouldStartWith "${LakeRules.ACCESS_KEY} and ${LakeRules.SECRET_KEY}"
+        enabled(LakeRules.READER_ACCESS_KEY to LakeRules.PRESENT).single() shouldStartWith LakeRules.READER_ACCESS_KEY
+        enabled(LakeRules.ACCESS_KEY to LakeRules.PRESENT, LakeRules.SECRET_KEY to LakeRules.PRESENT) shouldContainExactly emptyList()
+
+        LakeRules.CREDENTIAL_KEYS.forEach { key ->
+            LakeRules.carried(key, secret) shouldBe LakeRules.PRESENT
+            LakeRules.carried(key, "  ") shouldBe ""
+            LakeRules.carried(key, null) shouldBe ""
+        }
+        LakeRules.carried(LakeRules.BUCKET, "dp-lake") shouldBe "dp-lake"
+        // The snapshot as ConfigValidator.snapshotFrom builds it: every credential set to the secret, the rest shipped.
+        val carried = LakeRules.KEYS.associateWith { LakeRules.carried(it, if (it in LakeRules.CREDENTIAL_KEYS) secret else shipped[it]) }
+        LakeRules.CREDENTIAL_KEYS.size shouldBe 4
+        val snapshot = ConfigSnapshots.valid().copy(lake = carried)
+        snapshot.toString() shouldContain "${LakeRules.SECRET_KEY}=${LakeRules.PRESENT}"
+        snapshot.toString() shouldNotContain secret
+        half.joinToString() shouldNotContain secret
+    }
+
+    @Test
+    fun `the orphan grace must exceed job timeout plus statement timeout plus the skew hour`() {
+        // Shipped: 72 h × 3600 = 259 200 > 2 h + 30 s + 3600 = 10 830.
+        // Boundary: job 2 h + statement 30 s + 3600 s = 10 830 s; 3 h = 10 800 ≤ 10 830 → refused, 4 h passes.
+        enabled(LakeRules.ORPHAN_GRACE_HOURS to "3").single() shouldStartWith "${LakeRules.ORPHAN_GRACE_HOURS} × 3600 (10800)"
+        enabled(LakeRules.ORPHAN_GRACE_HOURS to "4") shouldContainExactly emptyList()
+        enabled(LakeRules.ORPHAN_GRACE_HOURS to "4", LakeRules.JOB_TIMEOUT to "3h").single() shouldStartWith
+            LakeRules.ORPHAN_GRACE_HOURS
+        enabled(LakeRules.PROTECTION_DAYS to "0").single() shouldStartWith LakeRules.PROTECTION_DAYS
+        enabled(LakeRules.JOB_TIMEOUT to "soon").single() shouldStartWith LakeRules.JOB_TIMEOUT
+    }
+
+    @Test
+    fun `the lease wait stays under the node query ceiling and a delivery's staging fits the scratch budget`() {
+        enabled(LakeRules.LEASE_WAIT_SECONDS to "900").single() shouldStartWith LakeRules.LEASE_WAIT_SECONDS
+        enabled(LakeRules.LEASE_WAIT_SECONDS to "899") shouldContainExactly emptyList()
+        // Shipped 2GB × 3 = 6GB ≤ 20GB; 7GB × 3 = 21GB > 20GB refuses; 6GB × 3 = 18GB passes.
+        enabled(LakeRules.MAX_DELIVERY_BYTES to "7GB").single() shouldStartWith LakeRules.MAX_DELIVERY_BYTES
+        enabled(LakeRules.MAX_DELIVERY_BYTES to "6GB") shouldContainExactly emptyList()
+        enabled(LakeRules.SCRATCH_BYTES to "lots").single() shouldStartWith LakeRules.SCRATCH_BYTES
+    }
+
+    @Test
+    fun `every number is positive and the maintenance window is HH_MM-HH_MM`() {
+        val positives =
+            listOf(
+                LakeRules.MAX_CONCURRENT_INGESTIONS,
+                LakeRules.MAX_CONCURRENT_MAINTENANCE,
+                LakeRules.MAX_OPEN_PARTITIONS,
+                LakeRules.LOCK_TIMEOUT_SECONDS,
+                LakeRules.MAX_GENERATION_AGE_SECONDS,
+                LakeRules.FRESHNESS_TICK_SECONDS,
+            )
+        positives.forEach { key -> enabled(key to "0").single() shouldStartWith key }
+        enabled(LakeRules.STAGING_MEMORY_LIMIT to "0MB").single() shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+        enabled(LakeRules.MAX_BYTES_REWRITTEN to "-1").single() shouldStartWith LakeRules.MAX_BYTES_REWRITTEN
+        enabled(LakeRules.MAINTENANCE_WINDOW to "2am-5am").single() shouldStartWith LakeRules.MAINTENANCE_WINDOW
+        enabled(LakeRules.MAINTENANCE_WINDOW to "22:30-01:15") shouldContainExactly emptyList()
+        // A statement timeout of zero fails positivity, and nothing downstream divides by it.
+        enabled(LakeRules.STATEMENT_TIMEOUT_SECONDS to "0") shouldHaveSize 1
+    }
+
+    /**
+     * #804 — the DuckDB staging admission is judged with the lake DISABLED, at every boundary:
+     * DuckDB's 1 MiB memory floor (exactly 1 MiB in, one byte below out), the one-reservation rule
+     * (`scratch ≥ memory × factor`; exactly one reservation in, one byte below out), and positivity.
+     * Before #804 the same lake-less deployments met only `DuckDbStagingProperties`' bare
+     * `IllegalArgumentException` at bean construction, and the reservation had no check at all.
+     */
+    @Test
+    fun `804 - the staging admission is judged with the lake disabled, at every boundary`() {
+        // The memory floor: 1 MiB exactly is admitted, 1048575 bytes and the issue's 512KB refuse.
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "1048576B")) shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "1048575B")).single().let {
+            it shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+            it shouldContain "at least 1 MiB"
+        }
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "512KB")).single().let {
+            it shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+            it shouldContain "at least 1 MiB"
+        }
+        // One default reservation, shipped 1GB × 3 = 3GB: exactly one reservation in, one byte below out.
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225472B")) shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225471B")).single().let {
+            it shouldStartWith LakeRules.SCRATCH_BYTES
+            it shouldContain "one DuckDB staging reservation"
+        }
+        // Positivity, judged without a lake too.
+        violations(mapOf(LakeRules.STAGING_EXPANSION_FACTOR to "0")).single() shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+        violations(mapOf(LakeRules.STAGING_EXPANSION_FACTOR to "soon")).single() shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "0")).single() shouldStartWith LakeRules.SCRATCH_BYTES
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "-1")).single() shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+    }
+
+    /**
+     * #804 — the reservation bound cannot overflow: the memory sits at `Long.MAX_VALUE` with factor 2,
+     * where a naive `memory × factor` wraps around to -2 and would ADMIT the configuration; the
+     * delivered shape divides the scratch by the factor (the delivery bound's shape), which cannot wrap.
+     * (Factor 3 is a false comfort: `Long.MAX × 3` wraps to a small positive, still over the scratch,
+     * so a plant survives it — the falsification run pins factor 2.)
+     */
+    @Test
+    fun `804 - the reservation rule cannot overflow the memory times the factor`() {
+        val overflow =
+            violations(
+                mapOf(
+                    LakeRules.STAGING_MEMORY_LIMIT to "9223372036854775807B",
+                    LakeRules.SCRATCH_BYTES to "20GB",
+                    LakeRules.STAGING_EXPANSION_FACTOR to "2",
+                ),
+            )
+        overflow.single() shouldStartWith LakeRules.SCRATCH_BYTES
+    }
+
+    /**
+     * #804 R1 — the factor's domain is its consumer's: `LakeProperties.Admission.stagingExpansionFactor` binds an
+     * `Int`, so the validator admits exactly up to `Int.MAX_VALUE` and names the key one past it. Before R1 the
+     * rule read a positive `Long`: `2147483648` passed the report and then failed the binder with a bare
+     * `NumberFormatException`. The binder side of the same two values is `StagingDuckDbWiringTest` (web), which
+     * binds them at `LAKE_ADMISSION_PREFIX` exactly as the staging bean does.
+     *
+     * Enabled, the delivery bound re-reads the factor silently with the same domain: at `2147483648` it must not
+     * compute (a 4GB delivery against `Long.MAX` bytes of scratch divided by 2147483648 would be a second
+     * violation), so the report still names the key once.
+     */
+    @Test
+    fun `804 R1 - the expansion factor is admitted up to Int MAX_VALUE and named once past it`() {
+        val roomy = mapOf(LakeRules.STAGING_MEMORY_LIMIT to "1048576B", LakeRules.SCRATCH_BYTES to "9223372036854775807B")
+        violations(roomy + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483647")) shouldContainExactly emptyList()
+        violations(roomy + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483648")).single().let {
+            it shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+            it shouldContain "no greater than 2147483647"
+        }
+
+        val delivery = LakeRules.MAX_DELIVERY_BYTES to "4GB"
+        val atBound = roomy.toList() + delivery + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483647")
+        enabled(*atBound.toTypedArray()) shouldContainExactly emptyList()
+        val pastBound = roomy.toList() + delivery + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483648")
+        enabled(*pastBound.toTypedArray()).single() shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+    }
+
+    /**
+     * #804 R1 sweep — every size form the rule ADMITS for `staging-memory-limit` and `scratch-bytes` is one the
+     * consumer binds to `DataSize`: both parse with `DataSize.parse` and no unit annotation, so the validator's
+     * domain is the binder's less the non-positive values. [ADMITTED_SIZES] is the same list
+     * `StagingDuckDbWiringTest` binds; a form one side changes is red on the other.
+     */
+    @Test
+    fun `804 R1 - every admitted staging size form is one the binder accepts`() {
+        ADMITTED_SIZES.forEach { size ->
+            // Factor 1 and the largest scratch: only the size's own rule can speak.
+            violations(
+                mapOf(
+                    LakeRules.STAGING_MEMORY_LIMIT to size,
+                    LakeRules.STAGING_EXPANSION_FACTOR to "1",
+                    LakeRules.SCRATCH_BYTES to "9223372036854775807B",
+                ),
+            ).let { check(it.isEmpty()) { "memory limit '$size' refused: $it" } }
+            violations(
+                mapOf(
+                    LakeRules.STAGING_MEMORY_LIMIT to "1048576B",
+                    LakeRules.STAGING_EXPANSION_FACTOR to "1",
+                    LakeRules.SCRATCH_BYTES to size,
+                ),
+            ).let { check(it.isEmpty()) { "scratch '$size' refused: $it" } }
+        }
+        // And the forms DataSize.parse refuses are refused here too, never admitted to fail the binder.
+        listOf("1gb", "1 GB", "1.5GB", "9223372036854775807KB", "1PB").forEach { size ->
+            violations(mapOf(LakeRules.SCRATCH_BYTES to size)).single() shouldStartWith LakeRules.SCRATCH_BYTES
+        }
+    }
+
+    /** #804 — a malformed staging key is named ONCE, enabled or not; the delivery bound re-reads it silently. */
+    @Test
+    fun `804 - a malformed staging key is named exactly once, and the lake keys it does not use stay ungated`() {
+        // Disabled: exactly one refusal, from the always-on check.
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "lots")) shouldHaveSize 1
+        // Enabled: the same key is still named exactly once — the delivery bound re-reads it silently (#804).
+        enabled(LakeRules.SCRATCH_BYTES to "lots") shouldHaveSize 1
+        enabled(LakeRules.SCRATCH_BYTES to "lots").single() shouldStartWith LakeRules.SCRATCH_BYTES
+        // A malformed factor is named once, not twice — the delivery bound re-reads it silently (#804).
+        enabled(LakeRules.STAGING_EXPANSION_FACTOR to "0") shouldHaveSize 1
+        // Likewise a zero scratch alongside a valid delivery: one refusal, and no second from the bound.
+        enabled(LakeRules.SCRATCH_BYTES to "0", LakeRules.MAX_DELIVERY_BYTES to "7GB") shouldHaveSize 1
+
+        // The lake-specific keys stay enabled-gated: with the lake off and the staging inputs valid,
+        // nonsense storage and retention is still no violation — and with the staging inputs broken,
+        // the refusal names ONLY the staging inputs.
+        violations(
+            mapOf(
+                LakeRules.BUCKET to "",
+                LakeRules.PROTECTION_DAYS to "0",
+                LakeRules.STAGING_MEMORY_LIMIT to "1048576B",
+            ),
+        ) shouldContainExactly emptyList()
+        val mixed =
+            violations(
+                mapOf(
+                    LakeRules.BUCKET to "",
+                    LakeRules.PROTECTION_DAYS to "0",
+                    LakeRules.STAGING_MEMORY_LIMIT to "512KB",
+                ),
+            )
+        mixed shouldHaveSize 1
+        mixed.single() shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+    }
+
+    @Test
+    fun `the freshness tick stays below the age bound and the reader memory is a positive size`() {
+        enabled(LakeRules.FRESHNESS_TICK_SECONDS to "900").single() shouldStartWith LakeRules.FRESHNESS_TICK_SECONDS
+        enabled(LakeRules.FRESHNESS_TICK_SECONDS to "899") shouldContainExactly emptyList()
+        enabled(LakeRules.READS_MEMORY_LIMIT to "0MB").single() shouldStartWith LakeRules.READS_MEMORY_LIMIT
+        enabled(LakeRules.READS_MEMORY_LIMIT to "plenty").single() shouldStartWith LakeRules.READS_MEMORY_LIMIT
+        enabled(LakeRules.READS_MEMORY_LIMIT to "2GB") shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `age bound plus twice the reaper delay plus the managed ceiling plus tick fits an hour of every protected day`() {
+        // Record §10 third amendment (#818e), #824. One protected day = 3600 s. Reaper delay 7;
+        // shipped managed ceiling = node timeout MAXIMUM 900 + 30 = 930; tick 60. Reader termination is not a safety term.
+        // 2596 + 2 × 7 + 930 + 60 = 3600 is admitted (≤); 2597 refuses, naming every term it used.
+        enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2596") shouldContainExactly emptyList()
+        val overBoundary = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2597")
+        overBoundary shouldHaveSize 1
+        val refused = overBoundary.single()
+        refused shouldStartWith LakeRules.MAX_GENERATION_AGE_SECONDS
+        refused shouldContain "2 × the reaper delay (7)"
+        refused shouldContain "the managed retire ceiling (930)"
+        refused shouldContain "(3600)"
+    }
+
+    @Test
+    fun `the managed ceiling - not the general one - is the rule's term (#824)`() {
+        // Discriminating: under the GENERAL derived ceiling (node timeout 60 + 30 = 90) an age of 2597 would be admitted,
+        // 2597 + 14 + 90 + 60 = 2761 ≤ 3600, and so would #818's old boundary, 3436. Under the managed one both refuse.
+        listOf("2597", "3436").forEach { age ->
+            val refused = enabled(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to age)
+            refused shouldHaveSize 1
+            refused.single() shouldContain "the managed retire ceiling (930)"
+        }
+    }
+
+    @Test
+    fun `the reads rule reads the derived delay from its constant - never a typed copy`() {
+        // #818c/#818d: ReaperDelayDerivationTest pins the delay; this pins
+        // LakeRules to them. Comments are removed first: prose (a `§7` cross-reference) is not a typed copy.
+        val source =
+            repoFile("modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt")
+                .readText()
+                .replace(Regex("(?s)/\\*.*?\\*/"), "")
+                .lines()
+                .joinToString("\n") { it.substringBefore("//") }
+        source shouldContain "ReaperDelay.SECONDS"
+        listOf(ReaperDelay.SECONDS).forEach { constant ->
+            Regex("\\b${constant}L?\\b").findAll(source).map { it.value }.toList() shouldContainExactly emptyList()
+        }
+    }
+
+    @Test
+    fun `the managed retire ceiling is read the way datasources derives it`() {
+        val atBoundary = mapOf(LakeRules.PROTECTION_DAYS to "1", LakeRules.MAX_GENERATION_AGE_SECONDS to "2596")
+
+        fun judged(snapshot: ConfigSnapshot): List<String> =
+            ConfigValidator
+                .validate(
+                    snapshot.copy(
+                        lake = shipped + mapOf(LakeRules.ENABLED to "true", LakeRules.BUCKET to "b", LakeRules.REGION to "r") + atBoundary,
+                    ),
+                ).violations
+        val base = ConfigSnapshots.valid()
+        judged(base) shouldContainExactly emptyList()
+        // A longer node timeout MAXIMUM raises the derived ceiling: 901 + 30 = 931 tips the sum over.
+        val longerMaximum = judged(base.copy(executorNodeQueryTimeoutMaxSeconds = "901"))
+        longerMaximum shouldHaveSize 1
+        longerMaximum.single() shouldContain "the managed retire ceiling (931)"
+        // A malformed maximum is the executor check's to name; this rule falls back to its default 900.
+        judged(base.copy(executorNodeQueryTimeoutMaxSeconds = "soon")).none { "managed retire ceiling" in it } shouldBe true
+        // An explicit managed ceiling wins over the derivation, in both directions.
+        judged(base.copy(executorNodeQueryTimeoutMaxSeconds = "901", datasourcesManagedRetireCeilingSeconds = "930")) shouldContainExactly
+            emptyList()
+        judged(base.copy(datasourcesManagedRetireCeilingSeconds = "931")).single() shouldContain "the managed retire ceiling (931)"
+        judged(base.copy(datasourcesManagedRetireCeilingSeconds = "soon")).single() shouldStartWith
+            "datapipelines.datasources.managed-retire-ceiling-seconds"
+    }
+
+    /**
+     * #845 (D1) — the egress term, its own named violations, both sides of each boundary. The floor is
+     * `node-query-timeout-max-seconds` + 30: shipped 900 + 30 = 930, so the shipped 960 is admitted.
+     */
+    @Test
+    fun `845 - the egress max-age is positive, the proxy is host-colon-port, and the cap clears the node timeout maximum plus 30`() {
+        val proxy = LakeRules.EGRESS_PROXY
+        val maxAge = LakeRules.EGRESS_MAX_AGE_SECONDS
+
+        // Shipped: no proxy, 960. Without a proxy the floor does not apply; positivity always does.
+        enabled() shouldContainExactly emptyList()
+        enabled(maxAge to "20") shouldContainExactly emptyList()
+        enabled(maxAge to "0").single() shouldStartWith maxAge
+        enabled(maxAge to "soon").single() shouldStartWith maxAge
+        // With a proxy: 930 is the floor, admitted; 929 refuses, naming both terms.
+        enabled(proxy to "egress-proxy:3128") shouldContainExactly emptyList()
+        enabled(proxy to "egress-proxy:3128", maxAge to "930") shouldContainExactly emptyList()
+        val belowFloor = enabled(proxy to "egress-proxy:3128", maxAge to "929").single()
+        belowFloor shouldStartWith "$maxAge (929)"
+        belowFloor shouldContain "node-query-timeout-max-seconds (900) + 30 (930)"
+        // The proxy's grammar is the adapter's.
+        listOf("http://egress-proxy:3128", "egress-proxy", "egress-proxy:0", "egress proxy:3128").forEach { bad ->
+            enabled(proxy to bad).single() shouldStartWith proxy
+        }
+
+        // A raised node timeout maximum raises the floor: 1000 + 30.
+        fun judged(vararg overrides: Pair<String, String?>): List<String> =
+            ConfigValidator
+                .validate(
+                    ConfigSnapshots.valid().copy(
+                        executorNodeQueryTimeoutMaxSeconds = "1000",
+                        lake =
+                            shipped +
+                                mapOf(LakeRules.ENABLED to "true", LakeRules.BUCKET to "b", LakeRules.REGION to "r", proxy to "p:3128") +
+                                overrides,
+                    ),
+                ).violations
+        judged(maxAge to "1030") shouldContainExactly emptyList()
+        judged(maxAge to "1029").single() shouldContain "node-query-timeout-max-seconds (1000) + 30 (1030)"
+    }
+
+    private fun repoFile(relative: String): File {
+        val root = generateSequence(File(".").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
+        return File(root, relative).also { check(it.isFile) { "missing $relative" } }
+    }
+
+    private companion object {
+        /**
+         * #804 R1 — size forms the staging admission admits, each at least 1 MiB: bare bytes, every unit, a sign,
+         * surrounding blanks, and the largest values short of `Long` overflow. `StagingDuckDbWiringTest` (web)
+         * carries the same list and binds each at `LAKE_ADMISSION_PREFIX`.
+         */
+        val ADMITTED_SIZES =
+            listOf("1048576", "1048576B", "1024KB", "1MB", "+1MB", " 2GB ", "20GB", "1TB", "9223372036854775807B", "8388607TB")
+    }
+}

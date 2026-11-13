@@ -34,8 +34,20 @@ class MicrometerPoolLifecycleMetrics(
         registry.counter(POOL_HARD_CLOSED, "datasource_name", datasourceName).increment()
     }
 
+    /** #818d — a handed-off close ran past its deadline (`DeadlinePoolCloser`); the WARN beside it has the detail. */
+    override fun poolCloseStuck(datasourceName: String) {
+        registry.counter(POOL_CLOSE_STUCK, "datasource_name", datasourceName).increment()
+    }
+
+    /** #818d — one reaper pass ran past `ReaperDelay.PASS_BOUND_SECONDS`. No tag: the pass is per instance, not per pool. */
+    override fun reaperPassSlow() {
+        registry.counter(REAPER_PASS_SLOW).increment()
+    }
+
     companion object {
         const val POOL_RETIRED = "datapipelines.datasource.pool.retired"
         const val POOL_HARD_CLOSED = "datapipelines.datasource.pool.hard_closed"
+        const val POOL_CLOSE_STUCK = "datapipelines.datasource.pool.close_stuck"
+        const val REAPER_PASS_SLOW = "datapipelines.datasource.pool.reaper_pass_slow"
     }
 }

@@ -46,17 +46,24 @@ class VisualizationMechanicalCheckTest {
 
     private val check =
         VisualizationMechanicalCheck(
-            renderers = RendererConfigValidators.deep(),
+            renderers = RendererConfigValidators.default(),
             fixtures = Fakes.evaluator,
             templates = Fakes.templateFacts,
             rendered = RenderedStateCheck.NOT_AVAILABLE,
         )
 
-    /** The spec's worked body, with the transform pin — valid at save, GREEN under these fakes. */
+    /**
+     * The spec's worked chart body, with the transform pin — valid at save, GREEN under these fakes: the evaluator
+     * returns two months, so the case's `mark_count` asserts the two marks they draw.
+     */
     private fun body(edit: (ObjectNode) -> Unit = {}): VisualizationBody {
-        val tree = DocumentFixtures.visualization().also(edit)
+        val tree = DocumentFixtures.visualization().also { it.obj("tests.cases[0].assertions[1]").put("equals", 2) }.also(edit)
         return ValidatorFakes.visualizationDocument(tree).body
     }
+
+    /** The worked `table` twin — the renderer whose text assertions are judged against the bound values. */
+    private fun table(edit: (ObjectNode) -> Unit = {}): VisualizationBody =
+        ValidatorFakes.visualizationDocument(DocumentFixtures.table().also(edit)).body
 
     init {
         Fakes.reset()
@@ -69,30 +76,36 @@ class VisualizationMechanicalCheckTest {
         report.failures.shouldBeEmpty()
         report.cases["twelve months"]!!.rows shouldBe 2
         report.cases["twelve months"]!!.rendered shouldBe "not_available"
+        report.unjudged.shouldBeEmpty()
+        check.run(WORKSPACE, table()).ok shouldBe true
     }
 
     // ---- step 1: schema -------------------------------------------------------------------------------
 
     @Test
-    fun `an unknown config attribute fails the schema step with the path - and un-falsifies when removed`() {
-        val bad =
-            body { it.obj("config.data[0]").put("bogus_attr", 1) }
+    fun `an unknown config attribute fails the chart schema step with the path - and un-falsifies when removed`() {
+        val bad = body { it.obj("config").put("bogus_attr", 1) }
         val report = check.run(WORKSPACE, bad)
         report.ok shouldBe false
-        report.failures.single().let {
-            it.step shouldBe "schema"
-            it.code shouldBe VisualizationErrorCodes.CONFIG_SCHEMA_INVALID
-            it.path shouldBe "config.data[0].bogus_attr"
-        }
+        report.failures.map { Triple(it.step, it.code, it.path) }.toSet() shouldBe
+            setOf(Triple("schema", VisualizationErrorCodes.CONFIG_SCHEMA_INVALID, "config"))
         check.run(WORKSPACE, body()).ok shouldBe true
     }
 
     @Test
-    fun `an unsupported trace type fails the schema step`() {
-        val report = check.run(WORKSPACE, body { it.obj("config.data[0]").put("type", "treemap") })
+    fun `a mark the bar family does not define fails the schema step under config`() {
+        val report = check.run(WORKSPACE, body { it.obj("config.mark").put("type", "treemap") })
+        report.failures.map { it.step to it.code }.toSet() shouldBe setOf("schema" to VisualizationErrorCodes.CONFIG_SCHEMA_INVALID)
+        report.failures.all { it.path.startsWith("config") } shouldBe true
+    }
+
+    @Test
+    fun `an unknown table key fails the table's own schema step`() {
+        val report = check.run(WORKSPACE, table { it.obj("config").put("bogus_attr", 1) })
         report.failures.single().let {
+            it.step shouldBe "schema"
             it.code shouldBe VisualizationErrorCodes.CONFIG_SCHEMA_INVALID
-            it.path shouldBe "config.data[0].type"
+            it.path shouldBe "config.bogus_attr"
         }
     }
 
@@ -100,28 +113,38 @@ class VisualizationMechanicalCheckTest {
 
     @Test
     fun `a binding column outside the output contract fails - and un-falsifies when the contract names it`() {
-        val bad = body { it.obj("bindings").put("data[0].x", "unknown_column") }
+        val bad = body { it.obj("bindings").put("amounts", "unknown_column") }
         val report = check.run(WORKSPACE, bad)
-        val failure = report.failures.single { it.step == "bindings" && it.path == "bindings.data[0].x" }
+        val failure = report.failures.single { it.step == "bindings" && it.path == "bindings.amounts" }
         failure.code shouldBe VisualizationErrorCodes.BINDING_UNBOUND
         failure.message shouldContain "not in the output contract"
-        // Falsification: `month_labels` IS in the faked contract.
-        check.run(WORKSPACE, body { it.obj("bindings").put("data[0].x", "month_labels") }).ok shouldBe true
+        // Falsification: `amounts` IS in the faked contract.
+        check.run(WORKSPACE, body { it.obj("bindings").put("amounts", "amounts") }).ok shouldBe true
     }
 
     @Test
-    fun `a numeric path bound to a text column fails the per-path type table - the table is pinned`() {
-        // y is a numeric leaf (BindingTypes); `month_labels` is STRING.
-        val bad = body { it.obj("bindings").put("data[0].y", "month_labels") }
-        val report = check.run(WORKSPACE, bad)
-        val failure = report.failures.single { it.path == "bindings.data[0].y" }
-        failure.code shouldBe VisualizationErrorCodes.BINDING_UNBOUND
-        failure.message shouldContain "not accepted at this path"
-        // Falsification: the DECIMAL column binds y; and the table itself is the pinned one.
-        check.run(WORKSPACE, body()).ok shouldBe true
-        BindingTypes.accepts(RendererKind.PLOTLY, "data[0].y", LogicalType.INTEGER) shouldBe true
-        BindingTypes.accepts(RendererKind.PLOTLY, "data[0].y", LogicalType.BIGDECIMAL) shouldBe false // wire STRING, renders as text
-        BindingTypes.accepts(RendererKind.PLOTLY, "layout.title.text", LogicalType.STRING) shouldBe true // not a numeric leaf
+    fun `a chart's field-keyed bindings are not config paths - a table's binding path must still resolve`() {
+        // `amounts` names no member of a chart's config; the chart is judged by its save rules, never by path resolution.
+        check
+            .run(WORKSPACE, body())
+            .failures
+            .filter { it.step == "bindings" }
+            .shouldBeEmpty()
+        val unresolved = check.run(WORKSPACE, table { it.obj("bindings").put("columns[5].values", "amounts") })
+        unresolved.failures.single { it.step == "bindings" }.message shouldContain "Does not resolve"
+    }
+
+    @Test
+    fun `the per-path type table is pinned - a chart, a table and a KPI bind every type, the reserved kinds none`() {
+        LogicalType.entries.forEach { type ->
+            withClue(type) {
+                BindingTypes.accepts(RendererKind.CHART, "amounts", type) shouldBe true
+                BindingTypes.accepts(RendererKind.TABLE, "columns[0].values", type) shouldBe true
+                BindingTypes.accepts(RendererKind.KPI, "value", type) shouldBe true
+                BindingTypes.accepts(RendererKind.HTML, "x", type) shouldBe false
+                BindingTypes.accepts(RendererKind.SVG, "x", type) shouldBe false
+            }
+        }
     }
 
     // ---- step 3: the fixture run ----------------------------------------------------------------------
@@ -146,6 +169,7 @@ class VisualizationMechanicalCheckTest {
         Fakes.evaluatorReturnsRows.clear()
         Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan") // amounts missing
         val report = check.run(WORKSPACE, body())
+        // The one defect is reported once: a case whose rows failed gets no chart model, so mark_count is not judged too.
         val failure = report.failures.single()
         failure.step shouldBe "fixtures"
         failure.code shouldBe VisualizationErrorCodes.BINDING_UNBOUND
@@ -184,7 +208,7 @@ class VisualizationMechanicalCheckTest {
             }
         val draftCheck =
             VisualizationMechanicalCheck(
-                renderers = RendererConfigValidators.deep(),
+                renderers = RendererConfigValidators.default(),
                 fixtures = Fakes.evaluator,
                 templates = draftFacts,
                 rendered = RenderedStateCheck.NOT_AVAILABLE,
@@ -202,11 +226,12 @@ class VisualizationMechanicalCheckTest {
         val direct =
             """
             {"name":"finance/visualizations/direct","display_name":"Direct",
-             "renderer":{"kind":"plotly","version":"4"},
+             "renderer":{"kind":"chart","version":"1"},
              "inputs":{"revenue":{"columns":[{"name":"month","type":"DATE","nullable":false},
                                              {"name":"amount","type":"DECIMAL","nullable":false}]}},
-             "config":{"data":[{"type":"bar","x":"$.month","y":"$.amount"}]},
-             "bindings":{"data[0].x":"month","data[0].y":"amount"},
+             "config":{"mark":{"type":"bar"},"encoding":{"x":{"field":"month","type":"temporal","sort":"ascending"},
+                       "y":{"field":"amount","type":"quantitative","aggregate":"sum"}}},
+             "bindings":{"amount":"amount","month":"month"},
              "tests":{"cases":[{"name":"rows","fixtures":{"revenue":[{"month":"2026-01-01","amount":10.5}]},
                                 "assertions":[{"kind":"rendered"}]}]}}
             """.trimIndent()
@@ -226,13 +251,21 @@ class VisualizationMechanicalCheckTest {
     // ---- step 4: assertion feasibility ----------------------------------------------------------------
 
     @Test
-    fun `trace_count is compared with config data length - and un-falsifies at the matching count`() {
-        val bad = body { objAssertion(it, 0, """{"kind":"trace_count","equals":7}""") }
+    fun `mark_count is compared with the chart model's drawn cells - and un-falsifies at the matching count`() {
+        val bad = body { objAssertion(it, 0, """{"kind":"mark_count","equals":7}""") }
         check.run(WORKSPACE, bad).failures.single { it.step == "assertions" }.let {
             it.code shouldBe VisualizationErrorCodes.TEST_CASE_INVALID
-            it.message shouldContain "renders 1 traces"
+            it.message shouldContain "draw 2 marks"
+            it.path shouldBe "tests.cases[0].assertions[2]"
         }
-        check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"trace_count","equals":1}""") }).ok shouldBe true
+        check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"mark_count","equals":2}""") }).ok shouldBe true
+        // mark_count is a chart's: on a table it is refused.
+        check
+            .run(WORKSPACE, table { objAssertion(it, 0, """{"kind":"mark_count","equals":2}""") })
+            .failures
+            .single()
+            .message shouldBe
+            "mark_count needs a chart document."
     }
 
     @Test
@@ -242,27 +275,133 @@ class VisualizationMechanicalCheckTest {
             .run(WORKSPACE, noData)
             .failures
             .single { it.step == "assertions" }
-            .message shouldContain "produced 2 rows"
+            .message shouldContain "draw 2 marks"
         Fakes.evaluatorReturnsRows.clear()
+        check
+            .run(WORKSPACE, body { it.obj("tests.cases[0].assertions[1]").put("equals", 0) })
+            .ok shouldBe true
         check
             .run(WORKSPACE, noData)
             .failures
-            .filter { it.step == "assertions" }
-            .shouldBeEmpty()
+            .map { it.message } shouldBe listOf("The case's rows draw 0 marks; the case asserts 2.")
+        // A table keeps the row rule.
+        Fakes.reset()
+        check
+            .run(WORKSPACE, table { objAssertion(it, 0, """{"kind":"no_data"}""") })
+            .failures
+            .single { it.step == "assertions" }
+            .message shouldContain "produced 2 rows"
+    }
+
+    @Test
+    fun `a chart whose every aggregate is null draws nothing - no_data holds and a mark is disproved`() {
+        val direct =
+            DocumentFixtures.tree(
+                """
+                {"name":"finance/visualizations/direct","display_name":"Direct",
+                 "renderer":{"kind":"chart","version":"1"},
+                 "inputs":{"revenue":{"columns":[{"name":"month","type":"DATE","nullable":false},
+                                                 {"name":"amount","type":"DECIMAL","nullable":true}]}},
+                 "config":{"mark":{"type":"bar"},"encoding":{"x":{"field":"month","type":"temporal","sort":"ascending"},
+                           "y":{"field":"amount","type":"quantitative","aggregate":"sum"}}},
+                 "bindings":{"amount":"amount","month":"month"},
+                 "tests":{"cases":[{"name":"gaps","fixtures":{"revenue":[{"month":"2026-01-01","amount":null},
+                                                                         {"month":"2026-02-01","amount":null}]},
+                                    "assertions":[{"kind":"no_data"},{"kind":"mark_count","equals":0}]}]}}
+                """.trimIndent(),
+            )
+        check.run(WORKSPACE, ValidatorFakes.visualizationDocument(direct).body).ok shouldBe true
+        // Falsified: one non-null amount draws one mark, and both assertions see it.
+        direct.obj("tests.cases[0].fixtures.revenue[1]").put("amount", 4)
+        check.run(WORKSPACE, ValidatorFakes.visualizationDocument(direct).body).failures.map { it.message } shouldBe
+            listOf("The case expects the empty state; its rows draw 1 marks.", "The case's rows draw 1 marks; the case asserts 0.")
+    }
+
+    @Test
+    fun `text_visible on a chart is proven by a config string, a category or an aggregate - otherwise unjudged, never refused`() {
+        // "Revenue" is the title; "Feb" a category; "10.5" and "12" the two aggregates' texts (12.0 is the JS number 12).
+        listOf("Revenue", "Feb", "10.5", "12").forEach { text ->
+            withClue(text) {
+                val report = check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"$text"}""") })
+                report.ok shouldBe true
+                report.unjudged.shouldBeEmpty()
+            }
+        }
+        val report = check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"NEITHER"}""") })
+        report.ok shouldBe true
+        report.failures.shouldBeEmpty()
+        report.unjudged shouldBe
+            listOf(VisualizationMechanicalCheck.Unjudged("twelve months", "tests.cases[0].assertions[2]", "text_visible"))
+        report.toJson()["unjudged"].single().let {
+            it["case"].asText() shouldBe "twelve months"
+            it["path"].asText() shouldBe "tests.cases[0].assertions[2]"
+            it["kind"].asText() shouldBe "text_visible"
+        }
+        // The same text on a table IS refused: the unjudged rule is the chart's alone.
+        check.run(WORKSPACE, table { objAssertion(it, 0, """{"kind":"text_visible","text":"NEITHER"}""") }).ok shouldBe false
+    }
+
+    @Test
+    fun `the record's example - 10 and 20 summed under decimal(2) prove 30 and leave the formatted 30_00 unjudged`() {
+        Fakes.evaluatorReturnsRows.clear()
+        Fakes.evaluatorReturnsRows +=
+            listOf(mapOf("month_labels" to "Jan", "amounts" to 10), mapOf("month_labels" to "Jan", "amounts" to 20))
+        val document =
+            body {
+                it.obj("config.encoding.y").put("format", "decimal(2)")
+                it.obj("tests.cases[0].assertions[1]").put("equals", 1)
+                objAssertion(it, 0, """{"kind":"text_visible","text":"30"}""")
+                objAssertion(it, 0, """{"kind":"text_visible","text":"30.00"}""")
+            }
+        val report = check.run(WORKSPACE, document)
+        report.ok shouldBe true
+        report.unjudged.map { it.path } shouldBe listOf("tests.cases[0].assertions[3]")
         Fakes.reset()
     }
 
     @Test
-    fun `text_visible must appear in the configuration or the bound values - and un-falsifies`() {
-        val absent = body { objAssertion(it, 0, """{"kind":"text_visible","text":"NEITHER"}""") }
+    fun `a series value proves text only through color - and a missing band x series pair is a gap, not a mark`() {
+        val colored =
+            DocumentFixtures.tree(
+                """
+                {"name":"finance/visualizations/direct","display_name":"Direct",
+                 "renderer":{"kind":"chart","version":"1"},
+                 "inputs":{"sales":{"columns":[{"name":"region","type":"STRING","nullable":false},
+                                               {"name":"product","type":"STRING","nullable":false},
+                                               {"name":"amount","type":"DECIMAL","nullable":false}]}},
+                 "config":{"mark":{"type":"bar"},"encoding":{"x":{"field":"region","type":"nominal","sort":null},
+                           "y":{"field":"amount","type":"quantitative","aggregate":"sum","stack":"zero"},
+                           "color":{"field":"product","type":"nominal","sort":null}}},
+                 "bindings":{"amount":"amount","product":"product","region":"region"},
+                 "tests":{"cases":[{"name":"rows","fixtures":{"sales":[{"region":"North","product":"Widget","amount":3},
+                                                                       {"region":"South","product":"Gadget","amount":4}]},
+                                    "assertions":[{"kind":"rendered"},{"kind":"mark_count","equals":2},
+                                                  {"kind":"text_visible","text":"Widget"}]}]}}
+                """.trimIndent(),
+            )
+        val report = check.run(WORKSPACE, ValidatorFakes.visualizationDocument(colored).body)
+        report.ok shouldBe true
+        report.unjudged.shouldBeEmpty()
+        // Four cells (two series x two bands), two of them gaps: a third mark is disproved.
+        colored.obj("tests.cases[0].assertions[1]").put("equals", 4)
+        check
+            .run(WORKSPACE, ValidatorFakes.visualizationDocument(colored).body)
+            .failures
+            .single()
+            .message shouldBe "The case's rows draw 2 marks; the case asserts 4."
+    }
+
+    @Test
+    fun `text_visible on a table must appear in the configuration or the bound values - and un-falsifies`() {
+        val absent = table { objAssertion(it, 0, """{"kind":"text_visible","text":"NEITHER"}""") }
         check
             .run(WORKSPACE, absent)
             .failures
             .single { it.step == "assertions" }
             .message shouldContain "appears neither"
-        // "Feb" is a bound value of the case's evaluation; "Revenue" is the layout title text.
-        check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"Feb"}""") }).ok shouldBe true
-        check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"Revenue"}""") }).ok shouldBe true
+        // "Feb" is a bound value of the case's evaluation; "Revenue" is a column label of the configuration.
+        check.run(WORKSPACE, table { objAssertion(it, 0, """{"kind":"text_visible","text":"Feb"}""") }).ok shouldBe true
+        check.run(WORKSPACE, table { objAssertion(it, 0, """{"kind":"text_visible","text":"Revenue"}""") }).ok shouldBe true
     }
 
     @Test
@@ -298,13 +437,13 @@ class VisualizationMechanicalCheckTest {
                 Fakes.evaluatorReturnsRows.clear()
                 Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan", "amounts" to value)
                 listOf("value_visible", "text_visible").forEach { kind ->
-                    assertFeasible(body { objAssertion(it, 0, """{"kind":"$kind","text":"$text"}""") }, "twelve months")
+                    assertFeasible(table { objAssertion(it, 0, """{"kind":"$kind","text":"$text"}""") }, "twelve months")
                 }
             }
         }
         Fakes.evaluatorReturnsRows.clear()
         Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan", "amounts" to BigDecimal("10.50"))
-        assertFeasible(body { objAssertion(it, 0, """{"kind":"value_visible","text":"0.50"}""") }, "twelve months")
+        assertFeasible(table { objAssertion(it, 0, """{"kind":"value_visible","text":"0.50"}""") }, "twelve months")
         Fakes.reset()
     }
 
@@ -325,7 +464,7 @@ class VisualizationMechanicalCheckTest {
         Fakes.evaluatorReturnsRows.clear()
         Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan", "amounts" to 10.5, "unbound" to 987654)
         listOf("987654", "876543").forEach { text ->
-            assertTextRefused(body { objAssertion(it, 0, """{"kind":"value_visible","text":"$text"}""") }, "twelve months", 2)
+            assertTextRefused(table { objAssertion(it, 0, """{"kind":"value_visible","text":"$text"}""") }, "twelve months", 2)
         }
         Fakes.reset()
     }
@@ -344,7 +483,7 @@ class VisualizationMechanicalCheckTest {
         specimens.forEach { (value, text) ->
             Fakes.evaluatorReturnsRows.clear()
             Fakes.evaluatorReturnsRows += mapOf("month_labels" to "Jan", "amounts" to value)
-            assertTextRefused(body { objAssertion(it, 0, """{"kind":"value_visible","text":"$text"}""") }, "twelve months", 2)
+            assertTextRefused(table { objAssertion(it, 0, """{"kind":"value_visible","text":"$text"}""") }, "twelve months", 2)
         }
         Fakes.reset()
     }
@@ -466,9 +605,9 @@ class VisualizationMechanicalCheckTest {
         val report =
             check.run(
                 WORKSPACE,
-                body {
-                    it.obj("config.data[0]").put("bogus", true) // schema step fails
-                    objAssertion(it, 0, """{"kind":"trace_count","equals":9}""") // assertions step fails
+                table {
+                    it.obj("config").put("bogus", true) // schema step fails
+                    objAssertion(it, 0, """{"kind":"text_visible","text":"NEITHER"}""") // assertions step fails
                 },
             )
         report.failures.map { it.step }.distinct() shouldContainExactlyInAnyOrder listOf("schema", "fixtures", "assertions")

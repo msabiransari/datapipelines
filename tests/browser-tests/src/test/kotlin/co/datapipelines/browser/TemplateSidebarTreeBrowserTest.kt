@@ -119,20 +119,24 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
     }
 
     /**
-     * The browser at one of the photographed widths: "narrow" its 240 floor (Home), "wide"
-     * its 480 ceiling (End, at 1440 the cap wins over 1440 - 202 - 320); a phone opens the
-     * drawer instead. Each key's layout write is waited for before the next step.
+     * The browser at one of the photographed widths: "narrow" its `--app-browser-min` floor
+     * (#784; Home), "wide" the clamp's ceiling (End; at 1440 the `1440 - 202 - main minimum` cap
+     * wins over `--app-browser-max`); a phone opens the drawer instead. Each key's layout write
+     * is waited for before the next step. #788: both bounds derive from the range the page
+     * reports ([browserRange]) — app.css is the range's one source.
      */
     private fun screenshotBrowser(width: String) {
         if (width == "phone") {
             page.click("#browser-open")
             return
         }
+        val range = browserRange(page)
+        val expected = if (width == "wide") range.maximumAt(1440, 202) else range.min
         page.focus("#browser-boundary")
         page.keyboard().press(if (width == "wide") "End" else "Home")
         page.waitForFunction(
             "expected => Math.round(document.getElementById('app-browser').getBoundingClientRect().width) === expected",
-            if (width == "wide") 480 else 240,
+            expected,
         )
     }
 
@@ -269,7 +273,8 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         page.waitForFunction("() => document.documentElement.classList.contains('rail-collapsed')")
         width("app-rail") shouldBe 64.0
         page.locator("#nav-tree-pipelines input").isVisible shouldBe true
-        browserWidth() shouldBe 300.0
+        // The menu's collapse is not the browser's: its band-default width stays put too.
+        browserWidth() shouldBe browserRange(page).effectiveDefault.toDouble()
         page.click("#rail-collapse")
         page.waitForFunction("() => !document.documentElement.classList.contains('rail-collapsed')")
         assertOpen("pipelines")
@@ -365,26 +370,29 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
         seedTemplate("acme/short/s1.sql")
         openTree()
         page.locator("$panel a").count() shouldBe 0
-        browserWidth() shouldBe 300.0
+        val range = browserRange(page)
+        // Six 16 px key steps from the band default (the separator's KEY_STEP).
+        val stepped = range.effectiveDefault + 6 * 16
+        browserWidth() shouldBe range.effectiveDefault.toDouble()
         page.locator("#browser-boundary").focus()
         repeat(6) { page.keyboard().press("ArrowRight") }
-        browserWidth() shouldBe 396.0
+        browserWidth() shouldBe stepped.toDouble()
         deepFolders.forEach { expand(it) }
         page.waitForSelector(leaf(deepLeaf))
         page.locator("${leaf(deepLeaf)} span").first().innerText() shouldBe deepLeaf.substringAfterLast('/')
-        browserWidth() shouldBe 396.0
+        browserWidth() shouldBe stepped.toDouble()
         width("app-rail") shouldBe 202.0
         // Record §7: long names wrap inside the column — the tree never scrolls sideways.
         val noSideways =
             "() => { const s = document.querySelector('#nav-tree-templates .dp-tree-scroll'); return s.scrollWidth <= s.clientWidth; }"
         page.evaluate(noSideways) shouldBe true
         page.click("${folder(deepFolders[1])} > .dp-tree-line button")
-        browserWidth() shouldBe 396.0
+        browserWidth() shouldBe stepped.toDouble()
         // Hide returns the browser's width to the content: main grows by exactly the column.
         val main = width("app-main")
         page.click("#browser-hide")
         assertOpen(null)
-        width("app-main") shouldBe main + 396.0
+        width("app-main") shouldBe main + stepped.toDouble()
         consoleErrors shouldBe emptyList()
     }
 
@@ -542,11 +550,12 @@ class TemplateSidebarTreeBrowserTest : BrowserSuite() {
                 page.navigate("$baseUrl/templates")
                 screenshotBrowser(width)
                 openTree()
-                // #554: the phone drawer is min(360px, 100vw) wide.
+                // #554: the phone drawer is min(360px, 100vw) wide; the desktop widths are
+                // the range's floor and the clamp's ceiling at 1440 (#788).
                 browserWidth() shouldBe
                     when (width) {
-                        "wide" -> 480.0
-                        "narrow" -> 240.0
+                        "wide" -> browserRange(page).maximumAt(1440, 202).toDouble()
+                        "narrow" -> browserRange(page).min.toDouble()
                         else -> 360.0
                     }
                 assertOpen("templates")

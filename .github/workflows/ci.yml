@@ -7,12 +7,14 @@
 #
 # WHAT RUNS WHERE —
 #
-#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 60-minute budget, #290, #669):
+#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 80-minute budget, #290, #669):
 #     ./scripts/helm-check.sh               — the reference Helm chart (deploy/helm/datapipelines)
-#         is linted and rendered by a PINNED helm binary (#411): `helm lint --strict` plus four
+#         is linted and rendered by a PINNED helm binary (#411): `helm lint --strict` plus ten
 #         template cases — defaults render no `env:` block at all, both `duckdb.*` values render
-#         exactly their two quoted entries, an `extraEnv` double-mapping of either DuckDB key is
-#         refused with the template's own `fail` message, and a missing `existingSecret` is
+#         exactly their two quoted entries, all nine `script.js.*` values render exactly their
+#         nine quoted entries (and `maxHeapMb` alone still renders its one entry), an `extraEnv`
+#         double-mapping of either DuckDB key or any of the nine JavaScript keys is refused
+#         with the template's own `fail` message, and a missing `existingSecret` is
 #         refused — the render-TIME behaviour the Kotlin drift test can only pin textually.
 #         The binary is downloaded from get.helm.sh and SHA-256-verified against an in-repo pin
 #         of the release's checksum file before first use and every run
@@ -52,23 +54,27 @@
 #         build step 33.7 / 28.3 / 32.8 / 29.5 min, the report step 22.7 / 19.0 / 22.6 /
 #         20.1 min of re-run tests. Run 36369728753 (one red browser test, build step
 #         36.2 min) was cancelled by the old 60-minute timeout 23.8 min into the report
-#         step, the red buried under "cancelled". The job now budgets 90 min like
-#         `integration`, and the build step has its own 70-minute ceiling so that even a
+#         step, the red buried under "cancelled". The first repair budgeted 90 min like
+#         `integration`, with a separate 70-minute build ceiling so that even a
 #         hung build leaves the report, the failure summary and the artifact their time.
 #         2026-10-21 (#669): the build step grew to 60–68 min as the browser suite grew
 #         (559 tests, run 39514670172) and hit 70 in runs 39348253765, 39501200887 and
 #         39525815939 (the last a pure timeout, 502 browser tests passed, 0 failed). The
-#         ceilings are raised to 100 (step) and 120 (job), keeping the 20-minute margin, as a
-#         stopgap until #669 moves the browser suite into its own sharded job.
+#         ceilings were raised to 100 (step) and 120 (job), keeping the 20-minute margin.
+#         2026-11-13 (#669): run 43354061464 reached that 100-minute build limit with
+#         11,796 unit tests green and the browser suite still emitting passing cases; its
+#         browser XML was incomplete. The combined dependency-graph tip has 735 browser
+#         cases; its separate local serial run took 83 min. The serial stopgap allowed
+#         150 min for the build and 170 for the job (9c22b3404).
 #         #669 (the structural fix): the browser suite is the `browser` job's. The step's
-#         ceiling is 40 and the job's 60 — INITIAL values from the projection (the step
-#         without the suite ≈ 17 min); the first run on `next` measures them and #669's
-#         follow-up sets them from that measurement.
+#         ceiling is 60 and the job's 80 — INITIAL values (the step without the suite
+#         projected ≈ 17 min on 2026-10-21 and the unit suites have grown since); the first
+#         run on `next` measures them and #669's follow-up sets them from that measurement.
 #     ./scripts/docs-audit.sh               — doc-structure checks over docs/ AND the served
 #         manual: `:modules:mcp-server:docsExport` renders it into build/skill-docs first
 #         (offline — the build step above resolved its classpath; 242a). No network.
 #
-#   browser (ubuntu-latest, Docker; three parallel legs, 60-minute budget each, #669):
+#   browser (ubuntu-latest, Docker; three parallel legs, 75-minute budget each, #669):
 #     ./gradlew :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted
 #               -Pdp.browser.shard=<i>/3   — the Playwright browser suite, split across
 #         `matrix.shard` 1..3 by buildSrc/src/main/kotlin/BrowserShards.kt: the *Test.kt
@@ -90,10 +96,20 @@
 #         enforced when the suite ran unsharded.
 #         `browser-verdict` (needs: browser, always) is red unless every leg succeeded: the
 #         ONE check name the `main` ruleset requires for the suite (owner ruling 2026-10-24).
-#         Measured basis: the rule split run 39689954314's XML into legs of 14.6–16.8 min
-#         of test time (the measured-weight optimum is 15.7); a leg also pays ≈ 10.5 min of
-#         setup and app + browser-test compile. Budgets: step 45, job 60 — INITIAL, from
-#         that ≈ 28 min projection; #669's follow-up sets them from the first measured run.
+#         Measured basis: the rule split run 39689954314's XML (126 classes) into legs of
+#         14.6–16.8 min of test time (the measured-weight optimum is 15.7); a leg also pays
+#         ≈ 10.5 min of setup and app + browser-test compile. 2026-11-13: the suite is 153
+#         classes / 735 tests; a serial local run measured 82.3 class-minutes, and the rule
+#         splits it into 23.3 / 28.5 / 30.5 (51 classes each). A fourth leg would shorten the
+#         slowest leg only to ≈ 24 class-minutes — under the `integration` job's 50–55 min —
+#         so it would cost a runner and shorten nothing (WHY THREE, D3/669b). Each leg is its
+#         own runner, so its own Postgres (#933); BrowserSuite.checkConnectionBudget prints
+#         the shared server's client count once per class and fails a class above 340 — read
+#         each leg's highest printed count on the first run (D6/669b). A leg uploads
+#         `browser-reports-<i>` (its JUnit XML and the #698 site-section captures), and on
+#         failure `browser-traces-<i>` (#717, Playwright traces). Budgets: step 60, job 75 —
+#         INITIAL (the leg figure is local class time and a CI runner is slower); #669's
+#         follow-up sets them from the first measured run.
 #
 #   integration (ubuntu-latest, Docker available and used):
 #     ./gradlew integrationTest             — the Testcontainers E2E suite AND the
@@ -125,8 +141,8 @@
 #                                   procedure (its own header), not a per-PR stage.
 #   container-scan.sh / vuln-scan.sh network-dependent scanner stages; run locally or
 #                                   as a scheduled job when the owner wants them.
-#   secret-scan.sh                  needs the gitleaks binary; the pre-push hook is
-#                                   the enforcement point (DEVELOPMENT.md).
+#   secret-scan.sh                  pre-commit scans staged changes; secret-scan.yml
+#                                   scans full history on push/PR (required on main).
 #
 # Branch protection (E3, owner-owned — see the 025 handback) began as `gate` on main, PRs
 # only. Since 2026-10-09 ruleset 23246563 requires `gate`, `integration` and `cold-verify` for
@@ -165,9 +181,10 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    # 90 since #290 over a measured 48–57 min; 120 as #669's stopgap (2026-10-21); 60 since the
-    # browser suite left this job (#669): the build step's 40 plus the reports' 20 (header).
-    timeout-minutes: 60
+    # 90 since #290 over a measured 48–57 min; 120 as #669's stopgap (2026-10-21); 170 as the
+    # serial stopgap's last form (2026-11-13, 9c22b3404); 80 INITIAL since the browser suite
+    # left this job (#669): the build step's 60 plus the reports' 20 (header).
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -194,13 +211,17 @@ jobs:
           EOF
       - name: every pinned test image still exists at its registry (cold — never the cache)
         run: ./scripts/verify-image-pins.sh
-      - name: render the reference Helm chart (pinned helm — lint + the five template cases)
+      - name: render the reference Helm chart (pinned helm — lint + the ten template cases)
         run: ./scripts/helm-check.sh
       # #485: the wrapper safety self-test (verification slots, memory floor, pregate
       # planner and evidence guards) — fixture wrappers, a recording Gradle stand-in and
       # their own cache dir, no JVM; ~45 s on the dev box. flock ships in util-linux.
       - name: pregate and verification-lock self-test (fixtures, no JVM)
         run: ./scripts/pregate.sh --self-test
+      # #724: buildSrc is its own build, which the root ktlintCheck/detekt below never reach.
+      # Lint first (DEVELOPMENT.md §9.4); by task path, so the root's dependency verification applies.
+      - name: buildSrc ktlint and detekt
+        run: ./gradlew :buildSrc:ktlintCheck :buildSrc:detekt
       - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
         id: build
         # --continue: one red module must not stop the others — every module's tests and
@@ -208,15 +229,22 @@ jobs:
         # gate has always run with it; 2026-09-14: a dag flake stopped CI before four modules
         # had tested, and the report step below then ran their suites instead of reporting).
         # Its own ceiling, 20 min under the job's: a hung build still leaves the steps below
-        # (the reports, the failure summary, the artifact) their time (#290). 100 was #669's
-        # stopgap (the browser suite took the step to 60–68 min); 40 since the suite is the
-        # `browser` job's — excluded here the way scripts/gate.sh does, its test classes still
-        # compiled (header). Initial, from the ≈ 17 min projection; #669 sets it from the measurement.
-        timeout-minutes: 40
+        # (the reports, the failure summary, the artifact) their time (#290). The ceiling grew
+        # 70 → 100 (2026-10-21) → 150 (2026-11-13, 9c22b3404) as the serial browser suite
+        # outgrew each one; 60 INITIAL since the suite is the `browser` job's — excluded here
+        # the way scripts/gate.sh does, its test classes still compiled (header). The first
+        # run on `next` measures it and #669's follow-up sets it from that measurement.
+        timeout-minutes: 60
         run: >-
           ./gradlew build ktlintCheck detekt --continue
           -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
           -x :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted :tests:browser-tests:testClasses
+      # #862: the pre-build chart check has no jar. Repeat after build so Secret-resolved
+      # app/proxy inputs also execute the shipped renderer, rather than skipping that witness.
+      - name: verify Helm inputs with the packaged egress renderer
+        env:
+          HELM_CHECK_RENDERER_JAR: modules/app/build/libs/datapipelines-app.jar
+        run: ./scripts/helm-check.sh
       # koverVerify writes only verify.err; the line-level XML the artifact below needs comes from
       # the report task, run AFTER the build so a failed verification still leaves the report.
       # It must NEVER run a test (#290): Kover 0.9.9's report tasks depend on every instrumented
@@ -272,6 +300,7 @@ jobs:
             modules/*/build/reports/kover/report.xml
             modules/*/build/reports/kover/verify.err
             modules/*/build/test-results/*/*.xml
+            modules/*/build/hs_err/*.log
             modules/scripting/build/reports/jsonata-breach.md
           retention-days: 7
           if-no-files-found: warn
@@ -284,9 +313,10 @@ jobs:
   # each leg compiles what it needs, so the run's wall clock is the slower of the two jobs.
   browser:
     runs-on: ubuntu-latest
-    # The step's 45 plus 15 for setup, the summary and the artifact. Initial, from the ≈ 28 min
-    # projection (header); #669 sets both from the first measured run.
-    timeout-minutes: 60
+    # The step's 60 plus 15 for setup, the summary and the artifact. INITIAL (header): the
+    # 2026-11-13 serial run's slowest leg is ≈ 30.5 class-minutes and a CI runner is slower
+    # than the dev box; #669's follow-up sets both from the first measured run.
+    timeout-minutes: 75
     strategy:
       # One red leg must not cancel the others: every leg's verdict is read (and a red one
       # re-run alone, `gh run rerun <id> --failed`).
@@ -302,6 +332,14 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      # #696: Docker veth IPv6 address churn can abort Chromium's in-flight script loads.
+      # Change only the default for NEW interfaces, then prove it on a fresh veth pair.
+      # Existing runner interfaces (including loopback) keep their current settings.
+      # Bound to this job (it exists for the browser suite's Chromium), not to `gate`.
+      - name: keep new Docker interfaces from interrupting Chromium
+        run: |
+          sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
+          sudo ./scripts/ci-browser-network-check.sh
       # Size Gradle for THIS runner (2 vCPU / 7 GB), not for the repo's defaults, which
       # gradle.properties sizes for a 96-thread dev box (DEVELOPMENT.md §9.5). A per-machine
       # gradle.properties in the Gradle user home wins over the repo's — the documented
@@ -328,7 +366,7 @@ jobs:
       # BrowserSuite reads GitHub's CI env var for its CI patience; no property is needed.
       - name: browser suite, shard ${{ matrix.shard }} of 3 (Playwright + Testcontainers — Docker required)
         id: build
-        timeout-minutes: 45
+        timeout-minutes: 60
         run: >-
           ./gradlew :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted
           -Pdp.browser.shard=${{ matrix.shard }}/3
@@ -337,8 +375,9 @@ jobs:
         env:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
         run: python3 scripts/ci-name-failing-tests.py 'tests/browser-tests/build/test-results/*/*.xml'
-      # This leg's JUnit XML, kept for a week, pass or fail; the recount reads every leg's
-      # beside gate-reports (DEVELOPMENT.md §9.4). `error`, not gate-reports' `warn`: a leg that
+      # This leg's JUnit XML kept for a week, pass or fail, beside the #698 site-section
+      # captures (which only a browser run produces); the recount reads every leg's beside
+      # gate-reports (DEVELOPMENT.md §9.4). `error`, not gate-reports' `warn`: a leg that
       # wrote no XML at all is a tooling event (the JVM never started, the step was cancelled
       # before its first class), and the missing artifact must not read as a quiet green leg.
       - name: keep the test-result reports
@@ -346,9 +385,22 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: browser-reports-${{ matrix.shard }}
-          path: tests/browser-tests/build/test-results/test/*.xml
+          path: |
+            tests/browser-tests/build/test-results/test/*.xml
+            tests/browser-tests/build/reports/site-section-alignment/*
           retention-days: 7
           if-no-files-found: error
+      # #717: Playwright's traces for a failed leg. The artifact name carries the leg — one
+      # run cannot hold three artifacts of one name (D2/669b). `failure()`: traces only
+      # exist where a case failed, and only then are they read.
+      - name: keep browser traces on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-traces-${{ matrix.shard }}
+          path: tests/browser-tests/build/reports/browser-traces/*.zip
+          retention-days: 7
+          if-no-files-found: warn
 
   # ONE stable required-check name over every browser leg, whatever BROWSER_SHARDS is (owner
   # ruling 2026-10-24, #669): until #669 the browser verdict rode inside the required `gate`
@@ -448,3 +500,9 @@ jobs:
         env:
           GRADLE_USER_HOME: ${{ runner.temp }}/cold-gradle-home
         run: ./gradlew help :modules:app:bootJar resolveDependencyVerificationSurface
+      - name: buildSrc tests under dependency verification
+        env:
+          GRADLE_USER_HOME: ${{ runner.temp }}/cold-gradle-home
+        run: |
+          ./gradlew :buildSrc:cleanTest :buildSrc:test
+          ./scripts/test-recount.sh buildSrc/build/test-results/test

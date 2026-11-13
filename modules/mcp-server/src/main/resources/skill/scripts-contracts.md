@@ -56,7 +56,8 @@ purpose: The three blocks on every script version — contract, invariants, test
   (`row_case_lists_table`). `expect` is exactly one of `output` (compared after
   canonicalisation — key order and decimal spelling never decide equality) or
   `refusal: "<code>"` (`expect_shape`). A case may pin the clock with `"now": "<ISO-8601>"`;
-  absent, `$now()` and `$millis()` refuse (the clock is an input, not an ambient read).
+  absent, `$now()` and `$millis()` refuse (the clock is an input, not an ambient read),
+  and `$random()`/`$shuffle()` always refuse.
 - **`invariants`** — JSONata over `{ rows, rejects, inputs }`, must be `true` on every case
   (and every real execution). Compiled at save (`invariant_invalid`); in row mode the table
   input appears under its contract name.

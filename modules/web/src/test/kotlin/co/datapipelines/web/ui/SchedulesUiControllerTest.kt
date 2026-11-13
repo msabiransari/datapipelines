@@ -3,7 +3,13 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.RolePermissions
+import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.scheduler.DeliveryOffReason
+import co.datapipelines.scheduler.LastRunOutcome
+import co.datapipelines.scheduler.NotificationDeliveryState
 import co.datapipelines.scheduler.OccurrenceFunction
+import co.datapipelines.scheduler.ScheduleService
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
@@ -13,9 +19,13 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import org.springframework.http.HttpStatus
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.ui.ExtendedModelMap
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.server.ResponseStatusException
 
 /**
  * #9 slice 2 — [SchedulesUiController]: the page is a SHELL on `schedule.read`, and the two facts
@@ -28,19 +38,25 @@ import org.springframework.web.bind.annotation.GetMapping
  */
 class SchedulesUiControllerTest {
     private val themeResolver = mockk<ThemeResolver>()
-    private val controller = SchedulesUiController(themeResolver)
+    private val schedules = mockk<ScheduleService>()
+    private val controller = SchedulesUiController(themeResolver, schedules, AuthoringGuard(false))
 
     @Test
     fun `the page renders the schedules shell with the theme, the roles and the zone list`() {
         every { themeResolver.resolve(any()) } returns "dark"
+        every { schedules.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.NO_ALLOWLIST)
         val model = ExtendedModelMap()
 
-        controller.page(model, MockHttpServletRequest()) shouldBe "schedules/index"
+        controller.page(model, MockHttpServletRequest(), null, null) shouldBe "schedules/index"
 
         model["activeTheme"] shouldBe "dark"
         // No principal in this unit context: RoleModel's NONE — every verb boolean false.
         model["canAuthor"] shouldBe false
+        // #786 D.4: the version picker's eligibility posture — a hardened deployment runs no draft.
+        model["draftsEligible"] shouldBe false
         model["timezoneGroups"] shouldBe ScheduleTimezones.GROUPS
+        // #442: the deployment's COMPUTED mail state, reason included, for the form's note.
+        model["notificationDelivery"] shouldBe mapOf("state" to "off", "reason" to "no_allowlist")
     }
 
     @Test
@@ -50,9 +66,114 @@ class SchedulesUiControllerTest {
                 "page",
                 org.springframework.ui.Model::class.java,
                 jakarta.servlet.http.HttpServletRequest::class.java,
+                String::class.java,
+                String::class.java,
             )
         handler.getAnnotation(RequiredScope::class.java).value shouldBe Permission.SCHEDULE_READ
         handler.getAnnotation(GetMapping::class.java).value.toList() shouldBe listOf("/schedules")
+    }
+
+    @ParameterizedTest
+    @CsvSource("enabled", "paused", "blocked")
+    fun `a condition deep link is bound at the page - the parsed word and the three options reach the model`(word: String) {
+        every { themeResolver.resolve(any()) } returns "saas"
+        every { schedules.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
+        val model = ExtendedModelMap()
+
+        controller.page(model, MockHttpServletRequest(), word, null) shouldBe "schedules/index"
+
+        model["condition"] shouldBe word
+        (model["conditionOptions"] as List<*>).map { (it as ScheduleConditionFilter.Option).value } shouldBe
+            listOf("enabled", "paused", "blocked")
+        (model["conditionOptions"] as List<*>).map { (it as ScheduleConditionFilter.Option).label } shouldBe
+            listOf("Enabled", "Paused", "Blocked")
+    }
+
+    @Test
+    fun `no condition, or an empty one, is the whole list - no word reaches the model`() {
+        every { themeResolver.resolve(any()) } returns "saas"
+        every { schedules.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
+        listOf(null, "").forEach { raw ->
+            val model = ExtendedModelMap()
+            controller.page(model, MockHttpServletRequest(), raw, null)
+            model["condition"] shouldBe ""
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource("nope", "BLOCKED", "Paused", "' blocked'", "blocked;x")
+    fun `an unknown condition is the house 400 with a constant reason - nothing of the input rides it`(raw: String) {
+        every { themeResolver.resolve(any()) } returns "saas"
+        every { schedules.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
+
+        val refused = shouldThrow<ResponseStatusException> { controller.page(ExtendedModelMap(), MockHttpServletRequest(), raw, null) }
+
+        refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+        refused.reason shouldBe ScheduleConditionFilter.BAD_CONDITION
+    }
+
+    @ParameterizedTest
+    @CsvSource("succeeded", "failed", "in-progress", "did-not-run", "never-ran")
+    fun `an outcome deep link is bound at the page - the parsed word and the five options reach the model`(word: String) {
+        every { themeResolver.resolve(any()) } returns "saas"
+        every { schedules.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
+        val model = ExtendedModelMap()
+
+        controller.page(model, MockHttpServletRequest(), null, word) shouldBe "schedules/index"
+
+        model["outcome"] shouldBe word
+        model["condition"] shouldBe ""
+        (model["outcomeOptions"] as List<*>).map { (it as ScheduleConditionFilter.Option).value } shouldBe
+            listOf("succeeded", "failed", "in-progress", "did-not-run", "never-ran")
+        (model["outcomeOptions"] as List<*>).map { (it as ScheduleConditionFilter.Option).label } shouldBe
+            listOf("Succeeded", "Failed", "In progress", "Did not run", "Never ran")
+    }
+
+    @Test
+    fun `no outcome, or an empty one, is the whole list - no word reaches the model`() {
+        every { themeResolver.resolve(any()) } returns "saas"
+        every { schedules.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
+        listOf(null, "").forEach { raw ->
+            val model = ExtendedModelMap()
+            controller.page(model, MockHttpServletRequest(), null, raw)
+            model["outcome"] shouldBe ""
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource("nope", "FAILED", "Failed", "' failed'", "in_progress", "never_ran", "blocked", "failed;x")
+    fun `an unknown outcome is the house 400 with a constant reason - nothing of the input rides it`(raw: String) {
+        every { themeResolver.resolve(any()) } returns "saas"
+        every { schedules.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
+
+        val refused = shouldThrow<ResponseStatusException> { controller.page(ExtendedModelMap(), MockHttpServletRequest(), null, raw) }
+
+        refused.statusCode shouldBe HttpStatus.BAD_REQUEST
+        refused.reason shouldBe ScheduleOutcomeFilter.BAD_OUTCOME
+    }
+
+    @Test
+    fun `both deep links bind together - each parsed word reaches the model, and either bad word is its own 400`() {
+        every { themeResolver.resolve(any()) } returns "saas"
+        every { schedules.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
+        val model = ExtendedModelMap()
+
+        controller.page(model, MockHttpServletRequest(), "blocked", "failed") shouldBe "schedules/index"
+
+        model["condition"] shouldBe "blocked"
+        model["outcome"] shouldBe "failed"
+        shouldThrow<ResponseStatusException> { controller.page(ExtendedModelMap(), MockHttpServletRequest(), "blocked", "nope") }
+            .reason shouldBe ScheduleOutcomeFilter.BAD_OUTCOME
+        shouldThrow<ResponseStatusException> { controller.page(ExtendedModelMap(), MockHttpServletRequest(), "nope", "failed") }
+            .reason shouldBe ScheduleConditionFilter.BAD_CONDITION
+    }
+
+    @Test
+    fun `the home's Last run bars open the filtered explorer at the enum's own word`() {
+        LastRunOutcome.entries.forEach { o ->
+            ScheduleOutcomeFilter.href(o) shouldBe "/schedules?outcome=${o.wire}"
+            ScheduleOutcomeFilter.parse(o.wire) shouldBe o
+        }
     }
 
     @Test

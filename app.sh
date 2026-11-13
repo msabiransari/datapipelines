@@ -4,6 +4,12 @@
 # inside a throwaway JDK container, packaged with the repo Dockerfile, and run
 # via deploy/compose.yml + deploy/compose.local-build.yml — the same stack an
 # engineer evaluating the project runs.
+# The build never packages outputs it did not write (#281): a host ./gradlew shares
+# modules/*/build, and the container's build then kept a resource whose source was
+# deleted. So modules/*/build is wiped before the build when it holds a file newer than
+# the stamp the last containerized build left (or when there is no stamp yet). The wipe
+# is conditional because an unconditional one makes every --start a cold compile; the
+# stamp keeps a checkout that only app.sh builds incremental.
 #
 #   ./app.sh --scaffold                   write deploy/secrets.env and stop
 #   ./app.sh --start [--env <label>] [--posture development|hardened]
@@ -209,6 +215,9 @@ fi
 export IMAGE_TAG
 BUILDER_IMAGE="eclipse-temurin:21-jdk"
 GRADLE_CACHE="$PWD/.gradle-docker"
+# Touched after every successful containerized build (#281): a build output newer than this
+# was written by something else — a host ./gradlew — and is wiped before the next build.
+BUILD_STAMP="$GRADLE_CACHE/app-sh-build.stamp"
 
 # The env-file list, in precedence order (compose: later files win). Every verb uses the
 # same list so `--status` and `--stop` see exactly the stack `--start` created.
@@ -377,6 +386,40 @@ EOM
 }
 
 # ---------------------------------------------------------------- build
+# #281: remove the build outputs app.sh's own build did not write, before that build runs.
+# Candidates are a FIXED glob under this checkout, never input. Containment, per candidate:
+# one whose parent is reached through a symlink (a module dir linked out of the checkout) is
+# skipped and named, never removed or scanned; one that is itself a symlink is unlinked
+# (rm -f), never followed; only then rm -rf. Wiped when there is no stamp yet and something
+# exists, or when a regular file under a candidate is newer than the stamp. `find` does not
+# follow symlinks, so a symlinked build dir never triggers a wipe by itself. A host write in
+# the stamp's own clock tick is not seen.
+wipe_foreign_build_outputs() {
+  local root rel parent physical candidates=() wipe=0
+  root="$(cd -P -- "$PWD" && pwd -P)"
+  for rel in modules/*/build; do
+    [[ -e $rel || -L $rel ]] || continue
+    parent="${rel%/*}"
+    physical="$(cd -P -- "$parent" && pwd -P)"
+    if [[ $physical != "$root/$parent" ]]; then
+      echo "==> skipping $rel: its parent is a symlink out of this checkout"
+      continue
+    fi
+    candidates+=("$rel")
+  done
+  ((${#candidates[@]})) || return 0
+  if [[ ! -e $BUILD_STAMP ]]; then
+    wipe=1
+  elif [[ -n $(find "${candidates[@]}" -type f -newer "$BUILD_STAMP" -print -quit) ]]; then
+    wipe=1
+  fi
+  ((wipe)) || return 0
+  echo "==> wiping build outputs not written by app.sh (${#candidates[@]} dirs): ${candidates[*]}"
+  for rel in "${candidates[@]}"; do
+    if [[ -L $rel ]]; then rm -f -- "$rel"; else rm -rf -- "$rel"; fi
+  done
+}
+
 build() {
   # The image's /info reports when THIS jar was built: the build stamps a time only when told
   # to (#292 — the default Instant.now() kept every Gradle invocation re-running the app's
@@ -391,11 +434,14 @@ build() {
   if ((DEMO_NYC || DEMO_TRADE)); then gradle_args=(-Pmysql "${gradle_args[@]}"); flag_note=" [-Pmysql]"; fi
   echo "==> building jar with the pinned Gradle wrapper in $BUILDER_IMAGE (cache: .gradle-docker/)${flag_note}"
   mkdir -p "$GRADLE_CACHE"
+  wipe_foreign_build_outputs
   docker run --rm \
     -v "$PWD":/ws -w /ws \
     -u "$(id -u)":"$(id -g)" \
     -e HOME=/tmp -e GRADLE_USER_HOME=/ws/.gradle-docker \
     "$BUILDER_IMAGE" ./gradlew "${gradle_args[@]}"
+  # Only after a successful build (set -e): a failed one keeps the old stamp.
+  touch "$BUILD_STAMP"
   echo "==> building image $IMAGE_TAG"
   docker build -t "$IMAGE_TAG" .
 }
@@ -640,8 +686,10 @@ start() {
     cat <<EOM
 ==> demo data loaded (${DEMO_FAMILIES}). The example pipelines are seeded into the
     shipped 'demo' workspace — the one every login lands in (auth.md §4.2 step 4).
-    To point an agent at it: log in -> copy your MCP key from the top bar -> give the agent
-    ${APP_URL}/mcp with that key. See docs/deployment.md Appendix B.
+    To point an agent at it: sign in as the admin printed above -> open ${APP_URL}/api-keys
+    (API keys) -> create an 'mcp' key with the role the agent should hold -> copy the key
+    when it is shown (it is shown once) -> give the agent ${APP_URL}/mcp with that key.
+    See docs/deployment.md Appendix B and docs/auth.md §7.4.
 EOM
   fi
 }

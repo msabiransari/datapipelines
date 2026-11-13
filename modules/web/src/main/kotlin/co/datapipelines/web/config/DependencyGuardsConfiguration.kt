@@ -2,9 +2,12 @@ package co.datapipelines.web.config
 
 import co.datapipelines.application.dependencies.DashboardParameterSetConsumers
 import co.datapipelines.application.dependencies.DashboardPipelineConsumers
+import co.datapipelines.application.dependencies.RegistryIncomingRows
+import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.parameters.ParameterSetConsumers
 import co.datapipelines.pipeline.PipelineVersionConsumers
 import co.datapipelines.visualization.ArtifactDependents
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -23,11 +26,16 @@ class DependencyGuardsConfiguration {
     @Bean
     fun artifactDependents(jdbc: NamedParameterJdbcTemplate): ArtifactDependents = ArtifactDependents(jdbc)
 
-    /** The pipeline aggregate's answer to "which dashboards pin this release?" (`pipeline.version.pinned`). */
+    /**
+     * The pipeline aggregate's answer to "which dashboards pin this release?" (`pipeline.version.pinned`) — an adapter over
+     * the pipeline family's dashboard arm (#877 §C), the registry read at the first question (no bean cycle).
+     */
     @Bean
-    fun pipelineVersionConsumers(dependents: ArtifactDependents): PipelineVersionConsumers = DashboardPipelineConsumers(dependents)
+    fun pipelineVersionConsumers(dependencyFamilyRegistry: ObjectProvider<FamilyRegistry>): PipelineVersionConsumers =
+        DashboardPipelineConsumers(RegistryIncomingRows(dependencyFamilyRegistry::getObject))
 
-    /** The parameter-set aggregate's answer to the same question (`parameter.in_use`). */
+    /** The parameter-set aggregate's answer to the same question (`parameter.in_use`), over the set family's dashboard arm. */
     @Bean
-    fun parameterSetConsumers(dependents: ArtifactDependents): ParameterSetConsumers = DashboardParameterSetConsumers(dependents)
+    fun parameterSetConsumers(dependencyFamilyRegistry: ObjectProvider<FamilyRegistry>): ParameterSetConsumers =
+        DashboardParameterSetConsumers(RegistryIncomingRows(dependencyFamilyRegistry::getObject))
 }

@@ -8,6 +8,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
+import java.io.File
 import java.security.MessageDigest
 
 /**
@@ -25,7 +26,9 @@ import java.security.MessageDigest
  *     sprite id" match is deliberately NOT used: init.js quotes `copy` for
  *     `execCommand` and toast.js quotes `info` as a VARIANT, neither an icon
  *     reference — a match that counts those would let a glyph pass as referenced when
- *     nothing draws it.
+ *     nothing draws it. #641: the overview homes' Continue your work rows name their glyph
+ *     in Kotlin (`OverviewPage.TaskRow(key, icon, …)`, rendered as `#${t.icon}`), so the
+ *     `TaskRow(` calls under `src/main/kotlin` are read too — the icon is the second literal.
  *  2. **Vendored** — the sprite's `<symbol>` ids. Nothing referenced may be absent
  *     (a 404 glyph renders as an empty box), and nothing vendored may be unreferenced
  *     (the subset is deliberately exact — a glyph nobody uses is weight and a lie about
@@ -61,6 +64,14 @@ class IconSpriteAuditTest {
             ).map { it.groupValues[1] }
             .toSet()
 
+    /** #641 — the glyphs the homes' `TaskRow` calls name in Kotlin (the frame renders `#${t.icon}`). */
+    private val taskRowIcons: Set<String> =
+        File("src/main/kotlin")
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .flatMap { file -> TASK_ROW_ICON.findAll(file.readText()).map { it.groupValues[1] } }
+            .toSet()
+
     /** Template references are full literals; JS references come from icon-reference contexts only. */
     private val referencedIds: Set<String> =
         buildSet {
@@ -83,6 +94,7 @@ class IconSpriteAuditTest {
                         TYPE_ICON_VALUE.findAll(block.groupValues[1]).forEach { add(it.groupValues[1]) }
                     }
             }
+            addAll(taskRowIcons)
         }
 
     /**
@@ -117,6 +129,13 @@ class IconSpriteAuditTest {
         appTemplates.size shouldBeGreaterThan 30
         spriteIds.size shouldBeGreaterThan 30
         referencedIds.shouldNotBeEmpty()
+    }
+
+    @Test
+    fun `the task rows' Kotlin glyphs are read - the scan is not vacuous`() {
+        // The homes' rows as of #641: drafts/live (lifecycle), console/keys (API), browse (datasources), unblock/next (schedules).
+        taskRowIcons.size shouldBeGreaterThan 5
+        withClue("the Schedules home's Unblock row") { ("octagon-alert" in taskRowIcons) shouldBe true }
     }
 
     @Test
@@ -177,6 +196,9 @@ class IconSpriteAuditTest {
         /** The TYPE_ICONS map and its values (`DQL: "db"`). */
         val TYPE_ICONS = Regex("""TYPE_ICONS\s*=\s*\{([^}]*)\}""")
         val TYPE_ICON_VALUE = Regex(""":\s*"([a-z0-9-]+)"""")
+
+        /** `TaskRow(` (optionally after a newline and `.`), the key literal, then the icon literal. */
+        val TASK_ROW_ICON = Regex("""TaskRow\(\s*"[a-z0-9-]+",\s*"([a-z0-9-]+)"""")
 
         val ENTITY = listOf("&times;", "&larr;", "&rarr;")
     }

@@ -179,7 +179,8 @@ data class AuthenticatedPrincipal(
      * reason: the UI once asked it as a scope question, and a SESSION carried no scopes at all
      * since D-R1, so two screens' action columns were invisible to every signed-in human. Found
      * by the browser suite. Since #215 slice (b) there is no credential axis left: the role is
-     * the whole answer, for a session and for the MCP key alike (its role capped at author, PK4).
+     * the whole answer — the member's role for a session, the key's own `keyRole` for a key,
+     * chosen at creation and judged by one §7.6 column (auth.md §7.5 "Key roles").
      */
     val isAuthor: Boolean
         get() = superAdmin || holds(Permission.TEMPLATE_UPDATE)

@@ -86,6 +86,20 @@
     </div>
   </template>
 
+  <!-- #641: a condition filter with no rows is a filtered empty state, like a search with
+       none (the pipelines catalog's #556 pair): the title names the condition and the search;
+       Clear search keeps the condition, Clear filters resets both controls. -->
+  <template id="sch-tpl-no-match-filtered">
+    <div class="ds-empty" data-empty="no-match-filtered">
+      <p class="ds-empty-title" data-slot="title">No schedules match these filters</p>
+      <div class="ds-empty-actions">
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm" data-sch-action="clear-search"
+                data-slot="clear-search" hidden>Clear search</button>
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm" data-sch-action="clear-filters">Clear filters</button>
+      </div>
+    </div>
+  </template>
+
   <!-- A read that failed: the REST envelope's user message, its code and correlation id (the
        id is what a person quotes in a support request — §5.1 Error rendering), and a retry. -->
   <template id="sch-tpl-error">

@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui.site
 
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldHaveAtLeastSize
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -80,6 +81,38 @@ class SiteSeoMetaTest {
         missing shouldBe emptyList()
     }
 
+    /**
+     * #700 — two registry pages that share a title, a description, an H1 or a canonical compete
+     * for one search result and tell the reader nothing about which page answers them; a
+     * canonical pointing at another page's address withdraws the page from the index. Each
+     * value is read off the RENDER, so a template that overrides the registry is caught too,
+     * and the failure names the value and every page sharing it.
+     */
+    @Test
+    fun `no two pages share a title, a description, an h1 or a canonical`() {
+        val served =
+            mapOf(
+                "title" to rendered.mapValues { (_, html) -> firstGroup(TITLE, html)?.trim() },
+                "description" to rendered.mapValues { (_, html) -> metaContent(html, "name=\"description\"") },
+                "h1" to rendered.mapValues { (_, html) -> firstGroup(H1_TEXT, html)?.let(::visibleText) },
+                "canonical" to rendered.mapValues { (_, html) -> firstGroup(CANONICAL, html) },
+            )
+        val shared =
+            served.flatMap { (field, values) ->
+                values.entries
+                    .groupBy({ it.value }, { it.key.path })
+                    .filter { (value, paths) -> value != null && paths.size > 1 }
+                    .map { (value, paths) -> "duplicate $field \"$value\" on ${paths.joinToString()}" }
+            }
+        shared shouldBe emptyList()
+        // Non-vacuity: every page yielded every field, so a regex that stopped matching cannot
+        // make the comparison vacuous by collapsing all values to null.
+        served.forEach { (field, values) ->
+            val blank = values.filterValues { it.isNullOrBlank() }.keys.map { it.path }
+            withClue("pages that rendered no $field") { blank shouldBe emptyList() }
+        }
+    }
+
     @Test
     fun `every page has exactly one h1 and skips no heading level`() {
         val broken =
@@ -151,6 +184,13 @@ class SiteSeoMetaTest {
         bad shouldBe emptyList()
     }
 
+    private fun firstGroup(
+        regex: Regex,
+        html: String,
+    ): String? = regex.find(html)?.groupValues?.get(1)
+
+    private fun visibleText(html: String): String = WHITESPACE.replace(TAG.replace(html, " "), " ").trim()
+
     private fun metaContent(
         html: String,
         marker: String,
@@ -161,8 +201,8 @@ class SiteSeoMetaTest {
             ?.let { CONTENT.find(it)?.groupValues?.get(1) }
 
     private companion object {
-        /** Two pillars + the engine pages + the one-off cluster pages (089 added dp-lake). */
-        const val EXPECTED_PAGES = 15
+        /** The 41 marketing pages at #700's base: two pillars, eight engines and 31 cluster/capability pages. */
+        const val EXPECTED_PAGES = 41
         const val TITLE_MAX = 70
         const val DESCRIPTION_MAX = 155
         const val MIN_ALT_CHARS = 20
@@ -173,6 +213,9 @@ class SiteSeoMetaTest {
         val CANONICAL = Regex("""<link rel="canonical" href="([^"]*)"""")
         val CONTENT = Regex("""content="([^"]*)"""")
         val HEADING = Regex("""<h([1-6])[\s>]""")
+        val H1_TEXT = Regex("""<h1\b[^>]*>(.*?)</h1>""", RegexOption.DOT_MATCHES_ALL)
+        val TAG = Regex("<[^>]+>")
+        val WHITESPACE = Regex("\\s+")
         val IMG = Regex("""<img\b[^>]*>""")
         val SVG_IMG = Regex("""<svg\b[^>]*role="img"[^>]*>""")
         val ALT = Regex("""\b(?:alt|aria-label)="([^"]*)"""")

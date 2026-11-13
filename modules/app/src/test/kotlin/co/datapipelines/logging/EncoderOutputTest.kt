@@ -29,6 +29,8 @@ class EncoderOutputTest {
     private val mapper = ObjectMapper()
     private val context = LoggerFactory.getILoggerFactory() as LoggerContext
     private val probe = context.getLogger("encoder-output-probe")
+
+    // raw-list-appender: synchronous — only the test thread logs to the private probe logger
     private val appender = ListAppender<ILoggingEvent>().apply { start() }
 
     @BeforeEach

@@ -8,6 +8,7 @@ private const val HTTP_FORBIDDEN = 403
 private const val HTTP_NOT_FOUND = 404
 private const val HTTP_TOO_MANY_REQUESTS = 429
 private const val HTTP_CONFLICT = 409
+private const val HTTP_SERVICE_UNAVAILABLE = 503
 
 /**
  * Request attributes shared between the auth filters and the Spring Security
@@ -20,6 +21,21 @@ private const val HTTP_CONFLICT = 409
  */
 object AuthAttributes {
     const val AUTH_ERROR = "co.datapipelines.auth.error"
+
+    /**
+     * A browser-shaped CSRF refusal (#782), carried as a [CsrfInvalidException] so the error
+     * page's resolver (web module) can render `error/403` with the refusal's fixed user
+     * message. Set only on the forward branch of the access-denied handler; machine surfaces
+     * never set it, so their §13.7 JSON envelope is untouched.
+     */
+    const val CSRF_REFUSAL = "co.datapipelines.auth.csrf_refusal"
+
+    /**
+     * The synchronous error-rendering target for a browser-shaped CSRF refusal (#782).
+     * The handler supplies the typed refusal and status as request attributes and renders
+     * before the correlation filter clears its MDC. See the handler's dispatch note.
+     */
+    const val ERROR_PAGE_PATH = "/error"
 }
 
 /**
@@ -60,21 +76,29 @@ object AuthErrorCodes {
     /**
      * 403 — the principal holds the right CREDENTIAL and the wrong ROLE (RBAC design §2,
      * D-R1). `details.required` names the capability the operation needs and `details.held`
-     * what the membership carries, because "ask a workspace admin for the author flag" is
-     * the only useful next step and it needs both halves to be stated.
+     * the role it was judged against — a session's membership role, the key's own `keyRole`,
+     * `super_admin`, or null — because "ask for the missing role" is the only useful next
+     * step and it needs both halves to be stated.
      *
-     * THE permission refusal since scopes left (#215): a session, a key role (`api_caller`,
-     * `promotion_receiver`) — every principal but the MCP key, whose refusal is
-     * [KEY_ISSUER_ROLE_LOST] because its role is its member's.
+     * THE permission refusal since scopes left (#215), for every principal: a session, and
+     * a key judged by its own `keyRole` (`api_caller`, `promotion_receiver`) — since keys v2
+     * an MCP key short of a permission refuses here exactly like a session (auth.md §7.5
+     * "Key roles"). The fix is a key created with the role the operation needs, or a role
+     * change for a session; [KEY_ISSUER_ROLE_LOST] answers only the context-judged key
+     * principal (its note below).
      */
     const val ROLE_REQUIRED = "auth.role_required"
 
     /**
-     * 403 — the KEY was valid; its issuer no longer holds the capability the operation needs
-     * (D-R12). Its own code rather than [ROLE_REQUIRED] because the recovery differs and a
-     * caller cannot guess it: retrying with this key will never work, and the fix is a new
-     * key from somebody who still holds the role. A demotion takes effect within one
-     * `AuthCache` TTL (60 s by default), so a key can start refusing mid-session.
+     * 403 — the KEY was valid, and the role it was JUDGED against does not reach this operation
+     * (D-R12). Since keys v2 (auth.md §7.5 "Key roles") every key carries its own role, chosen
+     * at creation and judged by one §7.6 column, so a key whose own `keyRole` falls short
+     * refuses [ROLE_REQUIRED] like a session; this code answers only a context-judged key
+     * principal — the promotion config-value peer and any legacy path that built a key
+     * principal without a `keyRole` (the arm comment in `ScopeMatrix` where it is raised).
+     * Its own code rather than [ROLE_REQUIRED] because the recovery differs and a caller
+     * cannot guess it: retrying with this key will never work, and the fix is a new key
+     * created with the role the operation needs.
      */
     const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
 
@@ -116,6 +140,15 @@ object AuthErrorCodes {
      * emits it — every refusal there is [PROMOTION_KEY_INVALID].
      */
     const val PRINCIPAL_DEACTIVATED = "auth.principal_deactivated"
+
+    /**
+     * #847 — 503: the native Argon2 verification of a password or key secret failed for a reason
+     * that is not a mismatch (memory allocation, a stored hash that does not decode). Nothing is
+     * known about the credential, so it is neither accepted nor counted as a wrong one (auth.md
+     * §5A.5, §9). Every surface that verifies a secret answers it — the unknown-email path too,
+     * so it is no enumeration signal.
+     */
+    const val SECRET_VERIFICATION_UNAVAILABLE = "auth.secret_verification.unavailable"
 
     /**
      * 091 — an issuance whose EXPIRY is not a usable one: an unknown preset, a custom date
@@ -163,6 +196,7 @@ object AuthErrorCodes {
             KEY_NAME_TAKEN,
             KEY_WORKSPACE_INACTIVE,
             PRINCIPAL_DEACTIVATED,
+            SECRET_VERIFICATION_UNAVAILABLE,
         )
 
     /**
@@ -228,6 +262,11 @@ object AuthErrorCodes {
             // families so no `doc_url` falls to the catalog top (the 194b lesson).
             "visualization." to "1322-visualizations",
             "dashboard." to "1323-dashboards",
+            "navigation." to "1324-navigation-trees",
+            // #785 — the managed lake's catalog fence (§13.25), anchored with the family (the 194b lesson).
+            "lake." to "1325-managed-lake",
+            // #875 — the dependency trees' refusals (§13.26), anchored with the family (the 194b lesson).
+            "dependencies." to "1326-dependency-trees",
         )
 }
 
@@ -440,6 +479,28 @@ class PrincipalDeactivatedException(
         HTTP_UNAUTHORIZED,
         "Account deactivated",
         "This account has been deactivated. Contact an administrator.",
+    )
+
+/**
+ * The native secret verification could not answer (#847, auth.md §9): [nativeCode] is argon2's
+ * return code — neither `ARGON2_OK` nor `ARGON2_VERIFY_MISMATCH` — and [cause] carries the
+ * library's own text. Both ride on the exception for the server log and the stack only: the
+ * message, the user message and the (empty) details are FIXED, so the envelope never carries
+ * the native text or code.
+ *
+ * Fail closed: it authenticates nobody, and every caller lets it propagate BEFORE a failure
+ * counter, an audit row or a cache admit, so it counts as no attempt. 503 because the fault is
+ * the server's and transient, not the caller's credential.
+ */
+class SecretVerificationUnavailableException(
+    val nativeCode: Int,
+    cause: Throwable?,
+) : AuthException(
+        AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE,
+        HTTP_SERVICE_UNAVAILABLE,
+        "Secret verification is temporarily unavailable",
+        "Sign-in is temporarily unavailable on our side. Try again in a moment; if it keeps happening, contact an administrator.",
+        cause = cause,
     )
 
 /**

@@ -666,6 +666,9 @@ object PipelineErrorCodes {
         const val MEMORY_LIMIT_EXCEEDED = "pipeline.staging.memory_limit_exceeded"
         const val INVALID_COLUMN_NAME = "pipeline.staging.invalid_column_name"
         const val TABLE_ALREADY_EXISTS = "pipeline.staging.table_already_exists"
+        const val SCRATCH_EXHAUSTED = "pipeline.staging.scratch_exhausted"
+        const val SCRATCH_BLOCKED = "pipeline.staging.scratch_blocked"
+        const val SCRATCH_LIMIT_EXCEEDED = "pipeline.staging.scratch_limit_exceeded"
     }
 
     /** §13.6 — type mapping. Warnings, not errors: they travel in the response `warnings` array. */
@@ -742,6 +745,13 @@ object PipelineErrorCodes {
          * credential becomes a principal; a deactivated WORKSPACE keeps the 404 rule instead.
          */
         const val PRINCIPAL_DEACTIVATED = "auth.principal_deactivated"
+
+        /**
+         * §13.7 (#847) — 503: the native Argon2 verification of a password or key secret failed for a
+         * reason that is not a mismatch (allocation, a stored hash that does not decode). Fail closed,
+         * counted as no attempt, and answered identically on the unknown-email path.
+         */
+        const val SECRET_VERIFICATION_UNAVAILABLE = "auth.secret_verification.unavailable"
     }
 
     /** §13.8 — datasource. Defined in datasources.md §9–10; cataloged here (D5). */
@@ -766,6 +776,16 @@ object PipelineErrorCodes {
         const val WORKSPACE_FORBIDDEN = "datasource.validation.workspace_forbidden"
 
         const val IN_USE = "datasource.in_use"
+
+        /** #818 — an edit or delete of the managed lake datasource, which the server owns (§13.8). 409. */
+        const val MANAGED = "datasource.managed"
+
+        /**
+         * #841 (G0) — a datasource definition, credential, delete or grant write waited past the writer guard's
+         * cumulative `lock-wait-seconds` for the datasource's prerequisite key or an affected workspace; nothing was
+         * written (§13.8). 409; `details` exactly `{lock_wait_seconds}`.
+         */
+        const val WRITE_BUSY = "datasource.write.busy"
         const val NOT_FOUND = "datasource.not_found"
         const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
 
@@ -1020,6 +1040,33 @@ object PipelineErrorCodes {
          * but you cannot see it"; `details.fact_id` names the first offending entry.
          */
         const val IMPLEMENTS_UNRESOLVED = "template.implements_unresolved"
+
+        /** §13.9 — 409: a visible missing/discarded pin or an unticked required draft; shared `blockers` details. */
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "template.release.dependency_not_released"
+
+        /** §13.9 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "template.release.plan_conflict"
+
+        /** §13.9 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "template.release.plan_required"
+
+        /** §13.9 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "template.release.plan_invalid"
+
+        /** §13.9 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "template.release.dependency_cycle"
+
+        /** §13.9 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "template.release.dependency_limit"
+
+        /** §13.9 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "template.release.busy"
+
+        /** §13.9 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "template.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "template.release.metadata_unavailable"
     }
 
     /** §13.10 — result retrieval. Defined in rest-api.md §7; cataloged here (D5/D9). */
@@ -1054,6 +1101,57 @@ object PipelineErrorCodes {
          * `details.limit` names the bound and `details.length` the refused length.
          */
         const val QUERY_TOO_LONG = "request.query_too_long"
+    }
+
+    /**
+     * §13.24 (#464) — the session-only navigation trees (rest-api §24). Three segments: the
+     * refused thing is the tree request or the view it reads, never an artifact family. Raised by
+     * `web`'s tree controller and projection; the static messages echo no caller input.
+     */
+    object Navigation {
+        /**
+         * §13.24 — 400: a malformed, foreign or stale continuation, a parent outside its root, or a
+         * path or search shape the tree refuses. The client retries from the beginning.
+         */
+        const val REQUEST_INVALID = "navigation.request.invalid"
+
+        /**
+         * §13.24 — 503, retryable: the caller's promotion view cannot be computed (its promotion
+         * target's inventory could not be read). `Retry-After` names the wait; logged at WARN.
+         */
+        const val VIEW_UNAVAILABLE = "navigation.view.unavailable"
+
+        /** §13.24 — 503: one node's metadata alone exceeds the tree's 1 MiB page budget. */
+        const val METADATA_TOO_LARGE = "navigation.metadata.too_large"
+    }
+
+    /**
+     * The session-only dependency tree routes, `GET /api/v1/dependencies/<family>` (#875 G4; rest-api "Dependency trees",
+     * dependency-graph record §11.1). Three segments, like [Navigation]: the refused thing is the tree request or the
+     * metadata read behind it, never an artifact family — a hidden or absent ROOT answers its family's own not-found code.
+     * Raised by `web`'s dependency tree service; the static messages echo no caller input. Only codes live here: every
+     * string constant of this object is a catalogued code to `PipelineErrorCodesSpecDriftTest` and to the MCP
+     * `core-error-codes` generator, so the `details.reason` tokens stay G1's `RefusalReason` and the `details` keys
+     * stay with the service.
+     */
+    object Dependencies {
+        /**
+         * 400: the request does not name one root the family's route can read. `details.field` names the query field
+         * (`name`, `id`, `version`) and `details.reason` one of G1's `RefusalReason` tokens — never the refused value.
+         */
+        const val REQUEST_INVALID = "dependencies.request.invalid"
+
+        /**
+         * 503, retryable: the metadata walk ran out of its deadline, a statement hit its bound, or a provider's read
+         * failed. No partial tree is answered. `Retry-After` names the wait; logged at WARN without a stack.
+         */
+        const val METADATA_UNAVAILABLE = "dependencies.metadata.unavailable"
+
+        /**
+         * 503: the projected tree is larger than `max-wire-bytes` although the walk stayed inside its traversal limits — the
+         * configured limits and byte budget disagree. Never a truncated tree; logged at ERROR with a stack.
+         */
+        const val RESPONSE_TOO_LARGE = "dependencies.response.too_large"
     }
 
     /** §13.11 — rate limiting / idempotency. */
@@ -1190,8 +1288,32 @@ object PipelineErrorCodes {
          */
         const val CONFIRM_MISMATCH = "pipeline.version.confirm_mismatch"
 
-        /** §13.13 / versioning §5.3 — pipeline release blocked on a DRAFT template pin. */
-        const val RELEASE_TEMPLATE_NOT_RELEASED = "pipeline.release.template_not_released"
+        /** §13.13 — 409: a visible missing/discarded pin or an unticked required draft; shared `blockers` details. */
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "pipeline.release.dependency_not_released"
+
+        /** §13.13 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "pipeline.release.plan_conflict"
+
+        /** §13.13 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "pipeline.release.plan_required"
+
+        /** §13.13 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "pipeline.release.plan_invalid"
+
+        /** §13.13 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "pipeline.release.dependency_cycle"
+
+        /** §13.13 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "pipeline.release.dependency_limit"
+
+        /** §13.13 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "pipeline.release.busy"
+
+        /** §13.13 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "pipeline.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "pipeline.release.metadata_unavailable"
 
         /**
          * §13.13 (7e, transform-nodes design §8.2) — a WARNING, never an error: the released
@@ -1214,6 +1336,13 @@ object PipelineErrorCodes {
          * pushed, so a missing name never leaves the target half-promoted.
          */
         const val PROMOTION_MISSING_DATASOURCES = "pipeline.promotion.missing_datasources"
+
+        /**
+         * §13.13 / versioning §10.5 (#778, dp-lake §7) — a promoted pipeline or parameter-set version reads a lake table
+         * the RECEIVER's registry does not hold. Checked by the receiver inside the batch transaction against the
+         * versions the batch landed, collected across the whole batch and reported once; the batch rolls back whole.
+         */
+        const val PROMOTION_LAKE_TABLE_UNAVAILABLE = "pipeline.promotion.lake_table_unavailable"
 
         /**
          * §13.13 / versioning §10.1 (D7) — promotion into a deployment whose authoring
@@ -1255,6 +1384,13 @@ object PipelineErrorCodes {
      * `PipelineErrorCodesSpecDriftTest.KNOWN_TWO_SEGMENT_CODES` lists each one deliberately.
      */
     object Endpoint {
+        /**
+         * #841 (G0) — a publish or unpublish waited past the writer guard's cumulative `lock-wait-seconds` for its
+         * workspace or the endpoint registry key; nothing was written (§13.14). 409; `details` exactly
+         * `{lock_wait_seconds}`.
+         */
+        const val WRITE_BUSY = "endpoint.write.busy"
+
         /**
          * §4.1 — a `path_pattern` that is not a legal path: wrong segment alphabet, fewer than
          * three or more than 10 segments, over 200 characters, a trailing slash, a `**`, a
@@ -1330,6 +1466,91 @@ object PipelineErrorCodes {
          * promotion pre-validation, so the target is left byte-unchanged.
          */
         const val PROMOTION_KEY_MISSING = "endpoint.promotion.key_missing"
+
+        /** #786 (record §24) — 404: the API has no version with that number (or the API is not visible). */
+        const val VERSION_NOT_FOUND = "endpoint.version.not_found"
+
+        /**
+         * #786 — 409: the draft save's `If-Match` is not the body hash of the version the edit is based on (the working
+         * draft, or the current version when no draft exists); `details.current_body_hash` names what is stored.
+         */
+        const val VERSION_CONFLICT = "endpoint.version.conflict"
+
+        /** #786 — 409: the verb needs a DRAFT (save, purge) and the addressed version is not one. */
+        const val VERSION_NOT_DRAFT = "endpoint.version.not_draft"
+
+        /** #786 — 409: a second working DRAFT was attempted; an API holds at most one (the V58 partial unique index). */
+        const val VERSION_DRAFT_EXISTS = "endpoint.version.draft_exists"
+
+        /** #786 (§14) — 409: something pins this API version; the hook APIs keep although nothing pins one today. */
+        const val VERSION_PINNED = "endpoint.version.pinned"
+
+        /** #786 — 409: a discard addresses a version that is not RELEASED (a draft is purged, never discarded). */
+        const val VERSION_NOT_RELEASED = "endpoint.version.not_released"
+
+        /** #786 — 409: a restore addresses a version that is not DISCARDED. */
+        const val VERSION_NOT_DISCARDED = "endpoint.version.not_discarded"
+
+        /**
+         * #786 (R1, versioning §3.2 — the `parameter.version.last_release` rule) — 409: an API entity deletion
+         * (`DELETE /api/v1/endpoints`, MCP `endpoints_delete`) found a version that is not a DRAFT. An API that was ever
+         * released keeps its history: discard is per version, the entity stays. Nothing is deleted.
+         */
+        const val VERSION_LAST_RELEASE = "endpoint.version.last_release"
+
+        /**
+         * #786 — 400: the purge dialog's typed confirm (ui-screens §5.1) did not name the version it asked for (`v2`);
+         * checked before the lifecycle service runs. The pipeline and template purge twins are `*.version.confirm_mismatch`.
+         */
+        const val VERSION_CONFIRM_MISMATCH = "endpoint.version.confirm_mismatch"
+
+        /**
+         * #786 (R3) — 409: the current switch names an API version this deployment's posture may not serve (a DRAFT
+         * where authoring is disabled, or a DISCARDED version anywhere).
+         */
+        const val VERSION_NOT_ELIGIBLE = "endpoint.version.not_eligible"
+
+        /**
+         * #786 (R3, A37) — 409: the exact pipeline version a save or a current switch pins exists but is not eligible
+         * under this deployment's posture (`eligibleForPointer`: RELEASED always, a DRAFT only where authoring is enabled).
+         */
+        const val PIPELINE_VERSION_NOT_ELIGIBLE = "endpoint.pipeline_version.not_eligible"
+
+        /** #786 — 400: the pinned pipeline, or its exact version, does not exist (or is DISCARDED). */
+        const val PIPELINE_VERSION_NOT_FOUND = "endpoint.pipeline_version.not_found"
+
+        /**
+         * #786 (§12) — 409: this deployment has authoring disabled; every API draft save, release, discard, restore,
+         * purge and current switch is refused regardless of role. Serving and reads are unaffected.
+         */
+        const val AUTHORING_DISABLED = "endpoint.authoring_disabled"
+
+        /** #786 (record §14) — 409: a visible missing/discarded pin or an unticked required draft; shared `blockers` details. */
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "endpoint.release.dependency_not_released"
+
+        /** #786 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "endpoint.release.plan_conflict"
+
+        /** #786 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "endpoint.release.plan_required"
+
+        /** #786 — 400: a malformed digest or selection, or unknown or duplicate ids. */
+        const val RELEASE_PLAN_INVALID = "endpoint.release.plan_invalid"
+
+        /** #786 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "endpoint.release.dependency_cycle"
+
+        /** #786 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "endpoint.release.dependency_limit"
+
+        /** #786 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "endpoint.release.busy"
+
+        /** #786 — 409: the promotion peer lacks the full-closure envelope capability (shared vocabulary; unused by APIs). */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "endpoint.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "endpoint.release.metadata_unavailable"
     }
 
     /**
@@ -1514,6 +1735,22 @@ object PipelineErrorCodes {
         /** 409 — the workspace already holds `max-schedules-per-workspace` live schedules. */
         const val LIMIT_PER_WORKSPACE = "schedule.limit.per_workspace"
 
+        /**
+         * 409 — #841 (G0): a create, or an edit that changes the schedule's target reference, waited past the writer
+         * guard's cumulative `lock-wait-seconds` for its workspace; nothing was written. `details` exactly
+         * `{lock_wait_seconds}`.
+         */
+        const val WRITE_BUSY = "schedule.write.busy"
+
+        /** 404 — no notification delivery with that id on that run (#442b). */
+        const val NOTIFICATION_NOT_FOUND = "schedule.notification.not_found"
+
+        /** 409 — resend of a notification that is not `failed` or `uncertain` (#442b). */
+        const val NOTIFICATION_NOT_RESENDABLE = "schedule.notification.not_resendable"
+
+        /** Resend refused by the deployment-wide pending cap (409). */
+        const val NOTIFICATION_BACKLOG_FULL = "schedule.notification.backlog_full"
+
         /** 400 — a missing or ill-typed request field. */
         const val REQUEST_INVALID = "schedule.validation.request_invalid"
 
@@ -1538,8 +1775,11 @@ object PipelineErrorCodes {
         /** 400 — the payload names a target the workspace does not hold. */
         const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
 
-        /** 400 — the payload names a pipeline with no current version to follow (#280). */
+        /** 400 — the payload pins a pipeline version the deployment's posture does not run (#280; #786 D.1). */
         const val TARGET_NOT_RELEASED = "schedule.validation.target_not_released"
+
+        /** 400 — the stored payload's schema is one the executor no longer accepts (#786 D.2); `details.stored`, `details.supported`. */
+        const val PAYLOAD_SCHEMA_UNSUPPORTED = "schedule.validation.payload_schema_unsupported"
 
         /** 400 — a `parameter_bindings` entry cannot be resolved (#9 slice 3); `details` names why. */
         const val BINDING_INVALID = "schedule.validation.binding_invalid"
@@ -1715,7 +1955,32 @@ object PipelineErrorCodes {
 
         const val VERSION_CONFIRM_MISMATCH = "parameter.version.confirm_mismatch"
 
-        const val RELEASE_TEMPLATE_NOT_RELEASED = "parameter.release.template_not_released"
+        /** §13.20 — 409: a visible missing/discarded pin or an unticked required draft; shared `blockers` details. */
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "parameter.release.dependency_not_released"
+
+        /** §13.20 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "parameter.release.plan_conflict"
+
+        /** §13.20 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "parameter.release.plan_required"
+
+        /** §13.20 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "parameter.release.plan_invalid"
+
+        /** §13.20 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "parameter.release.dependency_cycle"
+
+        /** §13.20 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "parameter.release.dependency_limit"
+
+        /** §13.20 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "parameter.release.busy"
+
+        /** §13.20 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "parameter.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "parameter.release.metadata_unavailable"
 
         const val IMPORT_MISSING_TEMPLATE = "parameter.import.missing_template"
 
@@ -1773,6 +2038,30 @@ object PipelineErrorCodes {
         const val RELEASE_MECHANICAL_FAILED = "visualization.release.mechanical_failed"
 
         const val RELEASE_DEPENDENCY_NOT_RELEASED = "visualization.release.dependency_not_released"
+
+        /** §13.22 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "visualization.release.plan_conflict"
+
+        /** §13.22 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "visualization.release.plan_required"
+
+        /** §13.22 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "visualization.release.plan_invalid"
+
+        /** §13.22 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "visualization.release.dependency_cycle"
+
+        /** §13.22 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "visualization.release.dependency_limit"
+
+        /** §13.22 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "visualization.release.busy"
+
+        /** §13.22 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "visualization.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "visualization.release.metadata_unavailable"
 
         const val IMPORT_ID_TAKEN = "visualization.import.id_taken"
 
@@ -1847,6 +2136,30 @@ object PipelineErrorCodes {
 
         const val RELEASE_DEPENDENCY_NOT_RELEASED = "dashboard.release.dependency_not_released"
 
+        /** §13.23 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "dashboard.release.plan_conflict"
+
+        /** §13.23 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "dashboard.release.plan_required"
+
+        /** §13.23 — 400: a malformed digest or selection, unknown or duplicate ids, or incompatible aliases. */
+        const val RELEASE_PLAN_INVALID = "dashboard.release.plan_invalid"
+
+        /** §13.23 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "dashboard.release.dependency_cycle"
+
+        /** §13.23 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "dashboard.release.dependency_limit"
+
+        /** §13.23 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "dashboard.release.busy"
+
+        /** §13.23 — 409: the promotion peer lacks the full-closure envelope capability. */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "dashboard.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "dashboard.release.metadata_unavailable"
+
         const val IMPORT_ID_TAKEN = "dashboard.import.id_taken"
 
         const val IMPORT_MISSING_DEPENDENCY = "dashboard.import.missing_dependency"
@@ -1870,6 +2183,128 @@ object PipelineErrorCodes {
          * of the caller's own tree (#191's rule).
          */
         const val BINDING_PATH_INVALID = "dashboard.binding.path_invalid"
+    }
+
+    /**
+     * §13.25 — the managed lake's catalog outcomes (#785, dp-lake P2). The two refusals are raised by
+     * the Flyway-owned fence trigger as SQLSTATEs `DP001` / `DP002`; the third is a lost connection
+     * mid-write. `modules/lake` surfaces each as a `LakeCatalogException` carrying its code. No route returns them in P2 (§13.25's HTTP
+     * column is `—`, `ApiErrorCatalog.NEVER_RETURNED_LIVE`); P8 brings the surfaces and their statuses.
+     */
+    object Lake {
+        const val CAPACITY_BUSY = "lake.capacity.busy"
+        const val APPEND_GRANT_MISSING = "lake.append.grant_missing"
+        const val APPEND_OUTCOME_UNKNOWN = "lake.append.outcome_unknown"
+        const val APPEND_FAILED = "lake.append.failed"
+        const val APPEND_PROVENANCE_MISSING = "lake.append.provenance_missing"
+        const val APPEND_AUTHORITY_LOST = "lake.append.authority_lost"
+        const val COMMIT_CONTENDED = "lake.commit.contended"
+        const val TABLE_BUSY = "lake.table.busy"
+        const val TABLE_DEPRECATED = "lake.table.deprecated"
+        const val DELIVERY_CHANGED = "lake.delivery.changed"
+        const val DELIVERY_CHANGED_DURING_READ = "lake.delivery.changed_during_read"
+        const val APPEND_FORBIDDEN = "lake.append.forbidden"
+        const val APPEND_AMBIGUOUS_COLUMN = "lake.append.ambiguous_column"
+        const val APPEND_UNKNOWN_COLUMN = "lake.append.unknown_column"
+        const val APPEND_MISSING_REQUIRED_COLUMN = "lake.append.missing_required_column"
+        const val APPEND_NULL_IN_REQUIRED = "lake.append.null_in_required"
+        const val APPEND_TYPE_MISMATCH = "lake.append.type_mismatch"
+        const val APPEND_TOO_MANY_PARTITIONS = "lake.append.too_many_partitions"
+        const val APPEND_RECIPE_EXISTS = "lake.append.recipe_exists"
+        const val APPEND_RECIPE_WRITE_FAILED = "lake.append.recipe_write_failed"
+        const val DELIVERY_INVALID_KEY = "lake.delivery.invalid_key"
+        const val DELIVERY_INCOMPLETE = "lake.delivery.incomplete"
+        const val DELIVERY_TOO_LARGE = "lake.delivery.too_large"
+        const val DELIVERY_UNSUPPORTED_FORMAT = "lake.delivery.unsupported_format"
+        const val DELIVERY_INVALID_MANIFEST = "lake.delivery.invalid_manifest"
+        const val DELIVERY_LISTING_FAILED = "lake.delivery.listing_failed"
+        const val DELIVERY_ADMISSION_FAILED = "lake.delivery.admission_failed"
+
+        const val DELIVERY_ONE_PER_PIPELINE = "lake.delivery.one_per_pipeline"
+        const val APPEND_ONE_PER_TABLE = "lake.append.one_per_table"
+        const val APPEND_REQUIRES_DELIVERY = "lake.append.requires_delivery"
+        const val APPEND_REJECTS_NOT_STRICT = "lake.append.rejects_not_strict"
+        const val APPEND_INVALID_NODE = "lake.append.invalid_node"
+        const val APPEND_BARRIER = "lake.append.barrier"
+        const val APPEND_REPLACE_REFUSED = "lake.append.replace_refused"
+        const val DELIVERY_INVALID_NODE = "lake.delivery.invalid_node"
+        const val DELIVERY_REQUIRES_DUCKDB = "lake.delivery.requires_duckdb"
+
+        /** `DP001`: a catalog write without a live lease of its operation on the row's name (§8a). */
+        const val CATALOG_FENCED = "lake.catalog.fenced"
+
+        /** `DP002`: a catalog write while `lake_control.mode = 'restoring'` (§9). */
+        const val CATALOG_RESTORING = "lake.catalog.restoring"
+
+        /**
+         * The catalog connection failed while a write was in flight (SQLSTATE class `08`): the write may have
+         * committed. Never retried (E1 #774 F3); settle decides (P4).
+         */
+        const val CATALOG_OUTCOME_UNKNOWN = "lake.catalog.outcome_unknown"
+
+        // #798 (dp-lake P3) — the managed table definitions' lifecycle and apply outcomes (§13.25). No route returns
+        // them before P8 (HTTP `—`); the apply outcomes are also recorded on the table's `apply_error_json`.
+
+        /** No managed table (or no such definition version of it) by that id or (namespace, table). */
+        const val DEFINITION_NOT_FOUND = "lake.definition.not_found"
+
+        /** The version named is not the table's DRAFT (release, purge-draft). */
+        const val DEFINITION_NOT_DRAFT = "lake.definition.not_draft"
+
+        /** Discard names a version that is not RELEASED. */
+        const val DEFINITION_NOT_RELEASED = "lake.definition.not_released"
+
+        /** The caller's `expected_body_hash` is not the draft's current hash: someone else wrote first. */
+        const val DEFINITION_VERSION_CONFLICT = "lake.definition.version_conflict"
+
+        /** The body breaks a rule of lake.md §1; `details.path` names the offending element. */
+        const val DEFINITION_INVALID_BODY = "lake.definition.invalid_body"
+
+        /** A managed table of that name already exists in the namespace. */
+        const val DEFINITION_NAME_TAKEN = "lake.definition.name_taken"
+
+        /** Discard names the version this environment has applied. */
+        const val DEFINITION_APPLIED_VERSION = "lake.definition.applied_version"
+
+        /** The change from the applied definition is in the policy's reviewed class (lake.md §4); recorded on the table as `failed`. */
+        const val DEFINITION_REVIEWED_CHANGE = "lake.definition.reviewed_change"
+
+        /** The change from the applied definition is in the policy's breaking class (lake.md §4); recorded on the table as `failed`. */
+        const val DEFINITION_BREAKING_CHANGE = "lake.definition.breaking_change"
+
+        /**
+         * The Iceberg table holds neither the target definition nor the last applied one (it was changed outside DP);
+         * recorded on the table as `failed` with the field diff.
+         */
+        const val DEFINITION_DRIFT = "lake.definition.drift"
+
+        /** Another operation holds the table (its lease, or an apply in flight); nothing changed. */
+        const val DEFINITION_TABLE_BUSY = "lake.definition.table_busy"
+
+        /** This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. */
+        const val DEFINITION_AUTHORING_DISABLED = "lake.definition.authoring_disabled"
+
+        /**
+         * #811, #822 — a step of the apply failed with an exception that is none of the catalog's classified refusals:
+         * before the commit the row is `pending` again; from the commit on, or when the row could not be stamped, it is
+         * left for `verifyApplying`. Never recorded as `failed`, and a release that reached it returns it as its apply outcome.
+         */
+        const val DEFINITION_APPLY_UNCLASSIFIED = "lake.definition.apply_unclassified"
+
+        // #818 (dp-lake P5) — the managed reads (§13.25, design record §10).
+
+        /**
+         * The managed lake datasource has no live generation and the catalog read a new one needs failed:
+         * no generation is built from an unverified read. 503; `details.cause` names the failure.
+         */
+        const val UNAVAILABLE = "lake.unavailable"
+
+        /**
+         * A managed table is unavailable for ingestion or has no view in the reader generation:
+         * archived, purged, unknown to the catalog, or the lake is disabled. 409; read details name
+         * the table and reason. Shared by the P4 delivery ledger and the P5 read gate.
+         */
+        const val TABLE_UNAVAILABLE = "lake.table.unavailable"
     }
 }
 

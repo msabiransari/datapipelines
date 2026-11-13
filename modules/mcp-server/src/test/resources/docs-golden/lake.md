@@ -2,9 +2,28 @@
 # Lake — querying object storage in place
 
 A **LAKE** datasource reads Parquet and Apache Iceberg tables on S3 or S3-compatible object
-storage **in place**, without a persistent bulk load into a warehouse, and it is **read-only**.
+storage **in place**, without a persistent bulk load into a warehouse. External LAKE datasources are **read-only**.
 DuckDB is the engine; the catalog is the server's own registry: a LAKE datasource exposes the
 tables you register. Querying still transfers data to the engine.
+
+## Appending a delivery to the managed lake
+
+The server's managed lake also accepts a pipeline delivery. Use `settings.tempdb.engine: DUCKDB` and one
+DQL node with `source: tempdb`, `delivery: {feed: "orders", id: "$batch_id"}`; its SQL reads `FROM delivery`,
+never an object path. The sender must upload CSV or Parquet files, then an empty `_done` object last, and leave
+that folder immutable. Feed and resolved id each match `[a-z0-9_-]{1,64}`.
+
+Each managed output is a DQL/tempdb node with
+`output: {target: datasource, datasource: <managed lake name>, table: "namespace.table", mode: append}`.
+Allow one append per table and make **every other node** an ancestor of every append via `depends_on`.
+This publication barrier includes validations and the delivery node. A SCRIPT with rejects must be strict.
+`replace` is refused. The effective role must be author, workspace admin or super admin; schedules use the system actor.
+Filtering rows in SQL is an authoring decision: the same delivery id cannot later publish the filtered-out rows.
+
+Parameter `redact_in_recipe` is optional and defaults to **false**. Set it to true for sensitive values that
+must become `<redacted>` in the immutable recipe; those recipes require operator-supplied values for replay.
+Redaction applies to declared inputs, not arbitrary secrets embedded in SQL, descriptions or row values.
+Execution, parameter binding and canonical hashing retain their normal behavior.
 
 ## The workflow
 
@@ -51,7 +70,7 @@ name, `FROM acme.analytics.events_by_day`.
 metadata file — `s3://bucket/table/metadata/00042-<uuid>.metadata.json`. A table that still
 receives commits gets a new metadata file per commit: re-register to follow it.
 
-**Pruning — the working rules, measured first-hand on DuckDB 1.5.5, until a new measurement
+**Pruning — the working rules, measured first-hand on DuckDB 1.5.5, 2026-09-09, until a new measurement
 replaces them.** The table listing and `datasources_get_table_stats` expose a registered
 `partition_column` (also an index entry of kind `partition` in stats); `null` means no
 registered partition key — it does not tell you the file count, prove the physical layout, or

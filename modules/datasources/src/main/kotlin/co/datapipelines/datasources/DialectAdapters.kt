@@ -419,6 +419,10 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
             // THE load-bearing lock: no filesystem, no network — so nothing external can be
             // fetched, loaded, attached, read or written, whatever the two toggles above say.
             "enable_external_access" to "false",
+            // #816 (§5.8, defense in depth beside the author-SQL guard): freezes every
+            // configuration option at open, so author SQL cannot SET the toggles above back.
+            // Session state (`SET search_path`, `USE`) stays settable — measured on 1.5.5.1.
+            "lock_configuration" to "true",
         )
 
     /** The DuckDB driver throws from `Connection.setReadOnly` — see the declaration's KDoc. */
@@ -554,7 +558,8 @@ class SqliteDialectAdapter : AbstractDialectAdapter(Dialect.SQLITE, "sqlite") {
  * `temp_directory` (a unique path under the JVM temp directory for anonymous engines by default),
  * and `preserve_insertion_order = false` ALWAYS — insertion
  * order costs the engine memory and temp-file discipline it would otherwise spend on a
- * guarantee a read-only lake never asks for.
+ * guarantee a read-only lake never asks for. An engine that loads `httpfs` (any `catalog.kind`)
+ * then gets the object-store request bounds, [LakeHttpBounds] (#818d) — constants, not keys.
  *
  * The DEFAULT memory limit, when `memory_limit` is unset, is either the operator's
  * [defaultMemoryLimit] (`datapipelines.duckdb.memory-limit`, configuration.md §3.25) verbatim,
@@ -664,10 +669,16 @@ class LakeDialectAdapter(
     override fun connectionInit(datasource: Datasource): List<String> =
         buildList {
             val dialectProperties = datasource.properties.dialect
-            addAll(extensionStatements(dialectProperties))
-            secretStatement(datasource, dialectProperties)?.let { add(it) }
+            addAll(storageInit(datasource))
             addAll(attachStatements(dialectProperties))
             addAll(limitStatements(datasource))
+        }
+
+    /** Trusted staging needs storage access while retaining its own memory and execution limits. */
+    fun storageInit(datasource: Datasource): List<String> =
+        buildList {
+            addAll(extensionStatements(datasource.properties.dialect))
+            secretStatement(datasource, datasource.properties.dialect)?.let { add(it) }
         }
 
     override fun validateDialectProperties(properties: Map<String, Any?>): ValidationResult {
@@ -684,14 +695,49 @@ class LakeDialectAdapter(
         enumValue(properties, "catalog.kind", CATALOG_KINDS)?.let { errors += it }
         enumValue(properties, "url_style", URL_STYLES)?.let { errors += it }
         enumValue(properties, "unsigned", BOOLEAN_WORDS)?.let { errors += it }
+        enumValue(properties, "managed", BOOLEAN_WORDS)?.let { errors += it }
         limitValueError(properties)?.let { errors += it }
+        egressProxyError(properties)?.let { errors += it }
         return ValidationResult.of(errors)
     }
 
     /**
+     * #845 (D2) — [LakeHttpBounds.EGRESS_PROXY_KEY] belongs to the managed row only: configuration writes it through
+     * the registrar, and DefaultDatasourceRegistry refuses `managed` on every caller's save, so a caller can never reach
+     * an accepted proxy key. It is admitted only beside `managed: true` and a `catalog.kind` (the `SET` exists only once
+     * `httpfs` is loaded), and only in the [LakeHttpBounds.isEgressProxy] grammar.
+     */
+    private fun egressProxyError(properties: Map<String, Any?>): ValidationResult.ValidationError? {
+        val key = LakeHttpBounds.EGRESS_PROXY_KEY
+        // A blank value is the generic EMPTY rule's (DatasourceValidator, PROPERTY_EMPTY): one cause, one error.
+        val value = properties[key]?.toString()?.takeIf { it.isNotBlank() } ?: return null
+        val problem =
+            when {
+                properties["managed"]?.toString()?.lowercase() != "true" -> {
+                    "properties.dialect.$key is accepted only on the managed lake datasource (managed: true)."
+                }
+
+                properties["catalog.kind"] == null -> {
+                    "properties.dialect.$key needs properties.dialect.catalog.kind: the proxy applies to the object-store client."
+                }
+
+                !LakeHttpBounds.isEgressProxy(value) -> {
+                    "properties.dialect.$key must be host:port (letters, digits, '.', '-'; port 1-65535)."
+                }
+
+                else -> {
+                    return null
+                }
+            }
+        return ValidationResult.ValidationError(DatasourceErrorCodes.PROPERTIES_INVALID, "properties.dialect.$key", problem)
+    }
+
+    /**
      * §D's engine limits as `SET` statements, in a fixed order: `memory_limit` (explicit, or
-     * the class-KDoc default), optional `threads`, explicit or generated `temp_directory`, and
-     * `preserve_insertion_order = false` always. Every value reached here already passed
+     * the class-KDoc default), optional `threads`, explicit or generated `temp_directory`,
+     * `preserve_insertion_order = false` always, then — for a datasource with `catalog.kind`,
+     * whose engine loads `httpfs` — [LakeHttpBounds.STATEMENTS] (#818d), code constants, and then, for the managed row
+     * carrying [LakeHttpBounds.EGRESS_PROXY_KEY], the egress proxy `SET` (#845). Every value reached here already passed
      * [validateDialectProperties] at save — the memory-limit regex admits no quote, `threads`
      * is a bare integer, and `temp_directory` carries none of the refused characters — so the
      * interpolation into the two string literals cannot break out of them.
@@ -722,6 +768,15 @@ class LakeDialectAdapter(
                 }
             effectiveSpillDirectory?.let { add("SET temp_directory = '${it.replace("'", "''")}'") }
             add("SET preserve_insertion_order = false")
+            // #818d: the object-store request bounds the silent-store hygiene budget is measured from. Only where `httpfs` is
+            // loaded (the extension statements' own predicate): the settings do not exist before it.
+            if (properties["catalog.kind"] != null) {
+                addAll(LakeHttpBounds.STATEMENTS)
+                // #845: the managed row's egress proxy, after the bounds and therefore before the §15a lockdown that the
+                // managed generation runs after this init (ManagedLakeGeneration.LOCKDOWN_STATEMENTS), which refuses
+                // any later SET or RESET of it. Validation admitted the key only beside managed: true.
+                properties[LakeHttpBounds.EGRESS_PROXY_KEY]?.toString()?.let { add(LakeHttpBounds.proxyStatement(it)) }
+            }
         }
 
     /** The class KDoc's default: 25 % of the container's memory, floored and hard-capped. */
@@ -845,7 +900,7 @@ class LakeDialectAdapter(
         // which is exactly what a public object needs. `unsigned` beats every credential kind.
         if (properties["unsigned"]?.toString()?.lowercase() == "true") return null
         val region = properties["region"]?.toString()
-        val endpoint = properties["endpoint"]?.toString()
+        val endpoint = properties["endpoint"]?.toString()?.let(::s3Endpoint)
         val urlStyle = properties["url_style"]?.toString()
         val options =
             buildList {
@@ -862,13 +917,30 @@ class LakeDialectAdapter(
                     }
                 }
                 region?.let { add("REGION ${quoted(it)}") }
-                endpoint?.let { add("ENDPOINT ${quoted(it)}") }
+                endpoint?.let { add("ENDPOINT ${quoted(it.hostAndPort)}") }
                 urlStyle?.let { add("URL_STYLE ${quoted(it)}") }
-                // MinIO and most on-prem S3 endpoints are plain HTTP; a declared endpoint is a
-                // deliberate non-AWS target, so TLS is not assumed for it.
-                if (endpoint != null) add("USE_SSL false")
+                // dp-lake call 24 (#785): the endpoint's SCHEME decides TLS — `https://` → USE_SSL true,
+                // `http://` → false. A scheme-less endpoint keeps the pre-#785 reading: a declared
+                // endpoint is a deliberate non-AWS target (MinIO, on-prem), plain HTTP wherever it was
+                // registered without one. DuckDB's ENDPOINT takes host[:port], so the scheme is stripped.
+                endpoint?.let { add("USE_SSL ${it.tls}") }
             }
         return "CREATE OR REPLACE SECRET dp_lake (${options.joinToString(", ")})"
+    }
+
+    /** A LAKE `endpoint` as DuckDB's secret wants it: host[:port] plus whether TLS is on (call 24). */
+    private class S3Endpoint(
+        val hostAndPort: String,
+        val tls: Boolean,
+    )
+
+    private fun s3Endpoint(raw: String): S3Endpoint {
+        val trimmed = raw.trim()
+        return when {
+            trimmed.startsWith("https://", ignoreCase = true) -> S3Endpoint(trimmed.substring("https://".length).trimEnd('/'), tls = true)
+            trimmed.startsWith("http://", ignoreCase = true) -> S3Endpoint(trimmed.substring("http://".length).trimEnd('/'), tls = false)
+            else -> S3Endpoint(trimmed, tls = false)
+        }
     }
 
     /**
@@ -919,6 +991,12 @@ class LakeDialectAdapter(
                 "memory_limit",
                 "threads",
                 "temp_directory",
+                // #818: marks the server-owned managed lake datasource (design record §6). Accepted
+                // here so the registrar's row validates; DefaultDatasourceRegistry refuses it on
+                // every caller's save (`datasource.managed`).
+                "managed",
+                // #845: the managed row's egress proxy (host:port), accepted only beside managed: true.
+                LakeHttpBounds.EGRESS_PROXY_KEY,
             )
         val CATALOG_KINDS = setOf("s3", "glue", "s3_tables", "rest")
         val ICEBERG_KINDS = setOf("glue", "s3_tables", "rest")

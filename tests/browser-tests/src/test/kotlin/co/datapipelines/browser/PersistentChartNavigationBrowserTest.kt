@@ -2,6 +2,7 @@ package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -12,11 +13,13 @@ import java.nio.file.Paths
 class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     @Test
     @Suppress("LongMethod") // a single chart/history/zero-width journey keeps identity witnesses live
-    fun `2d and 3d workspaces versions and cached history share one bundle and retain the shell`() {
+    fun `two chart workspaces, versions and cached history share one bundle and retain the shell`() {
         val root = ready("persistcharts")
         page.setViewportSize(1440, 1000)
         val (flat, _) = createVisualization("$root/charts/flat")
-        val (surface, _) = createVisualization("$root/charts/surface", trace3d = true)
+        // #860: the second workspace is a second bar chart (the 3d surface left with the plotly kind); the shell's one
+        // bundle is still the 3d superset it loads for every chart page.
+        val (second, _) = createVisualization("$root/charts/second")
         openVisualizations(root)
         page.evaluate(
             "() => " +
@@ -29,12 +32,16 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         preview()
         page.evaluate("() => {window.__plotly=window.Plotly;window.__runtime=window.DatapipelinesDashboard}")
         sameShell()
-        // #554: the browser's End (480 at 1440) leaves main 1440 - 202 - 480; Home (240) gives the chart room back.
+        // #554: the browser's End (the range's ceiling at 1440) narrows main and the chart with it;
+        // Home (the range's floor since #784) gives the chart room back. #788: the widths derive
+        // from the range the page reports — app.css is the range's one source.
+        val range = browserRange(page)
+        val mainAtCeiling = 1440 - 202 - range.maximumAt(1440, 202)
         page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
-        page.waitForFunction("() => document.getElementById('app-main').getBoundingClientRect().width === 758")
+        page.waitForFunction("expected => document.getElementById('app-main').getBoundingClientRect().width === expected", mainAtCeiling)
         val narrow = "() => document.querySelector('[data-viz-case-index=\"0\"] .js-plotly-plot')?.getBoundingClientRect().width"
-        page.waitForFunction("() => ($narrow)() < 758")
+        page.waitForFunction("limit => ($narrow)() < limit", mainAtCeiling)
         val chart = (page.evaluate(narrow) as Number).toDouble()
         page.keyboard().press("Home")
         page.waitForFunction("chart => ($narrow)() > chart", chart)
@@ -42,8 +49,8 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.waitForURL("**/visualizations/$flat?version=1&tab=preview")
         preview()
         sameShell()
-        page.click("#nav-tree-visualizations a[href='/visualizations/$surface']")
-        page.waitForURL("**/visualizations/$surface")
+        page.click("#nav-tree-visualizations a[href='/visualizations/$second']")
+        page.waitForURL("**/visualizations/$second")
         preview()
         sameShell()
         page.evaluate("() => window.Plotly===window.__plotly && window.DatapipelinesDashboard===window.__runtime") shouldBe true
@@ -54,7 +61,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         // #581: the Visualizations item lands on the family overview (a boosted leave either way).
         page.waitForSelector(".app-overview[data-overview='visualizations']")
         page.goBack()
-        page.waitForURL("**/visualizations/$surface")
+        page.waitForURL("**/visualizations/$second")
         preview()
         sameShell()
         page.goBack()
@@ -62,7 +69,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         preview()
         sameShell()
         page.goForward()
-        page.waitForURL("**/visualizations/$surface")
+        page.waitForURL("**/visualizations/$second")
         preview()
         sameShell()
         treeRequests.size shouldBe 0
@@ -85,7 +92,11 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
         pinShellNodes()
         val requests = mutableListOf<String>()
-        page.onRequest { if (it.url().contains("/tree")) requests += it.url() }
+        // #932: count only the sidebar's REST tree reads (`/api/v1/<family>/tree` and `tree/search`), as
+        // RoleVisibilityBrowserTest does. A bare `contains("/tree")` also matched page scripts such as
+        // `/js/dependencies/tree-view.js`, which the pipeline editor's on-mount catalog fetches and then executes on
+        // its first load, so the pipelines leg counted two script loads as tree requests.
+        page.onRequest { if (it.url().contains("/api/v1/") && it.url().contains("/tree")) requests += it.url() }
         listOf("pipelines", "templates", "dashboards", "visualizations", "parameter-sets").forEach { family ->
             val panel = "#nav-tree-$family"
             openBrowserTree(family)
@@ -132,7 +143,9 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
                     "window.__familyRow===document.querySelector('#nav-tree-'+family+' [role=treeitem]')",
                 family,
             ) shouldBe true
-            requests.size shouldBe before
+            withClue("$family: tree requests added between its leaf click and the assertion: ${requests.drop(before)}") {
+                requests.size shouldBe before
+            }
         }
     }
 
@@ -465,6 +478,11 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.addInitScript(COUNT_SCRIPT_EVALUATIONS)
         page.navigate("$baseUrl/dashboards/$board")
         page.waitForFunction("() => window.__dpPage?.ready===true")
+        // #783: the board carries the bare splitter tag too; ONE arrival is ONE evaluation (its listeners install
+        // once per document, its restore and wiring run per arrival).
+        @Suppress("UNCHECKED_CAST")
+        val onBoard = page.evaluate("() => window.__dpScriptEvaluations") as Map<String, Any?>
+        (onBoard["/js/splitter.js"] as Number?)?.toInt() shouldBe 1
         inShell("/parameter-sets/$parameterSet")
         parameterWorkspaceActive()
         inShell("/pipelines/$pipeline")
@@ -568,8 +586,8 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     private companion object {
         /**
          * Bare `<script>` tags outside every page-asset catalog, which re-run on each arrival and cached restore of
-         * their page: only the editor's parser-blocking splitter. It sizes the dock before the first paint,
-         * so it cannot wait for a loader.
+         * their page: only the parser-blocking splitter, carried by the pipeline editor, the schedules explorer and
+         * (#783) the dashboard board. It restores the pane sizes before the first paint, so it cannot wait for a loader.
          */
         val BARE_PER_ARRIVAL =
             setOf(

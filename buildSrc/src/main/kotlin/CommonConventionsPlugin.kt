@@ -7,8 +7,14 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.artifacts.dsl.LockMode
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileCollection
 import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.provider.ListProperty
+import org.gradle.api.provider.Provider
+import org.gradle.api.provider.ValueSource
+import org.gradle.api.provider.ValueSourceParameters
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.kotlin.dsl.configure
@@ -19,6 +25,7 @@ import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
+import org.jlleitschuh.gradle.ktlint.tasks.BaseKtLintCheckTask
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -57,7 +64,7 @@ import java.util.zip.ZipFile
  *
  * Deviations from the §7.1 sketch, both deliberate and both reported at P0:
  *  - `-Xcontext-receivers` is NOT set. The flag was removed from the Kotlin
- *    compiler in 2.2; on the pinned 2.4.10 it is a hard error, and with
+ *    compiler in 2.2; on the pinned 2.4.21 it is a hard error, and with
  *    `allWarningsAsErrors` there is no soft-landing. Context parameters
  *    (`-Xcontext-parameters`) are the successor, and nothing in v1 needs them
  *    yet, so no replacement flag is set.
@@ -67,6 +74,10 @@ import java.util.zip.ZipFile
  *    platform lets the Kotlin plugin's newer stdlib win over the BOM's 1.9.25.
  */
 class CommonConventionsPlugin : Plugin<Project> {
+    // The convention script: one block per convention, in the order the plugins it configures are
+    // applied. Its length and branch count are the number of conventions; #724 lints buildSrc
+    // without restructuring it.
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     override fun apply(project: Project) {
         project.plugins.apply("org.jetbrains.kotlin.jvm")
         // kotlin-spring (allopen): opens @Component/@Configuration/@Transactional
@@ -78,9 +89,11 @@ class CommonConventionsPlugin : Plugin<Project> {
         project.plugins.apply("org.jetbrains.kotlinx.kover")
 
         val libs = project.extensions.getByType<VersionCatalogsExtension>().named("libs")
-        fun lib(alias: String) = libs.findLibrary(alias).orElseThrow {
-            IllegalStateException("Version catalog alias '$alias' is missing from gradle/libs.versions.toml")
-        }
+
+        fun lib(alias: String) =
+            libs.findLibrary(alias).orElseThrow {
+                IllegalStateException("Version catalog alias '$alias' is missing from gradle/libs.versions.toml")
+            }
 
         project.extensions.configure<JavaPluginExtension> {
             sourceCompatibility = JavaVersion.VERSION_21
@@ -142,7 +155,16 @@ class CommonConventionsPlugin : Plugin<Project> {
                     }
                 }
             }
-
+            // SECURITY OVERRIDE (2026-11-02, GHSA-gwq9-9ffj-mvrv / GHSA-q233-g92q-qxp6 /
+            // GHSA-xqrx-qh46-34m7): snappy-java < 1.1.10.9 arrives through the lake graph
+            // (parquet-hadoop, avro, hadoop-client-*) with no BOM of its own; held by the
+            // same constraint mechanism. Rationale + retirement condition on the `snappy`
+            // entry in libs.versions.toml.
+            for (configuration in listOf("implementation", "testImplementation")) {
+                constraints.add(configuration, lib("snappy-java")) {
+                    because("GHSA-gwq9-9ffj-mvrv / GHSA-q233-g92q-qxp6 / GHSA-xqrx-qh46-34m7: snappy-java < 1.1.10.9")
+                }
+            }
 
             add("testImplementation", lib("junit-jupiter"))
             add("testImplementation", lib("mockk"))
@@ -182,6 +204,30 @@ class CommonConventionsPlugin : Plugin<Project> {
             }
         }
 
+        // A ktlint check task's stored output is not a function of its inputs (#689): on a
+        // REMOVED-only source change the plugin's incremental path finds no files to lint,
+        // returns before rewriting `discoveredErrors`, and Gradle stores the UNTOUCHED
+        // previous output under the new tree's cache key — so another checkout with the
+        // same relative sources is served findings named by THIS checkout's absolute
+        // paths (reproduced 2026-10-24: a clean tree failed lint on a scratch test it
+        // never contained). Keep worker outputs out of the build cache. Up-to-date and
+        // modified-only incremental behavior remain; source removals are handled below (#703).
+        // The reports half (`ktlint*Check`, GenerateReportsTask) stays cacheable by the
+        // contents of `discoveredErrors`; it cannot repair stale upstream findings.
+        project.tasks.withType<BaseKtLintCheckTask>().configureEach {
+            outputs.cacheIf(UNCACHEABLE_LINT_FINDINGS) { false }
+            // BaseKtLintCheckTask.getChangedSources drops REMOVED files, and runLint's
+            // empty-set skip leaves discoveredErrors untouched (ktlint-gradle 14.2.0).
+            // A lazy, non-file input invalidates incremental history when membership
+            // changes: Gradle then reports every current source as ADDED (#703).
+            // Content-only edits keep this inventory stable and lint incrementally.
+            val projectDirectory = project.layout.projectDirectory.asFile
+            inputs.property(
+                KTLINT_SOURCE_INVENTORY,
+                project.provider { source.files.map { it.relativeTo(projectDirectory).invariantSeparatorsPath }.sorted() },
+            )
+        }
+
         project.extensions.configure<DetektExtension> {
             buildUponDefaultConfig = true
             allRules = false
@@ -208,7 +254,11 @@ class CommonConventionsPlugin : Plugin<Project> {
             // build script AFTER this (tests/integration-tests: 6g; the two Testcontainers
             // suites: dp.test.forks.e2e). Providers, so a -P override is a tracked input.
             maxParallelForks =
-                project.providers.gradleProperty("dp.test.forks").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                project.providers
+                    .gradleProperty("dp.test.forks")
+                    .orNull
+                    ?.toIntOrNull()
+                    ?.coerceAtLeast(1) ?: 1
             maxHeapSize = project.providers.gradleProperty("dp.test.heap").orNull ?: "1g"
             // Order-shuffle verification (round 060 §A): `./gradlew :m:test
             // -Pjunit.jupiter.testmethod.order.default=org.junit.jupiter.api.MethodOrderer$Random
@@ -224,16 +274,73 @@ class CommonConventionsPlugin : Plugin<Project> {
                 "junit.jupiter.execution.order.random.seed",
                 "versionLifecycle.sequences",
             ).forEach { key ->
-                project.providers.gradleProperty(key).orNull?.let { value -> systemProperty(key, value) }
+                project.providers
+                    .gradleProperty(key)
+                    .orNull
+                    ?.let { value -> systemProperty(key, value) }
+            }
+            // A test JVM that HotSpot itself kills writes its error report into this task's
+            // build/hs_err/ (#685, DEVELOPMENT.md §9.4), where CI's gate-reports artifact keeps
+            // it; HotSpot's default is the JVM's cwd (the module directory), which nothing
+            // collects. ErrorFile ALONE: -XX:+ErrorFileToStderr would send the report to stderr
+            // INSTEAD of the file (measured on 21.0.12, #685 evidence 01). A provider with no
+            // annotated property: the absolute path is resolved at execution and is not a task
+            // input. HotSpot does not create a missing directory, so doFirst does.
+            val crashFileDirectory = project.layout.buildDirectory.dir("hs_err")
+            jvmArgumentProviders.add(
+                object : org.gradle.process.CommandLineArgumentProvider {
+                    override fun asArguments(): Iterable<String> {
+                        val report =
+                            crashFileDirectory
+                                .get()
+                                .asFile
+                                .resolve("hs_err_pid%p.log")
+                        return listOf("-XX:ErrorFile=" + report.path)
+                    }
+                },
+            )
+            doFirst { crashFileDirectory.get().asFile.mkdirs() }
+            // glibc's thread-stack cache is OFF in every test JVM (#685, DEVELOPMENT.md §9.4).
+            // Syscall captures showed isolate threads leaving a protected page inside a stack
+            // later reused by a Java thread; recursion faulted there with exit 139 and no
+            // HotSpot report. Disabling reuse removed the measured failure without JSONata
+            // changes. The attached-thread layout and signal-frame explanation is inferred.
+            // Uncached, every thread gets a fresh mapping. Set at
+            // execution, keeping any other tunable the environment already carries.
+            doFirst {
+                val stackCache = "glibc.pthread.stack_cache_size="
+                val kept =
+                    environment["GLIBC_TUNABLES"]
+                        ?.toString()
+                        .orEmpty()
+                        .split(':')
+                        .filter { it.isNotBlank() && !it.startsWith(stackCache) }
+                environment("GLIBC_TUNABLES", (kept + (stackCache + "0")).joinToString(":"))
             }
             // If the platform discovers no tests at all, that is a broken test setup,
             // not a pass. Guards the "engine found nothing" half of the false-green.
             failOnNoDiscoveredTests.set(true)
-            // The pregate runs with --build-cache (#480, DEVELOPMENT.md §9.4): compile and lint
-            // outputs may come from the cache, a test verdict never does. A cached test task
+            // The pregate runs with --build-cache (#480, DEVELOPMENT.md §9.4): compile and
+            // detekt outputs may come from the cache, a test verdict or a ktlint worker output
+            // never does (#689). A cached test task
             // would also leave the pregate without the fresh stage-2 evidence its guard
             // coverage requires (scripts/pregate-results-lib.sh pgres::guards_covered).
             outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
+            // The repository tree is an input of EVERY test task (#718, DEVELOPMENT.md §9.4).
+            // Spec-drift and source-scan guards open repo files by walking up to
+            // settings.gradle.kts — docs, the chart, scripts, the Dockerfile, other modules'
+            // source TEXT, and in two scanners every tracked file — none of which is on the
+            // test classpath. Undeclared, a docs-, chart- or comment-only edit left those
+            // guards UP-TO-DATE and their previous verdict reported as this run's (#712).
+            // RELATIVE: content and repo-relative path count, never the checkout's location
+            // or an mtime. See RepoTestInputs for what is excluded and why.
+            inputs
+                .files(RepoTestInputs.files(project))
+                .withPathSensitivity(PathSensitivity.RELATIVE)
+                .withPropertyName(RepoTestInputs.PROPERTY)
+            // The NAMES of the paths a guard asserts absent that the exclusions above hide (#728):
+            // creating or removing one re-runs the guard; its content is never read.
+            inputs.property(RepoTestInputs.EXISTENCE_PROPERTY, RepoTestInputs.existing(project))
             // The ONE-TestEngine rule (see this class's KDoc) enforced instead of merely
             // written down. `classpath` is this task's own input, so reading it here is
             // configuration-cache safe.
@@ -368,43 +475,54 @@ class CommonConventionsPlugin : Plugin<Project> {
     private fun registerZeroTestGuard(project: Project) {
         // Values are resolved at configuration time: the task action must not reach
         // back into the project (configuration-cache safe).
-        val testSourceDir = project.layout.projectDirectory.dir("src/test/kotlin").asFile
-        val resultsDir = project.layout.buildDirectory.dir("test-results/test").get().asFile
+        val testSourceDir =
+            project.layout.projectDirectory
+                .dir("src/test/kotlin")
+                .asFile
+        val resultsDir =
+            project.layout.buildDirectory
+                .dir("test-results/test")
+                .get()
+                .asFile
         val modulePath = project.path
 
-        val guard = project.tasks.register("verifyTestsExecuted") {
-            group = "verification"
-            description = "Fails if this module produced fewer test result files than it has test sources."
-            dependsOn(project.tasks.named("test"))
-            // No declared outputs, so Gradle would not cache it today; explicit so that a
-            // future output declaration cannot turn this run's count into a cached one (#480).
-            outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
-            doLast {
-                val sourceCount = testSourceDir.walkTopDown()
-                    .count { it.isFile && it.name.endsWith("Test.kt") }
-                if (sourceCount == 0) return@doLast
+        val guard =
+            project.tasks.register("verifyTestsExecuted") {
+                group = "verification"
+                description = "Fails if this module produced fewer test result files than it has test sources."
+                dependsOn(project.tasks.named("test"))
+                // No declared outputs, so Gradle would not cache it today; explicit so that a
+                // future output declaration cannot turn this run's count into a cached one (#480).
+                outputs.cacheIf(UNCACHEABLE_VERDICT) { false }
+                doLast {
+                    val sourceCount =
+                        testSourceDir
+                            .walkTopDown()
+                            .count { it.isFile && it.name.endsWith("Test.kt") }
+                    if (sourceCount == 0) return@doLast
 
-                val resultCount = resultsDir
-                    .listFiles { f -> f.isFile && f.name.startsWith("TEST-") && f.name.endsWith(".xml") }
-                    ?.size ?: 0
+                    val resultCount =
+                        resultsDir
+                            .listFiles { f -> f.isFile && f.name.startsWith("TEST-") && f.name.endsWith(".xml") }
+                            ?.size ?: 0
 
-                // `<` not `!=`: @Nested / parameterised suites legitimately emit MORE
-                // result files than source files. Fewer means a class silently vanished.
-                if (resultCount < sourceCount) {
-                    throw GradleException(
-                        "$modulePath produced $resultCount test result file(s) for $sourceCount test " +
-                            "source file(s) in $resultsDir. The build would otherwise have reported " +
-                            "success while silently skipping tests. " +
-                            "A FILTERED run (--tests …) ALWAYS fails this guard, by design — it ran " +
-                            "fewer classes than the module has, which is exactly what this counts. " +
-                            "That is not a red suite: read the XML in $resultsDir (or run " +
-                            "./scripts/test-recount.sh) for the verdict. " +
-                            "On an UNFILTERED run: re-run with --rerun-tasks; if it persists, the test " +
-                            "task is being skipped as NO-SOURCE, or a test class died without reporting.",
-                    )
+                    // `<` not `!=`: @Nested / parameterised suites legitimately emit MORE
+                    // result files than source files. Fewer means a class silently vanished.
+                    if (resultCount < sourceCount) {
+                        throw GradleException(
+                            "$modulePath produced $resultCount test result file(s) for $sourceCount test " +
+                                "source file(s) in $resultsDir. The build would otherwise have reported " +
+                                "success while silently skipping tests. " +
+                                "A FILTERED run (--tests …) ALWAYS fails this guard, by design — it ran " +
+                                "fewer classes than the module has, which is exactly what this counts. " +
+                                "That is not a red suite: read the XML in $resultsDir (or run " +
+                                "./scripts/test-recount.sh) for the verdict. " +
+                                "On an UNFILTERED run: re-run with --rerun-tasks; if it persists, the test " +
+                                "task is being skipped as NO-SOURCE, or a test class died without reporting.",
+                        )
+                    }
                 }
             }
-        }
 
         project.tasks.named("check").configure { dependsOn(guard) }
         // Also finalize `test` itself, not just `check`. Running `gradlew :m:test`
@@ -419,10 +537,19 @@ class CommonConventionsPlugin : Plugin<Project> {
     private companion object {
         const val JDK_VERSION = 21
         const val KTLINT_VERSION = "1.8.0"
+        const val KTLINT_SOURCE_INVENTORY = "ktlintSourceInventory"
 
         /** The reason Gradle logs (--info) for every task kept out of the build cache (#480). */
         const val UNCACHEABLE_VERDICT =
             "test, coverage and guard verdicts run fresh in every build; the pregate refuses cached test evidence (#480)"
+
+        /**
+         * The reason Gradle logs (--info) for every ktlint check task kept out of the build
+         * cache (#689): the task's stored output is the last incremental execution's, not a
+         * function of its inputs, so a cache hit can name another checkout's files.
+         */
+        const val UNCACHEABLE_LINT_FINDINGS =
+            "ktlint worker outputs stay out of the build cache; stored findings reflect incremental history, not only the inputs (#689)"
 
         /** Every Kover 0.9.x task class lives under this package (reports, verify, agent, artifact). */
         const val KOVER_TASK_PACKAGE = "kotlinx.kover.gradle.plugin.tasks."
@@ -436,43 +563,50 @@ class CommonConventionsPlugin : Plugin<Project> {
          * catch regressions; they do not demand new tests. Raise a floor only when
          * the module's coverage has genuinely improved.
          */
-        val COVERAGE_FLOORS: Map<String, Int> = mapOf(
-            ":modules:typesystem" to 96,
-            // #194: measured baseline 100.0 on the module's first Kover run (DagTest moved with Dag.kt), minus 2.
-            ":modules:graph" to 98,
-            // #266: measured baseline 97.27 on the module's first Kover run (30 tests), minus 2, floored.
-            ":modules:persistence" to 95,
-            // 072: measured baseline 95.9 on the module's first Kover run, minus 2, floored.
-            ":modules:calculators" to 93,
-            // 7a: measured baseline 91.4 on the module's first Kover run, minus 2, floored.
-            ":modules:scripting" to 89,
-            ":modules:pipeline-contract" to 94,
-            ":modules:templates" to 91,
-            ":modules:datasources" to 94,
-            ":modules:staging" to 93,
-            ":modules:auth" to 95,
-            // #9 scheduler lane 1: measured baseline 93.4 on the module's first Kover run, minus 2, floored.
-            ":modules:scheduler" to 91,
-            // 056: measured baseline 86.1 on the module's first Kover run, minus 2, floored.
-            // 083 §D: re-measured at 96.9 after the three JDBC classes here got direct tests —
-            // they were exercised only by the WEB module's suite, so this module earned no
-            // coverage for its own code and sat at 84.9 against 84, a margin thin enough that
-            // the next class added here would have tripped someone else's gate. The structural
-            // cause is fixed, so the floor follows the house rule again: baseline minus 2.
-            ":modules:application" to 94,
-            // #194: Dag.kt (100% covered) moved to graph; the lane measured 90.19 on the module after the move, minus 2
-            // (the house rule) — 90 left a 0.19-point margin a CI runner's coverage could fall under (MISTAKES: the race floor).
-            ":modules:dag" to 88,
-            // #194 lane B: measured baseline 95.71 on the module as delivered (A.1's 91.18 measured the model alone),
-            // minus 2, floored. The container suite (the repository and the lifecycle) carries a third of the lines.
-            ":modules:parameters" to 93,
-            // #10 L1a (dashboard implementation spec §1, §17): 90 until the first measured baseline; the
-            // orchestrator sets baseline minus 2 at the merge (the house rule).
-            ":modules:visualization" to 94,
-            ":modules:mcp-server" to 94,
-            ":modules:web" to 72,
-            ":modules:app" to 90,
-        )
+        val COVERAGE_FLOORS: Map<String, Int> =
+            mapOf(
+                ":modules:typesystem" to 96,
+                // #194: measured baseline 100.0 on the module's first Kover run (DagTest moved with Dag.kt), minus 2.
+                ":modules:graph" to 98,
+                // #868 G1: measured 98.46% line (2026-11-10, lane 868) minus 2, rounded down.
+                ":modules:dependency-contract" to 96,
+                // #266: measured baseline 97.27 on the module's first Kover run (30 tests), minus 2, floored.
+                ":modules:persistence" to 95,
+                // #756: measured baseline 90.91 (20/22 lines) on the module's first Kover run (6 tests), minus 2, floored.
+                ":modules:log-capture" to 88,
+                // 072: measured baseline 95.9 on the module's first Kover run, minus 2, floored.
+                ":modules:calculators" to 93,
+                // 7a: measured baseline 91.4 on the module's first Kover run, minus 2, floored.
+                ":modules:scripting" to 89,
+                ":modules:pipeline-contract" to 94,
+                ":modules:templates" to 91,
+                ":modules:datasources" to 94,
+                ":modules:staging" to 93,
+                ":modules:auth" to 95,
+                // #9 scheduler lane 1: measured baseline 93.4 on the module's first Kover run, minus 2, floored.
+                ":modules:scheduler" to 91,
+                // 056: measured baseline 86.1 on the module's first Kover run, minus 2, floored.
+                // 083 §D: re-measured at 96.9 after the three JDBC classes here got direct tests —
+                // they were exercised only by the WEB module's suite, so this module earned no
+                // coverage for its own code and sat at 84.9 against 84, a margin thin enough that
+                // the next class added here would have tripped someone else's gate. The structural
+                // cause is fixed, so the floor follows the house rule again: baseline minus 2.
+                ":modules:application" to 94,
+                // #194: Dag.kt (100% covered) moved to graph; the lane measured 90.19 on the module after the move, minus 2
+                // (the house rule) — 90 left a 0.19-point margin a CI runner's coverage could fall under (MISTAKES: the race floor).
+                ":modules:dag" to 88,
+                // #194 lane B: measured baseline 95.71 on the module as delivered (A.1's 91.18 measured the model alone),
+                // minus 2, floored. The container suite (the repository and the lifecycle) carries a third of the lines.
+                ":modules:parameters" to 93,
+                // #10 L1a (dashboard implementation spec §1, §17): 90 until the first measured baseline; the
+                // orchestrator sets baseline minus 2 at the merge (the house rule).
+                ":modules:visualization" to 94,
+                // #785 dp-lake P2: measured baseline 96.03 (339/353) at the pregate of a4dadf111 (54 tests), minus 2, floored.
+                ":modules:lake" to 94,
+                ":modules:mcp-server" to 94,
+                ":modules:web" to 72,
+                ":modules:app" to 90,
+            )
 
         /**
          * Modules with NO line-coverage floor, each with its reason — the same
@@ -481,15 +615,172 @@ class CommonConventionsPlugin : Plugin<Project> {
          * fails configuration, so the next module (or a renamed one) can never
          * silently escape the floors and the aggregate report.
          */
-        val NO_COVERAGE_FLOOR_ALLOWLIST: Set<String> = setOf(
-            // No main sources of its own — nothing to measure. (2026-08-15)
-            ":tests:integration-tests",
-            // Same reason as integration-tests, plus: pulling Playwright's browser
-            // launch into the Kover-instrumented unit graph would defeat the suite's
-            // deliberate separate invocation (module-structure §5.12). (2026-09-03)
-            ":tests:browser-tests",
+        val NO_COVERAGE_FLOOR_ALLOWLIST: Set<String> =
+            setOf(
+                // No main sources of its own — nothing to measure. (2026-08-15)
+                ":tests:integration-tests",
+                // Same reason as integration-tests, plus: pulling Playwright's browser
+                // launch into the Kover-instrumented unit graph would defeat the suite's
+                // deliberate separate invocation (module-structure §5.12). (2026-09-03)
+                ":tests:browser-tests",
+            )
+    }
+}
+
+/**
+ * The repository files every [Test] task declares as inputs (#718): the whole checkout,
+ * minus what is not repository content.
+ *
+ * Why the whole tree and not a list: the inventory at 9fcc1fb08 (lane 718's evidence) found
+ * tests across projects reading files outside their own classpath —
+ * docs, the Helm chart, compose and env files, scripts, the Dockerfile, the version catalog,
+ * the plugin mirror, other modules' Kotlin source as text (a comment-only edit changes no
+ * bytecode, so the classpath cannot see it) — and two scanners reading every tracked file.
+ * A per-module or per-directory list would need a guard proving each read is declared; the
+ * tree has nothing to forget (owner ruling 2026-10-25, over the brief's narrower list). The
+ * accepted cost: any edit re-runs every test task a build invokes, by design.
+ *
+ * [EXCLUDES] mirrors `.gitignore` (what git does not track is not repository content) plus
+ * Git's own directory and the wrapper's root `gate.log`. [RepoTestInputsTest] fails when a
+ * `.gitignore` entry is added without its mirror here. Two kinds of entry matter beyond speed:
+ *  - local data and state: the sample-data work directories hold gigabytes of Parquet,
+ *    and the pregate writes its logs inside the checkout while its own build runs;
+ *  - secrets: `deploy/secrets.env` and every other secret-shaped file `.gitignore` names
+ *    never enter Gradle's task history, not even as a content hash.
+ * [REINCLUDES] mirrors the `.gitignore` negations that name tracked content a test reads
+ * (`deploy/secrets.env.example`, the committed template — never a secret).
+ *
+ * The one thing a guard can do with an excluded path without reading it is assert that it does
+ * NOT exist (#728): creating `deploy/env/secrets.env.example` after a green run changes no
+ * declared input, so the guard stays UP-TO-DATE and the stale verdict stands. [EXISTENCE_ONLY]
+ * names such paths (a committed literal list, as [REINCLUDES] is) and [existing] feeds the
+ * subset that exists to the input [EXISTENCE_PROPERTY]: names only, never a hash, a size or a
+ * timestamp, so a content-only edit of an excluded secret still re-runs nothing.
+ * [RepoTestInputsTest] keeps the list in step with the negative-existence assertions the
+ * module and integration test sources make. That scan reads source text: it cannot see a path
+ * built at runtime, or one relative to a variable directory.
+ */
+internal object RepoTestInputs {
+    /** The input property name Gradle prints for these files in `--info` and in build scans. */
+    const val PROPERTY = "repoFilesReadByTests"
+
+    /** Ant patterns relative to the repo root; each line names the `.gitignore` entry it mirrors. */
+    val EXCLUDES: List<String> =
+        listOf(
+            // Git's own store (a directory in the main checkout, a file in a linked worktree).
+            ".git",
+            ".git/**",
+            // build/ and **/build/, buildSrc/build/, .gradle/, buildSrc/.gradle/, .gradle-docker/, .kotlin/, out/
+            "**/build/**",
+            "**/.gradle/**",
+            "**/.gradle-docker/**",
+            "**/.kotlin/**",
+            "**/out/**",
+            // The lander wrapper's root gate.log, plus .gate-logs/, gate-logs/, .pregate-logs/, .tools/
+            "gate.log",
+            "**/.gate-logs/**",
+            "**/gate-logs/**",
+            "**/.pregate-logs/**",
+            "**/.tools/**",
+            // the three sample-data work directories (downloaded sources and built dumps)
+            "scripts/sample-data/work/**",
+            "scripts/sample-data-trade/work/**",
+            "scripts/sample-data-lake/work/**",
+            // .claude/* (agent state, lane worktrees), .worktrees/, .kimi-code/, orchestration/
+            ".claude/**",
+            "**/.worktrees/**",
+            "**/.kimi-code/**",
+            "**/orchestration/**",
+            // .idea/, *.iml, *.ipr, *.iws, .vscode/, *.swp, .DS_Store, .playwright-mcp/, /*.png
+            "**/.idea/**",
+            "**/*.iml",
+            "**/*.ipr",
+            "**/*.iws",
+            "**/.vscode/**",
+            "**/*.swp",
+            "**/.DS_Store",
+            "**/.playwright-mcp/**",
+            "*.png",
+            // hs_err_pid*.log, replay_pid*.log, *.hprof, lib/*.jar
+            "**/hs_err_pid*.log",
+            "**/replay_pid*.log",
+            "**/*.hprof",
+            "lib/*.jar",
+            // secrets: .env, .env.*, *.key, *.pem, *.p8, *.jks, *.p12, *.pfx, *.keystore,
+            // *.truststore, credentials.*, secrets.* (deploy/secrets.env among them)
+            "**/.env",
+            "**/.env.*",
+            "**/*.key",
+            "**/*.pem",
+            "**/*.p8",
+            "**/*.jks",
+            "**/*.p12",
+            "**/*.pfx",
+            "**/*.keystore",
+            "**/*.truststore",
+            "**/credentials.*",
+            "**/secrets.*",
+        )
+
+    /**
+     * Tracked files an exclusion above would hide, as literal repo-relative FILE paths (never
+     * patterns: an empty include pattern set matches the whole tree); each mirrors a
+     * `.gitignore` negation.
+     */
+    val REINCLUDES: List<String> = listOf("deploy/secrets.env.example")
+
+    /** The input property name Gradle prints for the existence-only paths. */
+    const val EXISTENCE_PROPERTY = "repoPathsCheckedForExistence"
+
+    /**
+     * Repo-relative FILE paths a guard asserts ABSENT that an [EXCLUDES] pattern hides; names only.
+     * Each must match an exclusion (otherwise the tree input already sees it) and must not be a
+     * [REINCLUDES] entry.
+     */
+    val EXISTENCE_ONLY: List<String> =
+        listOf(
+            // PostureDefaultsSpecDriftTest: 081 retired it; the committed template is deploy/secrets.env.example.
+            "deploy/env/secrets.env.example",
+        )
+
+    /**
+     * The [EXISTENCE_ONLY] paths that exist right now, as names. A [ValueSource], so the answer is
+     * re-asked on every build under the configuration cache instead of frozen when it was stored.
+     */
+    fun existing(project: Project): Provider<List<String>> =
+        project.providers.of(ExistingRepoPaths::class.java) {
+            parameters.root.set(project.rootProject.layout.projectDirectory)
+            parameters.paths.set(EXISTENCE_ONLY)
+        }
+
+    /** Lazy: nothing is walked until Gradle fingerprints the task's inputs. */
+    fun files(project: Project): FileCollection {
+        val root = project.rootProject.layout.projectDirectory
+        return project.files(
+            root.asFileTree.matching { exclude(EXCLUDES) },
+            REINCLUDES.map { root.file(it) },
         )
     }
+}
+
+/**
+ * Which of [ExistingRepoPaths.Parameters.paths] exist under [ExistingRepoPaths.Parameters.root].
+ * Existence only: no content, size or timestamp is read (#728).
+ */
+internal abstract class ExistingRepoPaths : ValueSource<List<String>, ExistingRepoPaths.Parameters> {
+    interface Parameters : ValueSourceParameters {
+        val root: DirectoryProperty
+        val paths: ListProperty<String>
+    }
+
+    override fun obtain(): List<String> =
+        parameters.paths.get().filter {
+            parameters.root
+                .get()
+                .file(it)
+                .asFile
+                .exists()
+        }
 }
 
 /** The JUnit Platform's engine service descriptor, one per providing artifact. */
@@ -548,19 +839,29 @@ private fun declaredTestEngines(classpath: FileCollection): Map<String, String> 
         .forEach { found.putIfAbsent(it, source) }
 
     classpath.files.forEach { entry ->
-        when {
-            entry.isDirectory ->
-                File(entry, TEST_ENGINE_SERVICE)
-                    .takeIf { it.isFile }
-                    ?.let { record(it.readLines(), entry.name) }
-
-            entry.isFile && entry.name.endsWith(".jar") ->
-                ZipFile(entry).use { jar ->
-                    jar.getEntry(TEST_ENGINE_SERVICE)?.let { service ->
-                        record(jar.getInputStream(service).bufferedReader().readLines(), entry.name)
-                    }
-                }
-        }
+        testEngineServiceLines(entry)?.let { record(it, entry.name) }
     }
     return found
 }
+
+/** The engine service file's lines in a classpath directory or jar; null when the entry has none. */
+private fun testEngineServiceLines(entry: File): List<String>? =
+    when {
+        entry.isDirectory -> {
+            File(entry, TEST_ENGINE_SERVICE)
+                .takeIf { it.isFile }
+                ?.readLines()
+        }
+
+        entry.isFile && entry.name.endsWith(".jar") -> {
+            ZipFile(entry).use { jar ->
+                jar.getEntry(TEST_ENGINE_SERVICE)?.let { service ->
+                    jar.getInputStream(service).bufferedReader().readLines()
+                }
+            }
+        }
+
+        else -> {
+            null
+        }
+    }

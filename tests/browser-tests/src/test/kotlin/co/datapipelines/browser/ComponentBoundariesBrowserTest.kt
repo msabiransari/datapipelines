@@ -22,8 +22,8 @@ import java.nio.file.Paths
  * emulated dark preference — its dark half renders only there), every row's computed border colour and width, the
  * surface painted INSIDE the component and the surface painted OUTSIDE it (its parent, or the named element behind an
  * overlay), composited bottom-up through translucent layers on a 1×1 canvas (DangerInkContrastBrowserTest's method,
- * copied: this is its only other user). Each ratio must reach the row's floor, except a design-system token pair the
- * vendored audit does not cover, listed in [GAPS] with its follow-up issue — and a listed pair that now passes is red,
+ * copied: this is its only other user). Each ratio must reach the row's floor, except a regression explicitly
+ * listed in [GAPS] with its follow-up issue — and a listed pair that now passes is red,
  * so the list cannot outlive its reason. The full table lands in `build/reports/609-component-boundaries/`.
  */
 class ComponentBoundariesBrowserTest : VisualizationBrowserSuite() {
@@ -49,7 +49,7 @@ class ComponentBoundariesBrowserTest : VisualizationBrowserSuite() {
             )
     }
 
-    /** A vendored token pair below a floor on named themes, tracked by [issue] (the design system audits only surface-default). */
+    /** A vendored token pair below a floor on named themes, tracked by [issue] if a future regression needs an exception. */
     private data class Gap(
         val role: String,
         val surface: String,
@@ -100,6 +100,8 @@ class ComponentBoundariesBrowserTest : VisualizationBrowserSuite() {
             listOf(
                 Edge("dock pane", ".dp-board-dock", BOUNDARY, BOUNDARY_FLOOR),
                 Edge("refresh row", "#dp-board-dock-pane-history .dp-refreshes-row", SEPARATOR, SEPARATOR_FLOOR),
+                // #783: the board dock's grip is the shared splitter's, measured like the editor's.
+                Edge("dock grip", ".dp-board-dock-splitter", BOUNDARY, NO_FLOOR, width = null, kind = "grip", outside = ".dp-board-dock"),
             ),
         )
     }
@@ -227,14 +229,14 @@ class ComponentBoundariesBrowserTest : VisualizationBrowserSuite() {
             api(
                 "POST",
                 "/api/v1/visualizations/$id/tests/sessions/$sessionId/results",
-                """{"cases":[{"name":"two series","verdict":"green"},{"name":"empty","verdict":"green"}],
+                """{"cases":[{"name":"three months","verdict":"green"},{"name":"empty","verdict":"green"}],
                    "environment":{"browser":"chromium (playwright)","theme":"light","viewport":"1440x900"}}""",
             )
         val runId = submitted.at("data", "run_id") as String
         val upload = submitted.at("data", "upload") as Map<*, *>
         val stored =
             page.request().post(
-                "$baseUrl${upload["url"]}?case=two%20series",
+                "$baseUrl${upload["url"]}?case=${ChartBrowserFixtures.WORKSPACE_DATA_CASE.replace(" ", "%20")}",
                 RequestOptions
                     .create()
                     .setHeader(upload["header"] as String, upload["token"] as String)
@@ -427,22 +429,9 @@ class ComponentBoundariesBrowserTest : VisualizationBrowserSuite() {
         const val MIN_THEMES = 9
         const val EDITOR_WIDTH = 1440
         const val EDITOR_HEIGHT = 900
-        const val TOKEN_PAIRS_ISSUE = 628
 
-        /** The light themes whose page is darker than their default surface (minimal's is one colour). */
-        val DARKER_PAGE = setOf("light", "auto", "forest", "healthcare", "ocean", "professional", "saas")
-
-        /**
-         * Vendored pairs measured below their floor after #609's re-tokening (#628: the design system audits surface-default
-         * only). Every boundary that fails here fails on its OUTSIDE surface; the separators on inset fail on their inside.
-         */
-        val GAPS =
-            listOf(
-                Gap(BOUNDARY, "--surface-page", DARKER_PAGE, TOKEN_PAIRS_ISSUE),
-                Gap(BOUNDARY, "--surface-hover", DARKER_PAGE + setOf("dark", "auto(dark)"), TOKEN_PAIRS_ISSUE),
-                Gap(SEPARATOR, "--surface-page", DARKER_PAGE, TOKEN_PAIRS_ISSUE),
-                Gap(SEPARATOR, "--surface-inset", DARKER_PAGE + "minimal", TOKEN_PAIRS_ISSUE),
-            )
+        /** Empty since design-tokens 0.5.0 (#628); a listed pair that passes must still fail the sweep. */
+        val GAPS: List<Gap> = emptyList()
 
         /** ShellSurfacesBrowserTest's swap: REPLACE the theme link and wait for its own load. */
         val SWAP_THEME =

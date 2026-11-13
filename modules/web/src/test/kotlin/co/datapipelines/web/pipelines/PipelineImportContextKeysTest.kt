@@ -38,7 +38,15 @@ import java.util.UUID
  */
 class PipelineImportContextKeysTest {
     private val pipelines = mockk<PipelineRepository>(relaxed = true)
-    private val validator = mockk<PipelineValidator>()
+
+    init {
+        every { pipelines.recordManagedLakeWrites(any(), any(), any(), any(), any()) } returns 1
+    }
+
+    private val validator =
+        mockk<PipelineValidator>().also {
+            every { it.writesManagedLake(any(), any()) } returns false
+        }
     private val workspaceId = UUID.randomUUID()
     private val actorId = UUID.randomUUID()
 

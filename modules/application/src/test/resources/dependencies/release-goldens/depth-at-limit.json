@@ -1,0 +1,577 @@
+{
+  "case" : "depth-at-limit",
+  "bounds" : {
+    "max_depth" : 32,
+    "max_versions" : 1024,
+    "max_edges" : 4096,
+    "max_blockers" : 100,
+    "max_wire_bytes" : 1048576
+  },
+  "outcome" : "closure",
+  "nodes" : [
+    {
+      "node_id" : "n0",
+      "family" : "pipeline",
+      "entity_id" : "orders",
+      "version" : 1,
+      "name" : "acme/orders",
+      "status" : "DRAFT",
+      "body_hash" : "hash-pipeline-orders-1",
+      "current_version" : null,
+      "entity_uuid" : "aacb0166-8bcd-3d8e-906a-bf1e16f67daf"
+    },
+    {
+      "node_id" : "n1",
+      "family" : "template",
+      "entity_id" : "c1",
+      "version" : 1,
+      "name" : "acme/c1",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c1-1",
+      "current_version" : null,
+      "entity_uuid" : "3706f5c4-6ffa-346a-84a3-8f261293bc9b"
+    },
+    {
+      "node_id" : "n2",
+      "family" : "template",
+      "entity_id" : "c2",
+      "version" : 1,
+      "name" : "acme/c2",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c2-1",
+      "current_version" : null,
+      "entity_uuid" : "88d5d042-5d3e-36ec-b5be-1e56c1d3714b"
+    },
+    {
+      "node_id" : "n3",
+      "family" : "template",
+      "entity_id" : "c3",
+      "version" : 1,
+      "name" : "acme/c3",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c3-1",
+      "current_version" : null,
+      "entity_uuid" : "3f8a8d93-9d2a-3a8d-809a-2afde3fd4108"
+    },
+    {
+      "node_id" : "n4",
+      "family" : "template",
+      "entity_id" : "c4",
+      "version" : 1,
+      "name" : "acme/c4",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c4-1",
+      "current_version" : null,
+      "entity_uuid" : "41697486-a62f-3476-9bc6-7b6c12074a3b"
+    },
+    {
+      "node_id" : "n5",
+      "family" : "template",
+      "entity_id" : "c5",
+      "version" : 1,
+      "name" : "acme/c5",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c5-1",
+      "current_version" : null,
+      "entity_uuid" : "f7ecd18c-b45e-36ab-a4ab-bc6393d94a02"
+    },
+    {
+      "node_id" : "n6",
+      "family" : "template",
+      "entity_id" : "c6",
+      "version" : 1,
+      "name" : "acme/c6",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c6-1",
+      "current_version" : null,
+      "entity_uuid" : "11c39c47-7d43-3c6d-a2f7-01c6d8e325f4"
+    },
+    {
+      "node_id" : "n7",
+      "family" : "template",
+      "entity_id" : "c7",
+      "version" : 1,
+      "name" : "acme/c7",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c7-1",
+      "current_version" : null,
+      "entity_uuid" : "09441936-e8ec-3d52-966d-c60dfbb42395"
+    },
+    {
+      "node_id" : "n8",
+      "family" : "template",
+      "entity_id" : "c8",
+      "version" : 1,
+      "name" : "acme/c8",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c8-1",
+      "current_version" : null,
+      "entity_uuid" : "f8088e82-7158-33d0-a1bb-57accfd03c53"
+    },
+    {
+      "node_id" : "n9",
+      "family" : "template",
+      "entity_id" : "c9",
+      "version" : 1,
+      "name" : "acme/c9",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c9-1",
+      "current_version" : null,
+      "entity_uuid" : "84289530-e80a-375c-953c-13fdd0a9199a"
+    },
+    {
+      "node_id" : "n10",
+      "family" : "template",
+      "entity_id" : "c10",
+      "version" : 1,
+      "name" : "acme/c10",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c10-1",
+      "current_version" : null,
+      "entity_uuid" : "38bb56d4-740c-30a3-bfb4-145b6325ad88"
+    },
+    {
+      "node_id" : "n11",
+      "family" : "template",
+      "entity_id" : "c11",
+      "version" : 1,
+      "name" : "acme/c11",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c11-1",
+      "current_version" : null,
+      "entity_uuid" : "bcf35a4e-500e-34d9-852b-694a14ada9b0"
+    },
+    {
+      "node_id" : "n12",
+      "family" : "template",
+      "entity_id" : "c12",
+      "version" : 1,
+      "name" : "acme/c12",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c12-1",
+      "current_version" : null,
+      "entity_uuid" : "c363b0fe-ae17-3b02-83f2-a2d0a7b8ad1f"
+    },
+    {
+      "node_id" : "n13",
+      "family" : "template",
+      "entity_id" : "c13",
+      "version" : 1,
+      "name" : "acme/c13",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c13-1",
+      "current_version" : null,
+      "entity_uuid" : "1eb99615-39cc-3772-8663-625d383502d7"
+    },
+    {
+      "node_id" : "n14",
+      "family" : "template",
+      "entity_id" : "c14",
+      "version" : 1,
+      "name" : "acme/c14",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c14-1",
+      "current_version" : null,
+      "entity_uuid" : "146c1e84-8710-3c15-a51d-f4e5bea13c76"
+    },
+    {
+      "node_id" : "n15",
+      "family" : "template",
+      "entity_id" : "c15",
+      "version" : 1,
+      "name" : "acme/c15",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c15-1",
+      "current_version" : null,
+      "entity_uuid" : "1474be28-28d6-3edd-9265-f3bded4b7cdd"
+    },
+    {
+      "node_id" : "n16",
+      "family" : "template",
+      "entity_id" : "c16",
+      "version" : 1,
+      "name" : "acme/c16",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c16-1",
+      "current_version" : null,
+      "entity_uuid" : "d3cd4573-f43a-3d3b-819f-09cf7adb727c"
+    },
+    {
+      "node_id" : "n17",
+      "family" : "template",
+      "entity_id" : "c17",
+      "version" : 1,
+      "name" : "acme/c17",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c17-1",
+      "current_version" : null,
+      "entity_uuid" : "8aa28ca1-753c-3409-83b1-cac4b9fba801"
+    },
+    {
+      "node_id" : "n18",
+      "family" : "template",
+      "entity_id" : "c18",
+      "version" : 1,
+      "name" : "acme/c18",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c18-1",
+      "current_version" : null,
+      "entity_uuid" : "4ce67d78-cd08-35f0-b5c6-522a9924ee01"
+    },
+    {
+      "node_id" : "n19",
+      "family" : "template",
+      "entity_id" : "c19",
+      "version" : 1,
+      "name" : "acme/c19",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c19-1",
+      "current_version" : null,
+      "entity_uuid" : "f11c58a1-55b8-3dde-aa39-0c143081cb54"
+    },
+    {
+      "node_id" : "n20",
+      "family" : "template",
+      "entity_id" : "c20",
+      "version" : 1,
+      "name" : "acme/c20",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c20-1",
+      "current_version" : null,
+      "entity_uuid" : "a6661839-8197-3a01-86b8-822b2df372a7"
+    },
+    {
+      "node_id" : "n21",
+      "family" : "template",
+      "entity_id" : "c21",
+      "version" : 1,
+      "name" : "acme/c21",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c21-1",
+      "current_version" : null,
+      "entity_uuid" : "a24d1958-e9ab-3408-aabb-3548fe08b979"
+    },
+    {
+      "node_id" : "n22",
+      "family" : "template",
+      "entity_id" : "c22",
+      "version" : 1,
+      "name" : "acme/c22",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c22-1",
+      "current_version" : null,
+      "entity_uuid" : "a3f973ec-3fd0-3271-b960-e1e6e1de5a4d"
+    },
+    {
+      "node_id" : "n23",
+      "family" : "template",
+      "entity_id" : "c23",
+      "version" : 1,
+      "name" : "acme/c23",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c23-1",
+      "current_version" : null,
+      "entity_uuid" : "dd43f494-b70c-3f95-ba97-e5c31622cf8b"
+    },
+    {
+      "node_id" : "n24",
+      "family" : "template",
+      "entity_id" : "c24",
+      "version" : 1,
+      "name" : "acme/c24",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c24-1",
+      "current_version" : null,
+      "entity_uuid" : "107f699b-2d2f-3647-82bf-8123fed3d9d6"
+    },
+    {
+      "node_id" : "n25",
+      "family" : "template",
+      "entity_id" : "c25",
+      "version" : 1,
+      "name" : "acme/c25",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c25-1",
+      "current_version" : null,
+      "entity_uuid" : "89cdbe59-c89e-3f87-ad48-12759058accf"
+    },
+    {
+      "node_id" : "n26",
+      "family" : "template",
+      "entity_id" : "c26",
+      "version" : 1,
+      "name" : "acme/c26",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c26-1",
+      "current_version" : null,
+      "entity_uuid" : "17c19626-15b4-30c7-a0a4-f73108162220"
+    },
+    {
+      "node_id" : "n27",
+      "family" : "template",
+      "entity_id" : "c27",
+      "version" : 1,
+      "name" : "acme/c27",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c27-1",
+      "current_version" : null,
+      "entity_uuid" : "63fcb829-b8d3-360f-933d-074477ce3132"
+    },
+    {
+      "node_id" : "n28",
+      "family" : "template",
+      "entity_id" : "c28",
+      "version" : 1,
+      "name" : "acme/c28",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c28-1",
+      "current_version" : null,
+      "entity_uuid" : "0bce33b6-5364-3960-8f71-15b8797860b1"
+    },
+    {
+      "node_id" : "n29",
+      "family" : "template",
+      "entity_id" : "c29",
+      "version" : 1,
+      "name" : "acme/c29",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c29-1",
+      "current_version" : null,
+      "entity_uuid" : "5df8df9d-2880-3b7f-96ca-8b58d1be3ac7"
+    },
+    {
+      "node_id" : "n30",
+      "family" : "template",
+      "entity_id" : "c30",
+      "version" : 1,
+      "name" : "acme/c30",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c30-1",
+      "current_version" : null,
+      "entity_uuid" : "5621b1ad-3087-3c68-b4a0-eb0a8b53d0a0"
+    },
+    {
+      "node_id" : "n31",
+      "family" : "template",
+      "entity_id" : "c31",
+      "version" : 1,
+      "name" : "acme/c31",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c31-1",
+      "current_version" : null,
+      "entity_uuid" : "91288079-dbef-3915-808a-1689cdb609b8"
+    },
+    {
+      "node_id" : "n32",
+      "family" : "template",
+      "entity_id" : "c32",
+      "version" : 1,
+      "name" : "acme/c32",
+      "status" : "DRAFT",
+      "body_hash" : "hash-template-c32-1",
+      "current_version" : null,
+      "entity_uuid" : "27c133a1-9180-337d-89bc-11629ad4ab1d"
+    }
+  ],
+  "edges" : [
+    {
+      "from" : "n0",
+      "to" : "n1",
+      "path" : "nodes[0].template"
+    },
+    {
+      "from" : "n1",
+      "to" : "n2",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n2",
+      "to" : "n3",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n3",
+      "to" : "n4",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n4",
+      "to" : "n5",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n5",
+      "to" : "n6",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n6",
+      "to" : "n7",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n7",
+      "to" : "n8",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n8",
+      "to" : "n9",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n9",
+      "to" : "n10",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n10",
+      "to" : "n11",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n11",
+      "to" : "n12",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n12",
+      "to" : "n13",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n13",
+      "to" : "n14",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n14",
+      "to" : "n15",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n15",
+      "to" : "n16",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n16",
+      "to" : "n17",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n17",
+      "to" : "n18",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n18",
+      "to" : "n19",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n19",
+      "to" : "n20",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n20",
+      "to" : "n21",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n21",
+      "to" : "n22",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n22",
+      "to" : "n23",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n23",
+      "to" : "n24",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n24",
+      "to" : "n25",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n25",
+      "to" : "n26",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n26",
+      "to" : "n27",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n27",
+      "to" : "n28",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n28",
+      "to" : "n29",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n29",
+      "to" : "n30",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n30",
+      "to" : "n31",
+      "path" : "imports[0]"
+    },
+    {
+      "from" : "n31",
+      "to" : "n32",
+      "path" : "imports[0]"
+    }
+  ],
+  "depth" : 32,
+  "dependency_first" : [
+    "n32",
+    "n31",
+    "n30",
+    "n29",
+    "n28",
+    "n27",
+    "n26",
+    "n25",
+    "n24",
+    "n23",
+    "n22",
+    "n21",
+    "n20",
+    "n19",
+    "n18",
+    "n17",
+    "n16",
+    "n15",
+    "n14",
+    "n13",
+    "n12",
+    "n11",
+    "n10",
+    "n9",
+    "n8",
+    "n7",
+    "n6",
+    "n5",
+    "n4",
+    "n3",
+    "n2",
+    "n1",
+    "n0"
+  ],
+  "canonical" : "{\"format\":\"v1\",\"workspace\":\"00000000-0000-0000-0000-000000000868\",\"root\":[\"pipeline\",\"orders\",1],\"nodes\":[{\"id\":[\"pipeline\",\"orders\",1],\"entity_uuid\":\"aacb0166-8bcd-3d8e-906a-bf1e16f67daf\",\"status\":\"DRAFT\",\"body_hash\":\"hash-pipeline-orders-1\",\"current\":null},{\"id\":[\"template\",\"c1\",1],\"entity_uuid\":\"3706f5c4-6ffa-346a-84a3-8f261293bc9b\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c1-1\",\"current\":null},{\"id\":[\"template\",\"c10\",1],\"entity_uuid\":\"38bb56d4-740c-30a3-bfb4-145b6325ad88\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c10-1\",\"current\":null},{\"id\":[\"template\",\"c11\",1],\"entity_uuid\":\"bcf35a4e-500e-34d9-852b-694a14ada9b0\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c11-1\",\"current\":null},{\"id\":[\"template\",\"c12\",1],\"entity_uuid\":\"c363b0fe-ae17-3b02-83f2-a2d0a7b8ad1f\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c12-1\",\"current\":null},{\"id\":[\"template\",\"c13\",1],\"entity_uuid\":\"1eb99615-39cc-3772-8663-625d383502d7\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c13-1\",\"current\":null},{\"id\":[\"template\",\"c14\",1],\"entity_uuid\":\"146c1e84-8710-3c15-a51d-f4e5bea13c76\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c14-1\",\"current\":null},{\"id\":[\"template\",\"c15\",1],\"entity_uuid\":\"1474be28-28d6-3edd-9265-f3bded4b7cdd\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c15-1\",\"current\":null},{\"id\":[\"template\",\"c16\",1],\"entity_uuid\":\"d3cd4573-f43a-3d3b-819f-09cf7adb727c\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c16-1\",\"current\":null},{\"id\":[\"template\",\"c17\",1],\"entity_uuid\":\"8aa28ca1-753c-3409-83b1-cac4b9fba801\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c17-1\",\"current\":null},{\"id\":[\"template\",\"c18\",1],\"entity_uuid\":\"4ce67d78-cd08-35f0-b5c6-522a9924ee01\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c18-1\",\"current\":null},{\"id\":[\"template\",\"c19\",1],\"entity_uuid\":\"f11c58a1-55b8-3dde-aa39-0c143081cb54\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c19-1\",\"current\":null},{\"id\":[\"template\",\"c2\",1],\"entity_uuid\":\"88d5d042-5d3e-36ec-b5be-1e56c1d3714b\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c2-1\",\"current\":null},{\"id\":[\"template\",\"c20\",1],\"entity_uuid\":\"a6661839-8197-3a01-86b8-822b2df372a7\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c20-1\",\"current\":null},{\"id\":[\"template\",\"c21\",1],\"entity_uuid\":\"a24d1958-e9ab-3408-aabb-3548fe08b979\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c21-1\",\"current\":null},{\"id\":[\"template\",\"c22\",1],\"entity_uuid\":\"a3f973ec-3fd0-3271-b960-e1e6e1de5a4d\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c22-1\",\"current\":null},{\"id\":[\"template\",\"c23\",1],\"entity_uuid\":\"dd43f494-b70c-3f95-ba97-e5c31622cf8b\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c23-1\",\"current\":null},{\"id\":[\"template\",\"c24\",1],\"entity_uuid\":\"107f699b-2d2f-3647-82bf-8123fed3d9d6\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c24-1\",\"current\":null},{\"id\":[\"template\",\"c25\",1],\"entity_uuid\":\"89cdbe59-c89e-3f87-ad48-12759058accf\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c25-1\",\"current\":null},{\"id\":[\"template\",\"c26\",1],\"entity_uuid\":\"17c19626-15b4-30c7-a0a4-f73108162220\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c26-1\",\"current\":null},{\"id\":[\"template\",\"c27\",1],\"entity_uuid\":\"63fcb829-b8d3-360f-933d-074477ce3132\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c27-1\",\"current\":null},{\"id\":[\"template\",\"c28\",1],\"entity_uuid\":\"0bce33b6-5364-3960-8f71-15b8797860b1\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c28-1\",\"current\":null},{\"id\":[\"template\",\"c29\",1],\"entity_uuid\":\"5df8df9d-2880-3b7f-96ca-8b58d1be3ac7\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c29-1\",\"current\":null},{\"id\":[\"template\",\"c3\",1],\"entity_uuid\":\"3f8a8d93-9d2a-3a8d-809a-2afde3fd4108\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c3-1\",\"current\":null},{\"id\":[\"template\",\"c30\",1],\"entity_uuid\":\"5621b1ad-3087-3c68-b4a0-eb0a8b53d0a0\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c30-1\",\"current\":null},{\"id\":[\"template\",\"c31\",1],\"entity_uuid\":\"91288079-dbef-3915-808a-1689cdb609b8\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c31-1\",\"current\":null},{\"id\":[\"template\",\"c32\",1],\"entity_uuid\":\"27c133a1-9180-337d-89bc-11629ad4ab1d\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c32-1\",\"current\":null},{\"id\":[\"template\",\"c4\",1],\"entity_uuid\":\"41697486-a62f-3476-9bc6-7b6c12074a3b\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c4-1\",\"current\":null},{\"id\":[\"template\",\"c5\",1],\"entity_uuid\":\"f7ecd18c-b45e-36ab-a4ab-bc6393d94a02\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c5-1\",\"current\":null},{\"id\":[\"template\",\"c6\",1],\"entity_uuid\":\"11c39c47-7d43-3c6d-a2f7-01c6d8e325f4\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c6-1\",\"current\":null},{\"id\":[\"template\",\"c7\",1],\"entity_uuid\":\"09441936-e8ec-3d52-966d-c60dfbb42395\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c7-1\",\"current\":null},{\"id\":[\"template\",\"c8\",1],\"entity_uuid\":\"f8088e82-7158-33d0-a1bb-57accfd03c53\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c8-1\",\"current\":null},{\"id\":[\"template\",\"c9\",1],\"entity_uuid\":\"84289530-e80a-375c-953c-13fdd0a9199a\",\"status\":\"DRAFT\",\"body_hash\":\"hash-template-c9-1\",\"current\":null}],\"edges\":[{\"from\":[\"pipeline\",\"orders\",1],\"to\":[\"template\",\"c1\",1],\"path\":\"nodes[0].template\"},{\"from\":[\"template\",\"c1\",1],\"to\":[\"template\",\"c2\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c10\",1],\"to\":[\"template\",\"c11\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c11\",1],\"to\":[\"template\",\"c12\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c12\",1],\"to\":[\"template\",\"c13\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c13\",1],\"to\":[\"template\",\"c14\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c14\",1],\"to\":[\"template\",\"c15\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c15\",1],\"to\":[\"template\",\"c16\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c16\",1],\"to\":[\"template\",\"c17\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c17\",1],\"to\":[\"template\",\"c18\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c18\",1],\"to\":[\"template\",\"c19\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c19\",1],\"to\":[\"template\",\"c20\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c2\",1],\"to\":[\"template\",\"c3\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c20\",1],\"to\":[\"template\",\"c21\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c21\",1],\"to\":[\"template\",\"c22\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c22\",1],\"to\":[\"template\",\"c23\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c23\",1],\"to\":[\"template\",\"c24\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c24\",1],\"to\":[\"template\",\"c25\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c25\",1],\"to\":[\"template\",\"c26\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c26\",1],\"to\":[\"template\",\"c27\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c27\",1],\"to\":[\"template\",\"c28\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c28\",1],\"to\":[\"template\",\"c29\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c29\",1],\"to\":[\"template\",\"c30\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c3\",1],\"to\":[\"template\",\"c4\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c30\",1],\"to\":[\"template\",\"c31\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c31\",1],\"to\":[\"template\",\"c32\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c4\",1],\"to\":[\"template\",\"c5\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c5\",1],\"to\":[\"template\",\"c6\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c6\",1],\"to\":[\"template\",\"c7\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c7\",1],\"to\":[\"template\",\"c8\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c8\",1],\"to\":[\"template\",\"c9\",1],\"path\":\"imports[0]\"},{\"from\":[\"template\",\"c9\",1],\"to\":[\"template\",\"c10\",1],\"path\":\"imports[0]\"}]}",
+  "wire_bound" : 1048576,
+  "digest" : "v1:574425beaca944317e47177f7d2add3eca977014e292cb7c522cb750b70d3dac"
+}

@@ -4,10 +4,15 @@ import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -157,6 +162,51 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `released-only listing excludes a draft pointer even when an older release exists`() {
+        val current = repository.createReleased(workspaceId, draft(id = "test/draft-pointer.sql"), actor)
+        repository.createReleased(workspaceId, draft(id = "test/released.sql"), actor)
+        checkNotNull(
+            repository.createDraft(
+                workspaceId,
+                current.id,
+                draft(id = current.id, body = "SELECT 2"),
+                current.bodyHash,
+                actor,
+                WriteSurface.SESSION,
+            ),
+        )
+        checkNotNull(repository.switchCurrent(workspaceId, current.id, 2, draftEligible = true))
+
+        withClue("the unrestricted read still carries the draft pointer and the released sibling") {
+            repository.list(workspaceId).map { it.id to it.version } shouldContainExactly
+                listOf(current.id to 2, "test/released.sql" to 1)
+            repository.count(workspaceId) shouldBe 2
+        }
+        withClue("released-only means the pointer row itself must be RELEASED, without falling back to v1") {
+            repository.list(workspaceId, releasedOnly = true).map { it.id to it.version } shouldContainExactly
+                listOf("test/released.sql" to 1)
+            repository.count(workspaceId, releasedOnly = true) shouldBe 1
+        }
+    }
+
+    @Test
+    fun `released-only listing excludes a never-released template without the draft fallback`() {
+        repository.create(workspaceId, draft(id = "test/never-released.sql"), actor, CreateLifecycle.DRAFT, WriteSurface.SESSION)
+        repository.createReleased(workspaceId, draft(id = "test/released.sql"), actor)
+
+        withClue("the unrestricted read still carries the never-released draft and the released sibling") {
+            repository.list(workspaceId).map { it.id to it.version } shouldContainExactly
+                listOf("test/never-released.sql" to 1, "test/released.sql" to 1)
+            repository.count(workspaceId) shouldBe 2
+        }
+        withClue("the released-only read cannot advertise a template with no release") {
+            repository.list(workspaceId, releasedOnly = true).map { it.id to it.version } shouldContainExactly
+                listOf("test/released.sql" to 1)
+            repository.count(workspaceId, releasedOnly = true) shouldBe 1
+        }
+    }
+
+    @Test
     fun `an omitted id is auto-generated inside the identifier rule`() {
         val stored = repository.createReleased(workspaceId, draft(id = null), actor)
         isValidTemplateName(stored.id) shouldBe true
@@ -247,6 +297,36 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `findEstablishedType reads the retained history - an all-discarded template answers, an absent or foreign one is null`() {
+        // #883: the working-version reads answer nothing for an all-discarded template that is still registered; the
+        // import's §5.3 type resolution reads this instead. Workspace-scoped: a peer's same-named template is not read.
+        val peer = UUID.randomUUID()
+        jdbc.update("INSERT INTO workspaces (id, name, display_name) VALUES (:id, 'peer', 'Peer')", mapOf("id" to peer))
+        val html = "test/card.html"
+        repository.createReleased(
+            workspaceId,
+            draft(id = html, body = "<p>x</p>").copy(type = co.datapipelines.pipeline.TemplateType.HTML, dialect = null),
+            actor,
+        )
+        repository.createReleased(workspaceId, draft(), actor)
+        discardOnlyRelease(html)
+        discardOnlyRelease("test/fetch_orders.sql")
+        repository.createReleased(peer, draft(id = "test/peer_only.sql"), actor)
+
+        withClue("the precondition: no working version is left to read") {
+            repository.findWorking(workspaceId, html).shouldBeNull()
+            repository.existsId(workspaceId, html) shouldBe true
+        }
+        repository.findEstablishedType(workspaceId, html) shouldBe co.datapipelines.pipeline.TemplateType.HTML
+        repository.findEstablishedType(workspaceId, "test/fetch_orders.sql") shouldBe co.datapipelines.pipeline.TemplateType.SQL
+        repository.findEstablishedType(workspaceId, "test/absent.sql").shouldBeNull()
+        withClue("another workspace's template is absent here") {
+            repository.findEstablishedType(workspaceId, "test/peer_only.sql").shouldBeNull()
+            repository.findEstablishedType(peer, html).shouldBeNull()
+        }
+    }
+
+    @Test
     fun `findCurrentVersions answers latest released per id, absent for deleted, empty for no ids`() {
         // 040 D5's lookup: current_version IS the latest released version by the lifecycle's
         // invariant, and a draft must not move the answer.
@@ -269,6 +349,44 @@ class TemplateRepositoryIntegrationTest {
         repository.findCurrentVersions(workspaceId, listOf("test/a.sql", "test/b.sql", "test/c.sql", "test/nope.sql")) shouldBe
             mapOf("test/a.sql" to 1, "test/b.sql" to 1)
         repository.findCurrentVersions(workspaceId, emptyList()) shouldBe emptyMap()
+    }
+
+    @Test
+    fun `findReleaseVersions reads exact versions of any status in one batch - with the entity id and the live pointer`() {
+        // #873 §A.1: the template dependency provider's batch read. A DRAFT is read as such, a discarded entity's version
+        // still resolves (its pointer reads NULL: no longer live), an unknown key or version is absent.
+        val a = repository.createReleased(workspaceId, draft(id = "test/a.sql", body = "SELECT 1"), actor)
+        val second = draft(id = "test/a.sql", body = "SELECT 2")
+        checkNotNull(repository.createDraft(workspaceId, "test/a.sql", second, a.bodyHash, actor, WriteSurface.SESSION))
+        repository.createReleased(workspaceId, draft(id = "test/c.sql"), actor)
+        discardOnlyRelease("test/c.sql")
+
+        val rows =
+            repository.findReleaseVersions(
+                workspaceId,
+                listOf("test/a.sql" to 1, "test/a.sql" to 2, "test/c.sql" to 1, "test/a.sql" to 9, "test/nope.sql" to 1),
+            )
+
+        val read = rows.map { Triple("${it.template.id}@${it.template.version}", it.template.status, it.currentVersion) }
+        read shouldContainExactlyInAnyOrder
+            listOf(
+                Triple("test/a.sql@1", PipelineVersionStatus.RELEASED, 1),
+                Triple("test/a.sql@2", PipelineVersionStatus.DRAFT, 1),
+                Triple("test/c.sql@1", PipelineVersionStatus.DISCARDED, null),
+            )
+        rows.filter { it.template.id == "test/a.sql" }.map { it.entityUuid }.toSet() shouldBe
+            setOf(repository.findEntityUuid(workspaceId, "test/a.sql"))
+        repository.findReleaseVersions(workspaceId, emptyList()) shouldBe emptyList()
+    }
+
+    @Test
+    fun `findNameByEntityUuid is the inverse of findEntityUuid - and null for an id that is not a template here`() {
+        repository.createReleased(workspaceId, draft(id = "test/a.sql"), actor)
+        val entity = checkNotNull(repository.findEntityUuid(workspaceId, "test/a.sql"))
+
+        repository.findNameByEntityUuid(workspaceId, entity) shouldBe "test/a.sql"
+        repository.findNameByEntityUuid(workspaceId, UUID.randomUUID()) shouldBe null
+        repository.findNameByEntityUuid(UUID.randomUUID(), entity) shouldBe null
     }
 
     @Test
@@ -547,6 +665,23 @@ class TemplateRepositoryIntegrationTest {
     }
 
     @Test
+    fun `the inverse import pages walk a repeated import by keyset - limit + 1 rows, every occurrence once`() {
+        // #877 §B: report imports lib@1 twice in ONE version, summary once — three occurrences, the page unit.
+        val lib = "test/lib.sql"
+        val twice = listOf(TemplateImport(lib, 1, "a"), TemplateImport(lib, 1, "b"))
+        repository.createReleased(workspaceId, draft(id = "test/report.sql", imports = twice), actor)
+        repository.createReleased(workspaceId, draft(id = "test/summary.sql", imports = listOf(TemplateImport(lib, 1, "s"))), actor)
+        val request = InverseRequest(workspaceId, lib, 1, InverseScope.LIVE, null, 1)
+
+        repository.findImportPinOccurrences(request) shouldHaveSize 2
+        val paged = InverseSql.exhaust(1) { after -> repository.findImportPinOccurrences(request.copy(after = after)) }
+        paged shouldContainExactly repository.findImportPinOccurrences(request.copy(limit = InverseSql.EXHAUST_PAGE))
+        paged.map { it.dependentName to it.sourcePath } shouldContainExactlyInAnyOrder
+            listOf("test/report.sql" to "imports[0]", "test/report.sql" to "imports[1]", "test/summary.sql" to "imports[0]")
+        paged.filter { it.dependentName == "test/report.sql" }.map { it.elementId } shouldContainExactly listOf("a", "b")
+    }
+
+    @Test
     fun `imports are stored as JSONB and queryable as such`() {
         repository.createReleased(workspaceId, draft(imports = listOf(TemplateImport("test/lib.sql", 1, "l"))), actor)
 
@@ -568,6 +703,38 @@ class TemplateRepositoryIntegrationTest {
     // =============================================================================================
     // The draft/release lifecycle (versioning §3–§6, V6) — the template mirror of §13's floor.
     // =============================================================================================
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = [true, false])
+    fun `a released template write is independent of the same name in another workspace`(changed: Boolean) {
+        val otherWorkspace = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO workspaces (id, name, display_name) VALUES (:id, 'peer', 'Peer')",
+            mapOf("id" to otherWorkspace),
+        )
+        val id = "test/fetch_orders.sql"
+        repository.createReleased(workspaceId, draft(), actor)
+        repository.createReleased(otherWorkspace, draft(body = "SELECT 99", displayName = "Peer"), actor)
+        val peerBefore = repository.findWorking(otherWorkspace, id)
+        val released = checkNotNull(repository.findLatest(workspaceId, id))
+        val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true), TemplateImplementsRepository(jdbc))
+        val body = if (changed) "SELECT 2" else "SELECT 1"
+        val attempted =
+            runCatching {
+                service.write(workspaceId, id, draft(body = body, displayName = "Revised"), released.bodyHash, actor, WriteSurface.SESSION)
+            }
+        val persistedDraft = repository.findDraftDetail(workspaceId, id)
+        withClue("changed=$changed; failure=${attempted.exceptionOrNull()}; persisted draft=$persistedDraft") {
+            attempted.exceptionOrNull().shouldBeNull()
+            val detail = attempted.getOrThrow()
+            detail.version shouldBe if (changed) 2 else 1
+            detail.status shouldBe if (changed) PipelineVersionStatus.DRAFT else PipelineVersionStatus.RELEASED
+            checkNotNull(repository.findWorking(workspaceId, id)).body shouldBe body
+            repository.findWorking(otherWorkspace, id) shouldBe peerBefore
+            repository.findDraftDetail(otherWorkspace, id).shouldBeNull()
+            if (!changed) persistedDraft.shouldBeNull()
+        }
+    }
 
     @Test
     fun `createDraft copies the released version to a draft and leaves the released row untouched`() {

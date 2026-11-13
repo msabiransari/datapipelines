@@ -132,7 +132,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
 
         // Measured at both desktop sizes: the panel ends at or before the board begins, it holds
         // the set's field, and the board keeps a usable width.
-        for ((width, height) in listOf(DESKTOP_BOARD_WIDTH to 900, NARROW_DESKTOP_BOARD_WIDTH to 800)) {
+        for ((width, height) in listOf(DESKTOP_BOARD_WIDTH to 900, narrowDesktopBoardWidth() to 800)) {
             page.setViewportSize(width, height)
             page.waitForFunction("() => document.querySelector('.dp-board-page').getAttribute('data-dp-filters') === 'some'")
             val r = regions()
@@ -465,7 +465,8 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
               window.__dp2 = { ready: false, instance: null };
               const instance = window.DatapipelinesDashboard.init({ server: { baseUrl: '', credentials: 'session' },
                 dashboard: { id: id, version: 'released' }, container: second,
-                adapter: window.DatapipelinesDashboard.adapters(second) });
+                adapter: window.DatapipelinesDashboard.adapters(second),
+                charts: { library: 'plotly', instance: window.Plotly } });
               window.__dp2.instance = instance;
               instance.ready.then(function () { window.__dp2.ready = true; }, function () {}); }""",
             board,

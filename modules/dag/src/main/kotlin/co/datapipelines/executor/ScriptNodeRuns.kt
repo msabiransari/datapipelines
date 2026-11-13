@@ -47,6 +47,8 @@ class ResolvedScript(
     val body: String,
     val contract: ScriptContract,
     val invariants: List<ScriptInvariant>,
+    /** The same row read that supplied [body], for a managed delivery's execution recipe. */
+    val bodyHash: String = "",
 )
 
 /** Resolves the pinned `{id, version}` of a SCRIPT node inside the execution's workspace. */
@@ -169,6 +171,10 @@ internal object ScriptNodeRuns {
                         details = mapOf("template" to node.template.key, "node" to node.id),
                     )
             }
+        ctx.lakeLineage?.templateUsed(
+            co.datapipelines.pipeline.LakeArtifactReference(node.template.id, node.template.version, resolved.bodyHash),
+        )
+        ctx.lakeLineage?.nodeResolved(node.id)
         val engine = engineFor(resolved.type, support, node)
         val script = compile(node, resolved, engine)
         val limits = limitsOf(node, ctx, support, config)
@@ -1284,7 +1290,15 @@ internal class ScriptInvariants(
         )
     }
 
-    /** The §5.4 bound's count: rows + rejects + table inputs, before anything is read back. */
+    /**
+     * The §5.4 bound's count: rows + rejects + table inputs, before anything is read back.
+     *
+     * Every written table counts its rows. Row mode adds the buffered caller rows and rejects
+     * and the streamed input. Table/value mode adds each loaded table input and, when nothing
+     * was written (a `table` caller output), the gated rows the invariants will see as `rows`
+     * — a tempdb output's gated rows are already its written table, so they are not counted
+     * twice. A value or object output is a single gated value, never a list, and adds nothing.
+     */
     private suspend fun readBackSize(
         inputs: Map<String, Any?>,
         source: InvariantSource,
@@ -1302,6 +1316,10 @@ internal class ScriptInvariants(
 
             is InvariantSource.Single -> {
                 inputs.values.filterIsInstance<List<*>>().forEach { total += it.size.toLong() }
+                val gated = source.gated
+                if (writtenTables.isEmpty() && gated is List<*>) {
+                    total += gated.size.toLong()
+                }
             }
         }
         return total

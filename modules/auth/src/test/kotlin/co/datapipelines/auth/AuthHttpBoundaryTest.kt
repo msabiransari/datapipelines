@@ -5,20 +5,25 @@ import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotBeBlank
+import io.kotest.matchers.string.shouldNotContain
 import jakarta.servlet.ServletContext
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.client.TestRestTemplate
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Primary
 import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
@@ -39,6 +44,8 @@ import java.time.Instant
 import java.util.Base64
 import java.util.Date
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * AU-TEST-5: the auth contract asserted **at the wire**, over the real filter chain
@@ -65,6 +72,8 @@ class AuthHttpBoundaryTest {
 
     @Autowired private lateinit var authFilters: AuthFilters
 
+    @Autowired private lateinit var faultable: FaultableSecretHasher
+
     @LocalServerPort
     private var port: Int = 0
 
@@ -76,6 +85,32 @@ class AuthHttpBoundaryTest {
     private lateinit var revokedKey: String
     private lateinit var session: String
     private lateinit var mustChangeSession: String
+
+    /**
+     * #847 — the production bounded hasher with a fault switch: while [failing] is on, `verify`
+     * throws the native-fault exception (no real memory pressure anywhere). Every call is counted,
+     * so a case can prove the fault was actually REACHED rather than bypassed by the outcome cache.
+     */
+    class FaultableSecretHasher(
+        private val real: SecretHasher,
+    ) : SecretHasher by real {
+        val failing = AtomicBoolean(false)
+        val verifyCalls = AtomicInteger()
+
+        override fun verify(
+            encodedHash: String,
+            raw: String,
+        ): Boolean {
+            verifyCalls.incrementAndGet()
+            if (failing.get()) {
+                throw SecretVerificationUnavailableException(
+                    Argon2SecretHasher.MEMORY_ALLOCATION_ERROR,
+                    IllegalStateException("argon2id_verify failed: Memory allocation error (-22)"),
+                )
+            }
+            return real.verify(encodedHash, raw)
+        }
+    }
 
     /**
      * Probe endpoints standing in for the controllers P6a will ship — this module owns
@@ -92,6 +127,17 @@ class AuthHttpBoundaryTest {
      */
     @TestConfiguration
     class ProbeConfiguration {
+        /**
+         * #847 — @Primary under its OWN name, with the production bean injected BY NAME, so the
+         * wrapper never injects itself and every SecretHasher consumer (ApiKeyService included)
+         * gets it. With the switch off it is the production hasher.
+         */
+        @Bean
+        @Primary
+        fun faultableSecretHasher(
+            @Qualifier("secretHasher") real: SecretHasher,
+        ): FaultableSecretHasher = FaultableSecretHasher(real)
+
         @Controller
         class ProbeController {
             /** Public probe — §8.3 permitAll. */
@@ -403,6 +449,41 @@ class AuthHttpBoundaryTest {
     }
 
     /**
+     * #847 — the only proof through the real chain: the real [ApiKeyService] → an UNCACHED
+     * verification → [ApiKeyFilter] → [AuthEntryPoint]. The key is minted HERE, never a class-wide
+     * seeded one: `AuthCache.verifiedSecret` answers a warmed key from the cache before calling the
+     * verifier, so a key another case already used would bypass the fault.
+     */
+    @Test
+    fun `a native verification fault answers 503 through the real chain and is not cached`() {
+        val freshKey = seedUserKey("dpk_FAULTKEYAAAA", user.id, "fault-key", expiresAt = null)
+        val callsBefore = faultable.verifyCalls.get()
+        val response =
+            try {
+                faultable.failing.set(true)
+                call(HttpMethod.POST, "/mcp", headers(apiKey = freshKey))
+            } finally {
+                faultable.failing.set(false)
+            }
+
+        response.statusCode.value() shouldBe 503
+        val error = error(response)
+        error["code"] shouldBe AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
+        error["message"] shouldBe "Secret verification is temporarily unavailable"
+        (mapper.readValue(response.body, Map::class.java)["correlation_id"] as String).shouldNotBeBlank()
+        response.body.orEmpty() shouldNotContain "emory"
+        response.body.orEmpty() shouldNotContain "-22"
+        withClue("the throwing verify must have been REACHED, not bypassed by the outcome cache") {
+            faultable.verifyCalls.get() shouldBe callsBefore + 1
+        }
+
+        // The failure was not cached: the same key answers 200 once the native side recovers.
+        val recovered = call(HttpMethod.POST, "/mcp", headers(apiKey = freshKey))
+        recovered.statusCode.value() shouldBe 200
+        mapper.readValue(recovered.body, Map::class.java)["auth_method"] shouldBe "API_KEY"
+    }
+
+    /**
      * #215 B2 (owner ruling 2026-09-24, "MCP key should be only MCP"): the MCP key is refused on
      * every route off `/mcp` — REST, UI pages, partials, an unannotated handler — by the REST key
      * filter, before any permission is judged, with the confinement code. A non-vacuity count is
@@ -665,6 +746,69 @@ class AuthHttpBoundaryTest {
     @Test
     fun `an api-key state change needs no csrf token at all`() {
         call(HttpMethod.POST, "/mcp", headers(apiKey = readKey)).statusCode.value() shouldBe 200
+    }
+
+    // ------------------------------------ browser-shaped refusals (#782 option a)
+    //
+    // The CSRF refusal of a BROWSER navigation (Accept: text/html, no HX-Request, non-
+    // machine path) must answer through a FORWARD to /error — a page, not the §13.7
+    // envelope. The guard pins the outcome independently of dispatch registration:
+    // a refusal of a logout must not clear the session, whatever the wiring becomes.
+
+    private fun browserHeaders(
+        cookies: List<String>,
+        csrfToken: String? = "a-different-token",
+        fetchSite: String? = null,
+    ): HttpHeaders =
+        headers(cookies = cookies, csrfToken = csrfToken).apply {
+            set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            set("User-Agent", "Mozilla/5.0 (lane-782 boundary)")
+            fetchSite?.let { set("Sec-Fetch-Site", it) }
+        }
+
+    /** True only when the response explicitly EXPIRES dp_session (Max-Age=0), never for a mint. */
+    private fun clearsSession(response: ResponseEntity<String>): Boolean =
+        response.headers[HttpHeaders.SET_COOKIE].orEmpty().any {
+            it.startsWith("dp_session=") && it.contains("Max-Age=0")
+        }
+
+    @Test
+    fun `a browser-shaped csrf refusal of an app route answers html - not the envelope`() {
+        val response =
+            call(HttpMethod.POST, "/workspace/switch", browserHeaders(cookies = listOf("dp_session=$session")))
+
+        response.statusCode.value() shouldBe 403
+        response.headers.contentType.toString() shouldContain "text/html"
+        response.body.shouldNotBeNull().shouldNotContain("auth.csrf.invalid")
+        clearsSession(response) shouldBe false
+    }
+
+    @Test
+    fun `a refused logout clears nothing - not the session, not a redirect`() {
+        // No Sec-Fetch-Site at all: a form POST missing the attestation is NOT exempt.
+        val response = call(HttpMethod.POST, "/logout", browserHeaders(cookies = listOf("dp_session=$session")))
+
+        response.statusCode.value() shouldBe 403
+        response.headers.contentType.toString() shouldContain "text/html"
+        response.headers.location.shouldBeNull()
+        clearsSession(response) shouldBe false
+        response.body.shouldNotBeNull().shouldNotContain("auth.csrf.invalid")
+    }
+
+    @Test
+    fun `a same-site logout with a stale token is refused and clears nothing`() {
+        // The exemption's attestation boundary: same-site (a sibling origin the browser
+        // labels distinctly) is NOT the app's own page, so the refusal stands.
+        val response =
+            call(
+                HttpMethod.POST,
+                "/logout",
+                browserHeaders(cookies = listOf("dp_session=$session"), fetchSite = "same-site"),
+            )
+
+        response.statusCode.value() shouldBe 403
+        response.headers.location.shouldBeNull()
+        clearsSession(response) shouldBe false
     }
 
     // ----------------------------------- filter execution count (B12 behavioral, 015)

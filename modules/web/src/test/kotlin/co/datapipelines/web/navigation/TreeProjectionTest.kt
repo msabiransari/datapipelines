@@ -3,13 +3,14 @@ package co.datapipelines.web.navigation
 import co.datapipelines.pipeline.NavigationFamily
 import co.datapipelines.pipeline.NavigationRequest
 import co.datapipelines.pipeline.NavigationRow
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
-import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 class TreeProjectionTest {
@@ -17,6 +18,54 @@ class TreeProjectionTest {
     private val workspace = UUID.randomUUID()
     private val actor = UUID.randomUUID()
     private val rows = List(201) { index -> NavigationRow("scope/a/match_$index", "Display $index", UUID.randomUUID(), 1, null) }
+
+    /** #758: identical input/expected vectors live in reusable-tree.test.mjs. */
+    @Test
+    fun `tree query whitespace vectors reach the loader and query echo normalized`() {
+        listOf(
+            "\uFEFFa\u3000\u3000b\u00A0" to "a b",
+            "\u00A0 x\t\ny " to "x y",
+            "\u2028only" to "only",
+            "\t\n\u000B\u000C\r \u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006" +
+                "\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF" to "",
+        ).forEach { (input, expected) ->
+            val term = expected.ifEmpty { null }
+            val row = NavigationRow("scope/a/${expected.ifEmpty { "browse" }}", "Display", UUID.randomUUID(), 1, null)
+            val page =
+                answer(query = input) { request ->
+                    request.query shouldBe term
+                    listOf(row).filter { request.query == null || it.path.contains(request.query.orEmpty()) }
+                }
+            page.query shouldBe term
+            page.mode shouldBe if (term == null) "browse" else "search"
+            page.nodes.count { it.match } shouldBe if (term == null) 0 else 1
+        }
+    }
+
+    @Test
+    fun `unicode whitespace runs share the normalized continuation identity`() {
+        val cursor = answer(query = "a\u3000\u3000b") { rows }.nextCursor
+        answer(query = "a b", cursor = cursor) { request ->
+            request.query shouldBe "a b"
+            request.after shouldBe rows[199].orderKey
+            emptyList()
+        }.query shouldBe "a b"
+    }
+
+    @Test
+    fun `controls outside the tree whitespace alphabet are refused before loading`() {
+        shouldThrow<DatapipelinesException> {
+            answer(query = "\u0085x") { error("Control must be refused before loading") }
+        }.code shouldBe INVALID
+    }
+
+    @Test
+    fun `shared length bound runs before the tree collapse`() {
+        val over = "a" + "\u3000".repeat(co.datapipelines.pipeline.SearchNeedle.MAX_LENGTH) + "b"
+        shouldThrow<co.datapipelines.pipeline.SearchQueryTooLongException> {
+            answer(query = over) { error("The shared raw term bound must run before collapse") }
+        }
+    }
 
     @Test
     fun `search includes all ancestors of each delivered match inside the root`() {
@@ -38,31 +87,32 @@ class TreeProjectionTest {
     fun `continuation refuses a different query parent root workspace caller family or admitted view before loading`() {
         val cursor = answer(query = "match") { rows }.nextCursor
         val neverLoad: (NavigationRequest) -> List<NavigationRow> = { error("Foreign continuation reached repository") }
-        shouldThrow<ResponseStatusException> { answer(query = "other", cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(parent = "scope/other", cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(root = "", cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(workspaceId = UUID.randomUUID(), cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(actorId = UUID.randomUUID(), cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(family = NavigationFamily.TEMPLATES, cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(lens = ReadLens.Only(setOf("different")), cursor = cursor, load = neverLoad) }
-        shouldThrow<ResponseStatusException> { answer(lens = ReadLens.Only(setOf("everything")), cursor = cursor, load = neverLoad) }
+        listOf<() -> TreePage>(
+            { answer(query = "other", cursor = cursor, load = neverLoad) },
+            { answer(parent = "scope/other", cursor = cursor, load = neverLoad) },
+            { answer(root = "", cursor = cursor, load = neverLoad) },
+            { answer(workspaceId = UUID.randomUUID(), cursor = cursor, load = neverLoad) },
+            { answer(actorId = UUID.randomUUID(), cursor = cursor, load = neverLoad) },
+            { answer(family = NavigationFamily.TEMPLATES, cursor = cursor, load = neverLoad) },
+            { answer(lens = ReadLens.Only(setOf("different")), cursor = cursor, load = neverLoad) },
+            { answer(lens = ReadLens.Only(setOf("everything")), cursor = cursor, load = neverLoad) },
+        ).forEach { call -> shouldThrow<DatapipelinesException> { call() }.code shouldBe INVALID }
     }
 
     @Test
     fun `malformed tampered cursor and escaping parent are safe bad requests`() {
         listOf("bad", "!.!", "x".repeat(5000)).forEach { cursor ->
-            shouldThrow<ResponseStatusException> {
+            shouldThrow<DatapipelinesException> {
                 answer(
                     cursor = cursor,
                 ) { error("Must refuse before loading") }
-            }.statusCode.value() shouldBe
-                400
+            }.code shouldBe INVALID
         }
         val good = answer { rows }.nextCursor.orEmpty()
-        shouldThrow<ResponseStatusException> { answer(cursor = good + "x") { error("Must refuse") } }
-        shouldThrow<ResponseStatusException> { answer(parent = "sibling") { error("Must refuse") } }
-        shouldThrow<ResponseStatusException> { answer(root = "scope/../escape") { error("Must refuse") } }
-        shouldThrow<ResponseStatusException> { answer(query = "bad\u0000query") { error("Must refuse") } }
+        shouldThrow<DatapipelinesException> { answer(cursor = good + "x") { error("Must refuse") } }.code shouldBe INVALID
+        shouldThrow<DatapipelinesException> { answer(parent = "sibling") { error("Must refuse") } }.code shouldBe INVALID
+        shouldThrow<DatapipelinesException> { answer(root = "scope/../escape") { error("Must refuse") } }.code shouldBe INVALID
+        shouldThrow<DatapipelinesException> { answer(query = "bad\u0000query") { error("Must refuse") } }.code shouldBe INVALID
     }
 
     @Test
@@ -175,6 +225,13 @@ class TreeProjectionTest {
         }
     }
 
+    @Test
+    fun `one node over the whole page budget is the catalogued metadata refusal, not a truncated page (#464)`() {
+        val huge = NavigationRow("scope/huge", "x".repeat(TreeProjection.MAX_RESPONSE_BYTES), UUID.randomUUID(), 1, null)
+        shouldThrow<DatapipelinesException> { answer { listOf(huge) } }.code shouldBe
+            PipelineErrorCodes.Navigation.METADATA_TOO_LARGE
+    }
+
     @Suppress("LongParameterList") // explicit identity substitutions are the security cases
     private fun answer(
         family: NavigationFamily = NavigationFamily.PIPELINES,
@@ -188,4 +245,8 @@ class TreeProjectionTest {
         needsReview: ((List<TreeNode>) -> Set<String>)? = null,
         load: (NavigationRequest) -> List<NavigationRow>,
     ): TreePage = projection.page(family, workspaceId, actorId, lens, root, parent, query, cursor, needsReview, load)
+
+    private companion object {
+        const val INVALID = PipelineErrorCodes.Navigation.REQUEST_INVALID
+    }
 }

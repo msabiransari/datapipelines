@@ -46,6 +46,39 @@ class ScheduleRunRepository(
     fun lock(id: UUID): ScheduleRun? =
         jdbc.query("SELECT * FROM schedule_runs WHERE id = :id FOR UPDATE", mapOf("id" to id), rowMapper).singleOrNull()
 
+    /**
+     * #786 D.5 — the QUEUED runs of [scheduleId] whose payload copy is still at [schema]: a run materialised before the
+     * upgrade and not yet admitted. The conversion pins its copy exactly as it pins the schedule, so the upgrade does
+     * not block a schedule over a run that was merely waiting when the server stopped.
+     */
+    fun listQueuedAtSchema(
+        scheduleId: UUID,
+        schema: Int,
+    ): List<ScheduleRun> =
+        jdbc.query(
+            "SELECT * FROM schedule_runs WHERE schedule_id = :sid AND state = 'queued' AND payload_schema_version = :schema ORDER BY id",
+            mapOf("sid" to scheduleId, "schema" to schema),
+            rowMapper,
+        )
+
+    /**
+     * #786 D.5 — one QUEUED run's payload copy and its schema number, nothing else. False when the run left `queued` or
+     * is already converted (the caller skips it; a run that was admitted meanwhile is the executor's to refuse).
+     */
+    fun convertQueuedPayload(
+        id: UUID,
+        fromSchema: Int,
+        payload: JsonNode,
+        toSchema: Int,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE schedule_runs SET payload_json = CAST(:payload AS jsonb), payload_schema_version = :toSchema
+            WHERE id = :id AND state = 'queued' AND payload_schema_version = :fromSchema
+            """.trimIndent(),
+            mapOf("id" to id, "fromSchema" to fromSchema, "toSchema" to toSchema, "payload" to mapper.writeValueAsString(payload)),
+        ) == 1
+
     /** A run of [scheduleId] in [workspaceId] — the REST read, workspace-scoped. */
     fun findInSchedule(
         workspaceId: UUID,
@@ -272,6 +305,7 @@ class ScheduleRunRepository(
             "scheduledAt" to run.scheduledAt?.let(Timestamp::from),
             "referenceAt" to Timestamp.from(run.referenceAt),
             "referenceTimezone" to run.referenceTimezone,
+            "targetRef" to run.targetRef,
             "admitBy" to Timestamp.from(run.admitBy),
             "scheduleRevision" to run.scheduleRevision,
             "executorId" to run.executorId,
@@ -299,6 +333,7 @@ class ScheduleRunRepository(
             scheduledAt = rs.getTimestamp("scheduled_at")?.toInstant(),
             referenceAt = rs.getTimestamp("reference_at").toInstant(),
             referenceTimezone = rs.getString("reference_timezone"),
+            targetRef = rs.getString("target_ref"),
             admitBy = rs.getTimestamp("admit_by").toInstant(),
             scheduleRevision = rs.getObject("schedule_revision") as Int?,
             executorId = rs.getString("executor_id"),
@@ -329,11 +364,11 @@ class ScheduleRunRepository(
                                        reference_timezone, admit_by, schedule_revision, executor_id,
                                        payload_schema_version, payload_json, parameters_json, actor_user_id, requested_by,
                                        state, reason, idempotency_key, idempotency_hash, created_at, updated_at,
-                                       finished_at)
+                                       finished_at, target_ref)
             VALUES (:id, :scheduleId, :workspaceId, :origin, :scheduledAt, :referenceAt, :referenceTimezone,
                     :admitBy, :scheduleRevision, :executorId, :payloadSchemaVersion, CAST(:payload AS jsonb),
                     CAST(:parameters AS jsonb), :actorUserId, :requestedBy, :state, :reason, :idempotencyKey,
-                    :idempotencyHash, :createdAt, :createdAt, :finishedAt)
+                    :idempotencyHash, :createdAt, :createdAt, :finishedAt, :targetRef)
             """
     }
 }
@@ -360,6 +395,7 @@ data class NewRun(
     val createdAt: Instant,
     val idempotencyKey: String? = null,
     val idempotencyHash: String? = null,
+    val targetRef: String? = null,
 ) {
     /** A run born terminal is finished at birth. */
     val finishedAt: Instant? get() = if (state.active) null else createdAt

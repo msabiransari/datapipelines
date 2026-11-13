@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.DryRenderOutcome
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
@@ -35,6 +36,7 @@ internal class ParametersHarness(
     datasources: FakeDatasources = FakeDatasources(),
     customers: CustomerRegistry? = null,
     val config: ParametersConfig = ParametersConfig(),
+    guard: co.datapipelines.pipeline.release.ReleaseMutationGuard = co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE,
 ) {
     val jdbc = ParametersTestDb.jdbc
     val repository = ParameterSetRepository(jdbc)
@@ -77,6 +79,9 @@ internal class ParametersHarness(
 
     val statuses = TemplateVersionStatuses { workspaceId, id, version -> templates.findVersionStatus(workspaceId, id, version) }
 
+    /** The entity question (#737) over the real tables — the web `templateIds` bean's arrangement. */
+    val templateIds = TemplateIds { workspaceId, id -> templates.existsId(workspaceId, id) }
+
     /** The cascade's releaser over the template's own statement — the pinned version at its current hash (`releasePinned`'s rule). */
     val releaser =
         TemplateReleaser { workspaceId, id, version, actor ->
@@ -92,7 +97,7 @@ internal class ParametersHarness(
     /** The real selector runtime — present when the harness is given a customer registry. */
     val runner: SelectorRunner? = customers?.let { SelectorRunner(engines, it, config) }
 
-    val validator = ParameterSetValidator(config, registry, statuses, datasources, runner ?: probe)
+    val validator = ParameterSetValidator(config, registry, statuses, datasources, runner ?: probe, templateIds = templateIds)
 
     /**
      * #320 — the dashboards that pin a set: none unless a case seeds [pinnedByDashboards]. [consumerQuestions] records
@@ -120,8 +125,35 @@ internal class ParametersHarness(
                 return pinnedByDashboards.toList()
             }
         }
+
+    /**
+     * #873 §D.3 — what the transitive restore walk answers (empty: a fully released closure) and every root it was
+     * asked about; the walk itself is `WalkingRestoreDependencyGuardTest`'s.
+     */
+    val restoreReaches = mutableListOf<co.datapipelines.pipeline.release.RestoreReach>()
+    val restoreRechecked = mutableListOf<co.datapipelines.pipeline.release.ReleaseNodeIdentity>()
+
     val service =
-        ParameterSetService(repository, validator, AuthoringGuard(authoringEnabled), statuses, consumers, releaser, transactions)
+        ParameterSetService(
+            repository,
+            validator,
+            AuthoringGuard(authoringEnabled),
+            statuses,
+            consumers,
+            releaser,
+            transactions,
+            guard = guard,
+            restoreGuard =
+                object : co.datapipelines.pipeline.release.RestoreDependencyGuard {
+                    override fun recheck(root: co.datapipelines.pipeline.release.ReleaseNodeIdentity) =
+                        restoreReaches.toList().also { restoreRechecked += root }
+
+                    override fun recheck(
+                        root: co.datapipelines.pipeline.release.ReleaseNodeIdentity,
+                        pins: List<co.datapipelines.pipeline.release.ReleasePin>,
+                    ): List<co.datapipelines.pipeline.release.RestoreReach> = error("a set restore walks its stored body")
+                },
+        )
 
     /** Seeds an `sql` template (POSTGRES — the fake `warehouse`'s dialect) and answers its pin. */
     fun template(

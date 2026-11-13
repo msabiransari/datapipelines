@@ -36,7 +36,18 @@ class SiteV2GuardsTest {
     @Test
     fun `every FAQ block's JSON-LD mirrors the visible details, question for question`() {
         val pagesWithFaq = rendered.filter { (_, html) -> "\"@type\":\"FAQPage\"" in html || "\"@type\": \"FAQPage\"" in html }
-        pagesWithFaq.keys.map { it.path } shouldContainAll listOf("/", "/faq", "/security", "/published-api", "/tableau")
+        pagesWithFaq.keys.map { it.path } shouldContainAll
+            listOf(
+                "/",
+                "/faq",
+                "/security",
+                "/published-api",
+                "/tableau",
+                // #700: the three capability pages' FAQs, whose answers #699 corrected.
+                SitePages.PIPELINE_SCHEDULING.path,
+                SitePages.SQL_DASHBOARDS.path,
+                SitePages.REUSABLE_PARAMETER_SETS.path,
+            )
 
         pagesWithFaq.forEach { (page, html) ->
             val visible =
@@ -96,7 +107,7 @@ class SiteV2GuardsTest {
         val text = TAG.replace(rendered.getValue(SitePages.HOME), " ")
         withClue("/: the planned list is still there (the arm would pass on an empty page)") {
             text shouldContain "Planned"
-            text shouldContain "Native embeddable dashboards"
+            text shouldContain "Scheduled report delivery"
         }
     }
 
@@ -135,7 +146,8 @@ class SiteV2GuardsTest {
      * sentence renders are banned outright: every appearance of them on these pages has been a
      * scope claim. The last three were the tutorial's step 2 and the tools page's family
      * paragraph, rewritten to roles in the same slice; 160 banned only `admin`. The security
-     * page's role wording is the exemplar this guard holds the site to.
+     * page's role wording is the exemplar this guard holds the site to; #699 moved it to keys v2
+     * (the role chosen at creation under the subset rule, no cap).
      */
     @Test
     fun `no page names a key scope`() {
@@ -147,7 +159,7 @@ class SiteV2GuardsTest {
             }
         }
         val security = rendered.getValue(SitePages.SECURITY)
-        listOf("capped at author", "api caller").forEach { phrase ->
+        listOf("never more than your own", "api caller").forEach { phrase ->
             withClue("the security page no longer states the key roles — the arm would pass on an empty page") {
                 security.contains(phrase) shouldBe true
             }

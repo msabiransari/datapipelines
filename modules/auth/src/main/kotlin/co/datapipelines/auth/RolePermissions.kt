@@ -25,13 +25,16 @@ import co.datapipelines.auth.Permission.DATASOURCE_TEST
 import co.datapipelines.auth.Permission.DOCS_READ
 import co.datapipelines.auth.Permission.ENDPOINT_PUBLISH
 import co.datapipelines.auth.Permission.ENDPOINT_READ
+import co.datapipelines.auth.Permission.ENDPOINT_RELEASE
 import co.datapipelines.auth.Permission.ENDPOINT_SERVE
 import co.datapipelines.auth.Permission.ENDPOINT_UNPUBLISH
+import co.datapipelines.auth.Permission.ENDPOINT_VERSION_MANAGE
 import co.datapipelines.auth.Permission.EXECUTION_CANCEL
 import co.datapipelines.auth.Permission.EXECUTION_CANCEL_ALL
 import co.datapipelines.auth.Permission.EXECUTION_READ
 import co.datapipelines.auth.Permission.EXECUTION_READ_ALL
 import co.datapipelines.auth.Permission.EXECUTION_RESULT_READ
+import co.datapipelines.auth.Permission.LAKE_APPEND
 import co.datapipelines.auth.Permission.LAKE_TABLE_MANAGE
 import co.datapipelines.auth.Permission.MCP_KEY_CREATE
 import co.datapipelines.auth.Permission.MCP_KEY_OWN
@@ -206,8 +209,12 @@ object RolePermissions {
                 DATASOURCE_PREVIEW_ROWS,
                 DATASOURCE_SQL_PROBE,
                 LAKE_TABLE_MANAGE,
+                LAKE_APPEND,
                 ENDPOINT_PUBLISH,
                 ENDPOINT_UNPUBLISH,
+                // #786: an API's release and its version lifecycle are the author's, exactly as a pipeline's.
+                ENDPOINT_RELEASE,
+                ENDPOINT_VERSION_MANAGE,
                 SEMANTIC_RECORD,
                 SEMANTIC_RETIRE,
                 PROMOTION_READ,
@@ -318,13 +325,13 @@ object RolePermissions {
     /**
      * **The system identity's FIXED set** (#9 R2, scheduler design revision §4): what a schedule
      * fires with — execute a pipeline, read the pipeline version it pins, read the execution the
-     * reconciler watches — in ANY workspace, and nothing else. Not a role and not a column of
+     * reconciler watches, and append a managed delivery — in ANY workspace, and nothing else. Not a role and not a column of
      * auth.md §7.6: no member holds it, no key carries it, the role walk never sees it. It is
      * answered through [PermissionResolver.holdsAsSystemActor] — the seam's system arm — so a
      * test context can prove a widened set is caught (`SystemActorPrincipalTest`). A later executor
      * (reports) adds its own permission here with that executor.
      */
-    val SYSTEM_ACTOR: Set<Permission> = setOf(PIPELINE_EXECUTE, PIPELINE_READ, EXECUTION_READ)
+    val SYSTEM_ACTOR: Set<Permission> = setOf(PIPELINE_EXECUTE, PIPELINE_READ, EXECUTION_READ, LAKE_APPEND)
 
     /** D7: a super admin holds every permission in every workspace — except the [FENCED] ones, which are nobody's. */
     val SUPER_ADMIN: Set<Permission> = Permission.entries.toSet() - FENCED

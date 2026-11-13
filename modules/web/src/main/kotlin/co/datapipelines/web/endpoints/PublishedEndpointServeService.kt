@@ -7,6 +7,8 @@ import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.EndpointServeAudit
 import co.datapipelines.application.endpoints.PublishedEndpoint
+import co.datapipelines.application.endpoints.PublishedEndpointVersion
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
@@ -21,6 +23,7 @@ import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
@@ -62,14 +65,27 @@ import kotlin.time.Duration.Companion.seconds
  *
  * ## The read-only rule runs again here
  *
- * §4.2 checked it at publish, but an endpoint pins a PIPELINE and serves its latest RELEASED
- * version, so a later release can put a `DML` node under a live URL. Re-checking per serve is
- * what makes "GET is safe" true at the moment it matters rather than at the moment somebody
- * published. It costs one in-memory walk of a body that is already loaded.
+ * §4.2 checked it when the API version was saved. Since #786 an API version pins an EXACT pipeline
+ * version (the pin never moves when the pipeline's current moves, record §24/A06), so the body under a
+ * live URL changes only through an API release or current switch, both of which re-run the check; the
+ * per-serve check stays as the fail-closed backstop that keeps "GET is safe" true at the moment it
+ * matters (a child pipeline the version composes is resolved at serve time). It costs one in-memory
+ * walk of a body that is already loaded.
+ *
+ * ## Which version runs (#786 B.1)
+ *
+ * entity → its `current_version` → that API version row → eligible under the posture → the row's
+ * exact `(pipeline_name, pipeline_version)` → that pipeline version row → eligible under the posture
+ * → execute. The pipeline's own CURRENT pointer is never read. Every refusal on that chain is the one
+ * catalogued 503 whose body names no version, so a caller cannot learn which API versions exist.
  */
 @Suppress("LongParameterList") // one composition root for one request; every collaborator is used
 class PublishedEndpointServeService(
     private val registry: EndpointRegistry,
+    /** #786 — the API's current version, read per serve (never the registry snapshot's copy). */
+    private val versions: PublishedEndpointVersionRepository,
+    /** #786 — the pinned pipeline, by its portable name, and the exact version's status. */
+    private val pipelineRepository: PipelineRepository,
     private val bindings: EndpointKeyBindingRepository,
     private val authorizer: EndpointAuthorizer,
     private val readOnlyRule: ReadOnlyPipelineRule,
@@ -144,17 +160,19 @@ class PublishedEndpointServeService(
         // §5.6 / D15 — BEFORE the pipeline is resolved: nothing about a deactivated
         // workspace's endpoint is read, and the body is the unmatched path's, byte for byte.
         if (!workspaceLiveness.isActive(endpoint.workspaceId)) return notFound()
-        val version = pointedVersion(endpoint) ?: return notReleased(endpoint)
+        val pointed = pointedVersion(endpoint) ?: return notReleased(endpoint)
+        val version = pointed.executable
 
         val readOnly = readOnlyRule.check(version.pipeline, endpoint.workspaceId)
         if (!readOnly.isValid) {
-            // Live endpoint, changed target. Say so; do not run it.
+            // Live endpoint, changed target. Say so; do not run it. The body names the node, never a
+            // version (#786 §Security: serving never leaks which versions exist).
             val first = readOnly.failures.first()
             return Outcome.Refused(
                 HTTP_SERVICE_UNAVAILABLE,
                 PipelineErrorCodes.Endpoint.PIPELINE_NOT_READONLY,
                 "This endpoint's pipeline is no longer side-effect-free, so it was not run. ${first.message}",
-                mapOf("node_id" to first.details["node_id"], "pipeline_version" to version.version),
+                mapOf("node_id" to first.details["node_id"]),
             )
         }
 
@@ -198,7 +216,7 @@ class PublishedEndpointServeService(
             }
 
             is EndpointRequestValidator.Outcome.Valid -> {
-                run(endpoint, version, principal, validated)
+                run(endpoint, pointed, principal, validated)
             }
         }
     }
@@ -206,17 +224,27 @@ class PublishedEndpointServeService(
     /** Launch, await with the endpoint's timeout, and shape the answer (§5.4). */
     private fun run(
         endpoint: PublishedEndpoint,
-        version: PipelineService.ExecutablePipeline,
+        pointed: Pointed,
         principal: AuthenticatedPrincipal,
         validated: EndpointRequestValidator.Outcome.Valid,
     ): Outcome {
+        val version = pointed.executable
         // Minted here so the 202 can NAME the execution the caller must come back for.
         val executionId = UUID.randomUUID()
         val request =
             ExecuteRequest(
-                pipelineId = endpoint.pipelineId,
+                pipelineId = pointed.pipelineId,
                 pipelineVersion = version.version,
                 pipeline = version.pipeline,
+                lakeExecutionMetadata =
+                    co.datapipelines.pipeline.LakeExecutionMetadata
+                        .from(version),
+                lakeAppendGrant =
+                    co.datapipelines.application.LakeAppendAuthorization.grant(
+                        principal,
+                        version.writesManagedLake,
+                        java.time.Instant.now(),
+                    ),
                 userId = principal.userId,
                 workspaceId = endpoint.workspaceId,
                 parameters = validated.parameters,
@@ -227,12 +255,14 @@ class PublishedEndpointServeService(
                 // it as its own, workspace admins see it, the key's creator does not.
                 executedByKeyKind = principal.executedByKeyKind(),
                 executionId = executionId,
+                // #463: a published GET reads only — the database refuses a write where the dialect can.
+                readOnly = true,
                 // rootExecutionId stays null on purpose: a root request takes a concurrency slot,
                 // and an endpoint serve must be governed by the same limits every other run is.
             )
 
         val deferred: Deferred<ExecutionResult> = scope.async { runner.run(request, endpoint.workspaceId, ExecutionTrigger.ENDPOINT) }
-        val timeout = endpointsProperties.clampTimeout(endpoint.timeoutSeconds)
+        val timeout = endpointsProperties.clampTimeout(pointed.api.body.timeoutSeconds)
 
         // #192 — the audit tells the truth about WHAT HAPPENED, in two rows. The first is
         // written BEFORE the answer and is what lets this key read the result later — including
@@ -340,20 +370,29 @@ class PublishedEndpointServeService(
                 ),
         )
 
+    /** What one serve runs: the API's current version and the exact pipeline version it pins. */
+    private data class Pointed(
+        val api: PublishedEndpointVersion,
+        val pipelineId: UUID,
+        val executable: PipelineService.ExecutablePipeline,
+    )
+
     /**
-     * §5.1 — the version the pipeline's POINTER names (D60), when it is eligible for this posture
-     * (D63, 2026-09-09): a RELEASED version always; a DRAFT only under the development posture,
-     * where the pointer may legitimately fall back to (or be switched to) a draft so the endpoint
-     * can be tested BEFORE the release — "we should be able to point the API to any version in
-     * dev". A non-development deployment holds no drafts, so it serves releases by construction,
-     * not by this check. A NULL pointer, or a pointer at a version this posture may not serve,
-     * is the §5.6 `pipeline_not_released` refusal.
+     * §5.1 as of #786 B.1 — the API's CURRENT version (its own pointer, never the pipeline's), when it is eligible for
+     * this posture (D63: a RELEASED version always; a DRAFT only under the development posture), and the EXACT pipeline
+     * version its body pins, when that is present, not DISCARDED and eligible too. Anything else — no current pointer,
+     * an ineligible API version, a missing or DISCARDED pinned version — is the §5.6 `pipeline_not_released` refusal.
+     * `findCurrentVersion` is never called here: moving the pipeline's current never moves what an API serves (A06).
      */
-    private fun pointedVersion(endpoint: PublishedEndpoint): PipelineService.ExecutablePipeline? {
-        val record = pipelines.findRecord(endpoint.workspaceId, ReadLens.Everything, endpoint.pipelineId) ?: return null
-        val detail = pipelines.findCurrentVersion(endpoint.workspaceId, ReadLens.Everything, endpoint.pipelineId) ?: return null
+    @Suppress("ReturnCount") // one early null per link of the resolution chain above, in its order
+    private fun pointedVersion(endpoint: PublishedEndpoint): Pointed? {
+        val api = versions.findCurrent(endpoint.id) ?: return null
+        if (!servable(api.status)) return null
+        val record = pipelineRepository.findByName(endpoint.workspaceId, api.body.pipelineName) ?: return null
+        val detail = pipelineRepository.findVersionDetail(endpoint.workspaceId, record.id, api.body.pipelineVersion) ?: return null
         if (!servable(detail.status)) return null
-        return pipelines.findExecutable(endpoint.workspaceId, ReadLens.Everything, record, detail.version)
+        val executable = pipelines.findExecutable(endpoint.workspaceId, ReadLens.Everything, record, detail.version) ?: return null
+        return Pointed(api, record.id, executable)
     }
 
     /** The D63 rule, on its own so a test can read it: released always, a draft in development only. */
@@ -408,10 +447,10 @@ class PublishedEndpointServeService(
 
     private fun notReleased(endpoint: PublishedEndpoint): Outcome {
         log.warn(
-            "event=endpoint.pipeline_not_released path={} pipeline_id={} " +
-                "message=\"endpoint is live but its pipeline has no servable version\"",
+            "event=endpoint.pipeline_not_released path={} endpoint_id={} " +
+                "message=\"endpoint is live but its current API version or the pipeline version it pins is not servable\"",
             endpoint.pathPattern,
-            endpoint.pipelineId,
+            endpoint.id,
         )
         return Outcome.Refused(
             HTTP_SERVICE_UNAVAILABLE,

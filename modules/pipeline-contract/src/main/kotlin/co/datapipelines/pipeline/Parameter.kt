@@ -55,6 +55,15 @@ data class Parameter(
     /** Null means the author wrote none, which reads as [ParameterCardinality.SINGLE] — see [declaration]. */
     @field:JsonProperty("cardinality") @get:JsonProperty("cardinality") @param:JsonProperty("cardinality")
     val cardinality: ParameterCardinality? = null,
+    /**
+     * Recipe-only redaction opt-in (#799). Omitted is false; false is omitted on serialization
+     * so existing canonical bodies and their hashes remain unchanged. This does not change
+     * the parameter's logical type, binding, or other application surfaces.
+     */
+    @field:JsonProperty("redact_in_recipe") @get:JsonProperty("redact_in_recipe") @param:JsonProperty("redact_in_recipe")
+    @field:JsonInclude(JsonInclude.Include.NON_DEFAULT)
+    @get:JsonInclude(JsonInclude.Include.NON_DEFAULT)
+    val redactInRecipe: Boolean = false,
 ) {
     /**
      * True when the declaration supplies a default the executor may apply.

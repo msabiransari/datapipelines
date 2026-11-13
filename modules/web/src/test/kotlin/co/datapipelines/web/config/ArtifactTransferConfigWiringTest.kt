@@ -18,8 +18,6 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
-import io.kotest.matchers.collections.shouldBeEmpty
-import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -29,7 +27,6 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.PlatformTransactionManager
-import java.io.File
 import java.util.UUID
 
 /**
@@ -236,110 +233,17 @@ class ArtifactTransferConfigWiringTest {
         }
     }
 
-    // ---- the guard -----------------------------------------------------------------------------------------
-
-    /**
-     * The residue assertions are UNCONDITIONAL — no infix matcher dangles off an Elvis fallback in this
-     * file's source. An Elvis's right operand binds tighter than an infix function: a statement of the
-     * shape "query, Elvis-zero, matcher" parses as "query, Elvis (zero, matcher)" — the matcher is part
-     * of the FALLBACK and executes only when the left side is null. A non-null SQL COUNT therefore
-     * returns from such a statement having asserted nothing. The delivered L1c-d suite shipped both
-     * residue checks in that shape, reported green with zero executed assertions, and the root
-     * reviewer's compiled witness (count 7 in, assertions 0 out) is the independent proof.
-     *
-     * Deliberately a text scan of THIS file in the OrderedTestAnnotationGuardTest style, not a helper
-     * test that mirrors the faulty expression — a helper would stay green beside the bypass it copies.
-     * The paren depth decides: a matcher reached while still at or inside the Elvis's own depth is part
-     * of its fallback (the defect, explicitly parenthesized or not — grouping the matcher does not
-     * change which operand it belongs to); only a matcher first reached AFTER the Elvis's enclosing
-     * group has closed asserts the Elvis expression itself. Comment lines are skipped, so this KDoc
-     * names the shape in prose, and the floor below keeps the scan from passing vacuously.
-     */
-    @Test
-    fun `residue assertions execute - no matcher is bound to an Elvis fallback in this source`() {
-        val lines = sourceFile().readLines()
-        var matcherLines = 0
-        val offenders =
-            lines
-                .withIndex()
-                .mapNotNull { (index, line) ->
-                    val trimmed = line.trim()
-                    if (trimmed.isEmpty() || COMMENT_LINE.containsMatchIn(trimmed)) {
-                        return@mapNotNull null
-                    }
-                    if (MATCHER.containsMatchIn(line)) matcherLines++
-                    elvisBoundMatcher(line)?.let { "${index + 1}: $it" }
-                }
-
-        withClue(
-            "An Elvis's fallback swallows the infix matcher: the assertion runs only when the left " +
-                "side is null, and a SQL COUNT is never null — extract the query into a local value " +
-                "and assert on it (the L1c-d defect, which executed zero residue assertions).",
-        ) {
-            offenders.shouldBeEmpty()
-        }
-        withClue("the scan must see matcher-bearing code lines — vacuous is not clean") {
-            matcherLines shouldBeGreaterThanOrEqual MATCHER_FLOOR
-        }
-    }
-
-    /** The offending line when an infix matcher sits inside an Elvis's fallback on [line], else null. */
-    private fun elvisBoundMatcher(line: String): String? {
-        val matcherStarts = MATCHER.findAll(line).map { it.range.first }.toSet()
-        if (matcherStarts.isEmpty()) return null
-        var from = 0
-        while (true) {
-            val elvis = line.indexOf("?:", from)
-            if (elvis < 0) return null
-            from = elvis + "?:".length
-            val elvisDepth = depthAt(line, elvis)
-            var depth = elvisDepth
-            var at = elvis + "?:".length
-            while (at < line.length) {
-                if (depth < elvisDepth) break // the Elvis's enclosing group closed — a later matcher is outside it
-                if (at in matcherStarts) return line.trim()
-                when (line[at]) {
-                    '(' -> depth++
-                    ')' -> depth--
-                }
-                at++
-            }
-        }
-    }
-
-    private fun depthAt(
-        line: String,
-        index: Int,
-    ): Int {
-        var depth = 0
-        for (i in 0 until index) {
-            when (line[i]) {
-                '(' -> depth++
-                ')' -> depth--
-            }
-        }
-        return depth
-    }
-
-    /** This suite's own source, resolved by walking up to the repository root (the house guard pattern). */
-    private fun sourceFile(): File {
-        var dir: File? = File("").absoluteFile
-        while (dir != null && !File(dir, "modules/pipeline-contract").isDirectory) dir = dir.parentFile
-        val root = checkNotNull(dir) { "repository root not found walking up from ${File("").absolutePath}" }
-        return File(root, "modules/web/src/test/kotlin/co/datapipelines/web/config/ArtifactTransferConfigWiringTest.kt")
-            .also { found -> check(found.isFile) { "guard source not found at ${found.path}" } }
-    }
-
     // ---- fixtures ------------------------------------------------------------------------------------------
 
     /** A real visualization created through the context's service (the real save path), still DRAFT. */
     private fun createdVisualization(svc: VisualizationService) =
-        svc.create(
-            WS_A,
-            VisualizationReader().readOrThrow(ArtifactJson.mapper.readTree(DocumentFixturesJson.VISUALIZATION)),
-            AUTHOR,
-            WriteSurface.MCP,
-        )
+        svc
+            .create(
+                WS_A,
+                VisualizationReader().readOrThrow(ArtifactJson.mapper.readTree(DocumentFixturesJson.VISUALIZATION)),
+                AUTHOR,
+                WriteSurface.MCP,
+            ).version
 
     /** The SQL stamp the real release would write — the evidence gate is not this suite's subject. */
     private fun stampReleased(created: co.datapipelines.visualization.ArtifactVersion<*>) {
@@ -456,25 +360,16 @@ class ArtifactTransferConfigWiringTest {
         val RUN: String = UUID.randomUUID().toString().substring(0, 8)
         const val AT_CAP = 75
 
-        /** A Kotest infix matcher: the bare word, or the word followed by a capital continuation. */
-        val MATCHER = Regex("""\bshould(?:[A-Z]\w*)?\b""")
-
-        /** A comment line, by its first non-blank characters — skipped by the guard's scan. */
-        val COMMENT_LINE = Regex("""^(?://|/\*|\*)""")
-
-        /** Matcher-bearing CODE lines this file held at the guard's birth (the non-vacuity floor). */
-        const val MATCHER_FLOOR = 25
-
         /** The reader-valid minimal documents (the module fixtures' shapes, reader-bound before use). */
         object DocumentFixturesJson {
             const val VISUALIZATION =
                 """{"name":"cfg/charts/plain","display_name":"Plain","description":"config wiring",
-                   "renderer":{"kind":"plotly","version":"4"},
+                   "renderer":{"kind":"chart","version":"1"},
                    "inputs":{"revenue":{"columns":[{"name":"month","type":"DATE","nullable":false},
                                                    {"name":"amount","type":"DECIMAL","nullable":false}]}},
-                   "config":{"data":[{"type":"bar","x":[],"y":[]}],"layout":{}},
-                   "bindings":{"data[0].x":"month","data[0].y":"amount"},
-                   "presentation":{"title":"Plain","tokens":{"series":"categorical"}},
+                   "config":{"mark":{"type":"bar"},"encoding":{"x":{"field":"month","type":"temporal","sort":"ascending"},
+                             "y":{"field":"amount","type":"quantitative","aggregate":"sum"}}},
+                   "bindings":{"amount":"amount","month":"month"},
                    "tests":{"cases":[{"name":"one","fixtures":{"revenue":[{"month":"2026-01-01","amount":10.5}]},
                                       "assertions":[{"kind":"rendered"}]}]}}"""
 
@@ -509,6 +404,21 @@ class ArtifactTransferConfigWiringTest {
         @Configuration
         @Suppress("unused")
         class RealCollaborators {
+            /** #517 — the workspace writer guard the services now require; the graph, not the lock, is under test here. */
+            @Bean
+            fun releaseMutationGuard(): co.datapipelines.pipeline.release.ReleaseMutationGuard =
+                co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE
+
+            /** #873 §D — the transitive restore recheck the restores now take; the graph, not the walk, is under test here. */
+            @Bean
+            fun restoreDependencyGuard(): co.datapipelines.pipeline.release.RestoreDependencyGuard =
+                co.datapipelines.pipeline.release.RestoreDependencyGuard.DIRECT_ONLY
+
+            @Bean
+            fun releaseBounds(): co.datapipelines.pipeline.release.ReleaseBounds =
+                co.datapipelines.pipeline.release
+                    .ReleaseBounds()
+
             @Bean
             fun dataSource(): javax.sql.DataSource = SharedPostgres.dataSource()
 

@@ -147,12 +147,18 @@ object SitePageRenderer {
             // 145: the two hub pages, through their own controller (the docs catalog is its input).
             put(SitePages.USE_CASES.path, hubController::useCases)
             put(SitePages.EXPLORE.path, hubController::explore)
+            // #699: the three capability pages, through their own controller.
+            put(SitePages.PIPELINE_SCHEDULING.path, capabilitiesController::pipelineScheduling)
+            put(SitePages.SQL_DASHBOARDS.path, capabilitiesController::sqlDashboards)
+            put(SitePages.REUSABLE_PARAMETER_SETS.path, capabilitiesController::reusableParameterSets)
         }
     }
 
     private val batch2Controller = SiteV2Batch2Controller()
 
     private val hubController by lazy { SiteHubController(docs) }
+
+    private val capabilitiesController = SiteCapabilitiesController()
 
     /** The paths the v2 dispatch knows — the set the main [render] when matches against. */
     private val SITE_V2: Set<String> get() = siteV2Handlers.keys

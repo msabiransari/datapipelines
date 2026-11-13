@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.LoadState
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -80,8 +81,8 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         val (gs, gbody) = send("GET", "/api/v1/pipelines/$id")
         gs shouldBe 200
         val hash = Regex(""""body_hash"\s*:\s*"([0-9a-f]+)"""").find(gbody!!)!!.groupValues[1]
-        val (rs) = send("POST", "/api/v1/pipelines/$id/release", ifMatch = hash)
-        rs shouldBe 200
+        val (rs, responseBody) = send("POST", "/api/v1/pipelines/$id/release", ifMatch = hash)
+        withClue("Release response: $responseBody") { rs shouldBe 200 }
     }
 
     /**
@@ -318,8 +319,9 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
     /**
      * #416 — a release posts the draft hash the DIALOG read. The dialog opens on the draft as it is, the draft
      * changes underneath it (a valid REST write with the right If-Match, as a colleague or an agent would make),
-     * and the dialog is then submitted: the old hash reaches the service, which refuses it `pipeline.version.conflict`
-     * (409, the toast carries the code) and releases NOTHING. Before this lane the POST re-read the draft and
+     * and the dialog is then submitted: the old hash reaches the service, which refuses it (409, the toast carries the
+     * code: `pipeline.release.plan_conflict` since #876, whose plan `tree_hash` covers the root's draft;
+     * `pipeline.version.conflict` before) and releases NOTHING. Before this lane the POST re-read the draft and
      * released whatever it found, so the changed draft went live unseen. The control: a dialog opened AFTER the change
      * releases it, so the refusal is the stale hash and nothing broader.
      */
@@ -343,14 +345,14 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         val currentHash = bodyHashOf(probeId)
         (currentHash == dialogHash) shouldBe false
 
-        // Submit the OLD dialog: 409 pipeline.version.conflict, rendered as the toast, nothing released.
+        // Submit the OLD dialog: 409 pipeline.release.plan_conflict (#876), rendered as the toast, nothing released.
         val refused =
             page.waitForResponse({ it.url().contains("/lifecycle/release") }) {
                 staleDialog.locator("button[type=submit]").click()
             }
         refused.status() shouldBe 409
         page.locator("#toast .ds-toast").first().waitFor()
-        page.locator("#toast .ds-toast").first().innerText() shouldContain "pipeline.version.conflict"
+        page.locator("#toast .ds-toast").first().innerText() shouldContain "pipeline.release.plan_conflict"
         currentVersionOf(probeId) shouldBe null
         bodyHashOf(probeId) shouldBe currentHash
 
@@ -449,6 +451,52 @@ class LifecycleDialogBrowserTest : BrowserSuite() {
         page
             .locator("#nav-tree-templates a.dp-tree-activate", Page.LocatorOptions().setHasText("lifecycle_chaff"))
             .count() shouldBe 0
+    }
+
+    /**
+     * #907: a sole-draft LIBRARY only an importing template pins. The entity purge dialog names the
+     * importer under its own hook and offers no typed confirm and no button — the guard's refusal,
+     * shown before the click (the list container's condition once ignored importers).
+     */
+    @Test
+    fun `907 - an importer-only pin lists the importing template in the entity purge dialog, buttonless`() {
+        startTrace()
+        ready()
+        page.navigate("$baseUrl/dashboard")
+        val library = "test/lifecycle_library.sql"
+        val importer = "test/lifecycle_importer.sql"
+        createTemplate(library, "<#function suffix><#return '-lib'></#function>", library = true)
+        createTemplate(
+            importer,
+            "SELECT '${'$'}{lib.suffix()}' AS c",
+            imports = """[{"id":"$library","version":1,"alias":"lib"}]""",
+        )
+
+        page.setViewportSize(1280, 900)
+        selectLeafOf(library)
+        val entityDialog = openDialog(page.locator(".tw-topbar button", Page.LocatorOptions().setHasText("Purge template")))
+        withClue("entity purge dialog: ${entityDialog.innerHTML()}") {
+            entityDialog.locator("[data-purge-entity-pinner-template]").allInnerTexts() shouldBe listOf(importer)
+            entityDialog.locator("button[type=submit]").count() shouldBe 0
+            entityDialog.locator("[data-confirm-input]").count() shouldBe 0
+        }
+        entityDialog.innerText() shouldContain "importing template"
+    }
+
+    private fun createTemplate(
+        id: String,
+        body: String,
+        library: Boolean = false,
+        imports: String = "[]",
+    ) {
+        val (status, response) =
+            send(
+                "POST",
+                "/api/v1/templates",
+                """{"id":"$id","dialect":"POSTGRES","display_name":"${id.substringAfterLast('/')}",""" +
+                    """"description":"907 importer pin","is_library":$library,"imports":$imports,"body":"$body"}""",
+            )
+        withClue("create $id: $response") { status shouldBe 201 }
     }
 
     // -------------------------------------------------- every dialog, light and dark, two widths

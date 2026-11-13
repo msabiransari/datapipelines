@@ -122,6 +122,9 @@
        frame paints. This closes the exposure the line above names for `template-editor.css`. -->
   <link th:href="@{/css/template-editor.css}" rel="stylesheet">
   <link th:href="@{/css/template-workspace.css}" rel="stylesheet">
+  <!-- #876 G6 — the Dependencies pane every artifact workspace carries (design tokens only). Head-loaded
+       for 090's reason, §3.0 normative: all five workspaces are boosted arrivals. -->
+  <link th:href="@{/css/dependencies.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
        Until 188 this was the ONE inline script in the layout — the round's only
@@ -143,8 +146,10 @@
        760px and below neither class matters: the menu is an off-canvas drawer.
 
        #554 — the resource browser's two presentation choices, stamped here for the same
-       no-flash reason: its preferred width (`dp-browser-width:<workspace>`, 240–480 only)
-       as `--app-browser-preferred` on <html>, and the user's Hide (`dp-browser-hidden:
+       no-flash reason: its preferred width (`dp-browser-width:<workspace>`, a value within
+       `--app-browser-min`–`--app-browser-max`, which this script reads off the applied
+       app.css — #788 keeps the sheet as the range's one source) as
+       `--app-browser-preferred` on <html>, and the user's Hide (`dp-browser-hidden:
        <workspace>` = "1") as `browser-hidden`. The retired rail width key
        (`dp-rail-width:<workspace>`) is removed on sight, never reinterpreted: it measured a
        different composition (record §4).
@@ -468,15 +473,15 @@
            children with its search row and scroll region on first show). The ids and
            `data-nav-tree` are the contract the catalogs' Browse folders buttons
            (`aria-controls`) and the explorer keyboard's nav context (template-explorer.js) read. -->
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-pipelines" data-nav-tree="pipelines" data-browser-family="pipelines" data-browser-label="Pipelines"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-pipelines" data-nav-tree="pipelines" data-browser-family="pipelines" data-browser-label="Pipelines" data-browser-glyph="workflow"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'pipelines'} ? 'hidden' : null"></div>
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-templates" data-nav-tree="templates" data-browser-family="templates" data-browser-label="Templates"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-templates" data-nav-tree="templates" data-browser-family="templates" data-browser-label="Templates" data-browser-glyph="code"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'templates'} ? 'hidden' : null"></div>
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-dashboards" data-nav-tree="dashboards" data-browser-family="dashboards" data-browser-label="Dashboards"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-dashboards" data-nav-tree="dashboards" data-browser-family="dashboards" data-browser-label="Dashboards" data-browser-glyph="boxes"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'dashboards'} ? 'hidden' : null"></div>
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-visualizations" data-nav-tree="visualizations" data-browser-family="visualizations" data-browser-label="Visualizations"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-visualizations" data-nav-tree="visualizations" data-browser-family="visualizations" data-browser-label="Visualizations" data-browser-glyph="chart-line"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'visualizations'} ? 'hidden' : null"></div>
-      <div class="app-nav-tree app-browser-tree" id="nav-tree-parameter-sets" data-nav-tree="parameter-sets" data-browser-family="parameter-sets" data-browser-label="Parameter Sets"
+      <div class="app-nav-tree app-browser-tree" id="nav-tree-parameter-sets" data-nav-tree="parameter-sets" data-browser-family="parameter-sets" data-browser-label="Parameter Sets" data-browser-glyph="sliders-horizontal"
            th:attr="data-nav-workspace=${activeWorkspace},hidden=${browserFamily != 'parameter-sets'} ? 'hidden' : null"></div>
       <!-- View all is the explicit catalog action (record §3 rule 1). Refresh is the tree's own,
            beside its search (tree/component.mjs), so the column carries one control of that name. -->
@@ -492,12 +497,14 @@
         </button>
       </div>
       <!-- Record §4 "Browser resizing": the browser/content boundary. Pointer drag, arrows (±16px),
-           Home (240) and End (the most the viewport leaves while main keeps 320px); the reset
-           above returns to the band default. js/browser-resize.mjs keeps the preference apart
-           from the clamped width, so a narrow window never overwrites a wide screen's choice. -->
+           Home (`--app-browser-min`, the range's floor) and End (the most the viewport leaves while
+           main keeps 320px); the reset above returns to the band default. The range itself is
+           app.css's `--app-browser-min`–`--app-browser-max`; js/browser-resize.mjs keeps the
+           preference apart from the clamped width, so a narrow window never overwrites a wide
+           screen's choice. -->
       <div id="browser-boundary" class="app-browser-boundary" role="separator" tabindex="0"
            aria-orientation="vertical" aria-label="Resource browser width" aria-controls="app-browser"
-           aria-valuemin="240" aria-valuemax="480" aria-valuenow="300"></div>
+           aria-valuemin="280" aria-valuemax="480" aria-valuenow="320"></div>
     </aside>
 
     <!-- 110 §A, #554: the drawers' ONE scrim — a sibling of both asides, inert (invisible,
@@ -770,6 +777,15 @@
              visualization's — so the family carries its own switch, draft-purge and purge words. -->
         <th:block th:if="${code == 'visualization_switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'Dashboards that pin this visualization keep their pinned versions; the Versions tab shows which version is current.')}"></div></th:block>
         <th:block th:if="${code == 'visualization_draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft is gone. This cannot be undone.')}"></div></th:block>
+        <!-- #786 — the API versions page's verbs (ui-screens §4.18b): an API version is not a pipeline's, so the
+             family carries its own words; `switched` names what the API serves, never the pipeline's pointer. -->
+        <th:block th:if="${code == 'api_draft_saved'}"><div th:replace="~{partials/toast :: toast('success', 'Draft saved', 'The API draft pins the pipeline version you chose. Release it to lock it.')}"></div></th:block>
+        <th:block th:if="${code == 'api_released'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the API current version and is locked.')}"></div></th:block>
+        <th:block th:if="${code == 'api_discarded'}"><div th:replace="~{partials/toast :: toast('success', 'Version discarded', 'It no longer serves. The list shows which version is current now.')}"></div></th:block>
+        <th:block th:if="${code == 'api_restored'}"><div th:replace="~{partials/toast :: toast('success', 'Version restored', 'It is released again. The list shows which version is current.')}"></div></th:block>
+        <th:block th:if="${code == 'api_switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'The API now serves the version you chose, at its own pinned pipeline version.')}"></div></th:block>
+        <th:block th:if="${code == 'api_draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft is gone. This cannot be undone.')}"></div></th:block>
+        <th:block th:if="${code == 'api_purged'}"><div th:replace="~{partials/toast :: toast('success', 'API removed', 'Its only version was a draft, so the API is gone with it.')}"></div></th:block>
         <th:block th:if="${code == 'visualization_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Visualization purged', 'The visualization and its draft are gone.')}"></div></th:block></th:block>
     </div>
     <th:block th:replace="${content}"/>

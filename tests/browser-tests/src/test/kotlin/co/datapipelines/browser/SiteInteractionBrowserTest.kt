@@ -193,6 +193,39 @@ class SiteInteractionBrowserTest : BrowserSuite() {
         }
     }
 
+    @Test
+    fun `the tutorial index fits a short desktop viewport and scrolls to its final link`() {
+        startTrace()
+        page.setViewportSize(1024, 600)
+        navigate("/how-it-works")
+        val index = page.locator(".workflow-index")
+        index.locator("a").count() shouldBe 13
+        page.evaluate("() => window.scrollTo(0, 1000)")
+        withClue("the sticky index stays below the header and inside the viewport") {
+            index.evaluate(
+                """el => {
+                    const r = el.getBoundingClientRect();
+                    const header = document.querySelector('.site-header').getBoundingClientRect();
+                    return r.top >= header.bottom && r.bottom <= innerHeight;
+                }""",
+            ) shouldBe true
+        }
+        index.evaluate("el => { el.scrollTop = el.scrollHeight; }")
+        val lastLink = index.locator("a").last()
+        lastLink.getAttribute("href") shouldBe "#faq"
+        withClue("the final index link can be reached inside its scroll area") {
+            lastLink.evaluate(
+                """el => {
+                    const r = el.getBoundingClientRect();
+                    const index = el.closest('.workflow-index').getBoundingClientRect();
+                    return r.top >= index.top && r.bottom <= index.bottom;
+                }""",
+            ) shouldBe true
+        }
+        lastLink.click()
+        page.waitForCondition { page.url().endsWith("#faq") }
+    }
+
     private fun navigate(path: String) {
         page.navigate("$baseUrl$path")
         page.waitForLoadState(LoadState.NETWORKIDLE)
@@ -218,9 +251,9 @@ class SiteInteractionBrowserTest : BrowserSuite() {
     private companion object {
         const val TAB_STOPS = 12
 
-        /** `--site-ground` (#F5F7FA) and `--site-ink` (#101820) as the browser reports them. */
-        const val LIGHT_GROUND = "rgb(245, 247, 250)"
-        const val INK = "rgb(16, 24, 32)"
+        /** `--site-ground` (#F3F1E9, Atlas paper) and `--site-ink` (#142B21) as the browser reports them (698). */
+        const val LIGHT_GROUND = "rgb(243, 241, 233)"
+        const val INK = "rgb(20, 43, 33)"
 
         /** The focused element's label and its computed outline. */
         const val FOCUS_JS =

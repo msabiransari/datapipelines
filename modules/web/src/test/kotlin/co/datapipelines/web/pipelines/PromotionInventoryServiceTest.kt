@@ -17,6 +17,8 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import java.time.Instant
 import java.util.UUID
 
@@ -111,7 +113,7 @@ class PromotionInventoryServiceTest {
         every { workspaces.findByName("acme") } returns workspace()
         every { pipelines.findAll(workspaceId) } returns listOf(pipelineRecord("zeta"), pipelineRecord("alpha"))
         every { pipelines.findCurrentVersionDetail(workspaceId, any()) } returns detail("hash-of-current")
-        every { templates.list(workspaceId = workspaceId, offset = 0, limit = 200) } returns
+        every { templates.list(workspaceId = workspaceId, offset = 0, limit = 200, releasedOnly = true) } returns
             listOf(template("t_a", 2, "th1"))
         every { datasources.listVisible(dialect = null, workspaceId = workspaceId) } returns
             listOf(ds("pg2"), ds("pg1"))
@@ -134,7 +136,7 @@ class PromotionInventoryServiceTest {
         every { workspaces.findByName("acme") } returns workspace()
         every { pipelines.findAll(workspaceId) } returns listOf(pipelineRecord("kept"), pipelineRecord("ghost"))
         every { pipelines.findCurrentVersionDetail(workspaceId, any()) } returnsMany listOf(detail("h1"), null)
-        every { templates.list(workspaceId = workspaceId, offset = 0, limit = 200) } returns emptyList()
+        every { templates.list(workspaceId = workspaceId, offset = 0, limit = 200, releasedOnly = true) } returns emptyList()
         every { datasources.listVisible(dialect = null, workspaceId = workspaceId) } returns emptyList()
 
         val inventory = service.inventoryOf("acme")
@@ -142,13 +144,30 @@ class PromotionInventoryServiceTest {
         inventory.pipelines.map { it.name } shouldBe listOf("kept")
     }
 
+    @ParameterizedTest
+    @EnumSource(PipelineVersionStatus::class, names = ["DRAFT", "DISCARDED"])
+    fun `a non-released pipeline pointer is omitted while a released sibling is carried`(status: PipelineVersionStatus) {
+        val released = pipelineRecord("released")
+        val hidden = pipelineRecord("hidden")
+        every { workspaces.findByName("acme") } returns workspace()
+        every { pipelines.findAll(workspaceId) } returns listOf(released, hidden)
+        every { pipelines.findCurrentVersionDetail(workspaceId, released.id) } returns detail("release-hash")
+        every { pipelines.findCurrentVersionDetail(workspaceId, hidden.id) } returns detail("hidden-hash").copy(status = status)
+        every { templates.list(workspaceId = workspaceId, offset = 0, limit = 200, releasedOnly = true) } returns emptyList()
+        every { datasources.listVisible(dialect = null, workspaceId = workspaceId) } returns emptyList()
+
+        val inventory = service.inventoryOf("acme")
+
+        inventory.pipelines shouldBe listOf(PromotionWire.Entry("released", 3, "release-hash"))
+    }
+
     @Test
     fun `template paging walks past the first page`() {
         every { workspaces.findByName("acme") } returns workspace()
         every { pipelines.findAll(workspaceId) } returns emptyList()
-        every { templates.list(workspaceId = workspaceId, offset = 0, limit = 200) } returns
+        every { templates.list(workspaceId = workspaceId, offset = 0, limit = 200, releasedOnly = true) } returns
             List(200) { template("t%03d".format(it), 1, "h") }
-        every { templates.list(workspaceId = workspaceId, offset = 200, limit = 200) } returns
+        every { templates.list(workspaceId = workspaceId, offset = 200, limit = 200, releasedOnly = true) } returns
             listOf(template("t_last", 2, "h2"))
         every { datasources.listVisible(dialect = null, workspaceId = workspaceId) } returns emptyList()
 

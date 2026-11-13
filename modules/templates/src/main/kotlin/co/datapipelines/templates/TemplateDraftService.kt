@@ -2,7 +2,11 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.typesystem.DatapipelinesException
+import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
 
 /**
@@ -30,18 +34,49 @@ import java.util.UUID
  *    forward, so an edit that did not mention them — the script face's Save draft never
  *    does — cannot silently drop the semantic link.
  * The ids were validated by [TemplateValidator] before the call (every surface validates
- * first). Deliberately not one transaction with the content write: the draft write recovers
- * from a lost race by reading the winner after a unique violation, which an enclosing
- * transaction would abort (`PipelineService.update`'s finding). Each statement is atomic on its
- * own; a failure between them leaves the version with its previous citations — a claim, never
- * content — and the call fails loudly.
+ * first).
+ *
+ * ## The writer guard (#841 G0, #744; release-dependencies record §4.3)
+ *
+ * A template draft is a pin target, so every create and draft write runs in ONE metadata transaction that acquires the
+ * workspace writer [guard] FIRST, then re-checks the draft's references under it ([TemplateValidator.validateReferences]:
+ * library imports and citations — metadata reads, no parse or suite), then writes the content and its citations. No
+ * purge, discard or citation change can land between that answer and the write, and the content and citation writes
+ * commit together. The surfaces' full validation (body scan, test suite) stays outside, before the transaction opens.
+ * The draft race's winner-read recovery survives the enclosing transaction because the repository runs each racing
+ * statement under a savepoint (`RaceSavepoint`, the #517 precedent).
+ *
+ * [GuardedTransaction.DIRECT] and [ReleaseMutationGuard.NONE] are the directly constructed unit-test shape; production
+ * wires the metadata transaction manager and the JDBC guard (`TemplateLifecycleConfiguration`).
  */
 class TemplateDraftService(
     private val templates: TemplateRepository,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     /** 7e — the `template_implements` rows the write lands its citations in. */
     private val citations: TemplateImplementsRepository,
+    /** #841 — re-checks the references under the guard; null only in constructions that never wire a validator. */
+    private val validator: TemplateValidator? = null,
+    private val transactions: TransactionOperations = GuardedTransaction.DIRECT,
+    /** #841 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
 ) {
+    /**
+     * [block] in one metadata transaction with the workspace writer guard acquired first — the shape every template
+     * writer outside the lifecycle service uses (the MCP sole-draft purge included), so they share one guard and one
+     * transaction manager.
+     */
+    fun <T> guarded(
+        workspaceId: UUID,
+        block: () -> T,
+    ): T = GuardedTransaction.run(transactions, guard, workspaceId, ReleaseFamily.TEMPLATE, block)
+
+    private fun requireReferences(
+        draft: TemplateDraft,
+        workspaceId: UUID,
+    ) {
+        validator?.validateReferences(draft, workspaceId)?.orThrow()
+    }
+
     /**
      * Creates the template (version 1, [lifecycle]) from the ALREADY VALIDATED [draft] and lands
      * its stated `implements` on that version — the create half of the rule above (a new
@@ -58,11 +93,17 @@ class TemplateDraftService(
         via: co.datapipelines.pipeline.WriteSurface,
     ): Template {
         authoring.requireTemplateAuthoring()
-        val created = templates.create(workspaceId, draft, actor, lifecycle, via)
-        val cited = draft.implements?.let { ImplementsIds.parseLenient(it) }
-        if (cited.isNullOrEmpty()) return created
-        citations.replace(workspaceId, created.id, created.version, cited)
-        return templates.findVersion(workspaceId, created.id, created.version) ?: created
+        return guarded(workspaceId) {
+            requireReferences(draft, workspaceId)
+            val created = templates.create(workspaceId, draft, actor, lifecycle, via)
+            val cited = draft.implements?.let { ImplementsIds.parseLenient(it) }
+            if (cited.isNullOrEmpty()) {
+                created
+            } else {
+                citations.replace(workspaceId, created.id, created.version, cited)
+                templates.findVersion(workspaceId, created.id, created.version) ?: created
+            }
+        }
     }
 
     /**
@@ -90,7 +131,18 @@ class TemplateDraftService(
     ): TemplateVersionDetail {
         // §5.5: the template mirror of the pipeline guard — fail-closed at the write path.
         authoring.requireTemplateAuthoring()
+        return guarded(workspaceId) { writeGuarded(workspaceId, id, draft, expectedHash, actor, via) }
+    }
 
+    /** [write]'s body, inside the guarded transaction: read, re-check references, write, cite. */
+    private fun writeGuarded(
+        workspaceId: UUID,
+        id: String,
+        draft: TemplateDraft,
+        expectedHash: String,
+        actor: UUID,
+        via: co.datapipelines.pipeline.WriteSurface,
+    ): TemplateVersionDetail {
         // The WORKING version, not the released one (D55): between a template's creation and its
         // first release there IS no released projection, and reading one would refuse the second
         // write to a draft the same caller had just created.
@@ -101,6 +153,7 @@ class TemplateDraftService(
         // different one is refused here, and every row the write paths below store carries the
         // resolved type so the per-version contract stays self-contained.
         val resolved = TemplateTypeRule.forExisting(draft, latest.type)
+        requireReferences(resolved, workspaceId)
 
         val existingDraft = templates.findDraftDetail(workspaceId, id)
         if (existingDraft != null) {

@@ -37,10 +37,17 @@ import co.datapipelines.calculators.CalculatorRegistry
  * unresolvable datasource, a template that cannot render, or a pipeline reference that does not
  * resolve is rejected at save, not discovered at 3am by an execution.
  */
+@Suppress("LongParameterList") // the environment's registries plus the operator's bound ceilings, each its own seam
 class PipelineValidator(
     private val datasources: DatasourceRegistry,
     private val templates: TemplateDryRenderer,
     private val pipelines: PipelineResolver,
+    /**
+     * §12.9's entity question (#723): whether a pinned child's NAME is registered, asked only when
+     * [pipelines] cannot resolve the pinned version. Required, no default — a construction that
+     * cannot answer it must say so rather than inherit a guess.
+     */
+    private val pipelineNames: PipelineNames,
     private val maxCompositionDepth: Int,
     /**
      * The deployment's org tier (calculators design §0.1). Defaulted so a test or an in-memory
@@ -79,6 +86,15 @@ class PipelineValidator(
     private val calculatorKinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
 ) {
     /**
+     * Derived metadata outside the portable body. Execute admission rechecks it so an edited
+     * pinned child draft cannot hide a managed write behind its parent's older stored flag.
+     */
+    fun writesManagedLake(
+        pipeline: Pipeline,
+        workspaceId: java.util.UUID,
+    ): Boolean = ManagedLakeWrites(datasources, pipelines, maxCompositionDepth).writes(pipeline, workspaceId)
+
+    /**
      * Runs §12 against [pipeline] and returns every failure. [workspaceId] is the workspace
      * the pipeline is being saved into: its template, PIPELINE-node and datasource references
      * resolve there (design 2026-08-16-workspaces §3 — cross-workspace references do not exist
@@ -102,6 +118,7 @@ class PipelineValidator(
         CompositionRules.check(
             pipeline,
             pipelines,
+            pipelineNames,
             maxCompositionDepth,
             workspaceId,
             orgContext,
@@ -112,6 +129,7 @@ class PipelineValidator(
         // §12.13 AFTER §12.10 (7c, #7): the script rules read the writer map the calculator
         // rules establish — a value-mode SCRIPT's `context_key` is a writer of the same kind.
         ScriptRules.check(pipeline, orgContext, templates, workspaceId, collector, calculatorKinds)
+        LakeDeliveryRules.check(pipeline, datasources, workspaceId, collector)
         return collector.toResult()
     }
 

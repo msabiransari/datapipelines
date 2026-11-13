@@ -25,7 +25,7 @@
     <div class="container">
       <p class="eyebrow">Run it, then build on it</p>
       <h1 id="hiw-hero-title" class="ds-display">How it works: the MCP server tutorial, end to end on your laptop</h1>
-      <!-- claim: docs/deployment.md Appendix B (the demo quickstart), docs/mcp-server.md §3 (the endpoint), docs/rest-api.md §19 (the published endpoint) -->
+      <!-- claim: docs/deployment.md Appendix B (the demo quickstart), docs/auth.md §7.4 (the key is created on the Keys page), docs/mcp-server.md §3 (the endpoint), docs/rest-api.md §19 (the published endpoint) -->
       <p class="lede">Eight steps, each executed on a fresh checkout before it was written here. Start the server with sample data. Create your key on the Keys page. Connect Claude Code, Cursor or Copilot over MCP. Let the agent author and run a pipeline, release it, publish it as an API, bind a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
       <div class="actions">
         <a class="btn btn-primary" href="#quickstart">Start at step 1 <span aria-hidden="true">&rarr;</span></a>
@@ -33,6 +33,37 @@
       </div>
     </div>
   </section>
+
+  <!--/* 698 (Atlas): the reference's ordered reading structure — the eight executed steps in
+       one column beside a desktop index that stays in view while they are read. The index is
+       navigation, not outline: no headings, so the page's heading tree and every anchor are
+       unchanged. Below 64rem it is not drawn and the steps read as one natural column; the
+       hero's "Start at step 1" and every deep link reach the same anchors either way. The
+       step sections keep their markup (not re-indented: their <pre> blocks are verbatim) and
+       are separated by rules instead of alternating slabs. */-->
+  <div class="container workflow-layout">
+  <nav class="workflow-index" aria-label="Tutorial steps">
+    <p class="workflow-index-title">The tutorial</p>
+    <ol>
+      <li><a href="#quickstart"><span>01</span> Run it locally</a></li>
+      <li><a href="#step-key"><span>02</span> Create your key</a></li>
+      <li><a href="#step-connect"><span>03</span> Connect the agent</a></li>
+      <li><a href="#step-author"><span>04</span> Author and run</a></li>
+      <li><a href="#review"><span>05</span> Release it</a></li>
+      <li><a href="#step-publish"><span>06</span> Publish an API</a></li>
+      <li><a href="#step-endpoint-key"><span>07</span> Bind a key</a></li>
+      <li><a href="#step-call"><span>08</span> Call it</a></li>
+    </ol>
+    <p class="workflow-index-title">Then</p>
+    <ol>
+      <li><a href="#application">Inside the application</a></li>
+      <li><a href="#engineering">The engineering depth</a></li>
+      <li><a href="#capabilities">What's in the box</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#faq">Questions</a></li>
+    </ol>
+  </nav>
+  <div class="workflow-steps">
 
   <!-- ============================ STEP 1: RUN IT ============================ -->
   <section class="section" id="quickstart" aria-labelledby="quickstart-title">
@@ -55,7 +86,7 @@
     shipped 'demo' workspace — the one every login lands in (auth.md §4.2 step 4).</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
-      <!-- claim: docs/auth.md §5A.2 (the seed fires once), §5A.4 (the forced change), docs/auth.md §4.2 step 4 (login lands in the shipped demo workspace) -->
+      <!-- claim: docs/auth.md §5A.2 (the seed fires once), docs/auth.md §5A.4 (the forced change), docs/auth.md §4.2 step 4 (login lands in the shipped demo workspace) -->
       <p><strong>What just happened.</strong> The script started Postgres, Redis, the app and the demo loaders, ran the migrations and seeded the first admin behind a one-time password. The <code>--demo</code> flag restored three published sample families and registered them as read-only datasources with example pipelines beside them: NYC taxi trips on Postgres, NOAA weather on MySQL, the zone reference on SQLite, US trade at HS-6 grain on DuckDB, and a rideshare lake read in place as Parquet and Iceberg on S3.</p>
       <p>Now open <code>http://localhost:8080</code> and sign in with the printed login. The app forces a password change of twelve characters or more before anything else, then lands on the dashboard. You are already inside the <code>demo</code> workspace, which is where the example pipelines live.</p>
       <div>
@@ -69,17 +100,17 @@
   </section>
 
   <!-- ============================ STEP 2: THE AGENT'S KEY ============================ -->
-  <section class="section band" id="step-key" aria-labelledby="step-key-title">
+  <section class="section" id="step-key" aria-labelledby="step-key-title">
     <div class="container">
       <p class="kicker">Step 2</p>
       <h2 id="step-key-title" class="ds-headline">Create your key on the Keys page</h2>
-      <!-- claim: docs/ui-screens.md §4.19 (the Keys page, the ONE creation path), docs/auth.md §7.4 (keys v2: the role is chosen at creation under the subset rule; no key is minted at sign-in), §7.5 (the key acts as its own identity holding its chosen role) -->
+      <!-- claim: docs/ui-screens.md §4.19 (the Keys page, the ONE creation path), docs/auth.md §7.4 (keys v2: the role is chosen at creation under the subset rule; no key is minted at sign-in), docs/auth.md §7.5 (the key acts as its own identity holding its chosen role) -->
       <p class="section-lede"><strong>What you do.</strong> No key exists until someone creates one. Open the <strong>Keys page</strong>, choose <strong>New API key</strong>, pick the kind <code>mcp</code>, and give it a role: the dialog offers exactly the roles whose permissions are a subset of yours. <strong>Create</strong> shows the full key once; copy it into the client config in step 3 and keep the page's row for revoking later.</p>
       <div>
         <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Keys page</span><span class="tag">Screenshot</span></div>
-        <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The Keys page: the new-key dialog with the kind and role choice, and the table of keys with their role, whose key they act as, and who created them.">
-        <figcaption>The Keys page: choose the kind and the role, copy the shown-once key, revoke it there.</figcaption>
+        <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The Keys page: the table of keys with each key's kind, the role it carries, the identity it acts as, and who created it, beside the New API key button.">
+        <figcaption>The Keys page: create with New API key, copy the shown-once key, revoke it there.</figcaption>
         </figure>
       </div>
       <p><strong>What you see.</strong> The key acts as its own identity holding the role you gave it. An author-role key can create and run; a promoter-role key reads and promotes. For the demo workspace a workspace admin can offer any of the three roles, and an author exactly one: their own. The subset rule decides, never a promise.</p>
@@ -93,7 +124,7 @@
     <div class="container">
       <p class="kicker">Step 3</p>
       <h2 id="step-connect-title" class="ds-headline">Point the agent at <code>/mcp</code></h2>
-      <!-- claim: docs/mcp-server.md §3.2 (Streamable HTTP, one endpoint), §4.1 (the DP-API-Key header; sessions refused) -->
+      <!-- claim: docs/mcp-server.md §3.2 (Streamable HTTP, one endpoint), docs/mcp-server.md §4.1 (the DP-API-Key header; sessions refused) -->
       <p class="section-lede"><strong>What you do.</strong> Every client needs the same two facts: the endpoint <code>POST http://localhost:8080/mcp</code> and the key from step 2 in the <code>DP-API-Key</code> header. The blocks below are the ones <a th:href="@{/add-mcp-server-to-claude-code}">the setup page</a> shows. They are one shared fragment, so the two pages cannot drift.</p>
 
       <div th:replace="~{site/fragments/mcp-client-configs :: clientConfigs('http://localhost:8080')}"></div>
@@ -105,13 +136,13 @@
 datapipelines: http://localhost:8080/mcp (HTTP) - ✔ Connected</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
-      <!-- claim: docs/mcp-server.md §6.1 (the catalog size renders from the code), §4.1 (API keys only) -->
+      <!-- claim: docs/mcp-server.md §6.2 (the tool definitions; the catalog size renders from code), docs/mcp-server.md §4.1 (API keys only) -->
       <p><strong>What just happened.</strong> The client ran the MCP <code>initialize</code> handshake against <code>/mcp</code> with the key, and the server answered with its capabilities and its working instructions: the authoring flow, the naming rules, and what it may not do. The endpoint accepts API keys only; a browser session is refused, deliberately. Exactly <span th:text="${facts.toolCount}">30</span> tools cover the full lifecycle, starting with <code>pipelines_list</code> and <code>datasources_list</code>.</p>
     </div>
   </section>
 
   <!-- ============================ STEP 4: AUTHOR AND EXECUTE ============================ -->
-  <section class="section band" id="step-author" aria-labelledby="step-author-title">
+  <section class="section" id="step-author" aria-labelledby="step-author-title">
     <div class="container">
       <p class="kicker">Step 4</p>
       <h2 id="step-author-title" class="ds-headline">The agent authors a pipeline and runs it</h2>
@@ -155,7 +186,7 @@ anything. Stop after reporting.</code></pre>
         <figcaption>The run in the executions view: the SUCCESS badge, per-node row counts and durations.</figcaption>
         </figure>
       </div>
-      <!-- claim: docs/staging.md §3 (the per-run in-memory staging database), docs/datasources.md §4.1 (the engines), docs/mcp-server.md (no tool releases — the draft waits for a person) -->
+      <!-- claim: docs/staging.md §3 (the per-run in-memory staging database), docs/datasources.md §4.1 (the dialect catalog), docs/mcp-server.md (no tool releases — the draft waits for a person) -->
       <p><strong>What just happened.</strong> Each node read its own engine: trips from Postgres, rainfall from MySQL, the borough lookup from SQLite. The federated join happened in a per-run in-memory staging database that exists only for the execution. Nothing was copied into a warehouse first. And the agent stopped at <strong>draft</strong>, because no MCP tool can release anything. That is a design rule, not a demo limitation.</p>
     </div>
   </section>
@@ -181,7 +212,7 @@ anything. Stop after reporting.</code></pre>
   </section>
 
   <!-- ============================ STEP 6: PUBLISH THE ENDPOINT ============================ -->
-  <section class="section band" id="step-publish" aria-labelledby="step-publish-title">
+  <section class="section" id="step-publish" aria-labelledby="step-publish-title">
     <div class="container">
       <p class="kicker">Step 6</p>
       <h2 id="step-publish-title" class="ds-headline">Publish it as an API</h2>
@@ -200,7 +231,7 @@ anything. Stop after reporting.</code></pre>
  "url": "/api/nyc/v1/borough-fare-by-weather", …}</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
-      <!-- claim: docs/mcp-server.md §6.2.23 (endpoints_create), docs/rest-api.md §19.2 (released and side-effect-free), §19.1 (the path grammar; v* and api are reserved categories), §19.5 (the REST twin), docs/auth.md §7.7 (the MCP key reaches /mcp and nothing else) -->
+      <!-- claim: docs/mcp-server.md §6.2.23 (endpoints_create), docs/rest-api.md §19.2 (released and side-effect-free), docs/rest-api.md §19.1 (the path grammar; v* and api are reserved categories), docs/rest-api.md §19.5 (the REST twin), docs/auth.md §7.7 (the MCP key reaches /mcp and nothing else) -->
       <p><strong>What just happened.</strong> Publication is refused unless the pipeline has a released version and is side-effect-free. Every node reads, and writes at most to the per-run tempdb or to the caller. That is what makes a <code>GET</code> safe to retry, preload or crawl. The path is <em>category, version, path</em>, and a category like <code>v1</code> or the literal <code>api</code> can never be published, so a published path can never shadow a product route. The same publish exists as <code>POST /api/v1/endpoints</code> for a signed-in session. Your MCP key reaches <code>/mcp</code> and nothing else, so a script publishes with a session, not with that key. The API section in the UI lists the endpoint.</p>
     </div>
   </section>
@@ -218,7 +249,7 @@ anything. Stop after reporting.</code></pre>
         <figcaption>The API key in the keys table, with the associated path as its reach.</figcaption>
         </figure>
       </div>
-      <!-- claim: docs/auth.md §7.5 (the api_caller key role), §4.7 (the key's own identity), §7.7 (an endpoint key's reach is its bindings; nearest ancestor wins; the MCP key is refused off /mcp), docs/rest-api.md §19.3 (a session is a 401 here) -->
+      <!-- claim: docs/auth.md §7.5 (the api_caller key role), docs/auth.md §4.7 (the key's own identity), docs/auth.md §7.7 (an endpoint key's reach is its bindings; nearest ancestor wins; the MCP key is refused off /mcp), docs/rest-api.md §19.3 (a session is a 401 here) -->
       <p><strong>What just happened.</strong> The key acts as its own identity with one fixed role, <em>api caller</em>. The keys table's <em>Acts as</em> column names that identity after the key. Its reach is exactly its bindings, and the nearest bound ancestor decides: a binding to <code>/nyc</code> would cover every endpoint under it. The negative control, from the same run: the agent's key from step 2 is refused here, because an MCP key reaches <code>/mcp</code> and nothing else:</p>
       <div class="code-block">
         <pre><code>$ curl http://localhost:8080/api/nyc/v1/borough-fare-by-weather \
@@ -231,7 +262,7 @@ anything. Stop after reporting.</code></pre>
   </section>
 
   <!-- ============================ STEP 8: CALL IT ============================ -->
-  <section class="section band" id="step-call" aria-labelledby="step-call-title">
+  <section class="section" id="step-call" aria-labelledby="step-call-title">
     <div class="container">
       <p class="kicker">Step 8</p>
       <h2 id="step-call-title" class="ds-headline">Call it, and page the result</h2>
@@ -253,10 +284,13 @@ anything. Stop after reporting.</code></pre>
 }</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
-      <!-- claim: docs/rest-api.md §19.4 (the data_ready payload, 202 on timeout), §19.3 (strict parameter validation), §7.2 (the cursor's offset/limit) -->
+      <!-- claim: docs/rest-api.md §19.4 (the data_ready payload, 202 on timeout), docs/rest-api.md §19.3 (strict parameter validation), docs/rest-api.md §7.2 (the cursor's offset/limit) -->
       <p><strong>What just happened.</strong> The endpoint executed the latest released version in-process, audited against the key, and materialized the full result before answering. <code>DP-Result-Page-Rows: 5</code> returns five rows with <code>has_more: true</code>, and the cursor pages the rest inside the TTL with <code>GET …/result?offset=5&amp;limit=5</code>. The pipeline's declared parameters arrive as the query string, like <code>?year=2023</code>. Validation is strict on purpose: a typo like <code>?yr=2023</code> is a <code>400</code> listing every accepted parameter, because a silently defaulted year would return plausible, wrong rows. A run that outlives the endpoint's timeout answers <code>202</code> with the cursor instead of an error. The answer is coming.</p>
     </div>
   </section>
+
+  </div>
+  </div>
 
   <!-- ============================ INSIDE THE APPLICATION ============================ -->
   <!--/* 169: the three reserved frames hold real captures now, and every remaining shot the
@@ -315,11 +349,6 @@ anything. Stop after reporting.</code></pre>
           <figcaption>A shared template's version list, with the pipelines pinning each version.</figcaption>
         </figure>
         <figure class="media-frame">
-          <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API keys</span><span class="tag">Screenshot</span></div>
-          <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The top bar's right side: the MCP-key chip with its prefix, a Copy button and a delete-to-rotate button.">
-          <figcaption>Your MCP key. Copy it from the top bar.</figcaption>
-        </figure>
-        <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Executions</span><span class="tag">Screenshot</span></div>
           <img src="/site/img/executions.png" width="1440" height="900" loading="lazy" alt="The execution history table listing past runs with their status and duration, newest first.">
           <figcaption>The execution history: every run, its status and duration, newest first.</figcaption>
@@ -375,9 +404,9 @@ anything. Stop after reporting.</code></pre>
   <section class="section" aria-labelledby="hiw-mechanism">
     <div class="container">
       <h2 id="hiw-mechanism" class="ds-headline">The whole mechanism in one paragraph</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/pipeline-contract.md §3.1 (a versioned JSON DAG of SQL nodes), docs/mcp-server.md §6 (authored over MCP against your real schemas) -->
-        <!-- claim: docs/datasources.md §4.1 (the engine catalog), docs/staging.md §3 (an in-memory staging database that exists only for the run) -->
+        <!-- claim: docs/datasources.md §4.1 (the dialect catalog), docs/staging.md §3 (an in-memory staging database that exists only for the run) -->
         <!-- claim: docs/versioning.md §3 (a release is immutable), docs/rest-api.md §19 (published as a GET endpoint) -->
         <p>
           A dataset here is a pipeline: a versioned JSON DAG of SQL nodes the agent authors over MCP against your
@@ -406,7 +435,7 @@ anything. Stop after reporting.</code></pre>
       <ul class="engine-links">
         <li th:each="e : ${engines}"><a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a></li>
       </ul>
-      <!-- claim: docs/datasources.md §4.1 (the LAKE row), §8C -->
+      <!-- claim: docs/datasources.md §4.1 (the LAKE row), docs/datasources.md §8C -->
       <p class="engine-strip-more">Every dialect has its page. That includes H2, also the staging engine, and dp-lake, the <code>LAKE</code> dialect that reads Parquet and Iceberg on S3 in place. <a th:href="@{/dp-lake}">The dp-lake product page &rarr;</a></p>
       <p class="engine-strip-more"><a th:href="@{/mcp-server-for-sql-databases}">Start with the SQL MCP server overview &rarr;</a></p>
     </div>
@@ -552,6 +581,15 @@ anything. Stop after reporting.</code></pre>
 
         <article class="card ds-hover-lift">
           <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M9 7 4 12l5 5M15 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <!-- claim: docs/pipeline-contract.md §4.12 (the SCRIPT node: pinned jsonata or javascript templates, row, table and value modes), docs/deployment.md §6.4 (the JavaScript isolate) -->
+          <h3>SCRIPT nodes: JSONata and JavaScript</h3>
+          <p>When SQL is the wrong tool, a <code>SCRIPT</code> node runs a versioned <code>jsonata</code> or <code>javascript</code> template over staged tables, in <code>row</code>, <code>table</code> or <code>value</code> mode. The engines have different capabilities and evaluation limits, with no network or filesystem access. JavaScript runs in the image's isolate, without Node.js or npm.</p>
+        </article>
+
+        <article class="card ds-hover-lift">
+          <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <rect x="3" y="4" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
             <rect x="13" y="13" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
             <path d="M11 7.5h3a2 2 0 0 1 2 2V13" fill="none" stroke="currentColor" stroke-width="1.5"/>
@@ -596,6 +634,28 @@ anything. Stop after reporting.</code></pre>
       <div class="feature-group">
         <h3 class="group-title">Operate</h3>
         <div class="features-grid ds-stagger-children">
+
+        <article class="card ds-hover-lift">
+          <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3 12h3l2-6 4 12 2-6h7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <!-- claim: docs/scheduler.md §1, §3, §5.2 and §9 -->
+          <h3>Schedules that run pipelines</h3>
+          <p>A schedule runs one pipeline at a five-field cron pattern's times in an IANA time zone, previews the next runs, and records every run. A run whose outcome is unknown blocks the schedule until a person looks. Run notices are available when scheduler mail is enabled and the schedule has recipients.</p>
+          <a class="card-link" th:href="@{/pipeline-scheduling}">Pipeline scheduling &rarr;</a>
+        </article>
+
+        <article class="card ds-hover-lift">
+          <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M4 10h16" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M7 14h4M14 14h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <!-- claim: docs/dashboards.md §1, §5.5 and §6.5 -->
+          <h3>Dashboards over released pipelines</h3>
+          <p>Visualizations and dashboards are versioned like pipelines: an agent drafts, a person releases. Configured actions refresh a dashboard's pinned sources on opening, from buttons or from bound filter controls. Its filters come from a reusable parameter set, and it embeds in your product through your backend, which keeps the key.</p>
+          <a class="card-link" th:href="@{/sql-dashboards}">SQL dashboards &rarr;</a>
+        </article>
 
         <article class="card ds-hover-lift">
           <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -737,9 +797,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §7.7 -->
           <h3>A key has a kind, and the kind decides its reach</h3>
-          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Three kinds.</span> A <code>user</code> key is the agent's MCP key. It acts as its member, capped at author, and reaches <code>/mcp</code> and nothing else. An <code>endpoint</code> key carries the <em>api caller</em> role and authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
+          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Four kinds.</span> <code>mcp</code>: the agent's own identity, with the role its creator chose; it reaches only <code>/mcp</code>. <code>endpoint</code>: the <em>api caller</em> role, limited to bound published paths. <code>server</code>: promotion routes. <code>dashboard</code>: one external app's embeds.</p>
           <!-- claim: docs/auth.md §7.7 (the confinement is central) -->
-          <p>The confinement is decided centrally, before any handler's annotation is read. A new route cannot become quietly reachable to a key of the wrong kind.</p>
+          <p>A central check confines each kind before the handler's permission check. A new route never expands another kind's reach.</p>
           <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>
         </article>
 
@@ -765,7 +825,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §5.1, §4.7, §7.1–7.7 -->
           <h3>OIDC SSO + agent keys that carry a role</h3>
-          <p>Humans sign in through OIDC SSO. An agent's key acts as its person, capped at author. A program's API key acts as its own identity. Separate principals, separate blast radii.</p>
+          <p>Humans sign in through OIDC SSO. An agent's key is an identity of its own, holding the role its creator chose for it. A program's API key is an identity too. Separate principals, separate blast radii.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -808,7 +868,7 @@ anything. Stop after reporting.</code></pre>
       </div>
 
 
-      <p class="features-pointer">Charts and dashboards are next. <a th:href="@{/roadmap}">See the roadmap</a>.</p>
+      <p class="features-pointer">Scheduling, dashboards and parameter sets each have a page: <a th:href="@{/pipeline-scheduling}">pipeline scheduling</a>, <a th:href="@{/sql-dashboards}">SQL dashboards</a> and <a th:href="@{/reusable-parameter-sets}">parameter sets</a>. What is not built yet is on the <a th:href="@{/roadmap}">roadmap</a>.</p>
     </div>
   </section>
 
@@ -821,13 +881,13 @@ anything. Stop after reporting.</code></pre>
       <h2 id="sec-title" class="ds-headline">Security &amp; self-hosting</h2>
       <p class="section-lede">Runs on your hardware, under your policies. The defaults are paranoid so you don't have to be.</p>
 
-      <ul class="fact-list sec-list">
+      <ul class="fact-list sec-list text-columns">
         <li>
           <!-- claim: docs/auth.md §8.3 -->
           <strong>Authenticated by default.</strong> Every endpoint requires auth unless it's explicitly allowlisted.
         </li>
         <li>
-          <!-- claim: docs/environments.md §2 (the posture table), §5 (demo is a flag), docs/deployment.md Appendix B -->
+          <!-- claim: docs/environments.md §2 (the posture table), docs/environments.md §5 (demo is a flag), docs/deployment.md Appendix B -->
           <strong>Two variables, two files.</strong> An org sets what it calls the environment with <code>DATAPIPELINES_ENV</code>, and how careful the product should be with <code>DATAPIPELINES_POSTURE</code>: <code>development</code> or <code>hardened</code>. Configuration lives in exactly two files. A tracked <code>deploy/env/defaults.env</code> carries every non-secret default. A git-ignored <code>deploy/secrets.env</code> holds the secrets, and <code>./app.sh --scaffold</code> writes it for you with every secret generated. The <code>hardened</code> setting refuses the demo at boot.
         </li>
         <li>
@@ -884,14 +944,16 @@ anything. Stop after reporting.</code></pre>
         </article>
         <article class="card">
           <span class="card-number">NEXT UP</span>
-          <!-- claim: docs/ROADMAP.md §2 (charts and dashboards are planned) -->
+          <!-- claim: docs/scheduler.md §1 (a schedule reruns the pipeline), docs/dashboards.md §1 (a dashboard over it), docs/ROADMAP.md §2.2 (report delivery and condition alerts are not built) -->
           <h3>Where the product is going</h3>
-          <p>Charts and dashboards on top of released pipelines come next. <a th:href="@{/roadmap}">See the roadmap &rarr;</a></p>
+          <p>Run the released pipeline on a <a th:href="@{/pipeline-scheduling}">schedule</a>, or chart it on a <a th:href="@{/sql-dashboards}">dashboard</a>. Report delivery and alerts are not built yet. <a th:href="@{/roadmap}">See the roadmap &rarr;</a></p>
         </article>
       </div>
       <ul class="engine-links">
         <li><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview</a></li>
         <li><a th:href="@{/published-api}">Turn a release into an API</a></li>
+        <li><a th:href="@{/pipeline-scheduling}">Run it on a schedule</a></li>
+        <li><a th:href="@{/sql-dashboards}">Chart it on a dashboard</a></li>
         <li><a th:href="@{/federated-query}">Federated query, in detail</a></li>
         <li><a th:href="@{/dp-lake}">dp-lake: Parquet and Iceberg on S3</a></li>
         <li><a th:href="@{/demo-data}">The demo data, table by table</a></li>

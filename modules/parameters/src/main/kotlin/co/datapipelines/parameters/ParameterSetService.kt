@@ -12,6 +12,16 @@ import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.ReleasedVersion
+import co.datapipelines.pipeline.release.ReleasedVersionObserver
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreRechecks
 import co.datapipelines.pipeline.through
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.SimpleTransactionStatus
@@ -68,6 +78,26 @@ data class ParameterSetReleased(
 )
 
 /**
+ * The port [ParameterSetService.release] delegates to when the assembling layer wires one (#873 §C.1; the
+ * `PipelineReleaseCoordination` mold): every set release — the REST route's and the dialog's — then runs through the
+ * shared release planner and its ONE metadata transaction. A directly constructed service leaves it unset and releases
+ * natively.
+ */
+fun interface ParameterSetReleaseCoordination {
+    fun release(request: ParameterSetReleaseRequest): ParameterSetReleased
+}
+
+/** A set release as the surfaces ask for it: the legacy alias `release_pinned_templates`, or a plan (record §6). */
+data class ParameterSetReleaseRequest(
+    val workspaceId: UUID,
+    val id: UUID,
+    val expectedHash: String,
+    val actor: UUID,
+    val releasePinnedTemplates: Boolean = false,
+    val plan: ReleasePlanRequest? = null,
+)
+
+/**
  * The parameter-set aggregate's use cases (record §8.2, §8.3; versioning §3.5's verb table) — the one
  * place every write and every read passes, so the surfaces (lane D) add transport only.
  *
@@ -90,10 +120,15 @@ data class ParameterSetReleased(
  * opens a customer-datasource connection and `ConnectionLease` refuses one inside a metadata
  * transaction (`datasource.lease_in_transaction`).
  *
+ * **The writer guard (#517, release-dependencies record §4.3).** Every write here changes what a release resolves, so
+ * each runs in a metadata transaction that acquires the workspace writer [guard] FIRST — the inverse-pin checks of the
+ * purge and discard verbs then answer under it, and no pin save can land between their read and the write. The probes
+ * of create and the draft write stay outside, before the guarded transaction opens.
+ *
  * One façade over the aggregate's verb table (its ports are the constructor); each verb maps each
  * distinct refusal to its own catalogued code, so a verb throws as many as it has preconditions.
  */
-@Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount")
+@Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount", "LargeClass") // every verb of the family, as its repository
 class ParameterSetService(
     private val repository: ParameterSetRepository,
     private val validator: ParameterSetValidator,
@@ -105,7 +140,30 @@ class ParameterSetService(
     private val templateReleaser: TemplateReleaser = TemplateReleaser.NONE,
     private val transactions: TransactionOperations = DIRECT,
     private val newId: () -> UUID = UUID::randomUUID,
+    /** #517 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
+    /**
+     * #778 — told of every version this service makes RELEASED (a release, an import that lands or re-confirms one),
+     * inside that transaction: the lake reference scanner indexes it, and a scanner that throws rolls the write back
+     * (the owner's 2026-11-02 seam ruling). [ReleasedVersionObserver.NONE] in a directly constructed test.
+     */
+    private val observer: ReleasedVersionObserver = ReleasedVersionObserver.NONE,
+    /**
+     * #873 §C.1 — the shared release planner; when set, [release] delegates every request to it and the planner's
+     * participant calls [releaseTarget], [prepareRelease] and [commitRelease]. Null in a directly constructed test.
+     */
+    private val coordination: ParameterSetReleaseCoordination? = null,
+    /** #873 §D.3 — the transitive restore recheck; [RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test. */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
 ) {
+    /** [block] in one metadata transaction with the workspace writer guard acquired first (#517). */
+    private fun <T> guarded(
+        workspaceId: UUID,
+        block: () -> T,
+    ): T = GuardedTransaction.run(transactions, guard, workspaceId, ReleaseFamily.PARAMETER_SET, block)
+
     /** Repository-owned, lens-filtered navigation metadata only. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
         repository.navigation(request)
@@ -122,8 +180,11 @@ class ParameterSetService(
         requireAuthoring()
         val canonical = validOrThrow(validator.validate(workspaceId, document))
         val id = newId()
-        val detail = repository.create(workspaceId, id, canonical.name, canonical.body, actor, CreateLifecycle.DRAFT, via)
-        return checkNotNull(repository.findVersion(workspaceId, id, detail.version))
+        return guarded(workspaceId) {
+            validator.validatePinMetadata(workspaceId, canonical.body).throwIfInvalid()
+            val detail = repository.create(workspaceId, id, canonical.name, canonical.body, actor, CreateLifecycle.DRAFT, via)
+            checkNotNull(repository.findVersion(workspaceId, id, detail.version))
+        }
     }
 
     /**
@@ -152,13 +213,17 @@ class ParameterSetService(
         }
         // An open draft is overwritten in place (§5.2); a failed write there — a stale hash — falls through to
         // the copy-on-write arm (§5.1), whose guard then decides: both answer null on a stale base.
-        val inPlace =
-            repository.findDraft(workspaceId, id)?.let {
-                repository.writeDraft(workspaceId, id, canonical.body, expectedHash, actor, via)
-            }
-        val written =
-            inPlace ?: repository.createDraft(workspaceId, id, canonical.body, expectedHash, actor, via) ?: throw staleBase(workspaceId, id)
-        return checkNotNull(repository.findVersion(workspaceId, id, written.version))
+        return guarded(workspaceId) {
+            validator.validatePinMetadata(workspaceId, canonical.body).throwIfInvalid()
+            val inPlace =
+                repository.findDraft(workspaceId, id)?.let {
+                    repository.writeDraft(workspaceId, id, canonical.body, expectedHash, actor, via)
+                }
+            val written =
+                inPlace ?: repository.createDraft(workspaceId, id, canonical.body, expectedHash, actor, via)
+                    ?: throw staleBase(workspaceId, id)
+            checkNotNull(repository.findVersion(workspaceId, id, written.version))
+        }
     }
 
     /**
@@ -167,16 +232,25 @@ class ParameterSetService(
      * with the set in ONE metadata transaction, templates first (142); record §4 steps 4–6 re-run against
      * the pins as they are now, BEFORE that transaction (a draft template edited after the set's save is
      * caught here, with the step's own code).
+     *
+     * Since #873 a wired [coordination] owns the release after the authoring check (record §4.1): the alias consents to
+     * exactly the direct DRAFT selector templates above, a [plan] to its own selection; the native body below is the
+     * directly constructed service's, and a plan reaching it is a wiring defect.
      */
-    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal
+    @Suppress("ThrowsCount", "LongParameterList") // each throw is a distinct catalogued refusal; the request's fields
     fun release(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
         actor: UUID,
         releasePinnedTemplates: Boolean = false,
+        plan: ReleasePlanRequest? = null,
     ): ParameterSetReleased {
         requireAuthoring()
+        coordination?.let {
+            return it.release(ParameterSetReleaseRequest(workspaceId, id, expectedHash, actor, releasePinnedTemplates, plan))
+        }
+        check(plan?.present != true) { "a release plan needs the release coordinator, and none is wired" }
         repository.findRecord(workspaceId, id) ?: throw notFound(id)
         val draft = repository.findDraft(workspaceId, id) ?: throw notDraft(id)
         val body = checkNotNull(repository.findVersion(workspaceId, id, draft.version)).body
@@ -185,13 +259,65 @@ class ParameterSetService(
         val released =
             checkNotNull(
                 transactions.execute {
+                    guard.acquire(workspaceId, ReleaseFamily.PARAMETER_SET)
                     val cascaded = toCascade.map { templateReleaser.release(workspaceId, it.id, it.version, actor) }
                     val flipped = repository.releaseDraft(workspaceId, id, expectedHash, actor) ?: throw staleBase(workspaceId, id)
+                    observeReleased(workspaceId, id, flipped.version)
                     flipped to cascaded
                 },
             )
         return ParameterSetReleased(checkNotNull(repository.findVersion(workspaceId, id, released.first.version)), released.second)
     }
+
+    // ---- the release planner's seams (#873 §B.1) -------------------------------------------------------
+
+    /** The set's working DRAFT as a release names it — the record and the draft — or the native refusal. */
+    fun releaseTarget(
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<ParameterSetRecord, ParameterSetVersionDetail> {
+        val record = repository.findRecord(workspaceId, id) ?: throw notFound(id)
+        val draft = repository.findDraft(workspaceId, id) ?: throw notDraft(id)
+        return record to draft
+    }
+
+    /**
+     * The planner's PREPARE, outside every transaction (record §4.1 step 4): the DRAFT that is [version] at [expectedHash]
+     * re-judged against its selector sources as they are now — the probe opens customer-datasource connections, which a
+     * metadata transaction refuses. Null when that DRAFT is no longer the planned one (the participant's `plan_conflict`).
+     */
+    fun prepareRelease(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+        expectedHash: String,
+    ): ParameterSetVersion? {
+        val draft = repository.findDraft(workspaceId, id)?.takeIf { it.version == version && it.bodyHash == expectedHash } ?: return null
+        val stored = repository.findVersion(workspaceId, id, draft.version) ?: return null
+        validator.revalidateSources(workspaceId, stored.body).throwIfInvalid()
+        return stored
+    }
+
+    /**
+     * The planner's COMMIT, inside its guarded transaction (record §4.1 step 6): the one exact-hash flip and the #778
+     * observer; null when no DRAFT matched [expectedHash] (the caller's refusal — never a silent pickup).
+     */
+    fun commitRelease(
+        workspaceId: UUID,
+        id: UUID,
+        expectedHash: String,
+        actor: UUID,
+    ): ParameterSetVersion? {
+        val flipped = repository.releaseDraft(workspaceId, id, expectedHash, actor) ?: return null
+        observeReleased(workspaceId, id, flipped.version)
+        return checkNotNull(repository.findVersion(workspaceId, id, flipped.version))
+    }
+
+    /** The native stale-hash refusal for set [id] — the planner's answer when the root's `If-Match` no longer matches. */
+    fun staleRelease(
+        workspaceId: UUID,
+        id: UUID,
+    ): DatapipelinesException = staleBase(workspaceId, id)
 
     /** Purge the DRAFT (versioning §5.4) at [expectedHash]; the sole version takes the set with it. */
     fun purgeDraft(
@@ -200,10 +326,12 @@ class ParameterSetService(
         expectedHash: String,
     ): Purged {
         requireAuthoring()
-        val draft = repository.findDraft(workspaceId, id) ?: throw notDraft(id)
-        refuseIfDraftPinned(workspaceId, id, draft.version)
-        return transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) }
-            ?: throw staleBase(workspaceId, id)
+        return guarded(workspaceId) {
+            val draft = repository.findDraft(workspaceId, id) ?: throw notDraft(id)
+            refuseIfDraftPinned(workspaceId, id, draft.version)
+            transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) }
+                ?: throw staleBase(workspaceId, id)
+        }
     }
 
     /** Purge version [version] — drafts only (a release is discarded, never purged: `last_release`). */
@@ -214,11 +342,13 @@ class ParameterSetService(
         expectedHash: String? = null,
     ): Purged {
         requireAuthoring()
-        val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
-        if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(id, version)
-        refuseIfDraftPinned(workspaceId, id, version)
-        return transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) }
-            ?: throw staleBase(workspaceId, id)
+        return guarded(workspaceId) {
+            val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
+            if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(id, version)
+            refuseIfDraftPinned(workspaceId, id, version)
+            transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) }
+                ?: throw staleBase(workspaceId, id)
+        }
     }
 
     /** Purge the whole set — only when its only version is a DRAFT (versioning §3.2, graph rule 3). Entity by definition. */
@@ -227,11 +357,13 @@ class ParameterSetService(
         id: UUID,
     ): Purged {
         requireAuthoring()
-        repository.findRecord(workspaceId, id) ?: throw notFound(id)
-        val versions = repository.listVersions(workspaceId, id)
-        versions.firstOrNull { it.status != PipelineVersionStatus.DRAFT }?.let { throw lastRelease(id, it.version) }
-        refuseIfPinned(workspaceId, id, version = null)
-        transactions.execute { repository.purgeDraft(workspaceId, id, null, authoring.developmentPosture) }
+        guarded(workspaceId) {
+            repository.findRecord(workspaceId, id) ?: throw notFound(id)
+            val versions = repository.listVersions(workspaceId, id)
+            versions.firstOrNull { it.status != PipelineVersionStatus.DRAFT }?.let { throw lastRelease(id, it.version) }
+            refuseIfPinned(workspaceId, id, version = null)
+            transactions.execute { repository.purgeDraft(workspaceId, id, null, authoring.developmentPosture) }
+        }
         return Purged.Entity
     }
 
@@ -243,31 +375,50 @@ class ParameterSetService(
         actor: UUID,
     ): VersionMoved {
         requireAuthoring()
-        val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
-        if (detail.status !=
-            PipelineVersionStatus.RELEASED
-        ) {
-            throw wrongStatus(ParameterErrorCodes.VERSION_NOT_RELEASED, id, version, detail.status)
+        return guarded(workspaceId) {
+            val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
+            if (detail.status != PipelineVersionStatus.RELEASED) {
+                throw wrongStatus(ParameterErrorCodes.VERSION_NOT_RELEASED, id, version, detail.status)
+            }
+            refuseIfPinned(workspaceId, id, version)
+            transactions.execute { repository.discardVersion(workspaceId, id, version, actor, authoring.developmentPosture) }
+                ?: throw staleBase(workspaceId, id)
         }
-        refuseIfPinned(workspaceId, id, version)
-        return transactions.execute { repository.discardVersion(workspaceId, id, version, actor, authoring.developmentPosture) }
-            ?: throw staleBase(workspaceId, id)
     }
 
-    /** Restore DISCARDED version [version]; the pointer moves only above-current-or-NULL (D60). */
+    /**
+     * Restore DISCARDED version [version]; the pointer moves only above-current-or-NULL (D60). A restore lands RELEASED
+     * without a human's consent, so under the guard the stored body's selector-template pins are rechecked first (#517
+     * round three, record §12.1): a missing or DISCARDED pin refuses with the save rules' validation code (400), a DRAFT
+     * one `parameter.release.dependency_not_released` (409). A refusal writes nothing.
+     */
     fun restoreVersion(
         workspaceId: UUID,
         id: UUID,
         version: Int,
     ): VersionMoved {
         requireAuthoring()
-        val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
-        if (detail.status !=
-            PipelineVersionStatus.DISCARDED
-        ) {
-            throw wrongStatus(ParameterErrorCodes.VERSION_NOT_DISCARDED, id, version, detail.status)
+        return guarded(workspaceId) {
+            val stored = repository.findVersion(workspaceId, id, version) ?: throw notFound(id, version)
+            if (stored.detail.status != PipelineVersionStatus.DISCARDED) {
+                throw wrongStatus(ParameterErrorCodes.VERSION_NOT_DISCARDED, id, version, stored.detail.status)
+            }
+            refuseDanglingPins(workspaceId, stored)
+            transactions.execute { repository.restoreVersion(workspaceId, id, version) } ?: throw staleBase(workspaceId, id)
         }
-        return transactions.execute { repository.restoreVersion(workspaceId, id, version) } ?: throw staleBase(workspaceId, id)
+    }
+
+    private fun refuseDanglingPins(
+        workspaceId: UUID,
+        stored: ParameterSetVersion,
+    ) {
+        val name = stored.record.name
+        val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.PARAMETER_SET, name, stored.detail.version)
+        // §D.3: the direct pins keep their native judgement; the shared walk adds what lies BELOW a live pin.
+        val below = restoreGuard.recheck(root).filter { it.transitive }
+        val pins = validator.validateRestorePins(workspaceId, stored.body, below)
+        if (pins.result.failures.isNotEmpty()) throw ParameterSetValidationException(pins.result)
+        RestoreRechecks.notReleased(root, name, below, maxBlockers, extra = pins.drafts)?.let { throw it }
     }
 
     /** Point the set at [version] (D60) — the receiver's verb, never an authoring write. Answers the move and the name. */
@@ -275,18 +426,19 @@ class ParameterSetService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Switched {
-        val record = repository.findRecord(workspaceId, id) ?: throw notFound(id)
-        repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
-        val pointer =
-            transactions.execute { repository.switchCurrent(workspaceId, id, version, authoring.developmentPosture) }
-                ?: throw DatapipelinesException(
-                    ParameterErrorCodes.VERSION_NOT_ELIGIBLE,
-                    "Version $version is not live and eligible for this deployment's pointer.",
-                    mapOf("id" to id.toString(), "version" to version),
-                )
-        return Switched(record.name, pointer)
-    }
+    ): Switched =
+        guarded(workspaceId) {
+            val record = repository.findRecord(workspaceId, id) ?: throw notFound(id)
+            repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
+            val pointer =
+                transactions.execute { repository.switchCurrent(workspaceId, id, version, authoring.developmentPosture) }
+                    ?: throw DatapipelinesException(
+                        ParameterErrorCodes.VERSION_NOT_ELIGIBLE,
+                        "Version $version is not live and eligible for this deployment's pointer.",
+                        mapOf("id" to id.toString(), "version" to version),
+                    )
+            Switched(record.name, pointer)
+        }
 
     /**
      * Import (record §8.3; versioning §9.2): the body is validated in full AGAINST THIS DEPLOYMENT — its
@@ -326,18 +478,27 @@ class ParameterSetService(
 
     /**
      * [import]'s landing half, alone: hash check, the id/rename/version-taken rules and the insert —
-     * NO validation. [export]'s body must already be canonical and §4-proven: the receive's transaction
+     * metadata-only pin recheck. [export]'s body must already be canonical and §4-proven: the receive's transaction
      * body lands what [validateForImport] answered outside it (#302, C36 — one §10.4 transaction, no
-     * probe inside it). A caller that skips the validation stores an unproven body; the arm exists for
+     * probe inside it). Pin existence, status, type and dialect are checked again under the writer guard.
+     * A caller that skips the validation stores an unproven body; the arm exists for
      * the receive's validate-then-land split, not as a looser import.
      */
-    @Suppress("ThrowsCount", "ReturnCount") // each §9.2 row is its own refusal/answer
     fun importValidated(
+        workspaceId: UUID,
+        export: ParameterSetExport,
+        actor: UUID,
+    ): ParameterSetImported = guarded(workspaceId) { landValidated(workspaceId, export, actor) }
+
+    /** [importValidated]'s body, under the writer guard (#517): the §9.2 classification reads what it then writes. */
+    @Suppress("ThrowsCount", "ReturnCount") // each §9.2 row is its own refusal/answer
+    private fun landValidated(
         workspaceId: UUID,
         export: ParameterSetExport,
         actor: UUID,
     ): ParameterSetImported {
         val canonical = export.body
+        validator.validatePinMetadata(workspaceId, canonical).throwIfInvalid()
         if (export.version != null) {
             val declared = export.bodyHash ?: throw hashRefused("body_hash_missing", null, null)
             val actual = repository.computeBodyHash(canonical)
@@ -359,12 +520,15 @@ class ParameterSetService(
                         actor,
                     )
                 }
-            return ParameterSetImported(checkNotNull(detail), created = true, unchanged = false)
+            observeReleased(workspaceId, export.id, checkNotNull(detail).version)
+            return ParameterSetImported(detail, created = true, unchanged = false)
         }
         if (existing.name != export.name) throw renamed(existing.name, export.name)
         val occupant = export.version?.let { repository.findVersionDetail(workspaceId, export.id, it) }
         if (occupant != null) {
             if (occupant.status == PipelineVersionStatus.RELEASED && occupant.bodyHash == repository.computeBodyHash(canonical)) {
+                // Re-indexed against THIS deployment's registry as it is now — what a promotion check then reads.
+                observeReleased(workspaceId, export.id, occupant.version)
                 return ParameterSetImported(occupant, created = false, unchanged = true)
             }
             throw DatapipelinesException(
@@ -377,8 +541,16 @@ class ParameterSetService(
         val detail =
             transactions.execute { repository.insertReleased(workspaceId, export.id, canonical, export.version, export.releasedAt, actor) }
                 ?: throw staleBase(workspaceId, export.id)
+        observeReleased(workspaceId, export.id, detail.version)
         return ParameterSetImported(detail, created = false, unchanged = false)
     }
+
+    /** #778 — [observer] told that version [version] of set [id] is RELEASED here, inside the caller's transaction. */
+    private fun observeReleased(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ) = observer.released(ReleasedVersion(workspaceId, ReleaseFamily.PARAMETER_SET, id, version))
 
     // ---- reads (the working-version rule; the lens) ----------------------------------------------------
 
@@ -721,7 +893,7 @@ class ParameterSetService(
         if (blocking != null) {
             val (ref, status) = blocking
             throw DatapipelinesException(
-                ParameterErrorCodes.RELEASE_TEMPLATE_NOT_RELEASED,
+                ParameterErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED,
                 "Template '${ref.id.safeEcho()}' version ${ref.version} is not released; release it first, or release with the templates.",
                 mapOf(
                     "template_id" to ref.id.safeEcho(),

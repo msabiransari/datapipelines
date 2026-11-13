@@ -7,9 +7,19 @@ import java.util.UUID
  * The out-of-the-box workspace (D-R11): `demo`, seeded at first boot, and the workspace every
  * user with no membership becomes a VIEWER of on first login.
  *
- * V23 inserts the row for a fresh database. This seeder exists for the two cases DDL cannot
- * cover: a deployment that migrated past V23 with the row already removed, and — the one that
- * matters — **idempotence across restarts** (O-3).
+ * No migration inserts the row (`V23__rbac_core.sql` says so, and why): this seeder is the
+ * single authority for it, on a fresh database and on every later boot, because it also seeds
+ * the example content, which SQL cannot do — and it is **idempotent across restarts** (O-3).
+ *
+ * ## What creation grants
+ * `create()` grants `demo` every instance datasource (owned by no workspace) through
+ * [InstanceDatasourceGrants], the managed lake among them when it is enabled: the managed-lake
+ * registrar registers that row while the beans are created, before this seeder runs from
+ * `afterSingletonsInstantiated()`, so its grant is installed during startup, before the first
+ * freshness tick (#881, pinned by `DemoWorkspaceManagedLakeGrantE2eTest`). A
+ * `demo` created while the lake was disabled is granted by the boot that enables it. This
+ * seeder does not call `WorkspaceService.create`, so the creation-time managed grant of #823
+ * is not its path.
  *
  * ## O-3: a deactivated `demo` is never recreated
  * `demo` is deactivated like any other workspace, and a seeder that re-creates what an operator

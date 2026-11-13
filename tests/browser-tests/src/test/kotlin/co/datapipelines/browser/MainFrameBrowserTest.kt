@@ -18,8 +18,9 @@ import java.nio.file.Paths
  * #573 — <main>'s padding by the viewport's band and its 1500px frame, MEASURED in Chromium (the
  * application-shell record §4, ui-screens §3.1/§3.6). The bands: 40px from 1600, 32 from 1101 to
  * 1599, 24 from 761 to 1100, 20 at 760 and below, on all four sides, through `--app-main-pad`. The
- * 1512 reference: 202 menu + 300 browser leave a 1010px frame and 946px inside its padding. The
- * frame: at most 1500px outer width, centred in the content track — except on a page whose root
+ * 1512 reference: 202 menu + the browser's band default (app.css's `--app-browser-default`; #784)
+ * leave the remaining track for the frame, less its two 32px padding edges for the content.
+ * The frame: at most 1500px outer width, centred in the content track — except on a page whose root
  * carries `app-canvas` (the editors, the explorer, the board, the execution result), which keeps
  * the whole track. And no full-height canvas overflows <main>: their height calcs subtract the
  * same token, which is what a band change would otherwise break by twice the difference.
@@ -471,7 +472,7 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `the 1512 reference - a 1010 frame and 946 inside its padding`() {
+    fun `the 1512 reference derives the frame from the browser default and keeps its padding`() {
         ready("mfref")
         page.setViewportSize(REFERENCE_W, REFERENCE_H)
         openBrowserTree("pipelines")
@@ -483,11 +484,14 @@ class MainFrameBrowserTest : DashboardBrowserSuite() {
         readings["main.content"] = content
         printReadings("reference-1512")
         shot("pipelines-1512")
+        val expectedBrowser = browserRange(page).effectiveDefault.toDouble()
+        val expectedFrame = REFERENCE_W - 202.0 - expectedBrowser
         assertSoftly {
             near("main.rail", 202.0)
-            near("browser.width", 300.0)
-            near("main.width", 1010.0)
-            near("main.content", 946.0)
+            // #788: the browser's width is the stylesheet's band default, read off the page.
+            near("browser.width", expectedBrowser)
+            near("main.width", expectedFrame)
+            near("main.content", expectedFrame - 2 * 32.0)
         }
     }
 

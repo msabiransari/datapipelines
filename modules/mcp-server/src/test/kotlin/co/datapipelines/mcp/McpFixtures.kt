@@ -16,7 +16,7 @@ import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
-import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.pipeline.release.PipelineReleaseCoordination
 import co.datapipelines.templates.Template
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.databind.JsonNode
@@ -125,12 +125,21 @@ object McpFixtures {
      */
     fun pipelineService(
         pipelines: PipelineRepository,
-        validator: PipelineValidator = mockk(),
+        validator: PipelineValidator =
+            mockk<PipelineValidator>().apply {
+                io.mockk.every { writesManagedLake(any(), any()) } returns false
+            },
         authoring: AuthoringGuard = AuthoringGuard(true),
-        templateVersions: TemplateVersionStatuses = TemplateVersionStatuses { _, _, _ -> null },
         drafts: PipelineDraftService = PipelineDraftService(pipelines, authoring),
         releases: PipelineReleaseService =
-            PipelineReleaseService(pipelines, templateVersions, validator, authoring, dashboards = mockk(relaxed = true)),
+            PipelineReleaseService(
+                pipelines,
+                validator,
+                authoring,
+                dashboards = mockk(relaxed = true),
+                endpointVersions = mockk(relaxed = true),
+                schedules = mockk(relaxed = true),
+            ),
     ): PipelineService =
         PipelineService(
             pipelines = pipelines,
@@ -165,6 +174,10 @@ object McpFixtures {
                         pipelineName: String,
                     ) = emptyList<co.datapipelines.pipeline.DashboardPin>()
                 },
+            // #786 B.4 — nor API versions or schedules pinning a pipeline version (relaxed: every read answers empty).
+            endpointVersions = mockk(relaxed = true),
+            schedules = mockk(relaxed = true),
+            coordination = PipelineReleaseCoordination { error("this test never releases") },
         )
 
     fun request(

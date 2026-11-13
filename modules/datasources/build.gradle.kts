@@ -1,3 +1,6 @@
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
+
 // module-structure.md §5.4 — allowed internal deps: typesystem, persistence (#336: FailureShape
 // for the lease's cleanup WARNs; the SQLState walk stays in its one implementation).
 plugins { id("datapipelines.common-conventions") }
@@ -39,6 +42,8 @@ dependencies {
         runtimeOnly(libs.mysql.connector.j) // GPL + FOSS exception
     }
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     // Integration tests via Testcontainers (§13.2): real PG / MySQL / MSSQL containers exercise
     // each dialect's adapter, encryption round-trip and type mapping. The bundled drivers
     // (postgresql, mssql-jdbc, h2, …) are already on the test runtime via `runtimeOnly`; the
@@ -88,4 +93,45 @@ tasks.named<Test>("test") {
         .file(rootProject.file("docs/datasources.md"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("dialectChecklistSpec")
+    // #463 — `ReadOnlyEnforcementSpecDriftTest` reads dag-executor.md §8.2's read-only table the same
+    // way, so the same stale-green rule applies to it.
+    inputs
+        .file(rootProject.file("docs/dag-executor.md"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("readOnlyEnforcementSpec")
+}
+
+// #781 — the DuckDB driver version as RESOLVED, packaged beside the code that loads it, so what the
+// product states (DuckDbVersion, the site) is what the jar carries — never a typed literal. Read off
+// the runtime graph like :modules:app's generateThirdPartyNotices; the catalog is the declaration,
+// this is the resolution (STRICT locks make them equal, DuckDbVersionTest proves it).
+// #826 — the same file now also carries the BOM-managed H2 and SQLite JDBC drivers' resolved
+// versions (keys "h2" and "sqlite_jdbc", mirroring DriverVersions): they have no catalog row, so
+// this generated resolution is the drift guard's (DriverVersionSpecDriftTest) authority for them.
+val generateDuckDbVersion =
+    tasks.register<WriteProperties>("generateDuckDbVersion") {
+        description =
+            "Writes the resolved pinned-driver versions (org.duckdb:duckdb_jdbc, com.h2database:h2, " +
+                "org.xerial:sqlite-jdbc) for DuckDbVersion and DriverVersions."
+        destinationFile.set(layout.buildDirectory.file("generated/duckdb-version/duckdb-version.properties"))
+        fun resolvedDriver(group: String, module: String) =
+            providers.provider {
+                val graph = configurations["runtimeClasspath"].incoming.resolutionResult
+                // A refused resolution (a catalog bump before the locks move) surfaces as ITS error,
+                // not as "found []": an unresolved edge is not a component.
+                graph.allDependencies.filterIsInstance<UnresolvedDependencyResult>().firstOrNull()?.let { throw it.failure }
+                val drivers =
+                    graph.allComponents
+                        .mapNotNull { it.id as? ModuleComponentIdentifier }
+                        .filter { it.group == group && it.module == module }
+                check(drivers.size == 1) { "runtimeClasspath must resolve exactly one $group:$module, found $drivers" }
+                drivers.single().version
+            }
+        property("jdbc", resolvedDriver("org.duckdb", "duckdb_jdbc"))
+        property("h2", resolvedDriver("com.h2database", "h2"))
+        property("sqlite_jdbc", resolvedDriver("org.xerial", "sqlite-jdbc"))
+    }
+
+tasks.named<ProcessResources>("processResources") {
+    from(generateDuckDbVersion) { into("co/datapipelines/datasources") }
 }

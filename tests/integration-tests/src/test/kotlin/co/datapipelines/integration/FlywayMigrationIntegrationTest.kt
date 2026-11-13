@@ -44,7 +44,9 @@ class FlywayMigrationIntegrationTest {
     @Autowired
     private lateinit var dataSource: DataSource
 
+    // One row per shipped migration: the list grows with every migration by design (#785 took it past 60 lines).
     @Test
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per shipped migration, in order
     fun `every shipped migration is recorded as applied and successful`() {
         val rows =
             query(
@@ -166,6 +168,28 @@ class FlywayMigrationIntegrationTest {
                 // pipeline bodies rewritten with their hashes re-stamped, V33's blocks
                 // constraint renamed (the V33 file itself byte-identical).
                 "50|script node type|true",
+                // #442b (V51) — the schedule notification outbox: one event per selected run transition
+                // (or schedule block), one delivery per recipient, and the trail's four notification kinds.
+                "51|schedule notification outbox|true",
+                // #778 (V52) — the lake reference index: one scan row per released pipeline / parameter-set
+                // version, one row per table position its renderings name (metadata-db §4.41–§4.42).
+                "52|lake reference index|true",
+                // #785 (V53) — the managed lake's catalog core: Iceberg's two catalog tables in the V1 shape,
+                // lake_control / lake_leases / lake_table_revisions, the dp_fence and revision triggers.
+                "53|lake catalog core|true",
+                // #798 (V54) — managed lake table definitions: namespaces, managed tables, definition versions, the
+                // column-semantics projection, and lake_tables' origin / revision_seq.
+                "54|lake definitions|true",
+                "55|lake deliveries|true",
+                "56|lake reader leases|true",
+                // #844 (V57) — the settlement page's (table_id, id) partial index replaces V55's (table_id, state) one.
+                "57|lake deliveries keyset index|true",
+                // #786 (V58) — API versions with exact pipeline pins and the entity's own current pointer
+                // (metadata-db §4.13a); no data backfill in SQL (the conversion is code).
+                "58|published endpoint versions|true",
+                // #874 (V59) — the datasource's local incarnation UUID and generation counter (metadata-db §4.10),
+                // backfilled by their DEFAULTs on every row, soft-deleted ones included.
+                "59|datasource incarnation|true",
             )
     }
 
@@ -865,11 +889,228 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #442b (V51) — the notification outbox, read from the SHIPPED database: the trail's kind list gains the four
+     * notification kinds, an event's outcome is bound to its checkbox, a delivery is due exactly while pending, and
+     * the two identities (a run reaches each outcome once; a recipient once per event) are named UNIQUEs. Behaviour —
+     * enqueue in the transition's transaction, a replay writing nothing — is the scheduler module's own suite
+     * (`ScheduleNotificationOutboxIntegrationTest`); this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V51 creates the notification outbox and widens the trail kinds`() {
+        query(
+            "SELECT data_type || '|' || is_nullable FROM information_schema.columns " +
+                "WHERE table_name = 'schedule_runs' AND column_name = 'target_ref'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf("text|YES")
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN " +
+                "('chk_schedule_run_events_kind', 'chk_schedule_notification_events_outcome', " +
+                "'chk_schedule_notification_deliveries_due', 'uq_schedule_notification_events_run_outcome', " +
+                "'uq_schedule_notification_deliveries_event_recipient') ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_schedule_notification_deliveries_due|CHECK (((state = 'pending'::text) = (next_attempt_at IS NOT NULL)))",
+                "chk_schedule_notification_events_outcome|CHECK ((((event = 'start'::text) AND (outcome = 'started'::text)) OR " +
+                    "((event = 'success'::text) AND (outcome = 'completed'::text)) OR ((event = 'failure'::text) AND " +
+                    "(outcome = ANY (ARRAY['failed'::text, 'could_not_start'::text, 'cancelled'::text, 'aborted'::text]))) OR " +
+                    "((event = 'unknown'::text) AND (outcome = ANY (ARRAY['unknown'::text, 'unknown_update'::text]))) OR " +
+                    "((event = 'blocked'::text) AND (outcome = 'blocked'::text))))",
+                "chk_schedule_run_events_kind|CHECK ((kind = ANY (ARRAY['recorded'::text, 'capacity_retry'::text, 'claimed'::text, " +
+                    "'execution_started'::text, 'not_started'::text, 'skipped'::text, 'finished'::text, 'unknown'::text, " +
+                    "'updated_after_unknown'::text, 'unblocked'::text, 'notification_enqueued'::text, 'notification_sent'::text, " +
+                    "'notification_failed'::text, 'notification_uncertain'::text])))",
+                "uq_schedule_notification_deliveries_event_recipient|UNIQUE (event_id, recipient)",
+                "uq_schedule_notification_events_run_outcome|UNIQUE (run_id, outcome)",
+            )
+        columnsOf("schedule_notification_deliveries") shouldContainExactlyInAnyOrder
+            listOf(
+                "attempts",
+                "created_at",
+                "event_id",
+                "id",
+                "last_error_code",
+                "message_id",
+                "next_attempt_at",
+                "recipient",
+                "resend_count",
+                "sending_since",
+                "sent_at",
+                "state",
+                "updated_at",
+            )
+        columnsOf("schedule_notification_events") shouldContainExactlyInAnyOrder
+            listOf("created_at", "event", "id", "occurred_at", "outcome", "reason", "run_id", "run_state", "schedule_id", "sequence")
+    }
+
+    /**
+     * #778 (V52) — the lake reference index, read from the SHIPPED database: the scan's closed lists, the reference's
+     * resolved-identity pairing, the cascade from the scan row (a re-scan replaces a version's rows) and the by-table
+     * lookup. Behaviour is `LakeReferenceIndexRepositoryTest`'s; this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V52 creates the lake reference index with its closed lists, the cascade and the by-table lookup`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN " +
+                "('chk_lake_reference_scans_family', 'chk_lake_reference_scans_status', 'chk_lake_table_references_site', " +
+                "'fk_lake_table_references_scan') ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_lake_reference_scans_family|CHECK ((family = ANY (ARRAY['pipeline'::text, 'parameter_set'::text])))",
+                "chk_lake_reference_scans_status|CHECK ((status = ANY (ARRAY['exact'::text, 'partial'::text, 'unscannable'::text])))",
+                "chk_lake_table_references_site|CHECK (((node_id IS NULL) <> (selector IS NULL)))",
+                "fk_lake_table_references_scan|FOREIGN KEY (workspace_id, family, entity_id, version) REFERENCES " +
+                    "lake_reference_scans(workspace_id, family, entity_id, version) ON DELETE CASCADE",
+            )
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_lake_table_references_table'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE INDEX idx_lake_table_references_table ON public.lake_table_references USING btree " +
+                    "(datasource_name, namespace, table_name)",
+            )
+        columnsOf("lake_reference_scans") shouldContainExactlyInAnyOrder
+            listOf("entity_id", "family", "name", "reasons_json", "scanned_at", "scanner_version", "status", "version", "workspace_id")
+        columnsOf("lake_table_references") shouldContainExactlyInAnyOrder
+            listOf(
+                "datasource_name",
+                "entity_id",
+                "family",
+                "namespace",
+                "node_id",
+                "ordinal",
+                "resolved",
+                "selector",
+                "statement_index",
+                "table_name",
+                "template_id",
+                "template_version",
+                "time_travel",
+                "version",
+                "workspace_id",
+                "written_catalog",
+                "written_schema",
+                "written_table",
+            )
+    }
+
+    /**
+     * #798 (V54) — managed lake table definitions, read from the SHIPPED database: the closed lists the
+     * `lake.definitions` enums mirror (table status, apply state, version status, origin), the pointer/state pairing,
+     * the one-DRAFT index and every column. Behaviour is `LakeDefinitionRepositoryIntegrationTest`'s; this pins
+     * that production Flyway builds what it runs on.
+     */
+    @Test
+    @Suppress("LongMethod") // the inventory IS the assertion
+    fun `V54 creates the managed lake definitions with their closed lists, the one-draft index and lake_tables' origin`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN " +
+                "('chk_lake_namespaces_status', 'chk_lake_tables_managed_status', 'chk_lake_tables_managed_apply_state', " +
+                "'chk_lake_tables_managed_apply_pointer', 'chk_lake_table_definition_versions_status', " +
+                "'chk_lake_tables_origin', 'chk_lake_tables_revision_seq') ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_lake_namespaces_status|CHECK ((status = ANY (ARRAY['active'::text, 'deprecated'::text, 'archived'::text])))",
+                "chk_lake_table_definition_versions_status|CHECK ((status = ANY (ARRAY['DRAFT'::text, 'RELEASED'::text, " +
+                    "'DISCARDED'::text])))",
+                "chk_lake_tables_managed_apply_pointer|CHECK (((apply_state IS NULL) = (current_definition_version IS NULL)))",
+                "chk_lake_tables_managed_apply_state|CHECK ((apply_state = ANY (ARRAY['pending'::text, 'applying'::text, " +
+                    "'applied'::text, 'failed'::text])))",
+                "chk_lake_tables_managed_status|CHECK ((status = ANY (ARRAY['active'::text, 'deprecated'::text, " +
+                    "'archived'::text, 'purged'::text])))",
+                "chk_lake_tables_origin|CHECK ((origin = ANY (ARRAY['managed'::text, 'external'::text])))",
+                "chk_lake_tables_revision_seq|CHECK (((origin = 'managed'::text) OR (revision_seq IS NULL)))",
+            )
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND " +
+                "indexname = 'uq_lake_table_definition_versions_one_draft'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE UNIQUE INDEX uq_lake_table_definition_versions_one_draft ON public.lake_table_definition_versions " +
+                    "USING btree (table_id) WHERE (status = 'DRAFT'::text)",
+            )
+        columnsOf("lake_namespaces") shouldContainExactlyInAnyOrder
+            listOf(
+                "archived_at",
+                "archived_by",
+                "created_at",
+                "created_by",
+                "deprecated_at",
+                "deprecated_by",
+                "description",
+                "id",
+                "name",
+                "replacement_id",
+                "status",
+            )
+        columnsOf("lake_tables_managed") shouldContainExactlyInAnyOrder
+            listOf(
+                "applied_at",
+                "applied_version_here",
+                "apply_error_json",
+                "apply_operation_id",
+                "apply_state",
+                "archived_at",
+                "archived_by",
+                "created_at",
+                "created_by",
+                "current_definition_version",
+                "deprecated_at",
+                "deprecated_by",
+                "id",
+                "name",
+                "namespace_id",
+                "policy_json",
+                "purge_allowed_after",
+                "purged_at",
+                "purged_by",
+                "replacement_id",
+                "status",
+            )
+        columnsOf("lake_table_definition_versions") shouldContainExactlyInAnyOrder
+            listOf(
+                "body_hash",
+                "body_json",
+                "created_at",
+                "created_by",
+                "created_via",
+                "discarded_at",
+                "discarded_by",
+                "released_at",
+                "released_by",
+                "status",
+                "table_id",
+                "updated_at",
+                "updated_by",
+                "updated_via",
+                "version",
+            )
+        columnsOf("lake_column_semantics") shouldContainExactlyInAnyOrder
+            listOf(
+                "applied_version",
+                "doc",
+                "field_id",
+                "iceberg_type",
+                "logical_type",
+                "name",
+                "ordinal",
+                "required",
+                "table_id",
+                "tags_json",
+            )
+        query(
+            "SELECT column_name || '|' || is_nullable || '|' || coalesce(column_default, '') FROM information_schema.columns " +
+                "WHERE table_schema = 'public' AND table_name = 'lake_tables' AND column_name IN ('origin', 'revision_seq') " +
+                "ORDER BY column_name COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly listOf("origin|NO|'external'::text", "revision_seq|YES|")
+    }
+
+    /**
      * #9 (V38) — the scheduler's schema, read from the SHIPPED database: the CHECK lists that R6's
      * table and the trail kinds live in, the partial one-active index (the durable overlap guard) and
      * SCHEDULE joining the trigger CHECK. The trail is append-only by construction, not by a
-     * trigger (this schema has none — `emits no triggers` below). Behaviour is the scheduler
-     * module's own suites; this pins that production Flyway builds the same thing they run on.
+     * trigger (this schema has none outside the lake catalog — `emits no triggers but the four of the
+     * lake catalog` below). Behaviour is the scheduler module's own suites; this pins that production
+     * Flyway builds the same thing they run on.
      */
     @Test
     fun `V38 creates the scheduler's tables with R6's states, the overlap guard and SCHEDULE`() {
@@ -1310,6 +1551,72 @@ class FlywayMigrationIntegrationTest {
             )
     }
 
+    /**
+     * #874 (V59, metadata-db §4.10) — the datasource's local identity beside its name key: `incarnation_id` minted by
+     * its DEFAULT and unique across every row, `generation` starting at 1 and never below it. Both constraints are
+     * proven by a refused INSERT/UPDATE (the V17 rule: a constraint that parses but does not bind is invisible to a
+     * text assertion); the row a plain INSERT leaves carries both values with nothing supplied.
+     */
+    @Test
+    fun `V59 mints a unique incarnation and a generation from 1 on every datasource row`() {
+        query(
+            """
+            SELECT column_name || '|' || data_type || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
+              FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'datasources'
+               AND column_name IN ('incarnation_id', 'generation')
+             ORDER BY 1
+            """.trimIndent(),
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "generation|bigint|NO|1",
+                "incarnation_id|uuid|NO|gen_random_uuid()",
+            )
+        val userId = UUID.randomUUID()
+        val first = "v59-a-${userId.toString().take(8)}"
+        val second = "v59-b-${userId.toString().take(8)}"
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject) " +
+                        "VALUES ('$userId', 'v59-$userId@datapipelines.test', 'V59', 'local', 'v59-$userId')",
+                )
+                listOf(first, second).forEach { name ->
+                    statement.execute(
+                        "INSERT INTO datasources (name, display_name, dialect, jdbc_url, credential_kind, created_by) " +
+                            "VALUES ('$name', 'V59', 'H2', 'jdbc:h2:mem:$name', 'none', '$userId')",
+                    )
+                }
+                val duplicate =
+                    shouldThrow<SQLException> {
+                        statement.execute(
+                            "UPDATE datasources SET incarnation_id = (SELECT incarnation_id FROM datasources " +
+                                "WHERE name = '$first') WHERE name = '$second'",
+                        )
+                    }
+                duplicate.message.orEmpty() shouldContain "uq_datasources_incarnation"
+                val belowOne =
+                    shouldThrow<SQLException> {
+                        statement.execute("UPDATE datasources SET generation = 0 WHERE name = '$first'")
+                    }
+                belowOne.message.orEmpty() shouldContain "chk_datasources_generation"
+            }
+        }
+        query(
+            "SELECT (incarnation_id IS NOT NULL) || '|' || generation FROM datasources " +
+                "WHERE name IN ('$first', '$second') ORDER BY name",
+        ) { it.getString(1) } shouldContainExactly listOf("true|1", "true|1")
+        query("SELECT COUNT(DISTINCT incarnation_id) FROM datasources WHERE name IN ('$first', '$second')") {
+            it.getInt(1)
+        }.single() shouldBe 2
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("DELETE FROM datasources WHERE name IN ('$first', '$second')")
+                statement.execute("DELETE FROM users WHERE id = '$userId'")
+            }
+        }
+    }
+
     @Test
     fun `V5 adds the local password auth columns to users`() {
         // metadata-db §4.1 (auth.md §5A): password_hash NULL = OIDC-only account;
@@ -1365,7 +1672,8 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the thirty-eight tables of metadata-db §4`() {
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (54 after #786)
+    fun `creates exactly the fifty-four tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1387,8 +1695,25 @@ class FlywayMigrationIntegrationTest {
                 // L5 (#367, V45) — the `dashboard` key's folder bindings (§4.36).
                 "dashboard_key_bindings",
                 "execution_events",
+                // #785 (V53) — Iceberg's JdbcCatalog tables, owned by Flyway (metadata-db §4.43–§4.44).
+                "iceberg_namespace_properties",
+                "iceberg_tables",
+                // #778 (V52) — the lake reference index (metadata-db §4.41–§4.42).
+                "lake_reference_scans",
+                "lake_table_references",
                 // 089 §A (V15) — the dp-lake catalog.
                 "lake_tables",
+                // #785 (V53) — the managed lake's mode row, leases and revision log (metadata-db §4.45–§4.47).
+                "lake_control",
+                "lake_leases",
+                "lake_table_revisions",
+                // #798 (V54) — managed table definitions and their projection (metadata-db §4.48–§4.51).
+                "lake_namespaces",
+                "lake_tables_managed",
+                "lake_table_definition_versions",
+                "lake_column_semantics",
+                "lake_deliveries",
+                "lake_delivery_attempts",
                 // 118 (V25) — the learned semantic layer.
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
@@ -1411,6 +1736,9 @@ class FlywayMigrationIntegrationTest {
                 "visualizations",
                 // #9 (V38) — the scheduler: db-scheduler's queue, the schedules, their runs and the runs' trail.
                 "scheduled_tasks",
+                // #442b (V51) — the notification outbox (metadata-db §4.39–§4.40).
+                "schedule_notification_deliveries",
+                "schedule_notification_events",
                 "schedule_run_events",
                 "schedule_runs",
                 "schedules",
@@ -1419,6 +1747,8 @@ class FlywayMigrationIntegrationTest {
                 "pipeline_executions",
                 "pipeline_versions",
                 "pipelines",
+                // #786 (V58) — one row per API version, the exact pipeline pin (metadata-db §4.13a).
+                "published_endpoint_versions",
                 "published_endpoints",
                 // 7e (V36) — a transform version's cited facts (metadata-db §4.21).
                 "template_implements",
@@ -1476,14 +1806,46 @@ class FlywayMigrationIntegrationTest {
                 "datasource_workspaces.idx_datasource_workspaces_workspace",
                 "datasources.datasources_pkey",
                 "datasources.idx_datasources_active",
+                // #874 (V59) — the incarnation UUID is unique across every row, live or soft-deleted.
+                "datasources.uq_datasources_incarnation",
                 "dashboard_key_bindings.dashboard_key_bindings_pkey",
                 "dashboard_key_bindings.idx_dashboard_key_bindings_key",
                 "endpoint_key_bindings.endpoint_key_bindings_pkey",
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
                 "execution_events.execution_events_pkey",
                 "execution_events.uq_events_execution_event",
+                // #785 (V53) — the two catalog tables' library PKs; the control row's PK; a lease per (kind, name) and
+                // release by operation; the revision log's per-table walk, per-operation lookup, one current row.
+                "iceberg_namespace_properties.iceberg_namespace_properties_pkey",
+                "iceberg_tables.iceberg_tables_pkey",
+                "lake_control.lake_control_pkey",
+                "lake_leases.idx_lake_leases_operation",
+                "lake_leases.idx_lake_leases_reader_location",
+                "lake_leases.lake_leases_pkey",
+                "lake_table_revisions.idx_lake_table_revisions_operation",
+                "lake_table_revisions.idx_lake_table_revisions_table",
+                "lake_table_revisions.lake_table_revisions_pkey",
+                "lake_table_revisions.uq_lake_table_revisions_current",
+                // #778 (V52) — a scan's PK; a reference's PK and the by-table lookup (datasource, namespace, table).
+                "lake_reference_scans.lake_reference_scans_pkey",
+                "lake_table_references.idx_lake_table_references_table",
+                "lake_table_references.lake_table_references_pkey",
                 "lake_tables.lake_tables_pkey",
                 "lake_tables.uq_lake_tables_datasource_namespace_name",
+                // #798 (V54) — the four PKs, a namespace / table name each registered once, one DRAFT per table.
+                "lake_deliveries.lake_deliveries_pkey",
+                "lake_deliveries.uq_lake_deliveries_key",
+                "lake_deliveries.idx_lake_deliveries_unsettled_page",
+                "lake_delivery_attempts.lake_delivery_attempts_pkey",
+                "lake_delivery_attempts.lake_delivery_attempts_operation_id_key",
+                "lake_delivery_attempts.idx_lake_delivery_attempts_delivery",
+                "lake_column_semantics.lake_column_semantics_pkey",
+                "lake_namespaces.lake_namespaces_pkey",
+                "lake_namespaces.uq_lake_namespaces_name",
+                "lake_table_definition_versions.lake_table_definition_versions_pkey",
+                "lake_table_definition_versions.uq_lake_table_definition_versions_one_draft",
+                "lake_tables_managed.lake_tables_managed_pkey",
+                "lake_tables_managed.uq_lake_tables_managed_namespace_name",
                 // 118 (V25) — every read is per datasource; the workspace half is partial.
                 "learned_facts.idx_learned_facts_datasource",
                 // 7e (V36) — the successor of a retired fact (partial: few facts supersede one).
@@ -1542,6 +1904,10 @@ class FlywayMigrationIntegrationTest {
                 "pipelines.idx_pipelines_owner",
                 "pipelines.pipelines_pkey",
                 "pipelines.uq_pipelines_workspace_name",
+                // #786 (V58) — the PK, the one-draft partial index and the "who pins this pipeline version?" lookup.
+                "published_endpoint_versions.idx_published_endpoint_versions_pin",
+                "published_endpoint_versions.published_endpoint_versions_pkey",
+                "published_endpoint_versions.uq_published_endpoint_versions_one_draft",
                 "published_endpoints.idx_published_endpoints_pipeline",
                 "published_endpoints.idx_published_endpoints_workspace",
                 "published_endpoints.published_endpoints_path_pattern_key",
@@ -1551,6 +1917,16 @@ class FlywayMigrationIntegrationTest {
                 "scheduled_tasks.last_heartbeat_idx",
                 "scheduled_tasks.priority_execution_time_idx",
                 "scheduled_tasks.scheduled_tasks_pkey",
+                // #442b (V51) — the sender's due scan, an event's deliveries, the two uniquenesses (a recipient once per
+                // event, a Message-ID once) and the PK; an event's schedule FK, its (run, outcome) uniqueness and the PK.
+                "schedule_notification_deliveries.idx_schedule_notification_deliveries_due",
+                "schedule_notification_deliveries.idx_schedule_notification_deliveries_event",
+                "schedule_notification_deliveries.schedule_notification_deliveries_pkey",
+                "schedule_notification_deliveries.uq_schedule_notification_deliveries_event_recipient",
+                "schedule_notification_deliveries.uq_schedule_notification_deliveries_message_id",
+                "schedule_notification_events.idx_schedule_notification_events_schedule",
+                "schedule_notification_events.schedule_notification_events_pkey",
+                "schedule_notification_events.uq_schedule_notification_events_run_outcome",
                 // #9 (V38) — the trail's PK (run_id, seq) is its one access path.
                 "schedule_run_events.schedule_run_events_pkey",
                 // #9 (V38) — a schedule's history, the reconciler's worklist, the execution join,
@@ -1652,12 +2028,66 @@ class FlywayMigrationIntegrationTest {
                 "chk_datasource_dialect",
                 "chk_datasource_name",
                 "chk_datasource_query_timeout",
+                // #874 (V59) — the generation counter starts at 1 and only ever advances.
+                "chk_datasources_generation",
                 "chk_dialect",
                 // V30 (177, D11): the credential kind behind an execution — 'user' | 'endpoint' | 'server' | NULL.
                 "chk_executions_executed_by_key_kind",
+                // #798 (V54) — the semantics projection's floors and tags shape (§4.51), then the namespace's name grammar,
+                // description cap, lifecycle stamps and status (§4.48); `c` < `n` < `r`, so both sort before #778's rows.
+                "chk_lake_column_semantics_field",
+                "chk_lake_column_semantics_tags",
+                "chk_lake_deliveries_delivery_id",
+                "chk_lake_deliveries_failure_phase",
+                "chk_lake_deliveries_feed",
+                "chk_lake_deliveries_fingerprint",
+                "chk_lake_deliveries_replay_mode",
+                "chk_lake_deliveries_state",
+                "chk_lake_delivery_attempts_outcome",
+                "chk_lake_delivery_attempts_sha256",
+                "chk_lake_namespaces_description",
+                "chk_lake_namespaces_name",
+                "chk_lake_namespaces_stamps",
+                "chk_lake_namespaces_status",
+                // #778 (V52) — the scan's family/status lists, version floors and reasons shape (§4.41), sorted before
+                // `chk_lake_table_format` (`r` < `t`); the reference's counters, resolved-identity pairing and site
+                // (§4.42), sorted after it (`f` < `r`).
+                "chk_lake_reference_scans_family",
+                "chk_lake_reference_scans_reasons",
+                "chk_lake_reference_scans_scanner_version",
+                "chk_lake_reference_scans_status",
+                "chk_lake_reference_scans_version",
+                // #798 (V54) — the definition version's body shape, stamps, status, floor and surface (§4.50), before
+                // `chk_lake_table_format` (`d` < `f`).
+                "chk_lake_table_definition_versions_body",
+                "chk_lake_table_definition_versions_discard_stamps",
+                "chk_lake_table_definition_versions_release_stamps",
+                "chk_lake_table_definition_versions_status",
+                "chk_lake_table_definition_versions_version",
+                "chk_lake_table_definition_versions_via",
                 // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
+                "chk_lake_table_references_counters",
+                "chk_lake_table_references_resolved",
+                "chk_lake_table_references_site",
+                // #798 (V54) — the managed table's apply state machine, lifecycle and policy shape (§4.49); then
+                // lake_tables' origin and the managed-only revision sequence (§4.52). The database's collation skips
+                // `_` at the first level (measured on postgres:16-alpine), so `applied` < `apply_error` < `applying`.
+                "chk_lake_tables_managed_applied",
+                "chk_lake_tables_managed_applied_at",
+                "chk_lake_tables_managed_apply_error",
+                "chk_lake_tables_managed_apply_pointer",
+                "chk_lake_tables_managed_apply_state",
+                "chk_lake_tables_managed_applying",
+                "chk_lake_tables_managed_name",
+                "chk_lake_tables_managed_policy",
+                "chk_lake_tables_managed_purge_stamps",
+                "chk_lake_tables_managed_stamps",
+                "chk_lake_tables_managed_status",
+                "chk_lake_tables_managed_versions",
+                "chk_lake_tables_origin",
+                "chk_lake_tables_revision_seq",
                 // 118 (V25) — learned_facts: the closed kind list, the kind↔scope rule, the
                 // fact/summary length windows, refs ≥ 1 (V26: for a DATASOURCE fact; a WORKSPACE
                 // rule may carry none), the trust set, the write surface, the scope↔workspace
@@ -1702,6 +2132,25 @@ class FlywayMigrationIntegrationTest {
                 // 102 (V20): the write-surface stamps — 'session' | 'api_key' | 'mcp', both
                 // columns, the ruling's CHECK so a key id can never drift back in as a value.
                 "chk_pipeline_versions_via",
+                // #786 (V58) — the API version's stamps, exact pin floor, status and version floor, and the
+                // entity pointer's floor (its row link is the deferrable composite FK, not a CHECK).
+                "chk_published_endpoint_versions_discard_stamps",
+                "chk_published_endpoint_versions_pin",
+                "chk_published_endpoint_versions_release_stamps",
+                "chk_published_endpoint_versions_status",
+                "chk_published_endpoint_versions_version",
+                "chk_published_endpoints_current_version",
+                // #442b (V51) — the outbox's CHECKs (metadata-db §4.39–§4.40): a delivery's state list, its due/sending/
+                // accepted/failure pairings and counts; an event's checkbox list, its event/outcome pairing and sequence.
+                "chk_schedule_notification_deliveries_accepted",
+                "chk_schedule_notification_deliveries_counts",
+                "chk_schedule_notification_deliveries_due",
+                "chk_schedule_notification_deliveries_failure",
+                "chk_schedule_notification_deliveries_sending",
+                "chk_schedule_notification_deliveries_state",
+                "chk_schedule_notification_events_event",
+                "chk_schedule_notification_events_outcome",
+                "chk_schedule_notification_events_sequence",
                 // #9 (V38) — the trail's, the runs' and the schedules' CHECKs (metadata-db §4.22–§4.24),
                 // sorted as pg_constraint sorts them (the `_` is not a first-level sort key).
                 "chk_schedule_run_events_kind",
@@ -1875,9 +2324,12 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `emits no triggers`() {
+    fun `emits no triggers but the four of the lake catalog`() {
         // metadata-db.md §2/§7.2: updated_at is application-maintained. A generator
         // that "helpfully" adds a BEFORE UPDATE trigger contradicts the spec.
+        // The ONE exception is V53's (#785, dp-lake design record §8a): the lease fence on both Iceberg catalog
+        // tables and the revision log on iceberg_tables. They guard writes made by a library DP does not control,
+        // which no application-side check can reach. Exactly these four, named; any other trigger stays red.
         val triggers =
             query(
                 """
@@ -1889,7 +2341,13 @@ class FlywayMigrationIntegrationTest {
                 """.trimIndent(),
             ) { it.getString(1) }
 
-        triggers shouldBe emptyList()
+        triggers shouldContainExactlyInAnyOrder
+            listOf(
+                "iceberg_namespace_properties.dp_fence",
+                "iceberg_tables.dp_fence",
+                "iceberg_tables.dp_revlog",
+                "iceberg_tables.dp_revlog_drop",
+            )
     }
 
     @Test

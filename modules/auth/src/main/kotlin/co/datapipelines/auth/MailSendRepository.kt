@@ -9,8 +9,10 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
- * The three notices the product sends (auth.md §5A.8) — the `mail_sends.kind` closed list
- * (`chk_mail_sends_kind`, V27) and the template family under `mail-templates/`.
+ * The notices the product sends (auth.md §5A.8). The first three are the `mail_sends.kind` closed
+ * list (`chk_mail_sends_kind`, V27) and the template families under `mail-templates/`;
+ * [SCHEDULE_NOTIFICATION] is only a label on the shared transport — its recipients are not users,
+ * its identity is the scheduler's own delivery row, and it is NEVER claimed here (the CHECK refuses it).
  */
 enum class MailKind(
     /** The stored value and the audit `kind`. */
@@ -24,6 +26,9 @@ enum class MailKind(
 
     /** To sys-ops, at every new user (local or first social login). Never a password. */
     NEW_USER("new_user"),
+
+    /** #442b — a scheduler run notice, sent by `web`'s adapter over [MailSender]. Not a claim kind. */
+    SCHEDULE_NOTIFICATION("schedule_notification"),
 }
 
 /** One `mail_sends` row — the claim on a message identity and, later, its outcome. */

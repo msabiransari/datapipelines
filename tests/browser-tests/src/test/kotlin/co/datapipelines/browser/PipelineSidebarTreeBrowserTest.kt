@@ -12,19 +12,22 @@ import java.nio.file.Paths
 
 /**
  * Computed geometry and interactions for the resource browser (#554, record §4): the menu has fixed
- * 202/64 widths, the browser's user width (240–480, clamped to leave main 320) owns its column, and
- * neither moves with tree content. At 1440 (the 1101–1599 band): 202 + 300 default + main 938.
+ * 202/64 widths, the browser's user width (app.css's `--app-browser-min`–`--app-browser-max` range,
+ * clamped to leave main its minimum) owns its column, and neither moves with tree content. At 1440
+ * (the 1101–1599 band): 202 + the band default + main's remainder. #788: every expected width is
+ * derived from the range the page itself reports ([browserRange]).
  */
 class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
     @Test
-    fun `the browser resizes within 240-480 on its boundary, main keeps its minimum, and depth moves nothing`() {
+    fun `the browser resizes within its range on its boundary, main keeps its minimum, and depth moves nothing`() {
         readyTree()
         seedPipeline("acme/deep/one")
         openTree()
         expand("acme")
+        val range = browserRange(page)
         menuWidth() shouldBe 202
-        width() shouldBe 300
-        mainWidth() shouldBe 1440 - 202 - 300
+        width() shouldBe range.effectiveDefault
+        mainWidth() shouldBe 1440 - 202 - range.effectiveDefault
         page.locator("#browser-boundary").focus()
         page.keyboard().press("Shift+Tab")
         page.keyboard().press("Tab")
@@ -35,14 +38,15 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         println("644-measure|boundary|boxShadow|$boundaryShadow")
         println("644-measure|boundary|outline|" + page.locator("#browser-boundary").evaluate("el => getComputedStyle(el).outline"))
         page.keyboard().press("End")
-        width() shouldBe 480
-        mainWidth() shouldBe 1440 - 202 - 480
-        page.locator("#browser-boundary").getAttribute("aria-valuenow") shouldBe "480"
+        val ceiling = range.maximumAt(1440, 202)
+        width() shouldBe ceiling
+        mainWidth() shouldBe 1440 - 202 - ceiling
+        page.locator("#browser-boundary").getAttribute("aria-valuenow") shouldBe "$ceiling"
         page.keyboard().press("Home")
-        width() shouldBe 240
-        mainWidth() shouldBe 1440 - 202 - 240
+        width() shouldBe range.min
+        mainWidth() shouldBe 1440 - 202 - range.min
         page.keyboard().press("ArrowRight")
-        width() shouldBe 256
+        width() shouldBe range.min + 16
         val box = checkNotNull(page.locator("#browser-boundary").boundingBox())
         page.mouse().move(box.x + box.width / 2, box.y + box.height / 2)
         page.mouse().down()
@@ -69,34 +73,41 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
         readyTree()
         seedPipeline("acme/one")
         openTree()
+        val range = browserRange(page)
         val key = "dp-browser-width:" + page.evaluate("() => document.documentElement.dataset.dpWorkspace")
         page.locator("#browser-boundary").focus()
+        // Five 16 px key steps from the band default (the separator's KEY_STEP).
+        val stepped = range.effectiveDefault + 5 * 16
         repeat(5) { page.keyboard().press("ArrowRight") }
-        width() shouldBe 380
-        page.evaluate("k => localStorage.getItem(k)", key) shouldBe "380"
+        width() shouldBe stepped
+        page.evaluate("k => localStorage.getItem(k)", key) shouldBe "$stepped"
         // The menu's collapse and the browser's width are independent (record §3 rule 7).
         page.click("#rail-collapse")
         menuWidth() shouldBe 64
-        width() shouldBe 380
+        width() shouldBe stepped
         page.click("#rail-collapse")
         menuWidth() shouldBe 202
-        // A narrow window clamps the EFFECTIVE width to leave main 320 and never rewrites the
-        // preference: the explicit expansion holds in the 761–1100 band, so 800 - 202 - 320.
+        // A narrow window clamps the EFFECTIVE width and never rewrites the preference: the
+        // explicit expansion holds in the 761–1100 band. At 800 the clamp's upper bound is
+        // 800 - 202 - main's minimum = 278, but the range's `--app-browser-min` floor wins
+        // (the stylesheet's clamp() lets the minimum win) — the browser takes the floor and
+        // main gives it the 2px remainder.
         page.setViewportSize(800, 900)
         settle()
+        val narrowMaximum = range.maximumAt(800, 202)
         menuWidth() shouldBe 202
-        width() shouldBe 278
-        mainWidth() shouldBe 320
-        page.locator("#browser-boundary").getAttribute("aria-valuemax") shouldBe "278"
-        page.evaluate("k => localStorage.getItem(k)", key) shouldBe "380"
+        width() shouldBe narrowMaximum
+        mainWidth() shouldBe 800 - 202 - narrowMaximum
+        page.locator("#browser-boundary").getAttribute("aria-valuemax") shouldBe "$narrowMaximum"
+        page.evaluate("k => localStorage.getItem(k)", key) shouldBe "$stepped"
         page.setViewportSize(1440, 900)
         settle()
-        width() shouldBe 380
+        width() shouldBe stepped
         page.reload()
         page.waitForFunction("() => window.DatapipelinesSidebarTrees instanceof Map")
-        width() shouldBe 380
+        width() shouldBe stepped
         page.click("#browser-width-reset")
-        width() shouldBe 300
+        width() shouldBe range.effectiveDefault
         page.evaluate("k => localStorage.getItem(k)", key) shouldBe null
     }
 
@@ -267,24 +278,26 @@ class PipelineSidebarTreeBrowserTest : RestTreeBrowserFixture() {
     }
 
     @Test
-    fun `the tablet band starts with a 64 menu and a 270 browser, and the browser stays bounded once the menu expands`() {
+    fun `the tablet band starts with a 64 menu and the browser at the range's floor, and stays bounded once the menu expands`() {
         readyTree()
         seedPipeline("acme/one")
         page.setViewportSize(900, 900)
         settle()
         openTree()
+        val range = browserRange(page)
         menuWidth() shouldBe 64
-        width() shouldBe 270
+        width() shouldBe range.min
         page.click("#rail-collapse")
         menuWidth() shouldBe 202
-        width() shouldBe 270
+        width() shouldBe range.min
         page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
-        width() shouldBe 900 - 202 - 320
-        mainWidth() shouldBe 320
+        val ceiling = range.maximumAt(900, 202)
+        width() shouldBe ceiling
+        mainWidth() shouldBe 900 - 202 - ceiling
         overflow() shouldBe false
         page.keyboard().press("Home")
-        width() shouldBe 240
+        width() shouldBe range.min
     }
 
     @Test

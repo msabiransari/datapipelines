@@ -76,6 +76,42 @@
   }
 
   /**
+   * #786 — the exact pipeline version a schedule pins (payload schema 2), or null: a schema-1
+   * payload's `"current"` is not a version, and a missing one is nothing to show as one.
+   */
+  function pinnedVersionOf(schedule) {
+    var v = schedule && schedule.payload ? schedule.payload.version : null;
+    return typeof v === "number" && v >= 1 && Math.floor(v) === v ? v : null;
+  }
+
+  var VERSION_STATUS_TEXT = { RELEASED: "released", DRAFT: "draft", DISCARDED: "discarded" };
+
+  /**
+   * #786 D.4 — the version picker's options from §5.4's list (newest first): every version,
+   * each naming its number and status; one this deployment does not run (the executor's
+   * `eligibleForPointer`: RELEASED, or a DRAFT where `draftsEligible`) is DISABLED with its
+   * reason. `selected` is the stored pin when the list holds it — even an ineligible one, so an
+   * edit never silently repins (the save then refuses it with its own words) — else the newest
+   * RELEASED version, else the newest eligible draft (a draft in flight never becomes the default
+   * over a release), else null (no version this deployment runs: nothing to pick).
+   */
+  function versionChoices(versions, draftsEligible, pinned) {
+    var options = (versions || []).map(function (v) {
+      var status = String(v.status || "").toUpperCase();
+      var eligible = status === "RELEASED" || (status === "DRAFT" && !!draftsEligible);
+      var reason = eligible ? "" : status === "DRAFT" ? "drafts do not run here" : "not run here";
+      var label = "v" + v.version + " · " + (VERSION_STATUS_TEXT[status] || status.toLowerCase()) + (reason ? " — " + reason : "");
+      return { value: v.version, label: label, status: status, eligible: eligible };
+    });
+    var stored = options.filter(function (o) { return o.value === pinned; })[0];
+    var released = options.filter(function (o) { return o.status === "RELEASED"; })[0];
+    var newest = released || options.filter(function (o) { return o.eligible; })[0];
+    var selected = stored ? stored.value : newest ? newest.value : null;
+    options.forEach(function (o) { o.disabled = !o.eligible && o.value !== selected; });
+    return { options: options, selected: selected };
+  }
+
+  /**
    * The search (§5.1: it matches every column the list renders — the path, the pipeline, the
    * pattern, its preset wording, the zone and the condition). Case-insensitive substring; the
    * result is sorted by name.
@@ -89,6 +125,63 @@
         return hay.indexOf(q) !== -1;
       })
       .sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  }
+
+  // ------------------------------------------------------------------ the condition filter (#641)
+
+  /** §20.1's `condition` words — Schedule.condition's, in the server's order. */
+  var CONDITIONS = ["enabled", "paused", "blocked"];
+
+  /**
+   * The filter a raw value (the address bar's `condition`, the page's stamp) names: one of the
+   * three words exactly, else "" — no filter. Anything else is ignored, never echoed.
+   */
+  function conditionFilter(raw) {
+    return typeof raw === "string" && CONDITIONS.indexOf(raw) !== -1 ? raw : "";
+  }
+
+  /**
+   * Whether a schedule belongs in the list while [condition] is the filter ("" = every one). It
+   * reads the SERVER's word, where blocked already wins: a paused-and-blocked schedule is
+   * "blocked", so it stays in the blocked list and is absent from the paused one.
+   */
+  function matchesCondition(schedule, condition) {
+    return !condition || !!(schedule && schedule.condition === condition);
+  }
+
+  // ------------------------------------------------------------------ the last-run filter (#725)
+
+  /** §20.1's `outcome` words — LastRunOutcome.wire's, in the server's order (the home's Last run bars). */
+  var OUTCOMES = ["succeeded", "failed", "in-progress", "did-not-run", "never-ran"];
+
+  /**
+   * The last-run filter a raw value (the address bar's `outcome`, the page's stamp) names: one of
+   * the five words exactly, else "" — no filter. Anything else is ignored, never echoed.
+   */
+  function outcomeFilter(raw) {
+    return typeof raw === "string" && OUTCOMES.indexOf(raw) !== -1 ? raw : "";
+  }
+
+  /** How the empty state words each bucket after "No … schedules". */
+  var OUTCOME_PHRASE = {
+    succeeded: "whose last run succeeded",
+    failed: "whose last run failed",
+    "in-progress": "with a run in progress",
+    "did-not-run": "whose last run did not run",
+    "never-ran": "that never ran",
+  };
+
+  /**
+   * The empty list's title: the condition and the last run named (either or both), and the
+   * search when there is one; with neither filter it is the plain search's title.
+   */
+  function filteredEmptyTitle(condition, query, outcome) {
+    var q = String(query || "").trim();
+    var c = conditionFilter(condition);
+    var o = outcomeFilter(outcome);
+    if (!c && !o) return "No schedules match “" + q + "”";
+    var subject = "No " + (c ? c + " " : "") + "schedules" + (o ? " " + OUTCOME_PHRASE[o] : "");
+    return q ? subject + " match “" + q + "”." : subject + ".";
   }
 
   // ------------------------------------------------------------------ cron presets
@@ -275,6 +368,52 @@
     return String(state || "").replace(/_/g, " ");
   }
 
+  // ------------------------------------------------------------------ §20.11 deliveries (#442b)
+
+  /** A notice's words — the subject's state words (enums.md §43). */
+  var NOTICE_TEXT = {
+    started: "Started",
+    completed: "Completed",
+    failed: "Failed",
+    could_not_start: "Could not start",
+    cancelled: "Stopped — cancelled",
+    aborted: "Stopped — instance shut down",
+    unknown: "Outcome unknown",
+    unknown_update: "Update on an unknown run",
+    blocked: "Schedule blocked",
+  };
+
+  function noticeText(notice) {
+    return NOTICE_TEXT[notice] || String(notice || "");
+  }
+
+  /** A delivery state's badge (enums.md §44): accepted is the relay's word, never "delivered". */
+  var DELIVERY_BADGE = {
+    pending: "ds-badge-default",
+    accepted: "ds-badge-success",
+    failed: "ds-badge-danger",
+    uncertain: "ds-badge-warning",
+  };
+
+  function deliveryBadge(state) {
+    return DELIVERY_BADGE[state] || "ds-badge-default";
+  }
+
+  /** Only a failed or uncertain delivery may be resent (§20.13); the server refuses the rest. */
+  function canResend(delivery) {
+    return !!delivery && (delivery.state === "failed" || delivery.state === "uncertain");
+  }
+
+  /**
+   * The toast after a resend (§20.13): an uncertain delivery may already have reached the relay,
+   * so the server's `may_duplicate` warning is said out loud.
+   */
+  function resendNotice(response) {
+    return response && response.warning === "may_duplicate"
+      ? { variant: "warning", title: "Resend queued", message: "The first send may have arrived — the recipient can get this notice twice." }
+      : { variant: "success", title: "Resend queued", message: "The notice goes out on the sender's next tick." };
+  }
+
   var ACTIVE = { queued: true, starting: true, running: true };
 
   function isActive(run) {
@@ -306,7 +445,9 @@
    */
   var BLOCK_TEXT = {
     run_unknown: "A run's outcome is unknown — nobody can say whether its work happened. Check that run's execution and the pipeline's targets before unblocking.",
-    pointer_null: "The pipeline has no current version to follow. Release it, or switch its current version, then unblock.",
+    pointer_null: "The pipeline had no current version to follow (a schedule saved before exact versions). Edit the schedule to pick a version, then unblock.",
+    version_not_eligible: "The pinned pipeline version is not one this server runs (it was discarded, or it is a draft where drafts do not run). Edit the schedule to pick a released version, then unblock.",
+    payload_schema_unsupported: "This schedule was saved in the older format that followed the current version. Edit it to pick the exact version to run, then unblock.",
     target_not_found: "The pipeline this schedule runs no longer exists in this workspace.",
     payload_invalid: "The saved job no longer validates against the pipeline.",
     parameters_invalid: "The saved parameter values no longer fit the pipeline's declared parameters. Edit the schedule's parameters, then unblock.",
@@ -463,7 +604,8 @@
     "schedule.validation.timezone_invalid": "timezone",
     "schedule.validation.payload_invalid": "pipeline",
     "schedule.validation.target_not_found": "pipeline",
-    "schedule.validation.target_not_released": "pipeline",
+    "schedule.validation.target_not_released": "version",
+    "schedule.validation.payload_schema_unsupported": "version",
     "schedule.validation.executor_unknown": "pipeline",
   };
 
@@ -486,6 +628,10 @@
     if (!error || !error.code) return null;
     var code = error.code;
     var details = error.details || {};
+    // #786: a refusal about the VERSION lands at the version picker — the version grammar's
+    // `payload_invalid` reasons, and a `target_not_found` that names the missing version.
+    if (code === "schedule.validation.payload_invalid" && String(details.reason || "").indexOf("version_") === 0) return { field: "version" };
+    if (code === "schedule.validation.target_not_found" && details.version !== undefined && details.version !== null) return { field: "version" };
     if (FIELD_BY_CODE[code]) return { field: FIELD_BY_CODE[code] };
     if (code === "schedule.validation.request_invalid") {
       var f = FIELD_BY_REQUEST_FIELD[details.field];
@@ -629,7 +775,15 @@
     splitName: splitName,
     conditionBadge: conditionBadge,
     pipelineOf: pipelineOf,
+    pinnedVersionOf: pinnedVersionOf,
+    versionChoices: versionChoices,
     search: search,
+    CONDITIONS: CONDITIONS,
+    conditionFilter: conditionFilter,
+    matchesCondition: matchesCondition,
+    OUTCOMES: OUTCOMES,
+    outcomeFilter: outcomeFilter,
+    filteredEmptyTitle: filteredEmptyTitle,
     describeCron: describeCron,
     buildCron: buildCron,
     localText: localText,
@@ -641,6 +795,10 @@
     relativeText: relativeText,
     runChip: runChip,
     runStateText: runStateText,
+    noticeText: noticeText,
+    deliveryBadge: deliveryBadge,
+    canResend: canResend,
+    resendNotice: resendNotice,
     isActive: isActive,
     executionDurationMs: executionDurationMs,
     originText: originText,

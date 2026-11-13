@@ -1,5 +1,7 @@
 package co.datapipelines.visualization
 
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.ResultSet
@@ -15,14 +17,46 @@ import java.util.UUID
  * The single-use consumption is ONE guarded UPDATE (`consumeUploadCapability`) — the database's row lock,
  * not a JVM flag, is the replay fence, so it survives a process restart and serializes two competing
  * uploads with exactly one winner.
+ *
+ * **The writer guard (#517, release-dependencies record §4.3).** Opening a session and completing it are evidence
+ * writes a release judges, so each acquires the workspace writer [guard] first, inside the caller's metadata
+ * transaction (the session service's `start` and `submit`), before the run row is written: a release and an
+ * evidence completion of the same workspace serialize, and the release judges either all of a submission or none.
  */
 class TestRunRepository(
     private val jdbc: NamedParameterJdbcTemplate,
+    /** #517 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
 ) {
     // ---- writes ---------------------------------------------------------------------------------------
 
+    /** The guard for the workspace that owns [visualizationId]; no statement at all under [ReleaseMutationGuard.NONE]. */
+    private fun guardWorkspaceOf(visualizationId: UUID) {
+        if (guard === ReleaseMutationGuard.NONE) return
+        jdbc
+            .query(
+                "SELECT workspace_id FROM visualizations WHERE id = :id",
+                mapOf("id" to visualizationId),
+            ) { rs, _ -> rs.getObject("workspace_id", UUID::class.java) }
+            .singleOrNull()
+            ?.let { guard.acquire(it, ReleaseFamily.VISUALIZATION) }
+    }
+
+    /** The guard for the workspace that owns run [runId]; no statement at all under [ReleaseMutationGuard.NONE]. */
+    private fun guardWorkspaceOfRun(runId: UUID) {
+        if (guard === ReleaseMutationGuard.NONE) return
+        jdbc
+            .query(
+                "SELECT v.workspace_id FROM visualization_test_runs r JOIN visualizations v ON v.id = r.visualization_id WHERE r.id = :id",
+                mapOf("id" to runId),
+            ) { rs, _ -> rs.getObject("workspace_id", UUID::class.java) }
+            .singleOrNull()
+            ?.let { guard.acquire(it, ReleaseFamily.VISUALIZATION) }
+    }
+
     /** Opens the session: a RUNNING run pinned to the exact version, its hash, its cases and its actor. */
     fun insertRunning(run: RunningRun) {
+        guardWorkspaceOf(run.visualizationId)
         jdbc.update(
             """
             INSERT INTO visualization_test_runs
@@ -70,8 +104,9 @@ class TestRunRepository(
      * for this owner (expired, already submitted, or another actor's): the caller refuses without
      * overwriting anything, so a completed-result replay can never mint a replacement capability.
      */
-    fun completeSubmission(submission: Submission): Boolean =
-        jdbc.update(
+    fun completeSubmission(submission: Submission): Boolean {
+        guardWorkspaceOfRun(submission.id)
+        return jdbc.update(
             """
             UPDATE visualization_test_runs
                SET status = :status, completed_at = :completedAt,
@@ -83,6 +118,7 @@ class TestRunRepository(
             """.trimIndent(),
             submission.toParams(),
         ) == 1
+    }
 
     /**
      * The single-use consumption: guarded by the exact hash, not consumed, not expired. One UPDATE, one

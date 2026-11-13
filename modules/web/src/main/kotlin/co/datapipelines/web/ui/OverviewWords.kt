@@ -19,7 +19,7 @@ object OverviewWords {
 
     /** Review your drafts' sentence: the In development count worded, or none when it is unknown. */
     fun drafts(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         draftOnly: Long?,
     ): String =
         when (draftOnly) {
@@ -37,7 +37,7 @@ object OverviewWords {
         part: Long,
         whole: Long,
         group: String,
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         what: String,
     ): String? =
         when {
@@ -50,7 +50,7 @@ object OverviewWords {
 
     /** How the summary is counted: the four exclusive groups, the overlapping measure, the browser's count (#593, #626). */
     fun definitions(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         inventory: Inventory,
         windowDays: Int,
     ): OverviewPage.Explanation {
@@ -83,7 +83,7 @@ object OverviewWords {
 
     /** Understanding release history: the maturity rule, then the panel's own two sentences. */
     fun releases(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         note: List<String>,
     ): OverviewPage.Explanation =
         OverviewPage.Explanation(
@@ -98,7 +98,7 @@ object OverviewWords {
         )
 
     /** The activity dialog: the events rule above the table twin it receives. */
-    fun activity(family: OverviewPage.Family): OverviewPage.Explanation =
+    fun activity(family: OverviewFamily): OverviewPage.Explanation =
         OverviewPage.Explanation(
             key = ACTIVITY,
             title = "Development activity · ${Activity.WEEKS} weeks",

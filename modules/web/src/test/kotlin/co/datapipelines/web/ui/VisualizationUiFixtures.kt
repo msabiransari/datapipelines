@@ -24,8 +24,10 @@ internal object VisualizationUiFixtures {
     val AUTHOR_ID: UUID = UUID.randomUUID()
     const val NAME = "acme/charts/revenue"
 
-    private const val TRACES_2D = """{"data":[{"type":"bar"}]}"""
-    const val TRACES_3D = """{"data":[{"type":"surface"}]}"""
+    /** A bar chart config (the `chart` kind v1); the UI tests never validate it, they render around it. */
+    const val BAR_CONFIG =
+        """{"mark":{"type":"bar"},"encoding":{"x":{"field":"month","type":"nominal","sort":null},""" +
+            """"y":{"type":"quantitative","aggregate":"count"}}}"""
 
     fun version(
         id: UUID,
@@ -33,7 +35,7 @@ internal object VisualizationUiFixtures {
         version: Int,
         status: PipelineVersionStatus,
         currentVersion: Int? = null,
-        config: String = TRACES_2D,
+        config: String = BAR_CONFIG,
         body: VisualizationBody? = null,
     ): ArtifactVersion<VisualizationBody> =
         ArtifactVersion(
@@ -42,10 +44,10 @@ internal object VisualizationUiFixtures {
             body ?: bodyOf(config),
         )
 
-    fun bodyOf(config: String = TRACES_2D): VisualizationBody =
+    fun bodyOf(config: String = BAR_CONFIG): VisualizationBody =
         VisualizationBody(
             displayName = "Revenue",
-            renderer = RendererSpec(RendererKind.PLOTLY, "1"),
+            renderer = RendererSpec(RendererKind.CHART, "1"),
             inputs = emptyMap(),
             config = ArtifactJson.mapper.readTree(config) as ObjectNode,
         )

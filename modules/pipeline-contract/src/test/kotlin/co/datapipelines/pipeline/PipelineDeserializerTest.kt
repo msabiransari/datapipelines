@@ -1,6 +1,8 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
+import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.StagingEngine
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -177,10 +179,31 @@ class PipelineDeserializerTest {
     }
 
     @Test
-    fun `a reserved staging engine is rejected with tempdb_engine_unsupported`() {
+    fun `an engine outside StagingEngine is rejected with tempdb_engine_unsupported`() {
         val outcome =
             deserializer.read(
-                pipelineJson(NODE_NO_OUTPUT, settings = """{"tempdb":{"engine":"DUCKDB"}}"""),
+                pipelineJson(NODE_NO_OUTPUT, settings = """{"tempdb":{"engine":"ROCKSDB"}}"""),
+            )
+
+        outcome.shouldBeInstanceOf<DeserializationOutcome.Rejected>()
+        outcome.result.codes shouldContainExactly listOf(Validation.TEMPDB_ENGINE_UNSUPPORTED)
+    }
+
+    @Test
+    fun `DUCKDB binds as the DuckDB staging engine (dp-lake P1)`() {
+        val settings = parse(pipelineJson(NODE_NO_OUTPUT, settings = """{"tempdb":{"engine":"DUCKDB"}}""")).settings
+
+        settings.tempdb.engine shouldBe StagingEngine.DUCKDB
+        settings.tempdb.engine.dialect shouldBe Dialect.DUCKDB
+    }
+
+    @Test
+    fun `the engine wire value is case-sensitive - a lower-case duckdb is refused`() {
+        // enums.md: wire values are exact. Accepting `duckdb` here would make a second spelling
+        // the catalog does not list.
+        val outcome =
+            deserializer.read(
+                pipelineJson(NODE_NO_OUTPUT, settings = """{"tempdb":{"engine":"duckdb"}}"""),
             )
 
         outcome.shouldBeInstanceOf<DeserializationOutcome.Rejected>()
@@ -198,7 +221,7 @@ class PipelineDeserializerTest {
                     node("""{"target":"kafka"}""", id = "b"),
                     node("""{"target":"datasource","datasource":"d","table":"t","mode":"upsert"}""", id = "c"),
                     parameters = """{"p":{"type":"MONEY"}}""",
-                    settings = """{"tempdb":{"engine":"DUCKDB"}}""",
+                    settings = """{"tempdb":{"engine":"ROCKSDB"}}""",
                 ),
             )
 

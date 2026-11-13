@@ -276,7 +276,7 @@ internal class JsonScan(
 
         /**
          * How deep a renderer configuration may nest — a constant, like the request mappers' Jackson
-         * constraints (§13.21): a Plotly figure nests about six levels (`layout.xaxis.title.font.size`).
+         * constraints (§13.21): a chart document nests five levels deep (`config.encoding.y.axis.grid`).
          */
         const val MAX_RAW_DEPTH = 32
 

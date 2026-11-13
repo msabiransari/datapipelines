@@ -1,3 +1,5 @@
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
 import org.springframework.boot.gradle.tasks.bundling.BootJar
 import org.springframework.boot.gradle.tasks.run.BootRun
 import java.time.Instant
@@ -15,6 +17,10 @@ dependencies {
 
     implementation(libs.spring.boot.starter)
     implementation(libs.spring.boot.starter.actuator)
+    // #708 — Boot's PrometheusMetricsExportAutoConfiguration registers the scrape registry and
+    // `/actuator/prometheus` on the management port (observability.md §4.2). Runtime only:
+    // nothing compiles against it, and library modules keep micrometer-core (module-structure §5.10).
+    runtimeOnly(libs.micrometer.registry.prometheus)
     // Authorized by module-structure.md §5.10: serves the root-level /health,
     // /ready and /info probes (rest-api.md §11, observability.md §6).
     implementation(libs.spring.boot.starter.web)
@@ -35,6 +41,8 @@ dependencies {
     // Metadata-DB driver at runtime.
     runtimeOnly(libs.postgresql)
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     testImplementation(libs.spring.boot.starter.test)
     // The @SpringBootTest smoke test brings its own Postgres and Redis so it is
     // self-contained — it must not depend on deploy/compose.laptop-infra.yml being up.
@@ -81,6 +89,34 @@ springBoot {
             }
         }
     }
+}
+
+val generateThirdPartyNotices = tasks.register<ThirdPartyNoticesTask>("generateThirdPartyNotices") {
+    coordinates.set(providers.provider {
+        val graph = configurations["productionRuntimeClasspath"].incoming.resolutionResult
+        val unresolved = graph.allDependencies.filterIsInstance<UnresolvedDependencyResult>()
+        check(unresolved.isEmpty()) { "Cannot generate notices for an unresolved runtime graph: $unresolved" }
+        graph.allComponents
+            .mapNotNull { it.id as? ModuleComponentIdentifier }
+            .filter { it.group != project.group.toString() }
+            .map { "${it.group}:${it.module}:${it.version}" }
+            // BootJar adds this library outside productionRuntimeClasspath.
+            .plus("org.springframework.boot:spring-boot-jarmode-tools:${libs.versions.spring.boot.get()}")
+            .sorted()
+    })
+    mysql.set(providers.gradleProperty("mysql").isPresent)
+    oracle.set(providers.gradleProperty("oracle").isPresent)
+    // #781: the catalog is the one hand-edited DuckDB version; the licence read checks the ARG and CORE against it.
+    duckdbJdbcVersion.set(libs.versions.duckdb.jdbc.get())
+    dockerfile.set(rootProject.layout.projectDirectory.file("Dockerfile"))
+    duckdbChecksums.set(rootProject.layout.projectDirectory.file("deploy/duckdb-extensions.sha256"))
+    licenseTexts.set(rootProject.layout.projectDirectory.dir("gradle/licenses"))
+    duckdbClosures.set(rootProject.layout.projectDirectory.dir("deploy/duckdb-extension-ports"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/third-party-notices"))
+}
+
+tasks.named<ProcessResources>("processResources") {
+    from(generateThirdPartyNotices) { into("META-INF") }
 }
 
 // §5.4.1 — `lib/` driver drop-in with no rebuild.

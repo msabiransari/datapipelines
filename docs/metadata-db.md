@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.47 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.60 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-10-22
+**Last updated:** 2026-11-13
 
 ---
 
@@ -31,7 +31,7 @@ This spec defines the **complete physical schema** for the app's own metadata Po
 - **Encryption** uses `BYTEA` for ciphertext (AES-256-GCM, see [Datasources spec](datasources.md#7-credential-storage)).
 - **Naming**: `snake_case` for all identifiers. Table names are plural (`users`, `pipelines`). Column names are singular (`email`, `created_at`).
 - **Foreign keys** use `ON DELETE CASCADE` for child tables that don't make sense without their parent (e.g., `pipeline_versions` without `pipelines`). Use `ON DELETE RESTRICT` (default) for reference columns (e.g., `owner_id` in `pipelines` — don't delete a user who owns pipelines).
-- **`updated_at` maintenance:** every table that has an `updated_at` column gets it set **by the application, in the `SET` clause of every `UPDATE` statement** (`updated_at = NOW()`). There are **no triggers** in this schema — no `BEFORE UPDATE` trigger, no `moddatetime` extension. Rationale: a trigger hides a write from the statement that caused it, and this schema is small enough that the discipline is a code-review item, not an operational risk. The `DEFAULT NOW()` on the column covers INSERT only. An UPDATE that forgets `updated_at` is a bug in the repository method.
+- **`updated_at` maintenance:** every table that has an `updated_at` column gets it set **by the application, in the `SET` clause of every `UPDATE` statement** (`updated_at = NOW()`). There are **no triggers** in this schema — no `BEFORE UPDATE` trigger, no `moddatetime` extension — with ONE named exception: V53's four on the Iceberg catalog tables ([§4.43](#443-iceberg_tables), [§4.44](#444-iceberg_namespace_properties)), the lake's lease fence and revision log, which guard writes made by a library DP does not control. Rationale: a trigger hides a write from the statement that caused it, and this schema is small enough that the discipline is a code-review item, not an operational risk. The `DEFAULT NOW()` on the column covers INSERT only. An UPDATE that forgets `updated_at` is a bug in the repository method.
 - **Immutable tables carry no `updated_at`** (`execution_events`, `audit_log`) — see the per-table notes. Since V6 the version tables carry one **narrowly**: `pipeline_versions` / `template_versions` record the last DRAFT write in `updated_at`/`updated_by` (the 409 conflict details of [versioning §4.2](versioning.md)); a release or discard does not restamp it, and RELEASED/DISCARDED rows are never UPDATEd otherwise (versioning §3.1's amended immutability discipline).
 
 ---
@@ -54,7 +54,8 @@ users ──1:N── workspace_members
 
 workspaces ──1:N── pipelines (workspace_id)
 workspaces ──1:N── templates (workspace_id)
-workspaces ──0:N── datasources (workspace_id; NULL = global)
+workspaces ──0:N── datasources (owner_workspace_id: the OWNING workspace; NULL = an instance datasource — ownership, not visibility, V23)
+datasources ──1:N── datasource_workspaces ──N:1── workspaces (the GRANT rows: a datasource is visible to exactly the workspaces granted it — §4.16)
 workspaces ──1:N── api_keys (workspace_id)
 
 pipelines ──1:N── pipeline_versions
@@ -75,6 +76,12 @@ learned_facts ──1:N── template_implements (fact_id, NO cascade — a cit
 users ──1:N── mail_sends (the claim row behind every notice sent about or to the user, ON DELETE CASCADE — §4.19)
 
 pipelines ──1:N── pipeline_check_runs (the server-run release-check history of the pipeline's versions — §4.20)
+
+workspaces ──1:N── lake_reference_scans (one per scanned released pipeline / parameter-set version, ON DELETE CASCADE — §4.41)
+lake_reference_scans ──1:N── lake_table_references (the version's table positions, ON DELETE CASCADE — §4.42)
+lake_namespaces ──1:N── lake_tables_managed (namespace_id — §4.49)
+lake_tables_managed ──1:N── lake_table_definition_versions (table_id, no cascade — §4.50)
+lake_tables_managed ──1:N── lake_column_semantics (the applied version's columns, ON DELETE CASCADE — §4.51)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -349,7 +356,7 @@ CREATE INDEX idx_executions_heartbeat ON pipeline_executions(heartbeat_at)    --
 - **Lineage columns (V3).** A PIPELINE node's child execution records `parent_execution_id` + `parent_node_id` (NULL for roots); `root_execution_id` is the top ancestor. The migration backfills `root_execution_id = execution_id` for pre-existing rows and sets it NOT NULL from then on — one indexed query (`idx_executions_root`) returns the whole family and cancellation keys off it, with no NULL special-case anywhere. The repository binds `root_execution_id` as the record's own `execution_id` when the caller leaves it null, so roots never have to repeat their id.
 - **No `result_delivery` column.** Under D9 there is exactly one delivery path (every caller result is materialized in Redis and read through the cursor), so the old `'inline' | 'claim_check'` discriminator describes a fork that no longer exists. `result_row_count` and `result_size_bytes` remain as history/observability facts — they describe a result that is very likely already expired, and they are **not** a claim that the result is still retrievable. Retrievability is a Redis TTL question ([§9](#9-what-is-not-in-this-database)).
 - Both result columns are NULL for pipelines with zero caller nodes (legal under D1 — pure write-back pipelines).
-- `updated_at` is absent by design: the row's lifecycle is INSERT-on-start then one terminal UPDATE, and `completed_at` already carries that timestamp.
+- `updated_at` is absent by design: the row is inserted on start and receives a terminal UPDATE whose timestamp is `completed_at`; `recordResult` separately fills the result-history columns before or after that UPDATE without changing the completion timestamp ([DAG Executor §10.1](dag-executor.md#101-how-an-emitted-event-becomes-durable-266)).
 
 **Partitioning candidate:** Partition by month on `started_at` for large deployments. Note that the composite FK constrains this — a partitioned `pipeline_executions` still references an unpartitioned `pipeline_versions`, which Postgres supports; partitioning `pipeline_versions` would not.
 
@@ -511,6 +518,10 @@ CREATE TABLE datasources (
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by              UUID        NOT NULL REFERENCES users(id),
+    incarnation_id          UUID        NOT NULL DEFAULT gen_random_uuid(),  -- which incarnation of the name; internal, never on the wire (V59)
+    generation              BIGINT      NOT NULL DEFAULT 1,                  -- identity-bearing writes since the insert; internal, never on the wire (V59)
+    CONSTRAINT uq_datasources_incarnation UNIQUE (incarnation_id),           -- V59
+    CONSTRAINT chk_datasources_generation CHECK (generation >= 1),           -- V59
     CONSTRAINT chk_datasource_name CHECK (
         char_length(name) BETWEEN 1 AND 63 AND name ~ '^[a-z0-9_-]+$'
     ),
@@ -547,14 +558,15 @@ CREATE INDEX idx_datasources_active ON datasources(name) WHERE is_deleted = FALS
 - `credential_encrypted` (V13; `password_encrypted` before it) is `BYTEA` ciphertext only ([Datasources §7.1](datasources.md#71-encryption-at-rest)) — never plaintext, never returned by any endpoint, and never logged. The master key is required and fail-fast (D8). The blob is **kind-agnostic**: a password, a bearer token, a PEM private key or a service-account JSON document are all sealed identically under the V10 versioned envelope with the datasource NAME as AAD, so a new credential kind needs no crypto change and rotation (§7.3) is unaffected.
 - The three V13 credential columns are one contract ([Datasources §3.4](datasources.md#34-credential-kinds)). `credential_kind` gains `DEFAULT 'password'`, which is what makes the backfill TRUE rather than a guess: every pre-087 row went through a save path that required a username and a password, so every one of them IS a password. `chk_datasource_credential_present` pins `kind = 'none'` ⟺ no ciphertext — that equivalence is why the §3.2 response can DERIVE `password_set` from the kind instead of carrying a read-side flag every constructor would have to get right. `chk_datasource_credential_username` restates §3.4's field rules at the column, as the backstop for a row written by restore or by hand; the application validator reports the same rules as field errors on a 400. `username` became nullable in the same migration: a private key, a service-account blob and "no credential" have no username, and the dummy value a NOT NULL column forced (`username: "sqlite"`, [Datasources §8A.1](datasources.md#8a1-file-shape)) is the lie V13 removes.
 - `created_by` is a real foreign key to `users(id)` (`ON DELETE RESTRICT`, the §2 default) — a user who owns datasources cannot be hard-deleted.
-- `workspace_id` (V4) binds the datasource to a workspace as **visibility/ownership only** — `name` stays the globally-unique PK and namespace (workspaces design D2/D3: it is the PK, the GCM AAD anchor, and the cross-env contract). **`NULL = global`**: existing rows backfilled NULL, preserving the pre-workspaces shared behavior (D9). `is_readonly` (V4) forbids the three write-shaped uses of the datasource in the pipeline contract — enforced since the readonly slice (save-time validation + executor backstop + the pool flag), and WRITABLE since the surfaces slice through the D8-gated registry save path (pool rebuilt on every flag write; `readonly` on a global datasource is admin-only). Since the surfaces slice both columns live on the entity and the repository's SQL: INSERT/UPDATE write `workspace_id`/`is_readonly` explicitly, and every read joins `workspaces` for the additive `workspace` name; visibility (`bound-to-active OR global`) is the repository's `findAllVisible`/`findVisibleByName` predicates — one authority for REST, MCP and the UI.
+- `owner_workspace_id` (V23; V4's `workspace_id` before it) records **ownership only** — the workspace that registered the datasource, NULL for an instance datasource — and never decides who can see it: visibility is the §4.16 grant table. `name` stays the globally-unique PK and namespace (workspaces design D2/D3: it is the PK, the GCM AAD anchor, and the cross-env contract), so a name taken in one workspace is taken for every workspace. History: V4's `workspace_id` meant both, with **`NULL = global`** (visible to every workspace, D9); V23 split it — the owner moved to `owner_workspace_id`, a former global row became an instance datasource with one grant per live workspace (§4.16), and the column was dropped. `is_readonly` (V4) forbids the three write-shaped uses of the datasource in the pipeline contract — enforced since the readonly slice (save-time validation + executor backstop + the pool flag), and WRITABLE since the surfaces slice through the D8-gated registry save path (pool rebuilt on every flag write; any mutation of an instance datasource, a `readonly` flip included, is super-admin-only — [Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)). Both columns live on the entity and the repository's SQL: INSERT/UPDATE write `owner_workspace_id`/`is_readonly` explicitly, and every read left-joins `workspaces` on `owner_workspace_id` for the additive `workspace` name (NULL for an instance datasource); visibility is the repository's `GRANTED_PREDICATE` — `EXISTS` a `datasource_workspaces` row for the datasource and the reading workspace — inside `findAllVisible`/`findVisibleByName`, one authority for REST, MCP and the UI.
 - `idx_datasources_active` gives soft-delete parity with `pipelines` and `templates`: the registry's hot path is "list/lookup non-deleted datasources", and without it that scan had no supporting index. Note the PK index cannot serve it — `is_deleted` is not in the PK, so the filter would be a heap recheck on every row.
 - The three `last_test_*` columns (V9) record the outcome of the LAST connection test ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)). All three NULL = **never tested**, which is the truthful state of every pre-V9 row — there is no outcome to backfill and no default that would not be an invention. They are written by the probe (`POST .../test`, the UI's Test button, and the §8A.3 rule-3 bootstrap check) and by nothing else; `last_test_message` is redaction-scrubbed at the probe, so no credential can reach the column. They exist because LISTING a datasource does not connect to it: on 2026-09-02 the screen showed a datasource as fine while every execution failed at CONNECT.
+- `incarnation_id` and `generation` (V59, #874; [Datasources §11.2](datasources.md#112-identity-across-delete-and-recreation)) are the datasource's **local** identity beside its name key — the name stays the PK and every foreign key's target. V59 adds both with their defaults, so PostgreSQL fills every existing row, soft-deleted ones included, with its own `gen_random_uuid()` value and generation 1 in the same statement: no SQL backfill, no NULL. The application never writes `incarnation_id` (an insert takes the default; no UPDATE names it), so an update or a soft delete keeps it and a row inserted again using the default gets a new one. A backup restore that supplies the stored incarnation preserves it; the default never replaces an explicit value. `generation` is advanced by `+ 1` inside the writer's own statement, in its guarded section, for the writers §11.2 lists; the `last_test_*` write and an unchanged managed re-sync do not advance it. `uq_datasources_incarnation` makes two rows sharing an incarnation impossible; `chk_datasources_generation` keeps the counter at 1 or above. Neither column is read by any DTO, export, promotion or release statement: the dependency graph's three batch reads (`findVisibleGraphFacts`, `findLiveGraphFacts`, `findIncarnation`) are their only readers, and the graph folds them into an internal fingerprint. V59 adds no explicit index — the UNIQUE constraint's implicit index is the only one (§5), and the graph reads go through the PK.
 - All timestamps are `TIMESTAMPTZ`; `updated_at` is set by the application in every UPDATE (§2), including credential rotation and pool-affecting property changes — **with one documented exception**: the `last_test_*` write does NOT move it. A test outcome is an observation about the datasource, not a change to it, and [Datasources §8A.3](datasources.md#8a3-semantics-create-if-absent-never-update) rule 1 promises an operator's row survives a boot byte-untouched, a promise that stays mechanically checkable only while a probe leaves the definition columns (`updated_at` among them) alone.
 
 ### 4.11 `workspaces`
 
-The unit of team isolation (workspaces design 2026-08-16, D1). Pipelines and templates belong to exactly one workspace; datasources bind by visibility only (§4.10); API keys pin one at issuance (§4.2).
+The unit of team isolation (workspaces design 2026-08-16, D1). Pipelines and templates belong to exactly one workspace; a datasource has at most one OWNING workspace (`owner_workspace_id`, §4.10) and is visible to the workspaces GRANTED it (§4.16); API keys pin one at issuance (§4.2).
 
 ```sql
 CREATE TABLE workspaces (
@@ -614,11 +626,12 @@ CREATE TABLE published_endpoints (
     id               UUID        PRIMARY KEY,
     workspace_id     UUID        NOT NULL REFERENCES workspaces(id),
     path_pattern     TEXT        NOT NULL,   -- '/lending/v1/{borough}/home'
-    pipeline_id      UUID        NOT NULL REFERENCES pipelines(id),
-    timeout_seconds  INTEGER     NOT NULL,   -- clamped by config at write time
-    description      TEXT        NOT NULL DEFAULT '',
+    pipeline_id      UUID        NOT NULL REFERENCES pipelines(id),   -- #786: legacy, the conversion's SOURCE only
+    timeout_seconds  INTEGER     NOT NULL,   -- #786: legacy creation snapshot; the version row's value serves
+    description      TEXT        NOT NULL DEFAULT '',                 -- #786: legacy, as timeout_seconds
     is_enabled       BOOLEAN     NOT NULL DEFAULT TRUE,
     retired_reason   TEXT        NULL,       -- NULL = a normal row; 'pre-R-EP5 path' = retired (#274)
+    current_version  INTEGER     NULL,       -- #786 (V58): the API's OWN runtime pointer, see §4.13a
     created_by       UUID        NOT NULL REFERENCES users(id),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -633,9 +646,60 @@ CREATE INDEX idx_published_endpoints_pipeline ON published_endpoints(pipeline_id
 - **`UNIQUE (path_pattern)` is deployment-wide, not per-workspace, on purpose.** A URL is global: `GET /api/lending/v1/home` has exactly one meaning on a deployment, so two workspaces cannot both own it. `workspace_id` says who may manage the row and whose datasources the pipeline runs against — it does not namespace the path. A per-workspace constraint would let two rows claim one URL and make request-time resolution ambiguous.
 - **`retired_reason` (V41, #274) — a stored row that fails a later grammar is retired, never fatal.** R-EP5 (2026-09-19) made three segments the floor, and rows written before that day under the then-legal two-segment grammar parse against nothing: the row mapper threw inside the demo seeder's conflict check and refused the whole boot. V41 disables every row whose path has fewer than three segments and records why (`retired_reason = 'pre-R-EP5 path'`; NULL is a normal row). Rows are never deleted — the listing shows them flagged with the reason, and unpublishing one is the operator's deliberate act. Independently of this column, the repository maps a row whose path no longer parses as a legacy value and keeps it out of the serve registry and the conflict check, so a database V41 has not reached yet still boots; the column is what makes the row read back as an ordinary disabled row everywhere else. The migration's down path (documented in the file's header) re-enables every row the reason names — V41 cannot distinguish "disabled by V41" from "disabled by an operator before V41" — and drops the column. The column is an audit marker, not the source of the listing's flag: `legacy` and `reason` come from parsing the stored path on every read (the mapper), and V41's predicate is the two-segment shape only — a row malformed another way (an illegal segment, an empty path) stays `is_enabled = TRUE` in the table, is mapped legacy on every read and is never served. **What sees a legacy row (#286).** Only the legacy read (`findLegacy`, workspace-scoped — there is no deployment-wide read) and the row-level read unpublish needs (`findRowByPath`); every valid-endpoint read skips it — the serve registry, the conflict check, the workspace listing, `EndpointKeyService.requireInsideWorkspace` (a node only a legacy path lies under is not inside the workspace's tree, so no key binds there) and the pipeline explorer's Usage tab (`findByPipeline`: a pipeline served only by a legacy row reads as unpublished, which it is). A promotion batch omits it and the sender logs the count. `path_pattern` is `TEXT` with no CHECK, so the surfaces that echo a legacy path (REST, `endpoints_list`, the console) cut it at the grammar's 200 characters (`EndpointPath.echoBounded`); the column keeps the stored value, because unpublish is by path. The once-per-JVM `event=endpoint.legacy_rows` WARN names the FIRST query's count as `at_least` — after V41 the registry warm-up reads enabled rows only, so it is a floor, not the deployment's total.
 - The constraint is not the whole uniqueness rule. `/a/{x}` and `/a/b` are different strings that match the same URL; that overlap is refused at publish time in the application (`endpoint.path_conflict`), under a transaction-scoped advisory lock so two concurrent publishes cannot both pass the check. The constraint is the second line, catching exact duplication.
-- The row pins a **pipeline, not a version**: the latest RELEASED version is resolved at request time, which is why the read-only rule is re-checked on every serve and not only at publish.
+- **Since #786 (V58) the entity pins nothing itself.** Its `current_version` names one of its API versions (§4.13a), and that version pins an EXACT pipeline version; serving reads this pointer and that pin, never the pipeline's CURRENT. The pointer is tied to a version row by the composite foreign key `fk_published_endpoints_current_version (id, current_version) → published_endpoint_versions (endpoint_id, version)`, `DEFERRABLE INITIALLY DEFERRED` (a constraint, not a trigger: a transaction that purges the current version and moves the pointer is checked once, at commit); NULL serves nothing. `pipeline_id`, `timeout_seconds` and `description` stay as the in-place conversion's SOURCE — read once for an entity with no version row — and as a new entity's creation snapshot; no serve statement reads them. (Before #786 the row pinned a pipeline, not a version, and the latest RELEASED version was resolved at request time; the read-only rule is still re-checked on every serve.)
 - `timeout_seconds` is clamped to the `datapipelines.endpoints.timeout-min-seconds` / `datapipelines.endpoints.timeout-max-seconds` bounds when written, deliberately **not** by a CHECK constraint — the bounds are configuration an operator may retune, and a row written under the old bounds must keep serving rather than make the table unreadable.
 - Matching reads the enabled rows whole and matches them in memory (the set is small and cached per instance, invalidated over the same Redis channel datasource pools use), so no query plan depends on the shape of `path_pattern`.
+
+### 4.13a `published_endpoint_versions`
+
+One row per API version (V58, #786; dependency-graph record §5.3, §24): DRAFT, RELEASED or DISCARDED, the exact pipeline pin by portable NAME and version NUMBER (never a pipeline UUID), the timeout and the description, and the house body hash. See [REST API §19](rest-api.md#19-published-endpoints).
+
+```sql
+CREATE TABLE published_endpoint_versions (
+    endpoint_id      UUID        NOT NULL REFERENCES published_endpoints(id) ON DELETE CASCADE,
+    version          INTEGER     NOT NULL,
+    status           TEXT        NOT NULL DEFAULT 'DRAFT',   -- chk_published_endpoint_versions_status: DRAFT | RELEASED | DISCARDED
+    pipeline_name    TEXT        NOT NULL,   -- the portable pipeline identity (pipeline-contract §11.1)
+    pipeline_version INTEGER     NOT NULL,   -- the EXACT pin: never 'current', never re-resolved
+    timeout_seconds  INTEGER     NOT NULL,   -- clamped by config at write time
+    description      TEXT        NOT NULL DEFAULT '',
+    body_hash        TEXT        NOT NULL,
+    released_at      TIMESTAMPTZ NULL,
+    released_by      UUID        REFERENCES users(id),
+    discarded_at     TIMESTAMPTZ NULL,
+    discarded_by     UUID        REFERENCES users(id),
+    updated_at       TIMESTAMPTZ NULL,
+    updated_by       UUID        REFERENCES users(id),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by       UUID        NOT NULL REFERENCES users(id),
+    PRIMARY KEY (endpoint_id, version),
+    CONSTRAINT chk_published_endpoint_versions_version CHECK (version >= 1),
+    CONSTRAINT chk_published_endpoint_versions_pin CHECK (pipeline_version >= 1),
+    CONSTRAINT chk_published_endpoint_versions_release_stamps CHECK (
+        (status = 'DRAFT' AND released_at IS NULL AND released_by IS NULL)
+        OR (status <> 'DRAFT' AND released_at IS NOT NULL)),
+    CONSTRAINT chk_published_endpoint_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL))
+);
+
+CREATE UNIQUE INDEX uq_published_endpoint_versions_one_draft
+    ON published_endpoint_versions (endpoint_id) WHERE status = 'DRAFT';
+CREATE INDEX idx_published_endpoint_versions_pin ON published_endpoint_versions (pipeline_name, pipeline_version);
+
+ALTER TABLE published_endpoints ADD COLUMN current_version INTEGER NULL
+    CONSTRAINT chk_published_endpoints_current_version CHECK (current_version IS NULL OR current_version >= 1);
+ALTER TABLE published_endpoints ADD CONSTRAINT fk_published_endpoints_current_version
+    FOREIGN KEY (id, current_version) REFERENCES published_endpoint_versions (endpoint_id, version)
+    DEFERRABLE INITIALLY DEFERRED;
+```
+
+**Notes:**
+- **At most one working DRAFT per API** — the V39 partial-unique pattern; a second insert surfaces as `endpoint.version.draft_exists`. A draft save is a CAS on the body hash (`endpoint.version.conflict`).
+- **The body hash is ONE SQL expression** (`PublishedEndpointVersionRepository.API_BODY_HASH_EXPR`, quoted byte-equal in V58's header and drift-tested): `sha256` over `jsonb_build_object('pipeline', 'pipeline_version', 'timeout_seconds', 'description')`. jsonb canonicalises key order, so equal bodies hash equally on every deployment; the path, the entity and pipeline UUIDs, `is_enabled` and the key bindings are not inputs (acceptance A44).
+- **Who pins a pipeline version** — `idx_published_endpoint_versions_pin` serves the pipeline discard/purge protection (#786 B.4): a DRAFT or RELEASED API version — noncurrent, or of a disabled entity, included — refuses `pipeline.version.pinned` with `referencing_api_versions`; a DISCARDED one protects nothing (its restore rechecks the pin).
+- **No data is backfilled in SQL.** Existing APIs are converted IN PLACE by a startup step in `modules/app` under the writer guard and the shared hash expression (owner ruling 2026-11-08): v1 pins the legacy pipeline's CURRENT version exactly, RELEASED when that version is RELEASED and DRAFT otherwise, and `current_version = 1`. Every path that creates an entity writes its v1 in the same transaction, so a version-less entity is legacy data only.
+- The release participant flips a version RELEASED inside the release coordinator's one transaction; `released_at` survives a discard and a restore.
 
 ### 4.14 `endpoint_key_bindings`
 
@@ -691,6 +755,7 @@ CREATE TABLE lake_tables (
 - `partition_column` is nullable with no default: an unpartitioned table has none, and NULL is the truthful spelling of that (the `description` precedent, D4/2.9.4).
 - `registered_by` / `registered_at` follow the house `created_by`/`created_at` shape — a real FK to `users(id)` (`ON DELETE RESTRICT`, the §2 default) and a DB-defaulted TIMESTAMPTZ. There is no `updated_at`: a row is inserted and deleted, never edited — re-registration is delete + insert, so the registration audit columns always name the actor of the row that exists.
 - `last_error` / `last_error_at` (V22, 109 §A) record the connect-time view creation's failure ([datasources.md §8C.2](datasources.md#8c2-a-view-per-registered-table-built-at-connect--and-isolated-per-table)): a failing view is skipped and its bounded engine error stored here instead of failing the pool build; a later success clears both in the same UPDATE. NULL is the healthy spelling, so previously-healthy rows needed no backfill. Recording is transition-only (an unchanged outcome writes nothing), so `last_error_at` reads as "broken since", never "last observed". Written by `LakeTableRepository.recordViewOutcome` from the pool's view application.
+- **V54 (#798) adds `origin` and `revision_seq`** ([§4.52](#452-lake_tables-origin-and-revision-sequence)): every row above is `external`; a `managed` row is the managed lake's projection of one of its own tables, guarded by its revision sequence.
 - `uq_lake_tables_datasource_namespace_name` is the one rule beyond the CHECK: a table is its (datasource, namespace, name) triple, registered once. It is NAMED so the service maps its violation to the catalogued `datasource.lake_table_duplicate` (the `uq_pipelines_workspace_name` precedent, §4.4), and its index doubles as the access path for the registry's hot read — "list the tables of one datasource" — which is why §5 creates no separate index on `datasource_id`.
 
 ---
@@ -713,10 +778,10 @@ CREATE INDEX idx_datasource_workspaces_workspace ON datasource_workspaces(worksp
 
 **Notes:**
 - **Keyed by `datasource_name`, not by an id.** `datasources` is keyed by `name TEXT` (§4.10) and always has been; the RBAC design record's `datasource_id UUID` names a column that does not exist.
-- **V23's backfill preserves yesterday's visibility exactly.** A workspace-bound datasource is granted to its own workspace and `owner_workspace_id` is set to it; a former `global` datasource (`workspace_id IS NULL`) is granted to EVERY existing workspace and owns none. `granted_by` is the datasource's own `created_by` — the honest actor, and it keeps the migration from having to mint a users row.
+- **V23's backfill preserves yesterday's visibility exactly.** A workspace-bound datasource is granted to its own workspace and `owner_workspace_id` is set to it; a former `global` datasource (`workspace_id IS NULL`) is granted to every existing workspace that is not soft-deleted (`V23__rbac_core.sql` filters `w.is_deleted = FALSE`, so a soft-deleted workspace got no grant) and has no owner. `granted_by` is the datasource's own `created_by` — the honest actor, and it keeps the migration from having to mint a users row.
 - **`ON DELETE CASCADE` on the datasource, never on the workspace.** Removing a datasource removes its grants; a workspace is DEACTIVATED, never deleted (D-R10), so its grants must survive to be there when it is reactivated.
 - **Every grant is audited** (`datasource.granted` / `datasource.revoked`, auth.md §10.1). The row records who and when; the audit trail records the decision.
-- Revoking a grant does not touch the datasource. A workspace that loses one loses only its ability to SEE it — pipelines there that referenced it then fail with the ordinary not-found, which is the honest answer: it no longer exists for them.
+- Revoking a grant keeps the datasource's definition, credential and incarnation; when a grant row is actually removed, the same statement advances `datasources.generation` once (§4.10 — visibility is an identity fact for the dependency graph), and a revoke of a grant that did not exist advances nothing. A workspace that loses one loses only its ability to SEE it — pipelines there that referenced it then fail with the ordinary not-found, which is the honest answer: it no longer exists for them.
 
 ### 4.17 `workspace_invitations`
 
@@ -901,7 +966,7 @@ CREATE TABLE schedules (
     name                    TEXT        NOT NULL,       -- the pipeline path grammar (checked in code)
     revision                INT         NOT NULL DEFAULT 1,  -- the ETag / If-Match value; not a releasable version
     executor_id             TEXT        NOT NULL,       -- 'pipeline' in slice 1 — an allowlisted registry id
-    payload_schema_version  INT         NOT NULL,
+    payload_schema_version  INT         NOT NULL,       -- 'pipeline': 2 since #786 (the exact pin); 1 = pointer-following
     payload_json            JSONB       NOT NULL,       -- opaque; the executor validates it
     parameters_json         JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- literal inputs (R7), opaque here
     target_ref              TEXT        NOT NULL,       -- the executor's generic reference (B15): 'pipeline:<name>'
@@ -939,6 +1004,7 @@ CREATE INDEX idx_schedules_target ON schedules (workspace_id, target_ref) WHERE 
 
 **Notes:**
 - **Soft delete** (`deleted_at`, D-9.6/B17), not §2's `is_deleted` flag: the name is unique among LIVE schedules only (the partial index), so a deleted schedule keeps its runs and their trail and its name is free again. A deleted schedule is absent from every read.
+- **Payload schema 2 — the exact pin** (#786, no DDL change). The `pipeline` executor's payload is `{"pipeline": "<name>", "version": <int ≥ 1>}` at `payload_schema_version = 2`: every run executes exactly that pipeline version. Schema 1 (`"version": "current"`) followed the pointer; the executor READS the column and refuses a schema-1 payload (`schedule.validation.payload_schema_unsupported`; a run `payload_schema_unsupported`, blocking) rather than re-reading it. The upgrade's startup conversion rewrites every LIVE schema-1 row in place — only `payload_json.version` (`"current"` → the integer CURRENT names) and this column, under the row's revision CAS (so `revision` moves by one) — and the payload copy of each of its `queued` runs ([§4.23](#423-schedule_runs)) the same way; terminal runs keep the schema they ran under, as history. A deleted schedule is not converted. The pipeline discard's pin guard reads the schema-2 `version` as the version a schedule protects.
 - **`enabled` and `blocked_*` are independent operational controls** (record §1.1): pause flips `enabled`; an `unknown` run or a blocking refusal sets the block; resume never clears a block (unblock does).
 - **`next_due_at` is written only by the ONE occurrence function** (record §3.2) — at create, at the dispatcher's advance, and when resume, unblock or a cron/timezone edit recompute it from now.
 - **The dispatcher's scan** is `idx_schedules_due` joined to the workspace row (a deleted or DEACTIVATED workspace is not dispatched), locked `FOR UPDATE SKIP LOCKED`.
@@ -956,6 +1022,7 @@ CREATE TABLE schedule_runs (
     scheduled_at            TIMESTAMPTZ,                -- the UTC occurrence; NULL for a manual run
     reference_at            TIMESTAMPTZ NOT NULL,       -- the frozen time context (record §5.1)
     reference_timezone      TEXT        NOT NULL,
+    target_ref              TEXT,                       -- safe target summary frozen at run creation (V51); NULL for older/ad-hoc runs
     admit_by                TIMESTAMPTZ NOT NULL,       -- the lateness window's end
     schedule_revision       INT,
     executor_id             TEXT        NOT NULL,
@@ -1019,15 +1086,17 @@ CREATE TABLE schedule_run_events (
     details_json JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- the execution reference, a retry number, a summary's counts
     PRIMARY KEY (run_id, seq),
     CONSTRAINT chk_schedule_run_events_kind CHECK (kind IN ('recorded', 'capacity_retry', 'claimed',
-        'execution_started', 'not_started', 'skipped', 'finished', 'unknown', 'updated_after_unknown', 'unblocked')),
+        'execution_started', 'not_started', 'skipped', 'finished', 'unknown', 'updated_after_unknown', 'unblocked',
+        'notification_enqueued', 'notification_sent', 'notification_failed', 'notification_uncertain')),  -- V51 widened it
     CONSTRAINT chk_schedule_run_events_seq CHECK (seq >= 1)
 );
 ```
 
 **Notes:**
-- **Append-only by construction**, not by a trigger (§2: this schema has none): the one INSERT in `ScheduleRunRepository.appendTrail` draws `seq` from `schedule_runs.trail_seq` in the same statement, and no code path updates or deletes a row — `ScheduleTrailAppendOnlyTest` scans the sources. Like §2's other immutable tables it carries no `updated_at`.
+- **Append-only by construction**, not by a trigger (§2: the application schema has none): the one INSERT in `ScheduleRunRepository.appendTrail` draws `seq` from `schedule_runs.trail_seq` in the same statement, and no code path updates or deletes a row — `ScheduleTrailAppendOnlyTest` scans the sources. Like §2's other immutable tables it carries no `updated_at`.
 - **No copy of the pipeline's events.** The execution's own events stay in [`execution_events`](#47-execution_events); `schedule_runs.execution_id` is the join a merged Messages read uses (record §5.4).
-- **Retention** follows the run's history: slice 1 deletes neither (a retention policy for runs and their trail is a later slice's, with the notification outbox).
+- **Retention** follows the run's history: slice 1 deletes neither (a retention policy for runs and their trail is a later slice's; the notification outbox, [§4.39](#439-schedule_notification_events)–[§4.40](#440-schedule_notification_deliveries), is kept with them).
+- **The notification kinds** (V51, #442b): `notification_enqueued` is written in the transition's own transaction when the outbox queued a notice (details: the notice id, its event and outcome, the queued and refused counts — never an address); `notification_sent` / `notification_failed` / `notification_uncertain` when the sender settles a delivery, or recovers a claim a stopped instance left (details: the delivery id, the notice id, the attempt count and the code — no part of the address, not even its domain: the trail is read by every `schedule.read` holder). A retry that returns a delivery to `pending` writes no row.
 
 ### 4.25 `scheduled_tasks`
 
@@ -1492,6 +1561,522 @@ CREATE INDEX idx_parameter_evaluation_queries_evaluation ON parameter_evaluation
 - **Constants and free inputs are resolution steps, not query rows**: a `constants` selector and a plain-default `INPUT` produce NO row (their outcomes ride `outcomes_json`); the SAVE-time probe is authoring validation and records nothing here.
 - An evaluation holds at most `max-parameters-per-set` rows. `outcome` stays NULL on the rows of an evaluation the sweep closed `INCOMPLETE` — nobody saw them end.
 
+### 4.39 `schedule_notification_events`
+
+**One row per run transition — or schedule block — that the schedule's event set selected at that moment** (V51; #442b, the [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) §6.1). Written by `RunLedger` through `NotificationOutbox` in the SAME transaction as the transition and its trail row: both commit or neither, so there is never a notice without its transition nor a transition whose selected notice was lost.
+
+```sql
+CREATE TABLE schedule_notification_events (
+    id          UUID        PRIMARY KEY,
+    schedule_id UUID        NOT NULL REFERENCES schedules(id),
+    run_id      UUID        NOT NULL REFERENCES schedule_runs(id),  -- a block is always caused by a run; the notice attaches to it
+    event       TEXT        NOT NULL,                               -- the checkbox (NotificationEvent, enums.md §42)
+    outcome     TEXT        NOT NULL,                               -- what happened (NotificationOutcome, enums.md §43)
+    run_state   TEXT        NOT NULL,                               -- the run's state after the transition
+    reason      TEXT,                                               -- the run's (or the block's) reason word
+    occurred_at TIMESTAMPTZ NOT NULL,
+    sequence    INT         NOT NULL,                               -- the trail seq of the transition that produced it
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_schedule_notification_events_run_outcome UNIQUE (run_id, outcome),
+    CONSTRAINT chk_schedule_notification_events_event CHECK (event IN ('start', 'success', 'failure', 'unknown', 'blocked')),
+    CONSTRAINT chk_schedule_notification_events_outcome CHECK (
+        (event = 'start' AND outcome = 'started')
+        OR (event = 'success' AND outcome = 'completed')
+        OR (event = 'failure' AND outcome IN ('failed', 'could_not_start', 'cancelled', 'aborted'))
+        OR (event = 'unknown' AND outcome IN ('unknown', 'unknown_update'))
+        OR (event = 'blocked' AND outcome = 'blocked')),
+    CONSTRAINT chk_schedule_notification_events_sequence CHECK (sequence >= 1)
+);
+CREATE INDEX idx_schedule_notification_events_schedule ON schedule_notification_events (schedule_id);
+```
+
+**Notes:**
+- **Nothing is written when delivery is off** (`notifications.enabled=false`, mail unconfigured, or a development posture with no allowlist), when the event set does not select the outcome, when the schedule has no recipients, or when the schedule is deleted — no phantom rows a later enable would send.
+- **A run reaches each outcome once**, so the UNIQUE makes a replayed transition write nothing (`ON CONFLICT … DO NOTHING`). `blocked` is written only on the ACTUAL transition to blocked (`ScheduleRepository.block` returned true), never for a block that was already in place. A skipped run (its schedule blocked or deleted) writes nothing.
+
+### 4.40 `schedule_notification_deliveries`
+
+**One row per (event, recipient)** (V51; #442b, record §6.1) — one message per recipient, never a shared address list. The address is snapshotted at enqueue; the Message-ID (`<delivery-id@host-of-base-url>`) is fixed at enqueue, so a resend carries the same one.
+
+```sql
+CREATE TABLE schedule_notification_deliveries (
+    id              UUID        PRIMARY KEY,
+    event_id        UUID        NOT NULL REFERENCES schedule_notification_events(id),
+    recipient       TEXT        NOT NULL,                           -- personal data: never logged; shown only to schedule.update holders
+    state           TEXT        NOT NULL,                           -- DeliveryState (enums.md §44)
+    attempts        INT         NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ,                                    -- set exactly while pending
+    sending_since   TIMESTAMPTZ,                                    -- a claimed send in flight
+    last_error_code TEXT,                                           -- a sanitized code, never transport text
+    message_id      TEXT        NOT NULL,
+    sent_at         TIMESTAMPTZ,                                    -- the relay accepted it
+    resend_count    INT         NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_schedule_notification_deliveries_event_recipient UNIQUE (event_id, recipient),
+    CONSTRAINT uq_schedule_notification_deliveries_message_id UNIQUE (message_id),
+    CONSTRAINT chk_schedule_notification_deliveries_state CHECK (state IN ('pending', 'accepted', 'failed', 'uncertain')),
+    CONSTRAINT chk_schedule_notification_deliveries_due CHECK ((state = 'pending') = (next_attempt_at IS NOT NULL)),
+    CONSTRAINT chk_schedule_notification_deliveries_sending CHECK (sending_since IS NULL OR state = 'pending'),
+    CONSTRAINT chk_schedule_notification_deliveries_accepted CHECK (state <> 'accepted' OR sent_at IS NOT NULL),
+    CONSTRAINT chk_schedule_notification_deliveries_failure CHECK (state NOT IN ('failed', 'uncertain') OR last_error_code IS NOT NULL),
+    CONSTRAINT chk_schedule_notification_deliveries_counts CHECK (attempts >= 0 AND resend_count >= 0)
+);
+CREATE INDEX idx_schedule_notification_deliveries_due ON schedule_notification_deliveries (state, next_attempt_at);
+CREATE INDEX idx_schedule_notification_deliveries_event ON schedule_notification_deliveries (event_id);
+```
+
+**Notes:**
+- **Decided per recipient at enqueue, never dropped silently:** a recipient outside the allowlist is written `failed` / `domain_not_allowed`; over `notifications.backlog-max` pending deliveries a new one is written `failed` / `backlog_full` (and one WARN line). The codes are listed in enums.md §44.
+- **`accepted` means the SMTP relay took it** — not that it reached an inbox; no state says "delivered". `uncertain` is a send that may have reached the relay (the connection dropped after the data was sent, or a claim whose `sending_since` went stale because the instance stopped mid-send); it is never retried automatically. A person may resend a `failed` or `uncertain` delivery (`resend_count` counts it), with a may-duplicate warning for the uncertain one.
+
+**Strict deployment backlog admission (#442 round two).** Enqueue and explicit resend take transaction-scoped `pg_advisory_xact_lock(442004001)` (`NotificationRepository.ADMISSION_LOCK_KEY`) before counting pending rows, in the same READ COMMITTED transaction as insert/requeue. Lock order: enqueue takes the run row, then the advisory lock; resend takes the delivery row, then the advisory lock. The sender claims delivery rows with `FOR UPDATE SKIP LOCKED` and never takes the advisory lock, so there is no cycle. The advisory statement has a five-second query timeout on a dedicated template. This serializes admission across schedules and instances; at the hard cap, new deliveries become `failed/backlog_full` and resend is refused (`409 schedule.notification.backlog_full`, `details.pending`, `details.backlog_max`) without changing the row. Lowering the configured cap does not discard existing pending mail.
+
+### 4.41 `lake_reference_scans`
+
+**One row per scanned RELEASED version of a pipeline or a parameter set** (V52; #778, dp-lake design record §7 "Pipeline-to-table check", the reference-scanner slice D-C). Written by `LakeReferenceScanService` alone, in the SAME transaction that makes the version released — a release (`ReleaseCoordinator`, `ParameterSetService.release`) or an import (promotion, the bootstrap seeder) — and by the boot backfill for released versions that have no row or an older `scanner_version`. RELEASED version rows are never UPDATEd (§4.5), which is why the scan is its own table.
+
+```sql
+CREATE TABLE lake_reference_scans (
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    family          TEXT        NOT NULL,                -- 'pipeline' | 'parameter_set'
+    entity_id       UUID        NOT NULL,                -- pipelines.id / parameter_sets.id (no FK: one column, two parents)
+    version         INTEGER     NOT NULL,
+    name            TEXT        NOT NULL,                -- the entity's name at the scanned version, for display
+    status          TEXT        NOT NULL,                -- 'exact' | 'partial' | 'unscannable'
+    reasons_json    JSONB       NOT NULL DEFAULT '[]'::jsonb,  -- the classifier's / serializer's findings: [{site, kind, detail}]
+    scanner_version INTEGER     NOT NULL,                -- LakeReferenceScanService.SCANNER_VERSION at the time of the scan
+    scanned_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT lake_reference_scans_pkey PRIMARY KEY (workspace_id, family, entity_id, version),
+    CONSTRAINT chk_lake_reference_scans_family CHECK (family IN ('pipeline', 'parameter_set')),
+    CONSTRAINT chk_lake_reference_scans_status CHECK (status IN ('exact', 'partial', 'unscannable')),
+    CONSTRAINT chk_lake_reference_scans_version CHECK (version >= 1),
+    CONSTRAINT chk_lake_reference_scans_scanner_version CHECK (scanner_version >= 1),
+    CONSTRAINT chk_lake_reference_scans_reasons CHECK (jsonb_typeof(reasons_json) = 'array')
+);
+```
+
+**Notes:**
+- **A version with no LAKE site still gets a row** (`exact`, no references): the row says "scanned", so the backfill does not pick it again and a missing row always means "never scanned".
+- **`status` is the weakest site's**: `unscannable` when any LAKE rendering the parser refused (DML, DDL, `PIVOT`, a syntax error — one such statement makes that rendering's whole text unscannable) or any render failed; else `partial` when any LAKE template's body depends on a value (an interpolation, a branch, a loop, a macro call, an imported library — the classifier's kinds); else `exact`. `partial` and `unscannable` versions are ADMITTED everywhere (the owner's 2026-11-02 ratification): the check reads what the index holds and says nothing about what it cannot see.
+- **Keyed by id, not by name** (a deviation from the slice's D-C sketch, recorded in the lane's handback): pipeline and set names are unique per workspace only, and a release may carry a rename; `name` is display.
+- `reasons_json` never carries rendered SQL — a finding names the site and the construct (bounded), never the text, which may embed §12.6 sample values.
+
+### 4.42 `lake_table_references`
+
+**One row per table position a scanned version's LAKE renderings name** (V52; #778, slice D-C) — a pipeline node's rendered SQL or a parameter-set selector's rendered query, parsed by DuckDB's own serializer (`json_serialize_sql`, on a parse-only in-memory connection with external access off). Re-scanning a version replaces its rows (the cascade from §4.41).
+
+```sql
+CREATE TABLE lake_table_references (
+    workspace_id     UUID     NOT NULL,
+    family           TEXT     NOT NULL,
+    entity_id        UUID     NOT NULL,
+    version          INTEGER  NOT NULL,
+    ordinal          INTEGER  NOT NULL,                 -- document order within the version
+    node_id          TEXT,                              -- the pipeline node, or
+    selector         TEXT,                              -- the parameter-set selector (exactly one of the two)
+    template_id      TEXT     NOT NULL,                 -- the template name and version that rendered it
+    template_version INTEGER  NOT NULL,
+    datasource_name  TEXT     NOT NULL,                 -- the LAKE datasource BY NAME (names map between environments)
+    written_catalog  TEXT,                              -- the triple as written, NULL where the text did not spell it
+    written_schema   TEXT,
+    written_table    TEXT     NOT NULL,
+    resolved         BOOLEAN  NOT NULL,                 -- the position names a registry identity
+    namespace        TEXT[],                            -- that identity (lake_tables.namespace / name), or NULL
+    table_name       TEXT,
+    time_travel      BOOLEAN  NOT NULL DEFAULT FALSE,   -- AT (VERSION => n)
+    statement_index  INTEGER  NOT NULL,
+    CONSTRAINT lake_table_references_pkey PRIMARY KEY (workspace_id, family, entity_id, version, ordinal),
+    CONSTRAINT fk_lake_table_references_scan FOREIGN KEY (workspace_id, family, entity_id, version)
+        REFERENCES lake_reference_scans (workspace_id, family, entity_id, version) ON DELETE CASCADE,
+    CONSTRAINT chk_lake_table_references_site CHECK ((node_id IS NULL) <> (selector IS NULL)),
+    CONSTRAINT chk_lake_table_references_resolved CHECK (
+        (resolved AND namespace IS NOT NULL AND cardinality(namespace) >= 1 AND table_name IS NOT NULL)
+        OR (NOT resolved AND namespace IS NULL AND table_name IS NULL)),
+    CONSTRAINT chk_lake_table_references_counters CHECK (ordinal >= 0 AND statement_index >= 0 AND template_version >= 1)
+);
+CREATE INDEX idx_lake_table_references_table ON lake_table_references (datasource_name, namespace, table_name);
+```
+
+**Notes:**
+- **Resolution is the connection's own naming** (datasources.md's lake section): a two-segment namespace is a catalog and a schema, a one-segment namespace is a schema of the default catalog, so `cat.sch.t` resolves to `[cat, sch]`, `sch.t` to `[sch]`, and a bare `t` only when the datasource registers exactly one namespace (the connection's `search_path` rule). CTE names, the engine's system catalogs and schemas (`system`, `temp`, `information_schema`, `pg_catalog`) and its internal views are not table positions and write no row; a bare name under several namespaces writes an UNRESOLVED row.
+- **Table functions write no row** (`read_parquet(...)`, `query_table(...)`): they name a location or a string, not a registered table.
+- **No rendered SQL is stored** — only the written identifiers the parser returned.
+### 4.43 `iceberg_tables`
+
+**Iceberg's `JdbcCatalog` pointer table — one row per managed lake table, naming its current metadata file** (V53; #785, the dp-lake design record §5.1, §8a). Created by Flyway, not by the library: the catalog runs with `jdbc.init-catalog-tables=false`, so Iceberg issues no DDL at start-up, and the `iceberg_type` column makes `JdbcCatalog` select its V1 schema version from the column itself and alter nothing (`CatalogShapeIntegrationTest` pins it against Iceberg 1.12.0). Written ONLY by the library, inside a commit the lake's lease fences.
+
+```sql
+CREATE TABLE iceberg_tables (
+    catalog_name               VARCHAR(255) NOT NULL,
+    table_namespace            VARCHAR(255) NOT NULL,
+    table_name                 VARCHAR(255) NOT NULL,
+    metadata_location          VARCHAR(1000),
+    previous_metadata_location VARCHAR(1000),
+    iceberg_type               VARCHAR(5),
+    PRIMARY KEY (catalog_name, table_namespace, table_name)
+);
+CREATE TRIGGER dp_fence BEFORE INSERT OR UPDATE OR DELETE ON iceberg_tables
+    FOR EACH ROW EXECUTE FUNCTION dp_fence();
+CREATE TRIGGER dp_revlog AFTER INSERT OR UPDATE OF metadata_location ON iceberg_tables
+    FOR EACH ROW EXECUTE FUNCTION dp_revlog();
+CREATE TRIGGER dp_revlog_drop AFTER DELETE ON iceberg_tables FOR EACH ROW EXECUTE FUNCTION dp_revlog_drop();
+```
+
+**Notes:**
+- **The library's shape, byte for byte** — `VARCHAR(n)` against §2's `TEXT` rule, no `created_at`, no surrogate id — because the library reads and writes these columns and a drift is a catalog the library rejects or silently re-shapes. The boot check (`LakeBootCheck`, configuration.md §7) refuses a column list that is not this one.
+- **The fence (`dp_fence`, record §8a).** A write needs the session's `dp.lease_token` and `dp.operation_id` (else SQLSTATE `DP001`), a catalog whose `lake_control.mode` is not `restoring` (else `DP002`), and a live, undeadlined lease of THAT operation on `<namespace>.<table>`, read `FOR SHARE` in the same statement — the lock a takeover's UPDATE of the lease row waits on. A rename needs the lease on the OLD name too. The two session settings are set by `FencedJdbcClientPool` on connections it opens for one lease holder and closes at release (owner ruling 2026-11-02, record form); DP's own pool never carries them.
+- **The revision log (`dp_revlog`, `dp_revlog_drop`)** writes [§4.47](#447-lake_table_revisions) inside the commit's own transaction, so the log is complete by construction.
+- These are the schema's only triggers besides [§4.44](#444-iceberg_namespace_properties)'s fence (§2): they guard writes made by a library DP does not control, which no repository method can reach.
+
+### 4.44 `iceberg_namespace_properties`
+
+**Iceberg's `JdbcCatalog` namespace properties** (V53; #785, record §5.1). Library-shaped and library-written like [§4.43](#443-iceberg_tables); a namespace exists in the catalog as its `exists = true` property row.
+
+```sql
+CREATE TABLE iceberg_namespace_properties (
+    catalog_name   VARCHAR(255) NOT NULL,
+    namespace      VARCHAR(255) NOT NULL,
+    property_key   VARCHAR(255),
+    property_value VARCHAR(1000),
+    PRIMARY KEY (catalog_name, namespace, property_key)
+);
+CREATE TRIGGER dp_fence BEFORE INSERT OR UPDATE OR DELETE ON iceberg_namespace_properties
+    FOR EACH ROW EXECUTE FUNCTION dp_fence();
+```
+
+**Notes:**
+- **Fenced by the namespace lease** (`lake_leases.kind = 'namespace'`, name = the namespace) — the same `dp_fence` function as §4.43, keyed on the table it fires for.
+
+### 4.45 `lake_control`
+
+**The managed lake catalog's mode — exactly one row, inserted by V53** (#785, record §5.2, §9).
+
+```sql
+CREATE TABLE lake_control (
+    id                  INT         PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    mode                TEXT        NOT NULL DEFAULT 'normal' CHECK (mode IN ('normal', 'restoring', 'replaying')),
+    protection_interval INTERVAL    NOT NULL DEFAULT INTERVAL '7 days',
+    last_sweep_at       TIMESTAMPTZ,
+    restored_marker_at  TIMESTAMPTZ,
+    restore_epoch       UUID        NOT NULL DEFAULT gen_random_uuid()
+);
+INSERT INTO lake_control (id, mode) VALUES (1, 'normal');
+```
+
+**Notes:**
+- **`restoring` refuses every catalog write** at the fence (`DP002`). No code path in P2 changes the mode; the restore and replay flows that set it, and the sweep that stamps `last_sweep_at`, are later phases' (record §9, P6).
+- The boot check refuses a table that does not hold exactly its one row.
+
+### 4.46 `lake_leases`
+
+**The §8a lease rows: one per (kind, name), held by one operation** (V53; #785, record §8a). `LakeLeases` writes them — acquire is one `INSERT … SELECT … WHERE deadline > now() ON CONFLICT (kind, name) DO UPDATE … RETURNING token`, heartbeat extends `expires_at` up to `deadline_at`, release deletes by `operation_id`. Every comparison is PostgreSQL's `now()`.
+
+```sql
+CREATE TABLE lake_leases (
+    kind            TEXT        NOT NULL CHECK (kind IN ('table', 'namespace', 'reader')),
+    name            TEXT        NOT NULL,
+    operation_id    UUID        NOT NULL,
+    token           UUID        NOT NULL,
+    acquired_at     TIMESTAMPTZ NOT NULL,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    deadline_at     TIMESTAMPTZ NOT NULL,
+    operation       TEXT        NOT NULL,
+    holder_instance TEXT        NOT NULL,
+    pinned_metadata_location TEXT,
+    CONSTRAINT lake_leases_reader_location_check CHECK ((kind = 'reader') = (pinned_metadata_location IS NOT NULL)),
+    PRIMARY KEY (kind, name)
+);
+CREATE INDEX idx_lake_leases_operation ON lake_leases (operation_id);
+CREATE INDEX idx_lake_leases_reader_location ON lake_leases (pinned_metadata_location) WHERE kind = 'reader';
+```
+
+**Notes:**
+- **Tokens are random** (`gen_random_uuid()`), drawn anew on every takeover, so a restore cannot rewind them and a dead holder's token stops matching. `deadline_at` is never extended.
+- **V53's CHECKs are inline and unnamed** (Postgres names them `lake_leases_kind_check`, `lake_control_id_check` and `lake_control_mode_check`), verbatim from the E1 harness where every statement was falsified; `FlywayMigrationIntegrationTest`'s named-CHECK inventory covers only `chk_`-named constraints.
+- `holder_instance` (`<host>/<pid>`) is diagnostic for writer leases; the reader keeper compares it when renewing this instance's rows.
+- **V56 (#818): reader pins** use a generation UUID as operation id and `<namespace>.<table>@<holder>/<generation>` as name, never taking over another row. The metadata location is non-null iff the kind is `reader`. They cannot authorize a catalog write: `dp_fence` still requires the writer kind and name. The dedicated heartbeat renews only live, undeadlined rows; confirmed physical closure releases the operation. A dead instance's rows lapse at TTL ([Lake §9](lake.md#9-reads)).
+
+### 4.47 `lake_table_revisions`
+
+**The revision log: one row per pointer move of a managed table, written ONLY by the [§4.43](#443-iceberg_tables) triggers, never pruned** (V53; #785, record §5.2, §8a).
+
+```sql
+CREATE TABLE lake_table_revisions (
+    seq                        BIGSERIAL   PRIMARY KEY,
+    namespace                  TEXT        NOT NULL,
+    table_name                 TEXT        NOT NULL,
+    metadata_location          TEXT        NOT NULL,
+    previous_metadata_location TEXT,
+    became_current_at          TIMESTAMPTZ NOT NULL,
+    superseded_at              TIMESTAMPTZ,
+    protected_until            TIMESTAMPTZ,
+    operation_id               UUID,
+    dropped_at                 TIMESTAMPTZ
+);
+CREATE INDEX idx_lake_table_revisions_table ON lake_table_revisions (namespace, table_name, seq);
+CREATE INDEX idx_lake_table_revisions_operation ON lake_table_revisions (operation_id);
+CREATE UNIQUE INDEX uq_lake_table_revisions_current ON lake_table_revisions (namespace, table_name)
+    WHERE superseded_at IS NULL;
+```
+
+**Notes:**
+- **At most one current revision per table:** `dp_revlog` supersedes the current row before inserting the next, and the partial unique index refuses a second. A drop stamps the final row `superseded_at` and `dropped_at`.
+- **`protected_until` is left NULL (= protected)** by the trigger; a later statement finalises it (record §8a, P6's orphan sweep reads it). `operation_id` is the writing session's `dp.operation_id`.
+- No application code inserts, updates or deletes a row; the triggers are the only writers.
+
+### 4.48 `lake_namespaces`
+
+**One row per managed-lake namespace; not versioned** (V54; #798, dp-lake design record §5.2, builder B7). `LakeDefinitionService.createDraft` writes the row (`ON CONFLICT (name) DO NOTHING`) when the first table definition naming the namespace is created; the Iceberg namespace itself is created by the first apply, under a namespace lease ([§4.46](#446-lake_leases)). Its description, status and replacement are edited directly, never promoted; those edits and the lifecycle transitions belong to P8.
+
+```sql
+CREATE TABLE lake_namespaces (
+    id             UUID        PRIMARY KEY,
+    name           TEXT        NOT NULL,
+    description    TEXT        NOT NULL DEFAULT '',
+    status         TEXT        NOT NULL DEFAULT 'active',
+    deprecated_at  TIMESTAMPTZ NULL,
+    deprecated_by  UUID        REFERENCES users(id),
+    archived_at    TIMESTAMPTZ NULL,
+    archived_by    UUID        REFERENCES users(id),
+    replacement_id UUID        REFERENCES lake_namespaces(id),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by     UUID        NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_lake_namespaces_name UNIQUE (name),
+    CONSTRAINT chk_lake_namespaces_name CHECK (name ~ '^[a-z0-9_]{1,63}$'),
+    CONSTRAINT chk_lake_namespaces_description CHECK (char_length(description) <= 2000),
+    CONSTRAINT chk_lake_namespaces_status CHECK (status IN ('active', 'deprecated', 'archived')),
+    CONSTRAINT chk_lake_namespaces_stamps CHECK (
+        status <> 'active' OR (deprecated_at IS NULL AND deprecated_by IS NULL AND archived_at IS NULL AND archived_by IS NULL)
+    )
+);
+```
+
+**Notes:**
+- **The name grammar is `LakeNames.requireName`'s** (`^[a-z0-9_]{1,63}$`): the name is an Iceberg namespace and a storage path segment (`<root>/<namespace>/<table id>`). The CHECK is the database's copy of the same rule; the service refuses first.
+- `status` takes the [`LakeTableStatus`](enums.md#46-laketablestatus--a-managed-lake-tables-lifecycle) values except `purged` (a namespace is archived, never purged). An active row carries no lifecycle stamp; which transitions are allowed is P8's.
+
+### 4.49 `lake_tables_managed`
+
+**One row per managed table: its lifecycle, its definition pointer, and THIS environment's apply state machine** (V54; #798, record §5.2, §7). The id is the table's storage segment, so the table lives at `<root>/<namespace>/<id>` and a rename never moves data.
+
+```sql
+CREATE TABLE lake_tables_managed (
+    id                         UUID        PRIMARY KEY,
+    namespace_id               UUID        NOT NULL REFERENCES lake_namespaces(id),
+    name                       TEXT        NOT NULL,
+    status                     TEXT        NOT NULL DEFAULT 'active',
+    deprecated_at              TIMESTAMPTZ NULL,
+    deprecated_by              UUID        REFERENCES users(id),
+    archived_at                TIMESTAMPTZ NULL,
+    archived_by                UUID        REFERENCES users(id),
+    purged_at                  TIMESTAMPTZ NULL,
+    purged_by                  UUID        REFERENCES users(id),
+    replacement_id             UUID        REFERENCES lake_tables_managed(id),
+    purge_allowed_after        TIMESTAMPTZ NULL,
+    current_definition_version INTEGER     NULL,
+    applied_version_here       INTEGER     NULL,
+    apply_state                TEXT        NULL,
+    apply_error_json           JSONB       NULL,
+    applied_at                 TIMESTAMPTZ NULL,
+    apply_operation_id         UUID        NULL,
+    policy_json                JSONB       NOT NULL,
+    created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by                 UUID        NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_lake_tables_managed_namespace_name UNIQUE (namespace_id, name),
+    CONSTRAINT chk_lake_tables_managed_name CHECK (name ~ '^[a-z0-9_]{1,63}$'),
+    CONSTRAINT chk_lake_tables_managed_status CHECK (status IN ('active', 'deprecated', 'archived', 'purged')),
+    CONSTRAINT chk_lake_tables_managed_stamps CHECK (
+        status <> 'active' OR (deprecated_at IS NULL AND deprecated_by IS NULL AND archived_at IS NULL
+            AND archived_by IS NULL AND purged_at IS NULL AND purged_by IS NULL)
+    ),
+    CONSTRAINT chk_lake_tables_managed_purge_stamps CHECK ((status = 'purged') = (purged_at IS NOT NULL)),
+    CONSTRAINT chk_lake_tables_managed_versions CHECK (
+        (current_definition_version IS NULL OR current_definition_version >= 1)
+        AND (applied_version_here IS NULL OR applied_version_here >= 1)
+    ),
+    CONSTRAINT chk_lake_tables_managed_apply_state CHECK (apply_state IN ('pending', 'applying', 'applied', 'failed')),
+    CONSTRAINT chk_lake_tables_managed_apply_pointer CHECK ((apply_state IS NULL) = (current_definition_version IS NULL)),
+    CONSTRAINT chk_lake_tables_managed_applying CHECK (apply_state <> 'applying' OR apply_operation_id IS NOT NULL),
+    CONSTRAINT chk_lake_tables_managed_applied CHECK (
+        apply_state <> 'applied' OR applied_version_here = current_definition_version
+    ),
+    CONSTRAINT chk_lake_tables_managed_apply_error CHECK (
+        (apply_state IS NOT DISTINCT FROM 'failed') = (apply_error_json IS NOT NULL)
+        AND (apply_error_json IS NULL OR jsonb_typeof(apply_error_json) = 'object')
+    ),
+    CONSTRAINT chk_lake_tables_managed_applied_at CHECK ((applied_version_here IS NULL) = (applied_at IS NULL)),
+    CONSTRAINT chk_lake_tables_managed_policy CHECK (jsonb_typeof(policy_json) = 'object')
+);
+```
+
+**Notes:**
+- **`current_definition_version`** is the highest RELEASED definition version ([§4.50](#450-lake_table_definition_versions)); NULL until the first release. **`applied_version_here`** is the version whose intent this environment's Iceberg table holds (stamped with `applied_at`). They differ while an apply is pending, running or failed.
+- **`apply_state`** is [`LakeApplyState`](enums.md#47-lakeapplystate--a-managed-tables-apply-state): NULL before the first release, then `pending` → `applying` → `applied` | `failed` ([lake.md §3](lake.md#3-apply-states)). The CHECKs pin the pairings: no state without a pointer; `applying` names its attempt; `applied` means `applied_version_here = current_definition_version`; `apply_error_json` (`{code, message, details}`) is present exactly when `failed`.
+- **`apply_operation_id`** is the attempt that set `applying`. Every later stamp is `UPDATE … WHERE id = ? AND apply_state = 'applying' AND apply_operation_id = ?`: zero rows means a later attempt took the row over, and the stale attempt writes nothing. The same id is the attempt's lease operation and the `lake_table_revisions.operation_id` of anything it committed, which is how `LakeDefinitionApplier.verifyApplying` decides whether a crashed attempt committed ([§4.47](#447-lake_table_revisions)).
+- **`policy_json`** is the per-environment retention and maintenance policy (record §5.2): written at creation from `datapipelines.lake.retention.*` / `datapipelines.lake.maintenance.*`, never promoted, edited by a super admin (P8). P3 stores it; P6 reads it.
+- The lifecycle columns (`status`, the stamps, `replacement_id`, `purge_allowed_after`) exist for P8 and the purge flow; P3 writes `active` only.
+- `uq_lake_tables_managed_namespace_name` refuses a second table of the same name in a namespace (`lake.definition.name_taken`); its index prefix also serves the FK on `namespace_id`.
+
+### 4.50 `lake_table_definition_versions`
+
+**The promoted object: a managed table's definition bodies, DRAFT | RELEASED | DISCARDED** (V54; #798, record §5.2). The lifecycle follows versioning §3 ([lake.md §2](lake.md#2-lifecycle)); the body schema is [lake.md §1](lake.md#1-the-definition-body).
+
+```sql
+CREATE TABLE lake_table_definition_versions (
+    table_id     UUID        NOT NULL REFERENCES lake_tables_managed(id),
+    version      INTEGER     NOT NULL,
+    status       TEXT        NOT NULL DEFAULT 'DRAFT',
+    body_json    JSONB       NOT NULL,
+    body_hash    TEXT        NOT NULL,
+    released_at  TIMESTAMPTZ NULL,
+    released_by  UUID        REFERENCES users(id),
+    discarded_at TIMESTAMPTZ NULL,
+    discarded_by UUID        REFERENCES users(id),
+    updated_by   UUID        REFERENCES users(id),
+    updated_at   TIMESTAMPTZ NULL,
+    created_via  TEXT        NOT NULL DEFAULT 'session',
+    updated_via  TEXT        NOT NULL DEFAULT 'session',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by   UUID        NOT NULL REFERENCES users(id),
+    PRIMARY KEY (table_id, version),
+    CONSTRAINT chk_lake_table_definition_versions_version CHECK (version >= 1),
+    CONSTRAINT chk_lake_table_definition_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
+    CONSTRAINT chk_lake_table_definition_versions_body CHECK (
+        jsonb_typeof(body_json) = 'object' AND NOT (body_json ? 'name') AND NOT (body_json ? 'namespace')
+    ),
+    CONSTRAINT chk_lake_table_definition_versions_release_stamps CHECK (
+        (status = 'DRAFT' AND released_at IS NULL AND released_by IS NULL)
+        OR (status <> 'DRAFT' AND released_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_lake_table_definition_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
+    ),
+    CONSTRAINT chk_lake_table_definition_versions_via CHECK (
+        created_via IN ('session', 'api_key', 'mcp') AND updated_via IN ('session', 'api_key', 'mcp')
+    )
+);
+CREATE UNIQUE INDEX uq_lake_table_definition_versions_one_draft
+    ON lake_table_definition_versions (table_id) WHERE status = 'DRAFT';
+```
+
+**Notes:**
+- **The body is validated before it is stored** (`LakeDefinitionBodies.parse`, [lake.md §1](lake.md#1-the-definition-body)); an invalid body never reaches `body_hash`. `body_hash` is the house hash, computed in the same statement as the write: `encode(sha256(convert_to(CAST(:body AS jsonb)::text, 'UTF8')), 'hex')`. A draft write is conditional on the caller's hash (`lake.definition.version_conflict` otherwise).
+- **One DRAFT per table** is the partial unique index, the `uq_pipeline_versions_one_draft` pattern ([§4.5](#45-pipeline_versions)): the physical guard behind copy-on-write.
+- The FK has no cascade: a table row is deleted only by `purgeDraft` of a never-released table, which deletes its one version first.
+- `created_via` / `updated_via` are `WriteSurface` values ([versioning §3.7](versioning.md#37-what-rides-the-draft-vs-the-release)), passed in by the caller (P8's surfaces).
+
+### 4.51 `lake_column_semantics`
+
+**A read-only projection of the APPLIED definition, keyed by Iceberg field id** (V54; #798, record §5.2, builder B8). `LakeProjectionWriter` deletes and re-inserts a table's rows inside the transaction that stamps `applied`, so the projection and `applied_version_here` cannot disagree.
+
+```sql
+CREATE TABLE lake_column_semantics (
+    table_id        UUID    NOT NULL REFERENCES lake_tables_managed(id) ON DELETE CASCADE,
+    field_id        INTEGER NOT NULL,
+    ordinal         INTEGER NOT NULL,
+    name            TEXT    NOT NULL,
+    logical_type    TEXT    NOT NULL,
+    iceberg_type    TEXT    NOT NULL,
+    required        BOOLEAN NOT NULL,
+    doc             TEXT    NULL,
+    tags_json       JSONB   NOT NULL DEFAULT '[]'::jsonb,
+    applied_version INTEGER NOT NULL,
+    PRIMARY KEY (table_id, field_id),
+    CONSTRAINT chk_lake_column_semantics_field CHECK (field_id >= 1 AND ordinal >= 0 AND applied_version >= 1),
+    CONSTRAINT chk_lake_column_semantics_tags CHECK (jsonb_typeof(tags_json) = 'array')
+);
+```
+
+**Notes:**
+- `logical_type` is the body's DP type (`LogicalType` wire, with precision and scale where they apply, e.g. `DECIMAL(12,2)`); `iceberg_type` is Iceberg's own type string. Column names and types for queries are still read from Iceberg metadata (record §5.2, schema authority); this table carries the descriptions and tags Iceberg does not.
+- Learned facts keep using `learned_facts` ([§4.18](#418-learned_facts)); nothing joins this table to them.
+- No application path writes a row outside the `applied` transaction.
+
+### 4.52 `lake_tables` origin and revision sequence
+
+**V54 adds two columns to [§4.15](#415-lake_tables)'s registry** (#798, record §5.2, §8b).
+
+```sql
+ALTER TABLE lake_tables
+    ADD COLUMN origin TEXT NOT NULL DEFAULT 'external',
+    ADD COLUMN revision_seq BIGINT NULL,
+    ADD CONSTRAINT chk_lake_tables_origin CHECK (origin IN ('managed', 'external')),
+    ADD CONSTRAINT chk_lake_tables_revision_seq CHECK (origin = 'managed' OR revision_seq IS NULL);
+```
+
+**Notes:**
+- **`origin`**: `external` is every row registered by a person or a manifest, the only kind before V54, so the default leaves every existing row's meaning unchanged and `LakeTableRepository`'s inserts state it explicitly. `managed` is the managed lake's projection of one of its own tables: namespace `[<lake name>, <namespace>]`, `format = iceberg`, `location` = the current metadata file.
+- **`revision_seq`** is the `lake_table_revisions.seq` the managed row's `location` was projected from. The projection only moves forward: `… ON CONFLICT … DO UPDATE … WHERE lake_tables.origin = 'managed' AND (lake_tables.revision_seq IS NULL OR lake_tables.revision_seq < EXCLUDED.revision_seq)` (record §8b; an older writer that resumes late changes nothing).
+- A managed row is written only when the datasource named by `datapipelines.lake.name` exists; the registry's own `lake_tables_*` tools refusing `origin = managed` rows is P8's.
+
+### 4.53 `lake_deliveries`
+
+V55 adds the permanent delivery ledger (#799, design §5.2). Identity is `(table_id, feed, delivery_id)`; fingerprints hash the sorted manifest's keys, sizes and ETags. Execution and pipeline identifiers retain historical identity without foreign keys so execution retention cannot remove delivery evidence. Every state transition must compare the current `operation_id` as well as state.
+
+```sql
+CREATE TABLE lake_deliveries (
+    id                      UUID PRIMARY KEY,
+    table_id                UUID NOT NULL REFERENCES lake_tables_managed(id),
+    feed                    TEXT NOT NULL,
+    delivery_id             TEXT NOT NULL,
+    fingerprint             TEXT NOT NULL,
+    manifest_json           JSONB NULL,
+    state                   TEXT NOT NULL DEFAULT 'RECEIVED',
+    failure_phase           TEXT NULL,
+    failure_code            TEXT NULL,
+    error_json              JSONB NULL,
+    operation_id            UUID NOT NULL,
+    execution_id            UUID NOT NULL,
+    pipeline_id             UUID NOT NULL,
+    snapshot_id             BIGINT NULL,
+    metadata_location_after TEXT NULL,
+    replay_mode             TEXT NULL,
+    received_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    published_at            TIMESTAMPTZ NULL,
+    CONSTRAINT uq_lake_deliveries_key UNIQUE (table_id, feed, delivery_id),
+    CONSTRAINT chk_lake_deliveries_feed CHECK (feed ~ '^[a-z0-9_-]{1,64}$'),
+    CONSTRAINT chk_lake_deliveries_delivery_id CHECK (delivery_id ~ '^[a-z0-9_-]{1,64}$'),
+    CONSTRAINT chk_lake_deliveries_fingerprint CHECK (fingerprint ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT chk_lake_deliveries_state CHECK (state IN ('RECEIVED', 'PUBLISHING', 'PUBLISHED', 'FAILED', 'UNKNOWN')),
+    CONSTRAINT chk_lake_deliveries_failure_phase CHECK (failure_phase IN ('listing', 'staging', 'validation', 'publish')),
+    CONSTRAINT chk_lake_deliveries_replay_mode CHECK (replay_mode IN ('exact', 'directed'))
+);
+-- V57 (#844) replaced V55's idx_lake_deliveries_unsettled ON lake_deliveries (table_id, state) with:
+CREATE INDEX idx_lake_deliveries_unsettled_page ON lake_deliveries (table_id, id)
+    WHERE state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN');
+```
+
+**Notes:**
+- **V57 (#844): the settlement page's index.** The sweep reads one table's unsettled deliveries a keyset page at a time (`WHERE table_id = ? AND state IN (…) AND id > ? ORDER BY id LIMIT 50`). V55's `(table_id, state)` index served the filter but not the order, so a page could read and sort the table's whole backlog. `(table_id, id)` under the same partial predicate makes the page an index range scan that stops after its rows; the page is the predicate's only reader, so the new index replaces the old one rather than joining it. `UnsettledPageIndexIntegrationTest` pins the plan (no `Sort`, no `Filter`, `id >` in the index condition) under PostgreSQL's default plan cache. A server forced to generic plans (`plan_cache_mode = force_generic_plan`) keeps the keyset bound as a filter instead (#859).
+
+### 4.54 `lake_delivery_attempts`
+
+V55 adds one permanent row per publication attempt. Joining `operation_id` to `lake_table_revisions` provides durable commit evidence. Recipe fields and the outcome remain nullable until their respective persistent steps complete. Neither ledger has an application delete path.
+
+```sql
+CREATE TABLE lake_delivery_attempts (
+    id            UUID PRIMARY KEY,
+    delivery_id   UUID NOT NULL REFERENCES lake_deliveries(id),
+    operation_id  UUID NOT NULL UNIQUE,
+    recipe_key    TEXT NULL,
+    recipe_sha256 TEXT NULL,
+    started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ended_at      TIMESTAMPTZ NULL,
+    outcome       TEXT NULL,
+    CONSTRAINT chk_lake_delivery_attempts_outcome CHECK (outcome IN ('PUBLISHED', 'FAILED', 'UNKNOWN')),
+    CONSTRAINT chk_lake_delivery_attempts_sha256 CHECK (recipe_sha256 ~ '^[a-f0-9]{64}$')
+);
+CREATE INDEX idx_lake_delivery_attempts_delivery ON lake_delivery_attempts (delivery_id);
+```
+
+V55 also adds `pipeline_versions.writes_managed_lake BOOLEAN NOT NULL DEFAULT FALSE`, reserved for derivation from direct and transitive pipeline outputs at save, validation and import by the P4 execution implementation. Historical versions predate managed lake writes.
+
+```sql
+ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DEFAULT FALSE;
+```
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1501,6 +2086,12 @@ CREATE INDEX idx_parameter_evaluation_queries_evaluation ON parameter_evaluation
 
 | Table | Index | Kind | Purpose |
 |---|---|---|---|
+| `lake_deliveries` | `lake_deliveries_pkey` | via PK | Permanent delivery identity |
+| `lake_deliveries` | `uq_lake_deliveries_key` | via UNIQUE | Deduplicate table, feed and delivery id |
+| `lake_deliveries` | `idx_lake_deliveries_unsettled_page` | explicit | V57 (#844): the settlement sweep's keyset page — one table's unsettled deliveries in id order, partial on the unsettled states; replaces V55's `idx_lake_deliveries_unsettled` |
+| `lake_delivery_attempts` | `lake_delivery_attempts_pkey` | via PK | Attempt identity |
+| `lake_delivery_attempts` | `lake_delivery_attempts_operation_id_key` | via UNIQUE | Join commit evidence by operation |
+| `lake_delivery_attempts` | `idx_lake_delivery_attempts_delivery` | explicit | Attempt history for a delivery |
 | `users` | `users_pkey` | via PK | Lookup by id (hot — per-request `is_active` check, D13) |
 | `users` | `users_email_key` | via UNIQUE | Login lookup by email; enforces one account per email |
 | `users` | `uq_users_provider_subject` | explicit (unique) | OIDC identity lookup `(provider, provider_subject)` |
@@ -1536,6 +2127,7 @@ CREATE INDEX idx_parameter_evaluation_queries_evaluation ON parameter_evaluation
 | `template_versions` | `idx_template_versions_dialect` | explicit | Filter template versions by dialect |
 | `datasources` | `datasources_pkey` | via PK | Lookup by name — the registry's hot path |
 | `datasources` | `idx_datasources_active` | explicit (partial) | List non-deleted datasources |
+| `datasources` | `uq_datasources_incarnation` | via UNIQUE | V59 (#874): one row per incarnation — no explicit index; the graph's batch reads use the PK |
 | `workspaces` | `workspaces_pkey` | via PK | Lookup by id |
 | `workspaces` | `workspaces_name_key` | via UNIQUE | Workspace lookup by name (config/UX references) |
 | `workspace_members` | `workspace_members_pkey` | via PK | Membership check `(workspace_id, user_id)` |
@@ -1549,6 +2141,9 @@ CREATE INDEX idx_parameter_evaluation_queries_evaluation ON parameter_evaluation
 | `published_endpoints` | `published_endpoints_path_pattern_key` | via UNIQUE | One meaning per URL, deployment-wide ([§4.13](#413-published_endpoints)) |
 | `published_endpoints` | `idx_published_endpoints_workspace` | explicit | A workspace's endpoints — the management listing |
 | `published_endpoints` | `idx_published_endpoints_pipeline` | explicit | "Does any endpoint publish this pipeline?" — what a pipeline delete and the read-only re-check ask |
+| `published_endpoint_versions` | `published_endpoint_versions_pkey` | via PK | One row per `(endpoint_id, version)` ([§4.13a](#413a-published_endpoint_versions), #786) |
+| `published_endpoint_versions` | `uq_published_endpoint_versions_one_draft` | explicit (partial UNIQUE) | At most one working DRAFT per API |
+| `published_endpoint_versions` | `idx_published_endpoint_versions_pin` | explicit | "Which API versions pin this pipeline version?" — the pipeline discard/purge protection (#786 B.4) |
 | `endpoint_key_bindings` | `endpoint_key_bindings_pkey` | via PK | `(path_prefix, api_key_id)` — one key binds a node once |
 | `endpoint_key_bindings` | `idx_endpoint_key_bindings_key` | explicit | Which nodes a key binds — the key detail view and a revoke's blast radius |
 | `dashboard_key_bindings` | `dashboard_key_bindings_pkey` | via PK | `(name_prefix, api_key_id)` — one key binds a folder once (§4.36) |
@@ -1610,6 +2205,34 @@ CREATE INDEX idx_parameter_evaluation_queries_evaluation ON parameter_evaluation
 | `parameter_evaluations` | `idx_parameter_evaluations_finished` | explicit (partial) | V48: the retention step's cutoff scan on `started_at` over finished rows |
 | `parameter_evaluation_queries` | `parameter_evaluation_queries_pkey` | via PK | Each attempt's guarded terminal write ([§4.38](#438-parameter_evaluation_queries)) |
 | `parameter_evaluation_queries` | `idx_parameter_evaluation_queries_evaluation` | explicit | V48: a record's attempts (the detail) and the cascade from a deleted record (retention) |
+| `schedule_notification_events` | `schedule_notification_events_pkey` | via PK | Lookup by the notice id ([§4.39](#439-schedule_notification_events)) |
+| `schedule_notification_events` | `uq_schedule_notification_events_run_outcome` | via UNIQUE | V51 (#442b): a run reaches each outcome once — the outbox's `ON CONFLICT` arbiter, and a run's notices |
+| `schedule_notification_events` | `idx_schedule_notification_events_schedule` | explicit | V51: a schedule's notices (the FK to `schedules`) |
+| `schedule_notification_deliveries` | `schedule_notification_deliveries_pkey` | via PK | The sender's settle and the resend, by delivery id ([§4.40](#440-schedule_notification_deliveries)) |
+| `schedule_notification_deliveries` | `uq_schedule_notification_deliveries_event_recipient` | via UNIQUE | V51: one message per recipient per notice |
+| `schedule_notification_deliveries` | `uq_schedule_notification_deliveries_message_id` | via UNIQUE | V51: a Message-ID is never reused across deliveries |
+| `schedule_notification_deliveries` | `idx_schedule_notification_deliveries_due` | explicit | V51: the sender's claim — pending rows by `next_attempt_at` — and the backlog count |
+| `schedule_notification_deliveries` | `idx_schedule_notification_deliveries_event` | explicit | V51: a notice's deliveries — the run detail |
+| `lake_reference_scans` | `lake_reference_scans_pkey` | via PK | One scan per released version; the backfill's "no row or older scanner" probe ([§4.41](#441-lake_reference_scans)) |
+| `lake_table_references` | `lake_table_references_pkey` | via PK | A version's references in document order; its prefix serves the cascade and the receiver's per-version read ([§4.42](#442-lake_table_references)) |
+| `lake_table_references` | `idx_lake_table_references_table` | explicit | V52 (#778): the readers of one lake table — by datasource name, namespace and table |
+| `iceberg_tables` | `iceberg_tables_pkey` | via PK | The library's own key `(catalog_name, table_namespace, table_name)`: every load and every pointer CAS ([§4.43](#443-iceberg_tables)) |
+| `iceberg_namespace_properties` | `iceberg_namespace_properties_pkey` | via PK | The library's own key `(catalog_name, namespace, property_key)` ([§4.44](#444-iceberg_namespace_properties)) |
+| `lake_control` | `lake_control_pkey` | via PK | The one row (`CHECK (id = 1)`) the fence reads on every catalog write ([§4.45](#445-lake_control)) |
+| `lake_leases` | `lake_leases_pkey` | via PK | One lease per `(kind, name)` — the acquire's `ON CONFLICT` arbiter and the fence's `FOR SHARE` lookup ([§4.46](#446-lake_leases)) |
+| `lake_leases` | `idx_lake_leases_operation` | explicit | V53: release by operation — `DELETE … WHERE operation_id = ?` drops every lease of the operation at once |
+| `lake_leases` | `idx_lake_leases_reader_location` | explicit | V56: live reader pins identify protected metadata revisions |
+| `lake_table_revisions` | `lake_table_revisions_pkey` | via PK | Surrogate `BIGSERIAL` `seq` ([§4.47](#447-lake_table_revisions)) |
+| `lake_table_revisions` | `idx_lake_table_revisions_table` | explicit | V53: a table's revisions in order — the orphan sweep's and the history's walk |
+| `lake_table_revisions` | `idx_lake_table_revisions_operation` | explicit | V53: an operation's pointer moves — what one attempt committed |
+| `lake_table_revisions` | `uq_lake_table_revisions_current` | explicit (partial, unique) | V53: at most one CURRENT revision (`superseded_at IS NULL`) per table — the trigger supersedes before it inserts |
+| `lake_namespaces` | `lake_namespaces_pkey` | via PK | Lookup by id ([§4.48](#448-lake_namespaces)) |
+| `lake_namespaces` | `uq_lake_namespaces_name` | via UNIQUE | V54: one namespace per name — the create path's `ON CONFLICT (name)` arbiter |
+| `lake_tables_managed` | `lake_tables_managed_pkey` | via PK | Lookup by id — every lifecycle and apply statement ([§4.49](#449-lake_tables_managed)) |
+| `lake_tables_managed` | `uq_lake_tables_managed_namespace_name` | via UNIQUE | V54: one table per (namespace, name) — the `(namespace, table)` lookup and `lake.definition.name_taken`; its prefix serves the FK on `namespace_id` |
+| `lake_table_definition_versions` | `lake_table_definition_versions_pkey` | via PK | `(table_id, version)` fetch ([§4.50](#450-lake_table_definition_versions)) |
+| `lake_table_definition_versions` | `uq_lake_table_definition_versions_one_draft` | explicit (partial, unique) | V54: one DRAFT per table — the physical guard behind copy-on-write |
+| `lake_column_semantics` | `lake_column_semantics_pkey` | via PK | A table's columns by field id; its prefix serves the projection's delete-and-rebuild ([§4.51](#451-lake_column_semantics)) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1652,6 +2275,7 @@ table and the test's expected-table list in the same commit.
 | `pipeline_executions` | derived | Execution | — | `execution_id` | Produced by running; each environment's history is its own (versioning §9.3: "its own history references its own numbers") |
 | `execution_events` | derived | Event | — | `(execution_id, event_id)` | The durable SSE trail of local executions |
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
+| `published_endpoint_versions` | promotable | PublishedEndpoint | `version` (per API) | `(path_pattern, version)` | An API version is authored content (#786). Until follow-up #879 carries exact versions on the wire, promotion keeps today's by-path transfer: the receiver's import creates an absent API's v1 pinned to the TARGET pipeline's CURRENT, never a transmitted version or hash |
 | `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
 | `dashboard_key_bindings` | promotable | DashboardKeyBinding | — | — | The `endpoint_key_bindings` twin's OWN class, by the same reasoning (L5 #367's lane decision, recorded in the handback): a folder binding is authored topology. TODAY it has no promotion carrier (no batch row, no entity registered with the transfer) — the class states what it WOULD travel as; when a batch carries it, it travels by key NAME exactly like its twin |
@@ -1675,7 +2299,22 @@ table and the test's expected-table list in the same commit.
 | `dashboard_refresh_executions` | derived | DashboardRefresh | — | — | The refresh's link to its executions — the refresh's classification |
 | `parameter_evaluations` | derived | ParameterEvaluation | — | — | What THIS deployment's callers evaluated (#376); per-environment diagnostics by construction, never authored, never promoted |
 | `parameter_evaluation_queries` | derived | ParameterEvaluation | — | — | The evaluation's statement attempts — the record's classification |
+| `schedule_notification_events` | derived | ScheduleNotification | — | — | Notices THIS deployment's scheduler queued for its own runs (#442b); produced, never authored |
+| `schedule_notification_deliveries` | derived | ScheduleNotification | — | — | The per-recipient sends of those notices — the event's classification; addresses never leave the environment |
+| `lake_reference_scans` | derived | LakeReferenceScan | — | — | THIS deployment's scan of its own released versions (#778): computed from the version body, the template versions it pins and this environment's lake registry, so a promoted version is re-scanned by the receiver's import, never transferred |
+| `lake_table_references` | derived | LakeReferenceScan | — | — | The scan's table positions, resolved against THIS environment's [`lake_tables`](#415-lake_tables); the receiver re-derives them at import |
 | `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
+| `iceberg_tables` | environment-local | LakeCatalog | — | — | The managed lake's pointer rows: each names a metadata file in THIS environment's bucket, and an Iceberg snapshot is an environment-local data state that never promotes (dp-lake design record, one lake per environment) |
+| `iceberg_namespace_properties` | environment-local | LakeCatalog | — | — | The same catalog's namespaces — the catalog's classification |
+| `lake_control` | environment-local | LakeCatalog | — | — | This lake's mode and restore epoch; meaningless beside another environment's catalog |
+| `lake_leases` | environment-local | LakeCatalog | — | — | Live writer leases and reader pins of this deployment; runtime coordination, never authored |
+| `lake_table_revisions` | environment-local | LakeCatalog | — | — | This catalog's pointer history, written by its triggers; it protects THIS bucket's files from the orphan sweep |
+| `lake_namespaces` | environment-local | LakeNamespace | — | — | Created on each environment by its own first definition naming the namespace; description and status are edited per environment and never promoted (record §5.2, B7) |
+| `lake_tables_managed` | environment-local | LakeTable | — | — | The table row in THIS environment: its apply state, applied version and policy are facts about this deployment's Iceberg table; the receiver creates its own row when a definition version is imported (P9) |
+| `lake_table_definition_versions` | promotable | LakeTableDefinition | `lake_table_definition_versions.version` | `(namespace, table, version)` | The promoted object (record §5.2): a RELEASED body transfers at its exact version number; the receiver applies it to its own table. The import path itself is P9's |
+| `lake_deliveries` | environment-local | LakeDelivery | — | — | Permanent evidence of deliveries ingested in this environment; never promoted or deleted with execution history |
+| `lake_delivery_attempts` | environment-local | LakeDelivery | — | — | Permanent publication attempt identities joined to this environment's revision log |
+| `lake_column_semantics` | derived | LakeTableDefinition | — | — | Rebuilt from the applied body inside the `applied` transaction; a receiver derives its own when it applies |
 
 ---
 
@@ -1828,7 +2467,7 @@ Three things the generator must respect:
 
 - **Only explicit indexes get a `CREATE INDEX`.** Constraint-backed indexes (§5, "via PK"/"via UNIQUE") are created by Postgres from the constraint. Emitting a `CREATE INDEX` for one of those is a duplicate index, not a safety net.
 - **Table order follows the FK graph:** `users` → `api_keys`/`audit_log` → `pipelines` → `pipeline_versions` → `pipeline_executions` → `execution_events`, and `templates` → `template_versions`; `datasources` depends only on `users`. `pipeline_executions` cannot be created before `pipeline_versions` — its composite FK targets that table's primary key.
-- **No triggers are emitted.** `updated_at` is application-maintained (§2). A generator that "helpfully" adds a `BEFORE UPDATE` trigger contradicts this spec.
+- **No triggers are emitted** but V53's four lake catalog triggers (§2, [§4.43](#443-iceberg_tables)). `updated_at` is application-maintained (§2). A generator that "helpfully" adds a `BEFORE UPDATE` trigger contradicts this spec; `FlywayMigrationIntegrationTest` lists the four by name and refuses any other.
 
 The §8 jobs are **not** migrations — they are scheduled statements against the live schema and never appear in a versioned migration file.
 
@@ -1991,6 +2630,19 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.60 | #905 review F1 (no migration) — renumbered at final sync after dependency-graph | §4.6: correct the lifecycle note to include the separate result-history UPDATE, which does not change `completed_at`. |
+| 2026-11-11 | v1.59 | #896 docs: ownership and grants as they are since V23 | **No schema change.** Text that still described the V4 `workspace_id` model is corrected to the V23 model: the §3 relationship diagram shows `owner_workspace_id` (ownership; NULL = an instance datasource) and the `datasource_workspaces` grant rows (visibility); the §4.10 note on `workspace_id` becomes the `owner_workspace_id` note — ownership only, the global NAME namespace, visibility by `GRANTED_PREDICATE`, the V4 → V23 history kept as history; §4.11 no longer says datasources "bind by visibility only"; §4.16's backfill note names the `w.is_deleted = FALSE` filter (a soft-deleted workspace got no grant), and its revoke note says a removed grant advances `generation` once while the definition, credential and incarnation stay. |
+| 2026-11-11 | v1.58 | V59 (#874 G3) | **§4.10 `datasources` gains `incarnation_id`** (UUID, `DEFAULT gen_random_uuid()`, unique via `uq_datasources_incarnation`) **and `generation`** (BIGINT from 1, `chk_datasources_generation`) — the local identity beside the name key, both internal and never on the wire; the defaults fill every existing row in the migration's own statement. §5 gains the constraint's implicit index; V59 adds no explicit index. |
+| 2026-11-11 | v1.57 | #786 U2 (no migration) | **§4.22:** the `pipeline` payload is schema 2 — `{"pipeline", "version": <int>}`, the exact pin; schema 1 is refused at read, never re-read; the upgrade's startup conversion rewrites each live schema-1 row's `version` and `payload_schema_version` in place under its revision CAS, and each of its queued runs' payload copies. |
+| 2026-11-10 | v1.56 | V58 (#786 U1) | New **§4.13a `published_endpoint_versions`** — one row per API version (DRAFT/RELEASED/DISCARDED), the exact pipeline pin by name and number, the shared body-hash expression (A44), the one-draft partial index and the pin lookup; **§4.13 `published_endpoints` gains `current_version`**, the API's own pointer, tied to a version row by the deferrable composite FK `fk_published_endpoints_current_version`; the legacy `pipeline_id` / `timeout_seconds` / `description` stay as the in-place conversion's source and the creation snapshot, never served. The "pins a pipeline, not a version" note is corrected. §5 gains the three indexes; §5A classifies the table promotable (by-path transfer until #879). No SQL backfill: the conversion is code (owner ruling 2026-11-08). |
+| 2026-11-08 | v1.55 | 851 (#844) | V57 replaces `idx_lake_deliveries_unsettled (table_id, state)` with `idx_lake_deliveries_unsettled_page (table_id, id)` under the same partial predicate (§4.53, §5): the settlement page is an index range scan with no sort. |
+| 2026-11-06 | v1.54 | 818e (#818) | V56 widens the lease kind and adds reader metadata pins, their check and index; writer fencing is unchanged. |
+| 2026-11-04 | v1.53 | 799 (#799, dp-lake P4) | V55 adds permanent deliveries (§4.53), publication attempts (§4.54), and the derived pipeline version `writes_managed_lake` flag. |
+| 2026-11-02 | v1.52 | 798 (#798, dp-lake P3) | **V54 — managed lake table definitions.** New **§4.48 `lake_namespaces`** (one row per namespace, not versioned), **§4.49 `lake_tables_managed`** (lifecycle, the definition pointer, `applied_version_here` and the apply state machine `pending` / `applying` / `applied` / `failed` with `apply_operation_id` owning an `applying` row, `policy_json`), **§4.50 `lake_table_definition_versions`** (DRAFT / RELEASED / DISCARDED bodies, the house `body_hash`, the one-DRAFT partial unique index) and **§4.51 `lake_column_semantics`** (the applied version's projection by Iceberg field id); **§4.52** adds `lake_tables.origin` (`managed` / `external`, default `external`) and `revision_seq` (managed rows only), noted in §4.15. JSONB columns take the `_json` suffix (§2), so the record's `policy`, `apply_error` and `body` are `policy_json`, `apply_error_json` and `body_json`. §3 ERD, §5 (seven indexes) and §5A (three environment-local or derived, the definition versions promotable) updated. Down path documented in the migration header, not shipped. |
+| 2026-11-02 | v1.50 | 778 (#778) | **V52 — the lake reference index.** New **§4.41 `lake_reference_scans`** (one row per scanned released pipeline or parameter-set version — `exact` / `partial` / `unscannable`, the findings in `reasons_json`, `scanner_version` for re-scans; keyed by workspace, family, entity id and version) and **§4.42 `lake_table_references`** (one row per table position, the written triple and the resolved registry identity, cascading from the scan); §3 ERD, §5 (three indexes) and §5A (both **derived**) updated. Down path documented in the migration header, not shipped. |
+| 2026-11-02 | v1.51 | 785 (#785, dp-lake P2; sections and this row renumbered at merge after #778's v1.50) | **V53 — the managed lake's catalog core.** New **§4.43 `iceberg_tables`** and **§4.44 `iceberg_namespace_properties`** (Iceberg 1.12.0's `JdbcCatalog` V1 shape, byte for byte, created by Flyway so the library runs with `init-catalog-tables=false` and issues no DDL), **§4.45 `lake_control`** (one row, the catalog mode), **§4.46 `lake_leases`** (the design record §8a's lease rows) and **§4.47 `lake_table_revisions`** (the trigger-written revision log). **§2's no-trigger rule gains its one named exception:** `dp_fence` on both catalog tables and `dp_revlog` / `dp_revlog_drop` on `iceberg_tables` (§7 and `FlywayMigrationIntegrationTest` list exactly these four). §5 gains nine indexes; §5A classifies all five tables environment-local. V52 is #778's. Down path documented in the migration header, not shipped. |
+| 2026-10-25 | v1.49 | 442c (#442) | §4.23: nullable target_ref frozen at run creation (V51). §4.40: strict pending cap, shared advisory key, bounded acquisition, lock order and resend refusal. |
+| 2026-10-24 | v1.48 | 442b (#442) | **V51 — the schedule notification outbox.** New **§4.39 `schedule_notification_events`** (one row per selected transition or block, `run_id` NOT NULL, UNIQUE `(run_id, outcome)` so a replayed transition writes none) and **§4.40 `schedule_notification_deliveries`** (one row per notice and recipient, the address snapshotted, a fixed `message_id`, `pending` / `accepted` / `failed` / `uncertain` with the due/claim CHECKs, `resend_count`); §4.24's trail CHECK gains the four `notification_*` kinds (details carry ids, counts and codes — no address, no domain; retries write no trail row); §5 lists the five new indexes. Down path documented in the migration header, not shipped. |
 | 2026-10-22 | v1.47 | 8b (#8) | The existing V33 CHECK admits JavaScript rows; the pooled save gate and availability control writes without a schema change. |
 | 2026-10-21 | v1.46 | 636 (#636) the housekeeping statements' bounds | **§8.1** — the dashboard refreshes' DELETE and the parameter evaluations' batch DELETE are bounded at 25 s like the `execution_events` DELETE (the "not bounded" clause removed); **§8.4** — the stale refresh sweep's `UPDATE` at 10 s (`REFRESH_SWEEP_STATEMENT_TIMEOUT_SECONDS`, on the sweeper's own template); **§8.5** — the evaluation sweep's `UPDATE` at the tick's 25 s. Each names the SQLState `57014` cancel, which rolls the one statement back. No DDL, no migration. |
 | 2026-10-20 | v1.45 | V50 (#640, script-node-rename lane, owner ruling 2026-10-20) | The **TRANSFORM→SCRIPT node-type rename**, no alias and no deprecation window. V50 rewrites every stored `pipeline_versions.body_json` node `type` value `TRANSFORM` → `SCRIPT` (RELEASED and DRAFT alike), rebuilding the `nodes` array order-preservingly and re-stamping `body_hash` over the NEW body text in the same statement (all rows carry `body_hash` = sha256 over `body_json::text` again; the untouched control rows are byte-identical). Prose that merely mentions the word — node ids, descriptions — is deliberately NOT rewritten. `template_versions`' blocks constraint is RENAMED `chk_transform_blocks` → `chk_script_blocks` (metadata-only; the V33 file itself stays byte-identical — shipped migrations are immutable). The row-level proof is `ScriptNodeMigrationTest` (V1–V49 on a scratch database, seeded pre-V50 rows, then V50): typed field moved, prose and the no-transform control intact, hash re-stamped, node order preserved, the constraint answering to the new name. Renumbered at merge after #326's v1.44. |

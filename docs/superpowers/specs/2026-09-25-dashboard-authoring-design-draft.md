@@ -15,6 +15,9 @@ documentation. No dashboard prototype, library benchmark or new test run was per
 Existing code is not evidence that dashboards already ship.
 **Distribution:** contributor design material under `docs/superpowers/specs/`, outside the
 product documentation packaging allowlist.
+**Superseded in part (2026-11-08, #860):** the chart-language decisions D4, D12 (its language half) and D13 (its SVG
+half), the host-native row of §7.1 and §13's Vega-Lite entry. Each carries its own dated note below; the original
+text is kept. Current contract: [Dashboards §2.1.2 and §6.3](../../dashboards.md).
 
 Owner decisions, existing implementation evidence and proposals are distinguished throughout.
 This document does not amend current execution, authorization or versioning contracts.
@@ -64,7 +67,7 @@ foundations Datapipelines already has rather than rebuilding dashboard-specific 
 | D1 | Dashboard sources are **released pipeline artifacts pinned by release number**. A referenced pipeline definition does not change underneath the dashboard. A pin fixes the executable definition, not its future query results; historical reproduction needs retained execution data as well. |
 | D2 | Data engineers and pipelines own numerical correctness, reconciliation and business calculations. The dashboard presents their results and keeps pipeline validation outcomes in the loop without inventing another business-validation system. |
 | D3 | Dashboard and visualization authoring is **exclusively through MCP**: inspect available results and metadata, recommend visualizations, agree with the user, then create/update through tools. No authoring editor in the app; viewing, preview and debugging are app capabilities. User-specific layout editing/saving is deferred (D32). |
-| D4 | Chart configurations target the host's actual library (an ECharts host receives ECharts configurations). **No common chart language, cross-library translation layer, or renderer-independent chart specification.** |
+| D4 | Chart configurations target the host's actual library (an ECharts host receives ECharts configurations). **No common chart language, cross-library translation layer, or renderer-independent chart specification.** **Superseded 2026-11-08 (#860):** a chart is now ONE renderer-neutral document — the `chart` kind v1, its schema served at `/schemas/chart/1/` — and the runtime converts it into each host library's configuration through converters it ships; the host never translates (the chart-configuration design record (orchestration store, `design-records/2026-11-06-neutral-chart-grammar.md`), rulings R3 and R7). |
 | D5 | The `datapipelines-dashboard` client runtime owns communication with the server, refresh handling, state and dispatch. The adapter supplies concrete functions the runtime invokes. |
 | D6 | Adapter responsibilities: registrations, parameter and action-control rendering/events, visualization rendering/events, layout and host styling integration. |
 | D7 | Visualizations and pipelines are **many-to-many**. |
@@ -72,8 +75,8 @@ foundations Datapipelines already has rather than rebuilding dashboard-specific 
 | D9 | Reuse the transformer implementation and its validation machinery: transformations adapt data to the renderer's shape; their tests remain part of authoring validation. |
 | D10 | Datapipelines itself supports viewing dashboards in its UI. |
 | D11 | Extend the host theme contract with semantic palettes, stable category colours, typography, density and accessibility. |
-| D12 | **Plotly.js is the preferred chart renderer for Datapipelines** (superseding Vega-Lite). Native host-library configurations remain the rule; exact versions, packaging and report export remain to be selected. |
-| D13 | SVG and HTML content for what the chart renderer cannot express; their authoring and execution contracts still need design (§7.3). |
+| D12 | **Plotly.js is the preferred chart renderer for Datapipelines** (superseding Vega-Lite). Native host-library configurations remain the rule; exact versions, packaging and report export remain to be selected. **Superseded in part 2026-11-08 (#860):** Plotly.js stays the library the product's own pages and the agent test session draw with (the vendored bundles); it is no longer a chart LANGUAGE — the stored `plotly` kind is retired, and documents are the neutral `chart` kind that the runtime's Plotly converter draws (the chart-configuration design record (orchestration store, `design-records/2026-11-06-neutral-chart-grammar.md`), R2 and R5). |
+| D13 | SVG and HTML content for what the chart renderer cannot express; their authoring and execution contracts still need design (§7.3). **Amended 2026-11-08 (#860):** the SVG half has a direction — the runtime's own themed SVG drawer when a host's library has no converter for a chart family, and an agent-authored SVG kind for what no chart family expresses (the chart-configuration design record (orchestration store, `design-records/2026-11-06-neutral-chart-grammar.md`), R6 and §5.4); neither ships in the first chart lane. The HTML half is unchanged. |
 | D14 | **Visualization** is the general display-object term: charts, KPI widgets, tables, SVG and other supported content. |
 | D15 | Every dashboard object has a name unique across the entire dashboard and an explicit object type in its configuration. Groups do not introduce name scopes. |
 | D16 | Support a dashboard of one visualization as well as dashboards with many parameters, visualizations and groups containing parameters, visualizations and action controls. |
@@ -778,6 +781,11 @@ candidate.
 | SVG / HTML | Owner-requested; templating/binding contract open (§7.3) |
 | Host-native (e.g. ECharts) | Supported when the host uses it; author its native configuration |
 
+> **Superseded 2026-11-08 (#860):** the host-native row — an agent no longer authors a library's native
+> configuration. A host declares its chart library to the runtime at `init` (`charts: { library, instance }`), and
+> the runtime's converter for that library draws the one neutral `chart` document ([Dashboards §6.1, §6.3](../../dashboards.md);
+> the chart-configuration design record (orchestration store, `design-records/2026-11-06-neutral-chart-grammar.md`), R3). The Plotly.js row stands as the product's own library (D12's note).
+
 The runtime supplies transformed data through registered adapter functions; native
 configurations never fetch pipeline data themselves; asset-loading policy is defined separately.
 Plotly's SVG/raster exports embed raster content for WebGL traces; the reporting profile must
@@ -993,6 +1001,10 @@ Acceptance scenarios (proposals; duplicates of one rule merged):
 21. External access follows the selected transport: no reusable secret reaches the browser; the backend cannot relay unauthorized operations; two users of one key share data while keeping independent selections, streams and ownership; workspace and key bindings hold; host user correlation cannot broaden authority.
 
 ## 13. Alternatives considered
+
+> **Answered 2026-11-08 (#860):** "no translation proposal" below — the translation layer is the product's own
+> converters inside the runtime, over a small specification of its own with Vega-Lite-shaped words (the chart-configuration design record (orchestration store, `design-records/2026-11-06-neutral-chart-grammar.md`),
+> R7 and §5.2). Vega-Lite itself is not adopted as the stored language.
 
 Vega/Vega-Lite (composition, compilation to Vega, headless export — no longer preferred; no
 translation proposal), ECharts datasets (a valid customer host), GridStack (a layout candidate,

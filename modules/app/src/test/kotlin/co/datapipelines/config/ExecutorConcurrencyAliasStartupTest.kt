@@ -3,9 +3,9 @@ package co.datapipelines.config
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.SharedPostgres
+import co.datapipelines.logcapture.SnapshotListAppender
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -60,10 +60,11 @@ class ExecutorConcurrencyAliasStartupTest {
 
     @Test
     fun `both keys set and differing refuses startup - both keys named in the failure`() {
-        // Spring wraps the validator's @PostConstruct refusal in a BeanCreationException; the
-        // §7 message rides its cause chain verbatim — the operator sees the full text.
+        // The validator's @PostConstruct refusal reaches the caller wrapped by whichever bean pulled it
+        // first — since #804 R2 the key consumers depend on it, so that is web-server creation pulling
+        // the staging factory. The §7 report is the ROOT of the chain, verbatim — the operator sees it.
         val failure =
-            shouldThrow<org.springframework.beans.factory.BeanCreationException> {
+            shouldThrow<Exception> {
                 SpringApplicationBuilder(DatapipelinesApplication::class.java)
                     .run(
                         *(
@@ -74,7 +75,9 @@ class ExecutorConcurrencyAliasStartupTest {
                     ).close()
             }
 
-        val text = failure.message.orEmpty() + " " + (failure.cause?.message.orEmpty())
+        val root = generateSequence<Throwable>(failure) { it.cause }.last()
+        check(root is IllegalStateException) { "the boot failed, but not on the §7 report: $root" }
+        val text = root.message.orEmpty()
         text.shouldContain("startup refused")
         text.shouldContain("max-concurrent-executions-global (150)")
         text.shouldContain("max-concurrent-executions-per-instance (200)")
@@ -97,14 +100,10 @@ class ExecutorConcurrencyAliasStartupTest {
 
     /** Attaches a Logback appender around bean creation — see the class KDoc. */
     private class AliasWarnProbe : ApplicationContextInitializer<ConfigurableApplicationContext> {
-        val events = mutableListOf<ILoggingEvent>()
+        // A snapshot (#484): the booting context's threads share the JVM while the probe is attached.
+        private val appender = SnapshotListAppender()
 
-        private val appender =
-            object : ListAppender<ILoggingEvent>() {
-                override fun append(eventObject: ILoggingEvent) {
-                    events += eventObject
-                }
-            }
+        val events: List<ILoggingEvent> get() = appender.events()
 
         private val logger = LoggerFactory.getLogger(ConfigValidator::class.java) as Logger
 

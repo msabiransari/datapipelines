@@ -65,7 +65,7 @@ class MembershipBoundKeysE2eTest {
     @Order(1)
     fun `a - removing the member ends the keys they created on every surface they served, and re-entry creates fresh`() {
         val world = ensureWorld()
-        val bob = memberKey(BOB_EMAIL, world.bobOneTime, "kbound-bob-key")
+        val bob = memberKey(BOB_EMAIL, world.bobOneTime, world.bobNotice, "kbound-bob-key")
 
         // Non-vacuity: the key the member CREATED serves /mcp BEFORE anything ends it.
         val servedBefore = serveAll(bob.key)
@@ -81,7 +81,8 @@ class MembershipBoundKeysE2eTest {
         // Re-entry: re-invite, sign in again, CREATE a new key on the Keys page — and the
         // surfaces answer again (A15: no key is minted at the login; the member creates one).
         withAdmin { reinvite(it, world.acme, BOB_EMAIL) }
-        val bobAgain = memberKey(BOB_EMAIL, world.bobOneTime, "kbound-bob-key-2", settled = true)
+        val bobAgain =
+            memberKey(BOB_EMAIL, world.bobOneTime, world.bobNotice, "kbound-bob-key-2", settled = true)
         bobAgain.userId shouldBe bob.userId
         bobAgain.keyId shouldNotContain bob.keyId
         val servedAfter = serveAll(bobAgain.key)
@@ -94,7 +95,7 @@ class MembershipBoundKeysE2eTest {
     @Order(2)
     fun `b - an admin revokes the keys a member created, the member's session survives, and they create a fresh one`() {
         val world = ensureWorld()
-        val carol = memberKey(CAROL_EMAIL, world.carolOneTime, "kbound-carol-key")
+        val carol = memberKey(CAROL_EMAIL, world.carolOneTime, world.carolNotice, "kbound-carol-key")
 
         val servedBefore = serveAll(carol.key)
         val beforeRevoke = servedBefore.entries.joinToString(" ") { "${it.key}:${it.value}" }
@@ -122,13 +123,67 @@ class MembershipBoundKeysE2eTest {
             .body("data.email", Matchers.equalTo(CAROL_EMAIL))
 
         // The member creates a fresh key on the Keys page (A15 — no login mint), and it serves.
-        val carolAgain = memberKey(CAROL_EMAIL, world.carolOneTime, "kbound-carol-key-2", settled = true)
+        val carolAgain =
+            memberKey(CAROL_EMAIL, world.carolOneTime, world.carolNotice, "kbound-carol-key-2", settled = true)
         carolAgain.userId shouldBe carol.userId
         carolAgain.keyId shouldNotContain carol.keyId
         val servedAfter = serveAll(carolAgain.key)
         val afterRelogin = servedAfter.entries.joinToString(" ") { "${it.key}:${it.value}" }
         println("event=keybound.phase phase=revoke_after_relogin served=$afterRelogin")
         servedAfter.values.forEach { it shouldBeGreaterThanOrEqual SERVED_FLOOR }
+    }
+
+    @Test
+    @Order(3)
+    fun `c - the one-time password parse reads the admin notice, never the row's UUID window`() {
+        // #389 A.1's gate, both directions in one body: a crafted create-response renders
+        // the refreshed row fragment (its title IS the new user's full UUID,
+        // admin-user-row.html th:title) BEFORE the notice, with three adjacent digit-only
+        // UUID segments — the shape #616 measured the #370 batch's unanchored regex
+        // matching about one id in 668. That base parser (kept in the companion for this
+        // demonstration only) returns the UUID window; the fixture's ACTUAL parse returns
+        // the notice's password.
+        val uuid = "3c9f21a7-4827-4936-8492-b7d1c0e45f01"
+        val password = "HKQM-7R2X-N93T"
+        val body =
+            "<tr><td title=\"$uuid\">3c9f21a7...</td></tr>\n" +
+                "<div id=\"admin-notice\" hx-swap-oob=\"true\">One-time password for " +
+                "kbound-bob@datapipelines.test: <strong class=\"u-mono\">$password</strong>" +
+                " — shown ONCE</div>"
+        // The base parser's answer IS the defect: the UUID window, not the password.
+        checkNotNull(UNANCHORED_FOR_DEMO.find(body)) { "the unanchored demo regex found nothing" }
+            .groupValues[1] shouldBe "4827-4936-8492"
+        val grant = parseOneTimeGrant(body)
+        grant.oneTime shouldBe password
+        grant.notice shouldContain password
+    }
+
+    @Test
+    @Order(4)
+    fun `d - the tear-down hand-back removes a marker row even after the slate already ran`() {
+        // #389 A.3, falsifiable on the revert: tearDown used to call the GUARDED slate,
+        // which returns at once because `cleaned` is true by teardown time — the documented
+        // hand-back never ran and this suite's rows outlived it. The marker row (read with
+        // the fixture's own userRow SQL) must not survive the @AfterAll entry point; on the
+        // reverted short-circuit it survives and this test is RED.
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                // A prior run whose hand-back did not run (the plant goes red here) leaves
+                // the marker behind; start clean so this guard is itself re-runnable.
+                statement.execute("DELETE FROM users WHERE email = '$MARKER_EMAIL'")
+                statement.execute(
+                    "INSERT INTO users (email, display_name, provider, provider_subject, is_active, " +
+                        "is_admin, password_hash, password_changed_at, must_change_password) " +
+                        "VALUES ('$MARKER_EMAIL', 'Keybound Marker', 'local', 'kbound-marker', TRUE, FALSE, " +
+                        "'${E2eAuth.argon2Hash("kbound-marker-password")}', NOW(), FALSE)",
+                )
+            }
+        }
+        check(userRow(MARKER_EMAIL) != "(no row)") { "the marker row is missing before the hand-back" }
+        cleaned = true // the state @AfterAll always observes: the suite ran its slate once
+        tearDown()
+        userRow(MARKER_EMAIL) shouldBe "(no row)"
+        world = null // position-safety: any later test rebuilds the world through the app
     }
 
     // ------------------------------------------------------------------ the world
@@ -143,7 +198,11 @@ class MembershipBoundKeysE2eTest {
     private class World(
         val acme: String,
         val bobOneTime: String,
+        /** #389 A.2: the raw admin notice [bobOneTime] was parsed from, printed on a first-login red. */
+        val bobNotice: String,
         val carolOneTime: String,
+        /** #389 A.2: the raw admin notice [carolOneTime] was parsed from, printed on a first-login red. */
+        val carolNotice: String,
     )
 
     private fun ensureWorld(): World {
@@ -166,9 +225,9 @@ class MembershipBoundKeysE2eTest {
         createPipeline(publisher)
         publish(publisher)
 
-        val bobOneTime = createLocalUser(adminSession, admin.csrfToken, BOB_EMAIL, WS_ACME, "author")
-        val carolOneTime = createLocalUser(adminSession, admin.csrfToken, CAROL_EMAIL, WS_ACME, "author")
-        return World(WS_ACME, bobOneTime, carolOneTime).also { world = it }
+        val bob = createLocalUser(adminSession, admin.csrfToken, BOB_EMAIL, WS_ACME, "author")
+        val carol = createLocalUser(adminSession, admin.csrfToken, CAROL_EMAIL, WS_ACME, "author")
+        return World(WS_ACME, bob.oneTime, bob.notice, carol.oneTime, carol.notice).also { world = it }
     }
 
     // ------------------------------------------------------------------ the surfaces
@@ -303,6 +362,16 @@ class MembershipBoundKeysE2eTest {
         val key: String,
     )
 
+    /**
+     * The parsed one-time password AND the notice text it was parsed from (#389 A.2): a
+     * first-login red must be able to name a misparse against what the server actually
+     * rendered, so the notice rides beside the password through [World].
+     */
+    private class OneTimeGrant(
+        val oneTime: String,
+        val notice: String,
+    )
+
     /** A fresh admin session (its own login), for the member-management verbs. */
     private class AdminAuth(
         val session: String,
@@ -327,6 +396,7 @@ class MembershipBoundKeysE2eTest {
     private fun memberKey(
         email: String,
         oneTime: String,
+        notice: String,
         keyName: String,
         settled: Boolean = false,
     ): MemberSession {
@@ -340,8 +410,18 @@ class MembershipBoundKeysE2eTest {
         } else {
             val first = postLogin(email, oneTime)
             first.statusCode shouldBe 302
-            postPasswordChange(first.sessionCookie("first", userRow(email)), first.csrfToken, oneTime, MEMBER_PASSWORD, MEMBER_PASSWORD)
-                .statusCode shouldBe 200
+            // #389 A.2: on a red, NAME what the fixture parsed and the notice it came from.
+            // `parsed` holding a UUID fragment (e.g. 4827-4936-8492) reads as the old
+            // whole-body misparse; `parsed` equal to the notice's password with the login
+            // still refused reads as a PRODUCT defect — stop and report (A.4). The parsed
+            // value is a throwaway test credential for a fixture account on the local stack.
+            postPasswordChange(
+                first.sessionCookie("first", userRow(email), misparse = "parsed=$oneTime notice=[$notice]"),
+                first.csrfToken,
+                oneTime,
+                MEMBER_PASSWORD,
+                MEMBER_PASSWORD,
+            ).statusCode shouldBe 200
             val clean = postLogin(email, MEMBER_PASSWORD)
             clean.statusCode shouldBe 302
             session = clean.sessionCookie("clean", userRow(email))
@@ -417,14 +497,17 @@ class MembershipBoundKeysE2eTest {
         return response.detailedCookies().firstOrNull { it.name == "dp_session" }?.value ?: session
     }
 
-    /** Creates a local user through the REAL admin partial; returns the one-time password. */
+    /**
+     * Creates a local user through the REAL admin partial; returns the one-time password
+     * and the notice text it was parsed from.
+     */
     private fun createLocalUser(
         session: String,
         csrf: String,
         email: String,
         workspace: String,
         role: String,
-    ): String {
+    ): OneTimeGrant {
         val response =
             given()
                 .port(port)
@@ -439,9 +522,28 @@ class MembershipBoundKeysE2eTest {
                 .`when`()
                 .post("/partials/admin/users")
         response.statusCode shouldBe 200
-        return checkNotNull(ONE_TIME_PASSWORD.find(response.body().asString())) {
-            "no one-time password in the create response"
-        }.groupValues[1]
+        return parseOneTimeGrant(response.body().asString())
+    }
+
+    /**
+     * #389 A.1: parse the one-time password from the ADMIN NOTICE ONLY — `substringAfter`
+     * the notice's `id` attribute, never the whole response. The response renders the
+     * refreshed row fragment ABOVE the notice and that row carries the new user's full
+     * UUID in its `title` (admin-user-row.html th:title); #370's batch parsed the whole
+     * body with an UNANCHORED regex, which matched such a UUID window about one id in 668
+     * (#616). Such a misparse could explain issue #389's first-login refusal with
+     * `error=credentials` and `failed=1`; its original response was not retained,
+     * so the cause of that historical failure remains unproven.
+     * The anchored token regex stays as the second fence (#616).
+     */
+    private fun parseOneTimeGrant(body: String): OneTimeGrant {
+        check(NOTICE_ID_MARK in body) { "no admin-notice in the create response" }
+        val notice = body.substringAfter(NOTICE_ID_MARK).substringBefore("</div>")
+        val oneTime =
+            checkNotNull(ONE_TIME_PASSWORD.find(notice)) {
+                "no one-time password in the create response's admin-notice"
+            }.groupValues[1]
+        return OneTimeGrant(oneTime, notice)
     }
 
     private fun registerDatasource(admin: AdminAuth) {
@@ -558,7 +660,7 @@ class MembershipBoundKeysE2eTest {
             .cookie("dp_session", admin.session)
             .cookie("dp_csrf", admin.csrf)
             .header("DP-CSRF-Token", admin.csrf)
-            .body("""{"path": "/kbound/v1/report", "pipeline": "kbound/report", "timeout_seconds": 60}""")
+            .body("""{"path": "/kbound/v1/report", "pipeline": "kbound/report", "pipeline_version": 1, "timeout_seconds": 60}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -637,15 +739,21 @@ class MembershipBoundKeysE2eTest {
          * and the status/cookies it already holds were being dropped (the old `diagnose`
          * printed them to stdout only, which the next cycle's XML overwrote). The subject
          * user's row state rides along at the call sites that know the email ([userRow]).
+         * #389 A.2 adds [misparse] — the fixture's own `parsed=<oneTime> notice=[…]` suffix
+         * — for the member's FIRST login only, where a misparsed password and a product
+         * defect must stay distinguishable from the failure message alone. The suffix is
+         * built only on failure: a green run prints no credential.
          */
         fun sessionCookie(
             step: String,
             userRow: String? = null,
+            misparse: String? = null,
         ): String =
             checkNotNull(sessionCookieOrNull()) {
                 buildString {
                     append("no dp_session cookie after $step login: status=$statusCode location=$location cookies=$cookies")
                     if (userRow != null) append(" user=[$userRow]")
+                    if (misparse != null) append(" $misparse")
                 }
             }
 
@@ -701,6 +809,16 @@ class MembershipBoundKeysE2eTest {
         private fun ensureCleanSlate() {
             if (cleaned) return
             cleaned = true
+            runCleanSlate()
+        }
+
+        /**
+         * The slate body WITHOUT the once-per-JVM guard (#389 A.3): [ensureCleanSlate]
+         * short-circuits on [cleaned], and by @AfterAll time that flag is ALWAYS true —
+         * so tearDown used to call the guarded entry and return at once, and the
+         * documented hand-back below never ran. The @AfterAll path calls THIS directly.
+         */
+        private fun runCleanSlate() {
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
                 connection.createStatement().use { statement ->
                     statement.execute(
@@ -777,6 +895,18 @@ class MembershipBoundKeysE2eTest {
         // matched it one id in 668, and the create page renders the new user's id.
         private val ONE_TIME_PASSWORD = Regex("""(?<![0-9A-Za-z-])([A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4})(?![0-9A-Za-z-])""")
 
+        // #389 A.1: the notice's id is a STATIC attribute of admin-user-saved.html (line 13,
+        // rendered verbatim), so substringAfter can scope the password parse to the notice.
+        private const val NOTICE_ID_MARK = "id=\"admin-notice\""
+
+        // The #370 batch's UNANCHORED whole-body regex, kept ONLY for the `c -` demonstration
+        // that shows what it used to match (#389's A.1 gate); the fixture's own parse never
+        // uses it.
+        private val UNANCHORED_FOR_DEMO = Regex("""([A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4})""")
+
+        /** #389 A.3: a row the hand-back must remove, read back with the fixture's userRow SQL. */
+        private const val MARKER_EMAIL = "kbound-marker@datapipelines.test"
+
         private val random = SecureRandom()
 
         private val postgres get() = SharedE2e.postgres
@@ -810,7 +940,7 @@ class MembershipBoundKeysE2eTest {
         @AfterAll
         fun tearDown() {
             SharedE2e.postgres // first touch boots the container the slate runs against
-            ensureCleanSlate()
+            runCleanSlate() // #389 A.3: the hand-back ALWAYS runs; `cleaned` guards set-up only
         }
 
         @DynamicPropertySource

@@ -1,0 +1,7 @@
+# 2026-10-24 #686: public repeated HS256 key for the in-process JWKS fixture.
+# Exact introduction fingerprint only; other values, lines and commits remain scanned.
+06a4b2715310dee8d9c700bc9b0f49c2b7e9d7ca:modules/auth/src/test/kotlin/co/datapipelines/auth/JwksReadTimeoutTest.kt:generic-api-key:229
+
+# 2026-11-06 #389: fabricated parser-demonstration password; never used to authenticate.
+# Exact introduction only; other values, lines and commits remain scanned.
+daedc74826edd84e33862fca03c53acdcaddeee0:tests/integration-tests/src/test/kotlin/co/datapipelines/integration/MembershipBoundKeysE2eTest.kt:generic-api-key:147

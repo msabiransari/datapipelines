@@ -9,6 +9,7 @@
     <th:block th:if="${bundle != null}">
     <script th:src="@{/vendor/plotly/plotly-3d.min.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard.js}"></script>
+    <script th:src="@{/js/datapipelines-dashboard-chart.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
@@ -28,8 +29,25 @@
   <script data-page-mount th:src="@{/js/dashboards/workspace.js}" defer></script>
   <!-- 102: the lifecycle dialogs' client half — the ONE per-screen container is #dp-dialog. -->
   <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
+  <!-- #876 G6 — the Dependencies pane's renderer and its mount (record §13), last, after the workspace's own glue. -->
+  <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+  <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+  <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+  <script th:src="@{/js/dependencies/renderer.js}"></script>
+  <script th:src="@{/js/dependencies/tree-view.js}"></script>
+  <script th:src="@{/js/dependencies/plan-view.js}"></script>
+  <script th:src="@{/js/dependencies/list.js}"></script>
+  <script th:src="@{/js/dependencies/source.js}"></script>
+  <script data-page-mount th:src="@{/js/dependencies/mount.js}"></script>
 
   </template>
+
+  <!-- #783: the shared pane splitter (104 §A), the editor's tag verbatim. PARSER-BLOCKING and
+       above the markup on purpose: it restores the remembered `--dp-dock-pane-h` onto <html>
+       BEFORE the dock paints, so a height the person chose is the first frame's, never a
+       shift onto it. It stays a bare tag outside the catalog, and re-executes on every arrival
+       and cached restore by design (ui-screens §3.2); its document listeners install once. -->
+  <script th:src="@{/js/splitter.js}"></script>
 
   <!-- #350 — the global sidebar's current-leaf hook: which dashboard this page shows, by id
         AND full path, so the rail's Dashboards tree (js/tree/sidebar.mjs) can mark the leaf
@@ -94,6 +112,8 @@
                 data-dp-tab="overview" th:attr="aria-selected=${activeTab == 'overview'} ? 'true' : 'false'">Overview</button>
         <button type="button" class="dp-ws-tab" role="tab" id="dp-tab-refreshes" aria-controls="dp-pane-refreshes"
                 data-dp-tab="refreshes" th:attr="aria-selected=${activeTab == 'refreshes'} ? 'true' : 'false'">Refreshes</button>
+        <button type="button" class="dp-ws-tab" role="tab" id="dp-tab-dependencies" aria-controls="dp-pane-dependencies"
+                data-dp-tab="dependencies" th:attr="aria-selected=${activeTab == 'dependencies'} ? 'true' : 'false'">Dependencies</button>
         <button type="button" class="dp-ws-tab" role="tab" id="dp-tab-versions" aria-controls="dp-pane-versions"
                 data-dp-tab="versions" th:attr="aria-selected=${activeTab == 'versions'} ? 'true' : 'false'">Versions</button>
         <button th:if="${canBindKeys == true}" type="button" class="dp-ws-tab" role="tab" id="dp-tab-keys"
@@ -162,8 +182,13 @@
                  #400 built it. -->
             <section id="dp-board-dock" class="dp-board-dock" data-dp-dock-active="events"
                      aria-label="Dashboard activity">
-              <button type="button" class="dp-board-dock-splitter" data-dp-dock-resize
-                      aria-label="Resize the activity dock"></button>
+              <!-- #783: the dock's height is the user's, by the editor's ONE mechanism
+                   (splitter.js `board-dock`, ui-screens §4.4): drag, or focus and Arrow ±16 px,
+                   Shift ±64, Home/End, double-click to reset; remembered under
+                   `dp.pane.board-dock`. The role is in the markup; splitter.js publishes the
+                   value attributes at binding and keeps them in sync with the pane. -->
+              <div class="app-splitter app-splitter--y dp-board-dock-splitter" data-splitter="board-dock" role="separator"
+                   aria-orientation="horizontal" tabindex="0" aria-label="Resize the activity dock"></div>
               <div class="dp-board-dock-head">
                 <div class="dp-board-dock-tabs" role="tablist" aria-label="Activity views">
                   <button type="button" class="dp-board-dock-tab" role="tab" id="dp-board-dock-tab-events"
@@ -206,9 +231,10 @@
                     Clear
                   </button>
                   <button type="button" class="ds-button ds-button-ghost ds-button-sm dp-board-dock-collapse"
-                          data-dp-dock-collapse aria-expanded="true">
+                          data-dp-dock-collapse aria-expanded="true"
+                          data-dp-dock-label-open="Collapse" data-dp-dock-label-collapsed="Expand">
                     <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevrons-up-down"></use></svg>
-                    Collapse
+                    <span data-dp-dock-collapse-label>Collapse</span>
                   </button>
                 </div>
               </div>
@@ -252,6 +278,17 @@
         <div class="dp-ws-pane" id="dp-pane-refreshes" role="tabpanel" aria-labelledby="dp-tab-refreshes"
              data-dp-pane="refreshes" th:attr="hidden=${activeTab != 'refreshes'} ? 'hidden' : null, data-lazy-url=@{/partials/dashboards/{id}/refreshes(id=${dashboardId})}">
           <p class="dp-tab-note">Loading refreshes…</p>
+        </div>
+
+        <!-- DEPENDENCIES (#876 G6) — what THIS version depends on (record §13): its parameter set, source pipelines
+             and visualizations, down to templates and datasources. A dependencies/mount.js mount over the selected
+             version, fetched the first time the tab is shown — not a lazy partial. -->
+        <div class="dp-ws-pane" id="dp-pane-dependencies" role="tabpanel" aria-labelledby="dp-tab-dependencies"
+             data-dp-pane="dependencies" th:attr="hidden=${activeTab != 'dependencies'} ? 'hidden' : null">
+          <div class="dp-deps" data-dp-deps data-family="dashboard" data-dp-deps-state="idle"
+               th:attr="data-name=${dashboardName},data-version=${viewedVersion}">
+            <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this tab is opened.</p>
+          </div>
         </div>
 
         <!-- VERSIONS — the admitted history and the lifecycle verbs' dialogs (a success

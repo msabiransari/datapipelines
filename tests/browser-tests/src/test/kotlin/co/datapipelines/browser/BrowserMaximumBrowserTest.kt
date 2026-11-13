@@ -7,10 +7,13 @@ import kotlin.math.abs
 
 /**
  * #503, re-cut by #554 — the resource browser's maximum leaves a usable main track on real dashboard
- * pages. The width the reader can give the browser is `min(480, viewport - menu - 320)`: at 900 px the
- * compact menu (64) allows the full 480, the expanded menu (202) only 378, and the clamp moves the
- * rendered width without ever rewriting the stored preference (record §4 "Browser resizing"). Before
- * #554 this pinned the rail's 960/1120 maximum over a 232 px floor.
+ * pages. The width the reader can give the browser is `min(--app-browser-max, viewport - menu - main
+ * minimum)` and the stylesheet's clamp lifts its `--app-browser-min` floor over the band default;
+ * at 900 px the compact menu (64) allows the full ceiling, the expanded menu (202) only
+ * `900 - 202 - --app-main-min-width`, and the clamp moves the rendered width without ever rewriting
+ * the stored preference (record §4 "Browser resizing"). Before #554 this pinned the rail's 960/1120
+ * maximum over a 232 px floor. #788: every expected width is derived from the range the page itself
+ * reports ([browserRange]) — app.css is the range's one source.
  */
 class BrowserMaximumBrowserTest : DashboardBrowserSuite() {
     @Test
@@ -32,44 +35,58 @@ class BrowserMaximumBrowserTest : DashboardBrowserSuite() {
     private fun exerciseMaximum(board: String) {
         page.navigate("$baseUrl/dashboards/$board")
         awaitBoard()
-        assertGeometry(BAND_DEFAULT, maximum = 480)
+        val range = browserRange(page)
+        // In the 761–1100 band the menu is compact (64) and the band default sits under the
+        // range's floor, so the clamp lifts the effective width to the floor itself.
+        val bandMaximum = range.maximumAt(BAND_VIEWPORT, 64)
+        assertGeometry(range.effectiveDefault, maximum = bandMaximum, range = range)
         resizeBrowser("End")
-        assertGeometry(480, maximum = 480)
-        preference() shouldBe "480px"
+        assertGeometry(bandMaximum, maximum = bandMaximum, range = range)
+        preference() shouldBe "${bandMaximum}px"
 
-        // The expanded menu takes 138 px more: the clamp narrows the column to 378 and main keeps 320.
+        // The expanded menu takes 138 px more: the clamp narrows the column and main keeps its minimum.
         page.click("#rail-collapse")
-        assertGeometry(EXPANDED_MAXIMUM, maximum = EXPANDED_MAXIMUM)
-        preference() shouldBe "480px"
+        val expandedMaximum = range.maximumAt(BAND_VIEWPORT, 202)
+        assertGeometry(expandedMaximum, maximum = expandedMaximum, range = range)
+        preference() shouldBe "${bandMaximum}px"
         resizeBrowser("ArrowRight")
-        assertGeometry(EXPANDED_MAXIMUM, maximum = EXPANDED_MAXIMUM)
-        preference() shouldBe "480px"
-        stored() shouldBe "480"
+        assertGeometry(expandedMaximum, maximum = expandedMaximum, range = range)
+        preference() shouldBe "${bandMaximum}px"
+        stored() shouldBe "$bandMaximum"
         page.click("#rail-collapse")
-        assertGeometry(480, maximum = 480)
+        assertGeometry(bandMaximum, maximum = bandMaximum, range = range)
         resizeBrowser("Home")
-        assertGeometry(240, maximum = 480)
+        assertGeometry(range.min, maximum = bandMaximum, range = range)
 
-        // A value outside 240–480 is not a preference: removed before the first paint, the band default shows.
-        page.evaluate("() => localStorage.setItem('dp-browser-width:' + document.documentElement.dataset.dpWorkspace, '2000')")
-        page.reload()
-        awaitBoard()
-        assertGeometry(BAND_DEFAULT, maximum = 480)
-        preference() shouldBe ""
-        stored() shouldBe null
+        // A value outside the range (#784's raised floor: 256 was a preference under the old
+        // 240 floor and must now be removed) is not a preference: removed before the first
+        // paint, the band default shows. Both one-past-the-bounds values derive from the read
+        // range; the retired 256 stays as the named history case.
+        listOf("2000", "${range.max + 1}", "256", "${range.min - 1}").forEach { seed ->
+            page.evaluate("value => localStorage.setItem('dp-browser-width:' + document.documentElement.dataset.dpWorkspace, value)", seed)
+            page.reload()
+            awaitBoard()
+            assertGeometry(range.effectiveDefault, maximum = bandMaximum, range = range)
+            preference() shouldBe ""
+            stored() shouldBe null
+        }
 
         // A wider window moves the range, never the preference; a drag past the maximum stops there.
         page.setViewportSize(1440, 800)
-        page.waitForFunction("() => document.getElementById('browser-boundary').getAttribute('aria-valuenow') === '300'")
-        assertGeometry(300, maximum = 480)
+        val wide = browserRange(page)
+        page.waitForFunction(
+            "expected => document.getElementById('browser-boundary').getAttribute('aria-valuenow') === expected",
+            "${wide.effectiveDefault}",
+        )
+        assertGeometry(wide.effectiveDefault, maximum = wide.maximumAt(1440, 202), range = wide)
         val handle = checkNotNull(page.locator("#browser-boundary").boundingBox())
         page.mouse().move(handle.x + handle.width / 2, handle.y + handle.height / 2)
         page.mouse().down()
         page.mouse().move(1430.0, handle.y + handle.height / 2)
         page.mouse().up()
-        assertGeometry(480, maximum = 480)
+        assertGeometry(wide.maximumAt(1440, 202), maximum = wide.maximumAt(1440, 202), range = wide)
         resizeBrowser("Home")
-        assertGeometry(240, maximum = 480)
+        assertGeometry(wide.min, maximum = wide.maximumAt(1440, 202), range = wide)
     }
 
     private fun awaitBoard() {
@@ -89,6 +106,7 @@ class BrowserMaximumBrowserTest : DashboardBrowserSuite() {
     private fun assertGeometry(
         expectedBrowser: Int,
         maximum: Int,
+        range: BrowserRange,
     ) {
         val geometry =
             page.evaluate(
@@ -96,24 +114,23 @@ class BrowserMaximumBrowserTest : DashboardBrowserSuite() {
                   const main = document.getElementById('app-main');
                   const separator = document.getElementById('browser-boundary');
                   return { browser: browser.getBoundingClientRect().width, main: main.clientWidth, scroll: main.scrollWidth,
-                    now: separator.getAttribute('aria-valuenow'), max: separator.getAttribute('aria-valuemax') }; }""",
+                    now: separator.getAttribute('aria-valuenow'), max: separator.getAttribute('aria-valuemax'),
+                    min: separator.getAttribute('aria-valuemin') }; }""",
             ) as Map<*, *>
         withClue("browser/main geometry at $expectedBrowser px: $geometry") {
-            ((geometry["main"] as Number).toInt() >= 320) shouldBe true
+            ((geometry["main"] as Number).toInt() >= range.mainMin) shouldBe true
             geometry["scroll"] shouldBe geometry["main"]
             (abs((geometry["browser"] as Number).toDouble() - expectedBrowser) <= 1.0) shouldBe true
             geometry["now"] shouldBe expectedBrowser.toString()
             geometry["max"] shouldBe maximum.toString()
+            // The separator's live ARIA floor is the stylesheet's, read through the same page.
+            geometry["min"] shouldBe range.min.toString()
             documentOverflowsX() shouldBe false
         }
     }
 
     private companion object {
-        /** In the 761–1100 band: the menu compact (64) by default, the browser 270. */
+        /** In the 761–1100 band the menu is compact (64) and the band default sits under `--app-browser-min`. */
         const val BAND_VIEWPORT = 900
-        const val BAND_DEFAULT = 270
-
-        /** 900 - 202 - 320: the widest browser beside the expanded menu. */
-        const val EXPANDED_MAXIMUM = 378
     }
 }

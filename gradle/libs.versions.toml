@@ -40,13 +40,14 @@
 
 [versions]
 # --- Toolchain / plugins -----------------------------------------------------
-# Kotlin: latest stable (2.4.20-Beta2 exists and is rejected as pre-release).
+# Kotlin: newest stable 2.4.x patch (Maven Central, 2026-10-24; 2.5.0-Beta2 exists
+# and is rejected as pre-release).
 # EXCEPTION to the BOM rule: the Spring Boot 3.5.16 BOM imports kotlin-bom 1.9.25,
 # which predates the compiler we run. The Kotlin Gradle plugin contributes
 # kotlin-stdlib at its own version; because the BOM is applied as a non-enforced
-# platform, Gradle conflict resolution selects the higher (2.4.10). Verified by
+# platform, Gradle conflict resolution selects the higher (2.4.21). Verified by
 # `./gradlew :modules:typesystem:dependencies --configuration compileClasspath`.
-kotlin = "2.4.10"
+kotlin = "2.4.21"
 # Spring Boot: latest stable 3.x. module-structure.md §11.1 FREEZES "Spring Boot 3.x"
 # in v1, so 4.1.0 (the current overall latest) is deliberately not taken.
 spring-boot = "3.5.16"
@@ -104,6 +105,12 @@ jackson = "2.21.7"
 # and GHSA-8c42-7qj2-3j46 (6.5, CORS cache poisoning) are all "< 4.1.137.Final" per OSV;
 # 4.1.137.Final verified on Maven Central (4.1.138 exists; smallest step, as before).
 netty = "4.1.137.Final"
+# snappy-java — SECURITY OVERRIDE (2026-11-02, landing of #785): GHSA-gwq9-9ffj-mvrv (7.5), GHSA-q233-g92q-qxp6 (7.5)
+# and GHSA-xqrx-qh46-34m7 (5.9) cover snappy-java < 1.1.10.9. The lake graph (parquet-hadoop 1.17.1, avro 1.12.2,
+# hadoop-client-api/-runtime 3.5.0 declare it) resolves 1.1.10.7 onto the app/web/lake runtime classpaths; the
+# constraint in CommonConventionsPlugin raises it to the latest release (Central maven-metadata, 2026-11-02;
+# osv.dev query for 1.1.10.12 = {}). Retire when every declaring parent resolves >= 1.1.10.9 on its own.
+snappy = "1.1.10.12"
 
 # freemarker — GHSA-27j2-h3m2-8237 / CVE-2026-84939 (CRITICAL 9.1, path traversal in the
 # template-loading mechanism when a malformed locale identifier reaches a localized
@@ -144,13 +151,29 @@ tomcat = "10.1.59"
 
 # --- Not managed by the Spring Boot BOM: exact pins required -----------------
 duckdb-jdbc = "1.5.5.1"
-# awssdk s3: the 089 §F MinIO suites' bucket/upload client — TEST-scoped only, in
+# awssdk s3: the 089 §F MinIO suites' bucket/upload client — test-scoped in
 # tests/integration-tests (the MinIO E2E) and modules/datasources (the LAKE
-# connectivity probe). Latest stable on Maven Central (2.46.7, verified 2026-09-08
+# connectivity probe), and since #785 PRODUCTION-scoped in modules/lake (the
+# managed lake's S3FileIO and its boot check; dp-lake design record §3a). Latest stable on Maven Central (2.46.7, verified 2026-09-08
 # via search.maven.org). Taken WITH url-connection-client so the default Netty
 # HTTP stack and its transitive tree stay OFF the test classpath — bucket-create
 # plus PUTs need nothing the JDK's HttpURLConnection cannot do.
 awssdk = "2.46.7"
+# dp-lake (#785, design record §3, §3a) — the managed lake's catalog and table format.
+# Apache Iceberg 1.12.0 (Apache-2.0): latest stable on Maven Central (maven-metadata
+# <release>1.12.0</release>, read 2026-11-02); the version every dp-lake spike (E1 #774,
+# E9 #775, E11 #777) ran. JdbcCatalog ships IN iceberg-core — no iceberg-jdbc artifact.
+iceberg = "1.12.0"
+# Hadoop's shaded client pair (Apache-2.0, ≈50 MB): REQUIRED at runtime — Parquet.WriteBuilder
+# builds a Hadoop Configuration on every write and ParquetWriter lives in parquet-hadoop, whose
+# POM declares Hadoop `provided` (E1 #774 F16). Latest stable (<release>3.5.0</release>, read
+# 2026-11-02), the version E1's build resolved.
+hadoop = "3.5.0"
+# parquet-column: COMPILE-ONLY in modules/lake, at exactly the version iceberg-parquet 1.12.0
+# brings at runtime (GenericParquetWriter's signature names parquet's MessageType). Not the
+# latest (1.18.1) on purpose: the runtime version is iceberg-parquet's, and a compile pin above
+# it would compile against API the runtime does not carry.
+parquet = "1.17.1"
 # commonmark: renders docs/*.md in-product at /docs (033). Latest stable on Maven
 # Central (verified 2026-08-31 against repo1.maven.org maven-metadata.xml —
 # 0.30.0, released 2026-08, active release line). ZERO compile/runtime deps
@@ -162,6 +185,12 @@ awssdk = "2.46.7"
 # renders honestly as literal "- [ ]" without it.
 commonmark = "0.30.0"
 argon2-jvm = "2.12"
+# #847 — argon2-jvm's own JNA binding types (Argon2Library, Size_t) at COMPILE scope, so
+# Argon2SecretHasher can read the native verify code the library's boolean API hides. The
+# version argon2-jvm-nolibs 2.12's pom already pins (runtime scope) and auth's
+# runtimeClasspath already resolves; already in verification-metadata.xml. Not BOM-managed.
+# Nothing new enters the build.
+jna = "5.16.0"
 jjwt = "0.13.0"
 mockk = "1.14.11"
 kotest = "6.2.3"
@@ -170,6 +199,16 @@ kotest = "6.2.3"
 konsist = "0.17.3"
 # MCP SDK — GATE G1 CLOSED, see [libraries] below.
 mcp-sdk = "2.0.0"
+# JSON Schema validator for the chart document v1 (#860; design record
+# 2026-11-06-neutral-chart-grammar §4.2, draft 2020-12). Vetted 2026-11-07 (Maven
+# Central metadata + GitHub API): 2.0.8 (published 2026-10-02, Apache-2.0) is the
+# latest of the Jackson-2 line; 3.0.x targets Jackson 3 (tools.jackson.core) and is
+# out for a Jackson 2.x stack. 0 GitHub advisories for the package (positive
+# control: jackson-databind returns advisories). Already on the runtime classpath
+# at 2.0.0 through mcp-json-jackson2; this pin lifts that edge to 2.0.8 too.
+# Its POM asks for Jackson 2.22.1; modules/visualization holds the `jackson` pin
+# with enforcedPlatform(jackson-bom), the lake module's precedent for Iceberg.
+json-schema-validator = "2.0.8"
 # Playwright for Java — the browser suite's driver AND pinned browser set
 # (a Playwright release pins its bundled chromium build). Current stable on
 # Maven Central, verified 2026-09-11. 1.52.0 refused to install chromium on
@@ -258,6 +297,7 @@ jackson-dataformat-yaml = { module = "com.fasterxml.jackson.dataformat:jackson-d
 # CommonConventionsPlugin, after jackson-bom. Rationale + retirement condition
 # are in the `netty` entry under [versions] (GHSA-558v-64gr-wgg4).
 netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
+snappy-java = { module = "org.xerial.snappy:snappy-java", version.ref = "snappy" }  # SECURITY OVERRIDE — see `snappy` under [versions]
 # SECURITY OVERRIDE — the three tomcat-embed artifacts, applied as constraints (GHSA-9xv2-5v5q-p794 et al.)
 tomcat-embed-core = { module = "org.apache.tomcat.embed:tomcat-embed-core", version.ref = "tomcat" }
 tomcat-embed-el = { module = "org.apache.tomcat.embed:tomcat-embed-el", version.ref = "tomcat" }
@@ -288,6 +328,7 @@ duckdb-jdbc = { module = "org.duckdb:duckdb_jdbc", version.ref = "duckdb-jdbc" }
 
 # --- Auth / crypto (NOT BOM-managed) -----------------------------------------
 argon2-jvm = { module = "de.mkammerer:argon2-jvm", version.ref = "argon2-jvm" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 jjwt-api = { module = "io.jsonwebtoken:jjwt-api", version.ref = "jjwt" }
 jjwt-impl = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
 jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
@@ -316,10 +357,14 @@ db-scheduler-spring-boot-starter = { module = "com.github.kagkarlsson:db-schedul
 
 # --- Metrics / logging (BOM-managed) -----------------------------------------
 micrometer-core = { module = "io.micrometer:micrometer-core" }
+# #708 — the Prometheus scrape registry (observability.md §4.2). Only modules/app declares it: the
+# exporting registry is a deployment concern; library modules keep micrometer-core only.
+micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
 slf4j-api = { module = "org.slf4j:slf4j-api" }
-# Tests only, and only where no Spring Boot starter already brings it: modules/persistence's
-# suite records the writer's WARN lines with a ListAppender (#266b — a store's message must
-# never reach a log line). The version is the Spring Boot BOM's, the one every starter uses.
+# Test tooling: modules/log-capture exposes this as api for the shared snapshot capture (#756).
+# Its consumers use testImplementation only. modules/persistence also declares the backend for
+# its writer's WARN assertions (#266b — a store's message must never reach a log line).
+# The version is the Spring Boot BOM's, the one every starter uses.
 logback-classic = { module = "ch.qos.logback:logback-classic" }
 
 # --- Markdown rendering (033 docs-in-app; NOT BOM-managed) -------------------
@@ -349,6 +394,7 @@ commonmark-ext-gfm-strikethrough = { module = "org.commonmark:commonmark-ext-gfm
 # Jackson majors on one classpath.
 mcp-core = { module = "io.modelcontextprotocol.sdk:mcp-core", version.ref = "mcp-sdk" }
 mcp-json-jackson2 = { module = "io.modelcontextprotocol.sdk:mcp-json-jackson2", version.ref = "mcp-sdk" }
+json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "json-schema-validator" }
 
 # --- UI assets (NOT BOM-managed) ---------------------------------------------
 
@@ -365,9 +411,25 @@ kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.
 # modules/web (web rules) and tests/integration-tests (cross-module rules).
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+# --- dp-lake (#785): modules/lake ONLY — see the iceberg/hadoop/parquet version notes ---------
+iceberg-api = { module = "org.apache.iceberg:iceberg-api", version.ref = "iceberg" }
+iceberg-core = { module = "org.apache.iceberg:iceberg-core", version.ref = "iceberg" }
+iceberg-aws = { module = "org.apache.iceberg:iceberg-aws", version.ref = "iceberg" }
+iceberg-parquet = { module = "org.apache.iceberg:iceberg-parquet", version.ref = "iceberg" }
+iceberg-data = { module = "org.apache.iceberg:iceberg-data", version.ref = "iceberg" }
+hadoop-client-api = { module = "org.apache.hadoop:hadoop-client-api", version.ref = "hadoop" }
+hadoop-client-runtime = { module = "org.apache.hadoop:hadoop-client-runtime", version.ref = "hadoop" }
+parquet-column = { module = "org.apache.parquet:parquet-column", version.ref = "parquet" }
+parquet-format-structures = { module = "org.apache.parquet:parquet-format-structures", version.ref = "parquet" }
+# [upstream: apache/iceberg#18744 — TEMPORARY] iceberg-aws 1.12.0 declares the AWS SDK compileOnly, yet
+# S3FileIO.initialize loads kms.model.EncryptionAlgorithmSpec and sts.model.Tag through the eager
+# AwsProperties (E11 #777 F3). runtimeOnly in modules/lake at the SDK pin; DROP both when an Iceberg
+# release carries the fix.
+awssdk-kms = { module = "software.amazon.awssdk:kms", version.ref = "awssdk" }
+awssdk-sts = { module = "software.amazon.awssdk:sts", version.ref = "awssdk" }
 testcontainers = { module = "org.testcontainers:testcontainers" }           # testcontainers-bom 1.21.4
 testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter" }
-# The MinIO suites' S3 client (089 §F) — see the `awssdk` version note above.
+# The MinIO suites' S3 client (089 §F), and modules/lake's production S3 client (#785) — see the `awssdk` version note above.
 awssdk-s3 = { module = "software.amazon.awssdk:s3", version.ref = "awssdk" }
 awssdk-url-connection-client = { module = "software.amazon.awssdk:url-connection-client", version.ref = "awssdk" }
 testcontainers-postgresql = { module = "org.testcontainers:postgresql" }

@@ -1,0 +1,50 @@
+{
+  "case" : "missing-source-family",
+  "bounds" : {
+    "max_depth" : 32,
+    "max_versions" : 1024,
+    "max_edges" : 4096,
+    "max_blockers" : 100,
+    "max_wire_bytes" : 1048576
+  },
+  "outcome" : "closure",
+  "nodes" : [
+    {
+      "node_id" : "n0",
+      "family" : "dashboard",
+      "entity_id" : "board",
+      "version" : 1,
+      "name" : "acme/board",
+      "status" : "DRAFT",
+      "body_hash" : "hash-dashboard-board-1",
+      "current_version" : null,
+      "entity_uuid" : "05a29af6-250d-3e68-ab85-fe50da8c6ed5"
+    },
+    {
+      "node_id" : "n1",
+      "family" : "visualization",
+      "entity_id" : "chart",
+      "version" : 1,
+      "name" : "acme/chart",
+      "status" : "MISSING",
+      "body_hash" : null,
+      "current_version" : null,
+      "entity_uuid" : null
+    }
+  ],
+  "edges" : [
+    {
+      "from" : "n0",
+      "to" : "n1",
+      "path" : "visualizations[0].visualization"
+    }
+  ],
+  "depth" : 1,
+  "dependency_first" : [
+    "n1",
+    "n0"
+  ],
+  "canonical" : "{\"format\":\"v1\",\"workspace\":\"00000000-0000-0000-0000-000000000868\",\"root\":[\"dashboard\",\"board\",1],\"nodes\":[{\"id\":[\"dashboard\",\"board\",1],\"entity_uuid\":\"05a29af6-250d-3e68-ab85-fe50da8c6ed5\",\"status\":\"DRAFT\",\"body_hash\":\"hash-dashboard-board-1\",\"current\":null},{\"id\":[\"visualization\",\"chart\",1],\"entity_uuid\":null,\"status\":\"MISSING\",\"body_hash\":null,\"current\":null}],\"edges\":[{\"from\":[\"dashboard\",\"board\",1],\"to\":[\"visualization\",\"chart\",1],\"path\":\"visualizations[0].visualization\"}]}",
+  "wire_bound" : 1048576,
+  "digest" : "v1:e935f8044ce928039705c11fa5b0738ae9c0986fd93852ad9fd15d9803a204ec"
+}

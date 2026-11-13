@@ -3,6 +3,8 @@ plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     testImplementation(project(":modules:app"))
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
 
     // The tracer-bullet E2E seeds API keys via SQL, and the stored hash must be a real
     // Argon2id of the full key (auth.md §7.2). The P7 brief asked for auth's
@@ -15,6 +17,9 @@ dependencies {
     testImplementation(libs.argon2.jvm)
 
     testImplementation(libs.spring.boot.starter.test)
+    // #750: housekeeping fixtures share the real metadata transaction. These compile-time
+    // JDBC/transaction types already arrive at runtime through app, as in app's own build.
+    testImplementation(libs.spring.boot.starter.jdbc)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit.jupiter)
     // One container module per supported dialect that needs a real server.
@@ -59,15 +64,23 @@ dependencyLocking {
     ignoredDependencies.add("com.mysql:mysql-connector-j")
 }
 
+// #934: bound retained full application contexts in every test task, including security
+// assurance. Both 32 and eight cached contexts exceeded the unchanged 4096 MiB staging
+// budget in cold CI. Retain only the current cached application: H2 measures the whole
+// JVM, including otherwise idle apps. Explicit multi-instance fixtures still own theirs.
+tasks.withType<Test>().configureEach {
+    systemProperty("spring.test.context.cache.maxSize", "1")
+}
+
 // 025 B4: the jar smoke (JarSmokeE2eTest) boots the REAL bootJar — the packaged
 // classpath, not exploded classes. The task dependency guarantees the jar exists and is
 // current whenever the suite runs; the test itself fails with build instructions if the
 // file is missing (never silently skips — a guard that can skip is not a guard).
 tasks.named<Test>("test") {
     dependsOn(":modules:app:bootJar")
-    // The whole module runs in ONE forked JVM, and Spring's context cache keeps every
-    // suite's context — fifteen-odd full applications, their pools and the two-context
-    // suites' second boots — alive until JVM exit (SharedE2e's KDoc states the model).
+    // CI runs the whole module in one forked JVM. After #934, Spring's TestContext cache
+    // retains at most one entry per test JVM; eviction closes cached contexts and
+    // their resources. Manually booted contexts remain their callers' responsibility.
     // The default heap (a quarter of the host's RAM — 4 GB on a 16 GB box) ran OUT in
     // the full-module run: java.lang.OutOfMemoryError booting the alphabetically-late
     // suites, reproduced twice on 2026-09-08 once 089 §F added three more context-booting
@@ -76,15 +89,15 @@ tasks.named<Test>("test") {
     maxHeapSize = "6g"
     // The staging budget reads the JVM's live heap (staging.md §8.2: `System.gc()`, then
     // used heap, compared with `max-memory-mb`) — in production one application's heap, in
-    // THIS JVM thirty-odd cached applications' heap. At the shipped 1024 MB the 32nd suite in
+    // this JVM every retained application's heap. At the shipped 1024 MB the 32nd suite in
     // alphabetical order (CI's single fork: dp.test.forks.e2e=1) measured 1 111 595 KB live
     // before its first two-row stage and got `pipeline.staging.memory_limit_exceeded`
     // (run 35263013651 on d3c5d811; reproduced locally with the class order pinned, 154/#137).
     // Two forks halve the retained contexts, which is why the dev-box gate never saw it. The
     // budget is sized to this JVM through the operator's own key (configuration.md §3.3):
     // two-thirds of the heap above, so a runaway stage still trips the guard well before the
-    // JVM's ceiling, while the retained contexts (1.1 GB measured with ~28 alive; Spring's
-    // context cache caps them at 32) are not mistaken for one. The jar smoke's child JVM
+    // JVM's ceiling, while retained contexts are not mistaken for one. #934 bounds the
+    // context cache instead of raising this staging threshold again. The jar smoke's child JVM
     // inherits it and stages nothing.
     environment("DATAPIPELINES_STAGING_H2_MAX_MEMORY_MB", "4096")
     // Forks are containers AND contexts: each fork boots its own Postgres/Redis/MySQL set and

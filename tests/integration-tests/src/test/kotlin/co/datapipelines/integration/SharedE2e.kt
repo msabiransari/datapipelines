@@ -79,8 +79,9 @@ internal object SharedE2e {
             .withDatabaseName(DATABASE)
             .withUsername(USER)
             .withPassword(PASSWORD)
-            // The context cache keeps every suite's context — and its Hikari pool — open
-            // until JVM exit; fifteen-odd cached pools exhaust Postgres's default 100
+            // The context cache keeps each cached context and its Hikari pool open until
+            // eviction (one cached entry after #934's cold-CI recurrence). Fifteen-odd pools
+            // exhausted Postgres's default 100
             // connections mid-gate (observed as Flyway's "too many clients already"). A
             // shared server needs a shared-sized connection budget.
             .withCommand("postgres", "-c", "max_connections=400")
@@ -136,7 +137,7 @@ internal object SharedE2e {
      * user; `server /data` and the readiness wait below work unchanged (proven 2026-09-24 on
      * LakeMinioE2eTest + TaxiVsRideshareFourEngineE2eTest, 7/7).
      */
-    private const val MINIO_IMAGE = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
+    internal const val MINIO_IMAGE = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
     private const val MINIO_PORT = 9000
 
     /** The root credential the lake datasources and the seeding client both present. */
@@ -234,7 +235,7 @@ internal object SharedE2e {
  * the fresh-deployment walkthrough. Derives the table list from `pg_tables` — a migration
  * that adds a table is included automatically, never a hand-copied list — excludes
  * `flyway_schema_history` (dropping it would make every later context re-migrate or
- * fail), truncates with CASCADE, and re-seeds the V4 `default` workspace.
+ * fail), truncates with CASCADE, and re-seeds the V4 `default` workspace and V53 lake-control singleton.
  *
  * ALWAYS call [beforeSeeding] from the suite's first-test seed hook BEHIND its `seeded` flag — the
  * flag, not this object, provides the once-per-suite guarantee (several suites in one JVM each
@@ -247,6 +248,9 @@ internal object E2eClean {
     private const val DEFAULT_WORKSPACE =
         "INSERT INTO workspaces (id, name, display_name) VALUES " +
             "('defa0000-0000-0000-0000-000000000001', 'default', 'Default') ON CONFLICT DO NOTHING"
+
+    /** V53's required singleton must exist before the next managed-lake context's startup check. */
+    private const val LAKE_CONTROL = "INSERT INTO lake_control (id, mode) VALUES (1, 'normal')"
 
     fun beforeSeeding() = clear(requireMigrated = true)
 
@@ -284,6 +288,7 @@ internal object E2eClean {
                     statement.execute("TRUNCATE ${tables.joinToString(", ") { "\"$it\"" }} CASCADE")
                 }
                 statement.execute(DEFAULT_WORKSPACE)
+                if ("lake_control" in tables) statement.execute(LAKE_CONTROL)
             }
         }
     }

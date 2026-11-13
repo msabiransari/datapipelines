@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.5 (frozen contract — additive-only changes after this point)
+**Status:** v1.18 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-10-24
+**Last updated:** 2026-11-13
 
 ---
 
@@ -45,7 +45,9 @@ datapipelines/
 ├── modules/
 │   ├── typesystem/                      # [Type System spec]
 │   ├── graph/                           # the generic Dag<T> primitive, layer 0 (§5.17)
+│   ├── dependency-contract/             # the neutral business-object dependency contract, layer 0, #868 (§5.22)
 │   ├── persistence/                     # the generic batching writer — ordered group commit, layer 0 (§5.19)
+│   ├── log-capture/                     # the shared test log capture — TEST-ONLY, layer 0, #756 (§5.23)
 │   ├── calculators/                     # [Calculators catalog] — pure kinds, layer 0 (§5.14)
 │   ├── scripting/                       # Script engine seam, layer 0 (§5.15)
 │   ├── pipeline-contract/               # [Pipeline Contract spec]
@@ -55,6 +57,7 @@ datapipelines/
 │   ├── dag/                             # [DAG Executor spec]
 │   ├── parameters/                      # the parameter engine — parameter sets, #194 (§5.18)
 │   ├── visualization/                   # visualizations and dashboards — the two documents and their lifecycle, #10 (§5.20)
+│   ├── lake/                            # the managed lake — Iceberg catalog on DP's Postgres, leases, fence, #785 (§5.21)
 │   ├── auth/                            # [Auth spec]
 │   ├── scheduler/                       # [Scheduler reference] — durable occurrences, #9 (§5.16)
 │   ├── application/                     # cross-aggregate use cases (§5.13)
@@ -73,7 +76,9 @@ datapipelines/
 |---|---|---|---|
 | `typesystem` | [type-system.md](type-system.md) | The 11 canonical types, per-dialect mappers, H2 mapping, schema envelope. Foundation. | — (no persistence) |
 | `graph` | [dag-executor.md §3](dag-executor.md#3-dag-data-structure) (this spec, §5.17) | The generic DAG primitive — `Dag<T>`, `DagBuilder<T>` (topological order, cycle detection, reverse index). Stdlib only, no internal dependencies: moved out of `dag` (#194) so a module below the executor can build a graph without inheriting the executor's dependency set. Package `co.datapipelines.dag`, kept on purpose. | — (no persistence) |
+| `dependency-contract` | (this spec, §5.22; the dependency-graph design record) | The neutral business-object dependency contract (#868 G1): immutable graph types (`ObjectRequest`, `Node`, `Edge`, `GraphSnapshot`), the closed §11.1 vocabularies, the provider contract and its conformance harness, the DI-assembled `FamilyRegistry`, the bounded `DependencyWalker` and its internal fingerprint, `GraphLimits` and `Deadline`; the §11.1 wire schema and payload goldens as main resources. Kotlin/JDK only, no internal dependencies. | — (no persistence; providers read through their families' repositories in `application/dependencies`) |
 | `persistence` | [DAG Executor §10](dag-executor.md#10-sse-event-integration), [Auth §10](auth.md) (this spec, §5.19) | The generic batching writer (#266) — `BatchingWriter<T>`: an ordered, bounded, partitioned group commit in front of ONE store, with a bounded wait that falls back to the caller's own write, a singles retry that isolates a poison row, and a bounded shutdown drain. Knows no store: each supplies a `BatchSink`. Stdlib, coroutines and slf4j only. | — (writes whatever its sinks write; owns no table) |
+| `log-capture` | (this spec, §5.23) | TEST-ONLY (#756): the one shared Logback snapshot capture — `SnapshotListAppender` (appends and snapshot reads under the list's own monitor, #362/#391), `capturingLogEvents(logger, …)` and the root-logger `capturingLogs(…)`. Consumed by `testImplementation` alone; `verifyModuleDependencies` refuses any other edge into it. Logback only, no internal dependencies. | — (no persistence) |
 | `scripting` | (this spec, §5.15) | The script engine seam: `ScriptEngine` (JSONata in-process; JavaScript in a GraalJS isolate, #8), one registry wired in web and injected into the validator, test runner and node support, the evaluation pool, the type gate, canonical JSON. Pure library — evaluates untrusted script bodies with no I/O surface. | — (no persistence) |
 | `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. | `PipelineRepository` → `pipelines`, `pipeline_versions` |
 | `templates` | [templates.md](templates.md) | Freemarker integration, library macros, template registry, versioning. | `TemplateRepository` → `templates`, `template_versions` |
@@ -84,6 +89,7 @@ datapipelines/
 | `scheduler` | [scheduler.md](scheduler.md) | The pipeline-agnostic scheduler (#9): schedules, their occurrence function, the one dispatcher over db-scheduler, runs and their append-only trail, the generic executor port, capacity admission and reconciliation. Knows no pipeline semantics — the executor adapter lives in `web` (§5.16). | `ScheduleRepository` → `schedules`; `ScheduleRunRepository` → `schedule_runs`, `schedule_run_events`; db-scheduler owns `scheduled_tasks` (created by `app`'s V38) |
 | `parameters` | [parameter-engine design record](superpowers/specs/2026-09-21-parameter-engine-design.md) (this spec, §5.18) | The parameter engine (#194): the parameter-set definition model and its strict binding, the save-time validator (the record's §4), the expression AST, the set's dependency graph (over `graph`'s `Dag<T>`), the versioned lifecycle, the `parameter.*` codes and `datapipelines.parameters.*`. A single-aggregate module: the selector runtime arrives in lane C, the surfaces and the templates reverse arrow in lane D (`application`). | `ParameterSetRepository` → `parameter_sets`, `parameter_set_versions` (created by `app`'s V39) |
 | `visualization` | [dashboards.md](dashboards.md), the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (this spec, §5.20) | Visualizations and dashboards (#10): the two documents and their strict binding, the save-time validators, the name grammars, the versioned lifecycle (draft/release with the two cascades, discard, restore, purge, switch, import), the transfer service (export/import envelopes), the `visualization.*`/`dashboard.*` codes and `datapipelines.visualization.*`. A two-aggregate module whose cross-aggregate facts — a pinned pipeline release, a pinned set's parameters, a script's contract, the release evidence — arrive through ports it declares. | `VisualizationRepository` → `visualizations`, `visualization_versions`; `DashboardRepository` → `dashboards`, `dashboard_versions` (created by `app`'s V42, with the two test-evidence tables L4 writes) |
+| `lake` | the dp-lake design record, [configuration.md §3.36](configuration.md#336-managed-lake-dp-lake-785) (this spec, §5.21) | The managed lake (#785, dp-lake P2 onward): Iceberg's `JdbcCatalog` on DP's own metadata Postgres behind a per-lease fenced connection pool, the §8a lease protocol, deferred file deletes, the S3 client and the after-Flyway boot check. Off unless `datapipelines.lake.enabled=true`. | `LakeLeases` → `lake_leases`; Iceberg's `JdbcCatalog` (through `LakeCatalogs`) → `iceberg_tables`, `iceberg_namespace_properties`; the V53 triggers → `lake_table_revisions`; reads `lake_control` |
 | `application` | (this spec, §5.13) | **Cross-aggregate use cases** — the ones that need more than one domain module and so belong to none of them. Sits below `web` and `mcp-server` so both surfaces share one implementation (ARCH-AUDIT-2026-08 S4, ruling R6). | — (delegates to the owning modules' repositories) |
 | `mcp-server` | [mcp-server.md](mcp-server.md) | MCP transport (Streamable HTTP), tool/resource/prompt definitions. Thin adapter over the same services the REST layer uses. | — (delegates to the owning modules' repositories) |
 | `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. | — (delegates); Redis keys for the post-completion SSE event log and per-user rate-limit counters |
@@ -108,9 +114,12 @@ This diagram is a **rendering of the normative table in §4.2** — it carries n
 
 ```
 layer 0 — no internal deps
-┌──────────────┐ ┌─────────┐ ┌───────────────┐
-│  typesystem  │ │  graph  │ │  persistence  │
-└──────────────┘ └─────────┘ └───────────────┘
+┌──────────────┐ ┌─────────┐ ┌───────────────┐ ┌─────────────────────┐
+│  typesystem  │ │  graph  │ │  persistence  │ │ dependency-contract │
+└──────────────┘ └─────────┘ └───────────────┘ └─────────────────────┘
+┌───────────────┐
+│  log-capture  │  TEST-ONLY ← testImplementation of persistence, datasources, auth, dag, parameters,
+└───────────────┘               lake, web, app, tests/integration-tests — never a runtime edge (§5.23)
 
 layer 1 — typesystem (auth also persistence)
 ┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
@@ -128,10 +137,12 @@ layer 3
 └──────────────┘ └─────────────┘  scheduler ← typesystem, pipeline-contract (the name grammar only)
 
 layer 4
-┌──────────────┐ ┌──────────────┐
-│     dag      │ │  parameters  │  dag ← typesystem, calculators, pipeline-contract, templates,
-│  (executor)  │ │              │        datasources, staging, scripting, graph, persistence
-└──────────────┘ └──────────────┘  parameters ← typesystem, graph, pipeline-contract, templates, datasources
+┌──────────────┐ ┌──────────────┐ ┌────────┐
+│     dag      │ │  parameters  │ │  lake  │  dag ← typesystem, calculators, pipeline-contract, templates,
+│  (executor)  │ │              │ │        │        datasources, staging, scripting, graph, persistence
+└──────────────┘ └──────────────┘ └────────┘  parameters ← typesystem, graph, pipeline-contract, templates, datasources
+                                              lake ← typesystem, persistence, pipeline-contract, auth
+                                                     (allowed ahead: datasources, staging, scheduler)
 
 layer 5
 ┌─────────────────┐
@@ -141,7 +152,8 @@ layer 5
 layer 6
 ┌──────────────┐
 │ application  │  ← typesystem, scripting, pipeline-contract, templates,
-│ (use cases)  │    datasources, dag, auth, parameters, visualization
+│ (use cases)  │    datasources, dag, auth, parameters, visualization,
+│              │    dependency-contract (allowed ahead: scheduler)
 └──────────────┘
 
 layer 7
@@ -154,7 +166,7 @@ layer 8
 ┌──────────────┐
 │     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
 │              │    datasources, staging, dag, auth, application, mcp-server, scheduler,
-│              │    parameters, persistence, visualization
+│              │    parameters, persistence, visualization, lake, dependency-contract
 │              │    (declared explicitly, not transitively)
 └──────────────┘
 
@@ -165,7 +177,7 @@ layer 9
 
 layer 10 — the test suites
 ┌─────────────────────────┐ ┌─────────────────────┐
-│ tests/integration-tests │ │ tests/browser-tests │  ← app
+│ tests/integration-tests │ │ tests/browser-tests │  ← app (browser-tests: + web)
 └─────────────────────────┘ └─────────────────────┘
 ```
 
@@ -179,24 +191,27 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 |---|---|
 | `typesystem` | *(none)* |
 | `graph` | *(none)* |
-| `persistence` | *(none)* |
+| `dependency-contract` | *(none)* |
+| `log-capture` | *(none)* |
+| `persistence` | `log-capture` |
 | `calculators` | `typesystem` |
 | `scripting` | `typesystem` |
 | `pipeline-contract` | `typesystem`, `calculators` |
 | `templates` | `typesystem`, `pipeline-contract`, `scripting` |
-| `datasources` | `typesystem`, `persistence` |
+| `datasources` | `typesystem`, `persistence`, `log-capture` |
 | `staging` | `typesystem` |
-| `auth` | `typesystem`, `pipeline-contract`, `persistence` |
+| `auth` | `typesystem`, `pipeline-contract`, `persistence`, `log-capture` |
 | `scheduler` | `typesystem`, `pipeline-contract` |
-| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph`, `persistence` |
-| `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
+| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph`, `persistence`, `log-capture` |
+| `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources`, `log-capture` |
 | `visualization` | `typesystem`, `pipeline-contract`, `templates`, `parameters` |
-| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization` |
+| `lake` | `typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth`, `log-capture` |
+| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization`, `dependency-contract`, `scheduler` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters`, `visualization` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization` |
-| `app` | `web` |
-| `tests/integration-tests` | `app` |
-| `tests/browser-tests` | `app` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake`, `dependency-contract`, `log-capture` |
+| `app` | `web`, `log-capture` |
+| `tests/integration-tests` | `app`, `log-capture` |
+| `tests/browser-tests` | `app`, `web` |
 
 Notes on the shape (explanatory, not additional rules):
 
@@ -205,12 +220,15 @@ Notes on the shape (explanatory, not additional rules):
 - `scheduler` lists `pipeline-contract` for exactly ONE thing, the published `PipelineNameGrammar` (a schedule is named like a pipeline — scheduler design revision §6, A2); its `SchedulerBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge. It lists no `dag`, `auth` or `application`: the executor adapter, the capacity lease and the system principal live on `web`'s side of its port.
 - `auth` (#504b) lists `pipeline-contract` for exactly ONE thing, the shared search-needle rule — `SearchNeedle` and its typed refusal, the same rule every search-owning service applies at its door; its `AuthBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge.
 - `parameters` (#194) declares all five of its edges — `typesystem` (the shared value validator, `LogicalType`), `graph` (`Dag<T>`), `pipeline-contract` (`TemplateRef`, the name grammars, the `TemplateDryRenderer` / `DatasourceRegistry` / `TemplateVersionStatuses` / `TemplateReleaser` ports it validates and releases through, `ReadLens`, `AuthoringGuard`), and since lane C `templates` (the selector runtime renders a pinned template through `WorkspaceTemplateEngines`) and `datasources` (it runs through the registry's pools, `ReadOnlyStatementLease` and `ResultRowReader`). Since lane D the `parameters` edges of `application`, `mcp-server` and `web` are DECLARED (the record's §2.4): the surfaces compile against the engine, the reverse-arrow composition in `application`, the six tools in `mcp-server`, the routes and the wiring in `web`.
-- `persistence` (#266) is the second empty row beside `graph`, for the same reason: it is a primitive every store-owning module can sit on. `auth` lists it for the audit log's writer and `web` for the execution-event record's and the replay log's; `dag` does NOT — its repository offers the batch statement (`ExecutionEventRepository.appendAll`) and knows nothing of the queue in front of it, which is `web`'s wiring.
+- `dependency-contract` (#868) has no internal dependencies, like `graph` and `log-capture`: the dependency-graph record's neutral core (§3.1) must give datasource, API and schedule identities a home that is not pipeline-specific, and it must stay below every family so each family's adapter can sit on it. `application` declares it (the release adapters and the REPEATABLE READ planning walk in `application/dependencies`) and `web` declares it (the release wiring). `application` also lists `scheduler`, allowed ahead for the schedule family's provider (G2/#786) and undeclared until something compiles against it; the edge is acyclic because `scheduler` depends only on `typesystem` and `pipeline-contract` (record §3.1 [R31; F7]).
+- `persistence` (#266) has no internal dependencies in its main sources; its tests depend on `log-capture` (#756). Like `graph`, it is a primitive every store-owning module can sit on. `auth` lists it for the audit log's writer and `web` for the execution-event record's and the replay log's; `dag` uses the failure-shape and scheduled-job primitives, without the batching queue: its repository offers the batch statement (`ExecutionEventRepository.appendAll`), while the queue in front of it is `web`'s wiring.
 - `visualization` (#10) sits above `parameters` and below `application`: it declares `typesystem`, `pipeline-contract` (the name grammar, `ReadLens`, `AuthoringGuard`, the template ports it validates and releases through) and `parameters` (the production `ParameterSetFacts` reads a pinned set release through `ParameterSetRepository`). `templates` is allowed and NOT declared — every template fact reaches it through `pipeline-contract`'s ports. The pipeline facts a dashboard needs (released? read-only? the caller output columns) arrive through its `PipelineReleaseFacts` port, which `application` implements over `ReadOnlyPipelineRule` (L1b), so no `dag` edge exists. Since L1b the `visualization` edges of `application` (`PipelineReleaseFactsReader`, that port's implementation), `mcp-server` (the eleven `visualizations_*` / `dashboards_*` tools) and `web` (the two controllers and `VisualizationConfiguration`, the module's only Spring wiring) are DECLARED.
+- `lake` (#785) is the dp-lake design record's module (§3a, call 12) with the record's full edge set: `typesystem`, `persistence` (`FailureShape`, the SQLState walk a catalog failure is classified by) and `pipeline-contract` (`PipelineErrorCodes.Lake`) are declared by P2, and `auth` by P3 (#798: the definitions write their audit rows through `AuditEventSink`); `datasources`, `staging` and `scheduler` are allowed ahead for the later phases (staging hand-off, deliveries, maintenance) and stay undeclared until something compiles against them. `web` lists `lake` for the after-Flyway boot check (`LakeCatalogStartupCheck`).
 - `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
-- `app` lists `web` only. It contains `main()`, configuration (including the single `metadataTransactionManager`, §8.5), logback config, and the Flyway migrations (§3.1) — no domain code.
+- `app` lists `web` for its main sources and `log-capture` for its tests. It contains `main()`, configuration (including the single `metadataTransactionManager`, §8.5), logback config, and the Flyway migrations (§3.1) — no domain code.
+- `log-capture` (#756) is the one **test-only** module: the shared Logback snapshot capture that replaced nine module-local test-source copies. It is listed in the nine rows whose test sources capture logs (`persistence`, `datasources`, `auth`, `dag`, `parameters`, `lake`, `web`, `app`, `tests/integration-tests`), and every one of those edges is a `testImplementation`: `verifyModuleDependencies` fails when any configuration whose name does not start with `test` declares it (its `testOnlyModules` set), so test tooling never reaches a runtime classpath. `persistence`'s row is therefore no longer empty, but its main sources still have no internal dependency. The §4.3 "no `common` module" rule is unchanged: this module holds one fixture and carries its own guard.
 - A module may use `api(project(...))` instead of `implementation(...)` only where its own public API exposes the other module's types (e.g. `pipeline-contract` exposes `ColumnSchema` from `typesystem`). The allowed-set is the same either way.
 
 **Enforcement:** a Gradle verification task compares each subproject's declared project dependencies against this table and fails the build on any extra entry. Adding an edge means editing this table first — that is the review gate.
@@ -219,7 +237,7 @@ Notes on the shape (explanatory, not additional rules):
 
 Some concerns touch every module:
 - **Logging** — SLF4J + Logback (or structured logging via `minlog`/`logstash-logback-encoder`). Each module logs via SLF4J API; the actual logback config lives in `app`.
-- **Error handling** — every module's exceptions extend a base `DatapipelinesException`, which lives in `typesystem`. There is deliberately **no `common` module**: the §4.2 table is exhaustive, and a catch-all module is where layering rules go to die.
+- **Error handling** — every module's exceptions extend a base `DatapipelinesException`, which lives in `typesystem`. There is deliberately **no `common` module**: the §4.2 table is exhaustive, and a catch-all module is where layering rules go to die. The test-only `log-capture` (§5.23) is not one: it holds a single test fixture, and `verifyModuleDependencies` refuses every non-test edge into it.
 - **Configuration** — typed config classes per module, composed into the global `app` config.
 - **Metrics** — Micrometer API in modules, actual metrics registry configured in `app`.
 
@@ -240,8 +258,9 @@ Some concerns touch every module:
 - `H2IngressMapper` (H2 JDBC metadata → canonical `ColumnSchema`) and `H2EgressMapper` (canonical → H2 DDL type string + `java.sql.Types` code) — **two objects, not inverses**; signatures in [Staging §5.3](staging.md#53-mappers-and-helper-signatures)
 - `JsonEncoder` (canonical value → wire representation)
 - `SchemaEnvelope` data class
+- `co.datapipelines.typesystem.jdbc` (#816, TEMPORARY — [Datasources §5.8](datasources.md#58-the-author-sql-guard-on-duckdb-and-lake-leases-temporary-816)): `DuckDbAuthorSqlGate` (`REFUSED_NAMES`, `SEPARATOR`, `CARRIER_CALL`, `SQL_STATE`, `check(sql)`), its refusal type `DuckDbAuthorSqlRefusal`, and the decorator factory `Connection.guardedForAuthorSql()`. Here because two modules arm it — `datasources` (every `DUCKDB`/`LAKE` lease) and DuckDB `staging` — and `typesystem` is the one module both already depend on; plain `java.sql`, no new dependency.
 
-**Tests:** unit tests for every mapper; round-trip tests for every type.
+**Tests:** unit tests for every mapper; round-trip tests for every type; the guard's text rules and every decorator entry point (over H2 — the engine-driven sweep and catalog tests live in `datasources`, where the DuckDB driver is).
 
 ### 5.2 `pipeline-contract`
 
@@ -386,15 +405,17 @@ The wiring lives in `app` (it owns the runnable artifact) even though the driver
 
 **Dependencies (external):**
 - `com.h2database:h2`
+- `org.duckdb:duckdb_jdbc` (`libs.duckdb.jdbc`, the version the catalog pins for every module) — the DuckDB staging engine ([Staging §8.5](staging.md#85-the-duckdb-engine))
 - `org.jetbrains.kotlinx:kotlinx-coroutines-core` — pool admission is a coroutine `Semaphore` and every staging operation is `suspend` ([Staging §9.2](staging.md#92-one-owner-per-connection-and-session-state-is-per-lease)).
 
 **Public API:**
 - `Staging` interface
 - `StagingFactory` interface — `create(executionId, engine: StagingEngine = H2)`
 - `H2Staging`, `H2StagingFactory` implementations
+- `DuckDbStaging`, `DuckDbStagingFactory` (with `DuckDbStagingProperties` and the per-factory `ScratchBudget`) and `EngineDispatchingStagingFactory`, which routes `create` by engine
 - `StageResult` (`columns: List<ColumnSchema>`), `StagingStats` data classes
 
-No repository: tempdb lives and dies with one execution and is never persisted (§3.1).
+No repository: tempdb lives and dies with one execution and is never persisted (§3.1). A DuckDB staging database is a file, deleted when the execution's staging closes.
 
 **Tests:** unit tests for type mapping; integration tests for staging round-trip; streaming tests for memory-bounded behavior.
 
@@ -421,7 +442,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 - `EventEmitter` interface
 - `ExecutionEvent` sealed class
 - `ExecutionRepository` — `pipeline_executions`; `ExecutionEventRepository` — `execution_events` (durable 7-day record; the 1h Redis event log is `web`'s, §5.9)
-- `StaleExecutionSweeper` — the crash sweep's idempotent `UPDATE` (safe for every replica to run; no leader election by design). Its scheduling lives in `web` (§5.9): `web`'s `SweepSchedulingConfiguration` is the project's one `@EnableScheduling`/`@Scheduled` surface, introduced 2026-09-01 (036), and — since #316 — declares the scheduled jobs' own scheduler, `taskScheduler`: ONE daemon thread, `dp-scheduled`, that every `@Scheduled` job ticks on and nothing else uses. (Until #316 there was none, and Spring ran every job on the context's unique `ScheduledExecutorService` — the SSE log streamer's `dp-sse-log` thread, which serves replays.) Before 036, "no `@Scheduled`/Quartz/cron anywhere" was a verified property of the codebase — any NEW scheduled job is a lifecycle-surface change and belongs on this record.
+- `StaleExecutionSweeper` — the crash sweep's idempotent `UPDATE` (safe for every replica to run; no leader election by design). Its scheduling lives in `web` (§5.9): `web`'s `SweepSchedulingConfiguration` is the project's one `@EnableScheduling`/`@Scheduled` surface, introduced 2026-09-01 (036), and — since #316 — declares the scheduled jobs' own scheduler, `taskScheduler`: ONE daemon thread, `dp-scheduled`, that every `@Scheduled` job but the pool reaper ticks on and nothing else uses. The pool reaper alone names its own scheduler (`@Scheduled(scheduler = …)`): `web`'s `PoolReaperSchedulingConfiguration` declares `readerLeaseTaskScheduler` runs the metadata heartbeat on its own daemon `dp-reader-lease` thread (`PoolReaderLeaseConfiguration`); it does not delay the statement-free reaper. `poolReaperTaskScheduler`, one daemon thread `dp-reaper`, deliberately not named `taskScheduler` so the other jobs keep resolving to `dp-scheduled` (#818d, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)). (Until #316 there was none, and Spring ran every job on the context's unique `ScheduledExecutorService` — the SSE log streamer's `dp-sse-log` thread, which serves replays.) Before 036, "no `@Scheduled`/Quartz/cron anywhere" was a verified property of the codebase — any NEW scheduled job is a lifecycle-surface change and belongs on this record.
 - `BoundedJdbc` — (#326) the one construction of a JDBC template whose every statement carries a `queryTimeout` (#311's lifecycle writes, the stale sweep's UPDATE, the retention's statements; `web` hands the auth jobs a template it built here, because `persistence` holds no JDBC, §5.19)
 - `ExecutionEventRetention` — the `execution_events` retention job (050/T60): one idempotent `DELETE` past the retention window, safe for every replica, never touching `pipeline_executions`. Scheduled by `web`'s `RetentionSchedulingConfiguration` (`@Scheduled`, fixed-delay 1h, on the jobs' single-thread scheduler, `dp-scheduled` — still exactly ONE `@EnableScheduling`).
 
@@ -512,6 +533,7 @@ was vendored like the rest (`VendoredHtmxAuditTest` pins the bytes and the licen
 - `org.springframework.boot:spring-boot-starter`
 - `org.springframework.boot:spring-boot-starter-web` — serves the root-level `/health` and `/ready` probes (rest-api.md §11), which lived here from P0 (added 2026-08-07; if the probe controller moves to `web`, this dependency reverts with it — the §4.2 internal table is unaffected either way).
 - `org.springframework.boot:spring-boot-starter-actuator`
+- `io.micrometer:micrometer-registry-prometheus` (`runtimeOnly`, BOM-managed; #708) — the Prometheus registry behind `/actuator/prometheus` on the management port ([Observability §4.2](observability.md#42-exposure)). It lives in `app` because which registry exports the meters is a deployment concern: the library modules register meters against `micrometer-core`'s `MeterRegistry` only and never name a backend.
 - `org.flywaydb:flyway-core` + `org.flywaydb:flyway-database-postgresql` — schema migration. **This module is the only one that depends on Flyway** (§3.1 rule 2). The Postgres module is a separate artifact since Flyway 10 and is required for a Postgres target.
 - `org.postgresql:postgresql` — the metadata-DB driver at runtime (also bundled by `datasources` for user datasources; the version catalog pins it once).
 
@@ -538,7 +560,7 @@ was vendored like the rest (`VendoredHtmxAuditTest` pins the bytes and the licen
 
 ### 5.12 `tests/browser-tests`
 
-**Dependencies (internal):** `:modules:app` (full app context, same allowance as §5.11).
+**Dependencies (internal):** `:modules:app` (full app context, same allowance as §5.11) and `:modules:web` (`testImplementation`, #721: `SiteShotsRailOrderTest` reads `AppNav.ITEMS`; `app` carries `web` as `implementation`, so the edge is declared, not leaked).
 
 **Dependencies (external):**
 - `com.microsoft.playwright:playwright` — pinned in the catalog; the pin covers the
@@ -678,6 +700,7 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Dependencies (external):**
 - `com.github.kagkarlsson:db-scheduler-spring-boot-starter` (pinned, 16.12.0 at introduction; brings `db-scheduler` core and `db-scheduler-spring-common` at the same version) — the durable queue, cluster-wide picking and dead-task detection; Apache-2.0. Its Java-serialization default is replaced by the JSON serializer (scheduler design revision §2.2, A8), and its health indicator is disabled (the record §7.2).
 - `spring-boot-starter-jdbc`, `io.micrometer:micrometer-core`, Jackson (all BOM-managed).
+- `org.thymeleaf:thymeleaf-spring6` (BOM-managed, #442b) — the notice templates under `scheduler-mail-templates/`, rendered by an engine of the module's own exactly as `auth` renders its notices (no MVC, no view layer; the catalog note says why not bare Thymeleaf).
 
 **Public API:**
 - `ScheduleService` — the management use cases REST calls (create, edit, pause/resume/unblock, delete, Run now, reads, preview). The only scheduler type a transport may name.
@@ -685,7 +708,8 @@ build's `allowedInternalDependencies` map carries the same closed set).
 - `CapacityGate` / `CapacityLease` — the acquire-before-claim port (R4); `web` implements it over `dag`'s `ExecutionSlots`
 - `OccurrenceFunction` — the ONE occurrence computation (the record §3.2) the dispatcher and the preview share
 - `SchedulerProperties` — `datapipelines.scheduler.*` ([Configuration §3.29](configuration.md#329-scheduler-9))
-- the jobs `ScheduleDispatcher`, `ScheduledRunWorker`, `RunReconciler` — declared as db-scheduler tasks by the module's own `SchedulerAutoConfiguration`; no transport may name them (`ArchitectureGuardTest`, B5)
+- the jobs `ScheduleDispatcher`, `ScheduledRunWorker`, `RunReconciler`, `ScheduleNotifier` (#442b) — declared as db-scheduler tasks by the module's own `SchedulerAutoConfiguration`; no transport may name them (`ArchitectureGuardTest`, B5)
+- `NotificationMailer` (#442b) — the mail port: one rendered notice to one recipient, answered with whether the relay could have accepted it; `web` implements it over `auth`'s one shared SMTP transport (the scheduler cannot see `auth`)
 
 **Why it is its own module.** The scheduler must stay pipeline-agnostic (the owner's boundary, record §5): timing, occurrence identity, admission and the run trail are generic, and a report executor is expected to plug into the same port. A module with no `dag`/`application`/`auth` edge makes that a build fact; the fake executor in its own suite proves it at runtime.
 
@@ -712,7 +736,7 @@ build's `allowedInternalDependencies` map carries the same closed set).
 - `ParameterErrorCodes` — the `parameter.*` family ([Pipeline Contract §13.20](pipeline-contract.md)); `PipelineErrorCodes.Parameters` mirrors it, pinned equal by reflection.
 - `SelectorProbe` — the port the save-time validator's steps 5–6 call (the record's §4): render a pinned selector template, run it with `maxRows = 2`. REQUIRED by `ParameterSetValidator` since lane C, which retired the `selector_probe_unavailable` stand-in.
 - `SelectorRunner` (lane C) — the selector runtime and the production `SelectorProbe` (the record's §6.3): renders a pin through the workspace's `TemplateEngine`, resolves the datasource by the workspace-visible live read (P31), translates `:name` binds with `MULTI` list expansion (the empty list as `IN (NULL)`, P29's `__<k>` slices, every expanded placeholder counted), runs through `datasources`' `ReadOnlyStatementLease` (the §7D gate before any lease, the clamped timeout, `maxRows`) and reads canonical rows with the schema from metadata. Its evaluate-time face is `SelectorTasks` / `SelectorTask` / `SelectorRequest` / `SelectorRun` / `DatasourceResolver` — the unit the bulkhead runs and abandons.
-- `SelectorPool` (lane C) — the selector bulkhead (the record's P31, §5.2 step 3), the `ScriptEvaluationPool` shape copied: `size` RUNNING statements + `waiting` more admitted, `Saturated` at once when full, a suspending cancellable wait for a slot (the evaluate's deadline bounds it), one slot-owning thread per statement (abandoned ones keep their slot), the abandonment — `cancel()` then `ConnectionPool.discard` — off the caller's thread, the `abandoned` `LongAdder` for the `parameters.selectors.abandoned` gauge (the web wiring's bean). One per process.
+- `SelectorPool` (lane C) — the selector bulkhead (the record's P31, §5.2 step 3), the `ScriptEvaluationPool` shape copied: `size` RUNNING statements + `waiting` more admitted, `Saturated` at once when full, a suspending cancellable wait for a slot (the evaluate's deadline bounds it), one slot-owning thread per statement (abandoned ones keep their slot), the abandonment — `cancel()` then `ConnectionPool.discard` — off the caller's thread, the `abandoned` `LongAdder` for the `datapipelines.parameters.selectors.abandoned` gauge (the web wiring's bean). One per process.
 - `ParameterEvaluator` (lane C) — the runtime (the record's §5): `evaluate(workspaceId, set: ParameterSetVersion, selections)` / `evaluateBlocking` → `EvaluateResponse` (`EvaluatedParameter`, `ParameterState`, `EvaluatedOption`, `ParameterError`, `ValueOrigin`, `OrgEcho`) and `EvaluateResponseJson`, the one writer the byte cap measures. Step 1 through the shared validator, the set's `Dag`, one coroutine per parameter awaiting its parents on the bulkhead under `withTimeout(evaluate-timeout-seconds)`, the P26 selection priority, the three whole-request refusals as `DatapipelinesException`s (`unknown_parameter`, `timeout`, `response_too_large`). The route, the tool, the permission and the version resolution are lane D's.
 - `ParametersProperties` / `ParametersConfig` — `datapipelines.parameters.*` ([Configuration §3.30](configuration.md#330-parameter-engine-194)). The runner applies the statement-level keys from its own config and the evaluator the evaluate-level ones: the wiring builds both, and the one pool, from the same config (the record's §17, C27).
 - `ParameterSetTemplatePins` (#194 lane D) — the parameters side of the templates reverse arrow (the record's §8.4): the working-version, any-version, live-exact-pin and per-version-count scans over the set's pinned templates. ADDITIVE to the frozen repository (a separate class over the same tables). The COMPOSITION with the pipeline scan is `application`'s `TemplateUsage`; every consumer — `templates_used_by`, `templates_purge_draft`, the web delete guards, the template screen's counts — reads the composition.
@@ -725,7 +749,7 @@ build's `allowedInternalDependencies` map carries the same closed set).
 
 ### 5.19 `persistence`
 
-**Dependencies (internal):** none. **Dependencies (external):** `kotlinx-coroutines-core` (the bounded suspending record the event emitter awaits from the executor's coroutines) and `slf4j-api` (the WARNs a failed batch, a saturated queue and an incomplete drain owe the operator), both BOM-managed; tests only, `logback-classic` (the BOM's — the suite records the writer's WARN lines, #266b). No Spring, no Micrometer, no JDBC — `java.sql.SQLException` is read for its SQLState alone (`FailureShape`).
+**Dependencies (internal):** none in main sources; tests use `log-capture` (#756, §5.23). **Dependencies (external):** `kotlinx-coroutines-core` (the bounded suspending record the event emitter awaits from the executor's coroutines) and `slf4j-api` (the WARNs a failed batch, a saturated queue and an incomplete drain owe the operator), both BOM-managed; tests only, `logback-classic` (the BOM's — the suite records the writer's WARN lines, #266b). No Spring, no Micrometer, no JDBC — `java.sql.SQLException` is read for its SQLState alone (`FailureShape`).
 
 **Public API:**
 - `BatchingWriter<T>` — `record` (blocking: returns once the item is durable or definitively not), `recordSuspending` (bounded: at most twice `record-max-wait-ms`, then `Indeterminate`), `submit` (non-awaited, refuses when full — no production caller yet, D27's dashboard event), `queueDepth`/`queuedBytes`, `stop` (bounded drain → `DrainReport`)
@@ -745,7 +769,8 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Public API (#10 L1a — the documents, the codes, the ports and the repositories' API; L1b–L5 build on them):**
 - `VisualizationBody` / `DashboardBody` and their parts — the two documents ([dashboards.md §2](dashboards.md), the implementation spec §3), bound by `VisualizationReader` / `DashboardReader` (an explicit key table per level; unknown keys, wrong JSON types and missing keys refused as `*.validation.body_invalid` naming the path; the collection bounds checked before their members are walked) and `ArtifactJson`'s strict mapper.
 - `VisualizationErrorCodes` / `DashboardErrorCodes` — the `visualization.*` / `dashboard.*` families ([Pipeline Contract §13.22/§13.23](pipeline-contract.md)); `PipelineErrorCodes.Visualization` / `.Dashboard` mirror them, pinned equal by reflection.
-- `VisualizationValidator` / `DashboardValidator` — the save-time rules (the spec's §3.1/§3.2), exhaustive, one code per rule. The ports they judge through, declared here and implemented by the surfaces: `TemplateContractFacts` (a pinned template version's type and script contract — `TemplateContractFacts.over(TemplateDryRenderer, TemplateVersionStatuses)` is the production adapter), `RendererConfigValidator` (this module's `table`/`kpi` schemas and the Plotly shape check; L4 adds the plot-schema depth behind the same port), `PipelineReleaseFacts` (a pinned pipeline release: status, read-only, parameters, caller output columns — `application` implements it over `ReadOnlyPipelineRule`, L1b), `ParameterSetFacts` (a pinned set version's parameters and their dependents — `ParameterSetFacts.over(ParameterSetRepository)` is the production adapter).
+- `VisualizationValidator` / `DashboardValidator` — the save-time rules (the spec's §3.1/§3.2), exhaustive, one code per rule. The ports they judge through, declared here and implemented by the surfaces: `TemplateContractFacts` (a pinned template version's type and script contract — `TemplateContractFacts.over(TemplateDryRenderer, TemplateVersionStatuses)` is the production adapter), `RendererConfigValidator` (this module's `table`/`kpi` schemas; a `chart` document is judged WHOLE by `ChartDocumentRules` instead — #860, below), `PipelineReleaseFacts` (a pinned pipeline release: status, read-only, parameters, caller output columns — `application` implements it over `ReadOnlyPipelineRule`, L1b), `ParameterSetFacts` (a pinned set version's parameters and their dependents — `ParameterSetFacts.over(ParameterSetRepository)` is the production adapter).
+- The `chart` kind v1 (#860, design record 2026-11-06-neutral-chart-grammar §4): `ChartSchemas` / `ChartSchemaValidator` (the two v1 JSON Schema files on the classpath — the bytes the web module serves at `/schemas/chart/1/` — validated offline, every `$ref` from the classpath), `ChartSaveRules` (the `chart.*` save rules), `ChartLibrarySupport` (the server library's support table: `chart.unsupported.*` refusals, `chart.degraded.*` warnings), and `ChartDocumentRules`, the three layers in that order — `VisualizationValidator` stops at the first that refuses, so a document fails at exactly one; `ChartColumns` resolves the encoded fields' logical types from the same contract the save rules read, for every surface that hands a chart occurrence to the runtime.
 - `VisualizationRepository` / `DashboardRepository` (jdbc; V42) over ONE generic core, `ArtifactRepository` — the `ParameterSetRepository` API for each family: every statement takes the workspace, the hash is the database's (`HASH_EXPR` over the bound body), the one-draft index and the draft race mapped to `*.version.conflict`.
 - `VisualizationService` / `DashboardService` — the versioning §3.5 verb table over one generic core (`ArtifactLifecycle`): create, the draft write, release, purge, discard, restore, switch, import, and the lensed reads (every read takes a `ReadLens`, no default). A visualization's release cascades its DRAFT transform pins with consent (`TemplateReleaser`) and passes the `ReleaseEvidence` gate — whose default REFUSES (`visualization.release.tests_missing`) until L4 installs the evidence tables' gate. A dashboard's release checks its sources, set and visualizations and cascades DRAFT visualization pins with consent through `VisualizationService.release`, inside ONE transaction. Since L1b the lifecycle core's `repository`, `transactions` and `flipDraft`, and both services' `repository`, are module-INTERNAL (the L1a security pass's O3): a surface reads only through the lensed reads — which gained `findVersionByName` (a pin's address) and `DashboardService.pinnedBy` (D30's `used_by`, lensed) for the MCP tools.
 - `ArtifactTransferService` — the export envelopes (rest-api §21.4's shape: `templates` at a visualization envelope's root, `visualizations` at a dashboard's) and the import (the lifecycle keys stripped by name, the strict bind, templates → visualizations → the artifact) behind the `TemplateBundle` port; the routes are L1c's.
@@ -756,67 +781,99 @@ build's `allowedInternalDependencies` map carries the same closed set).
 
 **Tests:** the readers' key tables pinned against the models' properties by reflection, every reason and bound; the validators — one case per code, the count of codes covered asserted equal to the family's catalogued validation set, the spec's two worked documents accepted unchanged; the two repositories and every lifecycle verb against the module's own Postgres container (`VisualizationTestDb`, the shipped migrations through plain JDBC), one suite over both families — workspace scoping, the DB-projection hash, the one-draft index and the draft race FORCED; the release cascades rolled back by a stale hash; the transfer strip and order; the spec-drift suites (§13.22/§13.23 both directions, configuration §3.33, enums §31–§37).
 
+### 5.21 `lake`
+
+**Dependencies (internal):** `typesystem`, `persistence`, `pipeline-contract`, `auth` (#798, `AuditEventSink`) — declared; `datasources`, `staging`, `scheduler` allowed and not declared (§4.2 note). **Dependencies (external):** Iceberg 1.12.0 (`iceberg-api`, `iceberg-core` — `JdbcCatalog` ships in it — `iceberg-aws`, `iceberg-parquet`), the AWS SDK v2 `s3` with `url-connection-client` as its only HTTP client (`kms` and `sts` runtime-only, TEMPORARY: apache/iceberg#18744), Hadoop 3.5.0 `hadoop-client-api` + `hadoop-client-runtime` (runtime-only: every Parquet write builds a Hadoop `Configuration`), `parquet-column` compile-only, the PostgreSQL driver, `spring-boot-starter-jdbc`, and Jackson held at the product's pin by `enforcedPlatform` in THIS module only (Iceberg's POMs import a newer Jackson BOM). `iceberg-data` is deliberately not declared. Tests: Testcontainers Postgres and MinIO.
+
+**Public API (#785, P2 — the catalog core; P3–P7 build on it):**
+- `LakeLeases` — the record's §8a lease protocol over `lake_leases`: `acquire` (one `INSERT … SELECT … ON CONFLICT … RETURNING token` → `LeaseOutcome.Acquired` / `Busy` / `DeadlinePassed`), `heartbeat`, `release` (by operation id), `catalogNowPlus`; every comparison is the database's `now()`, and a call inside a Spring transaction is refused. `LeaseHandle` / `LeaseKind`.
+- `LakeCatalogs` — `open(lease)` → `LakeCatalogSession`: an Iceberg `JdbcCatalog` per lease whose connections come from a `FencedJdbcClientPool` (session-level `dp.lease_token` / `dp.operation_id` / `lock_timeout` / `statement_timeout`, closed at release — owner ruling 2026-11-02), `jdbc.init-catalog-tables=false` (no DDL), `S3FileIO` wrapped in `DeferringFileIO` (deletes deferred to the orphan sweep). The session's `createNamespace`, `createTable` (at `<root>/<ns>/<table-id>`, the closed `LakeTableProperties` list), `loadTable` and `write`, which classifies a failure by SQLSTATE into `LakeCatalogException.Fenced` (`DP001`), `Restoring` (`DP002`) or `OutcomeUnknown` (a commit whose outcome the connection lost — never retried blind). `LakeNames`, `CatalogDatabase`.
+- `LakeBootCheck` — the after-Flyway check `web`'s `LakeCatalogStartupCheck` runs when the lake is enabled: catalog shape, the four V53 triggers enabled and pointing at their functions, the one control row, a HEAD on the bucket and prefix, and a conditional PUT probe; each failure refuses boot with a catalogued `lake.boot.*` id ([Configuration §7](configuration.md)).
+- `LakeProperties` (the `datapipelines.lake.*` keys, [Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785); credentials redacted from every `toString`), `LakeS3Clients`, `LakeAutoConfiguration` (every bean `@ConditionalOnProperty(enabled=true)`; with `false` no lake bean exists).
+
+**Public API (#798, P3 — table definitions, package `co.datapipelines.lake.definitions`; no route, tool or screen yet, P8 adds them):**
+- `LakeDefinitionService` — the lifecycle of [Lake §2](lake.md#2-lifecycle): `createDraft`, `writeDraft` (overwrite or copy-on-write at a body hash), `release` (then applies), `discard`, `purgeDraft`, `findTable(namespace, table)`. Every verb takes `actor: UUID` and `via: WriteSurface`; authorization is the surfaces' (P8). Refuses with `lake.definition.*` ([Pipeline Contract §13.25](pipeline-contract.md#1325-managed-lake)); `lake.definition.authoring_disabled` when authoring is off.
+- `LakeDefinitionApplier` — the apply state machine of [Lake §3](lake.md#3-apply-states): `apply(tableId, version, deadline, actor)` and `verifyApplying(tableId, deadline, actor)` → `LakeApplyOutcome`; the namespace and table leases, the conditional stamps, the semantics projection, the `lake_tables` registry row and the three `lake.definition.*` audit events.
+- `LakeDefinitionBodies` / `LakeDefinitionRules` (the body of [Lake §1](lake.md#1-the-definition-body)), `LakeChangeClassifier` (the policy of [Lake §4](lake.md#4-the-supported-change-policy), a pure function), `LakeDefinitionRepository` / `LakeApplyRepository` (V54's tables), `LakeTableStatus` / `LakeApplyState` / `LakeChangeClass`, `LakeDefinitionsAutoConfiguration` (inert unless the lake is enabled; the app's one transaction manager and audit sink).
+
+**Why it is its own module.** The record's §3a: the lake is a storage product with its own catalog, lease protocol and object-store client, and its library stack (Iceberg, Hadoop, Parquet, the AWS SDK) must not leak onto the class path of modules that do not use it.
+
+**Tests:** the lease statements against Postgres with the shipped migrations applied (`LakeLeasesIntegrationTest`, incl. the past-deadline insert-path refusal); the fence (`LakeFenceIntegrationTest` — DP001/DP002, the rename OLD-name check, the takeover waiting on the `FOR SHARE` lock); the fenced pool (`FencedPoolIntegrationTest` — session settings, DP's Hikari pool carries none, no connection outlives the pool, a stock pool's lost-acknowledgement replay red beside the fenced pool's `OutcomeUnknown`); Iceberg's own schema check finding V53's shape and altering nothing (`CatalogShapeIntegrationTest`, A0); namespace, table and a Parquet append end to end on MinIO (`LakeCatalogBootstrapIntegrationTest`); the boot check's refusals (`LakeBootCheckIntegrationTest`, `LakeBootCheckTest`); the configuration keys pinned across the doc, `application.yml` and the binding (`LakeConfigKeysSpecDriftTest`).
+
+### 5.22 `dependency-contract`
+
+**Dependencies (internal):** none — layer 0 beside `graph` and `persistence`. **Dependencies (external):** none in main — Kotlin stdlib and the JDK only (the dependency-graph design record §3.1). Tests only: the networknt JSON Schema validator (the catalog entry #860 added) with Jackson held at the product's pin by `enforcedPlatform`, for the wire schema test.
+
+**What it must never depend on:** Spring, JDBC (`java.sql`), `jakarta`, or any family module — `pipeline-contract`, `templates`, `scheduler`, `auth`, `datasources`, `visualization`. Persistence, transactions and the family adapters live in `application/dependencies`; the Spring composition in `web`. `DependencyContractBoundaryTest` refuses those imports in the main sources (fully-qualified spellings included); the empty §4.2 row refuses the Gradle edge.
+
+**Public API (#868 G1, package `co.datapipelines.dependencies`; G2, #786 and G3 build on it):**
+- The record's §5.1 types, immutable: `ObjectAddress` / `LookupScope`, `Selector` (`ExactVersion` / `Current` / `Entity`), `ObjectRequest`, `ResolvedIdentity` / `OwnerScope`, `VersionInfo` (`Artifact` / `Revision` / `Unversioned`), `Node`, `Edge`, `GraphSnapshot`; the §5.2 dimensions as separate types — `Resolution` (no hidden value), `Lifecycle`, the sealed family-specific `Operational`, `Observation`.
+- `FamilyKey` — a value type over the wire string; `FamilyKey.PRODUCTION`, the frozen eight §4 keys with their `Capabilities` (`ReleaseCapability` / `PromotionCapability`) pairs. The closed set is a property of production admission (`FamilyRegistry.production`), not of the type, so a test family joins a test-built registry with no walker change.
+- The closed §11.1 vocabularies, each with a `wire` token: `Relationship`, `ConstraintKind` / `Constraint`, `DiagnosticKind`, `LimitKind`, `SelectorKind`, `VersionKind`, `OperationalKind`, `ScheduleCondition`.
+- `DependencyProvider` (`resolveMany(requests, context)` — one `Outcome` per request, MISSING/UNSUPPORTED as values, infrastructure failures propagate; `outgoing(resolved)` — deterministic `Reference`s over the loaded body), `FamilyDescriptor` (wire key, root selectors, capabilities, extractor schema version, provider, safe-summary projector) and `FamilyRegistry` (a duplicate key throws at construction).
+- `ResolveContext` — workspace, `MetadataSnapshot`, `Purpose`, server-built `Authority`, `Deadline` (the cumulative metadata deadline over an injectable clock; `Deadline.none()` is unbounded), and the `ReadIsolation` the walk fences a speculative provider call with (no default; a failed speculative read must leave a shared transaction usable — `application/dependencies`' `SavepointReadIsolation` is a savepoint, `ReadIsolation.NONE` only for sources whose failure leaves no state behind); no client flag. `DeadlineExceeded` — the walk's refusal to start a batch after expiry, never a partial graph.
+- `GraphLimits` — the one injected limits object (depth, nodes, edges, diagnostics, wire bytes, lock wait, and the record's §25.4 `resolveBatchSize` / `metadataTimeout` / `statementTimeout` with their defaults as named constants).
+- `DependencyWalker` — the record's §7.2 bounded walk (request and identity memos, every edge occurrence, explicit stack, provider batches of at most `resolveBatchSize` clamped by the node budget with the deadline checked before each, longest-path depth, a bounded cycle trail, `LIMIT` diagnostics, `dependencyFirst` only for a complete acyclic graph) and `GraphFingerprint` (the §5.3 internal fingerprint; never on the wire, never `tree_hash`).
+- `co.datapipelines.dependencies.conformance.ProviderConformance` — the provider conformance harness every family's test runs (one outcome per request, MISSING as a value, deterministic `outgoing`, every declared reference-bearing field produces a reference). In main, framework-free, because a `testFixtures` source set would be a self-edge `verifyModuleDependencies` refuses.
+- Resources: `co/datapipelines/dependencies/wire/dependencies-v1.schema.json` (the §11.1 shapes as JSON Schema 2020-12: the root is the 200 `data` object, `#/$defs/error_details` a request refusal's `details`, `#/$defs/request` the query rules) and `co/datapipelines/dependencies/wire/goldens/` (one synthetic payload per named case: the `data` object, or the `details` object for the `refusal-*` cases) — G4 serves them, G6 renders them. `co.datapipelines.dependencies.wire.DependencyWire` names both paths, the schema `$id` and the wire `schema_version`; `RequestField` and `RefusalReason` are the closed `details.field` / `details.reason` vocabularies.
+
+**Why it is its own module.** The record's §3.1: a datasource, API or schedule identity must not get a permanent home in a pipeline-specific module, and `pipeline-contract` is not JDK-only (its release participant imports Spring's `TransactionStatus`). The diagnostic business graph is not the executor's `Dag<T>` either: `graph` rejects dangling nodes and cycles, while this walk reports them.
+
+**Tests:** the walk's acceptance goldens (A02 identity memo, A03 longest path, A04 every limit at and over, A05 leaves, A28 the synthetic `test_widget` family), the batch call counts and the fake-clock deadline, the fingerprint golden and each excluded input varied, every vocabulary enumerated with its count, the conformance harness over the synthetic family, the wire suite (every golden validates against the schema, schema enums equal the types' tokens both ways, every token/variant/reason covered by a golden), `DependencyContractBoundaryTest`.
+
+### 5.23 `log-capture`
+
+**Dependencies (internal):** none — layer 0. **Dependencies (external):** `logback-classic` as `api` (BOM-managed, no version), because the helper's public signatures expose Logback's `Logger`, `ILoggingEvent` and `ListAppender` to its consumers' test sources.
+
+**TEST-ONLY.** Every consumer declares it with `testImplementation(project(":modules:log-capture"))`; `verifyModuleDependencies` fails on an edge from any configuration whose name does not start with `test` (only Kover's own self-edge in its exact plumbing configurations is exempt, as for every module), so the module never reaches a runtime classpath. Its sources sit in `src/main` only so that other modules can depend on them; nothing here is product code.
+
+**Public API (package `co.datapipelines.logcapture`, #756):**
+- `SnapshotListAppender` — a Logback `ListAppender<ILoggingEvent>` that starts itself, appends under its list's own monitor, and reads only detached snapshots: `events()` (the original events with their metadata, in capture order) and `messages()` (their formatted messages). The #362 `ConcurrentModificationException` and the #391 torn reads came from iterating the live list while another thread logged.
+- `capturingLogEvents(logger, appender = SnapshotListAppender(), block): List<ILoggingEvent>` — attaches to one logger for the block.
+- `capturingLogs(appender = SnapshotListAppender(), block): List<String>` — attaches to the ROOT logger and returns formatted messages; pass a shared appender when a poll must read the same capture the block writes.
+- Both (re)start the appender before attaching and detach and stop it in a `finally`, so a throwing block never leaves it attached and a reused appender records again.
+
+**Why it is its own module.** Until #756 every capturing module carried its own copy (nine, byte-identical but for the package line, one of them divergent). The owner ruled for one shared test-only module (2026-11-10, option A) over the earlier "one test-source copy per module" convention. `RawListAppenderGuardTest` (buildSrc) scans this module's main sources beside every test source, exempts the helper file by name, and refuses a module-local copy of the helper or its test anywhere else (`DEVELOPMENT.md` §9.6).
+
+**Tests:** `SnapshotListAppenderTest` — a returned snapshot stays unchanged after another append; snapshots keep event identity, level, arguments and throwable metadata; a throwing capture detaches and stops; a finite producer and reader see ordered independent snapshots; writer threads appending while a reader takes snapshots (no `ConcurrentModificationException`, nothing lost); the root-logger capture formats messages, detaches on a throw and records again when reused.
+
 ## 6. Version Catalog
 
 `gradle/libs.versions.toml` — single source of truth for third-party versions.
 
 ```toml
 [versions]
-kotlin = "1.9.24"
-spring-boot = "3.3.2"
-kotlinx-coroutines = "1.8.1"
-jackson = "2.17.2"
-flyway = "10.17.0"
-slf4j = "2.0.13"
-logback = "1.5.6"
-freemarker = "2.3.33"
-hikari = "5.1.0"
-postgresql = "42.7.3"
-mssql-jdbc = "12.6.1.jre11"
-mysql-connector-j = "8.4.0"
-h2 = "2.2.224"
-duckdb-jdbc = "1.0.0"
-sqlite-jdbc = "3.46.1.0"
-ojdbc11 = "23.4.0.24.114"
-argon2-jvm = "2.11"
-jjwt = "0.12.6"
-micrometer = "1.13.2"
-spring-boot-starter-test = "3.3.2"
-testcontainers = "1.20.1"
-mcp-sdk = "0.10.0"
-htmx = "2.0.0"
-junit-jupiter = "5.10.2"
-mockk = "1.13.12"
-kotest = "5.9.1"
+# SHAPE ONLY (#827): the values are deliberately NOT reproduced here — this excerpt went
+# stale while reading as authority. `gradle/libs.versions.toml` is the one place a version
+# literal lives; review the catalog (and bump drivers) there.
+kotlin = "<stable>"
+spring-boot = "<stable>"
+jackson = "<BOM or stable>"
+flyway = "<BOM or stable>"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
-kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
 # ... (every dependency declared here, used by ref from build.gradle.kts files)
 
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web", version.ref = "spring-boot" }
-spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc", version.ref = "spring-boot" }
-spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis", version.ref = "spring-boot" }
-spring-boot-starter-oauth2-client = { module = "org.springframework.boot:spring-boot-starter-oauth2-client", version.ref = "spring-boot" }
 
 # Flyway — `app` module only (§3.1 rule 2). Since Flyway 10 the Postgres support is a
 # separate artifact; flyway-core alone cannot migrate a Postgres target.
 flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
 flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
-# etc.
 ```
 
 **Redis client:** no explicit entry — `spring-boot-starter-data-redis` brings **Lettuce** as its default client, version-managed by the Spring Boot BOM. Adding a second, separately-pinned Lettuce entry would let it drift from the BOM; if Jedis is ever wanted instead, that is an explicit exclusion + dependency, and a spec change here.
 
-> **Gate G2 — RESOLVED 2026-08-07** (lockfile sub-item closed 2026-08-15, §7.6). Every entry was resolved against `repo1.maven.org` `maven-metadata.xml`, pre-releases rejected, and BOM-managed artifacts (verified by parsing `spring-boot-dependencies:3.5.16` + its 43 imported BOMs) declared version-less. **`gradle/libs.versions.toml` is now the ratified source of truth for versions; the table above is historical.** Anchor decisions: Spring Boot 3.5.16 (4.x exists but §11.1 freezes 3.x for v1), Kotlin 2.4.10 (with an empirically-verified conflict-resolution win over the BOM's kotlin-bom 1.9.25 — see the toml comment). `gradle.lockfile` (transitive pinning) landed 2026-08-15 per §7.6. The original G2 procedure is retained below for future catalog changes:
+> **Gate G2 — RESOLVED 2026-08-07** (lockfile sub-item closed 2026-08-15, §7.6). Every entry was resolved against `repo1.maven.org` `maven-metadata.xml`, pre-releases rejected, and BOM-managed artifacts (verified by parsing `spring-boot-dependencies:3.5.16` + its 43 imported BOMs) declared version-less. **`gradle/libs.versions.toml` is now the ratified source of truth for versions; the excerpt above is shape-only (#827).** Anchor decisions: Spring Boot 3.5.16 (4.x exists but §11.1 freezes 3.x for v1), Kotlin 2.4.10 (with an empirically-verified conflict-resolution win over the BOM's kotlin-bom 1.9.25 — see the toml comment). `gradle.lockfile` (transitive pinning) landed 2026-08-15 per §7.6. The original G2 procedure is retained below for future catalog changes:
 > 1. Resolve the current stable release: `curl -s 'https://search.maven.org/solrsearch/select?q=g:"org.flywaydb"+AND+a:"flyway-core"&core=gav&rows=5&wt=json' | jq -r '.response.docs[].v'` (repeat per artifact; or run `./gradlew dependencyUpdates` once the build exists).
 > 2. Reject anything that is not a released stable version — **no ranges, no `+`, no `latest.release`, no SNAPSHOT, no RC/M/beta** (§6.1, and the project-wide version-pinning rule).
 > 3. Check BOM-managed artifacts are **not** pinned here at all: anything the `spring-boot` BOM manages (Jackson, Micrometer, Lettuce, HikariCP, the Spring modules) takes its version from the BOM. A local pin that disagrees with the BOM is a silent runtime-incompatibility source.
 > 4. Verify JDK 21 compatibility for each pinned artifact, then commit `gradle.lockfile` (§6.1) in the same commit as the catalog.
 > 5. Record the date the catalog was verified in the change log below.
 >
-> This gate is the reason the versions above are safe to leave stale: they are explicitly labelled unverified, so nobody builds on them believing otherwise.
+> The excerpt is shape-only on purpose: `gradle/libs.versions.toml` is the one place a version literal lives, so a catalog review (or a driver bump) cannot be misled by a stale copy of this page.
 
 ### 6.1 Versioning rules
 
@@ -1286,7 +1343,8 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-10-24 | #669 the browser suite's CI home | 669 | §5.12's design rule: a local `build`/`check` still runs `:tests:browser-tests:test`; CI's gate job (like `scripts/gate.sh`) excludes it and compiles its classes, and CI's `browser` job runs it in three shards (`BrowserShards`, buildSrc). The old "CI's build step lists it; every gate log shows it" stopped being true at the 2026-10-09 gate ruling and at #669. |
+| 2026-10-24 | v1.7 | 442b (#442) | §5.16: `scheduler` gains `thymeleaf-spring6` (BOM-managed, already on `auth`'s and `web`'s class paths — the scheduler's lock gains its four lines) for the notice templates; its public API gains the `NotificationMailer` port and the `ScheduleNotifier` job (B5). `web` implements the port over `auth`'s `MailSender`. No internal dependency edge changes. |
+| 2026-10-24 | #669 the browser suite's CI home | 669 (lands with 669b) | §5.12's design rule: a local `build`/`check` still runs `:tests:browser-tests:test`; CI's gate job (like `scripts/gate.sh`) excludes it and compiles its classes, and CI's `browser` job runs it in three shards (`BrowserShards`, buildSrc). The old "CI's build step lists it; every gate log shows it" stopped being true at the 2026-10-09 gate ruling and at #669. |
 | 2026-10-22 | JavaScript product wiring | 8b (#8) | One availability-aware engine map supplies templates, the pool runner and node support; §3.1/§5.15 name the two engines and their responsibilities. |
 | 2026-10-21 | #8 the JavaScript engine | 8a (#8) | §5.15: the module gains the round-two engine — `JavaScriptEngine` on the same seam, `JavaScriptRuntime` (the one Engine/Context factory: UNTRUSTED policy, spawned isolate, one Engine per JVM), its options, `Availability`, `EngineScope`, the console sink types and `JavaScriptResourcesMain`. External dependencies gain GraalVM polyglot, nativebridge and truffle-api 25.4.4.1.1 (UPL 1.0; with collections, nativeimage, word and jniutils) and the test-runtime-only `js-isolate-community` (MIT + UPL 1.0); no isolate binary in the jar. The internal edge set is unchanged (`scripting` → `typesystem` only). No product surface: a javascript template is still refused until 8b. |
 | 2026-10-21 | #8 lane 8a the image's loader path (owner ruling 2026-10-21) | 8a (#8) | §5.4.1: the image's value is now `LOADER_PATH=/app/lib,/opt/graaljs` in the fence, the prose and the readiness checklist — the drop-in directory, then the JavaScript isolate's (§5.15). One list in one `ENV`, never a `-Dloader.path` beside it: `PropertiesLauncher` reads the system property before the environment, so a `-Dloader.path` for the isolate would silently drop the drop-in (measured in lane 8a). `ImageLoaderPathSpecDriftTest` pins the new value and refuses a `-Dloader.path` in the Dockerfile. |

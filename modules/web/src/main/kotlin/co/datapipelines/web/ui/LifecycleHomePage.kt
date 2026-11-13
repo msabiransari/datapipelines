@@ -17,7 +17,7 @@ internal object LifecycleHomePage {
      * unknown chart group is the frame's unavailable sentence, never a zero.
      */
     fun of(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         lensed: Boolean,
         charts: ChartsResult,
         recent: RecentResult?,
@@ -47,7 +47,7 @@ internal object LifecycleHomePage {
      * filter gets no row for it.
      */
     fun tasks(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         inventory: Inventory?,
     ): List<OverviewPage.TaskRow> =
         listOfNotNull(
@@ -58,7 +58,7 @@ internal object LifecycleHomePage {
                     "Review your drafts",
                     OverviewWords.drafts(family, inventory?.draftOnly),
                     href,
-                    "draft",
+                    OverviewPage.TaskTone.DRAFT,
                 )
             },
             family.filtered(LifecycleBucket.RELEASED_ONLY)?.let { href ->
@@ -68,19 +68,19 @@ internal object LifecycleHomePage {
                     "Explore live ${family.plural}",
                     "Run a released ${family.singular} with your own inputs.",
                     href,
-                    "released",
+                    OverviewPage.TaskTone.RELEASED,
                 )
             },
         )
 
-    /** The heading eyebrow's icon for a family route: the [Family]'s own, else the sibling homes' rail icons. */
+    /** The heading eyebrow's icon for a family route: the [OverviewFamily]'s own, else the sibling homes' rail icons. */
     fun iconFor(family: String): String =
-        OverviewPage.Family.entries
+        OverviewFamily.entries
             .firstOrNull { it.navigation.route == family }
             ?.icon ?: SIBLING_ICONS[family] ?: DEFAULT_ICON
 
     private fun page(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         lensed: Boolean,
         inventory: OverviewPage.InventoryPanel?,
         unavailable: String?,
@@ -98,7 +98,7 @@ internal object LifecycleHomePage {
         )
 
     private fun recentPanel(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         recent: RecentResult,
         now: Instant,
     ): OverviewPage.RecentPanel {

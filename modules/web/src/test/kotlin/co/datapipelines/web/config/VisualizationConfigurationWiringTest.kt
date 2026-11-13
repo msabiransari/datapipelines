@@ -85,10 +85,10 @@ class VisualizationConfigurationWiringTest {
         ObjectMapper().readTree(
             """
             {"name":"acme/visualizations/revenue","display_name":"Revenue",
-             "renderer":{"kind":"plotly","version":"4"},
+             "renderer":{"kind":"table","version":"1"},
              "inputs":{"revenue":{"columns":[{"name":"amount","type":"DECIMAL","nullable":false}]}},
-             "config":{"data":[{"type":"bar"}]},
-             "bindings":{${(0 until bindings).joinToString(",") { "\"data[0].y$it\":\"amount\"" }}}}
+             "config":{"columns":[]},
+             "bindings":{${(0 until bindings).joinToString(",") { "\"columns[$it].values\":\"amount\"" }}}}
             """.trimIndent(),
         )
 
@@ -96,6 +96,21 @@ class VisualizationConfigurationWiringTest {
     @Configuration
     @Suppress("unused")
     class Collaborators {
+        /** #517 — the workspace writer guard the services now require; the graph, not the lock, is under test here. */
+        @Bean
+        fun releaseMutationGuard(): co.datapipelines.pipeline.release.ReleaseMutationGuard =
+            co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE
+
+        /** #873 §D — the transitive restore recheck the restores now take; the graph, not the walk, is under test here. */
+        @Bean
+        fun restoreDependencyGuard(): co.datapipelines.pipeline.release.RestoreDependencyGuard =
+            co.datapipelines.pipeline.release.RestoreDependencyGuard.DIRECT_ONLY
+
+        @Bean
+        fun releaseBounds(): co.datapipelines.pipeline.release.ReleaseBounds =
+            co.datapipelines.pipeline.release
+                .ReleaseBounds()
+
         private fun dataSource(): javax.sql.DataSource = io.mockk.mockk(relaxed = true)
 
         @Bean

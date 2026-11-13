@@ -70,6 +70,9 @@ import java.time.Instant
  * yields the same string — the conformance suite proves it); null → calling them is a
  * typed refusal ("a script is a pure function of its inputs"). The refusal fires
  * when the body actually evaluates the call, so an unevaluated branch is legal.
+ * `$random()` and `$shuffle()` are likewise shadowed at call time, but always refuse:
+ * there is no seed input. Aliases and `$eval` inherit these per-evaluation bindings;
+ * deterministic local rebindings remain legal, just like local clock rebindings.
  *
  * ## What it does not guarantee
  *
@@ -170,6 +173,8 @@ class JsonataEngine(
         frame.setEvaluateEntryCallback { _, _, _ -> guard.onEntry() }
         frame.setEvaluateExitCallback { _, _, _, _ -> guard.onExit() }
         bindClock(frame, limits.now, guard)
+        frame.bind("random", refusingRandomFunction("random", SIGNATURE_RANDOM, guard))
+        frame.bind("shuffle", refusingRandomFunction("shuffle", SIGNATURE_SHUFFLE, guard))
         bindEval(frame, guard)
         return try {
             JsonataValues.fromEngineOutput(
@@ -197,7 +202,9 @@ class JsonataEngine(
      * Shadows `$eval` for this evaluation (#272): the string is parsed with the library's
      * own parser and a reserved bind is refused BEFORE the library evaluates it in the
      * calling frame. Anything else — including a string that does not parse, which keeps
-     * the library's own D3120 — goes to the library's `$eval` unchanged.
+     * the library's own D3120 — goes to the library's `$eval` unchanged. The string is
+     * parsed twice per call (the reserved-name walk, then the library's `functionEval`),
+     * accepted (#304) inside the evaluation pool's abandonment bound.
      */
     private fun bindEval(
         frame: Jsonata.Frame,
@@ -285,6 +292,24 @@ class JsonataEngine(
             )
         }
 
+    private fun refusingRandomFunction(
+        name: String,
+        signature: String,
+        guard: JsonataEvaluationGuard,
+    ): Jsonata.JFunction =
+        Jsonata.JFunction(
+            Jsonata.JFunctionCallable { _, _ ->
+                throw guard.refuse(
+                    ScriptEvaluationException(
+                        "\$$name() is not available: a script is a pure function of its inputs — " +
+                            "no seed exists; remove the call" +
+                            if (name == "shuffle") "; use sorting for deterministic ordering" else "",
+                    ),
+                )
+            },
+            signature,
+        )
+
     private fun syntaxException(
         body: String,
         err: JException,
@@ -318,6 +343,10 @@ class JsonataEngine(
         /** The library's own signature strings for the two clock builtins. */
         const val SIGNATURE_NOW = "<s?s?:s>"
         const val SIGNATURE_MILLIS = "<:n>"
+
+        /** The library's own signatures for the two ambient random builtins. */
+        const val SIGNATURE_RANDOM = "<:n>"
+        const val SIGNATURE_SHUFFLE = "<a:a>"
 
         /** The library's own signature for `$eval` (`Jsonata.java` registers it so). */
         const val SIGNATURE_EVAL = "<sx?:x>"

@@ -3,6 +3,7 @@ package co.datapipelines.application.dashboards
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.executor.SlotReservation
 import co.datapipelines.visualization.DashboardRuntimeConfig
+import co.datapipelines.visualization.DashboardRuntimeKey
 import kotlinx.coroutines.delay
 import java.time.Duration
 import java.util.UUID
@@ -27,6 +28,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * The counters are held until the refresh ENDS ([Admission.close]) rather than released execution by execution: a
  * refresh's executions all finish before the refresh does, so this over-holds by at most the tail of the slowest source.
+ *
+ * ## Busy or never (#762)
+ * A refresh needing more executions than a CEILING of this instance — `max-executions-per-refresh`, or the executor's
+ * `max-concurrent-executions-per-instance` ([ExecutionSlots.instanceCeiling]) — can never be admitted however long it
+ * waits, so it is answered [AdmissionResult.NeverAdmissible] BEFORE the wait, naming the smaller ceiling and its key.
+ * Waiting it out answered "try again shortly" after `max-wait-seconds`, for ever, and sent operators to the wrong key.
+ * The dashboard execution cap is not a third ceiling here: `DashboardRuntimeConfig` refuses one below
+ * `max-executions-per-refresh`, so it never binds first.
  */
 class RefreshAdmission(
     private val slots: ExecutionSlots,
@@ -46,26 +55,44 @@ class RefreshAdmission(
     val executionsReserved: Int get() = synchronized(lock) { dashboardExecutions }
 
     /**
-     * Admits a refresh of [executions] distinct executions in [workspaceId], or answers null when the instance stays
-     * full for `max-wait-seconds`. Nothing is held after a null.
+     * Admits a refresh of [executions] distinct executions in [workspaceId]: [AdmissionResult.Admitted] holding every
+     * place, [AdmissionResult.NeverAdmissible] at once when a ceiling of this instance is below [executions], or
+     * [AdmissionResult.Busy] when the instance stays full for `max-wait-seconds`. Nothing is held after a refusal.
      */
     suspend fun admit(
         workspaceId: UUID,
         executions: Int,
-    ): Admission? {
+    ): AdmissionResult {
         require(executions >= 0) { "executions must not be negative, was $executions" }
-        if (executions > config.maxExecutionsPerRefresh) return null // the validator refuses such a dashboard at save; never admissible
+        neverAdmissible(executions)?.let { return it }
         val deadline = System.nanoTime() + Duration.ofSeconds(config.maxWaitSeconds.toLong()).toNanos()
         while (true) {
             if (takeCounters(workspaceId, executions)) {
                 val reservation = reserve(executions, deadline)
-                if (reservation != null || executions == 0) return Admission(reservation) { giveCounters(workspaceId, executions) }
+                if (reservation != null || executions == 0) {
+                    return AdmissionResult.Admitted(Admission(reservation) { giveCounters(workspaceId, executions) })
+                }
                 giveCounters(workspaceId, executions)
             }
             val remainingNanos = deadline - System.nanoTime()
-            if (remainingNanos <= 0) return null
+            if (remainingNanos <= 0) return AdmissionResult.Busy
             delay(minOf(POLL_MILLIS, Duration.ofNanos(remainingNanos).toMillis().coerceAtLeast(1)))
         }
+    }
+
+    /**
+     * The smaller ceiling when [executions] exceeds it, else null. The per-refresh bound comes first so a tie names
+     * it: the document's own bound, which the validator refuses at save (a document over it was saved under an older,
+     * larger bound or on another instance).
+     */
+    private fun neverAdmissible(executions: Int): AdmissionResult.NeverAdmissible? {
+        val ceilings =
+            listOf(
+                config.maxExecutionsPerRefresh to DashboardRuntimeKey.MAX_EXECUTIONS_PER_REFRESH.path,
+                slots.instanceCeiling to ExecutionSlots.INSTANCE_CEILING_KEY,
+            )
+        val (ceiling, key) = ceilings.minBy { it.first }
+        return if (executions > ceiling) AdmissionResult.NeverAdmissible(executions, ceiling, key) else null
     }
 
     private suspend fun reserve(
@@ -104,6 +131,27 @@ class RefreshAdmission(
     private companion object {
         const val POLL_MILLIS = 25L
     }
+}
+
+/** What [RefreshAdmission.admit] answers (#762): admitted, busy now, or never on this instance. */
+sealed interface AdmissionResult {
+    /** Every place is held; [admission] gives them back when the refresh ends. */
+    data class Admitted(
+        val admission: Admission,
+    ) : AdmissionResult
+
+    /** The instance stayed full for `max-wait-seconds`; nothing is held, and a later attempt may be admitted. */
+    data object Busy : AdmissionResult
+
+    /**
+     * [executions] exceeds [ceiling], the value of configuration key [key] on this instance: no wait or retry can admit
+     * it until an operator raises that key (or the dashboard needs fewer executions). Decided before any wait.
+     */
+    data class NeverAdmissible(
+        val executions: Int,
+        val ceiling: Int,
+        val key: String,
+    ) : AdmissionResult
 }
 
 /**

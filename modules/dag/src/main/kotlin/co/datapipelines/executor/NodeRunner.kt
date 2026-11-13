@@ -6,6 +6,7 @@ import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.LakeBrokenTable
+import co.datapipelines.datasources.ReadOnlyConnectionMode
 import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.CalculatorInputResolver
@@ -148,6 +149,16 @@ data class NodeExecutionContext(
      * fixture is unchanged.
      */
     val operations: NodeOperations = NodeOperations(),
+    /** The root's checked append authority, inherited without deriving anything from [userId]. */
+    val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
+    /** Execution-owned managed delivery; never inherited by a child with a different staging database. */
+    val lakeAppendSession: co.datapipelines.pipeline.LakeAppendSession? = null,
+    /** Actual template versions used by this execution's recipe. */
+    val lakeLineage: co.datapipelines.pipeline.LakeExecutionLineage? = null,
+    /** The one delivery node whose successful SQL must be followed by the trusted re-list. */
+    val lakeDeliveryNodeId: String? = null,
+    /** [ExecuteRequest.readOnly]: DQL datasource statements run in the per-lease read-only mode (#463). */
+    val readOnly: Boolean = false,
     /** The root surface's admission check, retained through every composed child execution. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
 )
@@ -305,7 +316,9 @@ class NodeRunner(
             return runScript(node, ctx, startedAt)
         }
         val sql = phase(ctx, NodePhase.RENDER, node.id) { render(node, ctx) }
-        return dispatchRendered(node, ctx, startedAt, sql)
+        val result = dispatchRendered(node, ctx, startedAt, sql)
+        if (node.id == ctx.lakeDeliveryNodeId) ctx.lakeAppendSession?.readCompleted()
+        return result
     }
 
     /**
@@ -379,7 +392,15 @@ class NodeRunner(
     private fun render(
         node: ExecutableNode,
         ctx: NodeExecutionContext,
-    ): String = templateEngine.render(node.template, ctx.values, ctx.renderBudgetChars)
+    ): String =
+        if (ctx.lakeLineage == null) {
+            templateEngine.render(node.template, ctx.values, ctx.renderBudgetChars)
+        } else {
+            templateEngine
+                .render(node.template, ctx.values, ctx.renderBudgetChars) { ref, hash ->
+                    ctx.lakeLineage.templateUsed(co.datapipelines.pipeline.LakeArtifactReference(ref.id, ref.version, hash))
+                }.also { ctx.lakeLineage.nodeResolved(node.id) }
+        }
 
     // ---------------------------------------------------------------- tempdb
 
@@ -433,10 +454,19 @@ class NodeRunner(
 
             is NodeOutput.Datasource -> {
                 phase(ctx, NodePhase.WRITEBACK, node.id) {
-                    tempdbCursor(node, bound, ctx, resolved) { rs ->
-                        val op = ctx.operations.observerFor(node.id)
-                        val written = writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId, op)
-                        NodeResult.of(node.id, written, startedAt)
+                    val lake = ctx.lakeAppendSession?.takeIf { it.datasourceName == output.datasource }
+                    if (lake != null) {
+                        val target =
+                            datasourceRegistry.getVisible(output.datasource, ctx.workspaceId)
+                                ?: throw NodeRefusals.datasourceNotFound(output.datasource)
+                        if (target.dialect != Dialect.LAKE) throw NodeRefusals.writebackTargetReadonly(output)
+                        LakeNodeWriteback.run(node, output, bound, ctx, resolved, startedAt, lake) { checkStagingBudget(node, ctx) }
+                    } else {
+                        tempdbCursor(node, bound, ctx, resolved) { rs ->
+                            val op = ctx.operations.observerFor(node.id)
+                            val written = writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId, op)
+                            NodeResult.of(node.id, written, startedAt)
+                        }
                     }
                 }
             }
@@ -494,10 +524,12 @@ class NodeRunner(
     /**
      * `CREATE TABLE <table> AS <sql>` on the staging connection.
      *
-     * Run through `withConnection` rather than `Staging.execute` so the statement gets a
-     * `queryTimeout` and is registered for `Statement.cancel()`: staging sets **no** timeout on
-     * `execute`/`withConnection`, so author tempdb SQL could otherwise hold its leased connection
-     * for as long as it liked with the execution timeout as the only backstop. The memory budget
+     * Run through `withConnection` rather than `Staging.execute` so the statement gets the node's
+     * `queryTimeout` and is registered for the node's `Statement.cancel()`: staging bounds
+     * `execute` and `withQuery` with its own `query-timeout-seconds` and cancels them only when the
+     * whole database closes, and it bounds **no** `withConnection` statement, so this one is the
+     * executor's to bound — otherwise author tempdb SQL could hold its leased connection for as
+     * long as it liked with the execution timeout as the only backstop. The memory budget
      * `execute` would have checked is checked explicitly afterwards ([checkStagingBudget]).
      *
      * ## Why the row count is a second statement
@@ -694,9 +726,12 @@ class NodeRunner(
         // raw "table not found", which says nothing about WHY. Refuse HERE, at CONNECT, with
         // the registry's recorded reason (details carry `table` and `last_error`). The check is
         // a registry read against the rendered SQL's table references — no connection is leased
-        // for a node that cannot succeed.
+        // for a node that cannot succeed. The managed lake's own refusal (a table its generation
+        // serves no view for, #818) runs at the lease below, against the generation leased.
         if (datasource.dialect == Dialect.LAKE) {
-            phase(ctx, NodePhase.CONNECT, node.id) { LakeTableGate.enforceAvailable(datasourceRegistry, datasource, bound) }
+            phase(ctx, NodePhase.CONNECT, node.id) {
+                LakeTableGate.enforceAvailable(datasourceRegistry, datasource, bound)
+            }
         }
         // Workspaces design §6 layer 2a (D10): the save-time readonly check read the registry
         // as of the SAVE; this backstop re-reads the LIVE entry (past the metadata cache) at
@@ -741,13 +776,23 @@ class NodeRunner(
                 // execution caused this credential to be decrypted", which is the one question
                 // datasources §7.4 exists to answer.
                 auditSink?.withCause(ctx.executionId, node.id) {
-                    datasourceRegistry.poolFor(datasource).leaseConnection()
-                } ?: datasourceRegistry.poolFor(datasource).leaseConnection()
+                    ManagedLakeTableGate.leaseServing(datasourceRegistry, datasource, bound)
+                } ?: ManagedLakeTableGate.leaseServing(datasourceRegistry, datasource, bound)
             }
         return connection.use { conn ->
             when (node.type) {
+                // #463: on a read-only run the per-lease mode encloses datasourceQuery whole and owns the restore;
+                // an entry failure fails closed with the connect code (this `use` closes the lease), a restore
+                // failure after a returned query fails like a refused streaming commit.
                 NodeType.DQL -> {
-                    datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect)
+                    ReadOnlyConnectionMode.within(
+                        connection = conn,
+                        dialect = datasource.dialect,
+                        discard = { datasourceRegistry.poolFor(datasource).discard(it) },
+                        active = ctx.readOnly,
+                        onEntryFailure = { asNodeFailure(it, NodePhase.CONNECT, node.id) },
+                        onExitFailure = SourceCommit::commitFailedSignal,
+                    ) { datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect) }
                 }
 
                 NodeType.DML -> {
@@ -764,28 +809,6 @@ class NodeRunner(
             }
         }
     }
-
-    /**
-     * The inner 057 decorator: stamps the resolved dialect onto the failure record's node
-     * context, filling the whole context when the signal carries none yet. Rebuilding the
-     * signal (not mutating it — [MappedError] is immutable by design) preserves the original
-     * cause chain, which [PipelineExecutor.failNode] unwraps for the exception detail.
-     */
-    private fun decorateWithDialect(
-        error: Exception,
-        node: ExecutableNode,
-        dialect: Dialect,
-    ): Exception =
-        when (error) {
-            is NodeFailedSignal -> {
-                val context = error.error.node?.copy(dialect = dialect.name) ?: NodeErrorContext.of(node, dialect.name)
-                NodeFailedSignal(error.error.copy(node = context), error.cause ?: error)
-            }
-
-            else -> {
-                error
-            }
-        }
 
     /**
      * Stamps [resolved]'s tier onto an escaping [NodeQueryTimeoutException] (156, #2) — the
@@ -1118,6 +1141,28 @@ class NodeRunner(
 }
 
 /**
+ * The inner 057 decorator: stamps the resolved dialect onto the failure record's node
+ * context, filling the whole context when the signal carries none yet. Rebuilding the
+ * signal (not mutating it — [MappedError] is immutable by design) preserves the original
+ * cause chain, which [PipelineExecutor.failNode] unwraps for the exception detail.
+ */
+private fun decorateWithDialect(
+    error: Exception,
+    node: ExecutableNode,
+    dialect: Dialect,
+): Exception =
+    when (error) {
+        is NodeFailedSignal -> {
+            val context = error.error.node?.copy(dialect = dialect.name) ?: NodeErrorContext.of(node, dialect.name)
+            NodeFailedSignal(error.error.copy(node = context), error.cause ?: error)
+        }
+
+        else -> {
+            error
+        }
+    }
+
+/**
  * A node failure that already knows its catalog code — thrown by [NodeRunner], caught by
  * [PipelineExecutor], which emits `node_failed` exactly once and rethrows it as a
  * [NodeExecutionException].
@@ -1239,8 +1284,11 @@ internal object SourceCommit {
         }
     }
 
-    /** The success-path refusal as the node's own failure: the catalogued code, the refusal as cause. */
-    private fun commitFailedSignal(refusal: Throwable): NodeFailedSignal =
+    /**
+     * The success-path refusal as the node's own failure: the catalogued code, the refusal as cause. Internal
+     * for the read-only mode's restore failure after a returned query (#463), which fails the node the same way.
+     */
+    internal fun commitFailedSignal(refusal: Throwable): NodeFailedSignal =
         NodeFailedSignal(
             MappedError(
                 code = PipelineErrorCodes.Node.COMMIT_FAILED,

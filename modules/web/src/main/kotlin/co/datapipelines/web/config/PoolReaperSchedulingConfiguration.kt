@@ -1,12 +1,25 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.datasources.ManagedLakeTableRepository
+import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.ManagedLakeCatalog
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
+import co.datapipelines.executor.BoundedJdbc
+import co.datapipelines.lake.LakeProperties
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.web.metrics.MicrometerPoolLifecycleMetrics
 import io.micrometer.core.instrument.MeterRegistry
+import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
+import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 /**
  * The retired-pool reaper, scheduled (datasources.md §5.2, 094) — the third sibling of
@@ -14,10 +27,17 @@ import org.springframework.scheduling.annotation.Scheduled
  * decisions:
  *
  * - **No second `@EnableScheduling`:** the sweep configuration's annotation is the context's
- *   one; `@Scheduled` here rides the jobs' own scheduler, its one `dp-scheduled` thread (#316 —
- *   not Spring's default, and no longer the SSE log streamer's `dp-sse-log` thread it fell back to
- *   before; the sweep configuration's KDoc has the decision). The tick reads one in-memory queue —
- *   usually empty — and closes what has drained.
+ *   one. The freshness tick rides the jobs' own scheduler, the one `dp-scheduled` thread (#316; the
+ *   sweep configuration's KDoc has the decision).
+ * - **The reaper has a thread of its own (#818d, record §10 RULING 4 amended, item 5):**
+ *   [poolReaperTaskScheduler], ONE daemon thread named `dp-reaper`, named on the reaper's `@Scheduled` by its
+ *   `scheduler` attribute and by nothing else. On the shared thread the reap could wait behind one run of every
+ *   sibling job (each one bounded statement after another), and the lifetime rule had to carry their sum; alone,
+ *   the reaper's delay is its cadence plus its own pass ([ReaperDelay]). The bean is deliberately NOT named
+ *   `taskScheduler`, so the registrar's default lookup still finds the jobs' scheduler for every other job. The
+ *   tick walks the live pool map for managed lake generations past their age bound and retires them (#818c),
+ *   then reads one in-memory queue — usually empty — and hands each pool that drained, or passed its ceiling, to
+ *   the closer ([poolCloser], the `dp-pool-close` threads). The pass issues no statement and closes nothing.
  * - **`fixedDelay`, not `fixedRate`:** a slow tick delays the next instead of piling on. The
  *   reaper catches up by construction: every decision is made from the pool's CURRENT active
  *   count and its own absolute deadline, never from how long ago the last tick ran.
@@ -37,8 +57,100 @@ import org.springframework.scheduling.annotation.Scheduled
 @Configuration
 class PoolReaperSchedulingConfiguration {
     @Bean
-    fun datasourcePoolReaperScheduler(datasources: DatasourceRegistry): DatasourcePoolReaperScheduler =
-        DatasourcePoolReaperScheduler(datasources)
+    fun datasourcePoolReaperScheduler(
+        datasources: DatasourceRegistry,
+        metrics: PoolLifecycleMetrics,
+    ): DatasourcePoolReaperScheduler = DatasourcePoolReaperScheduler(datasources, metrics)
+
+    /**
+     * #818d — the reaper's own scheduler (class KDoc): one daemon `dp-reaper` thread, the jobs' scheduler's shutdown
+     * shape (its lifecycle [ScheduledJobsTaskScheduler.SHUTDOWN_PHASE], below both drains, and its bounded await),
+     * so no pass STARTS once the context begins to close and the bean is destroyed after the execution drain.
+     */
+    @Bean(name = [PoolReaperTaskScheduler.BEAN_NAME])
+    fun poolReaperTaskScheduler(): PoolReaperTaskScheduler =
+        PoolReaperTaskScheduler().apply {
+            poolSize = PoolReaperTaskScheduler.THREADS
+            phase = ScheduledJobsTaskScheduler.SHUTDOWN_PHASE
+            setThreadFactory { runnable -> Thread(runnable, PoolReaperTaskScheduler.THREAD_NAME).apply { isDaemon = true } }
+            setAwaitTerminationMillis(ScheduledJobsTaskScheduler.SHUTDOWN_AWAIT_MILLIS)
+        }
+
+    /**
+     * #818d (record §10 RULING 4 amended, item 6) — the closer every pool the reaper hands off is closed by: the
+     * `dp-pool-close` threads, each close under its pool's own deadline (#840,
+     * [co.datapipelines.datasources.pooling.PoolCloser.deadlineFor]); a managed generation's adds the release of its
+     * reader pins on the metadata pool [jdbc] runs on ([DeadlinePoolCloser.managedReleaseBound]). A context with no
+     * `JdbcTemplate` (a slice that wires the reaper alone) has no keeper either, so the term falls back to HikariCP's
+     * default checkout, as the keeper's own derivation does for a pool it cannot read.
+     * The registry takes it (`DomainConfiguration.datasourceRegistry`), which is what orders its destruction after
+     * the registry's own synchronous shutdown close.
+     */
+    @Bean
+    fun poolCloser(
+        metrics: PoolLifecycleMetrics,
+        jdbc: ObjectProvider<JdbcTemplate>,
+    ): DeadlinePoolCloser =
+        DeadlinePoolCloser(
+            metrics,
+            managedReleaseBound = DeadlinePoolCloser.managedReleaseBound(jdbc.ifAvailable?.dataSource),
+        )
+
+    /**
+     * #818 (dp-lake record §10 RULING 4 item 2) — the managed lake's freshness tick, on the jobs' `dp-scheduled`
+     * thread (the reaper left it for `dp-reaper`, #818d). Unlike the reaper's, its cadence IS a key (`reads.freshness-tick-seconds`),
+     * because it is one term of the `LakeRules` inequality an operator tunes. Inert without a managed generation:
+     * the registry's pass iterates live managed generations only, and the regrant returns at once when the lake
+     * is disabled.
+     *
+     * #818b A — the tick's own statements run over [statements], a dedicated template bounded at
+     * [ManagedLakeFreshnessScheduler.FRESHNESS_STATEMENT_TIMEOUT_SECONDS] (the sweep's and the retention job's
+     * `BoundedJdbc` pattern, never the shared template's timeout). The tick has two steps, each inside ONE budget of
+     * that bound (#841 R4 re-derived the inventory after G0 put the regrant under the writer guard):
+     *
+     * 1. **refresh** — the managed catalog read, one per live managed generation, over the same SQL and disabled-lake
+     *    rule as the build's read ([LakeConfiguration.managedLakeCatalogOver]): one statement, its bound its budget.
+     * 2. **regrant** — the repair, one metadata transaction of five phases sharing ONE deadline of the same bound
+     *    ([DatasourceGrantRepository.grantToEveryWorkspace]): the budget's `statement_timeout` (on [statements], so the
+     *    connection carries its socket bound before the guard's statements run on it), the datasource's prerequisite
+     *    key and the workspace rows on the shared writer guard [writes] (their `lock_timeout` capped at the deadline
+     *    whatever `lock-wait-seconds` is), the discovery read and the INSERT (each `statement_timeout` = the time
+     *    left). Before #841 R4 the key wait and the INSERT wait were consecutive full bounds: a peer that waited on the
+     *    key behind a sibling's held INSERT then waited a full bound again on its own INSERT (the gate-red probe's
+     *    ten-second call).
+     */
+    @Bean
+    fun managedLakeFreshnessScheduler(
+        datasources: DatasourceRegistry,
+        registrar: ManagedLakeDatasourceRegistrar,
+        jdbc: NamedParameterJdbcTemplate,
+        lakeProperties: ObjectProvider<LakeProperties>,
+        writes: co.datapipelines.datasources.DatasourceWriteGuarding,
+    ): ManagedLakeFreshnessScheduler {
+        val statements =
+            BoundedJdbc.bounded(
+                jdbc,
+                ManagedLakeFreshnessScheduler.FRESHNESS_STATEMENT_TIMEOUT_SECONDS,
+                "FRESHNESS_STATEMENT_TIMEOUT_SECONDS",
+            )
+        return ManagedLakeFreshnessScheduler(
+            datasources = datasources,
+            registrar = registrar,
+            catalog =
+                LakeConfiguration.managedLakeCatalogOver(
+                    ManagedLakeTableRepository(statements),
+                    enabled = lakeProperties.ifAvailable?.enabled == true,
+                ),
+            // #841 (G0): the tick's repair grants take the datasource's prerequisite key and the workspaces they
+            // change, on the shared writer guard; #841 R4: the whole repair shares one freshness bound.
+            grants =
+                DatasourceGrantRepository(
+                    statements,
+                    writes,
+                    repairBudget = Duration.ofSeconds(ManagedLakeFreshnessScheduler.FRESHNESS_STATEMENT_TIMEOUT_SECONDS.toLong()),
+                ),
+        )
+    }
 
     /**
      * The pool-retirement instruments (observability.md §4.1). A real
@@ -52,17 +164,149 @@ class PoolReaperSchedulingConfiguration {
     fun poolLifecycleMetrics(meterRegistry: MeterRegistry): PoolLifecycleMetrics = MicrometerPoolLifecycleMetrics(meterRegistry)
 }
 
-/** The `@Scheduled` adapter over [DatasourceRegistry.reapRetiredPools] — see [PoolReaperSchedulingConfiguration]. */
-class DatasourcePoolReaperScheduler(
+/**
+ * The `@Scheduled` adapter over the managed lake's freshness pass (#818): one catalog read per live managed
+ * generation, a stale one retired, then the grant to workspaces created since the last tick. `fixedDelay`, as
+ * the reaper, so a slow catalog read delays the next tick instead of piling on. It ticks on `dp-scheduled`; the
+ * reaper, since #818d, does not, so a catalog read held at its bound delays the next tick, never a reap.
+ *
+ * #818b A — both steps read and write through [catalog] and [grants], the bean's statement-bounded pair, so a
+ * step queued behind a lock ends within [FRESHNESS_STATEMENT_TIMEOUT_SECONDS] and the shared `dp-scheduled` thread
+ * returns to its sibling jobs (#841 R4: the regrant's guarded phases share that one budget). Each step is isolated
+ * as the retention tick's are: a step that throws is one WARN (`event=lake.freshness_tick_failed step=<name>`,
+ * class and SQLState only), the next step runs, and nothing reaches the scheduler, so the next tick runs on
+ * schedule. The registry's pass already turns a failed catalog read into its own WARN
+ * (`lake.freshness_read_failed`); the catch here holds what escapes.
+ * Failed ticks are not added to `ScheduledJob`'s failed-tick counter: that enum lives outside this lane.
+ */
+class ManagedLakeFreshnessScheduler(
     private val datasources: DatasourceRegistry,
+    private val registrar: ManagedLakeDatasourceRegistrar,
+    private val catalog: ManagedLakeCatalog,
+    private val grants: DatasourceGrantRepository,
 ) {
-    @Scheduled(fixedDelay = REAP_INTERVAL_MILLIS)
-    fun reap() {
-        datasources.reapRetiredPools()
+    @Scheduled(fixedDelayString = TICK_SECONDS_PLACEHOLDER, initialDelayString = TICK_SECONDS_PLACEHOLDER, timeUnit = TimeUnit.SECONDS)
+    fun tick() {
+        step("refresh") {
+            val retired = datasources.refreshManagedGenerations(catalog)
+            // The brief's DoS bound: a retire storm is bounded by the pool count, and the count is logged per tick.
+            if (retired > 0) {
+                log.info(
+                    "event=lake.freshness_tick_retired generations={} message=\"freshness tick retired stale managed generations\"",
+                    retired,
+                )
+            }
+        }
+        step("regrant") { registrar.regrant(grants) }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // the point IS any failure: one WARN line, the next step and tick run
+    private inline fun step(
+        name: String,
+        block: () -> Unit,
+    ) {
+        try {
+            block()
+        } catch (e: RuntimeException) {
+            // The class and the SQLState only — no message, no stack (a store's message can carry a row).
+            log.warn(
+                "event=lake.freshness_tick_failed step={} error={} sql_state={} " +
+                    "message=\"freshness tick step failed; the next step and the next tick still run\"",
+                name,
+                FailureShape.cause(e),
+                FailureShape.sqlState(e),
+            )
+        }
     }
 
     companion object {
-        /** Five seconds — see [PoolReaperSchedulingConfiguration] for why, and why not sixty. */
+        private val log = LoggerFactory.getLogger(ManagedLakeFreshnessScheduler::class.java)
+
+        /**
+         * #818b A — the bound on each step of the tick: the catalog read's JDBC `queryTimeout`, and (#841 R4) the ONE
+         * budget the regrant's guarded phases share — key and workspace-row waits (`lock_timeout`, refused `55P03`),
+         * the discovery read and the INSERT (`statement_timeout` = the time left, cancelled `57014`). Not a
+         * configuration key, for the reaper's reason: it bounds how long the tick can hold the `dp-scheduled` thread
+         * its sibling jobs share (the reaper no longer does, #818d), so a tick blocked in both of its steps delays a
+         * sibling by at most 2 × 5 s. A healthy catalog read and repair take milliseconds, so the bound fires only on
+         * a step queued behind a lock. A cancelled read retires nothing (the generation serves until its age bound);
+         * a cancelled or refused repair grants nothing and the next tick retries the same idempotent repair.
+         */
+        const val FRESHNESS_STATEMENT_TIMEOUT_SECONDS = 5
+
+        /** `reads.freshness-tick-seconds`, defaulted as application.yml defaults it (the drift test pins that value). */
+        const val TICK_SECONDS_PLACEHOLDER = "\${datapipelines.lake.reads.freshness-tick-seconds:60}"
+    }
+}
+
+/**
+ * The `@Scheduled` adapter over [DatasourceRegistry.reapRetiredPools] — see [PoolReaperSchedulingConfiguration].
+ *
+ * #818c (record §10 RULING 4 amended 2026-11-05, item 3) — the pass first retires every managed lake generation past
+ * `reads.max-generation-age-seconds`, with no borrower (`ConnectionPoolManager.retireExpiredGenerations`), then reaps,
+ * so an idle server's over-age generation is retired within one [ReaperDelay] of its age bound and hard-closed within
+ * one more of its ceiling. The pass issues no statement: the retirement is a clock comparison over the live map.
+ * Each retirement logs `lake.generation_expired trigger=reaper`; the pass logs its count once, only when it is not
+ * zero (`lake.reaper_retired`, the freshness tick's pattern). The count is at most the live managed generation
+ * count, one per managed datasource name.
+ */
+class DatasourcePoolReaperScheduler(
+    private val datasources: DatasourceRegistry,
+    private val metrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
+) {
+    @Scheduled(fixedDelay = REAP_INTERVAL_MILLIS, scheduler = PoolReaperTaskScheduler.BEAN_NAME)
+    fun reap() {
+        val started = System.nanoTime()
+        val outcome = datasources.reapRetiredPools()
+        passMeasured(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started))
+        if (outcome.expired > 0) {
+            log.info(
+                "event=lake.reaper_retired generations={} message=\"the pool reaper retired managed generations past their age bound\"",
+                outcome.expired,
+            )
+        }
+    }
+
+    /**
+     * #818d — every pass measures itself against [ReaperDelay.PASS_BOUND_SECONDS], the bound the lifetime rule counts
+     * twice. Over it: one WARN and one increment per slow pass, never a retry; the pass's work is already done.
+     */
+    internal fun passMeasured(elapsedMillis: Long) {
+        if (elapsedMillis <= PASS_BOUND_MILLIS) return
+        log.warn(
+            "event=datasource.reaper_pass_slow elapsed_ms={} bound_ms={} " +
+                "message=\"a pool reaper pass ran past the bound the reads lifetime rule counts on\"",
+            elapsedMillis,
+            PASS_BOUND_MILLIS,
+        )
+        metrics.reaperPassSlow()
+    }
+
+    companion object {
+        private val log = LoggerFactory.getLogger(DatasourcePoolReaperScheduler::class.java)
+
+        /** [ReaperDelay.PASS_BOUND_SECONDS] in the unit the pass measures in. */
+        val PASS_BOUND_MILLIS: Long = TimeUnit.SECONDS.toMillis(ReaperDelay.PASS_BOUND_SECONDS)
+
+        /** Five seconds — see [PoolReaperSchedulingConfiguration] for why, and why not sixty. [ReaperDelay] starts from it. */
         const val REAP_INTERVAL_MILLIS = 5_000L
+    }
+}
+
+/**
+ * #818d — the reaper's own scheduler, configured by [PoolReaperSchedulingConfiguration.poolReaperTaskScheduler]: a
+ * plain [ThreadPoolTaskScheduler] whose one thread is `dp-reaper`. Its own type so a test or a reader can find it
+ * by class as well as by name; it adds no behaviour.
+ */
+class PoolReaperTaskScheduler : ThreadPoolTaskScheduler() {
+    companion object {
+        /** The bean name the reaper's `@Scheduled(scheduler = …)` resolves; deliberately not `taskScheduler`. */
+        const val BEAN_NAME = "poolReaperTaskScheduler"
+
+        /** The reaper's one thread — the name its pass's log lines carry. */
+        const val THREAD_NAME = "dp-reaper"
+
+        /** One: one job, and `fixedDelay` keeps two of its passes from overlapping at any pool size. */
+        const val THREADS = 1
     }
 }

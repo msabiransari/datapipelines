@@ -2,18 +2,28 @@ package co.datapipelines.browser
 
 import co.datapipelines.browser.ScheduleFixtures.createSchedule
 import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
+import co.datapipelines.browser.ScheduleFixtures.send
+import com.microsoft.playwright.Page
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
+import java.util.UUID
 
 /**
- * #584 — the Schedules home in real Chromium: the rail's Schedules item lands on
- * `/overview/schedules` (the explorer stays at `/schedules`, View all), lit as the Schedules item
- * with the resource browser closed — Schedules is not a tree family. A fresh workspace reads
- * zeros, the two empty notes and an author's New schedule; one schedule later, the page counts it
+ * #584 — Schedules in real Chromium: `/overview/schedules`, the resource browser closed.
+ * The explorer stays at `/schedules` (View all). A fresh workspace reads zeros and an author's New schedule; the page counts it
  * and its Up next row opens the explorer's detail for that schedule. #639: on the v2 frame a
  * panel's info button opens its dialog section, the task row leads to the explorer, and a viewer
- * sees no New schedule, only who creates schedules.
+ * sees no New schedule, only who creates schedules. #641: the Unblock task row opens the explorer
+ * filtered to blocked — a flat list, the select reading Blocked, the address bar carrying it — and
+ * All brings the tree back with the parameter gone. #725: each Last run bar opens the explorer
+ * filtered to its bucket (`?outcome=`), and the bar's count is the filtered list's row count — walked
+ * over all five buckets for a viewer and a promoter (#764). Succeeded and Did not run use real
+ * Run now actions; Failed and In progress use seeded state words. All outcomes restores the tree.
  */
 class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
     private fun openOverview() {
@@ -93,9 +103,167 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
     }
 
     @Test
+    fun `the Unblock row opens the explorer filtered to blocked, and All brings the tree back`() {
+        startTrace()
+        val root = ready("schovb")
+        releasedPipeline(page, "$root/jobs/rows")
+        val closing = releasedPipeline(page, "$root/jobs/close")
+        createSchedule(page, "$root/nightly/rows", "$root/jobs/rows")
+        val blocked = createSchedule(page, "$root/monthly/close", "$root/jobs/close")
+        // Blocked the way a person meets it: its pipeline's release discarded (legacy data since #786 B.4,
+        // which protects a release a live schedule runs), then a Run now that cannot start.
+        plantLegacyDiscardedRelease(closing)
+        openSchedules("?id=$blocked")
+        detail().waitFor()
+        page.locator("[data-verb='schedule-run']").click()
+        page.locator("#schedule-detail [data-slot='blocked']:not([hidden])").waitFor()
+
+        openOverview()
+        count("blocked") shouldBe "1"
+        page.click("[data-overview-recent] [data-task='unblock'] a")
+        page.waitForURL("**/schedules?condition=blocked")
+        page.locator("#schedule-list:not([aria-busy]) .tpl-results").waitFor()
+        page.locator("#schedule-filter-condition").inputValue() shouldBe "blocked"
+        page.locator("#schedule-tree-pane [data-leaf-name]").all().map { it.getAttribute("data-leaf-name") } shouldBe
+            listOf("$root/monthly/close")
+        page.locator("#schedule-list details.tpl-folder").count() shouldBe 0
+        page.url().substringAfter(baseUrl) shouldBe "/schedules?condition=blocked"
+
+        page.selectOption("#schedule-filter-condition", "")
+        page.locator("#schedule-list:not([aria-busy]) [role='tree'] details.tpl-folder[data-folder='$root']").waitFor()
+        page.locator("#schedule-list .tpl-results").count() shouldBe 0
+        page.url().substringAfter(baseUrl) shouldBe "/schedules"
+    }
+
+    @Test
+    fun `each Last run bar opens the explorer filtered to that last run - its count is the list's rows - and All brings the tree back`() {
+        startTrace()
+        val root = "schovo" + suffix()
+        val outcomes = prepareOutcomes(root)
+        openMember(root, "viewer")
+        walkOutcomes(root, outcomes)
+    }
+
+    @Test
+    fun `a promoter walks all five Last run bars without schedules already held by the target`() {
+        startTrace()
+        val root = "schovp" + suffix()
+        val outcomes = prepareOutcomes(root)
+        openMember(root, "promoter")
+        walkOutcomes(root, outcomes.mapValues { (bucket, names) -> if (bucket in setOf("failed", "in-progress")) emptyList() else names })
+    }
+
+    private fun prepareOutcomes(root: String): Map<String, List<String>> {
+        val admin = seedLocalUser(uniqueEmail("$root-admin"), generatedPassword("pw"), mustChange = false)
+        login(admin.email, admin.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        createWorkspace(root)
+        releasedPipeline(page, "$root/jobs/rows")
+        val closing = releasedPipeline(page, "$root/jobs/close")
+        releasedPipeline(page, ScheduleFixtures.HIDDEN_PIPELINE)
+        val ok = createSchedule(page, "$root/nightly/rows", "$root/jobs/rows")
+        val stopped = createSchedule(page, "$root/monthly/close", "$root/jobs/close")
+        val failed = createSchedule(page, "$root/failed", ScheduleFixtures.HIDDEN_PIPELINE)
+        val queued = createSchedule(page, "$root/in-progress", ScheduleFixtures.HIDDEN_PIPELINE)
+        val never = createSchedule(page, "$root/never-ran", "$root/jobs/rows")
+        ScheduleFixtures.seedLastRun(failed, "failed")
+        ScheduleFixtures.seedLastRun(queued, "queued")
+        mapOf(failed to "failed", queued to "queued").forEach { (id, state) ->
+            withClue("fixture $state") {
+                openSchedules("?id=$id")
+                detail().waitFor()
+                page.locator("#schedule-detail .sch-runrow[data-state='$state']").waitFor()
+            }
+        }
+        openSchedules("?id=$never")
+        detail().waitFor()
+        page.locator("#schedule-detail [data-slot='runs-empty']:not([hidden])").waitFor()
+        page.locator("#schedule-detail .sch-runrow").count() shouldBe 0
+        // A real succeeded run: Run now, followed to its end (SchedulesRunsBrowserTest's wait).
+        openSchedules("?id=$ok")
+        detail().waitFor()
+        page.waitForResponse({ it.url().endsWith("/api/v1/schedules/$ok/run") && it.status() == 202 }) {
+            page.locator("[data-verb='schedule-run']").click()
+        }
+        page.waitForFunction(
+            "() => (document.querySelector('#schedule-detail .sch-runrow') || {}).getAttribute && " +
+                "document.querySelector('#schedule-detail .sch-runrow').getAttribute('data-state') === 'succeeded'",
+            null,
+            Page.WaitForFunctionOptions().setTimeout(60_000.0),
+        )
+        // A real run that did not start: its release discarded (legacy data since #786 B.4), then a Run now
+        // the worker refuses.
+        plantLegacyDiscardedRelease(closing)
+        openSchedules("?id=$stopped")
+        detail().waitFor()
+        page.locator("[data-verb='schedule-run']").click()
+        page.locator("#schedule-detail [data-slot='blocked']:not([hidden])").waitFor()
+        page.locator("#schedule-detail .sch-runrow[data-state='not_started']").waitFor()
+        // Restore the pointer so the promoter admits this schedule; its last run remains not_started.
+        send(page, "POST", "/api/v1/pipelines/$closing/versions/1/restore").status shouldBe 200
+        return linkedMapOf(
+            "succeeded" to listOf("$root/nightly/rows"),
+            "failed" to listOf("$root/failed"),
+            "in-progress" to listOf("$root/in-progress"),
+            "did-not-run" to listOf("$root/monthly/close"),
+            "never-ran" to listOf("$root/never-ran"),
+        )
+    }
+
+    private fun openMember(
+        root: String,
+        role: String,
+    ) {
+        val member = seedLocalUser(uniqueEmail("$root-$role"), generatedPassword("pw"), mustChange = false, isAdmin = false, role = role)
+        ScheduleFixtures.seedMembership(root, member.email, role)
+        page.context().clearCookies()
+        login(member.email, member.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        enterWorkspace(page, root)
+    }
+
+    private fun walkOutcomes(
+        root: String,
+        outcomes: Map<String, List<String>>,
+    ) {
+        val hidden = listOf("$root/failed", "$root/in-progress").filter { it !in outcomes.values.flatten() }
+        openOverview()
+        listOf("succeeded", "failed", "in-progress", "did-not-run", "never-ran").map { bar("last-run", it) } shouldBe
+            outcomes.values.map { it.size.toString() }
+        outcomes.forEach { (outcome, names) ->
+            withClue(outcome) {
+                openOverview()
+                hidden.forEach { page.locator("body").innerText().contains(it) shouldBe false }
+                val counted = bar("last-run", outcome).toInt()
+                page.click("[data-chart='last-run'] [data-bar='$outcome'] .app-overview-bar-name a")
+                page.waitForURL("**/schedules?outcome=*")
+                page.url().substringAfter(baseUrl) shouldBe "/schedules?outcome=$outcome"
+                page.locator("#schedule-list:not([aria-busy])").waitFor()
+                page.locator("#schedule-list [data-empty='no-match-filtered']").count() shouldBe if (names.isEmpty()) 1 else 0
+                page.locator("#schedule-filter-outcome").inputValue() shouldBe outcome
+                page.locator("#schedule-filter-condition").inputValue() shouldBe ""
+                val rows = page.locator("#schedule-tree-pane [data-leaf-name]").all().map { it.getAttribute("data-leaf-name") }
+                rows shouldBe names
+                rows.size shouldBe counted
+                hidden.forEach { page.locator("body").innerText().contains(it) shouldBe false }
+                page.locator("#schedule-list details.tpl-folder").count() shouldBe 0
+            }
+        }
+
+        page.selectOption("#schedule-filter-outcome", "")
+        page.locator("#schedule-list:not([aria-busy]) [role='tree'] details.tpl-folder[data-folder='$root']").waitFor()
+        page.locator("#schedule-list .tpl-results").count() shouldBe 0
+        page.url().substringAfter(baseUrl) shouldBe "/schedules"
+        page.locator("details[data-folder='$root'] > summary").click()
+        page.locator("details[data-folder='$root'] > .tpl-level:not([aria-busy])").waitFor()
+        leaf("$root/never-ran").isVisible shouldBe true
+        hidden.forEach { leaf(it).count() shouldBe 0 }
+        hidden.forEach { page.locator("body").innerText().contains(it) shouldBe false }
+    }
+
+    @Test
     fun `a viewer lands on the home with no New schedule and reads who creates schedules`() {
         startTrace()
-        // The viewer is a member of `default`; the home reads that workspace.
         val viewer =
             seedLocalUser(
                 uniqueEmail("schov-viewer-" + suffix()),
@@ -111,5 +279,23 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         page.locator("[data-overview-new-schedule]").count() shouldBe 0
         page.locator("[data-overview-create-note]").innerText() shouldContain "an author or a workspace admin"
         page.locator("[data-overview-recent] [data-task='next'] a").getAttribute("href") shouldBe "/schedules"
+    }
+
+    private companion object {
+        private val targetKey = UUID.randomUUID().toString()
+        private val target = ScheduleFixtures.promotionTarget(targetKey)
+
+        @DynamicPropertySource
+        @JvmStatic
+        fun promotionProperties(registry: DynamicPropertyRegistry) {
+            registry.add("datapipelines.deployment.promotion.target.base-url") { "http://127.0.0.1:${target.address.port}" }
+            registry.add("datapipelines.deployment.promotion.target.server-key") { targetKey }
+        }
+
+        @AfterAll
+        @JvmStatic
+        fun stopTarget() {
+            target.stop(0)
+        }
     }
 }

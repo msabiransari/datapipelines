@@ -21,7 +21,7 @@ object SiteFaqsHub {
         listOf(
             FaqEntry(
                 "Do I need someone technical to set it up?",
-                "Yes. Someone deploys the server on your infrastructure, registers the database connections in " +
+                "Yes. Someone deploys the server on your infrastructure (docs/deployment.md §4), registers the database connections in " +
                     "the application, because there is deliberately no agent tool that registers one " +
                     "(docs/mcp-server.md §6.2.22), and connects the AI client. After setup, business questions can be asked in plain " +
                     "language; a person who understands your data reviews the resulting SQL and numbers.",
@@ -68,11 +68,12 @@ object SiteFaqsHub {
             ),
             FaqEntry(
                 "Can I use it with Tableau today?",
-                "Yes, for the data preparation: a released pipeline serves a versioned JSON endpoint " +
-                    "(docs/rest-api.md §19), or writes its result into a database Tableau already connects to " +
-                    "(docs/pipeline-contract.md §8). Visualisation stays in Tableau or your own application; " +
-                    "native dashboards and scheduled refresh are planned (docs/ROADMAP.md §2).",
-                "docs/rest-api.md §19, docs/pipeline-contract.md §8, docs/ROADMAP.md §2",
+                "Yes, for the data preparation: a released pipeline serves a versioned JSON endpoint, or writes " +
+                    "its result into a database Tableau already connects to. Visualisation can stay in Tableau or " +
+                    "your own application; a schedule can rerun the pipeline that writes the table, and its own SQL " +
+                    "dashboards are an option beside Tableau, not a replacement. The contracts are docs/rest-api.md " +
+                    "§19, docs/pipeline-contract.md §8, docs/scheduler.md §1 and docs/dashboards.md §1.",
+                "docs/rest-api.md §19, docs/pipeline-contract.md §8, docs/scheduler.md §1, docs/dashboards.md §1",
             ),
         )
 }

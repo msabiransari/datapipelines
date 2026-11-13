@@ -1,0 +1,80 @@
+package co.datapipelines.lake.definitions
+
+import co.datapipelines.lake.settle.SettleDeferCause
+import co.datapipelines.pipeline.PipelineErrorCodes
+
+/**
+ * What one apply (or verify) attempt did to a managed table (lake.md §3). Each outcome names the state the row is
+ * left in; none is thrown, because a release's landing stands whatever its apply reaches (dp-lake design record §7).
+ */
+sealed interface LakeApplyOutcome {
+    /** The catalogued code a surface reports for this outcome; null for success. */
+    val code: String?
+
+    /** The table holds [version]; [committed] = this attempt made an Iceberg commit (false: S already equalled intent). Row `applied`. */
+    data class Applied(
+        val version: Int,
+        val committed: Boolean,
+    ) : LakeApplyOutcome {
+        override val code: String? = null
+    }
+
+    /** A definite negative verdict, recorded: row `failed` with [error] in `apply_error_json`. No commit was made. */
+    data class Failed(
+        val version: Int,
+        override val code: String,
+        val error: Map<String, Any?>,
+    ) : LakeApplyOutcome
+
+    /** A lease could not be taken within the wait ([reason]: `namespace`, `table` or `deadline`). Nothing changed. */
+    data class Busy(
+        val reason: String,
+    ) : LakeApplyOutcome {
+        override val code: String = PipelineErrorCodes.Lake.DEFINITION_TABLE_BUSY
+    }
+
+    /**
+     * Row `pending`: the attempt stopped before any commit ([code] names why: the fence, restoring mode, a lost lease;
+     * `lake.definition.apply_unclassified` for a failure no catalog classified, at any step before the commit, the
+     * release's deadline read included, #822), or a verify found that the interrupted attempt committed nothing
+     * ([code] null).
+     */
+    data class Pending(
+        override val code: String?,
+    ) : LakeApplyOutcome
+
+    /**
+     * The attempt cannot say what it left: a commit's outcome is unknown, or the row could not be stamped. The row is
+     * left for [LakeDefinitionApplier.verifyApplying], which settles an `applying` row from the revision log; a row whose
+     * `applying` mark never landed stays `pending` for the retry verb. [code] says why: `lake.catalog.outcome_unknown`,
+     * the catalog connection failed while the commit was in flight; `lake.definition.apply_unclassified`, the commit
+     * step failed with an exception the catalog does not classify (#811), or DP's metadata store failed at or after
+     * the `applying` mark — the mark, the lease renewal, a stamp, a put-back to `pending` (#822).
+     */
+    data class Unknown(
+        override val code: String,
+    ) : LakeApplyOutcome
+
+    /** Nothing to do: the version is not the table's current one, or the row is not in a state this call moves. */
+    data class NotApplicable(
+        val state: LakeApplyState?,
+        val currentVersion: Int?,
+    ) : LakeApplyOutcome {
+        override val code: String? = null
+    }
+
+    /**
+     * A sweep's verification stopped before its verdict ([cause]): no stamp, row untouched, lease released; the next
+     * tick resumes it. Counted on the sweep's line, never returned by the request path (§8b).
+     */
+    data class Deferred(
+        val cause: SettleDeferCause,
+    ) : LakeApplyOutcome {
+        override val code: String? = null
+    }
+
+    /** The attempt's stamp changed no row: a newer attempt owns the table. Nothing was recorded by this one. */
+    data object Superseded : LakeApplyOutcome {
+        override val code: String? = null
+    }
+}

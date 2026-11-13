@@ -25,6 +25,7 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepo
 import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod
 import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter
+import org.springframework.security.oauth2.jwt.JwtDecoderFactory
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.RestTemplate
 import java.time.Duration
@@ -151,7 +152,10 @@ class OidcConfig {
         return RestClientAuthorizationCodeTokenResponseClient().apply { setRestClient(client) }
     }
 
-    /** OIDC user-info uses the same bound; Spring still owns ID-token validation and JWKS. */
+    /**
+     * OIDC user-info uses the same bound; the ID-token decoder runs through
+     * [providerIdTokenDecoderFactory] (#686), whose JWKS fetch carries it too.
+     */
     @Bean
     fun providerOidcUserService(authProperties: AuthProperties): OidcUserService {
         val rest = boundedRestTemplate(authProperties)
@@ -160,6 +164,19 @@ class OidcConfig {
         delegate.setRestOperations(rest)
         return OidcUserService().apply { setOauth2UserService(delegate) }
     }
+
+    /**
+     * The ID-token decoder's JWKS fetch is bounded by the same key (#686): Spring's login
+     * config resolves the `JwtDecoderFactory<ClientRegistration>` bean from this context and
+     * hands it to its OIDC authentication provider in place of a plain
+     * `OidcIdTokenDecoderFactory`, whose JWK client keeps Spring's unbounded default.
+     * [BoundedOidcIdTokenDecoderFactory] mirrors that factory exactly — the same algorithm
+     * resolution, the same validators, the same claim-type conversion, one decoder per
+     * registration — and changes only the HTTP client the JWKS read runs on.
+     */
+    @Bean
+    fun providerIdTokenDecoderFactory(authProperties: AuthProperties): JwtDecoderFactory<ClientRegistration> =
+        BoundedOidcIdTokenDecoderFactory(boundedRestTemplate(authProperties))
 
     companion object {
         /** The shared connect/read policy for login-thread provider reads (#682). */

@@ -36,15 +36,15 @@
   --edge-done: var(--accent-success);
 }
 
-/* #10 L3a — CHART tokens (dashboards): what the Plotly adapter reads into `layout` at each render
- * (D25, the record's theme contract). Every one bridges the THEME's own tokens — no literal colour,
+/* #10 L3a — CHART tokens (dashboards): what the chart adapter resolves at each render (D25, the
+ * record's theme contract). Every one bridges the THEME's own tokens — no literal colour,
  * the same rule the 080 block above follows — so all nine themes and both modes carry a coherent
  * chart surface without the adapter knowing a hex. The four categorical series hues are the theme's
  * four accents in the design system's own order (info, success, warning, danger); the two blended
  * series are color-mix steps between accent pairs so a six-trace chart stays inside the theme's
  * range. The adapter resolves these through a probe element (a `color-mix()` token stream reads
- * back verbatim otherwise) and maps them onto Plotly's paper/plot/grid/font/colorway — see
- * datapipelines-dashboard-plotly.js and dashboards.md §4. */
+ * back verbatim otherwise) and the library's converter maps them onto its own surface (#860: Plotly's
+ * paper/plot/grid/font/colorway) — see datapipelines-dashboard-chart.js and dashboards.md §6.3. */
 :root {
   --chart-canvas: var(--surface-default);
   --chart-plot: var(--surface-page);
@@ -103,7 +103,7 @@
   --app-text-ui: 0.8125rem;            /* 13px — base UI, controls, notices */
   --app-leading-ui: 1.5;               /* 19.5px at 13 */
   --app-text-support: 0.75rem;         /* 12px — support copy, tabs, table cells, card titles, form help/errors */
-  --app-text-name: 0.75rem;            /* 12px — resource names; wrap, never clip */
+  --app-text-name: 0.75rem;            /* 12px — resource names; one line, truncates with an ellipsis (#701) */
   --app-leading-name: 1.55;            /* 18.6px at 12 */
   --app-text-heading: 0.875rem;        /* 14px — a dialog or section heading (the prototype's dialog h3) */
   --app-text-browser-title: var(--app-text-heading); /* 14px — the resource browser's title (#554 reads it) */
@@ -133,6 +133,63 @@
   --app-radius-badge: var(--radius-sm);   /* 4px — a status badge */
   --app-dialog-max: 560px;             /* an ordinary dialog; it also never exceeds 90vw */
   --app-target-min: 44px;              /* a coarse pointer's smallest target */
+  /* #783 — ONE pane-splitter grip (104 §B / 141 §C), read by the editor dock's and the board
+     dock's handles: the strip straddling the pane's edge, and the pill drawn at its centre. */
+  --app-splitter-strip: 9px;
+  --app-splitter-grip-w: 40px;
+  --app-splitter-grip-h: 3px;
+}
+
+/* #801 — both dock handles share geometry, ink and interaction states. Page classes
+   place the strip against their pane border and hide it while the pane is collapsed. */
+.app-splitter {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.app-splitter--y {
+  top: calc((var(--app-splitter-strip) - 1px) / -2);
+  left: 0;
+  right: 0;
+  height: var(--app-splitter-strip);
+  cursor: row-resize;
+}
+
+.app-splitter::after {
+  content: "";
+  width: var(--app-splitter-grip-w);
+  height: var(--app-splitter-grip-h);
+  border-radius: var(--radius-pill);
+  background: var(--border-default);
+  transition: background var(--duration-normal);
+}
+
+.app-splitter:hover::after,
+.app-splitter:focus-visible::after,
+.is-dragging > .app-splitter::after {
+  background: var(--brand);
+}
+
+/* A discrete resize and a captured drag must both follow the pointer immediately. */
+.is-dragging:has(> .app-splitter) {
+  transition: none;
+}
+
+html.dp-splitting-y,
+html.dp-splitting-y * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+html.dp-splitting-x,
+html.dp-splitting-x * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 /* Application-level semantic tokens — derive from design system, never hardcoded hex */
@@ -939,9 +996,11 @@ button.app-busy::after {
   /* The menu's width right now: compact under `rail-collapsed` (below) and by default
      from 761 to 1100px (the 110 table at the foot of this file). */
   --app-menu-width: var(--app-menu-expanded);
-  /* The browser's band default (300 here, 320 from 1600, 270 from 761 to 1100), the
-     user's range, and the at-most-360 phone drawer. */
-  --app-browser-default: 300px;
+  /* The browser's band default (re-declared by the width bands below; the table at the
+      foot of this file is the spec), the user's `--app-browser-min`–`--app-browser-max`
+      range, and the at-most-360 phone drawer. #788: this sheet is the range's ONE source
+      — rail.js and browser-resize.mjs read the bounds from here, never from a literal. */
+  --app-browser-default: 320px;
   /* <main>'s padding on all four sides, by the record §4 table's bands: 40 from 1600,
      32 from 1101 to 1599 (here), 24 from 761 to 1100, 20 at 760 and below. Every
      full-height canvas's calc and the status pill's offset read it (ui-screens §3.6). */
@@ -952,14 +1011,15 @@ button.app-busy::after {
      less, half the rest beyond it; a canvas page zeroes it, the anonymous shell's track is the
      window. A fixed element that lines up with the content edge (the status pill) adds it. */
   --app-frame-inset: max(0px, (100vw - var(--app-menu-width) - var(--app-browser-col) - var(--app-frame-max)) / 2);
-  --app-browser-min: 240px;
+  --app-browser-min: 280px;
   --app-browser-max: 480px;
   --app-drawer-max: 360px;
   /* Record §4: the PREFERRED width (`--app-browser-preferred`, stamped by rail.js and
-     written by browser-resize.mjs) clamped to the range and to what leaves <main> its
-     320px. clamp() lets the minimum win, so a viewport too narrow for both still gets a
-     240px browser rather than a negative one. The preference itself is never rewritten
-     by the clamp: a narrow window does not overwrite a wide screen's choice. */
+      written by browser-resize.mjs) clamped to the `--app-browser-min`–
+      `--app-browser-max` range and to what leaves <main> its 320px. clamp() lets the
+      minimum win, so a viewport too narrow for both still gets a browser at
+      `--app-browser-min` rather than a negative one. The preference itself is never
+      rewritten by the clamp: a narrow window does not overwrite a wide screen's choice. */
   --app-browser-width: clamp(
     var(--app-browser-min),
     var(--app-browser-preferred, var(--app-browser-default)),
@@ -990,7 +1050,7 @@ button.app-busy::after {
 
 @media (min-width: 1600px) {
   :root {
-    --app-browser-default: 320px;
+    --app-browser-default: 340px;
     --app-main-pad: var(--space-10);
   }
 }
@@ -1411,12 +1471,24 @@ button.app-busy::after {
 }
 
 .app-browser-tree {
-  /* The explorers' guide geometry (template-tree.css derives the rows' guides from these;
-     `.tplx-tree` declares them for the page explorer). --tpl-row-h follows the compact
-     row padding, so the guides still meet the chevrons. */
-  --tpl-indent: calc(var(--gap-md) + var(--gap-xs));
-  --tpl-row-h: calc(var(--space-1) * 2 + var(--text-sm) * var(--leading-normal));
-  --tpl-guide-x: calc(var(--gap-xs) + var(--icon-xs) / 2 - var(--tpl-indent));
+  /* #943 (owner 2026-11-13): the browser's rows take the EXPLORER tree's look (085 §A,
+     template-tree.css) — a chevron on folders, tight rows with no gap between them,
+     continuous guides and a tick that reaches the row's first icon. The geometry below
+     mirrors the explorer's --tpl-* derivation with the browser's own lengths; it amends
+     the spacing of #604 (4px row rhythm) and #701/#739 (12px/8px row padding); #784's
+     12px indent and 280px floor stand. --dp-tree-slot is the chevron's slot: a leaf leaves it empty so its
+     glyph sits in the folders' glyph column. --dp-tree-guide-x is the vertical guide's x
+     relative to a row's item: the PARENT's chevron centre, negative by construction. */
+  --dp-tree-indent: var(--space-3);
+  --dp-tree-inset: var(--gap-xs);
+  --dp-tree-gap: var(--gap-sm);
+  --dp-tree-slot: calc(var(--icon-xs) + var(--dp-tree-gap));
+  --dp-tree-row-h: calc(var(--gap-sm) * 2 + var(--app-text-name) * var(--app-leading-name));
+  --dp-tree-guide-x: calc(var(--dp-tree-inset) + var(--icon-xs) / 2 - var(--dp-tree-indent));
+
+  /* #943: the tree box is a size container so the rows below can retract the chevron
+     when the browser is too narrow for it (the block after the guides). */
+  container: dp-browser-tree / inline-size;
 
   flex: 1;
   min-height: 0;
@@ -1443,28 +1515,63 @@ button.app-busy::after {
   padding: var(--gap-xs) var(--gap-sm);
 }
 
-/* Record §5/§7 (#604): a browser row is a card on the overlay surface. The control
-   paints the 12px padding, the 8px radius, the hover tint and the selection tint; the
-   line stays transparent so the surface shows through. The name is its own 12px title
-   that wraps — a long unbroken name included — and never clips or line-clamps; the
-   badges wrap onto their own metadata line in the title's column, 8px under the
-   title's last line, in muted ink. */
+/* Record §5/§7 (#604, re-cut by #701 — owner ruling 2026-10-24; spacing re-cut by #943):
+   a browser row is ONE line on the overlay surface. The control paints the explorer's
+   8px vertical / 4px horizontal padding, the 8px radius, the
+   hover tint and the selection tint; the line stays transparent so the surface shows
+   through. The 12px title truncates with an ellipsis — the control's title attribute
+   carries the full canonical name — and yields width to the badges, which stay on the
+   same line after it, never wrapping and never leaving the rail (#541). The icons are
+   flex: none and vertically centred by the row's align-items; a folder's chevron rotates
+   and its closed/open glyph follows the renderer's aria-expanded. The line keeps display: block so the
+   control fills the row and the #516 ring rides the line (kept below). */
 .app-browser .dp-tree-line {
+  position: relative;
+  z-index: calc(var(--z-base) + 1);
   display: block;
   min-width: 0;
 }
 
 .app-browser .dp-tree-activate {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: var(--space-2);
-  row-gap: 0;
-  align-items: start;
+  display: flex;
+  align-items: center;
+  gap: var(--dp-tree-gap);
   min-width: 0;
-  padding: var(--space-3);
+  min-height: var(--dp-tree-row-h);
+  box-sizing: border-box;
+  padding: var(--gap-sm) var(--dp-tree-inset);
   border-radius: var(--radius-md);
-  white-space: normal;
+  white-space: nowrap;
   text-align: start;
+}
+
+/* #943: a leaf keeps the chevron's slot EMPTY, so its family glyph sits where a sibling
+   folder's glyph sits and its name where that folder's name sits (the explorer's
+   .tpl-leaf rule, owner 2026-09-12). A folder row is the one that carries aria-expanded. */
+.app-browser .dp-tree-item:not([aria-expanded]) > .dp-tree-line > .dp-tree-activate {
+  padding-inline-start: calc(var(--dp-tree-inset) + var(--dp-tree-slot));
+}
+
+/* #943: the disclosure marker is the sprite's chevron-right, muted, rotated a quarter
+   turn while its folder is expanded (the explorer's .tpl-chevron). */
+.app-browser .dp-tree-chevron {
+  color: var(--text-muted);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.app-browser .dp-tree-item[aria-expanded="true"] > .dp-tree-line .dp-tree-chevron {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Open/closed is information, so the rotation stays; only the transition goes. */
+  .app-browser .dp-tree-chevron {
+    transition: none;
+  }
+}
+
+.app-browser .dp-tree-activate .ds-icon {
+  flex: none;
 }
 
 .app-browser .dp-tree-activate:hover {
@@ -1472,26 +1579,27 @@ button.app-busy::after {
 }
 
 .app-browser .dp-tree-title {
+  flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--app-text-name);
   line-height: var(--app-leading-name);
 }
 
 .app-browser .dp-tree-meta {
-  grid-column: 2;
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  min-width: 0;
-  margin-top: var(--space-2);
+  gap: var(--space-0-5);
   color: var(--text-secondary);
 }
 
-/* A row with no visible badge carries no metadata line at all — the title's box is
-   the row's whole content, with no dead space beneath it. */
+/* A row with no visible badge carries no metadata box at all — no dead gap between the
+   title's end and the row's padding. The span stays in the DOM (the renderer's
+   contract); only its box leaves. */
 .app-browser .dp-tree-meta:not(:has(> .ds-badge:not([hidden]))) {
-  margin-top: 0;
+  display: none;
 }
 
 /* #604: selection is primary ink over the tint on the CONTROL — the generic line
@@ -1505,16 +1613,94 @@ button.app-busy::after {
   background: var(--surface-selected);
 }
 
-/* #604: the record's 4px rhythm between rows on the browser surface. */
-.app-browser .dp-tree-item + .dp-tree-item {
-  margin-top: var(--space-1);
-}
-
 /* #516's keyboard ring stays on the row LINE (the generic .dp-tree-item:focus-visible
    rule draws it); inside the browser the focused line takes the card's radius, so the
    ring follows the control's rounded shape without moving off the line. */
 .app-browser .dp-tree-item:focus-visible > .dp-tree-line {
   border-radius: var(--radius-md);
+}
+
+/* #739 (owner ruling 2026-10-26, spacing reduction approved after the 240px probe):
+   compact at every width, 8px per level, 8px row insets, 4px row gaps, 2px badge gaps
+   and sides. Previous spacing put the depth-10 three-badge row 26px outside the rail
+   at 240px. No width threshold: #701's threshold hid a name on widening (131px at
+   381px compact, 0px at 382px full). Vertical padding and the 4px row rhythm stay.
+   #784 amends the indent: 8px per level → --space-3 (12px), so the tick reads 6px.
+   #943 re-cuts the spacing to the explorer's: 4px row insets, 8px in-row gaps, no gap
+   between rows; #784's 12px per level and the 2px badge gaps and sides stand. */
+.app-browser .dp-tree-group {
+  padding-inline-start: var(--dp-tree-indent);
+}
+
+/* The item wraps its subtree. Non-last guides span it whole, so siblings join in one
+   stroke (#943: no gap between rows); the last stops at its OWN row centre.
+   :not(:has(~ .dp-tree-item)) ignores trailing notices.
+   Search keeps its server-provided hierarchy, but never paints browse guides. Controls
+   paint hover/selection over the guide, as in the 085 §A explorer exemplar. */
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item {
+  position: relative;
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: var(--dp-tree-guide-x);
+  top: 0;
+  bottom: 0;
+  width: var(--space-px);
+  background: var(--border-subtle);
+  pointer-events: none;
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:first-child::before {
+  top: calc(-1 * var(--dp-tree-row-h) / 2);
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:not(:has(~ .dp-tree-item))::before {
+  bottom: auto;
+  height: calc(var(--dp-tree-row-h) / 2);
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:first-child:not(:has(~ .dp-tree-item))::before {
+  height: var(--dp-tree-row-h);
+}
+
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: var(--dp-tree-guide-x);
+  top: calc(var(--dp-tree-row-h) / 2);
+  width: calc(var(--dp-tree-inset) - var(--dp-tree-guide-x));
+  height: var(--space-px);
+  background: var(--border-subtle);
+  pointer-events: none;
+}
+
+/* #943: a leaf's tick runs on across the empty chevron slot to its glyph. */
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:not([aria-expanded])::after {
+  width: calc(var(--dp-tree-inset) + var(--dp-tree-slot) - var(--dp-tree-guide-x));
+}
+
+/* #943 (owner ruling 2026-11-13, option 1): below a 320px browser the row has no room
+   for the chevron — a depth-ten three-badge leaf left the rail by 18px at the 280px
+   floor (#541/#739's containment rule) — so the chevron and the leaf's empty slot
+   retract TOGETHER: folder and leaf glyphs stay in one column, and the folder's
+   folder / folder-open glyph alone carries the expansion, as before #943. Nothing is
+   hidden but the ornament. The condition reads the tree box, which is the browser
+   less its 1px edge (319px at a 320px browser); a container condition cannot read a
+   custom property, hence the literal. */
+@container dp-browser-tree (width < 319px) {
+  .app-browser .dp-tree-scroll {
+    --dp-tree-slot: 0px;
+  }
+
+  .app-browser .dp-tree-chevron {
+    display: none;
+  }
+}
+
+.app-browser .dp-tree-meta .ds-badge {
+  padding-inline: var(--space-0-5);
 }
 
 .app-browser-foot {
@@ -3369,10 +3555,11 @@ button.app-busy::after {
 
    | Width        | Menu                               | Resource browser                    | Topbar                                  | Main gutter |
    |--------------|------------------------------------|-------------------------------------|-----------------------------------------|-------------|
-   | ≥ 1600 px    | 202 expanded / 64 compact (the     | 320 default; the user's 240–480,    | as today                                | --gap-lg    |
-   |              | user's `dp-rail`, remembered)      | clamped to leave main 320           |                                         |             |
-   | 1101–1599    | 202 / 64, as above                 | 300 default, same range             | as today                                | --gap-lg    |
-   | 761–1100     | starts compact (64) unless the     | 270 default, same range             | search hidden; crumbs truncate to the   | --gap-lg    |
+   | ≥ 1600 px    | 202 expanded / 64 compact (the     | the band default; the user's        | as today                                | --gap-lg    |
+   |              | user's `dp-rail`, remembered)      | `--app-browser-min`–`--app-browser- |                                         |             |
+   |              |                                    | max`, clamped to leave main 320     |                                         |             |
+   | 1101–1599    | 202 / 64, as above                 | the band default, same range        | as today                                | --gap-lg    |
+   | 761–1100     | starts compact (64) unless the     | the band default, same range        | search hidden; crumbs truncate to the   | --gap-lg    |
    |              | user expanded it — same class,     |                                     | LEAF with the full path in title        |             |
    |              | same key; the DEFAULT flips here   |                                     |                                         |             |
    | ≤ 760 px     | the Navigation drawer: not in the  | the Browse resources drawer: not in | hamburger + folder, crumbs (leaf only), | --gap-md    |
@@ -3898,7 +4085,9 @@ pre.tf-pane-input {
 .dp-tree-item:focus { outline: 0; }
 .dp-tree-item:focus-visible { box-shadow: none; }
 .dp-tree-item:focus-visible > .dp-tree-line { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--space-px)); }
-.dp-tree-item[aria-expanded="true"] > .dp-tree-line .ds-icon { transform: rotate(90deg); }
+/* #701 — the chevron rotation lived here; no tree row emits a chevron any more (a
+   folder's closed/open folder glyph follows aria-expanded in the renderer), so the
+   rule is gone. A folder glyph must never rotate. */
 .dp-tree-item[aria-selected="true"] > .dp-tree-line { background: var(--surface-selected); color: var(--text-link); }
 .dp-tree-status { padding: var(--gap-xs); color: var(--text-muted); }
 
@@ -4201,6 +4390,7 @@ pre.tf-pane-input {
 }
 .app-overview-task-icon[data-tone="draft"] { background: var(--accent-warning-bg); color: var(--app-warning-ink); }
 .app-overview-task-icon[data-tone="released"] { background: var(--accent-success-bg); color: var(--app-success-ink); }
+.app-overview-task-icon[data-tone="danger"] { background: var(--accent-danger-bg); color: var(--app-danger-ink); }
 .app-overview-task-text { display: grid; gap: var(--space-1); min-width: 0; }
 .app-overview-task-text b { font-weight: var(--weight-medium); }
 .app-overview-task-text small { color: var(--text-muted); font-size: var(--app-text-support); }

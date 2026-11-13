@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 # Developer-local handback checks. Full Gate A belongs to the lander.
-# --plan [base] is read-only. Default stops after failure; --continue-on-failure
-# explicitly collects later diagnostics. XML and logs survive each completed stage.
+# --plan [base] is read-only; base defaults to the local main, else origin/main (#757).
+# A run stops after failure by default; --continue-on-failure explicitly collects later
+# diagnostics. XML and logs survive each completed stage.
+# Stage 0 (#797) runs scripts/vuln-scan.sh — Gate A's OSV scan, outbound to api.osv.dev —
+# only when the diff changes a gradle.lockfile, gradle/libs.versions.toml or
+# gradle/verification-metadata.xml; its exits follow the gate's mapping (200 = offline skip).
+# A failed stage names the HotSpot report of a crashed test JVM it left (#773).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT" || exit 2
 source "$ROOT/scripts/pregate-2b-lib.sh"
 source "$ROOT/scripts/pregate-results-lib.sh"
 source "$ROOT/scripts/pregate-plan-lib.sh"
-BASE=origin/main; preview=0; diagnostic=0; selftest=0; base_set=0; help=0
-usage() { echo 'Usage: pregate.sh [--plan | --continue-on-failure] [base-ref] | --self-test'; }
+# The crash-report helper is gate.sh's (one definition, #773); scan-tools.sh owns the
+# vuln-scan exit contract's offline sentinel (stage 0, #797).
+source "$ROOT/scripts/lib/gate-stages.sh"
+source "$ROOT/scripts/lib/scan-tools.sh"
+BASE=; preview=0; diagnostic=0; selftest=0; base_set=0; help=0
+usage() { echo 'Usage: pregate.sh [--plan | --continue-on-failure] [base-ref] | --self-test  (base-ref default: main, else origin/main)'; }
 for arg in "$@"; do
   case "$arg" in
     --plan) [ "$preview" -eq 0 ] || { usage >&2; exit 2; }; preview=1 ;;
@@ -33,6 +42,22 @@ if [ "$selftest" -eq 1 ]; then
   [ "$s_sel" -eq 0 ] && [ "$s_res" -eq 0 ] && [ "$s_safe" -eq 0 ]; exit $?
 fi
 [ "$preview" -eq 0 ] || [ "$diagnostic" -eq 0 ] || { usage >&2; exit 2; }
+# Lanes are cut from the LOCAL main, which runs ahead of origin/main while a landed batch
+# waits for CI on next; an origin/main base plans that whole batch too (#757, #752). CI's
+# checkout has no local main, so origin/main stays the fallback. An explicit base wins.
+PG_BASE_SOURCE=explicit
+if [ "$base_set" -eq 0 ]; then
+  if git show-ref --verify --quiet refs/heads/main; then
+    BASE=main; PG_BASE_SOURCE=default:main
+    if git show-ref --verify --quiet refs/remotes/origin/main; then
+      read -r ahead behind < <(git rev-list --left-right --count origin/main...main) || exit 2
+      PG_BASE_SOURCE="$PG_BASE_SOURCE; origin/main is $behind behind"
+      [ "$ahead" -eq 0 ] || PG_BASE_SOURCE="$PG_BASE_SOURCE, $ahead ahead"
+    fi
+  else
+    BASE=origin/main; PG_BASE_SOURCE=default:origin/main
+  fi
+fi
 [ "$preview" -eq 1 ] || start="$(pgres::now_ms)" || exit 1
 pgplan::build "$BASE" || exit $?
 if [ "$preview" -eq 1 ]; then pgplan::print; exit $?; fi
@@ -53,13 +78,13 @@ for m in "${PG_DEFERRED[@]}"; do
   pgres::manifest_stage "$MANIFEST" "2b-${m#tests/}" deferred 0 "$(pg2b::deferral_reason "$m")" || snap=1
 done
 [ "$snap" -eq 0 ] && [ "$prune" -eq 0 ] || { failed=1; stopped_by=bookkeeping; }
-echo "Pre-gate base=$BASE merge-base=$PG_MB head=$PG_HEAD evidence=$RUN_DIR"
+echo "Pre-gate base=$BASE ($PG_BASE_SOURCE) merge-base=$PG_MB head=$PG_HEAD evidence=$RUN_DIR"
 pgplan::print
 # Numeric 125 preserves the exit-field grammar while meaning NOT RUN, never success.
-declare -A exits=([1]=125 [2]=125 [2b]=125 [3]=125 [4]=125)
-declare -A logs=([1]=1-lint.log [2]=2-touched-modules.log [2b]=2b-tests-modules.log [3]=3-guards.log [4]=4-compile-all-tests.log)
+declare -A exits=([0]=125 [1]=125 [2]=125 [2b]=125 [3]=125 [4]=125)
+declare -A logs=([0]=0-deps-scan.log [1]=1-lint.log [2]=2-touched-modules.log [2b]=2b-tests-modules.log [3]=3-guards.log [4]=4-compile-all-tests.log)
 
-for stage in 1 2 2b 3 4; do
+for stage in "${PG_STAGES[@]}"; do
   if [ "$failed" -ne 0 ] && [ "$diagnostic" -eq 0 ]; then
     pgres::manifest_stage "$MANIFEST" "stage-$stage" not-run 125 "reason=after-$stopped_by elapsed_ms=0" || snap=1
     printf 'stage=%s disposition=not-run reason=after-%s\n' "$stage" "$stopped_by" >> "$RUN_DIR/COMMANDS.txt" || snap=1
@@ -100,7 +125,13 @@ for stage in 1 2 2b 3 4; do
       done
     fi
     if [ "$snap" -eq 0 ] || [ "$diagnostic" -eq 1 ]; then
-      ./gradlew "${args[@]}" 9>&- > "$LOGDIR/${logs[$stage]}" 2>&1; rc=$?
+      # The step's start marker: a HotSpot report not older than it is this step's (#773).
+      : > "$RUN_DIR/stage-$stage.start" || snap=1
+      if [ "$stage" = 0 ]; then
+        "${args[@]}" 9>&- > "$LOGDIR/${logs[$stage]}" 2>&1; rc=$?
+      else
+        ./gradlew "${args[@]}" 9>&- > "$LOGDIR/${logs[$stage]}" 2>&1; rc=$?
+      fi
       # Preserve the actual stage log before any later stage or invocation overwrites it.
       cp "$LOGDIR/${logs[$stage]}" "$RUN_DIR/${logs[$stage]}" || snap=1
     else
@@ -108,6 +139,8 @@ for stage in 1 2 2b 3 4; do
     fi
   fi
   exits[$stage]="$rc"
+  # rc decides the stage's failure; for stage 0 the gate's exit contract maps it first.
+  fail_rc="$rc"
   if [ "$status" = executed ] && [[ "$stage" == 2 || "$stage" == 2b || "$stage" == 3 ]]; then
     pgres::capture "$ROOT" "$RUN_DIR" "$stage" executed "$rc" "$LOGDIR/${logs[$stage]}" "${roots[@]}" || snap=1
   else
@@ -115,6 +148,27 @@ for stage in 1 2 2b 3 4; do
     [ "$status" != executed ] || reason=completed
     [ "$status" != covered ] || reason=covered-by-stage-2
     [ "$status" != not-run ] || reason=bookkeeping-failure
+    if [ "$stage" = 0 ]; then
+      # scripts/vuln-scan.sh's EXIT CONTRACT, mapped exactly as gate.sh maps it.
+      if [ "$status" = skipped ]; then
+        reason=no-dependency-change
+        echo "  0 deps-scan skipped — no dependency file changed (no gradle.lockfile, gradle/libs.versions.toml or gradle/verification-metadata.xml in the diff)"
+      elif [ "$status" = executed ]; then
+        case "$rc" in
+          0) echo "  0 deps-scan PASS — no known vulnerabilities in the committed lockfiles" ;;
+          1) reason=findings
+             echo "  0 deps-scan FAIL — known vulnerabilities; the OSV table is in the stage log: $RUN_DIR/${logs[0]}" ;;
+          "$SCAN_EXIT_OFFLINE")
+             # Fail-soft BY DESIGN, as in Gate A: the verdict line carries scan=200, which
+             # reads "scan not done here" — never a clean result.
+             status=skipped; reason=offline; fail_rc=0
+             echo "  0 deps-scan !! SKIPPED — offline (fail-soft by design; NOT a clean result; log: $RUN_DIR/${logs[0]})"
+             grep -F 'WARNING' "$LOGDIR/${logs[0]}" | sed 's/^/      /' ;;
+          *) reason=no-verdict
+             echo "  0 deps-scan FAIL — no verdict: scanner error or broken environment (exit $rc; never a pass)" ;;
+        esac
+      fi
+    fi
     pgres::manifest_stage "$MANIFEST" "stage-$stage" "$status" "$rc" "reason=$reason" || snap=1
   fi
   if [ "$stage" = 2 ] && [ "$status" = executed ]; then
@@ -133,9 +187,19 @@ for stage in 1 2 2b 3 4; do
   pgres::elapsed "$MANIFEST" "$stage" "$before" "$after" || snap=1
   printf 'stage=%s disposition=%s exit=%s\n' "$stage" "$status" "$rc" >> "$RUN_DIR/COMMANDS.txt" || snap=1
   echo "  $stage $status EXIT=$rc elapsed_ms=$((after - before))"
-  if [ "$rc" -ne 0 ] || [ "$snap" -ne 0 ]; then
+  if [ "$fail_rc" -ne 0 ] || [ "$snap" -ne 0 ]; then
     failed=1; stopped_by="$stage"
-    if [ "$status" = executed ]; then tail -n 24 "$LOGDIR/${logs[$stage]}"; fi
+    if [ "$status" = executed ]; then
+      # A test worker HotSpot killed is a crash, not a test failure: name its report (#773).
+      if [ "$stage" != 0 ]; then
+        crash="$(gate_crash_explain "$LOGDIR/${logs[$stage]}" "$RUN_DIR/stage-$stage.start" "$ROOT")"
+        if [ -n "$crash" ]; then
+          printf '%s\n' "$crash" | sed 's/^/    /'
+          printf '%s\n' "$crash" > "$RUN_DIR/stage-$stage.crash-reports.txt" || snap=1
+        fi
+      fi
+      tail -n 24 "$LOGDIR/${logs[$stage]}"
+    fi
   fi
 done
 finish="$(pgres::now_ms)" || { snap=1; finish="$start"; }
@@ -144,7 +208,7 @@ outcome=FAIL
 [ "$failed" -eq 0 ] && [ "$snap" -eq 0 ] && [ "$prune" -eq 0 ] && outcome=PASS
 # Final manifest write is mandatory too. It must precede any PASS publication.
 if ! pgres::manifest_verdict "$MANIFEST" "$outcome" "$RUN_ID"; then snap=1; outcome=FAIL; fi
-line="PRE-GATE $outcome base=$BASE merge-base=${PG_MB:0:8} head=${PG_HEAD:0:8} at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') lint=${exits[1]} mod=${exits[2]} t2b=${exits[2b]} grd=${exits[3]} cmp=${exits[4]} snap=$snap prune=$prune run=$RUN_ID deferred=${PG_DEFERRED[*]:-none} elapsed_ms=$((finish - start)) diagnostic=$diagnostic"
+line="PRE-GATE $outcome base=$BASE merge-base=${PG_MB:0:8} head=${PG_HEAD:0:8} at=$(date -u '+%Y-%m-%dT%H:%M:%SZ') scan=${exits[0]} lint=${exits[1]} mod=${exits[2]} t2b=${exits[2b]} grd=${exits[3]} cmp=${exits[4]} snap=$snap prune=$prune run=$RUN_ID deferred=${PG_DEFERRED[*]:-none} elapsed_ms=$((finish - start)) diagnostic=$diagnostic"
 if ! printf '%s\n' "$line" >> "$LOGDIR/0-verdict.log"; then
   pgres::manifest_verdict "$MANIFEST" FAIL "$RUN_ID" || true
   echo 'PRE-GATE FAIL: cannot append verdict' >&2; exit 1

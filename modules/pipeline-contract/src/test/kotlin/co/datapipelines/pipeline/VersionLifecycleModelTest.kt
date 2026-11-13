@@ -137,7 +137,7 @@ class VersionLifecycleModelTest {
     private fun excluded(row: VersionLifecycleTable.Row): Boolean =
         row.edge.contains("template twin") ||
             row.citedCodes.any { it.startsWith("template.") } ||
-            row.outcome.contains("template_not_released")
+            row.outcome.contains("dependency_not_released")
 
     private fun replayRow(
         row: VersionLifecycleTable.Row,
@@ -845,23 +845,34 @@ class VersionLifecycleModelTest {
                 DatasourceRegistry { name, _ -> if (name == "pg") DatasourceFacts(co.datapipelines.typesystem.Dialect.H2) else null },
                 PermissiveTemplates,
                 PipelineResolver { _, _, _ -> null },
+                PipelineNames { _, _ -> false },
                 5,
+            )
+        val statuses = TemplateVersionStatuses { _, _, _ -> PipelineVersionStatus.RELEASED }
+        val releases =
+            PipelineReleaseService(
+                repository,
+                validator,
+                guard,
+                dashboards = NoDashboards,
+                endpointVersions = NoApiVersionPins,
+                schedules = NoSchedulePins,
             )
         return PipelineService(
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, guard),
-            releases =
-                PipelineReleaseService(
-                    repository,
-                    TemplateVersionStatuses { _, _, _ -> PipelineVersionStatus.RELEASED },
-                    validator,
-                    guard,
-                    dashboards = NoDashboards,
-                ),
+            releases = releases,
             authoring = guard,
             draftTemplates = NoExclusiveDraftTemplates,
             dashboards = NoDashboards,
+            endpointVersions = NoApiVersionPins,
+            schedules = NoSchedulePins,
+            // #877 §E.3 — the model's `release` event is the pipeline participant's own seams (prepare, flip): its
+            // templates are always RELEASED, so the coordinator's dependency guard has nothing to decide here.
+            coordination = ReleaseCoordinationDoubles.setUp(releases, statuses),
+            // The model's templates are always RELEASED, so a restore's pin recheck (#517 round three) passes.
+            templateStatuses = statuses,
         )
     }
 

@@ -1,5 +1,6 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.typesystem.jdbc.DuckDbAuthorSqlGate
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
@@ -52,6 +53,20 @@ class SqlProbePermissionDeniedTest {
             { SQLException("canceling statement due to statement timeout", "57014").isPermissionDenied() shouldBe false },
             { SQLException("Connection refused", "08001").isPermissionDenied() shouldBe false },
             { SQLException("Table \"ORDERS\" not found", "42S02", 42102).isPermissionDenied() shouldBe false },
+        )
+    }
+
+    @Test
+    fun `the author-SQL guard's 42501 is not a privilege refusal, bare or wrapped`() {
+        // #816 (§5.8): the guard refused the statement's TEXT; no table was read and no credential
+        // is at fault, so the probe and preview boundaries must answer query_execution_failed with
+        // the guard's message — never table_forbidden. An engine's own 42501 still classifies.
+        val refusal = runCatching { DuckDbAuthorSqlGate.check("SELECT * FROM query('SELECT 1')") }.exceptionOrNull() as SQLException
+        assertAll(
+            { refusal.sqlState shouldBe "42501" },
+            { refusal.isPermissionDenied() shouldBe false },
+            { SQLException("wrapper", "HY000", 0, refusal).isPermissionDenied() shouldBe false },
+            { SQLException("ERROR: permission denied for table orders", "42501").isPermissionDenied() shouldBe true },
         )
     }
 

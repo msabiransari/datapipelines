@@ -114,7 +114,8 @@ object LifecycleVerbs {
      * The release a family verb's cascade rode on (#332): which family release ordered a cascaded
      * template or visualization release — the [CascadeSource] question with the source key spelled
      * per family (`cascade_from_parameter_set_id`, `cascade_from_visualization_id`,
-     * `cascade_from_dashboard_id`).
+     * `cascade_from_dashboard_id`; the release coordinator's other roots too — `cascade_from_api_endpoint_id` since
+     * #894, `cascade_from_template_id`).
      */
     data class FamilyCascade(
         val idKey: String,
@@ -245,6 +246,11 @@ object LifecycleVerbs {
      * `pipeline.version.released` naming them. Called only after the service returned, i.e.
      * after the one transaction committed; a refusal anywhere threw before this and logs
      * nothing, which is the audit half of the cascade's atomicity.
+     *
+     * Since #517 a release through the release coordinator arrives with every row already written, strictly, inside
+     * its own transaction ([co.datapipelines.pipeline.PipelineReleaseService.Released.auditedInTransaction]); this emits
+     * nothing for it, so no release is audited twice (record §11). Only a directly constructed service reaches the rows
+     * below.
      */
     fun auditRelease(
         sink: AuditEventSink,
@@ -253,6 +259,7 @@ object LifecycleVerbs {
         pipelineId: UUID,
         released: co.datapipelines.pipeline.PipelineReleaseService.Released,
     ) {
+        if (released.auditedInTransaction) return
         val source = CascadeSource(pipelineId, released.version.version)
         released.templatesReleased.forEach { template ->
             audit(

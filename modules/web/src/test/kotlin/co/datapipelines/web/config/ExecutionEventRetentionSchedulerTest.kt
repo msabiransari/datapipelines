@@ -195,6 +195,7 @@ class ExecutionEventRetentionSchedulerTest {
 
     private fun captured(block: () -> Unit): List<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(ExecutionEventRetentionScheduler::class.java) as ch.qos.logback.classic.Logger
+        // raw-list-appender: synchronous — retain() runs on the test thread over mocks; no scheduler
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         try {

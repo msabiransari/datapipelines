@@ -12,7 +12,7 @@
 
   <section class="section page-hero" aria-labelledby="tts-title">
     <div class="container">
-      <!-- claim: docs/mcp-server.md §6.1, docs/versioning.md §3 -->
+      <!-- claim: docs/mcp-server.md §6.2, docs/versioning.md §3 -->
       <p class="eyebrow">We do not generate SQL · the agent does · the pipeline is versioned</p>
       <p class="kicker">Text to SQL, and then what?</p>
       <h1 id="tts-title" class="ds-display">The text-to-SQL agent: from a question to a pipeline your team can rerun</h1>
@@ -46,14 +46,14 @@
       <h2 id="four-title" class="ds-headline">Real schemas, a versioned artifact, readable failures, history</h2>
       <div class="features-grid">
         <article class="card">
-          <!-- claim: docs/mcp-server.md §6.1 -->
+          <!-- claim: docs/mcp-server.md §6.2 -->
           <h3>Your actual schema, before the query</h3>
           <p><code>datasources_get_schemas</code>, <code>datasources_get_tables</code>, <code>datasources_get_columns</code> and <code>datasources_preview_rows</code>. The agent looks at the columns and a few real values first, so its SQL is grounded rather than inferred.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/pipeline-contract.md §3.1 -->
+          <!-- claim: docs/pipeline-contract.md §3.1, docs/scheduler.md §1, docs/dashboards.md §5.1 -->
           <h3>The answer becomes an artifact</h3>
-          <p>The query is saved as a template, referenced by a pipeline in declarative JSON. It has a name, parameters, and a diff. Somebody else can run it without asking the agent again.</p>
+          <p>The query is saved as a template, referenced by a pipeline in declarative JSON. It has a name, parameters, and a diff. Somebody else can run it without asking the agent again, put it on a <a th:href="@{/pipeline-scheduling}">schedule</a>, or chart its released version on a <a th:href="@{/sql-dashboards}">dashboard</a>.</p>
         </article>
         <article class="card">
           <!-- claim: docs/versioning.md §3.1, docs/versioning.md §3.2 -->
@@ -83,7 +83,7 @@
     <div class="container">
       <h2 id="cross-title" class="ds-headline">And the question that crosses two databases</h2>
       <!-- claim: docs/staging.md §1 -->
-      <p class="section-lede">
+      <p class="section-lede text-columns">
         The question that stops a single-database text-to-SQL tool dead, "revenue by borough" where the trips are
         in Postgres and the zone lookup is in SQLite, is an ordinary pipeline here. Each source is read in place,
         staged into an in-memory database created for that one execution, and joined there.
@@ -100,7 +100,7 @@
         <li><strong>No model shipped or called.</strong> This is not a text to SQL LLM and not an AI SQL query generator: the quality of the SQL is your agent's; the quality of what happens to it is ours.</li>
         <li><strong>No accuracy claim.</strong> We do not benchmark on Spider or BIRD, because we are not the thing being benchmarked.</li>
       </ul>
-      <p><a th:href="@{/ai-data-pipeline}">What an AI data pipeline is here &rarr;</a> &middot;
+      <p class="section-note"><a th:href="@{/ai-data-pipeline}">What an AI data pipeline is here &rarr;</a> &middot;
          <a th:href="@{/add-mcp-server-to-claude-code}">Connect your agent &rarr;</a></p>
     </div>
   </section>
@@ -108,16 +108,16 @@
   <section class="section" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <!-- claim: docs/mcp-server.md §6.1 — does datapipelines generate the SQL -->
-      <!-- claim: docs/pipeline-contract.md §3.1 — what happens to the query after it answers -->
+      <!-- claim: docs/mcp-server.md §6.2 — agent tools accept templates and pipeline definitions -->
+      <!-- claim: docs/pipeline-contract.md §3.1 — the saved JSON structure: version, parameters and template references -->
       <!-- claim: docs/pipeline-contract.md §13 — what the agent gets when a query fails -->
-      <!-- claim: docs/staging.md §1 — can it join two databases in one question -->
+      <!-- claim: docs/staging.md §1 — per-execution in-memory staging holds intermediate result sets -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Text-to-SQL questions, answered plainly')}"></div>
     </div>
   </section>
 
   <section class="section band" aria-labelledby="cta-title">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="cta-title" class="ds-headline">Ask the question that keeps coming back</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">

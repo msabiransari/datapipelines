@@ -123,7 +123,7 @@ class VisualizationTestSurfacesE2eTest {
         cases.map { it.path("name").asText() } shouldBe listOf("one month", "no rows")
         val result = cases[0].path("results").path("preview")
         result.path("rows").asInt() shouldBe 1
-        result.path("bindings").path("data[0].y").map { it.asDouble() } shouldBe listOf(10.5)
+        result.path("bindings").path("amount").map { it.asDouble() } shouldBe listOf(10.5)
         cases[1]
             .path("results")
             .path("preview")
@@ -621,7 +621,7 @@ class VisualizationTestSurfacesE2eTest {
         ifMatch: String,
     ): String {
         val node = mapper.readTree(DOCUMENT) as ObjectNode
-        (node.get("presentation") as ObjectNode).put("title", title)
+        (node.get("config").get("title") as ObjectNode).put("text", title)
         val written =
             given()
                 .port(port)
@@ -775,15 +775,16 @@ class VisualizationTestSurfacesE2eTest {
         val DOCUMENT =
             """
             {"name": "$NAME", "display_name": "Evidence", "description": "",
-             "renderer": {"kind": "plotly", "version": "4"},
+             "renderer": {"kind": "chart", "version": "1"},
              "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                 {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-             "config": {"data": [{"type": "bar", "x": [], "y": []}]},
-             "bindings": {"data[0].x": "month", "data[0].y": "amount"},
-             "presentation": {"title": "Evidence"},
+             "config": {"title": {"text": "Evidence"}, "mark": {"type": "bar"},
+                        "encoding": {"x": {"field": "month", "type": "temporal", "sort": "ascending"},
+                                     "y": {"field": "amount", "type": "quantitative", "aggregate": "sum"}}},
+             "bindings": {"amount": "amount", "month": "month"},
              "tests": {"cases": [
                 {"name": "one month", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
-                 "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]},
+                 "assertions": [{"kind": "rendered"}, {"kind": "mark_count", "equals": 1}]},
                 {"name": "no rows", "fixtures": {"revenue": []}, "assertions": [{"kind": "no_data"}]}]}}
             """.trimIndent()
 

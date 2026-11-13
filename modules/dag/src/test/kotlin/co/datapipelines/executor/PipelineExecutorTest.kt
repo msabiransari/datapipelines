@@ -12,9 +12,9 @@ import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.Staging
-import co.datapipelines.staging.StagingEngine
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull

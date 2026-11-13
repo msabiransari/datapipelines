@@ -258,7 +258,7 @@ class LakeConnectivityIntegrationTest {
                 ),
         )
 
-    private companion object {
+    internal companion object {
         private const val BUCKET = "dp-lake-it"
         private const val PUBLIC_BUCKET = "dp-lake-it-public"
         private const val MINIO_PORT = 9000
@@ -277,9 +277,9 @@ class LakeConnectivityIntegrationTest {
          * the digest held `RELEASE.2026-09-22T19-25-18Z` when pinned on 2026-09-24, and Chainguard
          * never deletes old digests. `scripts/verify-image-pins.sh` checks the pin against the
          * registry in CI. Move BOTH pins together (this one and SharedE2e's) — they must run the
-         * same server.
+         * same server. ManagedLakeMinioIntegrationTest (#818) reads this constant rather than a copy.
          */
-        private const val MINIO_IMAGE = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
+        internal const val MINIO_IMAGE = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
 
         @Container
         @JvmStatic

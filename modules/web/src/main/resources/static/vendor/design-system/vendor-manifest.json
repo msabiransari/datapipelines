@@ -1,7 +1,7 @@
 {
   "design-system": {
     "package": "@acme/design-tokens",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "source": "../design-system-starter/dist/",
     "files": [
       "tokens.css",
@@ -25,15 +25,15 @@
       "motion.css": "1f32f4f6018752b434ad30114710ca10c7dfe514e5419003325da824c8ff608b",
       "primitives.css": "e8704e4d09d04be0b1048a9816e54cb756481012099d71fdb46129e9e2cb685b",
       "icons.css": "68b21794e9c5e0c6586fd30dae189d63e716cbeaa49a434f46a5db47b827a622",
-      "themes/saas.css": "18209b1ca2670a81fa35e697d5cf69d921d62fff141480090d3c2ceadc4aacf1",
-      "themes/light.css": "1cffafddaeddd5713b6c5b7ac45984f2ce528fcea7aa9bae01ba8effa96a5227",
-      "themes/dark.css": "ff2dc29f17532921e2e8b484ab35df7d01570093856254154393379d94133691",
-      "themes/professional.css": "7b782e7404736cc5d065041dd4d0ee9337cbaaad95d765822f06c3200324a39c",
-      "themes/auto.css": "e681de0b5234edb2b0f7c25244df4be04c3b53d045a6538797d5e56f1758a7ef",
-      "themes/healthcare.css": "3d988215a95bb2937dfcd120e22254a599e5bb666026dfa0254b9288061aabed",
-      "themes/minimal.css": "c69c4933ba6d65c3570ac641f8962a8f9c78ebf522b1ec84ecb92249b20feb28",
-      "themes/forest.css": "31125a2db7994a9fbb774d79fbfe02eeae306b96573e59a03b4c9937fbff6d08",
-      "themes/ocean.css": "db66b72c9862a66c4544eca3206140fa3aa70e3b28c8b1a8088b36dfed64a8eb"
+      "themes/saas.css": "e067daa1a387fe3afcf1286eea8c67fff15900227f50ef77527f62acd4122b90",
+      "themes/light.css": "1d4bca7f6b776ba44f30f477477aa843a49320ec83974bc767a1dc90c02d4696",
+      "themes/dark.css": "33ceab1fe58ab8eb51892df6e49dcce6cc13207ecc48b61df2be42c0b2417abf",
+      "themes/professional.css": "5a625877d6918024ed9f169dbb7e6e92028e723b7e9ec791bbce01492915436f",
+      "themes/auto.css": "e136dcac02e39e4609b408b31a496132fd56a61530ff7626141e03c6d1862970",
+      "themes/healthcare.css": "bf0c968a8f0285680727b94adaae966d80ee1a980fad2b3a8681c8af5e9a56fc",
+      "themes/minimal.css": "15750279a296feb1d917424569951e6570d33e3c46542bd3af1e76a844314cbf",
+      "themes/forest.css": "3844a8aa81e3a50197d2f20f16a2c50250a6ed4dcd757b0faa056a775a8a0d6c",
+      "themes/ocean.css": "dfab9ff4f5eb90a8f533667578443f860f3518924dd27ce51dc14835f50cce6d"
     },
     "license": "MIT"
   },
@@ -42,6 +42,9 @@
     "file": "vendor/cytoscape/cytoscape.min.js",
     "sha256": "9c2a3bf2592e0b14a1f7bec07c03a54f16dedf32af9cd0af155c716aa6c87bc3",
     "source": "https://unpkg.com/cytoscape@3.34.0/dist/cytoscape.min.js",
+    "license_file": "vendor/cytoscape/LICENSE.cytoscape",
+    "license_file_source": "https://unpkg.com/cytoscape@3.34.0/LICENSE",
+    "license_file_sha256": "eb319c6e6f233607f71e8e2f450391751883cfc0eeb3ca7ef574c13d1d9c2203",
     "license": "MIT"
   },
   "cytoscape-dagre": {
@@ -49,6 +52,9 @@
     "file": "vendor/cytoscape/cytoscape-dagre.js",
     "sha256": "bf70fe402991dcbff33e05a7a4a5271c78020bb75e85d1c80ab7538e4157112e",
     "source": "https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js",
+    "license_file": "vendor/cytoscape/LICENSE.cytoscape-dagre",
+    "license_file_source": "https://unpkg.com/cytoscape-dagre@2.5.0/LICENSE",
+    "license_file_sha256": "fccef1f60ab551f032291912d77bb9e8cd98b99bd1cffe185062ac7216a36d5e",
     "license": "MIT"
   },
   "cytoscape-node-html-label": {
@@ -56,6 +62,9 @@
     "file": "vendor/cytoscape/cytoscape-node-html-label.js",
     "sha256": "ea4b3acc5c0ab4d4429707b62a7b3eb3ff99cf683f6212265962683b877d951e",
     "source": "https://unpkg.com/cytoscape-node-html-label@1.2.2/dist/cytoscape-node-html-label.js",
+    "license_file": "vendor/cytoscape/LICENSE.cytoscape-node-html-label",
+    "license_file_source": "https://unpkg.com/cytoscape-node-html-label@1.2.2/LICENSE",
+    "license_file_sha256": "418b3a46691c9716339e85b61293c8dfa45e79a4ff65c9f43661d1f53ae9dcc5",
     "license": "MIT",
     "note": "059 — HTML node cards overlaid on Cytoscape nodes (pointer-events:none container, scales with pan/zoom via container transform)."
   },
@@ -63,7 +72,7 @@
     "package": "lucide-static",
     "version": "1.39.0",
     "file": "vendor/icons/lucide-sprite.svg",
-    "sha256": "6ce082c7ac2be4b1f2365a9efbf2d253280519e8d2a41f1b1c1c81b85e68f34b",
+    "sha256": "7f5ecf022b25352e894a57e3c95d2ee196fdbae7a7bdd144ce9429ad2b50e553",
     "source": "https://unpkg.com/lucide-static@1.39.0/icons/{name}.svg",
     "license": "ISC",
     "subset": [
@@ -112,10 +121,13 @@
       "sliders-horizontal",
       "chart-line",
       "eye",
-      "eye-off"
+      "eye-off",
+      "octagon-alert"
     ],
     "note": "059 — subset ONLY (glyphs assembled into one sprite, symbol ids left of the mapping); stroke=currentColor so tokens colour them. No vendor logos (trademarks). 085 §B: the sprite now covers EVERY icon the app references — the nav, the actions and the tree glyphs were ad-hoc inline copies at mixed weights until now; IconSpriteAuditTest keeps referenced, vendored and this subset list equal. db/table/boxes/workflow are the 059 legacy ids (db = lucide's database; its subset_sha256 is database.svg's). The upstream LICENSE is vendored verbatim as LICENSE.lucide (ISC, with the Feather-derived MIT appendix).",
     "license_file": "vendor/icons/LICENSE.lucide",
+    "license_file_source": "https://unpkg.com/lucide-static@1.39.0/LICENSE",
+    "license_file_sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
     "subset_sha256": {
       "db": "ba411fddd776d3937bb0afb44a17e08561cf00483b48922033697233a41c320c",
       "table": "a226cd8b351e79a2826b69ca3b131d59d2fbf9aca5c37de9c30be14ff72ef16e",
@@ -162,7 +174,8 @@
       "sliders-horizontal": "3553f5e026f5bdf7e512e57ae54a672ced42df62d1dd2b8de0fc1a898d56e7d5",
       "chart-line": "3b83d3bc804083413091262ea77af17a4a0ce2d9dddfe87b0ddfa9a8a4155983",
       "eye": "5db18e2f562787f3652e4071f5b7011e7b54971a881b39f8f377ba70ae0e2c4b",
-      "eye-off": "81900df1dcf8644102427a5a02eff61c3c1f48a67266ed6f192bf9d7e537b493"
+      "eye-off": "81900df1dcf8644102427a5a02eff61c3c1f48a67266ed6f192bf9d7e537b493",
+      "octagon-alert": "1f6a0318d4e3ae2e9f734632819c9a0d258a1134dd502d832b366001e018f50f"
     }
   },
   "plotly": {
@@ -175,12 +188,14 @@
       "vendor/plotly/LICENSE"
     ],
     "sha256": {
-      "vendor/plotly/plotly-2d.min.js": "9be1c4996edddf09a0c3d5ac4be26193ba4361934d049925d2182b910d4df633",
-      "vendor/plotly/plotly-3d.min.js": "24273a50c5860ea6d01cd74d0fc0f67ad8dc9dda253b3a4c6396e3c64234e602",
+      "vendor/plotly/plotly-2d.min.js": "3513d76fb5e1bf28a15f3df03f8c50139f8f0db9ab3db62993c9ec4ff355227f",
+      "vendor/plotly/plotly-3d.min.js": "7faef8ff2c80c769de21cb0b878e491e4956d5d7d64c504cbbf5b05a6a876fd2",
       "vendor/plotly/plotly.css": "2ac4dc70c5023a2ecc62a626fa61da33b38327b1926312a7af6111308473acdb"
     },
     "license": "MIT",
     "license_file": "vendor/plotly/LICENSE",
+    "license_file_source": "https://raw.githubusercontent.com/plotly/plotly.js/v4.1.1/LICENSE",
+    "license_file_sha256": "8c45d9eaf50c2f72dd9c7ab9ef440788ba58a3538484b5c51c1f17d5128752e7",
     "source": "https://github.com/plotly/plotly.js (git clone --branch v4.1.1, commit 0aabc3c5cc4f1d91fd6dd3846c5353de1beb0885; the npm tarball plotly.js-4.1.1.tgz sha1 f797e8f2d54603fd9d11b08aae8eb31147200b67 was verified against the same tag)",
     "traces": {
       "plotly-2d.min.js": ["scatter", "bar", "pie", "histogram", "box", "heatmap"],
@@ -188,24 +203,26 @@
     },
     "build": "cd \"$(mktemp -d)\" && git clone --depth 1 --branch v4.1.1 https://github.com/plotly/plotly.js.git plotly.js && cd plotly.js && git apply <repo>/modules/web/src/main/resources/static/vendor/plotly/patches/*.patch && npm ci --no-audit --no-fund && npm run custom-bundle -- --traces scatter,bar,pie,histogram,box,heatmap --strict --out 2d && npm run custom-bundle -- --traces scatter,bar,pie,histogram,box,heatmap,scatter3d,surface,mesh3d --strict --out 3d; built with Node v24.21.0 / npm 11.19.0 using npm ci, esbuild 0.28.1 from the tag's lockfile, clone commit 0aabc3c5cc4f1d91fd6dd3846c5353de1beb0885; patches 0001–0003 apply in order; 0003 (#571) hashes the root-relative CSS path under the historical directory as a constant salt, preserving the committed bytes from any clone directory. Run scripts/verify-plotly-bundles.sh (exit 0) before copying a rebuild in; the lander runs it when a diff touches static/vendor/plotly/ or this plotly entry, never in gate, pregate or CI; plotly.css is the npm package's dist/plotly.css (the release build's own strict-CSP sheet). Rebuild recipe in docs/deployment.md.",
     "sizes": {
-      "plotly-2d.min.js": "1254487 bytes (418262 gzipped, zlib deflate level 9, gzip framing, mtime 0)",
-      "plotly-3d.min.js": "1831532 bytes (588221 gzipped, zlib deflate level 9, gzip framing, mtime 0)",
+      "plotly-2d.min.js": "1170988 bytes (406683 gzipped, zlib deflate level 9, gzip framing, mtime 0)",
+      "plotly-3d.min.js": "1748030 bytes (576983 gzipped, zlib deflate level 9, gzip framing, mtime 0)",
       "plotly.css": "7467 bytes"
     },
-    "note": "#10 L3a — two self-contained custom bundles (the implementation spec's §10.4, D63): the 2D bundle is the default, the 3D bundle loads only on a dashboard whose pinned visualizations carry a 3D trace (renderer.bundle on runtime/config). Neither contains a new Worker site (measured); the 3D bundle carries webpack's `new Function(\"return this\")` globalThis fallback, dead code on any browser this app serves (the conformance suite renders under the live CSP, no unsafe-eval, to keep that true). Plotly's runtime sheet injection is designed around, not allowed: each host pre-places the empty <template id=plotly.js-style-global class=no-inline-styles> marker Plotly checks (src/lib/dom.js addRelatedStyleRule, which reads the id and class alone; #456), and the runtime's fallback for a host without one creates the same template (#526) and loads the vendored plotly.css — a real stylesheet under style-src 'self' — so the bundle injects nothing. #525 — one source patch (patches/0001-colorbar-style-reset-without-attribute.patch): the colorbar reset of its fill rects wrote `.attr('style', '')`, an inline-style attribute the enforced CSP refuses, and now removes the attribute (`.attr('style', null)`); it changes exactly the two `attr(\"style\",\"\")` sites in each bundle (+4 bytes). The bundles were REBUILT with it: the 2026-09-30 build (the original recipe, build directory not recorded) is not reproducible from the recorded recipe — an unpatched rebuild has the same length and different identifier mangling (430-432 differing bytes in about 238 regions of the 2D bundle, 114-116 in 2 regions of the 3D bundle), and the output was path-dependent until 0003 (#571; mechanism researched in #530) — so these bytes differ from the 2026-09-30 bundles beyond the two sites. Sizes: 2D 1254444 -> 1254448, 3D 1831489 -> 1831493; the trace lists are unchanged. #531 — a second source patch (patches/0002-heatmap-pixelated-hint-via-cssom.patch) sets the default heatmap image-rendering fallbacks through the CSSOM in their original order, ending in pixelated; both bundles were rebuilt at the fixed path, with unchanged trace lists and exactly the two heatmap hunks in each unminified comparison (minified identifier allocation also changes)."
+    "note": "#10 L3a — two self-contained custom bundles (the implementation spec's §10.4, D63): the 2D bundle is the default, the 3D bundle loads only on a dashboard whose pinned visualizations carry a 3D trace (renderer.bundle on runtime/config). Neither contains a new Worker site (measured); the 3D bundle carries webpack's `new Function(\"return this\")` globalThis fallback, dead code on any browser this app serves (the conformance suite renders under the live CSP, no unsafe-eval, to keep that true). Plotly's runtime sheet injection is designed around, not allowed: each host pre-places the empty <template id=plotly.js-style-global class=no-inline-styles> marker Plotly checks (src/lib/dom.js addRelatedStyleRule, which reads the id and class alone; #456), and the runtime's fallback for a host without one creates the same template (#526) and loads the vendored plotly.css — a real stylesheet under style-src 'self' — so the bundle injects nothing. #525 — one source patch (patches/0001-colorbar-style-reset-without-attribute.patch): the colorbar reset of its fill rects wrote `.attr('style', '')`, an inline-style attribute the enforced CSP refuses, and now removes the attribute (`.attr('style', null)`); it changes exactly the two `attr(\"style\",\"\")` sites in each bundle (+4 bytes). The bundles were REBUILT with it: the 2026-09-30 build (the original recipe, build directory not recorded) is not reproducible from the recorded recipe — an unpatched rebuild has the same length and different identifier mangling (430-432 differing bytes in about 238 regions of the 2D bundle, 114-116 in 2 regions of the 3D bundle), and the output was path-dependent until 0003 (#571; mechanism researched in #530) — so these bytes differ from the 2026-09-30 bundles beyond the two sites. Sizes: 2D 1254444 -> 1254448, 3D 1831489 -> 1831493; the trace lists are unchanged. #531 — a second source patch (patches/0002-heatmap-pixelated-hint-via-cssom.patch) sets the default heatmap image-rendering fallbacks through the CSSOM in their original order, ending in pixelated; both bundles were rebuilt at the fixed path, with unchanged trace lists and exactly the two heatmap hunks in each unminified comparison (minified identifier allocation also changes). #570 — patch 0004 (patches/0004-drop-unreachable-maplibre-css-require.patch) removes the unreachable maplibre-gl stylesheet require from both non-map bundles; drop this patch when a map trace joins a trace list."
   },
   "datapipelines-dashboard-runtime": {
     "package": "first-party (this repository)",
     "version": "1",
     "files": [
       "js/datapipelines-dashboard.js",
+      "js/datapipelines-dashboard-chart.js",
       "js/datapipelines-dashboard-plotly.js",
       "js/datapipelines-dashboard-table.js",
       "js/datapipelines-dashboard-kpi.js"
     ],
     "sha256": {
-      "js/datapipelines-dashboard.js": "e3bde65959fc8fe95f2c49256cb34a41386935a683c8000c730a43f06fc5b4c2",
-      "js/datapipelines-dashboard-plotly.js": "e59ee43fd9f192b60ed5d3e42111c64a1cae737c172b85ddad885efba5754ff7",
+      "js/datapipelines-dashboard.js": "bf31d4e8d8a6677c1fc3dd5c94a97b8a8ac3a0f8fff40897dac9bcec205f4631",
+      "js/datapipelines-dashboard-chart.js": "4b56c48b95f28d0ebfddc753afbdcd527745edcd0b6c4b76500984905c6bf42c",
+      "js/datapipelines-dashboard-plotly.js": "85da47639cfc25ffe658becc713808e8294b6e547fa27265505201b9dc35c3fb",
       "js/datapipelines-dashboard-table.js": "3412e46ba63d4e045ac33fc7d3305352ab9da5bff015863b5dc96d4e56ce9e39",
       "js/datapipelines-dashboard-kpi.js": "1de1ea45789aebece9397f7c87622eb7cd27705874ce009b4623ce28f3bbcb28"
     },
@@ -221,6 +238,8 @@
     "source": "org.webjars.npm:htmx.org:2.0.10 -> META-INF/resources/webjars/htmx.org/2.0.10/dist/htmx.min.js",
     "license": "0BSD",
     "license_file": "vendor/htmx/LICENSE",
+    "license_file_source": "https://unpkg.com/htmx.org@2.0.10/LICENSE",
+    "license_file_sha256": "d3d2456f76414f2456104660ebd65aff1c04cd7966b942bdabd63f3cdb316a38",
     "note": "096 §B — htmx was the ONLY webjar, served from /webjars/** : a ** glob over a namespace the dependency graph fills rather than this repository. Vendored like Alpine, Cytoscape and dagre so the allowlist loses that entry (MISTAKES.md, 'Frontend Dependencies via CDN' — a dependency-supplied servlet namespace is the same class of trust as a CDN). The bytes are the webjar's own dist/htmx.min.js, sha256-identical to the artifact this round removed; VendoredHtmxAuditTest pins the hash and refuses any /webjars/ reference in the layouts."
   },
   "dagre": {
@@ -228,6 +247,9 @@
     "file": "vendor/dagre/dagre.min.js",
     "sha256": "62eb9787ccfdbdf4148d4d99d31dbf9ee4770eafee81e637d759b52aac22cd51",
     "source": "https://unpkg.com/dagre@0.8.5/dist/dagre.min.js",
+    "license_file": "vendor/dagre/LICENSE",
+    "license_file_source": "https://unpkg.com/dagre@0.8.5/LICENSE",
+    "license_file_sha256": "6a349742a6cb219d5a2fc8d0844f6d89a6efc62e20c664450d884fc7ff2d6015",
     "license": "MIT"
   },
   "alpinejs": {
@@ -236,6 +258,9 @@
     "sha256": "40f00d7aaa543eabd17c3a0f79ce2ac62e6be17caa9564527c20ec39152bb157",
     "package": "@alpinejs/csp",
     "source": "https://registry.npmjs.org/@alpinejs/csp/-/csp-3.14.1.tgz (the CSP build's dist/cdn.min.js; tarball sha256 ab76984420bcc7e30d96b39338b4715bf514275de4d8b466c36bca5b178ca46a)",
+    "license_file": "vendor/alpinejs/LICENSE",
+    "license_file_source": "https://raw.githubusercontent.com/alpinejs/alpine/v3.14.1/LICENSE.md",
+    "license_file_sha256": "5f05c4925dd3edf049a70b4b403ac0dd43b20f72501d9359911ddd25d5ac657d",
     "license": "MIT"
   },
   "noto-sans": {
@@ -256,6 +281,9 @@
       "vendor/fonts/noto-sans/OFL.txt": "54ec7b5a35310ad66f9f3091426f7028484cbf9ae1ab5da30122ee412a3009e1"
     },
     "source": "https://registry.npmjs.org/@fontsource-variable/noto-sans/-/noto-sans-5.3.0.tgz",
+    "license_file": "vendor/fonts/noto-sans/OFL.txt",
+    "license_file_source": "https://unpkg.com/@fontsource-variable/noto-sans@5.3.0/LICENSE",
+    "license_file_sha256": "54ec7b5a35310ad66f9f3091426f7028484cbf9ae1ab5da30122ee412a3009e1",
     "license": "OFL-1.1",
     "license_file_upstream": "LICENSE",
     "note": "551 — the app's sans face is Noto Sans, the bundled family the owner chose against the prototype (record 2026-10-16 \u00a75, decision also on #547). The woff2 subsets (variable wght axis 100-900, normal + italic, latin + latin-ext) come from the pinned fontsource package, whose metadata names upstream v42 of google/fonts; the tarball was fetched once, its sha512 checked against the registry integrity before extraction, and the computed tarball sha256 is 2cd97f3573b6e8ceaaa54ddf5df3f8e64d89a5bb31954013700d36a7ec01dcd6. Upstream notofonts releases ship TTF only, so the npm package is the pinned, hash-recorded source, as for Manrope. Upstream ships the OFL text as LICENSE; it is vendored verbatim as OFL.txt. Italic faces are declared because the app has sans-italic rules (template/pipeline editors) but are not preloaded. No Google Fonts, no CDN."
@@ -278,6 +306,9 @@
       "vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Medium.woff2": "4a752d6e3a3edb4615952b4a813cae005c600fd17f810fec2217fd81cd34db43"
     },
     "source": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
+    "license_file": "vendor/fonts/jetbrains-mono/OFL.txt",
+    "license_file_source": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/v2.304/OFL.txt",
+    "license_file_sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad",
     "license": "OFL-1.1",
     "note": "079 §G — weights 400/500 only (the two the app renders: mono cells and the key prefix chips). Static woff2 from the release zip's fonts/webfonts/. 133: JetBrainsMonoSite-* are site-only latin subsets (39 KB total vs 184) — the marketing pages render authored English code only, and the full 184 KB pair in the late sheet cost ~1.05s of FCP under the throttled Lighthouse harness. The app keeps the full faces."
   },
@@ -295,6 +326,9 @@
       "vendor/fonts/manrope/OFL.txt": "d826ab6583b12c26807d8716a545bdbbb672df04f48608a364ba9efdbe501c30"
     },
     "source": "https://registry.npmjs.org/@fontsource-variable/manrope/-/manrope-5.3.0.tgz",
+    "license_file": "vendor/fonts/manrope/OFL.txt",
+    "license_file_source": "https://unpkg.com/@fontsource-variable/manrope@5.3.0/LICENSE",
+    "license_file_sha256": "d826ab6583b12c26807d8716a545bdbbb672df04f48608a364ba9efdbe501c30",
     "license": "OFL-1.1",
     "license_file_upstream": "LICENSE",
     "note": "Site v2 (2026-09-09) — the marketing site's display/body face (direction B). Variable weight axis, latin + latin-ext subsets from the pinned fontsource package (upstream sharanda/manrope's GitHub API answered 404 on 2026-09-09, so the npm package is the pinned, hash-recorded source). Vendored verbatim; the app keeps Inter. No Google Fonts, no CDN."
@@ -320,7 +354,10 @@
       "vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-700-normal.woff2": "5b9b81f54dd69635c7adcaacd4c4545a73fe4809c528e22734b238a83a74135f",
       "vendor/fonts/ibm-plex-mono/OFL.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
     },
-    "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700 (woff2 UA), licence https://github.com/google/fonts/raw/main/ofl/ibmplexmono/OFL.txt",
+    "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700 (woff2 UA), licence https://raw.githubusercontent.com/google/fonts/465b90c97b4de569e0b546bb2536900194cf7187/ofl/ibmplexmono/OFL.txt",
+    "license_file": "vendor/fonts/ibm-plex-mono/OFL.txt",
+    "license_file_source": "https://raw.githubusercontent.com/google/fonts/465b90c97b4de569e0b546bb2536900194cf7187/ofl/ibmplexmono/OFL.txt",
+    "license_file_sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
     "license": "OFL-1.1",
     "note": "133 — the marketing site display face (owner ruling 2026-09-14, the mock's plexmono preset): h1-h3, kickers, proof-strip values. Weights 500/600/700, latin + latin-ext subsets. font-display: swap per the 133 ruling (the h1 is the LCP element)."
   }

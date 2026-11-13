@@ -191,8 +191,9 @@ object ScopeMatrix {
 
     /**
      * #215 A.6: `required` is the catalog permission; `held` is the ROLE it was judged against —
-     * the member role (for the MCP key, the capped one), `super_admin`, or the key role —
-     * informative only, no code compares it.
+     * informative only, no code compares it. Since keys v2 (auth.md §7.5 "Key roles") a key's
+     * role is its own, chosen at creation: `held` is the key's own `keyRole`, the member role
+     * for a session, `super_admin`, or null.
      */
     private fun roleRefusal(
         code: String,

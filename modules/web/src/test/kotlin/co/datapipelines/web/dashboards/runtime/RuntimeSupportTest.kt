@@ -1,10 +1,12 @@
 package co.datapipelines.web.dashboards.runtime
 
+import co.datapipelines.application.dashboards.AdmissionResult
 import co.datapipelines.application.dashboards.RefreshAdmission
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.persistence.ScheduledJob
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ActionScope
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRecord
@@ -82,7 +84,7 @@ class RuntimeSupportTest {
     }
 
     @Test
-    fun `the bundle is 3d only when a pinned plotly visualization carries a 3D trace - otherwise 2d`() {
+    fun `the bundle is 2d for every pinned kind since the plotly kind retired - a 3D trace name in a chart changes nothing`() {
         fun pinned(
             kind: RendererKind,
             config: String,
@@ -102,28 +104,15 @@ class RuntimeSupportTest {
             )
         }
 
-        // A 2D trace, a table renderer, a KPI renderer and a config without data stay on the 2D bundle.
+        // Every v1 chart family is a 2D trace (design record 2026-11-06 §5.1): a chart, a table, a KPI and none at all.
         RuntimeViews.rendererBundle(emptyList()) shouldBe "2d"
-        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.PLOTLY, """{"data":[{"type":"bar"}]}"""))) shouldBe "2d"
+        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.CHART, """{"mark":{"type":"bar"}}"""))) shouldBe "2d"
         RuntimeViews.rendererBundle(listOf(pinned(RendererKind.TABLE, """{"columns":[]}"""))) shouldBe "2d"
         RuntimeViews.rendererBundle(listOf(pinned(RendererKind.KPI, """{}"""))) shouldBe "2d"
-        RuntimeViews.rendererBundle(
-            listOf(
-                pinned(RendererKind.PLOTLY, """{"layout":{"title":{"text":"x"}}}"""),
-                pinned(RendererKind.TABLE, """{"columns":[]}"""),
-            ),
-        ) shouldBe "2d"
-        // The trace types the derivation reads are the validator's closed list, not a re-spelled copy.
+        // The retired kind's 3D trace types, spelled into a config, no longer select the heavy bundle.
         RendererConfigValidators.PLOTLY_3D_TRACES.forEach { trace ->
-            RuntimeViews.rendererBundle(listOf(pinned(RendererKind.PLOTLY, """{"data":[{"type":"$trace"}]}"""))) shouldBe "3d"
+            RuntimeViews.rendererBundle(listOf(pinned(RendererKind.CHART, """{"data":[{"type":"$trace"}]}"""))) shouldBe "2d"
         }
-        // One 3D trace anywhere loads the heavy bundle for the whole board — the two are never on one page.
-        RuntimeViews.rendererBundle(
-            listOf(
-                pinned(RendererKind.PLOTLY, """{"data":[{"type":"bar"}]}"""),
-                pinned(RendererKind.PLOTLY, """{"data":[{"type":"surface"}]}"""),
-            ),
-        ) shouldBe "3d"
     }
 
     @Test
@@ -176,7 +165,7 @@ class RuntimeSupportTest {
                 configurationId = "cfg-1",
             )
 
-        val config = RuntimeViews.config(resolved, DashboardRuntimeConfig())
+        val config = RuntimeViews.config(resolved, DashboardRuntimeConfig(), emptyMap())
         val visualization = config["visualizations"][0]
 
         visualization["name"].asText() shouldBe "rev"
@@ -195,7 +184,68 @@ class RuntimeSupportTest {
                 sources = emptyMap(),
                 configurationId = "cfg-1",
             )
-        RuntimeViews.config(withoutDescription, DashboardRuntimeConfig())["visualizations"][0]["description"].isNull shouldBe true
+        RuntimeViews.config(withoutDescription, DashboardRuntimeConfig(), emptyMap())["visualizations"][0]["description"].isNull shouldBe
+            true
+    }
+
+    @Test
+    fun `a chart occurrence carries its columns as wire types and a table occurrence carries none - 860`() {
+        val at = Instant.parse("2026-11-08T00:00:00Z")
+        val user = UUID.randomUUID()
+
+        fun pinned(
+            kind: RendererKind,
+            config: String,
+        ): ArtifactVersion<VisualizationBody> {
+            val id = UUID.randomUUID()
+            return ArtifactVersion(
+                ArtifactRecord(id, UUID.randomUUID(), "dbr/viz", "v", "", 1, at, at, user),
+                ArtifactVersionDetail(id, 1, PipelineVersionStatus.RELEASED, "h", at, user),
+                VisualizationBody(
+                    displayName = "v",
+                    renderer = RendererSpec(kind, "1"),
+                    inputs = emptyMap(),
+                    config = ArtifactJson.mapper.readTree(config) as ObjectNode,
+                ),
+            )
+        }
+        val occurrence = { name: String ->
+            VisualizationOccurrence(name = name, type = DashboardObjectType.VISUALIZATION, visualization = ArtifactRef("v", 1))
+        }
+        val servedId = UUID.randomUUID()
+        val resolved =
+            ResolvedDashboard(
+                served =
+                    ArtifactVersion(
+                        ArtifactRecord(servedId, UUID.randomUUID(), "dbr/dashboard", "Board", "", 1, at, at, user),
+                        ArtifactVersionDetail(servedId, 1, PipelineVersionStatus.RELEASED, "h", at, user),
+                        DashboardBody(
+                            displayName = "Board",
+                            visualizations = listOf(occurrence("bars"), occurrence("rows")),
+                            layout = DashboardLayout(),
+                        ),
+                    ),
+                visualizations =
+                    mapOf(
+                        "bars" to pinned(RendererKind.CHART, """{"mark":{"type":"bar"}}"""),
+                        "rows" to pinned(RendererKind.TABLE, """{"columns":[]}"""),
+                    ),
+                set = null,
+                sources = emptyMap(),
+                configurationId = "cfg-1",
+            )
+        val columns =
+            mapOf(
+                "bars" to linkedMapOf("amount" to LogicalType.BIGINTEGER, "region" to LogicalType.STRING),
+                "rows" to mapOf("ignored" to LogicalType.STRING),
+            )
+
+        val entries = RuntimeViews.config(resolved, DashboardRuntimeConfig(), columns)["visualizations"]
+
+        entries[0]["columns"].toString() shouldBe """{"amount":"BIGINTEGER","region":"STRING"}"""
+        entries[1].has("columns") shouldBe false
+        // A chart whose contract is unknowable still carries the key: the runtime reads `{}` as "no contract".
+        RuntimeViews.config(resolved, DashboardRuntimeConfig(), emptyMap())["visualizations"][0]["columns"].toString() shouldBe "{}"
     }
 
     @Test
@@ -313,6 +363,7 @@ class RuntimeSupportTest {
         metrics.refreshEnded(RefreshStatus.COMPLETED, Duration.ofMillis(750))
         metrics.refreshEnded(RefreshStatus.ABORTED, Duration.ofMillis(5))
         metrics.refused(DashboardMetrics.REASON_SATURATED)
+        metrics.refused(DashboardMetrics.REASON_NEVER_ADMISSIBLE)
 
         registry.counter(DashboardMetrics.REFRESHES, "status", "COMPLETED").count() shouldBe 2.0
         registry.counter(DashboardMetrics.REFRESHES, "status", "ABORTED").count() shouldBe 1.0
@@ -324,8 +375,9 @@ class RuntimeSupportTest {
             ).totalTime(java.util.concurrent.TimeUnit.MILLISECONDS) shouldBe
             1000.0
         registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "saturated").count() shouldBe 1.0
+        registry.counter(DashboardMetrics.REFRESHES_REFUSED, "reason", "never_admissible").count() shouldBe 1.0
         registry.get(DashboardMetrics.REFRESHES_ACTIVE).gauge().value() shouldBe 0.0
-        val held = runBlocking { admission.admit(UUID.randomUUID(), executions = 1) }!!
+        val held = (runBlocking { admission.admit(UUID.randomUUID(), executions = 1) } as AdmissionResult.Admitted).admission
         registry.get(DashboardMetrics.REFRESHES_ACTIVE).gauge().value() shouldBe 1.0
         registry.get(DashboardMetrics.EXECUTIONS_RESERVED).gauge().value() shouldBe 1.0
         held.close()

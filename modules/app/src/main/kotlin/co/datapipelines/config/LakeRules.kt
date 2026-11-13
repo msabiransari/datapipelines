@@ -1,0 +1,465 @@
+package co.datapipelines.config
+
+import co.datapipelines.web.config.DatasourcesProperties
+import co.datapipelines.web.config.ManagedLakeEgressCheck
+import co.datapipelines.web.config.ReaperDelay
+import org.springframework.boot.convert.DurationStyle
+import org.springframework.util.unit.DataSize
+import java.net.URI
+import java.time.Duration
+
+/**
+ * §7 / §3.36 (#785, dp-lake P2) — the managed lake's keys at boot (dp-lake design record §6 `LakeRules`). Judged
+ * only when `datapipelines.lake.enabled=true`: a deployment without a lake is never refused for lake keys it does
+ * not use — the ONE exception being [checkStagingAdmission]'s three DuckDB staging inputs, which staging consumes
+ * whether or not the lake is enabled (#804). Values arrive as raw STRINGS (`ConfigSnapshot.lake`), so a malformed
+ * one is a NAMED violation here rather than a binder crash; application.yml supplies every key, so an unset one is
+ * judged as its default.
+ *
+ * The record's rules, and where each one lives:
+ * - the DuckDB staging admission, consumed with or without a lake (#804, staging §7.1): `staging-memory-limit` a
+ *   positive size at least DuckDB's 1 MiB floor, `staging-expansion-factor` and `scratch-bytes` positive, and
+ *   `scratch-bytes ≥ staging-memory-limit × staging-expansion-factor` — one default reservation, record §15
+ *   ([checkStagingAdmission]);
+ * - storage: enabled → a bucket, and a region or an endpoint ([checkLakeStorage]);
+ * - `protection-days ≥ 1`; `orphan-grace-hours × 3600 > job-timeout + statement-timeout-seconds + 3600` — a
+ *   REFUSAL, the safety premise of §8a part (b) ([checkLakeRetention]);
+ * - `lease-wait-seconds < node-query-timeout-max-seconds`; `max-delivery-bytes × staging-expansion-factor ≤
+ *   scratch-bytes` ([checkLakeAdmission]);
+ * - every other number positive, the maintenance window `HH:MM-HH:MM` ([checkLakeBounds]);
+ * - `freshness-tick-seconds < max-generation-age-seconds`, `reads.memory-limit` a positive size, and
+ *   `max-generation-age + 2 × reaper-delay + managed-retire-ceiling + freshness-tick ≤
+ *   protection-days × 86400 / 24` (record §10 RULING 4 as amended, #818 P5 / #818c / #818d) ([checkLakeReads]). The
+ *   ceiling is the one `datasources` applies to a retired MANAGED generation (#824, owner ruling 2026-11-07):
+ *   `managed-retire-ceiling-seconds` when set, else `node-query-timeout-max-seconds + 30` (datasources.md §5.2). The
+ *   reaper delay is a code constant, not a key: [ReaperDelay.SECONDS] (the scheduling layer) derived and pinned where
+ *   it is produced.
+ *
+ * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` and the cgroup memory
+ * sum to P1/P6 (the sum's amendment adds keys that do not exist yet, and E10b is its acceptance — owner
+ * 2026-11-02); the sum's `reads.memory-limit` term is a filed follow-up of #818 (owner 2026-11-04).
+ */
+internal object LakeRules {
+    private const val PREFIX = "datapipelines.lake"
+
+    const val ENABLED = "$PREFIX.enabled"
+    const val NAME = "$PREFIX.name"
+    const val MODE = "$PREFIX.mode"
+    const val STORAGE_KIND = "$PREFIX.storage.kind"
+    const val BUCKET = "$PREFIX.storage.bucket"
+    const val PREFIX_KEY = "$PREFIX.storage.prefix"
+    const val LANDING_PREFIX = "$PREFIX.storage.landing-prefix"
+    const val REGION = "$PREFIX.storage.region"
+    const val ENDPOINT = "$PREFIX.storage.endpoint"
+    const val ACCESS_KEY = "$PREFIX.storage.access-key"
+    const val SECRET_KEY = "$PREFIX.storage.secret-key"
+    const val READER_ACCESS_KEY = "$PREFIX.storage.reader-access-key"
+    const val READER_SECRET_KEY = "$PREFIX.storage.reader-secret-key"
+    const val MAX_CONCURRENT_INGESTIONS = "$PREFIX.admission.max-concurrent-ingestions"
+    const val MAX_CONCURRENT_MAINTENANCE = "$PREFIX.admission.max-concurrent-maintenance"
+    const val MAX_DELIVERY_BYTES = "$PREFIX.admission.max-delivery-bytes"
+    const val STAGING_EXPANSION_FACTOR = "$PREFIX.admission.staging-expansion-factor"
+    const val SCRATCH_BYTES = "$PREFIX.admission.scratch-bytes"
+    const val STAGING_MEMORY_LIMIT = "$PREFIX.admission.staging-memory-limit"
+    const val MAX_OPEN_PARTITIONS = "$PREFIX.admission.max-open-partitions-per-append"
+    const val JOB_TIMEOUT = "$PREFIX.admission.job-timeout"
+    const val LEASE_WAIT_SECONDS = "$PREFIX.admission.lease-wait-seconds"
+    const val LOCK_TIMEOUT_SECONDS = "$PREFIX.catalog.lock-timeout-seconds"
+    const val STATEMENT_TIMEOUT_SECONDS = "$PREFIX.catalog.statement-timeout-seconds"
+    const val MAX_GENERATION_AGE_SECONDS = "$PREFIX.reads.max-generation-age-seconds"
+    const val FRESHNESS_TICK_SECONDS = "$PREFIX.reads.freshness-tick-seconds"
+    const val READS_MEMORY_LIMIT = "$PREFIX.reads.memory-limit"
+    const val EGRESS_PROXY = "$PREFIX.reads.egress-proxy"
+    const val EGRESS_MAX_AGE_SECONDS = "$PREFIX.reads.egress-max-age-seconds"
+    const val MAINTENANCE_WINDOW = "$PREFIX.maintenance.window"
+    const val MAX_BYTES_REWRITTEN = "$PREFIX.maintenance.max-bytes-rewritten-per-run"
+    const val PROTECTION_DAYS = "$PREFIX.retention.protection-days"
+    const val ORPHAN_GRACE_HOURS = "$PREFIX.retention.orphan-grace-hours"
+
+    /** Every key `ConfigValidator.snapshotFrom` reads off the environment for these rules. */
+    val KEYS: List<String> =
+        listOf(
+            ENABLED,
+            NAME,
+            MODE,
+            STORAGE_KIND,
+            BUCKET,
+            PREFIX_KEY,
+            LANDING_PREFIX,
+            REGION,
+            ENDPOINT,
+            ACCESS_KEY,
+            SECRET_KEY,
+            READER_ACCESS_KEY,
+            READER_SECRET_KEY,
+            MAX_CONCURRENT_INGESTIONS,
+            MAX_CONCURRENT_MAINTENANCE,
+            MAX_DELIVERY_BYTES,
+            STAGING_EXPANSION_FACTOR,
+            SCRATCH_BYTES,
+            STAGING_MEMORY_LIMIT,
+            MAX_OPEN_PARTITIONS,
+            JOB_TIMEOUT,
+            LEASE_WAIT_SECONDS,
+            LOCK_TIMEOUT_SECONDS,
+            STATEMENT_TIMEOUT_SECONDS,
+            MAX_GENERATION_AGE_SECONDS,
+            FRESHNESS_TICK_SECONDS,
+            READS_MEMORY_LIMIT,
+            EGRESS_PROXY,
+            EGRESS_MAX_AGE_SECONDS,
+            MAINTENANCE_WINDOW,
+            MAX_BYTES_REWRITTEN,
+            PROTECTION_DAYS,
+            ORPHAN_GRACE_HOURS,
+        )
+
+    /** The credential keys: a rule needs only whether each is set, so the snapshot never holds their values. */
+    val CREDENTIAL_KEYS: Set<String> = setOf(ACCESS_KEY, SECRET_KEY, READER_ACCESS_KEY, READER_SECRET_KEY)
+
+    /**
+     * #804 — the three admission inputs DuckDB staging consumes on every deployment, with or without a lake
+     * (staging.md §7.1): the keys [checkStagingAdmission] judges ALWAYS, the rest of the lake set being
+     * enabled-gated. `DomainConfiguration.stagingFactoryFor` binds exactly these for `DuckDbStagingFactory`.
+     */
+    val STAGING_ADMISSION_KEYS: Set<String> = setOf(STAGING_MEMORY_LIMIT, STAGING_EXPANSION_FACTOR, SCRATCH_BYTES)
+
+    /** What `ConfigSnapshot.lake` carries for [key]: the raw value, or for a credential only [PRESENT] / empty. */
+    fun carried(
+        key: String,
+        raw: String?,
+    ): String? = if (key in CREDENTIAL_KEYS) (if (raw.isNullOrBlank()) "" else PRESENT) else raw
+
+    /** A set credential's stand-in in the snapshot (its toString may be logged; the value never is). */
+    const val PRESENT = "<set>"
+
+    private val MODES = setOf("normal", "restoring", "replaying")
+    private val LAKE_NAME = Regex("^[a-z0-9_]{1,63}$")
+    private val WINDOW = Regex("^([01]\\d|2[0-3]):[0-5]\\d-([01]\\d|2[0-3]):[0-5]\\d$")
+    private val ENDPOINT_SCHEMES = setOf("http", "https")
+
+    /** The fixed allowance for the object store's clock against the catalog's `now()` (record §8a, call 33). */
+    private const val SKEW_ALLOWANCE_SECONDS = 3_600L
+    private const val SECONDS_PER_HOUR = 3_600L
+
+    /** §3.2's default for `node-query-timeout-max-seconds`, read when the key is unset (ConfigValidator's twin). */
+    private const val DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS = 900L
+
+    /** The share of the protection window the read bounds may use (record §10 RULING 4: one hour of a 24-hour day). */
+    private const val PROTECTION_SHARE_DIVISOR = 24L
+    private const val SECONDS_PER_DAY = 86_400L
+
+    /**
+     * DuckDB's floor for a staging database's memory limit, in bytes (1 MiB). The staging module's own
+     * `DuckDbStagingProperties.MIN_MEMORY_LIMIT_BYTES` refuses below this at bean construction — but that module is
+     * not on this one's compile classpath, so the value is pinned here for the always-on §3.36 report and, from the
+     * other side, by `StagingDuckDbWiringTest` (web) and `LakeRulesTest`'s boundary cases (#804).
+     */
+    private const val DUCKDB_MIN_STAGING_MEMORY_BYTES = 1_048_576L
+
+    private fun enabled(snapshot: ConfigSnapshot): Boolean = snapshot.lake[ENABLED]?.trim()?.equals("true", ignoreCase = true) == true
+
+    private fun value(
+        snapshot: ConfigSnapshot,
+        key: String,
+    ): String = snapshot.lake[key]?.trim().orEmpty()
+
+    /** enabled → a bucket and a region or an endpoint; a known kind, mode and name; a usable endpoint; whole key pairs. */
+    fun checkLakeStorage(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        if (!enabled(snapshot)) return
+        if (value(snapshot, STORAGE_KIND) != "s3") violations += "$STORAGE_KIND must be 's3' (§3.36; the only kind)."
+        if (value(snapshot, BUCKET).isEmpty()) violations += "$BUCKET is required when $ENABLED=true (§3.36)."
+        val endpoint = value(snapshot, ENDPOINT)
+        if (value(snapshot, REGION).isEmpty() && endpoint.isEmpty()) {
+            violations += "$REGION or $ENDPOINT is required when $ENABLED=true (§3.36)."
+        }
+        if (endpoint.isNotEmpty() && !usableEndpoint(endpoint)) {
+            violations += "$ENDPOINT must be an http:// or https:// URL with a host and no credentials, query or fragment " +
+                "(§3.36); its scheme decides TLS."
+        }
+        if (value(snapshot, MODE) !in MODES) violations += "$MODE must be one of $MODES (§3.36)."
+        if (!LAKE_NAME.matches(value(snapshot, NAME))) violations += "$NAME must match [a-z0-9_]{1,63} (§3.36)."
+        requirePair(snapshot, ACCESS_KEY, SECRET_KEY, violations)
+        requirePair(snapshot, READER_ACCESS_KEY, READER_SECRET_KEY, violations)
+    }
+
+    /** `protection-days ≥ 1`, and the orphan grace above the longest lease-free life of a run's output plus the skew. */
+    fun checkLakeRetention(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        if (!enabled(snapshot)) return
+        positiveLong(snapshot, PROTECTION_DAYS, violations)
+        val grace = positiveLong(snapshot, ORPHAN_GRACE_HOURS, violations)
+        val job = duration(snapshot, JOB_TIMEOUT, violations)
+        val statement = positiveLong(snapshot, STATEMENT_TIMEOUT_SECONDS, violations)
+        if (grace != null && job != null && statement != null) {
+            val bound = job.seconds + statement + SKEW_ALLOWANCE_SECONDS
+            if (grace * SECONDS_PER_HOUR <= bound) {
+                violations +=
+                    "$ORPHAN_GRACE_HOURS × 3600 (${grace * SECONDS_PER_HOUR}) must exceed $JOB_TIMEOUT + " +
+                    "$STATEMENT_TIMEOUT_SECONDS + 3600 ($bound) (§3.36 — the remover's safety premise)."
+            }
+        }
+    }
+
+    /**
+     * #804 — the three admission inputs DuckDB staging consumes on EVERY deployment, lake or not
+     * (DomainConfiguration.stagingFactoryFor binds them for `DuckDbStagingFactory` whether or not the lake is
+     * enabled; staging.md §7.1): `staging-memory-limit` a positive size at least DuckDB's 1 MiB floor,
+     * `staging-expansion-factor` and `scratch-bytes` positive, and `scratch-bytes` at least one default
+     * reservation, `staging-memory-limit × staging-expansion-factor` (dp-lake record §15, owner ruling
+     * 2026-11-02). The factor's domain is its CONSUMER's: `LakeProperties.Admission.stagingExpansionFactor` binds
+     * an `Int`, so a value past [Int.MAX_VALUE] is named here rather than admitted to fail the binder (#804 R1).
+     * These were judged only under `lake.enabled=true`, so a lake-less deployment met a bad value as
+     * `DuckDbStagingProperties`' `IllegalArgumentException` at bean construction — never this catalogued §7
+     * report — and the cross-key reservation had no check at all. The comparison divides the scratch by the factor
+     * rather than multiplying the memory (the delivery bound's shape below): no term can overflow.
+     *
+     * Not enabled-gated — this is the exception the class KDoc names. The lake-specific rules stay in
+     * [checkLakeAdmission] and friends: a deployment without a lake is still never refused for lake keys it does
+     * not use.
+     */
+    fun checkStagingAdmission(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        val memory = dataSize(snapshot, STAGING_MEMORY_LIMIT, violations)
+        if (memory != null && memory.toBytes() < DUCKDB_MIN_STAGING_MEMORY_BYTES) {
+            violations +=
+                "$STAGING_MEMORY_LIMIT ($memory) must be at least 1 MiB, DuckDB's floor for a staging database " +
+                "(§3.36, staging.md)."
+        }
+        val factor = positiveInt(snapshot, STAGING_EXPANSION_FACTOR, violations)
+        val scratch = dataSize(snapshot, SCRATCH_BYTES, violations)
+        if (memory == null || factor == null || scratch == null) return
+        if (scratch.toBytes() / factor < memory.toBytes()) {
+            violations +=
+                "$SCRATCH_BYTES ($scratch) must be at least $STAGING_MEMORY_LIMIT × $STAGING_EXPANSION_FACTOR " +
+                "($memory × $factor — one DuckDB staging reservation; §3.36, staging.md)."
+        }
+    }
+
+    /**
+     * The lease wait under the node query ceiling; a delivery's staging footprint within the scratch budget.
+     * `staging-expansion-factor` and `scratch-bytes` enter this bound but are NOT named here — they are consumed
+     * and named by [checkStagingAdmission] whether or not the lake is enabled (#804), so this re-reads them
+     * silently rather than naming a malformed value twice in one §7 report.
+     */
+    fun checkLakeAdmission(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        if (!enabled(snapshot)) return
+        positiveLong(snapshot, MAX_CONCURRENT_INGESTIONS, violations)
+        positiveLong(snapshot, MAX_CONCURRENT_MAINTENANCE, violations)
+        positiveLong(snapshot, MAX_OPEN_PARTITIONS, violations)
+        val wait = positiveLong(snapshot, LEASE_WAIT_SECONDS, violations)
+        val ceiling = snapshot.executorNodeQueryTimeoutMaxSeconds?.trim()?.toLongOrNull() ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
+        if (wait != null && wait >= ceiling) {
+            violations +=
+                "$LEASE_WAIT_SECONDS ($wait) must be below datapipelines.executor.node-query-timeout-max-seconds ($ceiling) (§3.36)."
+        }
+        val delivery = dataSize(snapshot, MAX_DELIVERY_BYTES, violations)
+        val factor = positiveIntOrNull(snapshot, STAGING_EXPANSION_FACTOR)
+        val scratch = runCatching { DataSize.parse(value(snapshot, SCRATCH_BYTES)) }.getOrNull()?.takeIf { it.toBytes() > 0 }
+        if (delivery == null || factor == null || scratch == null) return
+        if (delivery.toBytes() > scratch.toBytes() / factor) {
+            violations += "$MAX_DELIVERY_BYTES × $STAGING_EXPANSION_FACTOR must not exceed $SCRATCH_BYTES (§3.36)."
+        }
+    }
+
+    /** The catalog timeouts and the maintenance budget positive; the window `HH:MM-HH:MM` (UTC). */
+    fun checkLakeBounds(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        if (!enabled(snapshot)) return
+        positiveLong(snapshot, LOCK_TIMEOUT_SECONDS, violations)
+        dataSize(snapshot, MAX_BYTES_REWRITTEN, violations)
+        if (!WINDOW.matches(value(snapshot, MAINTENANCE_WINDOW))) {
+            violations += "$MAINTENANCE_WINDOW must be HH:MM-HH:MM in UTC (§3.36)."
+        }
+    }
+
+    /**
+     * The managed reads (record §10 RULING 4, #818): the tick below the age bound (a tick at or above it would
+     * never retire a generation before the bound does), the reader's memory bound a positive size, and the
+     * longest a generation can keep serving a snapshot within an hour of every protected day, so no reader can
+     * hold a snapshot the remover may already have expired.
+     *
+     * #818c (RULING 4 amended 2026-11-05) — that longest is `age bound + 2 × reaper delay + retire ceiling + one
+     * tick`: the reaper retires an over-age generation with no borrower within one [ReaperDelay] of its age bound,
+     * and hard-closes it within one more of its ceiling. The delay is [ReaperDelay.SECONDS], never typed here.
+     *
+     * #818e: this bounds staleness; live reader leases independently pin snapshot expiry.
+     */
+    fun checkLakeReads(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        if (!enabled(snapshot)) return
+        dataSize(snapshot, READS_MEMORY_LIMIT, violations)
+        readsEgressTerm(snapshot, violations)
+        val age = positiveLong(snapshot, MAX_GENERATION_AGE_SECONDS, violations)
+        val tick = positiveLong(snapshot, FRESHNESS_TICK_SECONDS, violations)
+        if (age != null && tick != null && tick >= age) {
+            violations += "$FRESHNESS_TICK_SECONDS ($tick) must be below $MAX_GENERATION_AGE_SECONDS ($age) (§3.36)."
+        }
+        val days = value(snapshot, PROTECTION_DAYS).toLongOrNull()?.takeIf { it > 0 } ?: return // checkLakeRetention names it
+        val ceiling = managedRetireCeilingSeconds(snapshot, violations) ?: return
+        if (age == null || tick == null) return
+        val window = days * SECONDS_PER_DAY / PROTECTION_SHARE_DIVISOR
+        val reaperDelay = ReaperDelay.SECONDS
+        if (age + 2 * reaperDelay + ceiling + tick > window) {
+            violations +=
+                "$MAX_GENERATION_AGE_SECONDS ($age) + 2 × the reaper delay ($reaperDelay) + the managed retire ceiling ($ceiling) + " +
+                "$FRESHNESS_TICK_SECONDS ($tick) must not exceed " +
+                "$PROTECTION_DAYS × 86400 / 24 ($window) (§3.36 — staleness bound; reader leases protect live readers)."
+        }
+    }
+
+    /**
+     * #824 — the ceiling `datasources` applies to a retired MANAGED generation (datasources.md §5.2,
+     * `DatasourcesProperties.managedCeiling`); a malformed explicit value is named here. The general
+     * `retire-ceiling-seconds` does not enter: it bounds every other retired pool, never a managed generation.
+     */
+    private fun managedRetireCeilingSeconds(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ): Long? {
+        val explicit = snapshot.datasourcesManagedRetireCeilingSeconds?.trim().orEmpty()
+        if (explicit.isNotEmpty()) {
+            val parsed = explicit.toLongOrNull()?.takeIf { it > 0 }
+            if (parsed == null) {
+                violations += "datapipelines.datasources.managed-retire-ceiling-seconds must be a positive whole number (§3.36)."
+            }
+            return parsed
+        }
+        // A malformed maximum is named by the executor's own check; fall back to its default here.
+        val nodeTimeoutMax =
+            snapshot.executorNodeQueryTimeoutMaxSeconds
+                ?.trim()
+                ?.toLongOrNull()
+                ?.takeIf { it > 0 } ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
+        return nodeTimeoutMax + DatasourcesProperties.CEILING_SLACK_SECONDS
+    }
+
+    private fun usableEndpoint(endpoint: String): Boolean =
+        runCatching { URI(endpoint) }
+            .getOrNull()
+            ?.let {
+                it.scheme?.lowercase() in ENDPOINT_SCHEMES && !it.host.isNullOrBlank() &&
+                    it.userInfo == null && it.query == null && it.fragment == null
+            } == true
+
+    private fun requirePair(
+        snapshot: ConfigSnapshot,
+        first: String,
+        second: String,
+        violations: MutableList<String>,
+    ) {
+        if (value(snapshot, first).isEmpty() != value(snapshot, second).isEmpty()) {
+            violations += "$first and $second are set together or not at all (§3.36)."
+        }
+    }
+
+    /**
+     * [key] as a positive `Int`, or null — the domain of a key whose consumer binds an `Int`
+     * (`LakeProperties.Admission.stagingExpansionFactor`). The silent reader a later rule re-reads a key with, so it
+     * can never compute with a value the naming rule refused (#804 R1).
+     */
+    private fun positiveIntOrNull(
+        snapshot: ConfigSnapshot,
+        key: String,
+    ): Int? = value(snapshot, key).toIntOrNull()?.takeIf { it > 0 }
+
+    private fun positiveInt(
+        snapshot: ConfigSnapshot,
+        key: String,
+        violations: MutableList<String>,
+    ): Int? {
+        val parsed = positiveIntOrNull(snapshot, key)
+        if (parsed == null) violations += "$key must be a positive whole number no greater than ${Int.MAX_VALUE} (§3.36)."
+        return parsed
+    }
+
+    private fun positiveLong(
+        snapshot: ConfigSnapshot,
+        key: String,
+        violations: MutableList<String>,
+    ): Long? {
+        val parsed = value(snapshot, key).toLongOrNull()?.takeIf { it > 0 }
+        if (parsed == null) violations += "$key must be a positive whole number (§3.36)."
+        return parsed
+    }
+
+    private fun dataSize(
+        snapshot: ConfigSnapshot,
+        key: String,
+        violations: MutableList<String>,
+    ): DataSize? {
+        val parsed = runCatching { DataSize.parse(value(snapshot, key)) }.getOrNull()?.takeIf { it.toBytes() > 0 }
+        if (parsed == null) violations += "$key must be a positive size such as 2GB or 512MB (§3.36)."
+        return parsed
+    }
+
+    private fun duration(
+        snapshot: ConfigSnapshot,
+        key: String,
+        violations: MutableList<String>,
+    ): Duration? {
+        val parsed = runCatching { DurationStyle.detectAndParse(value(snapshot, key)) }.getOrNull()?.takeIf { !it.isNegative && !it.isZero }
+        if (parsed == null) violations += "$key must be a positive duration such as 2h or 90m (§3.36)."
+        return parsed
+    }
+
+    /** #845 D1: the proxy may never cut a healthy query before the executor's own longest timeout, plus this slack. */
+    private const val EGRESS_MAX_AGE_SLACK_SECONDS = 30L
+
+    /**
+     * #845 (owner ruling 2026-11-06 option B, decision D1) — the managed reads' egress proxy term, its own violations:
+     * `reads.egress-max-age-seconds` is a positive whole number; when `reads.egress-proxy` is set, the proxy is
+     * `host:port` (the adapter's grammar, [ManagedLakeEgressCheck.isWellFormed]) and the max-age is at least
+     * `node-query-timeout-max-seconds` + [EGRESS_MAX_AGE_SLACK_SECONDS], so a healthy query is never cut by the proxy
+     * before its own timeout ends it. Whether the proxy answers and declares that max-age is the boot check's
+     * (`lake.boot.egress_proxy`), not configuration's.
+     *
+     * The floor compares the max-age itself, NOT the derived reader end-by
+     * (`LakeHttpBounds.egressReaderEndByMillis`, (http_retries + 1) × max-age + slack): it protects a HEALTHY query,
+     * whose connection is never cut and so never retried, and one connection's age is what the proxy cuts. Comparing
+     * end-by would admit a max-age below the query timeout. End-by bounds only a trickled reader (hygiene); no rule
+     * compares it, because the reader lease, not this bound, is the safety premise (#818e).
+     *
+     * Deliberately NOT named `check…`: it is a term of [checkLakeReads], not a new §7 rule, and
+     * `ConfigValidatorCheckCountTest` counts `check*` declarations against `CHECK_COUNT`.
+     */
+    private fun readsEgressTerm(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        val maxAge = positiveLong(snapshot, EGRESS_MAX_AGE_SECONDS, violations)
+        val proxy = value(snapshot, EGRESS_PROXY)
+        if (proxy.isEmpty()) return
+        if (!ManagedLakeEgressCheck.isWellFormed(proxy)) {
+            violations += "$EGRESS_PROXY must be host:port — letters, digits, '.' and '-', port 1-65535, no scheme (§3.36)."
+        }
+        if (maxAge == null) return
+        // A malformed node timeout maximum is named by the executor's own check; fall back to its default here.
+        val nodeMax =
+            snapshot.executorNodeQueryTimeoutMaxSeconds
+                ?.trim()
+                ?.toLongOrNull()
+                ?.takeIf { it > 0 } ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
+        val floor = nodeMax + EGRESS_MAX_AGE_SLACK_SECONDS
+        if (maxAge < floor) {
+            violations +=
+                "$EGRESS_MAX_AGE_SECONDS ($maxAge) must be at least datapipelines.executor.node-query-timeout-max-seconds " +
+                "($nodeMax) + $EGRESS_MAX_AGE_SLACK_SECONDS ($floor) while $EGRESS_PROXY is set (§3.36 — the proxy never " +
+                "cuts a healthy query before its own timeout)."
+        }
+    }
+}

@@ -595,6 +595,7 @@ class ExampleContentSeederTest {
         val logger = LoggerFactory.getLogger(ExampleContentSeeder::class.java) as ch.qos.logback.classic.Logger
         val previousLevel = logger.level
         val appender =
+            // raw-list-appender: synchronous — the seeder runs on the test thread over mocks
             ListAppender<ILoggingEvent>().apply {
                 list = CopyOnWriteArrayList()
                 start()

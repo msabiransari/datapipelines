@@ -14,14 +14,15 @@ import org.springframework.context.ApplicationListener
 import java.util.UUID
 
 /**
- * The scheduler's three db-scheduler tasks (scheduler design revision §2.2) — the only place a
- * db-scheduler task is defined. Task data is a run id string at most; the JSON serializer
+ * The scheduler's db-scheduler tasks (scheduler design revision §2.2; the notifier since #442b) —
+ * the only place a db-scheduler task is defined. Task data is a run id string at most; the JSON serializer
  * ([SchedulerAutoConfiguration]) writes it, never Java serialization (A8).
  */
 object SchedulerTasks {
     const val DISPATCHER = "schedule-dispatcher"
     const val RECONCILER = "schedule-reconciler"
     const val RUN = "schedule-run"
+    const val NOTIFIER = "schedule-notifier"
 
     /** The run task's descriptor: instance id and data are both the run id. */
     val RUN_TASK: TaskDescriptor<String> = TaskDescriptor.of(RUN, String::class.java)
@@ -56,6 +57,15 @@ object SchedulerTasks {
         reconciler: RunReconciler,
         properties: SchedulerProperties,
     ): RecurringTask<Void> = Tasks.recurring(RECONCILER, FixedDelay.of(properties.tickInterval)).execute { _, _ -> reconciler.tick() }
+
+    /**
+     * `schedule-notifier` — drains the notification outbox ([ScheduleNotifier], #442b); fixed delay,
+     * one instance cluster-wide. It runs only where db-scheduler runs: an API-mode instance sends nothing.
+     */
+    fun notifierTask(
+        notifier: ScheduleNotifier,
+        properties: SchedulerProperties,
+    ): RecurringTask<Void> = Tasks.recurring(NOTIFIER, FixedDelay.of(properties.tickInterval)).execute { _, _ -> notifier.tick() }
 }
 
 /**

@@ -54,7 +54,7 @@ function mount(family) {
   const panel = panels.get(family);
   const label = panel.dataset.browserLabel || family.replaceAll("-", " ");
   const instance = mountSearchTree(panel, {
-    source: restTreeSource(family), context: { workspace }, label,
+    source: restTreeSource(family), context: { workspace }, label, leafGlyph: panel.dataset.browserGlyph,
     searchPlaceholder: `Search ${label.toLowerCase()}…`, maxLength: Number(root.dataset.dpSearchMaxLength),
     getHref: node => node.href,
     onRendered(region) { window.htmx?.process(region || panel); markCurrent(); },

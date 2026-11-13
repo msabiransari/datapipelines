@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.76 (frozen contract — additive-only changes after this point)
+**Status:** v1.80 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-10-22
+**Last updated:** 2026-11-12
 
 ---
 
@@ -87,7 +87,7 @@ Server response: JSON for single-message exchanges, `text/event-stream` for stre
 - `DP-API-Key: dpk_<id>.<secret>` — the REST convention; the primary case.
 - `Authorization: Bearer dpk_<id>.<secret>` — for MCP clients that can only set the standard Authorization header (Claude Desktop and several others). The filter recognizes the `dpk_` prefix and routes the token through the identical validation path.
 
-Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, same Argon2id verification, same 60s-TTL revocation/liveness re-check ([Auth §11.4](auth.md#114-api-key-validation-cache)). A revoked key, a deactivated member or a role change takes effect within the auth cache TTL (60 s by default, #215 B5).
+Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, same Argon2id verification, same 60s-TTL revocation/liveness re-check ([Auth §11.4](auth.md#114-api-key-validation-cache)). Revocation or deactivation of the key's identity, its MCP creator or its pinned workspace takes effect within the auth cache TTL (60 s by default, #215 B5). The creator's deactivation remains a liveness check (A20); a later change to the creator's member role changes nothing for the key, whose authority is its own chosen role (keys v2, [Auth §7.5](auth.md#75-key-roles)).
 
 **Session JWTs are not accepted on `/mcp`.** There is no cookie auth and no non-`dpk_` Bearer token path — a browser-embedded MCP client must use an API key like any other agent.
 
@@ -100,11 +100,11 @@ API keys of the `mcp` kind (keys v2 #233, A13–A19) are:
 
 **Enforcement is the ROLE** ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative), [§11A](auth.md#11a-roles)). Each tool declares ONE catalog permission on its catalog entry (`McpToolCatalog.Entry.permission`) — this spec restates it in §6.2 for readability, but the catalog is authoritative on any conflict, and one function (`ScopeMatrix.allowedTool`) answers here and at the REST interceptor. A tool that declares none is refused (`auth.permission.undeclared`).
 
-**A key does what its MEMBER can do NOW, capped at author.** On every request the member's CURRENT role in the pinned workspace is checked against the tool's permission — re-read inside the same 60 s validation-cache TTL as revocation. So a member's role change reaches their key within about a minute (a promotion widens it, a demotion narrows it — C2), and a refusal is `auth.key_issuer_role_lost`: the key is fine, the member's role does not reach this tool, and the fix is a role, not a retry.
+**A key acts as its OWN identity, at the role chosen at creation** (keys v2, [Auth §7.5](auth.md#75-key-roles)): every request judges the key's OWN role against the tool's permission — nothing is derived from a membership at request time, so a later change to the creator's member role changes nothing for the key. What DOES reach the key within the 60 s validation-cache TTL is revocation and deactivation (§4.2): a revoked key, a deactivated key identity or MCP creator, or a deactivated workspace stops working within about a minute. A refusal is `auth.role_required` ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)) — `details.required` names the permission and `details.held` the key's own role; the fix is a key whose role holds the permission (create one under the subset rule, revoke this one), never a member-role change.
 
 **A promoter's key sees through the promoter LENS (178, [Auth §11A.1](auth.md#11a1-the-404-rule)).** The role narrows what a READ returns, never who may read: `pipelines_list/get`, `templates_list/get/used_by`, `endpoints_list/get`, the resource catalogue and the pipeline/template resources answer a promoter with RELEASED objects newer than the promotion target's inventory entry ([Versioning §10.2](versioning.md#102-the-listing-rule-what-the-ui-shows)) and nothing else — a draft, an already-promoted object, or a pipeline behind the target is ABSENT for that key and resolves as not-found, exactly as another workspace's would; a visible object's pending DRAFT is invisible too — `pipelines_get` / `templates_get` default to the RELEASE for that key, carry no `draft` pointer, and an explicit draft `version` is not-found. The inventory is read through a per-workspace cache (`datapipelines.deployment.promotion.inventory-cache-ttl-seconds`); when the target cannot be read the lens fails CLOSED — lists are empty, gets are not-found, never a 502 to a read — and the server logs `pipeline.promotion.lens_unavailable` once per window. Every other role's key is unaffected and triggers no target call.
 
-No MCP tool needs more than author (record §3.4), so the PK4 cap withholds nothing an agent can call. Release, promote, workspace creation and membership have no MCP tool at all: they are human verbs, which is the same reason no key is ever a super admin. Registering, editing and deleting datasources remain UI/REST-only.
+A key's role can be `promoter` or `workspace_admin`, and such a key is limited by its ROLE — the permission catalog rows it holds and, for a `promoter`, the release lens above — never by a cap. Release, promote, workspace creation and membership have no MCP tool at all: they are human verbs, which is the same reason no key is ever a super admin. Registering, editing and deleting datasources remain UI/REST-only.
 
 **Datasource visibility is a GRANT** ([Auth §11A](auth.md#11a-roles)). A datasource not granted to the key's pinned workspace does not exist for it: `datasources_list` is the truth, and guessing a name gets the not-found envelope, never a "forbidden".
 
@@ -249,7 +249,7 @@ A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_
 
 ### 6.2 Tool definitions
 
-Every tool definition below carries a **Permission** row: the catalog permission the tool declares (`McpToolCatalog.Entry.permission`), which the calling key's role must hold — its member's role in the pinned workspace, capped at author (PK4). Those values are sourced from the [Auth §7.6 permission catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative), which is authoritative — if this doc and the catalog ever disagree, the catalog wins. Scopes were removed (#215). No MCP tool needs more than author, so the cap costs an agent nothing.
+Every tool definition below carries a **Permission** row: the catalog permission the tool declares (`McpToolCatalog.Entry.permission`), which the calling key's ROLE must hold — the role chosen at creation ([Auth §7.5](auth.md#75-key-roles)). Those values are sourced from the [Auth §7.6 permission catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative), which is authoritative — if this doc and the catalog ever disagree, the catalog wins. Scopes were removed (#215): the role is the one axis, so a `promoter`- or `workspace_admin`-role key reaches farther than an `author`-role one — exactly as far as its catalog rows allow, and no farther.
 
 Every tool's result envelope, including its error shape, is §6.3.
 
@@ -978,17 +978,18 @@ An agent that needs a datasource it cannot find should **ask the person** to add
 
 #### 6.2.23 `endpoints_create`
 
-Publish a released pipeline as a `GET` endpoint at `/api/<category>/<version>/<path…>` (R-EP5; [REST API §19](rest-api.md#19-published-endpoints)). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule, the same reserved-category refusal, the same ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
+Create a `GET` API at `/api/<category>/<version>/<path…>` (R-EP5; [REST API §19](rest-api.md#19-published-endpoints)) — its version 1 a DRAFT pinned to the EXACT `pipeline_version` given (#786; dependency-graph record §24): the pin never moves when the pipeline's current version moves, and no tool releases it — releasing is a person's act in the UI or over REST (`POST /api/v1/endpoints/{id}/release`, session only). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule, the same reserved-category refusal, the same ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
 
 ```json
 {
   "name": "endpoints_create",
-  "description": "Publish a released pipeline as a GET endpoint at /api/<category>/<version>/<path>. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pipeline must have a RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — create one with the api_caller role and bind it over REST or in the UI (auth.md §7.7); an endpoint bound to no key is served to no one, and an MCP key never reaches REST at all (it acts over /mcp only).",
+  "description": "Create a GET endpoint at /api/<category>/<version>/<path>: this creates the API's first DRAFT version pinned to the exact pipeline_version given. Creation is an authoring operation: a deployment with authoring disabled refuses it (endpoint.authoring_disabled); there is no release to perform there. In an authoring-enabled deployment the draft is the entity's current version and serves under the normal runtime checks — the entity is enabled, the caller's key is bound, and the pinned pipeline version is eligible. The pin never moves when the pipeline's current version moves. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pinned pipeline version must be eligible here (RELEASED; a DRAFT only where authoring is enabled — else endpoint.pipeline_version.not_eligible) and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — create one with the api_caller role and bind it over REST or in the UI (auth.md §7.7); an endpoint bound to no key is served to no one, and an MCP key never reaches REST at all (it acts over /mcp only).",
   "inputSchema": {
     "type": "object",
     "required": [
       "path",
-      "pipeline"
+      "pipeline",
+      "pipeline_version"
     ],
     "additionalProperties": false,
     "properties": {
@@ -998,7 +999,12 @@ Publish a released pipeline as a `GET` endpoint at `/api/<category>/<version>/<p
       },
       "pipeline": {
         "type": "string",
-        "description": "The pipeline NAME. It must have a released version."
+        "description": "The pipeline NAME."
+      },
+      "pipeline_version": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "The EXACT pipeline version the API's first draft pins. It never moves when the pipeline's current version moves."
       },
       "timeout_seconds": {
         "type": "integer",
@@ -1060,12 +1066,12 @@ Returns the §6.2.23 shape, or `endpoint.not_found`.
 
 #### 6.2.26 `endpoints_delete`
 
-Unpublish an endpoint. The pipeline is untouched; key bindings on that node are not removed, since a node may still carry other endpoints beneath it.
+Unpublish an endpoint — the guarded entity deletion (#786). The pipeline is untouched; key bindings on that node are not removed, since a node may still carry other endpoints beneath it. An API is deleted only while every version it holds is a DRAFT: a RELEASED version (current or not) or a DISCARDED one refuses `endpoint.version.last_release` (409) with nothing removed — the API, its pointer, its versions and its bindings stay. A legacy row (#274) is never served and stays deletable.
 
 ```json
 {
   "name": "endpoints_delete",
-  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row.",
+  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row. An API that holds a RELEASED or DISCARDED version is never deleted: the call is refused endpoint.version.last_release and nothing is removed — discard is per version, the API stays.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -1082,7 +1088,7 @@ Unpublish an endpoint. The pipeline is untouched; key bindings on that node are 
 }
 ```
 
-Returns `{path, deleted: true}`, or `endpoint.not_found`.
+Returns `{path, deleted: true}`, `endpoint.not_found`, or `endpoint.version.last_release` (`details`: this API's blocking `version` and `status`).
 
 **Permission:** `endpoint.unpublish`. **Mutating** — declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 
@@ -1190,7 +1196,7 @@ Register one table in a LAKE datasource's catalog — the dp-lake registry ([met
 }
 ```
 
-**Permission:** `lake_table.manage` — the datasource-mutation floor ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). Mutating a GLOBAL datasource's registry additionally requires admin, a workspaces D8 rule inside the shared service rather than a scope.
+**Permission:** `lake_table.manage` — the datasource-mutation floor ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). Mutating an INSTANCE datasource's registry (one owned by no workspace) additionally requires super admin, a workspaces D8 rule inside the shared service rather than a scope.
 
 **Mutating.** Declared `mutating` in the tool catalog: every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 
@@ -1314,7 +1320,7 @@ Hard-delete a template that has NEVER been released — the one lifecycle verb a
 ```json
 {
   "name": "templates_purge_draft",
-  "description": "Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, no parameter-set version either (#194), and no visualization version (#320) may reference any version of it (the refusal names the pinning pipelines, sets or visualizations your view admits; templates_used_by answers the working-version scan if you need to inspect them). The sole-draft purge takes the entity row with it. A template holding any RELEASED or discarded version, another user's draft, or a pinned draft is refused — humans release and humans discard releases; an agent's own draft that should not exist is what this verb removes. Mutating.",
+  "description": "Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, no parameter-set version either (#194), no visualization version (#320), and no template version that imports it (#877) may reference any version of it (the refusal names the pinning pipelines, sets, visualizations or importing templates your view admits; templates_used_by answers the working-version scan if you need to inspect them). The sole-draft purge takes the entity row with it. A template holding any RELEASED or discarded version, another user's draft, or a pinned draft is refused — humans release and humans discard releases; an agent's own draft that should not exist is what this verb removes. Mutating.",
   "inputSchema": {
     "type": "object",
     "required": ["id"],
@@ -1328,7 +1334,7 @@ Hard-delete a template that has NEVER been released — the one lifecycle verb a
 
 Returns: `{"id", "purged": true}`.
 
-Admission is exact: the ONLY version is a DRAFT, created by THIS key's user (templates record a creator user, never a key — "this key created it" degrades to "this key's user"), and NOTHING pins any version of it in ANY pipeline version ever — the delete guard's every-version-ever scan, not the working-version scan `templates_used_by` (§6.2.21) answers. A pinned draft is refused with `template.in_use` and `details.pinned_by` naming the pipelines to change first (`details.referencing_parameter_sets` for the parameter sets, #194 lane D; `details.referencing_visualizations` for the visualizations, #320 — the third arm, over every stored visualization version ever, discarded included); the scans read the WHOLE workspace whatever the caller's view (#300 — a hidden pin still refuses), and the refusal ECHOES only the pins the caller's view admits: when others exist outside the view it carries `details.pins_hidden: true` and says so in words — never a name, and never a count, of what the view hides; a template holding any RELEASED or discarded version is `template.version.last_release`; another user's draft is `auth.role_required` with `details.reason: "not_creator"` (the one authorization refusal since #215, owner ruling 2026-09-24); an unknown id is `template.not_found`. The sole-draft purge takes the entity row with it, and a concurrent edit between the guard reads and the delete is `template.version.conflict` — never a silent delete of someone else's save.
+Admission is exact: the ONLY version is a DRAFT, created by THIS key's user (templates record a creator user, never a key — "this key created it" degrades to "this key's user"), and NOTHING pins any version of it in ANY pipeline version ever — the delete guard's every-version-ever scan, not the working-version scan `templates_used_by` (§6.2.21) answers. A pinned draft is refused with `template.in_use` and `details.pinned_by` naming the pipelines to change first (`details.referencing_parameter_sets` for the parameter sets, #194 lane D; `details.referencing_visualizations` for the visualizations, #320 — the third arm, over every stored visualization version ever, discarded included; `details.referencing_templates` for the templates whose `imports` pin it, #877 — the fourth arm, over every stored version of an importing template that still has a live version, a DRAFT importer included (an importer whose every version is DISCARDED pins nothing, the rule every reverse arm shares, and restoring it is refused `template.validation.import_not_found`): before it a library draft could be purged out from under a draft importer, a guard correction, not a dependency feature); the scans read the WHOLE workspace whatever the caller's view (#300 — a hidden pin still refuses), and the refusal ECHOES only the pins the caller's view admits: when others exist outside the view it carries `details.pins_hidden: true` and says so in words — never a name, and never a count, of what the view hides; a template holding any RELEASED or discarded version is `template.version.last_release`; another user's draft is `auth.role_required` with `details.reason: "not_creator"` (the one authorization refusal since #215, owner ruling 2026-09-24); an unknown id is `template.not_found`. The sole-draft purge takes the entity row with it, and a concurrent edit between the guard reads and the delete is `template.version.conflict` — never a silent delete of someone else's save.
 
 **Permission:** `template.version.manage`.
 
@@ -1994,7 +2000,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
 ```json
 {
   "name": "visualizations_create",
-  "description": "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — the renderer's configuration schema, every binding path (it must already exist in config) and column, the transform pin's contract against the inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the id the other tools take and the body_hash an update needs.",
+  "description": "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — the renderer's configuration schema, every binding path (it must already exist in config) and column, the transform pin's contract against the inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the id the other tools take, the body_hash an update needs, and warnings: [] on a clean save, else one {code, path, library} per chart field the library draws only in part (the save landed; the warning names what will look different).",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2019,7 +2025,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "renderer": {
         "type": "object",
-        "description": "{kind, version}: kind is plotly, table or kpi (html and svg are reserved and refused); version is the renderer major the host must provide, as a string (\"4\")."
+        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (plotly is retired; html and svg are reserved; all three are refused); version is the renderer major the host must provide, as a string."
       },
       "inputs": {
         "type": "object",
@@ -2031,19 +2037,19 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's native configuration, stored verbatim and validated against its schema (plotly: a non-empty data array of supported traces). At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: the bar family's {mark, encoding, title}, validated against the v1 JSON Schema (https://datapipelines.co/schemas/chart/1/bar.schema.json, served at /schemas/chart/1/bar.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
-        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
+        "description": "Optional. chart: derived from the encoding, {<field>: <field>} for every encoded field; omit it, or send exactly that. table and kpi: {<path into config, e.g. columns[0].values>: <column of the transform's output, or of the single input>}; each path must already exist in config, and its value is replaced by the column's values at render."
       },
       "presentation": {
         "type": "object",
-        "description": "Optional: {title, tokens} — tokens name theme tokens, never colours."
+        "description": "Optional, table and kpi only (a chart's title is config.title): {title, tokens} — tokens name theme tokens, never colours."
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, trace_count (with equals), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the bars drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       },
       "confirm_new_root": {
         "type": "boolean",
@@ -2055,7 +2061,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
 }
 ```
 
-**Permission:** `visualization.create`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`. **Errors:** `visualization.validation.*` (every failure in `details.failures`; `name_taken` 409), `visualization.validation.new_root_requires_confirmation` (`details.existing_roots`), `visualization.authoring.disabled`.
+**Permission:** `visualization.create`. **Mutating.** **Returns:** `{id, name, version, status, body_hash, warnings}` — `warnings` is always present: `[]` on a clean save, else one `{code, path, library}` per chart field the declared library draws only in part (`chart.degraded.<field>`, design record 2026-11-06 §4.4; recomputed on every save, never stored, never document text). The save has landed either way. **Errors:** `visualization.validation.*` (every failure in `details.failures`; `name_taken` 409), `visualization.validation.new_root_requires_confirmation` (`details.existing_roots`), `visualization.authoring.disabled`.
 
 #### 6.2.53 `visualizations_update`
 
@@ -2064,7 +2070,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
 ```json
 {
   "name": "visualizations_update",
-  "description": "Edit a visualization by ID: the first change after a release opens a DRAFT (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from visualizations_get (or the previous update's result) for the version this edit is based on; a mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. A visualization is never renamed: a document naming another is refused.",
+  "description": "Edit a visualization by ID: the first change after a release opens a DRAFT (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from visualizations_get (or the previous update's result) for the version this edit is based on; a mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. A visualization is never renamed: a document naming another is refused. Returns the new body_hash and warnings, as visualizations_create does.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2099,7 +2105,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "renderer": {
         "type": "object",
-        "description": "{kind, version}: kind is plotly, table or kpi (html and svg are reserved and refused); version is the renderer major the host must provide, as a string (\"4\")."
+        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (plotly is retired; html and svg are reserved; all three are refused); version is the renderer major the host must provide, as a string."
       },
       "inputs": {
         "type": "object",
@@ -2111,19 +2117,19 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's native configuration, stored verbatim and validated against its schema (plotly: a non-empty data array of supported traces). At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: the bar family's {mark, encoding, title}, validated against the v1 JSON Schema (https://datapipelines.co/schemas/chart/1/bar.schema.json, served at /schemas/chart/1/bar.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
-        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
+        "description": "Optional. chart: derived from the encoding, {<field>: <field>} for every encoded field; omit it, or send exactly that. table and kpi: {<path into config, e.g. columns[0].values>: <column of the transform's output, or of the single input>}; each path must already exist in config, and its value is replaced by the column's values at render."
       },
       "presentation": {
         "type": "object",
-        "description": "Optional: {title, tokens} — tokens name theme tokens, never colours."
+        "description": "Optional, table and kpi only (a chart's title is config.title): {title, tokens} — tokens name theme tokens, never colours."
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, trace_count (with equals), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the bars drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       }
     },
     "additionalProperties": false
@@ -2131,7 +2137,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
 }
 ```
 
-**Permission:** `visualization.update`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`. **Errors:** `visualization.not_found`, `visualization.version.conflict` (stale `expected_hash` — re-read and rebase), `visualization.validation.*` (`name_invalid` / `immutable` for another name).
+**Permission:** `visualization.update`. **Mutating.** **Returns:** `{id, name, version, status, body_hash, warnings}` — `warnings` as `visualizations_create` answers it. **Errors:** `visualization.not_found`, `visualization.version.conflict` (stale `expected_hash` — re-read and rebase), `visualization.validation.*` (`name_invalid` / `immutable` for another name).
 
 #### 6.2.54 `visualizations_purge_draft`
 
@@ -2707,7 +2713,7 @@ Returns a page of resource descriptors (URI, name, description, MIME type) plus 
 - The response omits `nextCursor` on the last page. Presence of `nextCursor` is the only "there is more" signal.
 - Enumeration order is stable within a paging run (docs, then pipelines, then templates, then datasources, then executions; each by id).  The `docs` rows lead because they are the only constant-size kind — the skill plus one row per reference, identical on every server — so they cannot push an entity off a page, and an agent that lists resources at all meets the manual before it meets content. Entities created mid-run may be missed — `resources/list` is a discovery aid, not a consistent snapshot.
 
-**Role filtering:** the listing is filtered to what the calling key's role may read — each family under its read permission (`pipeline.read`, `template.read`, `datasource.read`, `execution.read`, `docs.read`; a promoter's key lists no executions), and ownership rules apply to executions — the listing reads what `executions_list` reads (§6.2.13, #275: own runs plus every SCHEDULED run, or every run with `execution.read_all`) — **and to the key's pinned workspace** (workspaces design §5.2/§5.3: its pipelines/templates/executions, its bound datasources plus global ones), so two agents see different resource sets on the same server.
+**Role filtering:** the listing is filtered to what the calling key's role may read — each family under its read permission (`pipeline.read`, `template.read`, `datasource.read`, `execution.read`, `docs.read`; a promoter's key lists no executions), and ownership rules apply to executions — the listing reads what `executions_list` reads (§6.2.13, #275: own runs plus every SCHEDULED run, or every run with `execution.read_all`) — **and to the key's pinned workspace** (workspaces design §5.2/§5.3: its pipelines/templates/executions, and the datasources GRANTED to it — RBAC design §4, D-R7), so two agents see different resource sets on the same server.
 
 **Execution resources are windowed:** only executions from the **last 24 hours** are enumerated. Older executions remain readable by direct URI (`datapipelines://executions/{id}`) as long as their metadata exists in the Metadata DB — they are simply not listed, because an unbounded execution history would make `resources/list` useless (and enormous) on any busy instance. Result rows are governed by the much shorter result TTL regardless (§6.2.15).
 
@@ -2829,8 +2835,8 @@ The error payload inside the tool result matches the [REST API `error` object](r
 ### 9.3 Transport errors
 
 - HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked or expired. Retrying does not help; the user must supply a new key.
-- HTTP 401 (`auth.principal_deactivated`) → the key's member was deactivated; HTTP 404 (`auth.key_workspace_inactive`) → the workspace the key is pinned to was deactivated. Neither is a key problem: an administrator reactivating the user or the workspace restores the same key.
-- `isError` with `auth.key_issuer_role_lost` → your role in the key's workspace does not hold the tool's permission (§6.2, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). Retrying does not help: the key acts as you, so the fix is a role in that workspace, not a new key.
+- HTTP 401 (`auth.principal_deactivated`) → the key's identity or MCP creator was deactivated; HTTP 404 (`auth.key_workspace_inactive`) → the workspace the key is pinned to was deactivated. Neither is a key problem: an administrator reactivating the user or the workspace restores the same key.
+- A tool result with `isError` and `auth.role_required` → the key's OWN role (chosen at creation) does not hold the tool's permission; `details.required` names it and `details.held` is the key's role (§6.2, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). Retrying does not help and neither does a role change on the Keys page: the key is judged by its own role, so the fix is a key whose role holds the permission — create one under the subset rule ([Auth §7.4](auth.md#74-issuance)) and revoke this one. (`auth.key_issuer_role_lost` is never an MCP answer: an MCP key always carries a role of its own and refuses with `auth.role_required`; that code survives only on the context-judged path, where a key principal is judged through a workspace context — the promotion peer, [Auth §9](auth.md#9-auth-errors).)
 - HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
 - HTTP 429 (`rate_limit.unavailable`) → the limiter could not decide and refused the call (fail closed, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Not your budget: honor `Retry-After` and retry, and do not treat it as a signal to reduce your request rate permanently.
 - HTTP 5xx → server error; agent should retry with backoff.
@@ -2907,8 +2913,8 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 - [ ] Every MCP endpoint requires auth (no unauthenticated access).
 - [ ] API key validated on every request, not just session establishment — via `DP-API-Key` **and** `Authorization: Bearer dpk_...`, both through the single [Auth §7.3](auth.md#73-validation-flow) path. No second, laxer code path for the Bearer form.
 - [ ] Session JWTs (`dp_session` cookie, non-`dpk_` Bearer tokens) are **rejected** on `/mcp` — verify with a test that a valid browser session cannot call a tool.
-- [ ] Key revocation, member deactivation and a role change take effect within the cache TTL (~60s) on `/mcp`, not just on REST.
-- [ ] The permission enforced per tool against the [Auth §7.6 catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative) — every tool walked with every role an MCP key can act with (viewer, promoter, author), admitted exactly where the role's column holds the tool's permission.
+- [ ] Key revocation and identity/creator/workspace deactivation take effect within the cache TTL (~60s) on `/mcp`; a member role change does not reach the key — its authority is its own chosen role (keys v2).
+- [ ] The permission enforced per tool against the [Auth §7.6 catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative) — every tool walked with every role an MCP key can act with (viewer, promoter, author, workspace admin), admitted exactly where the role's column holds the tool's permission.
 - [ ] Execution ownership enforced on `executions_get`, `executions_get_result`, and execution resources — a key of a member without `execution.read_all` cannot read another user's results.
 - [ ] `resources/list` filtered by the caller's role (each family's read permission) and ownership (§7.3), not just paginated.
 - [ ] Datasource passwords never included in tool results or resources; `datasources_test` failures do not echo credentials or JDBC URLs.
@@ -3118,6 +3124,10 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.80 | #877 G7 (importer arm, ruling A.0 option 1) | **§6.2.32 `templates_purge_draft`: the guard gains its FOURTH arm** — a template version (any status; a DISCARDED one while its template keeps a live version) whose `imports` pin any version of the draft refuses `template.in_use` with `details.referencing_templates`, narrowed by the caller's view with `pins_hidden` exactly as the other three arms (#300). A guard CORRECTION, not a dependency feature (record §22, Draft 9 erratum): before it a library draft could be purged out from under a draft importer. The tool's description names the arm; schema, permission row and tool count (61) unchanged; `templates_used_by` unchanged. |
+| 2026-11-11 | v1.79 | #896 docs: datasource grants | **Text only, no surface change.** The resource listing's "Role filtering" paragraph names the datasources GRANTED to the key's pinned workspace (`DatasourceRepository.findAllVisible`, the grant predicate) instead of "its bound datasources plus global ones"; §6.2.29's permission note says mutating an INSTANCE datasource's registry (owned by no workspace) needs super admin, not "a GLOBAL datasource … admin". |
+| 2026-11-10 | v1.78 | #786 U1 (API versions, exact pins) | **§6.2.23 `endpoints_create`: `pipeline_version` is a REQUIRED input** (owner ruling 2026-11-08: the pin is authored input on every surface, MCP included — a named exception to the additive-only rule). The tool creates the API's version 1 as a DRAFT pinned to that exact version; the pin must be eligible under the posture (`endpoint.pipeline_version.not_eligible`) and creation is refused on an authoring-disabled deployment (`endpoint.authoring_disabled`). No tool releases an API. The response shape, `endpoints_list` and `endpoints_get` are unchanged; **§6.2.26 `endpoints_delete` is the guarded entity deletion** (#786 R1): an API holding a RELEASED or DISCARDED version is refused `endpoint.version.last_release` and nothing is removed, a draft-only API or a legacy row is deleted as before — its description says so, its input is unchanged; `pipeline` in every response is the CURRENT version's pinned name. No tool added, removed or renamed; no permission change. |
+| 2026-10-25 | v1.77 | 706 (#706) | **§4.1/§6 preamble/§9.3: the live prose still taught the retired PK4 cap, the membership-freshness rule (C2) and `auth.key_issuer_role_lost` as the MCP refusal, contradicting §4.1's own keys-v2 bullets and §4.2 — rewritten to the key's chosen role and `auth.role_required`; recovery = a new key under the subset rule. §13's checklist includes workspace-admin keys and preserves MCP creator liveness (A20), and §9.3 names identity or creator deactivation; the §4.1 TTL sentence says the same (revocation and deactivation reach the key; a member role change does not). History rows v1.47/v1.50 unchanged. No tool, route, permission or code change.** |
 | 2026-10-22 | v1.76 | 8b (#8) | The type description and §6.2.43 describe JavaScript availability, statement bodies and console results. |
 | 2026-10-21 | v1.75 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The template-type and node prose say script**: the script contract / invariants / tests descriptions, the `scripts` docs area and `skill/scripts-contracts`, the `templates_*` refusal reason `type_not_script`, the key `datapipelines.script.evaluate-timeout-seconds`; the visualization write tools' block property stays `transform` (restored in this lane's third round; `ArtifactWriteSchemaReaderParityTest` pins schema = reader keys). A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |
 | 2026-10-11 | v1.74 | 504b (#504b) one shared search-needle rule | **§6.2.2 `pipelines_list` and §6.2.6 `templates_list` say what `q` matches and its bound**: the `inputSchema`'s `q` description now states the case-insensitive substring match, the columns actually searched (name, display name and description on pipelines; name and display name on templates — #424's understatements corrected), that a present `prefix` wins, and the shared 200-after-trim bound (#490, [pipeline-contract §13.21](pipeline-contract.md) v1.58). A longer `q` on ANY list tool is refused JSON-RPC `-32602 invalid params` (§9.1) naming the limit, the length and `request.query_too_long`, before any read and without echoing the term — the mapping moved from `parameter_sets_list`'s own catch to the dispatcher, so all three tools answer identically. REST answers the same term with `400` ([REST §21.2](rest-api.md#212-routes) v2.95). No tool, argument name, count or permission changed. |

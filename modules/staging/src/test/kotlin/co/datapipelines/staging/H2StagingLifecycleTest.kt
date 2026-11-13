@@ -2,6 +2,7 @@ package co.datapipelines.staging
 
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -135,7 +136,7 @@ class H2StagingLifecycleTest {
     private fun execUserCount(connection: Connection): Long =
         // UPPER(...), not §12's bare literal: the factory creates the user with an UNQUOTED
         // `CREATE USER STAGING_EXEC`, so under the URL's DATABASE_TO_LOWER=TRUE the catalog stores
-        // it as `staging_exec` (measured on 2.3.232). The literal comparison would return 0 while
+        // it as `staging_exec` (measured on 2.3.232, 2026-08-10). The literal comparison would return 0 while
         // the user was very much alive — turning this test's whole point, "the user is gone once
         // the database dies", into a constant that can no longer distinguish the two states.
         scalarLong(connection, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.USERS WHERE UPPER(USER_NAME) = 'STAGING_EXEC'")
@@ -219,5 +220,18 @@ class H2StagingLifecycleTest {
         val staging = H2StagingFactory(props).create(UUID.randomUUID())
         staging.close()
         staging.close()
+    }
+
+    @Test
+    fun `the H2 factory refuses a DUCKDB request as engine_unavailable instead of staging on H2`() {
+        // #795: DUCKDB is a StagingEngine value now. Dispatch is the wiring's job; an H2-only
+        // factory that silently built an H2 database for it would run DuckDB-dialect SQL on H2.
+        val executionId = UUID.randomUUID()
+
+        val refused = shouldThrow<DatapipelinesException> { H2StagingFactory(props).create(executionId, StagingEngine.DUCKDB) }
+
+        refused.code shouldBe StagingErrorCodes.ENGINE_UNAVAILABLE
+        refused.details["engine"] shouldBe "DUCKDB"
+        refused.details["execution_id"] shouldBe executionId.toString()
     }
 }

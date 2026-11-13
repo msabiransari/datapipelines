@@ -92,11 +92,18 @@ object ApiErrorCatalog {
             "datasource.validation." to HttpStatus.BAD_REQUEST,
             "template.validation." to HttpStatus.BAD_REQUEST,
             "template.version." to HttpStatus.CONFLICT,
+            // #517 §13.9 — the template family's release-plan refusals (release-dependencies record §14): a state
+            // conflict like every other family's `release.` prefix; the 428/400/422 rows are EXCEPTIONS below.
+            "template.release." to HttpStatus.CONFLICT,
             "result." to HttpStatus.INTERNAL_SERVER_ERROR,
             "workspace." to HttpStatus.FORBIDDEN,
             // 074 §13.14 — the request validator is the biggest half of the family and every
             // one of its codes is a 400, so 400 is the honest default; the publish-time and
             // resolution-time refusals each name their own status in EXCEPTIONS below.
+            // #786 §13.14 — the API version lifecycle and its release are state conflicts, the pipeline.version. /
+            // pipeline.release. shape; listed BEFORE the family's 400 so the first matching prefix is the specific one.
+            "endpoint.version." to HttpStatus.CONFLICT,
+            "endpoint.release." to HttpStatus.CONFLICT,
             "endpoint." to HttpStatus.BAD_REQUEST,
             // #9 §13.19 — the scheduler's save-time validation: every one is the caller's request, 400.
             "schedule.validation." to HttpStatus.BAD_REQUEST,
@@ -133,21 +140,75 @@ object ApiErrorCatalog {
             // other status to default away from), wired explicitly so the code owns a row rather
             // than being absorbed by the catalog's unknown-code 500.
             "request." to HttpStatus.PAYLOAD_TOO_LARGE,
+            // #464 §13.24 — the navigation trees: the family's one caller refusal is the invalid
+            // request or continuation (400); the two 503s are explicit rows below.
+            "navigation." to HttpStatus.BAD_REQUEST,
+            // #875 — the dependency trees: the family's one caller refusal is the invalid request (400); the two 503s are
+            // explicit rows below. A hidden or absent root answers its own family's not-found, never a code here.
+            "dependencies." to HttpStatus.BAD_REQUEST,
         )
 
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
     private val EXCEPTIONS: Map<String, HttpStatus> =
         mapOf(
+            PipelineErrorCodes.Lake.CAPACITY_BUSY to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to HttpStatus.FORBIDDEN,
+            PipelineErrorCodes.Lake.APPEND_OUTCOME_UNKNOWN to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.APPEND_FAILED to HttpStatus.INTERNAL_SERVER_ERROR,
+            PipelineErrorCodes.Lake.APPEND_PROVENANCE_MISSING to HttpStatus.INTERNAL_SERVER_ERROR,
+            PipelineErrorCodes.Lake.APPEND_AUTHORITY_LOST to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.COMMIT_CONTENDED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.TABLE_BUSY to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.TABLE_DEPRECATED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.TABLE_UNAVAILABLE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED_DURING_READ to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_INVALID_KEY to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_FORBIDDEN to HttpStatus.FORBIDDEN,
+            PipelineErrorCodes.Lake.APPEND_AMBIGUOUS_COLUMN to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_UNKNOWN_COLUMN to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_MISSING_REQUIRED_COLUMN to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_TOO_MANY_PARTITIONS to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS to HttpStatus.INTERNAL_SERVER_ERROR,
+            PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.DELIVERY_INCOMPLETE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Lake.DELIVERY_TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
+            PipelineErrorCodes.Lake.DELIVERY_UNSUPPORTED_FORMAT to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_INVALID_MANIFEST to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_LISTING_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.DELIVERY_ADMISSION_FAILED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Lake.DELIVERY_ONE_PER_PIPELINE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_ONE_PER_TABLE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_REQUIRES_DELIVERY to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_REJECTS_NOT_STRICT to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_INVALID_NODE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_BARRIER to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.APPEND_REPLACE_REFUSED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_INVALID_NODE to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Lake.DELIVERY_REQUIRES_DUCKDB to HttpStatus.BAD_REQUEST,
             // 091 §13.7: the one `auth.api_key.` code that is not 401. The credential is fine;
             // the ISSUANCE BODY named an expiry that is not usable, which is a 400.
             co.datapipelines.auth.AuthErrorCodes.API_KEY_EXPIRY_INVALID to HttpStatus.BAD_REQUEST,
             // #9 §13.19 — a schedule or run the caller's workspace does not hold (or the lens hides).
             co.datapipelines.scheduler.ScheduleErrorCodes.NOT_FOUND to HttpStatus.NOT_FOUND,
             co.datapipelines.scheduler.ScheduleErrorCodes.RUN_NOT_FOUND to HttpStatus.NOT_FOUND,
+            co.datapipelines.scheduler.ScheduleErrorCodes.NOTIFICATION_NOT_FOUND to HttpStatus.NOT_FOUND,
             // §13.21 / #504b — the shared search-needle refusal on every REST `q`: 400, an argument
             // to fix, before any read. (BODY_TOO_LARGE needs no row — the body-cap filter answers
             // 413 itself, never through the catalog.)
             PipelineErrorCodes.Request.QUERY_TOO_LONG to HttpStatus.BAD_REQUEST,
+            // #464 §13.24 — the caller's promotion view cannot be computed: retryable, so a 503 with
+            // `Retry-After` ([retryAfterSeconds]) rather than a completed empty level.
+            PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            // #464 §13.24 — one node's metadata alone exceeds the page budget: no page can carry it.
+            PipelineErrorCodes.Navigation.METADATA_TOO_LARGE to HttpStatus.SERVICE_UNAVAILABLE,
+            // #875 — the metadata walk ran out of its deadline or a provider read failed: retryable, `Retry-After`
+            // ([retryAfterSeconds]), never a partial tree.
+            PipelineErrorCodes.Dependencies.METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            // #875 — the projected tree is over `max-wire-bytes` even reduced to its roots: a configuration defect.
+            PipelineErrorCodes.Dependencies.RESPONSE_TOO_LARGE to HttpStatus.SERVICE_UNAVAILABLE,
             // §12's duplicate_name row documents HTTP 409 ("mapped from the UNIQUE constraint").
             PipelineErrorCodes.Validation.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Import.VERSION_CONFLICT to HttpStatus.CONFLICT,
@@ -216,6 +277,16 @@ object ApiErrorCatalog {
             // recorded as broken: the content a party behind us serves failed, like
             // `datasource_connection_failed`, so 502 and the WARN demotion below.
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE to HttpStatus.BAD_GATEWAY,
+            // #818 (dp-lake record §6) — the managed lake datasource is configuration's, so an edit or a delete
+            // conflicts with the server's ownership of the row: 409, like `datasource.in_use`.
+            PipelineErrorCodes.Datasource.MANAGED to HttpStatus.CONFLICT,
+            // #841 (G0) — an exhausted writer-guard wait: another change holds the lock, retry later, like every
+            // `<family>.release.busy`. `datasource.` and `endpoint.` have no 409 family default; `schedule.` does.
+            PipelineErrorCodes.Datasource.WRITE_BUSY to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Endpoint.WRITE_BUSY to HttpStatus.CONFLICT,
+            // #818 (record §10) — the catalog read a new managed generation needs failed, so none was built:
+            // the metadata database is the dependency, and the condition is temporary.
+            PipelineErrorCodes.Lake.UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             // 109 §A — the registration pre-flight refusal: 400 like the family default, wired
             // explicitly so the code owns a row rather than being absorbed (the 025 A2 convention).
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNREADABLE to HttpStatus.BAD_REQUEST,
@@ -256,6 +327,8 @@ object ApiErrorCatalog {
             // §13.13 (055) — 409 like the pipeline.promotion family default, wired explicitly
             // so each code owns a row rather than being absorbed by the default (025 A2).
             PipelineErrorCodes.Versioning.PROMOTION_MISSING_DATASOURCES to HttpStatus.CONFLICT,
+            // §13.13 (#778) — the receiver's lake-table check: 409 like its sibling, its own row (025 A2).
+            PipelineErrorCodes.Versioning.PROMOTION_LAKE_TABLE_UNAVAILABLE to HttpStatus.CONFLICT,
             PipelineErrorCodes.Versioning.PROMOTION_TARGET_IS_AUTHORING to HttpStatus.CONFLICT,
             // §13.13 (055) — a transport failure reaching the target: 502, against the
             // promotion family's 409. It is the one promotion code that is not a refusal.
@@ -309,6 +382,36 @@ object ApiErrorCatalog {
             // 400, not a 404 — the payload is the caller's to fix, and the one answer for
             // "absent" and "not yours" is what keeps it from being an existence oracle.
             PipelineErrorCodes.Template.IMPLEMENTS_UNRESOLVED to HttpStatus.BAD_REQUEST,
+            // #517 (release-dependencies record §14) — every family's `<family>.release.` prefix defaults to 409; three
+            // reasons are not state conflicts: a cascade consent without a preview digest is 428 (obtain a plan
+            // first), a malformed plan is the caller's 400, and a closure over a configured bound is 422.
+            PipelineErrorCodes.Versioning.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Versioning.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Versioning.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Template.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Template.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Parameters.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Parameters.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Parameters.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Visualization.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Visualization.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Visualization.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Dashboard.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Dashboard.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Dashboard.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Endpoint.RELEASE_PLAN_REQUIRED to HttpStatus.PRECONDITION_REQUIRED,
+            PipelineErrorCodes.Endpoint.RELEASE_PLAN_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Endpoint.RELEASE_DEPENDENCY_LIMIT to HttpStatus.UNPROCESSABLE_ENTITY,
+            // #786 E.3 (record §25.4, erratum (6)) — the release-planning deadline expired: the metadata database did not
+            // answer in time, so no plan was built. Retryable: 503 + the catalog's constant Retry-After, WARN without a
+            // stack ([EXPECTED_UNAVAILABLE]); one row per family because the ROOT's family prefixes the code.
+            PipelineErrorCodes.Versioning.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Template.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Parameters.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Visualization.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Dashboard.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Endpoint.RELEASE_METADATA_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             // §13.7 (055) — 401 like the auth.promotion family default, same A2 reason.
             PipelineErrorCodes.Auth.PROMOTION_KEY_INVALID to HttpStatus.UNAUTHORIZED,
             // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,
@@ -332,6 +435,10 @@ object ApiErrorCatalog {
             // `auth.` code with no dotted family, so it is wired explicitly like the two 403s
             // above rather than resolving to the catalog's 500 for an unknown code.
             co.datapipelines.auth.AuthErrorCodes.PRINCIPAL_DEACTIVATED to HttpStatus.UNAUTHORIZED,
+            // #847 — the native secret verification could not answer: a server-side, transient fault,
+            // so 503. A bare three-segment `auth.` code with no family default, wired explicitly
+            // rather than resolving to the catalog's 500.
+            co.datapipelines.auth.AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             // 179 (D16) — a `user` key is minted by the login hook, never on demand. A 400 like
             // `auth.api_key.expiry_invalid`: the credential is fine, the KIND is not mintable on
             // a request surface.
@@ -374,6 +481,15 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Endpoint.KEY_NOT_BOUND to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.PROMOTION_KEY_MISSING to HttpStatus.CONFLICT,
+            // #786 §13.14 — an unknown API version is a 404 under the version family's 409; an exact pin the caller's
+            // posture does not admit, and an authoring-disabled deployment's API write, are state conflicts (409) under
+            // the family's 400. `endpoint.pipeline_version.not_found` keeps the 400: the request names a version that
+            // is not there (a restore's missing pin is the native 400, record §25.4).
+            PipelineErrorCodes.Endpoint.VERSION_NOT_FOUND to HttpStatus.NOT_FOUND,
+            // The purge dialog's typed confirm is the caller's input, never the version's state: 400, as its twins.
+            PipelineErrorCodes.Endpoint.VERSION_CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Endpoint.PIPELINE_VERSION_NOT_ELIGIBLE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Endpoint.AUTHORING_DISABLED to HttpStatus.CONFLICT,
             // 118 §13.15 — the learned semantic layer. Bare `semantics.` codes with no family
             // default (the auth.role_required reasoning): each row is explicit.
             PipelineErrorCodes.Semantics.KIND_INVALID to HttpStatus.BAD_REQUEST,
@@ -430,6 +546,26 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Parameters.EVALUATE_INPUT_SOURCE_MULTIPLE_ROWS,
             PipelineErrorCodes.Parameters.EVALUATE_SELECTOR_VALUE_TYPE_MISMATCH,
             PipelineErrorCodes.Parameters.EVALUATE_SELECTORS_SATURATED,
+            // §13.25 (#785) — the managed lake's fence codes: raised inside DP's own catalog writes, which no
+            // route reaches before P8. They have no family default, so `statusFor` answers 500 for them.
+            PipelineErrorCodes.Lake.CATALOG_FENCED,
+            PipelineErrorCodes.Lake.CATALOG_RESTORING,
+            PipelineErrorCodes.Lake.CATALOG_OUTCOME_UNKNOWN,
+            // §13.25 (#798) — the definitions' lifecycle and apply outcomes: the service has no route before P8.
+            PipelineErrorCodes.Lake.DEFINITION_NOT_FOUND,
+            PipelineErrorCodes.Lake.DEFINITION_NOT_DRAFT,
+            PipelineErrorCodes.Lake.DEFINITION_NOT_RELEASED,
+            PipelineErrorCodes.Lake.DEFINITION_VERSION_CONFLICT,
+            PipelineErrorCodes.Lake.DEFINITION_INVALID_BODY,
+            PipelineErrorCodes.Lake.DEFINITION_NAME_TAKEN,
+            PipelineErrorCodes.Lake.DEFINITION_APPLIED_VERSION,
+            PipelineErrorCodes.Lake.DEFINITION_REVIEWED_CHANGE,
+            PipelineErrorCodes.Lake.DEFINITION_BREAKING_CHANGE,
+            PipelineErrorCodes.Lake.DEFINITION_DRIFT,
+            PipelineErrorCodes.Lake.DEFINITION_TABLE_BUSY,
+            PipelineErrorCodes.Lake.DEFINITION_AUTHORING_DISABLED,
+            // §13.25 (#811) — an apply outcome, returned in the release's result; no route before P8.
+            PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED,
         )
 
     /**
@@ -466,7 +602,59 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE,
         )
 
+    /**
+     * #464 — the codes whose 5xx is an EXPECTED, retryable unavailability of a view this process
+     * derives from somebody else's machine, logged at WARN without a stack. Unlike
+     * [CALLER_DOWNSTREAM_DOWN] there is no cause chain to summarize: the refusal is thrown
+     * deliberately, after the view reported why. `navigation.metadata.too_large` is deliberately
+     * NOT here — a node over the page budget is a server-side defect and keeps its stack. The same split holds for the
+     * dependency trees (#875): `dependencies.metadata.unavailable` is here, `dependencies.response.too_large` is not.
+     */
+    val EXPECTED_UNAVAILABLE: Set<String> =
+        // #786 E.3 — beside the view, the release-planning deadline's refusal, one per family (record §25.4: WARN
+        // without stack).
+        setOf(PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE, PipelineErrorCodes.Dependencies.METADATA_UNAVAILABLE) +
+            RELEASE_METADATA_UNAVAILABLE
+
+    /** #786 E.3 — every family's `<family>.release.metadata_unavailable` (record §25.4, erratum (6)). */
+    private val RELEASE_METADATA_UNAVAILABLE: Set<String>
+        get() =
+            setOf(
+                PipelineErrorCodes.Versioning.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Template.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Parameters.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Visualization.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Dashboard.RELEASE_METADATA_UNAVAILABLE,
+                PipelineErrorCodes.Endpoint.RELEASE_METADATA_UNAVAILABLE,
+            )
+
+    /**
+     * The `Retry-After` the navigation view 503 answers (#464 §13.24): a constant, never derived from input. The
+     * dependency trees' metadata 503 (#875) answers the same wait.
+     */
+    const val RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS = 5
+
+    /** The `Retry-After` a release-planning deadline 503 answers (#786 E.3, record §25.4): a constant. */
+    const val RETRY_AFTER_RELEASE_METADATA_SECONDS = 5
+
+    /** The `Retry-After` seconds [code] answers with, or null when its response carries none. */
+    fun retryAfterSeconds(code: String): Int? =
+        when (code) {
+            PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE -> RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS
+            PipelineErrorCodes.Dependencies.METADATA_UNAVAILABLE -> RETRY_AFTER_VIEW_UNAVAILABLE_SECONDS
+            in RELEASE_METADATA_UNAVAILABLE -> RETRY_AFTER_RELEASE_METADATA_SECONDS
+            else -> null
+        }
+
+    /** #786 E.3 — the release plan could not be read in time; nothing was released. */
+    private const val RELEASE_METADATA_USER_MESSAGE =
+        "The release plan couldn't be read in time. Nothing was released; try again in a moment."
+
     private const val GENERIC_USER_MESSAGE = "Something went wrong on our side. Quote the correlation id when reporting this."
+
+    /** #841 (G0): the exhausted writer-guard wait — another change holds the lock; nothing was written, retry. */
+    private const val WRITER_BUSY_USER_MESSAGE =
+        "Another change in this workspace is in progress. Nothing was written; try again in a moment."
 
     /** versioning §5.5: both authoring-disabled mirrors share one actionable sentence. */
     private const val RECEIVER_USER_MESSAGE =
@@ -479,6 +667,8 @@ object ApiErrorCatalog {
             "pipeline.import." to "This pipeline couldn't be imported into this environment.",
             "pipeline.promotion." to "This item couldn't be promoted to the target environment.",
             "pipeline.check." to "Some release checks failed. Review the checks on this version and try again.",
+            // #517 — the pipeline release-plan refusals (400/409/422/428, never ours): the twin of the other families' lines.
+            "pipeline.release." to "This pipeline can't be released yet. The details say what to release first.",
             "pipeline.execution." to "The pipeline run couldn't be completed.",
             "pipeline.node." to "A step in the pipeline failed while it was running.",
             // 7c §13.18 — a SCRIPT node's refusal: the script, its inputs or its own
@@ -488,12 +678,19 @@ object ApiErrorCatalog {
             "pipeline.staging." to "The pipeline ran out of room, or produced a value the temporary database couldn't hold.",
             "datasource.validation." to "These connection details aren't valid. Check them and try again.",
             "template.validation." to "This SQL template isn't valid. Check the reported problem and try again.",
+            // #517 — the template family's release-plan refusals, the parameter.release. sentence's twin.
+            "template.release." to "This template can't be released yet. The details say what to release first.",
             "result." to "The results for this run aren't available.",
             "workspace." to "That workspace isn't available to you. Check the name, or ask a workspace admin for access.",
             // 074 — the request family is the one a caller of a published endpoint sees, so the
             // family message is written for THEM (a machine client's developer), not for an
             // author. The publish-time refusals carry their own overrides below.
             "endpoint.request." to "The request to this endpoint isn't valid. Every problem with it is listed in the error details.",
+            // #786 — the API version lifecycle and its release are an AUTHOR's refusals, not a serve caller's.
+            "endpoint.version." to "This API version can't do that right now. The details say why.",
+            "endpoint.release." to "This API can't be released yet. The details say what to release first.",
+            "endpoint.pipeline_version." to "That pipeline version can't be pinned by this API. The details say why.",
+            "endpoint.authoring_disabled" to RECEIVER_USER_MESSAGE,
             "endpoint." to "This published endpoint couldn't serve the request.",
             // #9 — the schedule families: validation names the field in its details; the rest
             // is a state the schedule is in, which the message and details spell out.
@@ -529,10 +726,49 @@ object ApiErrorCatalog {
             // #279 §13.21 — the body the caller sent is over the platform's cap; nothing about the
             // server refused them, so the sentence points at the payload.
             "request." to "That request is too large. Send less data and try again.",
+            // #464 §13.24 — the family line is the 400's: the cursor or the folder it named is stale,
+            // and reloading the tree is the remedy. The two 503s carry their own overrides.
+            "navigation." to "The navigation tree changed under you. Reload it and try again.",
+            // #875 — the family line is the 400's: the link or address that asked for the tree is malformed.
+            "dependencies." to "That dependency view link isn't valid. Open the object again and retry.",
+            // #785 §13.25 — the managed lake's fence: another operation holds the table, or the catalog is
+            // being restored. Never returned live in P2 (NEVER_RETURNED_LIVE); the line is the manual's.
+            // #798 §13.25 — the definitions' family line, placed BEFORE `lake.` (the first matching prefix wins).
+            "lake.delivery." to "The delivery could not be read. Check its status and try again.",
+            "lake.append." to "The pipeline is not ready to append to the lake. Check its validation details.",
+            "lake.definition." to "That table definition can't be changed this way. Check the definition and try again.",
+            "lake." to "The lake is busy with another change to this table. Try again shortly.",
         )
 
-    private val USER_MESSAGE_OVERRIDES: Map<String, String> =
+    private val AUTHORED_USER_MESSAGES: Map<String, String> =
         mapOf(
+            PipelineErrorCodes.Lake.CAPACITY_BUSY to "Delivery capacity is busy. Retry when an ingestion slot and scratch are available.",
+            PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to "The execution has no checked authority to append to the lake.",
+            PipelineErrorCodes.Lake.APPEND_OUTCOME_UNKNOWN to
+                "Publication is unconfirmed. Wait for settlement before retrying this delivery.",
+            PipelineErrorCodes.Lake.APPEND_FAILED to "The append failed. Inspect its recorded delivery outcome before retrying.",
+            PipelineErrorCodes.Lake.APPEND_PROVENANCE_MISSING to
+                "The execution lacks its required recovery provenance. Report this execution.",
+            PipelineErrorCodes.Lake.APPEND_AUTHORITY_LOST to "The append lost its lease authority. Retry after settlement.",
+            PipelineErrorCodes.Lake.COMMIT_CONTENDED to "The catalog remained contended. Retry the same immutable delivery.",
+            PipelineErrorCodes.Lake.TABLE_BUSY to "This table has an active or unconfirmed publication. Retry after settlement.",
+            PipelineErrorCodes.Lake.TABLE_DEPRECATED to "A deprecated table does not accept new deliveries.",
+            PipelineErrorCodes.Lake.TABLE_UNAVAILABLE to "That managed lake table is unavailable. Check its state and the error details.",
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED to "This delivery id already names different files. Use a new id for corrected input.",
+            PipelineErrorCodes.Lake.DELIVERY_CHANGED_DURING_READ to
+                "The delivery changed while staging read it. Its files must be immutable.",
+            PipelineErrorCodes.Lake.APPEND_FORBIDDEN to "Your current role cannot append deliveries to the lake.",
+            PipelineErrorCodes.Lake.APPEND_AMBIGUOUS_COLUMN to "The staged result has column names that differ only by case.",
+            PipelineErrorCodes.Lake.APPEND_UNKNOWN_COLUMN to "The staged result contains a column outside the managed table schema.",
+            PipelineErrorCodes.Lake.APPEND_MISSING_REQUIRED_COLUMN to "The staged result omits a required managed table column.",
+            PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED to
+                "The staged result has null values in required columns; details contain every count.",
+            PipelineErrorCodes.Lake.APPEND_TYPE_MISMATCH to "A staged native type cannot be stored without narrowing or coercion.",
+            PipelineErrorCodes.Lake.APPEND_TOO_MANY_PARTITIONS to "The append exceeds the configured open partition limit.",
+            PipelineErrorCodes.Lake.APPEND_RECIPE_EXISTS to
+                "This publication attempt has a conflicting recovery record. Report this execution for investigation.",
+            PipelineErrorCodes.Lake.APPEND_RECIPE_WRITE_FAILED to
+                "The delivery's recovery record could not be stored. Retry when storage is available.",
             // #353 — the two screenshot refusals are about the IMAGE, not the session: the `visualization.test.`
             // family line ("start a new session") would send an agent to restart a run its upload can still finish.
             PipelineErrorCodes.Visualization.TEST_SCREENSHOT_TOO_LARGE to
@@ -573,6 +809,16 @@ object ApiErrorCatalog {
             // is unchanged.
             PipelineErrorCodes.Request.QUERY_TOO_LONG to
                 "That search term is too long. Search with ${SearchNeedle.MAX_LENGTH} characters or fewer.",
+            // #464 §13.24 — the tree's two 503s: an outage to wait out, and a listing too large for one page.
+            PipelineErrorCodes.Navigation.VIEW_UNAVAILABLE to
+                "The navigation view isn't available right now. Try again in a few seconds.",
+            PipelineErrorCodes.Navigation.METADATA_TOO_LARGE to
+                "One item here has too much to list on one page. Quote the correlation id when reporting this.",
+            // #875 — the dependency trees' two 503s: an outage to wait out, and a tree over the response budget.
+            PipelineErrorCodes.Dependencies.METADATA_UNAVAILABLE to
+                "The dependencies couldn't be read right now. Try again in a few seconds.",
+            PipelineErrorCodes.Dependencies.RESPONSE_TOO_LARGE to
+                "This object has too many dependencies to show at once. Quote the correlation id when reporting this.",
             PipelineErrorCodes.Datasource.DUPLICATE_NAME to
                 "A connection with that name already exists. Pick a different name.",
             PipelineErrorCodes.Datasource.NOT_FOUND to
@@ -583,6 +829,15 @@ object ApiErrorCatalog {
                 "This connection's database user isn't allowed to read that table. Ask the database owner for access.",
             PipelineErrorCodes.Datasource.LAKE_TABLE_UNAVAILABLE to
                 "A registered table on this data lake couldn't be read. The recorded reason is in the error details.",
+            // #841 (G0) — the exhausted writer-guard wait; the family lines do not say "try again".
+            PipelineErrorCodes.Datasource.WRITE_BUSY to WRITER_BUSY_USER_MESSAGE,
+            PipelineErrorCodes.Endpoint.WRITE_BUSY to WRITER_BUSY_USER_MESSAGE,
+            PipelineErrorCodes.Schedule.WRITE_BUSY to WRITER_BUSY_USER_MESSAGE,
+            // #818 — the "lake." family line ("busy with another change") describes neither of these.
+            PipelineErrorCodes.Datasource.MANAGED to
+                "This connection is the server's managed lake. It is set in the server configuration and can't be changed here.",
+            PipelineErrorCodes.Lake.UNAVAILABLE to
+                "The lake can't be read right now because its catalog didn't answer. Try again in a moment.",
             PipelineErrorCodes.Template.NOT_FOUND to
                 "We couldn't find that template. It may have been deleted.",
             PipelineErrorCodes.Template.DUPLICATE_NAME to
@@ -634,13 +889,24 @@ object ApiErrorCatalog {
             ScheduleErrorCodes.TARGET_NOT_FOUND to
                 "No pipeline by that name exists in this workspace. Pick one from the suggestions.",
             ScheduleErrorCodes.TARGET_NOT_RELEASED to
-                "This pipeline has no released version yet. Release it (or switch its current version), then schedule it.",
+                "This pipeline version isn't one this server runs — it was discarded, or it's a draft and drafts " +
+                "don't run here. Pick a released version.",
             ScheduleErrorCodes.PAYLOAD_INVALID to
                 "This schedule's job doesn't have the right shape — it must name one pipeline of this workspace " +
-                "with the version set to `current`.",
+                "and the exact version number to run.",
+            ScheduleErrorCodes.PAYLOAD_SCHEMA_UNSUPPORTED to
+                "This schedule was saved in the older format that followed the current version. Edit it and pick " +
+                "the exact version to run.",
             ScheduleErrorCodes.EXECUTOR_UNKNOWN to
                 "That kind of job can't be scheduled on this server.",
             PipelineErrorCodes.Versioning.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
             PipelineErrorCodes.Template.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
         )
+
+    /**
+     * #786 E.3 — the planning deadline is an outage to wait out, not a dependency to release first. The family codes
+     * come first, so an authored entry still wins a clash exactly as it did when they were spread at the literal's head.
+     */
+    private val USER_MESSAGE_OVERRIDES: Map<String, String> =
+        RELEASE_METADATA_UNAVAILABLE.associateWith { RELEASE_METADATA_USER_MESSAGE } + AUTHORED_USER_MESSAGES
 }

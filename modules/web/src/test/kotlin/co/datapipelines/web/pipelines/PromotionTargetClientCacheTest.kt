@@ -35,6 +35,8 @@ class PromotionTargetClientCacheTest {
     private var now = 0L
     private val requests = AtomicInteger()
     private var server: HttpServer? = null
+
+    // raw-list-appender: synchronous — the client's blocking send logs on the test thread
     private val warnings = ListAppender<ILoggingEvent>().also { it.start() }
     private val logger = LoggerFactory.getLogger(PromotionTargetClient::class.java) as Logger
 

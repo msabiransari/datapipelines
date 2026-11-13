@@ -35,7 +35,7 @@ fun interface TemplateReleaser {
          * No releaser wired — the default for constructions that predate 142 (the MCP
          * fixtures, the lifecycle unit tests). A cascade asked of it is a wiring defect, not a
          * refusal a caller can act on, so it fails loudly instead of answering
-         * `template_not_released` and hiding the gap.
+         * `dependency_not_released` and hiding the gap.
          */
         val NONE =
             TemplateReleaser { _, templateId, version, _ ->

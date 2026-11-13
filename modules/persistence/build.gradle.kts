@@ -1,4 +1,5 @@
-// module-structure.md §5.19 — layer 0 beside `typesystem` and `graph`: NO internal dependencies.
+// module-structure.md §5.19 — layer 0 beside `typesystem` and `graph`: no internal MAIN dependencies.
+// Tests use the shared `log-capture` module (#756, §5.23).
 // The module holds the generic batching writer (#266): an ordered, bounded, partitioned queue in
 // front of a store, with a group commit, a bounded wait that falls back to a direct write, a
 // singles retry that isolates a poison row, and a bounded shutdown drain. It knows nothing of
@@ -16,6 +17,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.slf4j.api)
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     testImplementation(libs.kotlinx.coroutines.test)
     // A logging backend for the suite alone: it records the writer's WARN lines and asserts a
     // store's exception message never reaches them (#266b). Production stays on slf4j-api.

@@ -118,6 +118,7 @@ class ParameterEvaluationHousekeepingTest {
         block: () -> Unit,
     ): List<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(type) as ch.qos.logback.classic.Logger
+        // raw-list-appender: synchronous — the step runs on the test thread over a mocked repository
         val appender = ListAppender<ILoggingEvent>().apply { start() }
         logger.addAppender(appender)
         try {

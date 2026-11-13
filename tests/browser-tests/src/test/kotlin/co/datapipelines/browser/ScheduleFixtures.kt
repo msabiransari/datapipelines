@@ -1,11 +1,17 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
+import java.net.URLDecoder
+import java.sql.DriverManager
+import java.util.UUID
 
 /**
- * #9 slice 2 — REST-seeded fixtures for the Schedules suites, through the browser's OWN session
- * and CSRF cookie (the in-page fetch [EditorRunFixtures] and `LifecycleDialogBrowserTest` use),
- * so nothing here bypasses the product's authorization.
+ * #9 slice 2 — fixtures for the Schedules suites. REST helpers use the browser's own session
+ * and CSRF cookie (the in-page fetch [EditorRunFixtures] and `LifecycleDialogBrowserTest` use).
+ * #764's membership and latest-run helpers seed the isolated [SharedBrowserE2e] database
+ * directly; their callers then sign in fresh members and exercise the page.
  *
  * The pipeline a schedule runs is ONE `CALCULATOR` node with literal inputs: it needs no
  * datasource and no credential, finishes in milliseconds and still emits the full durable event
@@ -14,6 +20,83 @@ import com.microsoft.playwright.Page
  * the binder has something to refuse.
  */
 internal object ScheduleFixtures {
+    const val HIDDEN_PIPELINE = "schedules764/hidden"
+
+    /** #764: no existing controlled blocking executor; seed state words just like OverviewSchedulesE2eTest. */
+    fun seedLastRun(
+        scheduleId: String,
+        state: String,
+    ) {
+        require(state in setOf("failed", "queued"))
+        DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    INSERT INTO schedule_runs (id, schedule_id, workspace_id, origin, scheduled_at, reference_at,
+                        reference_timezone, admit_by, executor_id, payload_schema_version, payload_json, actor_user_id, state)
+                    SELECT ?, id, workspace_id, 'cron', NOW(), NOW(), 'UTC', NOW(), 'pipeline', 1, '{}'::jsonb, created_by, ?
+                      FROM schedules WHERE id = ?
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.setObject(1, UUID.randomUUID())
+                    statement.setString(2, state)
+                    statement.setObject(3, UUID.fromString(scheduleId))
+                    check(statement.executeUpdate() == 1) { "missing schedule $scheduleId for $state fixture" }
+                }
+        }
+    }
+
+    /** Membership in the walk's isolated workspace, granted before the member's first login. */
+    fun seedMembership(
+        workspace: String,
+        email: String,
+        role: String,
+    ) {
+        DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    INSERT INTO workspace_members (workspace_id, user_id, role)
+                    SELECT w.id, u.id, ? FROM workspaces w, users u WHERE w.name = ? AND u.email = ?
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.setString(1, role)
+                    statement.setString(2, workspace)
+                    statement.setString(3, email)
+                    check(statement.executeUpdate() == 1) { "missing workspace/member for $role fixture" }
+                }
+        }
+    }
+
+    /** Loopback higher environment already holding [HIDDEN_PIPELINE] at its released version. */
+    fun promotionTarget(key: String): HttpServer =
+        HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).also { server ->
+            server.createContext("/api/v1/promotion/inventory") { exchange ->
+                val workspace =
+                    exchange.requestURI.rawQuery
+                        .orEmpty()
+                        .split('&')
+                        .firstOrNull { it.startsWith("workspace=") }
+                        ?.substringAfter('=')
+                        ?.let { URLDecoder.decode(it, Charsets.UTF_8) }
+                        .orEmpty()
+                val admitted = exchange.requestHeaders.getFirst("DP-Promotion-Key") == key
+                val body =
+                    if (admitted) {
+                        """{"schema_version":1,"correlation_id":"stub","data":{"deployment":"uat",""" +
+                            """"authoring_enabled":false,"workspace":"$workspace","pipelines":[{"name":"$HIDDEN_PIPELINE",""" +
+                            """"current_version":1,"body_hash":"hash-on-target"}],"templates":[],"datasources":[],"parameter_sets":[]}}"""
+                    } else {
+                        """{"error":{"code":"promotion.key_invalid","message":"bad key"}}"""
+                    }
+                val bytes = body.toByteArray(Charsets.UTF_8)
+                exchange.responseHeaders.add("Content-Type", "application/json")
+                exchange.sendResponseHeaders(if (admitted) 200 else 401, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
+            server.start()
+        }
+
     /** Once a year, 03:00 UTC on 1 January — never due while a suite runs. */
     const val YEARLY = "0 3 1 1 *"
 
@@ -72,9 +155,10 @@ internal object ScheduleFixtures {
     }
 
     /**
-     * A calculator pipeline that was NEVER released (#280): the draft is live, `current_version`
-     * is null — the shape `PipelineJobExecutor.validate` refuses with
-     * `schedule.validation.target_not_released` and the form names at pick time. Returns its id.
+     * A calculator pipeline that was NEVER released (#280): its only version is the v1 DRAFT. Where
+     * drafts do not run (the hardened posture) `PipelineJobExecutor.validate` refuses a pin of it
+     * with `schedule.validation.target_not_released` and the form names it at pick time; where
+     * they do (this suite's development posture, #786 D.1) the v1 draft is pinnable. Returns its id.
      */
     fun draftPipeline(
         page: Page,
@@ -150,7 +234,7 @@ internal object ScheduleFixtures {
                 page,
                 "POST",
                 "/api/v1/schedules",
-                """{"name":"$name","payload":{"pipeline":"$pipeline","version":"current"},""" +
+                """{"name":"$name","payload":{"pipeline":"$pipeline","version":1},""" +
                     """"parameters":{"$PARAMETER":$batchSize},"cron":"$cron","timezone":"$timezone"}""",
             )
         check(created.status == 201) { "schedule create ${created.status}: ${created.body.take(400)}" }
@@ -174,7 +258,7 @@ internal object ScheduleFixtures {
                 page,
                 "POST",
                 "/api/v1/schedules",
-                """{"name":"$name","payload":{"pipeline":"$pipeline","version":"current",""" +
+                """{"name":"$name","payload":{"pipeline":"$pipeline","version":1,""" +
                     """"parameter_bindings":{"$DATE_PARAMETER":{"source":"keyword","name":"$keyword"}}},""" +
                     """"cron":"$cron","timezone":"$timezone"}""",
             )

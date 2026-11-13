@@ -21,7 +21,8 @@ import java.util.UUID
  * takes no per-user slot; waits at most `max-wait-seconds`; and everything it took comes back on [Admission.close].
  *
  * Falsified at birth: reserving the instance slots one at a time (keeping what it got) turns the "holds nothing"
- * case red; taking a per-user slot turns the viewer's-own-run case red.
+ * case red; taking a per-user slot turns the viewer's-own-run case red. #762: on the base code a refresh over the
+ * executor ceiling answered only after the whole `max-wait-seconds` (measured 10.229 s against the 1 s assertion).
  */
 class RefreshAdmissionTest {
     private val workspace: UUID = UUID.fromString("00000000-0000-0000-0000-0000000000c1")
@@ -45,7 +46,7 @@ class RefreshAdmissionTest {
             val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 100)
             val admission = RefreshAdmission(slots, config())
 
-            val admitted = admission.admit(workspace, executions = 3).shouldNotBeNull()
+            val admitted = admission.admit(workspace, executions = 3).admitted()
 
             admission.refreshesIn(workspace) shouldBe 1
             admission.executionsReserved shouldBe 3
@@ -62,7 +63,7 @@ class RefreshAdmissionTest {
     fun `a refresh never takes a per-user slot - the viewer's own runs are not starved by it`() =
         runBlocking<Unit> {
             val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 100)
-            val admitted = RefreshAdmission(slots, config()).admit(workspace, executions = 5).shouldNotBeNull()
+            val admitted = RefreshAdmission(slots, config()).admit(workspace, executions = 5).admitted()
 
             slots.trackedUsers shouldBe 0
             val own = slots.acquire(viewer) // the per-user cap is 1 — still free
@@ -75,13 +76,13 @@ class RefreshAdmissionTest {
         runBlocking<Unit> {
             val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 100)
             val admission = RefreshAdmission(slots, config(perWorkspace = 4))
-            val held = (1..4).map { admission.admit(workspace, executions = 1).shouldNotBeNull() }
+            val held = (1..4).map { admission.admit(workspace, executions = 1).admitted() }
 
-            admission.admit(workspace, executions = 1).shouldBeNull()
+            admission.admit(workspace, executions = 1) shouldBe AdmissionResult.Busy
 
             admission.refreshesIn(workspace) shouldBe 4
             slots.inFlight shouldBe 4
-            admission.admit(UUID.randomUUID(), executions = 1).shouldNotBeNull().close() // another workspace is not affected
+            admission.admit(UUID.randomUUID(), executions = 1).admitted().close() // another workspace is not affected
             held.forEach(Admission::close)
         }
 
@@ -90,13 +91,35 @@ class RefreshAdmissionTest {
         runBlocking<Unit> {
             val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 100)
             val admission = RefreshAdmission(slots, config(perRefresh = 8, perInstance = 10))
-            val first = admission.admit(workspace, executions = 8).shouldNotBeNull()
+            val first = admission.admit(workspace, executions = 8).admitted()
 
-            admission.admit(UUID.randomUUID(), executions = 3).shouldBeNull() // 8 + 3 > 10
+            admission.admit(UUID.randomUUID(), executions = 3) shouldBe AdmissionResult.Busy // 8 + 3 > 10
 
             admission.executionsReserved shouldBe 8
             first.close()
         }
+
+    @Test
+    fun `the dashboard reservation cap can exceed live executor slots and still limit overlapping refreshes`() {
+        runBlocking {
+            val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 2)
+            val admission = RefreshAdmission(slots, config(perRefresh = 2, perInstance = 3))
+            admission.admit(workspace, executions = 2).admitted().use { first ->
+                val reservation = first.reservation.shouldNotBeNull()
+                reservation.next().close()
+                slots.inFlight shouldBe 1
+                admission.admit(workspace, executions = 1).admitted().use {
+                    admission.executionsReserved shouldBe 3
+                    slots.inFlight shouldBe 2
+                    reservation.next().close()
+                    slots.inFlight shouldBe 1
+                    admission.admit(workspace, executions = 1) shouldBe AdmissionResult.Busy
+                }
+            }
+            admission.executionsReserved shouldBe 0
+            slots.inFlight shouldBe 0
+        }
+    }
 
     @Test
     fun `when the instance slots are full it holds NOTHING - not the workspace place, not the execution count`() =
@@ -105,7 +128,7 @@ class RefreshAdmissionTest {
             val blocker = slots.acquireInstanceOnly(3, java.time.Duration.ZERO).shouldNotBeNull()
             val admission = RefreshAdmission(slots, config())
 
-            admission.admit(workspace, executions = 3).shouldBeNull() // 1 slot free, 3 asked
+            admission.admit(workspace, executions = 3) shouldBe AdmissionResult.Busy // 1 slot free, 3 asked
 
             admission.refreshesIn(workspace) shouldBe 0
             admission.executionsReserved shouldBe 0
@@ -125,13 +148,67 @@ class RefreshAdmissionTest {
 
             val admitted = RefreshAdmission(slots, config(waitSeconds = 10)).admit(workspace, executions = 2)
 
-            admitted.shouldNotBeNull().close()
+            admitted.admitted().close()
         }
 
     @Test
-    fun `a refresh needing more executions than one refresh may run is never admissible`() =
+    fun `a refresh needing more executions than one refresh may run is never admissible - naming that key`() =
         runBlocking<Unit> {
-            RefreshAdmission(ExecutionSlots(1, 100), config(perRefresh = 4)).admit(workspace, executions = 5).shouldBeNull()
+            RefreshAdmission(ExecutionSlots(1, 100), config(perRefresh = 4)).admit(workspace, executions = 5) shouldBe
+                AdmissionResult.NeverAdmissible(5, 4, PER_REFRESH_KEY)
+        }
+
+    @Test
+    fun `a refresh over the executor ceiling is refused at once, not at the deadline - and holds nothing`() =
+        runBlocking<Unit> {
+            val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 3)
+            val admission = RefreshAdmission(slots, config(waitSeconds = 10))
+            val started = System.nanoTime()
+
+            val result = admission.admit(workspace, executions = 4)
+
+            ((System.nanoTime() - started) / NANOS_PER_MILLI < 1_000) shouldBe true // the bound is 10 s; it took microseconds
+            result shouldBe AdmissionResult.NeverAdmissible(executions = 4, ceiling = 3, key = EXECUTOR_KEY)
+            admission.refreshesIn(workspace) shouldBe 0
+            admission.executionsReserved shouldBe 0
+            slots.inFlight shouldBe 0
+        }
+
+    @Test
+    fun `raising the executor ceiling to the refresh's executions admits it`() =
+        runBlocking<Unit> {
+            val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 4)
+
+            val admitted = RefreshAdmission(slots, config(waitSeconds = 10)).admit(workspace, executions = 4).admitted()
+
+            slots.inFlight shouldBe 4
+            admitted.close()
+        }
+
+    @Test
+    fun `the smaller ceiling is the one named - a tie names the per-refresh bound`() =
+        runBlocking<Unit> {
+            RefreshAdmission(ExecutionSlots(1, 3), config(perRefresh = 16)).admit(workspace, executions = 20) shouldBe
+                AdmissionResult.NeverAdmissible(20, 3, EXECUTOR_KEY)
+            RefreshAdmission(ExecutionSlots(1, 20), config(perRefresh = 16)).admit(workspace, executions = 25) shouldBe
+                AdmissionResult.NeverAdmissible(25, 16, PER_REFRESH_KEY)
+            RefreshAdmission(ExecutionSlots(1, 16), config(perRefresh = 16)).admit(workspace, executions = 17) shouldBe
+                AdmissionResult.NeverAdmissible(17, 16, PER_REFRESH_KEY)
+        }
+
+    @Test
+    fun `a busy instance still waits to the deadline and answers Busy - the 429 for a genuinely full instance is unchanged`() =
+        runBlocking<Unit> {
+            val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 4)
+            val blocker = slots.acquireInstanceOnly(4, java.time.Duration.ZERO).shouldNotBeNull()
+            val started = System.nanoTime()
+
+            val result = RefreshAdmission(slots, config(waitSeconds = 1)).admit(workspace, executions = 2)
+
+            result shouldBe AdmissionResult.Busy
+            ((System.nanoTime() - started) / NANOS_PER_MILLI >= 1_000) shouldBe true // it waited the whole bound
+            slots.inFlight shouldBe 4
+            blocker.close()
         }
 
     @Test
@@ -140,7 +217,7 @@ class RefreshAdmissionTest {
             val slots = ExecutionSlots(maxPerUser = 1, maxPerInstance = 100)
             val admission = RefreshAdmission(slots, config())
 
-            val admitted = admission.admit(workspace, executions = 0).shouldNotBeNull()
+            val admitted = admission.admit(workspace, executions = 0).admitted()
 
             admitted.reservation.shouldBeNull()
             admission.refreshesIn(workspace) shouldBe 1
@@ -157,14 +234,23 @@ class RefreshAdmissionTest {
 
             val results = (1..10).map { async(Dispatchers.Default) { admission.admit(workspace, executions = 1) } }.awaitAll()
 
-            results.count { it != null } shouldBe 4
+            results.count { it is AdmissionResult.Admitted } shouldBe 4
             slots.inFlight shouldBe 4
-            results.filterNotNull().forEach(Admission::close)
+            results.filterIsInstance<AdmissionResult.Admitted>().forEach { it.admission.close() }
             slots.inFlight shouldBe 0
         }
 
     @Test
     fun `a negative execution count is a programming error`() {
         shouldThrow<IllegalArgumentException> { runBlocking { RefreshAdmission(ExecutionSlots(1, 1), config()).admit(workspace, -1) } }
+    }
+
+    /** The places of an [AdmissionResult.Admitted]; any other answer fails the case. */
+    private fun AdmissionResult.admitted(): Admission = (this as? AdmissionResult.Admitted).shouldNotBeNull().admission
+
+    private companion object {
+        const val NANOS_PER_MILLI = 1_000_000L
+        const val EXECUTOR_KEY = "datapipelines.executor.max-concurrent-executions-per-instance"
+        const val PER_REFRESH_KEY = "datapipelines.dashboards.admission.max-executions-per-refresh"
     }
 }

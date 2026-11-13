@@ -135,6 +135,26 @@ class SiteKeywordCoverageTest {
             Row("duckdb s3", SitePages.DP_LAKE, H2),
             Row("sql on s3", SitePages.DP_LAKE, BODY),
             Row("iceberg sql", SitePages.DP_LAKE, BODY),
+            // ---- #700: the three capability pages, from the 2026-10-24 measurement (50 phrases).
+            // #735 owner correction (2026-10-25): the "sql scheduler" TITLE row is retired — the
+            // category must be the generic "job scheduler" (pipelines are the job type it runs
+            // today), and product truth overrides keyword volume; the measurement had
+            // "workflow scheduler" (40/mo) alongside "sql scheduler" (20/mo) anyway. #763 owner
+            // ruling (2026-10-28): the BODY row is retired with it — the site does not name a
+            // "SQL scheduler" anywhere, not even to correct it; the phrase is banned site-wide by
+            // SiteCapabilitiesContentTest, so a row here would demand text that test refuses.
+            Row("sql dashboard", SitePages.SQL_DASHBOARDS, TITLE),
+            Row("parameter sets", SitePages.REUSABLE_PARAMETER_SETS, TITLE),
+            Row("dashboard filters", SitePages.REUSABLE_PARAMETER_SETS, TITLE),
+            // ---- 700b (2026-10-27): Google Ads US, window 2025-10..2026-09, chosen by live result
+            // intent. "data api" (390) keeps its H1 but lost the title: its results are directories
+            // of other people's APIs; "rest api from database" (30) returns this page's how-to job.
+            Row("rest api from database", SitePages.PUBLISHED_API, TITLE),
+            Row("data api", SitePages.PUBLISHED_API, H1),
+            Row("mcp server security", SitePages.SECURITY, TITLE),
+            Row("sample sql database", SitePages.DEMO_DATA, TITLE),
+            Row("semantic layer for ai", SitePages.SEMANTIC_LAYER, TITLE),
+            Row("cascading filters", SitePages.REUSABLE_PARAMETER_SETS, BODY),
         )
 
     private val rendered: Map<String, String> by lazy {

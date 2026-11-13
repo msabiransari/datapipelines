@@ -36,9 +36,11 @@ class EndpointPromotionLegacyOmissionTest {
     private val endpoints = mockk<PublishedEndpointRepository>()
     private val pipelines = mockk<PipelineRepository>()
     private val bindings = mockk<EndpointKeyBindingRepository> { every { findByWorkspace(WORKSPACE_ID) } returns emptyList() }
-    private val promotion = EndpointPromotion(mockk(), mockk(), endpoints, bindings, mockk(), pipelines)
+    private val promotion = EndpointPromotion(mockk(), mockk(), mockk(), endpoints, bindings, mockk(), pipelines)
 
     private val logger = LoggerFactory.getLogger(EndpointPromotion::class.java) as Logger
+
+    // raw-list-appender: synchronous — entriesFor runs on the test thread over mocks
     private val captured = ListAppender<ILoggingEvent>().also { it.start() }
 
     init {
@@ -53,11 +55,10 @@ class EndpointPromotionLegacyOmissionTest {
     @Test
     fun `a legacy row over a promoted pipeline is omitted from the batch and the omission is logged with its count, never its path`() {
         val promoted = UUID.randomUUID()
-        val other = UUID.randomUUID()
         every { pipelines.findByName(WORKSPACE_ID, "lending_home") } returns record("lending_home", promoted)
         every { endpoints.findByWorkspace(WORKSPACE_ID) } returns emptyList()
         every { endpoints.findLegacy(WORKSPACE_ID) } returns
-            listOf(legacy("/lending/home", promoted), legacy("/trade/rates", other))
+            listOf(legacy("/lending/home", "lending_home"), legacy("/trade/rates", "trade_rates"))
 
         val entries = promotion.entriesFor(WORKSPACE_ID, listOf("lending_home"))
 
@@ -76,7 +77,7 @@ class EndpointPromotionLegacyOmissionTest {
         val promoted = UUID.randomUUID()
         every { pipelines.findByName(WORKSPACE_ID, "lending_home") } returns record("lending_home", promoted)
         every { endpoints.findByWorkspace(WORKSPACE_ID) } returns emptyList()
-        every { endpoints.findLegacy(WORKSPACE_ID) } returns listOf(legacy("/trade/rates", UUID.randomUUID()))
+        every { endpoints.findLegacy(WORKSPACE_ID) } returns listOf(legacy("/trade/rates", "trade_rates"))
 
         promotion.entriesFor(WORKSPACE_ID, listOf("lending_home"))
 
@@ -99,12 +100,12 @@ class EndpointPromotionLegacyOmissionTest {
 
     private fun legacy(
         path: String,
-        pipelineId: UUID,
+        pipelineName: String,
     ) = EndpointRow.Legacy(
         id = UUID.randomUUID(),
         workspaceId = WORKSPACE_ID,
         pathPattern = path,
-        pipelineId = pipelineId,
+        pipelineName = pipelineName,
         reason = "Path has 2 segment(s); an endpoint is at least 3.",
         enabled = false,
     )

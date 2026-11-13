@@ -60,10 +60,10 @@ class DatasourceScopeThreadingTest {
         withClue("every lookup names the save's workspace — none is workspace-less: ${registry.lookups}") {
             registry.lookups.map { it.second }.distinct() shouldBe listOf(workspaceId)
         }
-        // Each name is asked twice: once by the §11.4 portability scan ("is this a registry
-        // name?") and once by §12.5 (the facts). Both must ask from the same workspace.
+        // Sources are asked by portability and reference rules. Outputs are also asked by the
+        // managed table identifier rule and the delivery rule; all four retain the save scope.
         registry.lookups.map { it.first } shouldContainExactlyInAnyOrder
-            listOf("pg-prod", "pg-prod", "pg-warehouse", "pg-warehouse", "pg-meta", "pg-meta")
+            listOf("pg-prod", "pg-prod", "pg-warehouse", "pg-warehouse", "pg-meta", "pg-meta", "pg-meta", "pg-meta")
     }
 
     @Test

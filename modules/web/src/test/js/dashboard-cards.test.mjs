@@ -120,8 +120,8 @@ function uninstallDom() {
 function stubRenderer(runtime) {
   runtime._internal.resetRenderers();
   runtime.registerRenderer({
-    kind: "plotly",
-    version: "4",
+    kind: "stub",
+    version: "1",
     create: () => ({ renderData: () => Promise.resolve("rendered"), resize: () => {}, dispose: () => {} }),
   });
 }
@@ -135,14 +135,14 @@ async function mountedAdapter(runtime, options) {
 
 const OCCURRENCE = {
   name: "rev",
-  renderer: { kind: "plotly", version: "4" },
+  renderer: { kind: "stub", version: "1" },
   display_name: "Revenue",
   description: "Monthly revenue by region",
   config: { label: "Old label" },
 };
 
 async function cardOf(adapter, occurrence) {
-  await adapter.mountVisualization(occurrence || OCCURRENCE, { kind: "plotly", version: "4" });
+  await adapter.mountVisualization(occurrence || OCCURRENCE, { kind: "stub", version: "1" });
   const slot = adapter.grid ? adapter.grid.rev : null;
   return slot.children[slot.children.length - 1];
 }

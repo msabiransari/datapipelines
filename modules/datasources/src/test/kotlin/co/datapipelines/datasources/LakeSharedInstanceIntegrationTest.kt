@@ -1,5 +1,6 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.ConnectionPoolManager
 import co.datapipelines.datasources.pooling.HikariConnectionPool
 import co.datapipelines.typesystem.Dialect
@@ -40,7 +41,7 @@ class LakeSharedInstanceIntegrationTest {
                 val cold: Triple<Int, Int, Long>
                 val cachedAfterCold: Long
                 pool.leaseConnection().use { connection ->
-                    firstPhysical = physicalId(connection)
+                    firstPhysical = physicalId(pool, connection)
                     cacheBytes(connection) shouldBe 0L
                     server.reset()
                     rowOf(connection, sql) shouldBe listOf(5000L, 24_995_000L)
@@ -59,7 +60,7 @@ class LakeSharedInstanceIntegrationTest {
                 (pool as HikariConnectionPool).softEvict()
                 server.reset()
                 pool.leaseConnection().use { connection ->
-                    physicalId(connection) shouldNotBe firstPhysical
+                    physicalId(pool, connection) shouldNotBe firstPhysical
                     withClue("the replacement physical connection must see the cache the first one filled") {
                         cacheBytes(connection) shouldBe cachedAfterCold
                     }
@@ -114,7 +115,7 @@ class LakeSharedInstanceIntegrationTest {
             pool.leaseConnection().use { a ->
                 pool.leaseConnection().use { b ->
                     assertAll(
-                        { physicalId(a) shouldNotBe physicalId(b) },
+                        { physicalId(pool, a) shouldNotBe physicalId(pool, b) },
                         // The secret was created ONCE, on the owner, and both duplicates see it.
                         { rowOf(a, "SELECT count(*) FROM duckdb_secrets() WHERE name = 'dp_lake'") shouldBe listOf(1L) },
                         { rowOf(b, "SELECT count(*) FROM duckdb_secrets() WHERE name = 'dp_lake'") shouldBe listOf(1L) },
@@ -189,8 +190,15 @@ class LakeSharedInstanceIntegrationTest {
                 ),
         )
 
-    /** The raw driver connection behind Hikari's proxy — its identity IS the physical connection. */
-    private fun physicalId(connection: Connection): Int = System.identityHashCode(connection.unwrap(Connection::class.java))
+    /**
+     * The raw driver connection behind Hikari's proxy — its identity IS the physical connection. #816: a LAKE lease is the author-SQL
+     * guard, whose `unwrap` answers itself, so the identity is read through the pool's own
+     * connection (Hikari's proxy), whose `unwrap` reaches the physical duplicate.
+     */
+    private fun physicalId(
+        pool: ConnectionPool,
+        connection: Connection,
+    ): Int = System.identityHashCode((pool as HikariConnectionPool).poolConnectionOf(connection).unwrap(Connection::class.java))
 
     private fun cacheBytes(connection: Connection): Long =
         connection.createStatement().use { st ->

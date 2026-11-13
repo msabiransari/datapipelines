@@ -72,7 +72,7 @@ fun interface ScriptClock {
  *    call is the backstop, not the mechanism.
  *  - **No Micrometer here.** This module has no metrics dependency (typesystem has
  *    none to build on); [abandoned] is the `LongAdder` a caller scrapes into its own
- *    meter (`script.evaluations.abandoned` is the record's name).
+ *    meter (`datapipelines.script.evaluations.abandoned` is the record's name).
  *
  * NOT a `ThreadPoolExecutor`: the fixed resource here is the CAPACITY, not a worker set —
  * an abandoned evaluation's thread is never handed new work, and its slot comes back only

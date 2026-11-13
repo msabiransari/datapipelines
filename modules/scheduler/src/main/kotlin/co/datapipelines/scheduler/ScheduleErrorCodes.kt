@@ -34,6 +34,24 @@ object ScheduleErrorCodes {
     /** 409 — the workspace already holds `max-schedules-per-workspace` live schedules (B18, L4). */
     const val LIMIT_PER_WORKSPACE = "schedule.limit.per_workspace"
 
+    /**
+     * 409 — #841 (G0, dependency-graph record §15.1): a create, or an edit that changes the target reference, waited
+     * past the writer guard's cumulative `lock-wait-seconds` for its workspace; nothing was written.
+     */
+    const val WRITE_BUSY = "schedule.write.busy"
+
+    /** 404 — no notification delivery with that id on that run (#442b). */
+    const val NOTIFICATION_NOT_FOUND = "schedule.notification.not_found"
+
+    /**
+     * 409 — resend of a notification that is `pending` or `accepted` (#442b): only a `failed` or
+     * `uncertain` delivery can be queued again; `details.state` names the state it is in.
+     */
+    const val NOTIFICATION_NOT_RESENDABLE = "schedule.notification.not_resendable"
+
+    /** 409 — resend refused by the deployment cap; details.pending and details.backlog_max name the bound. */
+    const val NOTIFICATION_BACKLOG_FULL = "schedule.notification.backlog_full"
+
     /** 400 — a missing or ill-typed request field; `details.field` names it. */
     const val REQUEST_INVALID = "schedule.validation.request_invalid"
 
@@ -62,10 +80,17 @@ object ScheduleErrorCodes {
     const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
 
     /**
-     * 400 — the payload names a pipeline with no current version to follow (#280): release it, or switch
-     * its current version, then save again.
+     * 400 — the payload pins a pipeline version this deployment's posture does not run (#280; #786 D.1: a draft
+     * where drafts do not run, or a discarded version): pick a released version, then save again.
      */
     const val TARGET_NOT_RELEASED = "schedule.validation.target_not_released"
+
+    /**
+     * 400 — the schedule's STORED payload is in a schema its executor no longer accepts (#786 D.2: the pipeline
+     * executor accepts schema 2, the exact pin, only). `details.stored` and `details.supported` name both numbers.
+     * Never upgraded at read time: edit the schedule to pick an exact version.
+     */
+    const val PAYLOAD_SCHEMA_UNSUPPORTED = "schedule.validation.payload_schema_unsupported"
 
     /** 400 — a `parameter_bindings` entry cannot be resolved; `details.reason` and `details.parameter` name why. */
     const val BINDING_INVALID = "schedule.validation.binding_invalid"
@@ -92,6 +117,10 @@ object ScheduleErrorCodes {
             BLOCKED,
             NOT_BLOCKED,
             LIMIT_PER_WORKSPACE,
+            WRITE_BUSY,
+            NOTIFICATION_NOT_FOUND,
+            NOTIFICATION_NOT_RESENDABLE,
+            NOTIFICATION_BACKLOG_FULL,
             REQUEST_INVALID,
             NOTIFICATIONS_INVALID,
             NAME_INVALID,
@@ -102,6 +131,7 @@ object ScheduleErrorCodes {
             PAYLOAD_INVALID,
             TARGET_NOT_FOUND,
             TARGET_NOT_RELEASED,
+            PAYLOAD_SCHEMA_UNSUPPORTED,
             BINDING_INVALID,
             BINDING_CONFLICT,
         )

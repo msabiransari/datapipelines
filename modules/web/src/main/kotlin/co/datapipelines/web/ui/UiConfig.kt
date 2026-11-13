@@ -3,9 +3,14 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.ui.site.SiteDemoData
+import org.springframework.boot.autoconfigure.web.WebProperties
+import org.springframework.boot.autoconfigure.web.servlet.error.DefaultErrorViewResolver
 import org.springframework.boot.context.properties.EnableConfigurationProperties
+import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.Ordered
+import org.springframework.core.annotation.Order
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository
 
 /**
@@ -25,6 +30,22 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 class UiConfig {
     @Bean
     fun oidcRegistrations(repository: ClientRegistrationRepository): OidcRegistrations = OidcRegistrations(repository)
+
+    /**
+     * #782: the browser-shaped CSRF refusal's resolver — first claimant of error renderings
+     * carrying the stash (see [CsrfErrorPageResolver]); method-level `@Order` is what Boot's
+     * `errorViewResolvers.orderedStream()` sorts on.
+     */
+    @Bean
+    @Order(Ordered.HIGHEST_PRECEDENCE)
+    fun csrfErrorPageResolver(uiProperties: UiProperties): CsrfErrorPageResolver = CsrfErrorPageResolver(uiProperties)
+
+    /** Boot backs off its conventional resolver when any custom ErrorViewResolver exists. */
+    @Bean
+    fun conventionErrorViewResolver(
+        applicationContext: ApplicationContext,
+        webProperties: WebProperties,
+    ): DefaultErrorViewResolver = DefaultErrorViewResolver(applicationContext, webProperties.resources)
 
     /** Bean name pinned: it is the name the scanned stereotype carried (see [ThemeResolver]). */
     @Bean(name = ["uiThemeResolver"])
@@ -270,12 +291,10 @@ class UiConfig {
     fun visualizationLifecycleDialogModel(
         visualizations: co.datapipelines.visualization.VisualizationService,
         dashboards: co.datapipelines.visualization.DashboardService,
-        templateStatuses: co.datapipelines.pipeline.TemplateVersionStatuses,
         evidence: co.datapipelines.visualization.ReleaseEvidence,
         actorNames: ActorNames,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
-    ): VisualizationLifecycleDialogModel =
-        VisualizationLifecycleDialogModel(visualizations, dashboards, templateStatuses, evidence, actorNames, authoring)
+    ): VisualizationLifecycleDialogModel = VisualizationLifecycleDialogModel(visualizations, dashboards, evidence, actorNames, authoring)
 
     /** 067: the pipelines screen's one model, shared by the page and the partial controllers. */
     @Bean
@@ -321,6 +340,9 @@ class UiConfig {
         schedules: co.datapipelines.scheduler.ScheduleService,
         // #320 — the dashboards that pin a release, the port the service's discard guard asks.
         dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
+        // #786 B.4 — the live API versions and schedules that pin a version: the guard's two new ports.
+        endpointVersions: co.datapipelines.pipeline.EndpointVersionConsumers,
+        scheduleConsumers: co.datapipelines.pipeline.ScheduleConsumers,
     ): PipelineLifecycleDialogModel =
         PipelineLifecycleDialogModel(
             repository,
@@ -334,7 +356,24 @@ class UiConfig {
             co.datapipelines.pipeline.PipelineDeserializer(),
             schedules,
             dashboards,
+            endpointVersions,
+            scheduleConsumers,
         )
+
+    /** #786 B.3: the API versions page and its dialogs, over the services the REST routes call. */
+    @Bean
+    @Suppress("LongParameterList") // the page model's collaborators, one per concern
+    fun endpointVersionsPageModel(
+        publishing: co.datapipelines.application.endpoints.EndpointPublishService,
+        versions: co.datapipelines.application.endpoints.EndpointVersionService,
+        bindings: co.datapipelines.application.endpoints.EndpointKeyBindingRepository,
+        apiKeys: co.datapipelines.auth.ApiKeyRepository,
+        pipelines: co.datapipelines.pipeline.PipelineRepository,
+        pins: co.datapipelines.application.endpoints.EndpointPinValidator,
+        authoring: co.datapipelines.pipeline.AuthoringGuard,
+        coordinator: co.datapipelines.web.release.ReleaseCoordinator,
+    ): EndpointVersionsPageModel =
+        EndpointVersionsPageModel(publishing, versions, bindings, apiKeys, pipelines, pins, authoring, coordinator)
 
     /** 102: the template twin of [pipelineLifecycleDialogModel]. */
     @Bean
@@ -345,6 +384,23 @@ class UiConfig {
         actorNames: ActorNames,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
     ): TemplateLifecycleDialogModel = TemplateLifecycleDialogModel(templates, usage, actorNames, authoring)
+
+    /** #876 §F.3: the parameter-set release dialog's root facts (the plan is [releasePreviews]'s). */
+    @Bean
+    fun parameterSetLifecycleDialogModel(
+        sets: co.datapipelines.parameters.ParameterSetService,
+        actorNames: ActorNames,
+    ): ParameterSetLifecycleDialogModel = ParameterSetLifecycleDialogModel(sets, actorNames)
+
+    /**
+     * #876 §F.2: the release dialogs' planning read — the session plan and its datasource prerequisites from ONE
+     * read-only planning transaction, the read every release dialog GET renders (never the interactive tree route).
+     */
+    @Bean
+    fun releasePreviews(
+        planning: co.datapipelines.application.dependencies.ReleasePlanningWalk,
+        bounds: co.datapipelines.pipeline.release.ReleaseBounds,
+    ): ReleasePreviews = ReleasePreviews(planning, bounds)
 
     /**
      * #407 — the release flash's one-shot, session-held cascade names, shared by the

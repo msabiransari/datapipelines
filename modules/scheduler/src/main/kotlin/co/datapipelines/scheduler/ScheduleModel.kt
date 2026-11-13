@@ -43,14 +43,39 @@ data class Schedule(
     /** Blocked takes display precedence over paused (record §1.1). */
     val blocked: Boolean get() = blockedAt != null
 
-    /** The operational condition shown for a schedule: `blocked`, `paused` or `enabled`. */
-    val condition: String
-        get() =
+    /** The operational condition shown for a schedule: `blocked`, `paused` or `enabled` ([ScheduleCondition]'s wire word). */
+    val condition: String get() = ScheduleCondition.of(enabled = enabled, blocked = blocked).wire
+}
+
+/**
+ * #641 — a schedule's operational condition, the ONE vocabulary of its three words: the
+ * [Schedule.condition] getter reads it, and the explorer's filter (rest-api §20.1 `condition`)
+ * is its SQL twin in [ScheduleRepository], chosen by `when` over these entries so the predicate
+ * and the getter cannot name different sets. Blocked wins over paused (record §1.1).
+ */
+enum class ScheduleCondition(
+    val wire: String,
+) {
+    ENABLED("enabled"),
+    PAUSED("paused"),
+    BLOCKED("blocked"),
+    ;
+
+    companion object {
+        /** Blocked takes precedence over paused; enabled is what remains. */
+        fun of(
+            enabled: Boolean,
+            blocked: Boolean,
+        ): ScheduleCondition =
             when {
-                blocked -> "blocked"
-                !enabled -> "paused"
-                else -> "enabled"
+                blocked -> BLOCKED
+                !enabled -> PAUSED
+                else -> ENABLED
             }
+
+        /** The exact lower-case wire word, else null. */
+        fun fromWire(value: String): ScheduleCondition? = entries.firstOrNull { it.wire == value }
+    }
 }
 
 /** The five per-schedule notification choices, serialized in declaration order (#442). */
@@ -187,11 +212,14 @@ data class ScheduleRun(
      */
     val executionStartedAt: Instant? = null,
     val executionCompletedAt: Instant? = null,
+    /** Safe target summary frozen at creation; null for older or ad-hoc runs (V51). */
+    val targetRef: String? = null,
 )
 
 /**
- * The trail's kinds (`schedule_run_events.kind`, record §7.1, R10). Slice 4's notification kinds
- * widen the table's CHECK when they land; none is reserved here.
+ * The trail's kinds (`schedule_run_events.kind`, record §7.1, R10). Slice 4's four notification
+ * kinds (#442b, V51) record a notice queued for a run and each delivery's outcome — ids, event and
+ * code only, never an address.
  */
 enum class TrailKind(
     val wire: String,
@@ -206,6 +234,10 @@ enum class TrailKind(
     UNKNOWN("unknown"),
     UPDATED_AFTER_UNKNOWN("updated_after_unknown"),
     UNBLOCKED("unblocked"),
+    NOTIFICATION_ENQUEUED("notification_enqueued"),
+    NOTIFICATION_SENT("notification_sent"),
+    NOTIFICATION_FAILED("notification_failed"),
+    NOTIFICATION_UNCERTAIN("notification_uncertain"),
     ;
 
     companion object {

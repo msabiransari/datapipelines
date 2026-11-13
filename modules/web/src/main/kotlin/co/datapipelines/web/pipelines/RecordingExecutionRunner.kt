@@ -113,6 +113,7 @@ class RecordingExecutionRunner(
      * [ExecutionStreamLauncher]; null only in module-slice wiring.
      */
     private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
+    private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
@@ -174,20 +175,26 @@ class RecordingExecutionRunner(
                 }
                 throw error
             }
-        recordResultColumns(result)
+        recordResultColumns(result, emitter)
         return result
     }
 
     /**
      * The §10.2 result-history columns — same write [ExecutionStreamLauncher] performs for REST runs;
      * the emitter's terminal event carries no result size, so they land after `execute` returns.
-     * Bookkeeping only: a failure is logged, never fails the completed execution.
+     * Bookkeeping only: a failure is logged, never fails the completed execution. #905: the write
+     * goes through the run's [emitter], ordered behind an unconfirmed RUNNING insert.
      */
-    private fun recordResultColumns(result: ExecutionResult) {
+    private fun recordResultColumns(
+        result: ExecutionResult,
+        emitter: WebEventEmitter,
+    ) {
         val ref = result.resultRef ?: return
         runCatching {
             val view = resultStore.describe(ref) ?: return
-            executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            emitter.writeBehindUnconfirmedInsert(result.executionId, RESULT_COLUMNS_WRITE) {
+                executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            }
         }.onFailure { log.warn("Result columns for execution {} not recorded.", result.executionId, it) }
     }
 
@@ -213,5 +220,6 @@ class RecordingExecutionRunner(
             progress = executionProgress,
             subPipelineRunner = subPipelineRunner,
             scripts = scriptSupport,
+            lakeAppendPort = lakeAppendPort,
         )
 }

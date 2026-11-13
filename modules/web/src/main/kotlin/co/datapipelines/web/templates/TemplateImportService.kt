@@ -5,6 +5,9 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.templates.CitableFacts
 import co.datapipelines.templates.ImplementsIds
 import co.datapipelines.templates.ScriptBlocks
@@ -22,6 +25,7 @@ import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.RequestBodies
 import com.fasterxml.jackson.databind.node.ObjectNode
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 import java.util.UUID
 
@@ -62,6 +66,13 @@ class TemplateImportService(
     /** 7e — where the kept citations land. */
     private val citations: TemplateImplementsRepository,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
+    /**
+     * #517 — each entry's metadata transaction and the workspace writer guard it acquires first (record §4.3: imports
+     * are pin-affecting writers). One transaction PER ENTRY keeps the per-entry semantics above; a promotion receive's
+     * outer transaction is joined. The defaults run directly, as a directly constructed test always did.
+     */
+    private val transactions: TransactionOperations = GuardedTransaction.DIRECT,
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
 ) {
     /**
      * Imports the `{"templates": [...]}` [body] into [workspaceId] on behalf of [actorId].
@@ -74,21 +85,33 @@ class TemplateImportService(
         actorId: UUID,
     ): List<Template> =
         importEntries(body).map { (entry, preserved) ->
-            // 7e: the citable subset only (see the class KDoc) — before validation, so the
-            // validator's strict `implements_unresolved` never fires on an import.
-            val cited = entry.implements?.let { ImplementsIds.keepCitable(workspaceId, it, citableFacts) }
-            val draft = validator.validateOrThrow(entry.copy(implements = cited), workspaceId)
-            val landed =
-                if (preserved != null) {
-                    importPreserved(workspaceId, draft, preserved, actorId)
-                } else {
-                    Landed(importNextLocal(workspaceId, draft, actorId), wrote = true)
-                }
-            if (cited == null || !landed.wrote) return@map landed.template
-            val template = landed.template
-            citations.replace(workspaceId, template.id, template.version, ImplementsIds.parseLenient(cited))
-            templates.findVersion(workspaceId, template.id, template.version) ?: template
+            GuardedTransaction.run(transactions, guard, workspaceId, ReleaseFamily.TEMPLATE) {
+                importEntry(workspaceId, entry, preserved, actorId)
+            }
         }
+
+    /** One entry, validated and landed under the guard. */
+    private fun importEntry(
+        workspaceId: UUID,
+        entry: TemplateDraft,
+        preserved: Preserved?,
+        actorId: UUID,
+    ): Template {
+        // 7e: the citable subset only (see the class KDoc) — before validation, so the
+        // validator's strict `implements_unresolved` never fires on an import.
+        val cited = entry.implements?.let { ImplementsIds.keepCitable(workspaceId, it, citableFacts) }
+        val draft = validator.validateOrThrow(entry.copy(implements = cited), workspaceId)
+        val landed =
+            if (preserved != null) {
+                importPreserved(workspaceId, draft, preserved, actorId)
+            } else {
+                Landed(importNextLocal(workspaceId, draft, actorId), wrote = true)
+            }
+        if (cited == null || !landed.wrote) return landed.template
+        val template = landed.template
+        citations.replace(workspaceId, template.id, template.version, ImplementsIds.parseLenient(cited))
+        return templates.findVersion(workspaceId, template.id, template.version) ?: template
+    }
 
     /** What one entry produced, and whether the import WROTE it (a §9.2 idempotent no-op did not). */
     private data class Landed(
@@ -246,8 +269,16 @@ class TemplateImportService(
 
     /**
      * The §5.3 (046) existing-template resolution for imports: the payload inherits the
-     * template's established type or is refused. Reads the working version's type — identical
-     * across every version of the template by rule, so "latest" is as authoritative as any.
+     * template's established type or is refused. The type is identical across every version
+     * of the template by rule, so any version is as authoritative as another.
+     *
+     * Read first from the working version (a local template that exists only as a draft still
+     * has an established type, and §5.3 inherits it — D55); when there is none — every version
+     * DISCARDED (#883) — from the template's retained history. Such a template is registered
+     * ([TemplateRepository.existsId] counts any status), and an import onto it lands the next
+     * release and sets the NULL pointer (versioning §9.2, D60's first-import exception;
+     * lifecycle row `{X,X}` import), on both import modes: the working-version read alone
+     * answered `template.not_found` for a template that exists.
      */
     private fun resolvedAgainstExisting(
         workspaceId: UUID,
@@ -255,9 +286,8 @@ class TemplateImportService(
         draft: TemplateDraft,
     ): TemplateDraft {
         val established =
-            // The working version: a local template that exists only as a draft still has an
-            // established type, and §5.3 inherits it (D55).
             templates.findWorking(workspaceId, id)?.type
+                ?: templates.findEstablishedType(workspaceId, id)
                 ?: throw ApiErrors.templateNotFound(id)
         return TemplateTypeRule.forExisting(draft, established)
     }

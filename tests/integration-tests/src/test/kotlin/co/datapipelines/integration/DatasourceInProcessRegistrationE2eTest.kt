@@ -212,9 +212,11 @@ class DatasourceInProcessRegistrationE2eTest {
             Case("duckdb-mem", "DUCKDB", "jdbc:duckdb::memory:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
             Case("duckdb-file", "DUCKDB", "jdbc:duckdb:$underRoot/app.duckdb", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
             Case("duckdb-file-out", "DUCKDB", "jdbc:duckdb:/etc/sweep186.duckdb", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
-            // The driver matches :memory: case-insensitively (probed, 186b) — and md: is
+            // #941: the DuckDB driver is case-SENSITIVE (DuckDbMemoryFormParityTest): :MEMORY: is a
+            // literal FILE named ":MEMORY:", so the form is InProcessFile — gated for the workspace
+            // admin, roots-refused for the super admin (a relative path names no root). md: is
             // refused in both cases (it reaches the network on connect).
-            Case("duckdb-mem-mixed", "DUCKDB", "jdbc:duckdb::MEMORY:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
+            Case("duckdb-mem-mixed", "DUCKDB", "jdbc:duckdb::MEMORY:", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
             Case("duckdb-md-mixed", "DUCKDB", "jdbc:duckdb:MD:sweep186", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
             Case("sqlite-mem", "SQLITE", "jdbc:sqlite::memory:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
             Case("sqlite-file", "SQLITE", "jdbc:sqlite:$underRoot/app.db", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),

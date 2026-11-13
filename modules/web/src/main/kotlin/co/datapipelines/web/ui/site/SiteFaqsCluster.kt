@@ -37,10 +37,9 @@ object SiteFaqsCluster {
             ),
             FaqEntry(
                 "How do I revoke one agent?",
-                "Delete its key from the top bar's MCP-key chip, and the agent stops working within about a minute, " +
-                    "the validation cache's TTL; your next sign-in mints you a fresh one. No shared password to " +
-                    "rotate, and nobody else's key is touched. Revocation and the validation cache are " +
-                    "docs/auth.md §11.4.",
+                "Revoke its key on the Keys page, and the agent stops working within about a minute, " +
+                    "the validation cache's TTL. No shared password to rotate, and nobody else's key is " +
+                    "touched. Revocation and the validation cache are docs/auth.md §11.4.",
                 "docs/auth.md §11.4",
             ),
             FaqEntry(
@@ -64,9 +63,10 @@ object SiteFaqsCluster {
             ),
             FaqEntry(
                 "What role does the agent's key carry?",
-                "Yours, capped at author: the key is created at sign-in and acts as you in that workspace. " +
-                    "A viewer's key browses and runs, an author's also creates and edits drafts, a promoter's reads " +
-                    "released content, and a workspace admin's acts as an author. The rule is docs/auth.md §7.5.",
+                "The one you chose at creation: the Keys page dialog offers exactly the roles whose permissions " +
+                    "are a subset of yours, and viewer is never one of them. An author-role key browses, runs and " +
+                    "drafts, a promoter-role key reads released content, and a workspace-admin-role key also " +
+                    "administers the workspace. The rule is docs/auth.md §7.5.",
                 "docs/auth.md §7.5",
             ),
             FaqEntry(
@@ -79,11 +79,11 @@ object SiteFaqsCluster {
             FaqEntry(
                 "The tools did not come back: what now?",
                 "Read the refusal: auth.api_key.missing means the header did not arrive; invalid or expired means " +
-                    "wrong, revoked or the owner is deactivated; auth.key_issuer_role_lost means the key is real " +
-                    "but your role does not reach that tool. A silently ignored browser session is expected, " +
-                    "because /mcp takes API keys only. " +
-                    "The troubleshooting list is docs/mcp-server.md §4.2.",
-                "docs/mcp-server.md §4.2",
+                    "wrong, revoked or expired; auth.principal_deactivated means the key's identity or MCP-key " +
+                    "creator is deactivated; auth.role_required means the key's own role does not reach that tool. " +
+                    "A silently ignored browser session is expected, because /mcp takes API keys only. " +
+                    "The refusal codes are docs/pipeline-contract.md §13.7; the transport is docs/mcp-server.md §4.2.",
+                "docs/pipeline-contract.md §13.7",
             ),
         )
 
@@ -95,8 +95,8 @@ object SiteFaqsCluster {
                 "Your real schema: datasources_get_schemas, datasources_get_tables, datasources_get_columns and " +
                     "datasources_preview_rows return the columns that exist and the values they actually hold, so " +
                     "the query is grounded rather than inferred from table names. The tool list is " +
-                    "docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "How do parameter values reach the SQL?",
@@ -128,8 +128,8 @@ object SiteFaqsCluster {
                 "Does datapipelines generate the SQL?",
                 "No. Your agent does that, and the page says so in its first sentence. What the server adds is " +
                     "everything on either side: the real schema going in, and a versioned, reviewable artifact " +
-                    "coming out. The grounding tools are docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "coming out. The grounding tools are docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "What happens to the query after it answers once?",
@@ -159,10 +159,12 @@ object SiteFaqsCluster {
         listOf(
             FaqEntry(
                 "Does this replace Airflow's scheduler?",
-                "No. Pipelines here execute on demand, by an agent, a REST call or a person; there are no " +
-                    "cron triggers, backfills or SLAs. If scheduling is the problem, Airflow is the answer, and " +
-                    "the page says so first. The execution model is docs/dag-executor.md §5.",
-                "docs/dag-executor.md §5",
+                "Not as an orchestrator. A schedule here runs one SQL pipeline at a cron pattern's times in an IANA " +
+                    "time zone (docs/scheduler.md §1), records every run and blocks when an outcome is unknown " +
+                    "(docs/scheduler.md §5.2). It has no dependencies between schedules, no range backfills, no sensors " +
+                    "and no task fan-out across other systems. If orchestrating many systems is the problem, Airflow is " +
+                    "the answer.",
+                "docs/scheduler.md §1, docs/scheduler.md §5.2",
             ),
             FaqEntry(
                 "Can Airflow trigger these pipelines?",
@@ -175,8 +177,8 @@ object SiteFaqsCluster {
                 "Can an agent author the work?",
                 "The full lifecycle is on the MCP tools: introspect schemas, create a template, create a " +
                     "pipeline, execute it and read the rows back. That is the shape an Airflow DAG repository " +
-                    "does not offer a tool-calling agent. The tool list is docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "does not offer a tool-calling agent. The tool list is docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "Are reruns reproducible?",
@@ -209,16 +211,17 @@ object SiteFaqsCluster {
                 "That is the intended shape: introspect, create a template, create a pipeline, execute, read rows " +
                     "so the whole loop runs over MCP tools, with a person releasing what the agent drafts. dbt's " +
                     "authoring surface is a repository and a CLI, a different shape of collaboration. The tools " +
-                    "are docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "are docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "What is the credential story?",
                 "Read-only datasources whose write-shaped uses are refused at save time and again at execution, " +
-                    "one revocable key per agent that holds no more than its person's role, and an audit log entry " +
-                    "for every tool call. Those are the checks " +
-                    "an agent-facing warehouse pipeline needs. The read-only flag is docs/datasources.md §5.7.",
-                "docs/datasources.md §5.7",
+                    "revocable agent keys that are identities of their own, each holding the role its creator chose and " +
+                    "never more than the creator's own (docs/auth.md §7.5), and an audit log entry for every tool call. " +
+                    "Those are the checks an agent-facing warehouse pipeline needs. The read-only flag is " +
+                    "docs/datasources.md §5.7.",
+                "docs/auth.md §7.5, docs/datasources.md §5.7",
             ),
         )
 
@@ -232,11 +235,12 @@ object SiteFaqsCluster {
         listOf(
             FaqEntry(
                 "Do I need Dagster or Airflow to run pipelines here?",
-                "No. Pipelines execute on demand, by an agent over MCP, by a REST call, or by a person in the " +
-                    "editor, and there is no scheduler inside this server: no cron triggers, no backfills, no " +
-                    "sensors. If the work needs those, that is the orchestrator's job, and the page says which " +
-                    "one fits which team. The execution lifecycle is docs/dag-executor.md §5.",
-                "docs/dag-executor.md §5",
+                "No. Pipelines execute on demand, by an agent over MCP, by a REST call or by a person, and a " +
+                    "built-in schedule can run one pipeline on a cron pattern. There are no dependencies between " +
+                    "schedules, no range backfills and no sensors (docs/scheduler.md §1). If the work needs those, that " +
+                    "is the orchestrator's job, and the page says which one fits which team. The execution lifecycle is " +
+                    "docs/dag-executor.md §5.",
+                "docs/scheduler.md §1, docs/dag-executor.md §5",
             ),
             FaqEntry(
                 "Can Dagster, Airflow or Prefect trigger a pipeline here?",
@@ -252,8 +256,8 @@ object SiteFaqsCluster {
                     "server runs SQL pipelines across several operational databases, authored by an agent and " +
                     "executed under governed, read-only-by-default credentials. It is a narrower thing that composes " +
                     "with either rather than replacing it. What it does run is docs/dag-executor.md §5; what an " +
-                    "agent can author is docs/mcp-server.md §6.1.",
-                "docs/dag-executor.md §5, docs/mcp-server.md §6.1",
+                    "agent can author is docs/mcp-server.md §6.2.",
+                "docs/dag-executor.md §5, docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "Where do the facts about Dagster, Airflow and Prefect on this page come from?",
@@ -279,7 +283,7 @@ object SiteFaqsCluster {
                 "Is anything copied between the engines?",
                 "Nothing permanent: results are staged into the scratch database for the duration of the one " +
                     "execution, and the staging database is destroyed when the execution ends. That is by design, not " +
-                    "as a limitation. The design is docs/staging.md §1.",
+                    "as a limitation. The per-execution staging design is docs/staging.md §1.",
                 "docs/staging.md §1",
             ),
             FaqEntry(
@@ -328,8 +332,8 @@ object SiteFaqsCluster {
                 "Can the agent register the datasource itself?",
                 "No. No credential travels through an agent, so a person registers the connection and the agent " +
                     "uses it by name. What the agent gets instead is the read side: schemas, tables, columns and " +
-                    "preview rows over the introspection tools. The tool list is docs/mcp-server.md §6.1.",
-                "docs/mcp-server.md §6.1",
+                    "preview rows over the introspection tools. The tool list is docs/mcp-server.md §6.2.",
+                "docs/mcp-server.md §6.2",
             ),
         )
 }

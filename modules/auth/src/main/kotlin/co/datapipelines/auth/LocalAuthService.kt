@@ -18,6 +18,15 @@ import java.time.Instant
  * [DUMMY_HASH], so response timing cannot tell "no such account" from "wrong
  * password".
  *
+ * ## A native verification fault is not a wrong password (#847, §5A.5)
+ * [SecretHasher.verify] throws [SecretVerificationUnavailableException] when the native side
+ * could not answer. Both verifications here — the account's and the dummy one — let it
+ * propagate UNCAUGHT, before any failure counter or audit row: it is no attempt, and the login
+ * boundary answers 503. The dummy verify must stay un-caught as well: catching it would answer
+ * the unknown-email path "invalid credentials" while a real account answers 503, an enumeration
+ * oracle. For the same reason [DUMMY_HASH] is a precomputed constant — no native hash runs on a
+ * request, so a cold first attempt cannot fail differently from a warm one.
+ *
  * ## Lockout (§5A.3)
  * Per-account, after `lockout.max-failures` consecutive failures — the per-IP
  * [LoginRateLimitFilter] cannot stop a slow spray against one account. While
@@ -72,6 +81,7 @@ class LocalAuthService(
             return LocalLoginResult.Locked
         }
 
+        // A native fault throws past here (#847): no failure recorded, no audit row.
         if (!secretHasher.verify(credential.passwordHash, password)) {
             return rejectWrongPassword(credential, normalized, sourceIp, userAgent)
         }
@@ -108,6 +118,7 @@ class LocalAuthService(
         sourceIp: String?,
         userAgent: String?,
     ): LocalLoginResult {
+        // Result ignored, exception NOT caught (#847): a native fault answers 503 here exactly as on a real account.
         secretHasher.verify(dummyHash(), password)
         auditFailure("bad_credentials", null, email, sourceIp, userAgent, emptyMap())
         return LocalLoginResult.BadCredentials
@@ -161,13 +172,20 @@ class LocalAuthService(
 
     private fun dummyHash(): String = DUMMY_HASH
 
-    private companion object {
+    internal companion object {
         /**
-         * A genuine Argon2id encoding (the same parameters [Argon2SecretHasher] uses),
-         * verified against when no credential row exists so the no-row path costs what
-         * the wrong-password path costs. Computed once, lazily — never a real account's
-         * hash, and nothing about it is secret.
+         * A genuine Argon2id encoding (the same parameters the production hasher uses) of
+         * [DUMMY_PLAINTEXT], verified against when no credential row exists so the no-row path
+         * costs what the wrong-password path costs. PRECOMPUTED (#847): generated once by the
+         * production hasher and pasted here, so no request ever runs a native hash outside
+         * [BoundedSecretHasher]'s permits. Never a real account's hash, and nothing about it is
+         * secret. A change to the hasher's parameters must regenerate it — `LocalAuthServiceTest`
+         * pins the prefix to those parameters and goes red until it is.
          */
-        private val DUMMY_HASH: String by lazy { Argon2SecretHasher().hash("dummy-password-for-timing-equalization") }
+        const val DUMMY_HASH: String =
+            "\$argon2id\$v=19\$m=19456,t=2,p=1\$GbtHdKmU7ra7U1jzVPrb1w\$YiPmmzSXMpImFc+zBnpsrhvD/4ve6cdDBjZ6pUPOQQU"
+
+        /** The fixed, public string [DUMMY_HASH] encodes. */
+        const val DUMMY_PLAINTEXT = "dummy-password-for-timing-equalization"
     }
 }

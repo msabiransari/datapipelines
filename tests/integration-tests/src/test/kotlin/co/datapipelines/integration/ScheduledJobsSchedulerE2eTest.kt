@@ -83,6 +83,12 @@ import java.util.function.Supplier
  *
  * The web module's `ScheduledJobsSchedulerTest` is the small-context twin (and the one that proves a
  * tick cannot START once the context is closing).
+ *
+ * #818d (dp-lake record §10 RULING 4, second amendment, item 5): the pool reaper alone left `dp-scheduled`
+ * for a single-thread scheduler of its own, `dp-reaper` (`poolReaperTaskScheduler`, named on its
+ * `@Scheduled`), so no sibling job's statement can delay a pass. The thread case pins both schedulers and
+ * that the default is still `taskScheduler`; the shutdown case pins that the reaper's scheduler is
+ * terminated by the time the application has closed.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
@@ -122,13 +128,22 @@ class ScheduledJobsSchedulerE2eTest {
 
     @Test
     @Order(1)
-    fun `every scheduled job's own tick runs on dp-scheduled, and nothing else shares that scheduler`() {
+    fun `every scheduled job but the reaper ticks on dp-scheduled, the reaper alone on dp-reaper`() {
         val recorder = app.getBean(TickRecorder::class.java)
         awaitCondition("a startup tick of each job") { SCHEDULED_METHODS.all { job -> recorder.threadsOf(job).isNotEmpty() } }
         val observed = SCHEDULED_METHODS.associateWith { job -> recorder.threadsOf(job) }
         // Non-vacuity: the clue names the thread each job was actually observed on.
         withClue("the thread each job's ticks ran on, as Spring's observation saw them: $observed") {
-            observed shouldBe SCHEDULED_METHODS.associateWith { setOf(JOBS_THREAD) }
+            observed shouldBe
+                SCHEDULED_METHODS.associateWith { job ->
+                    setOf(
+                        when (job) {
+                            REAP -> REAPER_THREAD
+                            READER -> "dp-reader-lease"
+                            else -> JOBS_THREAD
+                        },
+                    )
+                }
             // Every @Scheduled task the application runs, not just the ones named here.
             recorder.jobs() shouldBe SCHEDULED_METHODS
         }
@@ -147,6 +162,16 @@ class ScheduledJobsSchedulerE2eTest {
         processor.scheduledTasks.map { it.task.toString() }.toSet() shouldBe SCHEDULED_METHODS
         app.beanFactory.getDependentBeans(SCHEDULER_BEAN).toList() shouldBe
             listOf(TaskManagementConfigUtils.SCHEDULED_ANNOTATION_PROCESSOR_BEAN_NAME)
+
+        // #818d: the reaper's own scheduler — one thread, a different bean from the default, which it never is.
+        val reaperScheduler = app.getBean(REAPER_SCHEDULER_BEAN).shouldBeInstanceOf<ThreadPoolTaskScheduler>()
+        (reaperScheduler === scheduler) shouldBe false
+        reaperScheduler.poolSize shouldBe 1
+        // Nothing but Spring's @Scheduled processor is wired to it: the reaper is the only task it runs (above).
+        app.beanFactory
+            .getDependentBeans(REAPER_SCHEDULER_BEAN)
+            .filter { it != TaskManagementConfigUtils.SCHEDULED_ANNOTATION_PROCESSOR_BEAN_NAME }
+            .shouldBeEmpty()
     }
 
     @Test
@@ -201,7 +226,10 @@ class ScheduledJobsSchedulerE2eTest {
     @Test
     @Order(4)
     fun `on close the jobs' scheduler stops after the execution drain and every writer's drain`(output: CapturedOutput) {
+        val reaperExecutor = app.getBean(REAPER_SCHEDULER_BEAN).shouldBeInstanceOf<ThreadPoolTaskScheduler>().scheduledExecutor
+        val readerExecutor = app.getBean("readerLeaseTaskScheduler").shouldBeInstanceOf<ThreadPoolTaskScheduler>().scheduledExecutor
         app.close()
+        readerExecutor.isTerminated shouldBe true
         val log = output.out
         val executionDrain = log.indexOf("event=shutdown.drain_complete")
         val drained = WRITERS.map { writer -> log.indexOf("event=persistence.drained writer=$writer") }
@@ -212,6 +240,8 @@ class ScheduledJobsSchedulerE2eTest {
             drained.filter { it >= stopped }.shouldBeEmpty()
             log.contains("event=shutdown.scheduled_jobs_stopped thread=$JOBS_THREAD") shouldBe true
             log.contains("event=shutdown.scheduled_jobs_incomplete") shouldBe false
+            // #818d: the reaper's scheduler stops in the same phase, with its own bounded await.
+            reaperExecutor.isTerminated shouldBe true
         }
     }
 
@@ -411,6 +441,8 @@ class ScheduledJobsSchedulerE2eTest {
                 "datapipelines.auth.oidc.providers[0].issuer-uri" to oidc.issuer,
                 "datapipelines.auth.oidc.providers[0].display-name" to "Test google",
                 "datapipelines.auth.base-url" to "http://localhost:8080",
+                // #818: the freshness tick's startup tick must land inside the await (its default is 60 s).
+                "datapipelines.lake.reads.freshness-tick-seconds" to "1",
             )
         // As command-line arguments, NOT builder `properties(...)` — PersistenceRestartE2eTest says why.
         return SpringApplicationBuilder(DatapipelinesApplication::class.java, TickRecorderConfiguration::class.java)
@@ -574,14 +606,23 @@ class ScheduledJobsSchedulerE2eTest {
 
         /** The spec's name (#316), a literal — never read back from the class under test. */
         const val JOBS_THREAD = "dp-scheduled"
+
+        /** #818d: the reaper's own scheduler and thread (record §10 RULING 4, second amendment), literals. */
+        const val REAPER_SCHEDULER_BEAN = "poolReaperTaskScheduler"
+        const val REAPER_THREAD = "dp-reaper"
+        const val REAP = "co.datapipelines.web.config.DatasourcePoolReaperScheduler.reap"
         const val SWEEP = "co.datapipelines.web.config.StaleExecutionSweepScheduler.sweep"
+        const val READER = "co.datapipelines.web.config.ReaderLeaseKeeper.heartbeat"
         val SCHEDULED_METHODS =
             setOf(
                 SWEEP,
-                "co.datapipelines.web.config.DatasourcePoolReaperScheduler.reap",
+                READER,
+                REAP,
                 "co.datapipelines.web.config.ExecutionEventRetentionScheduler.retain",
                 // #10 L2: the dashboard refresh sweep — an approved `@Scheduled` home riding the same thread.
                 "co.datapipelines.web.dashboards.runtime.DashboardRefreshSweepScheduler.sweep",
+                // #818: the managed lake's freshness tick, booted at a one-second cadence below.
+                "co.datapipelines.web.config.ManagedLakeFreshnessScheduler.tick",
             )
         val WRITERS = listOf("audit", "execution_events", "replay_log")
 

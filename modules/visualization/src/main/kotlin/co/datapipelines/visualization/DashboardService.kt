@@ -4,8 +4,17 @@ import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreRechecks
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
@@ -15,6 +24,14 @@ data class DashboardReleased(
     val version: ArtifactVersion<DashboardBody>,
     val visualizationsReleased: List<ArtifactRef>,
 )
+
+/**
+ * The port [DashboardService.release] delegates to when the assembling layer wires one (#873 §C.1; the
+ * `PipelineReleaseCoordination` mold): every dashboard release then runs through the shared release planner.
+ */
+fun interface DashboardReleaseCoordination {
+    fun release(request: ArtifactReleaseRequest): DashboardReleased
+}
 
 /**
  * The dashboard aggregate's use cases (the spec's §3.2, §11.4, §12; D61) — [VisualizationService]'s twin. What is
@@ -30,6 +47,9 @@ data class DashboardReleased(
  *   visualization's own `releasePinnedTemplates`, the conservative reading of D61's "same consent flag").
  * - **Import** (§12): the rules against THIS deployment; a pin it lacks (`dependency_not_found`) is
  *   `import.missing_dependency` (the promotion order: pipelines, sets and visualizations first).
+ * - **The writer guard** (#517, release-dependencies record §4.3): every write runs in one metadata transaction that
+ *   acquires the workspace writer [guard] first; the validator's pin reads (metadata only, no egress) run under it, so
+ *   a dependency cannot be discarded or purged between the pin check and the save.
  */
 @Suppress("TooManyFunctions", "LongParameterList") // one façade over the aggregate's verb table; its ports are the constructor
 class DashboardService(
@@ -41,12 +61,31 @@ class DashboardService(
     authoring: AuthoringGuard,
     transactions: TransactionOperations = ArtifactLifecycle.DIRECT,
     newId: () -> UUID = UUID::randomUUID,
+    /** #517 — the workspace writer guard; [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /**
+     * #873 §C.1 — the shared release planner; when set, [release] delegates every request to it and the planner's
+     * participant calls [releaseTarget], [prepareRelease] and [commitRelease]. Null in a directly constructed test.
+     */
+    private val coordination: DashboardReleaseCoordination? = null,
+    /**
+     * #873 §D.1 — the transitive restore recheck ([RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test)
+     * and the blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14).
+     */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     /** Repository-owned, lens-filtered navigation metadata only. */
     fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
         repository.navigation(request)
 
     private val lifecycle = ArtifactLifecycle(repository, authoring, transactions, newId)
+
+    /** [block] in one metadata transaction, the workspace writer guard acquired first (#517); the lifecycle's transactions join it. */
+    private fun <T> guarded(
+        workspaceId: UUID,
+        block: () -> T,
+    ): T = GuardedTransaction.run(lifecycle.transactions, guard, workspaceId, ReleaseFamily.DASHBOARD, block)
 
     // ---- writes ---------------------------------------------------------------------------------------
 
@@ -57,8 +96,10 @@ class DashboardService(
         via: WriteSurface,
     ): ArtifactVersion<DashboardBody> {
         lifecycle.requireAuthoring()
-        val valid = validated(workspaceId, document)
-        return lifecycle.create(workspaceId, valid.name, valid.body, actor, via)
+        return guarded(workspaceId) {
+            val valid = validated(workspaceId, document)
+            lifecycle.create(workspaceId, valid.name, valid.body, actor, via)
+        }
     }
 
     fun write(
@@ -70,8 +111,10 @@ class DashboardService(
         via: WriteSurface,
     ): ArtifactVersion<DashboardBody> {
         lifecycle.requireAuthoring()
-        val valid = validated(workspaceId, document)
-        return lifecycle.write(workspaceId, id, valid.name, valid.body, expectedHash, actor, via)
+        return guarded(workspaceId) {
+            val valid = validated(workspaceId, document)
+            lifecycle.write(workspaceId, id, valid.name, valid.body, expectedHash, actor, via)
+        }
     }
 
     /** The §3.2 rules against the dependencies' current state, no write — `POST /{id}/validate`, `dashboards_validate`. */
@@ -80,15 +123,26 @@ class DashboardService(
         document: DashboardDocument,
     ): ArtifactValidation<DashboardDocument> = validator.validate(workspaceId, document, requireReleasedSources = false)
 
-    /** Release the DRAFT at [expectedHash] (see the class KDoc for the order of the checks). */
+    /**
+     * Release the DRAFT at [expectedHash] (see the class KDoc for the order of the checks). Since #873 a wired
+     * [coordination] owns the release after the authoring check: the alias consents to exactly the DRAFT pinned
+     * visualizations; a DRAFT source pipeline is a plan-selectable dependency (`dependency_not_released`, kind
+     * `pipeline`, when unselected — never the validator's 400 any more); the native body is the unwired service's.
+     */
+    @Suppress("LongParameterList") // the request's fields
     fun release(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
         actor: UUID,
         releasePinnedVisualizations: Boolean = false,
+        plan: ReleasePlanRequest? = null,
     ): DashboardReleased {
         lifecycle.requireAuthoring()
+        coordination?.let {
+            return it.release(ArtifactReleaseRequest(workspaceId, id, expectedHash, actor, releasePinnedVisualizations, plan))
+        }
+        check(plan?.present != true) { "a release plan needs the release coordinator, and none is wired" }
         val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
         val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
         val body = checkNotNull(repository.findVersion(workspaceId, id, draft.version)).body
@@ -99,6 +153,7 @@ class DashboardService(
         val released =
             checkNotNull(
                 lifecycle.transactions.execute {
+                    guard.acquire(workspaceId, ReleaseFamily.DASHBOARD)
                     val cascaded = toCascade.map { (visualizationId, ref) -> cascade(workspaceId, visualizationId, ref, actor) }
                     lifecycle.flipDraft(workspaceId, id, expectedHash, actor) to cascaded
                 },
@@ -106,30 +161,88 @@ class DashboardService(
         return DashboardReleased(checkNotNull(repository.findVersion(workspaceId, id, released.first.version)), released.second)
     }
 
+    // ---- the release planner's seams (#873 §B.3) -------------------------------------------------------
+
+    /** The dashboard's working DRAFT as a release names it — the record and the draft — or the native refusal. */
+    fun releaseTarget(
+        workspaceId: UUID,
+        id: UUID,
+    ): Pair<ArtifactRecord, ArtifactVersionDetail> {
+        val record = repository.findRecord(workspaceId, id) ?: throw lifecycle.notFound(id)
+        val draft = repository.findDraft(workspaceId, id) ?: throw lifecycle.notDraft(id)
+        return record to draft
+    }
+
+    /**
+     * The planner's PREPARE, outside every transaction (record §4.1 step 4; brief §C.4): the DRAFT that is [version] at
+     * [expectedHash] judged by every §3.2 rule EXCEPT the source-status one — a DRAFT source pipeline is a dependency the
+     * plan may select, and the commit re-judges it strictly. Null when that DRAFT is no longer the planned one.
+     */
+    fun prepareRelease(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+        expectedHash: String,
+    ): ArtifactVersion<DashboardBody>? {
+        val record = repository.findRecord(workspaceId, id) ?: return null
+        val draft = repository.findDraft(workspaceId, id)?.takeIf { it.version == version && it.bodyHash == expectedHash } ?: return null
+        val stored = repository.findVersion(workspaceId, id, draft.version) ?: return null
+        validator
+            .validate(workspaceId, DashboardDocument(record.name, stored.body), requireReleasedSources = false)
+            .orThrow(DashboardErrorCodes.BODY_INVALID)
+        return stored
+    }
+
+    /**
+     * The planner's COMMIT, inside its guarded transaction after every selected dependency flipped (dependency-first is
+     * the planner's order; record §4.1 step 6, the S5 row "strict validation after deps commit"): the §3.2 rules again
+     * WITH the source-status rule (R5 — a dashboard never commits over a non-RELEASED source; the validator's pin reads are
+     * metadata only), then the one exact-hash flip. Null when no DRAFT matched [expectedHash] (the caller's refusal).
+     */
+    fun commitRelease(
+        workspaceId: UUID,
+        prepared: ArtifactVersion<DashboardBody>,
+        expectedHash: String,
+        actor: UUID,
+    ): ArtifactVersion<DashboardBody>? {
+        validator
+            .validate(workspaceId, DashboardDocument(prepared.record.name, prepared.body), requireReleasedSources = true)
+            .orThrow(DashboardErrorCodes.BODY_INVALID)
+        val id = prepared.record.id
+        val flipped = repository.releaseDraft(workspaceId, id, expectedHash, actor) ?: return null
+        return checkNotNull(repository.findVersion(workspaceId, id, flipped.version))
+    }
+
+    /** The native stale-hash refusal for [id] — the planner's answer when the root's `If-Match` no longer matches. */
+    fun staleRelease(
+        workspaceId: UUID,
+        id: UUID,
+    ): DatapipelinesException = lifecycle.staleBase(workspaceId, id)
+
     fun purgeDraft(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,
-    ): Purged = lifecycle.purgeDraft(workspaceId, id, expectedHash)
+    ): Purged = guarded(workspaceId) { lifecycle.purgeDraft(workspaceId, id, expectedHash) }
 
     fun purgeVersion(
         workspaceId: UUID,
         id: UUID,
         version: Int,
         expectedHash: String? = null,
-    ): Purged = lifecycle.purgeVersion(workspaceId, id, version, expectedHash)
+    ): Purged = guarded(workspaceId) { lifecycle.purgeVersion(workspaceId, id, version, expectedHash) }
 
     fun purgeEntity(
         workspaceId: UUID,
         id: UUID,
-    ): Purged = lifecycle.purgeEntity(workspaceId, id)
+    ): Purged = guarded(workspaceId) { lifecycle.purgeEntity(workspaceId, id) }
 
     fun discardVersion(
         workspaceId: UUID,
         id: UUID,
         version: Int,
         actor: UUID,
-    ): VersionMoved = lifecycle.discardVersion(workspaceId, id, version, actor)
+    ): VersionMoved = guarded(workspaceId) { lifecycle.discardVersion(workspaceId, id, version, actor) }
 
     /**
      * Restore DISCARDED version [version] — after its DEPENDENCIES are judged against today's state (#320, D7). While a
@@ -145,9 +258,48 @@ class DashboardService(
         version: Int,
     ): VersionMoved {
         lifecycle.requireAuthoring()
-        val stored = repository.findVersion(workspaceId, id, version)
-        if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPins(workspaceId, id, stored.body)
-        return lifecycle.restoreVersion(workspaceId, id, version)
+        return guarded(workspaceId) {
+            val stored = repository.findVersion(workspaceId, id, version)
+            if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) {
+                refuseDanglingPins(workspaceId, id, stored.body)
+                refuseUnreleasedClosure(workspaceId, id, version)
+            }
+            lifecycle.restoreVersion(workspaceId, id, version)
+        }
+    }
+
+    /**
+     * #873 §D.1 — the stored body's closure through the shared restore walk (record §25.2 row G2, §25.4 D15): a missing
+     * or DISCARDED node anywhere below a pin is the native 400 `dependency_not_found` at that pin (its `kind`, `name` and
+     * `version`, plus the full `path` and the intermediate nodes as `via`); a present DRAFT — a pin itself (a DRAFT source
+     * pipeline, set or visualization) or a node beneath a RELEASED one — is `dashboard.release.dependency_not_released`
+     * (409, `reason: not_released`).
+     */
+    private fun refuseUnreleasedClosure(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ) {
+        val record = repository.findRecord(workspaceId, id) ?: return
+        val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.DASHBOARD, record.name, version)
+        val reaches = restoreGuard.recheck(root)
+        val dangling =
+            reaches.filter { it.dangling }.map { reach ->
+                ValidationFailure(
+                    DashboardErrorCodes.DEPENDENCY_NOT_FOUND,
+                    reach.directPath,
+                    "The ${reach.identity.family.wire} ${reach.identity.entityId.safeEcho()} version ${reach.identity.version}, " +
+                        "reached through '${reach.path}', is not live here; a restore lands RELEASED.",
+                    mapOf(
+                        "kind" to reach.identity.family.wire,
+                        "name" to reach.identity.entityId.safeEcho(),
+                        "version" to reach.identity.version,
+                        "status" to reach.status.name,
+                    ) + if (reach.transitive) mapOf("path" to reach.path, "via" to reach.viaDetails()) else emptyMap(),
+                )
+            }
+        if (dangling.isNotEmpty()) throw ArtifactValidationException(ValidationResult(dangling), DashboardErrorCodes.BODY_INVALID)
+        RestoreRechecks.notReleased(root, record.name, reaches, maxBlockers)?.let { throw it }
     }
 
     private fun refuseDanglingPins(
@@ -166,7 +318,7 @@ class DashboardService(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): Switched = lifecycle.switchCurrent(workspaceId, id, version)
+    ): Switched = guarded(workspaceId) { lifecycle.switchCurrent(workspaceId, id, version) }
 
     /** Import (§12): [validateForImport] then the lifecycle's landing. Not an authoring write. */
     fun import(
@@ -174,11 +326,10 @@ class DashboardService(
         export: ArtifactExport<DashboardBody>,
         actor: UUID,
     ): ArtifactImported =
-        lifecycle.importValidated(
-            workspaceId,
-            export.copy(body = validateForImport(workspaceId, DashboardDocument(export.name, export.body)).body),
-            actor,
-        )
+        guarded(workspaceId) {
+            val validated = export.copy(body = validateForImport(workspaceId, DashboardDocument(export.name, export.body)).body)
+            lifecycle.importValidated(workspaceId, validated, actor)
+        }
 
     /** The rules against THIS deployment with the import lens: a pin it lacks is `import.missing_dependency`. */
     fun validateForImport(

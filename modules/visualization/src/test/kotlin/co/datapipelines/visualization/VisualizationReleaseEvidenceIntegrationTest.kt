@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.DocumentFixtures.obj
+import com.fasterxml.jackson.databind.node.ArrayNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -73,7 +74,7 @@ class VisualizationReleaseEvidenceIntegrationTest {
         val current = h.visualizationRepository.findDraft(TestEvidenceHarness.WORKSPACE, created.detail.artifactId)!!
         val edited =
             ValidatorFakes.visualizationDocument(
-                DocumentFixtures.visualization().also { it.obj("presentation").put("title", "v2") },
+                DocumentFixtures.visualization().also { it.obj("config.title").put("text", "v2") },
             )
         h.visualizations.write(
             TestEvidenceHarness.WORKSPACE,
@@ -203,6 +204,23 @@ class VisualizationReleaseEvidenceIntegrationTest {
     }
 
     @Test
+    fun `an UNJUDGED chart text assertion is not a mechanical failure - a GREEN run releases`() {
+        val created =
+            h.createVisualization {
+                (it.obj("tests.cases[0]")["assertions"] as ArrayNode)
+                    .add(ArtifactJson.mapper.readTree("""{"kind":"text_visible","text":"Only the browser draws this"}"""))
+            }
+        val candidate = candidateOf(created.detail)
+        // Non-vacuity: the assertion IS unjudged on the mechanical report the gate reads.
+        h.mechanical.run(TestEvidenceHarness.WORKSPACE, candidate.body).let {
+            it.ok shouldBe true
+            it.unjudged.map { u -> u.path } shouldBe listOf("tests.cases[0].assertions[2]")
+        }
+        greenRun(candidate)
+        evidenceFor(candidate) shouldBe EvidenceVerdict.Pass
+    }
+
+    @Test
     fun `the real release flips on GREEN evidence - and the same release refuses with no evidence`() {
         val created = h.createVisualization()
         val candidate = candidateOf(created.detail)
@@ -224,6 +242,34 @@ class VisualizationReleaseEvidenceIntegrationTest {
 
         // The retained run is the release's evidence for the version's life.
         h.runRepository.latestRun(created.detail.artifactId, 1)!!.status shouldBe TestRunStatus.GREEN
+    }
+
+    @Test
+    fun `the release planner's commit judges the evidence too - no run refuses tests_missing and flips nothing, a GREEN run releases`() {
+        // #873 A12 / §C.8: the participant's commit seam is the gate's second caller; the verdict runs there, not only
+        // on the native path above.
+        val created = h.createVisualization()
+        val id = created.detail.artifactId
+        val candidate =
+            checkNotNull(
+                h.visualizations.prepareRelease(TestEvidenceHarness.WORKSPACE, id, created.detail.version, created.detail.bodyHash),
+            )
+        val commit = {
+            h.visualizations.commitRelease(
+                TestEvidenceHarness.WORKSPACE,
+                candidate,
+                candidate.bodyHash,
+                TestEvidenceHarness.AUTHOR,
+            )
+        }
+        val status = { checkNotNull(h.visualizationRepository.findVersion(TestEvidenceHarness.WORKSPACE, id, 1)).detail.status }
+
+        shouldThrow<DatapipelinesException> { commit() }.code shouldBe VisualizationErrorCodes.RELEASE_TESTS_MISSING
+        status() shouldBe PipelineVersionStatus.DRAFT
+
+        greenRun(candidate)
+        checkNotNull(commit()).detail.status shouldBe PipelineVersionStatus.RELEASED
+        status() shouldBe PipelineVersionStatus.RELEASED
     }
 
     @Test

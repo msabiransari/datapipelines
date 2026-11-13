@@ -3,6 +3,7 @@ package co.datapipelines.pipeline
 import co.datapipelines.pipeline.EnvSpecificValueScanner.Heuristic
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldBeNull
@@ -163,5 +164,11 @@ class EnvPortabilityRuleTest {
     private fun validate(
         pipeline: Pipeline,
         datasources: DatasourceRegistry = StubDatasources(),
-    ) = PipelineValidator(datasources, StubTemplates(), PipelineResolver { _, _, _ -> null }, 5).validate(pipeline, workspaceId)
+    ) = PipelineValidator(
+        datasources,
+        StubTemplates(),
+        PipelineResolver { _, _, _ -> null },
+        PipelineNames { _, _ -> false },
+        5,
+    ).validate(pipeline, workspaceId)
 }

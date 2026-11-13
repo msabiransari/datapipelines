@@ -15,10 +15,8 @@ import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
-import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.Staging
-import co.datapipelines.staging.StagingEngine
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.typesystem.DatapipelinesException
@@ -50,7 +48,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import co.datapipelines.pipeline.StagingEngine as PipelineStagingEngine
 
 /**
  * The runtime engine (dag-executor.md §5): takes a validated pipeline plus parameters, walks the
@@ -96,6 +93,8 @@ class PipelineExecutor(
      * fixture.
      */
     private val resultUrls: ResultUrlFactory,
+    /** Managed delivery integration, inverted through pipeline-contract; absent when the lake is disabled. */
+    private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
      * The calculator-catalog lookup (121) — the registry is a deployment constant, so production
      * constructs this class unchanged; a test injects a fixture kind through the seam. Threaded
@@ -181,14 +180,31 @@ class PipelineExecutor(
         )
 
         var staging: Staging? = null
+        var lakeSession: co.datapipelines.pipeline.LakeAppendSession? = null
         val handle = cancellationRegistry.register(executionId)
         try {
             // §15.2: staging creation opens JDBC connections — blocking work, so it belongs on the
             // executor's own pool, never on whatever thread the caller happened to arrive on.
-            val opened = withContext(dispatcher.context) { stagingFactory.create(executionId, stagingEngineFor(request.pipeline)) }
-            staging = opened
-            val ctx = nodeContext(request, opened, handle, run, context)
+            // The opened database is recorded INSIDE the block, for `finally` to close: withContext
+            // dispatches its result back "with a prompt cancellation guarantee" — a caller cancelled
+            // by then gets CancellationException and the result is discarded (its KDoc) — so an
+            // assignment after the call would never run and the database would leak (#795 F5).
             return withTimeout(config.executionTimeoutSeconds.seconds) {
+                handle.bind(coroutineContext.job)
+                val opened =
+                    withContext(dispatcher.context) {
+                        LakeExecutionSetup.open(
+                            request,
+                            executionId,
+                            context,
+                            stagingFactory,
+                            lakeAppendPort,
+                            handle,
+                            onStaging = { staging = it },
+                            onSession = { lakeSession = it },
+                        )
+                    }
+                val ctx = nodeContext(request, opened, handle, run, context)
                 coroutineScope {
                     handle.bind(coroutineContext.job)
                     val poller = launch(dispatcher.context) { pollCancelFlag(run, handle) }
@@ -205,6 +221,7 @@ class PipelineExecutor(
                 }
             }
         } catch (e: NodeExecutionException) {
+            lakeSession?.failed(e.errorCode)
             failWithNode(run, e)
         } catch (e: TimeoutCancellationException) {
             // Ours, or an ancestor's? kotlinx passes a cancellation cause that is ALREADY a
@@ -214,6 +231,7 @@ class PipelineExecutor(
         } catch (e: ExecutionAbortedException) {
             abort(run, e)
         } catch (e: DatapipelinesException) {
+            lakeSession?.failed(e.code)
             // A catalogued setup failure — staging creation is the one §8.2 names (F9). It reaches
             // the stream as `pipeline_failed` on the execution the caller is already watching.
             failWithSetup(run, e)
@@ -223,7 +241,7 @@ class PipelineExecutor(
             // [abortStructurally].
             abortStructurally(run, e)
         } finally {
-            cleanup(executionId, staging)
+            cleanup(executionId, staging, lakeSession)
         }
     }
 
@@ -864,6 +882,7 @@ class PipelineExecutor(
     private suspend fun cleanup(
         executionId: UUID,
         staging: Staging?,
+        lakeSession: co.datapipelines.pipeline.LakeAppendSession?,
     ) {
         cancellationRegistry.deregister(executionId)
         // The one path every execution takes, which is why the progress sink's per-execution state
@@ -873,8 +892,15 @@ class PipelineExecutor(
         // caller thread that might be a Netty event loop. `NonCancellable` because cleanup must
         // complete even when we got here by cancellation.
         withContext(dispatcher.context + NonCancellable) {
-            cancellationFlags.clear(executionId)
-            staging?.close()
+            try {
+                cancellationFlags.clear(executionId)
+            } finally {
+                try {
+                    staging?.close()
+                } finally {
+                    lakeSession?.close()
+                }
+            }
         }
     }
 
@@ -1005,11 +1031,12 @@ class PipelineExecutor(
 
     private fun nodeContext(
         request: ExecuteRequest,
-        staging: Staging,
+        resources: ExecutionStaging,
         handle: CancellationHandle,
         run: ExecutionRun,
         values: RunContext,
     ): NodeExecutionContext {
+        val staging = resources.staging
         // B2: the pipeline's `settings.tempdb.config.max_memory_mb` may only ever LOWER the
         // operator's global ceiling, never raise it. Save-time validation only checks `> 0`, so an
         // author could otherwise declare 1_000_000 MB and disable `checkStagingBudget` — the ONLY
@@ -1048,6 +1075,11 @@ class PipelineExecutor(
             // A13: the frozen reference travels with the context so a PIPELINE node's child
             // request can inherit it — the family resolves bindings on one logical time.
             reference = request.reference,
+            lakeAppendGrant = request.lakeAppendGrant,
+            lakeAppendSession = resources.session,
+            lakeLineage = resources.lineage,
+            lakeDeliveryNodeId = resources.deliveryNodeId,
+            readOnly = request.readOnly,
             pipelineAdmission = request.pipelineAdmission,
             // 108 §D: the staging drain's per-batch count lands in the stats collector and, at
             // most once per `progress-write-interval-seconds`, in the row. The snapshot is built
@@ -1063,14 +1095,6 @@ class PipelineExecutor(
     }
 
     private suspend fun emit(event: ExecutionEvent) = eventEmitter.emit(event)
-
-    private fun stagingEngineFor(pipeline: Pipeline): StagingEngine =
-        when (pipeline.settings.tempdb.engine) {
-            // The two enums are separate declarations by layering necessity (staging.StagingEngine
-            // KDoc): `staging` may not depend on `pipeline-contract`, so `dag` — which depends on
-            // both — owns the mapping. Exhaustive, so a new engine is a compile error here.
-            PipelineStagingEngine.H2 -> StagingEngine.H2
-        }
 
     private companion object {
         val LOG = LoggerFactory.getLogger(PipelineExecutor::class.java)
@@ -1200,6 +1224,8 @@ fun pipelineExecutor(
      * the executor writes node stats once, at the end, exactly as it did before 108.
      */
     progress: ExecutionProgress = ExecutionProgress.NONE,
+    /** The neutral managed-delivery port; keep calculatorKinds as the last function-typed parameter. */
+    lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
      * The calculator-catalog lookup (121) — see [PipelineExecutor.calculatorKinds]. Defaulted to
      * the deployment's registry; a test wires a fixture kind here and it reaches both the
@@ -1241,5 +1267,6 @@ fun pipelineExecutor(
         metrics = metrics,
         progress = progress,
         resultUrls = resultUrls,
+        lakeAppendPort = lakeAppendPort,
         calculatorKinds = calculatorKinds,
     )

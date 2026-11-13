@@ -49,16 +49,18 @@
             <!-- The workspace that REGISTERED it, marked rather than protected: the REST
                  surface lets a super admin revoke this grant too, and a screen that refuses
                  what the server allows is the same defect as one that offers what it
-                 refuses. -->
+                 refuses. The MANAGED lake is the one exception (isManaged): the server refuses
+                 its revoke, so the actions cell below draws no button for it. -->
             <span th:if="${g.owner}" class="ds-badge ds-badge-default">registering workspace</span>
           </td>
           <td th:text="${g.grantedBy}">Muhammad</td>
           <td class="u-secondary" th:text="${g.grantedAt}">2026-09-10T09:00:00Z</td>
           <td class="num">
-            <button th:if="${isSuperAdmin == true}" type="button" data-verb="datasource-grant-remove" class="ds-button ds-button-ghost ds-button-sm"
+            <button th:if="${isSuperAdmin == true and isManaged != true}" type="button" data-verb="datasource-grant-remove" class="ds-button ds-button-ghost ds-button-sm"
                     th:attr="hx-post=@{/partials/datasources/{name}/grants/{workspace}/remove(name=${datasource.name}, workspace=${g.workspace})},
                              hx-target='#ds-dialog', hx-swap='innerHTML'"
                     hx-disabled-elt="this">Revoke</button>
+            <span th:if="${isManaged == true}" class="u-muted u-text-sm" data-role="managed-grant">granted by the server</span>
           </td>
         </tr>
       </tbody>

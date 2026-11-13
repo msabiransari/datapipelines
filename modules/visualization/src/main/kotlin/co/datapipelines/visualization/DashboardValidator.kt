@@ -125,26 +125,15 @@ class DashboardValidator(
     }
 
     /**
-     * The dashboard's DISTINCT executions (spec §18 premise 11): the sources some occurrence reads, collapsed by the
-     * refresh's own sharing identity — pinned release plus bindings, the outgoing overrides applied. A refresh reserves
-     * one slot per distinct execution and is admitted for at most [maxExecutionsPerRefresh], so a document needing more
-     * could be saved and released and then be `dashboard.refresh.saturated` for ever; it is refused here instead.
-     *
-     * The identity here is decided from the DOCUMENT (a set-parameter binding is its name, a literal its canonical
-     * text), the refresh's from the evaluated values, so two bindings that happen to evaluate equal are two here and one
-     * there — this count is never below the refresh's, and a document that passes here is admissible on that ground.
+     * Refuses a document whose DISTINCT executions ([distinctInvocations]) exceed [maxExecutionsPerRefresh]: a refresh
+     * reserves one slot per distinct execution and is admitted for at most that many, so a document needing more could
+     * be saved and released and then be `dashboard.refresh.saturated` for ever; it is refused here instead.
      */
     private fun invocations(
         body: DashboardBody,
         failures: ArtifactFailures,
     ) {
-        val read = body.visualizations.flatMap { occurrence -> occurrence.inputs.values.map { it.source } }.toSet()
-        val distinct =
-            body.sources
-                .filter { it.name in read }
-                .map { staticIdentity(body, it) }
-                .toSet()
-                .size
+        val distinct = distinctInvocations(body)
         if (distinct > maxExecutionsPerRefresh) {
             failures.add(
                 DashboardErrorCodes.TOO_MANY_INVOCATIONS,
@@ -154,24 +143,6 @@ class DashboardValidator(
             )
         }
     }
-
-    private fun staticIdentity(
-        body: DashboardBody,
-        source: DashboardSource,
-    ): String {
-        val bound = source.parameters.mapValues { (_, binding) -> binding.parameter?.let { "@$it" } ?: ("=" + canonical(binding.value)) }
-        val overridden = body.outgoingOverrides[source.name].orEmpty().mapValues { (_, literal) -> "=" + canonical(literal.value) }
-        return source.pipeline.toString() + "#" + (bound + overridden).toSortedMap()
-    }
-
-    /** JSON text with object keys sorted at every level — two spellings of one literal are one. */
-    private fun canonical(node: com.fasterxml.jackson.databind.JsonNode?): String =
-        when {
-            node == null -> "null"
-            node.isObject -> node.properties().sortedBy { it.key }.joinToString(",", "{", "}") { "\"${it.key}\":" + canonical(it.value) }
-            node.isArray -> node.joinToString(",", "[", "]") { canonical(it) }
-            else -> node.toString()
-        }
 
     @Suppress("LongParameterList") // one source's bindings judged against its release, the set and the overrides
     private fun sourceParameters(
@@ -482,6 +453,48 @@ class DashboardValidator(
 
         /** The shipped `max-executions-per-refresh` — the constructor's default for callers that wire no runtime config. */
         const val DEFAULT_MAX_EXECUTIONS_PER_REFRESH = 16
+
+        /**
+         * The dashboard's DISTINCT executions (spec §18 premise 11): the sources some occurrence reads, collapsed by the
+         * refresh's own sharing identity — pinned release plus bindings, the outgoing overrides applied. ONE count, pure
+         * over the body: the save-time bound above and the boot-time scan of saved dashboards (`AuthoringStartupCheck`,
+         * #762) both read it, so the two can never disagree about a document.
+         *
+         * The identity here is decided from the DOCUMENT (a set-parameter binding is its name, a literal its canonical
+         * text), the refresh's from the evaluated values, so two bindings that happen to evaluate equal are two here and
+         * one there — this count is never below the refresh's, and a document that passes the bound is admissible on that
+         * ground.
+         */
+        fun distinctInvocations(body: DashboardBody): Int {
+            val read = body.visualizations.flatMap { occurrence -> occurrence.inputs.values.map { it.source } }.toSet()
+            return body.sources
+                .filter { it.name in read }
+                .map { staticIdentity(body, it) }
+                .toSet()
+                .size
+        }
+
+        private fun staticIdentity(
+            body: DashboardBody,
+            source: DashboardSource,
+        ): String {
+            val bound =
+                source.parameters.mapValues { (_, binding) -> binding.parameter?.let { "@$it" } ?: ("=" + canonical(binding.value)) }
+            val overridden = body.outgoingOverrides[source.name].orEmpty().mapValues { (_, literal) -> "=" + canonical(literal.value) }
+            return source.pipeline.toString() + "#" + (bound + overridden).toSortedMap()
+        }
+
+        /** JSON text with object keys sorted at every level — two spellings of one literal are one. */
+        private fun canonical(node: com.fasterxml.jackson.databind.JsonNode?): String =
+            when {
+                node == null -> "null"
+                node.isObject -> canonicalObject(node)
+                node.isArray -> node.joinToString(",", "[", "]") { canonical(it) }
+                else -> node.toString()
+            }
+
+        private fun canonicalObject(node: com.fasterxml.jackson.databind.JsonNode): String =
+            node.properties().sortedBy { it.key }.joinToString(",", "{", "}") { "\"${it.key}\":" + canonical(it.value) }
     }
 }
 

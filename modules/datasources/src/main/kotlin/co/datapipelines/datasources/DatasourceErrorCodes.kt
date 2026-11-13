@@ -75,6 +75,28 @@ object DatasourceErrorCodes {
     const val IN_USE = "datasource.in_use"
 
     /**
+     * 409 — an edit or delete of the MANAGED lake datasource, or a revoke of its grant to a workspace
+     * (pipeline-contract §13.8).
+     *
+     * #818 (design record §6): the server owns the row and re-syncs it from `datapipelines.lake.*` at
+     * every boot, so no caller may change it. `DefaultDatasourceRegistry` refuses the edit and the
+     * delete below every surface, together with any save whose row claims the managed marker.
+     *
+     * #823: the server, not a person, holds the lake's workspace grants, and the freshness tick would
+     * restore a revoked one. The REST and UI grant-revoke handlers refuse the revoke before anything
+     * is deleted or audited, whether or not the workspace holds the grant. The grant repository does
+     * not refuse it.
+     */
+    const val MANAGED = "datasource.managed"
+
+    /**
+     * 409 — #841 (G0, dependency-graph record §15.1): a definition, credential, delete or grant write waited past the
+     * writer guard's cumulative `lock-wait-seconds` for the datasource's prerequisite key or an affected workspace;
+     * nothing was written (pipeline-contract §13.8).
+     */
+    const val WRITE_BUSY = "datasource.write.busy"
+
+    /**
      * Datasource name unknown on a read/mutate/test path (pipeline-contract §13.8, added
      * 2026-08-11 with v1.3). Raised by the read/test surfaces (web/mcp) and by this module's
      * [SchemaIntrospector] — mirrored here so the §13.8 drift guard stays complete.

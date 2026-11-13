@@ -19,6 +19,11 @@ import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.release.GuardedTransaction
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleasedVersion
+import co.datapipelines.pipeline.release.ReleasedVersionObserver
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
@@ -26,6 +31,7 @@ import co.datapipelines.web.api.RequestBodies
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.dao.DuplicateKeyException
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 import java.util.UUID
 
@@ -66,12 +72,30 @@ class PipelineImportService(
     private val orgContext: OrgContext = OrgContext.DEFAULTS,
     /** Null disables the §0.5 bind scan — the seeder path, whose content is authored here. */
     private val templates: TemplateDryRenderer? = null,
+    /**
+     * #517 — the import's metadata transaction (a `TransactionTemplate` over `metadataTransactionManager` in production)
+     * and the workspace writer guard it acquires first (record §4.3: imports are pin-affecting writers). A promotion
+     * receive's outer transaction is joined. The defaults run directly, as a directly constructed test always did.
+     */
+    private val transactions: TransactionOperations = GuardedTransaction.DIRECT,
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /**
+     * #778 — told of the RELEASED version every import lands or re-confirms, inside the import's transaction: the lake
+     * reference scanner indexes it against THIS deployment's registry, and a scanner that throws rolls the import back
+     * (the owner's 2026-11-02 seam ruling). [ReleasedVersionObserver.NONE] for a directly constructed test.
+     */
+    private val observer: ReleasedVersionObserver = ReleasedVersionObserver.NONE,
 ) {
-    /** What the import stored, plus whether the pipeline row was created (`201`) or gained a version (`200`). */
+    /**
+     * What the import stored, plus whether the pipeline row was created (`201`) or gained a version (`200`). [version]
+     * (#778) is the RELEASED version number the import landed or found identical — the preserved number when the
+     * payload carried one, which need not be [PipelineRecord.currentVersion].
+     */
     data class Imported(
         val record: PipelineRecord,
         val canonical: String,
         val created: Boolean,
+        val version: Int,
     )
 
     /**
@@ -101,6 +125,19 @@ class PipelineImportService(
         SERVER_FIELDS.forEach(tree::remove)
 
         val pipeline = deserializer.readOrThrow(MAPPER.writeValueAsString(tree))
+        // #517: validation reads every pin target, so it runs under the guard with the write.
+        return GuardedTransaction.run(transactions, guard, workspaceId, ReleaseFamily.PIPELINE) {
+            validateAndLand(workspaceId, requestedId, pipeline, preserved, actorId)
+        }
+    }
+
+    private fun validateAndLand(
+        workspaceId: UUID,
+        requestedId: UUID?,
+        pipeline: Pipeline,
+        preserved: Preserved?,
+        actorId: UUID,
+    ): Imported {
         // BEFORE §12: a body that binds an org key this deployment does not define is a
         // configuration conflict (409), not an authoring defect (400), and the two have different
         // people fixing them. The validator would also refuse it — as an unknown reference — so
@@ -109,11 +146,23 @@ class PipelineImportService(
         importValidation(pipeline.name, validator.validate(pipeline, workspaceId)).orThrow()
         val canonical = serializer.write(pipeline)
 
-        return if (preserved != null) {
-            importPreserved(workspaceId, requestedId, pipeline, canonical, preserved, actorId)
-        } else {
-            importNextLocal(workspaceId, requestedId, pipeline, canonical, actorId)
-        }
+        val imported =
+            if (preserved != null) {
+                importPreserved(workspaceId, requestedId, pipeline, canonical, preserved, actorId)
+            } else {
+                importNextLocal(workspaceId, requestedId, pipeline, canonical, actorId)
+            }
+        check(
+            pipelines.recordManagedLakeWrites(
+                workspaceId,
+                imported.record.id,
+                imported.version,
+                canonical,
+                validator.writesManagedLake(pipeline, workspaceId),
+            ) == 1,
+        )
+        observer.released(ReleasedVersion(workspaceId, ReleaseFamily.PIPELINE, imported.record.id, imported.version))
+        return imported
     }
 
     /** The §9.2 payload: `version` plus the `body_hash` / `released_at` / `caller_output` (#328) that ride with it. */
@@ -226,7 +275,7 @@ class PipelineImportService(
     private fun importNextLocal(
         workspaceId: UUID,
         requestedId: UUID?,
-        pipeline: co.datapipelines.pipeline.Pipeline,
+        pipeline: Pipeline,
         canonical: String,
         actorId: UUID,
     ): Imported {
@@ -253,7 +302,8 @@ class PipelineImportService(
                     throw idAlreadyTaken(requestedId, e)
                 }
             }
-        return Imported(record = record, canonical = canonical, created = existing == null)
+        val version = checkNotNull(record.currentVersion) { "an import's pipeline row carries its RELEASED version" }
+        return Imported(record = record, canonical = canonical, created = existing == null, version = version)
     }
 
     /**
@@ -266,7 +316,7 @@ class PipelineImportService(
     private fun importPreserved(
         workspaceId: UUID,
         requestedId: UUID?,
-        pipeline: co.datapipelines.pipeline.Pipeline,
+        pipeline: Pipeline,
         canonical: String,
         preserved: Preserved,
         actorId: UUID,
@@ -308,7 +358,7 @@ class PipelineImportService(
                         actorId,
                         preserved.callerOutputJson,
                     )
-                return Imported(record, canonical, created = true)
+                return Imported(record, canonical, created = true, version = preserved.version)
             } catch (e: DuplicateKeyException) {
                 throw idAlreadyTaken(requestedId, e)
             }
@@ -327,12 +377,12 @@ class PipelineImportService(
                         null,
                     )
                 }
-                Imported(existing, canonical, created = false)
+                Imported(existing, canonical, created = false, version = preserved.version)
             }
 
             target.status == PipelineVersionStatus.RELEASED && target.bodyHash == declared -> {
                 // Idempotent no-op: re-importing an old export is safe (§9.2).
-                Imported(existing, canonical, created = false)
+                Imported(existing, canonical, created = false, version = preserved.version)
             }
 
             else -> {
@@ -349,7 +399,7 @@ class PipelineImportService(
         workspaceId: UUID,
         pipelineId: UUID,
         preserved: Preserved,
-        pipeline: co.datapipelines.pipeline.Pipeline,
+        pipeline: Pipeline,
         canonical: String,
         declared: String,
         actorId: UUID,
@@ -369,7 +419,8 @@ class PipelineImportService(
                 preserved.callerOutputJson,
             )
         } catch (e: DuplicateKeyException) {
-            // The row appeared between the read and the insert — classify by what is there now.
+            // The row appeared between the read and the insert — classify by what is there now (the insert ran
+            // under a savepoint inside the guarded transaction, #517, so this read still answers).
             throw versionConflict(pipelines.findVersionDetail(workspaceId, pipelineId, preserved.version), preserved, e)
         }
 

@@ -16,7 +16,7 @@ const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const M = require(path.join(here, "../../main/resources/static/js/schedules/model.js"));
 
-const s = (name, extra = {}) => ({ id: name, name, condition: "enabled", cron: "0 6 * * *", timezone: "UTC", payload: { pipeline: "p/x", version: "current" }, ...extra });
+const s = (name, extra = {}) => ({ id: name, name, condition: "enabled", cron: "0 6 * * *", timezone: "UTC", payload: { pipeline: "p/x", version: 1 }, ...extra });
 
 test("a level lists its direct folders with subtree counts, and its direct leaves", () => {
   const all = [s("finance/daily/revenue"), s("finance/daily/costs"), s("finance/weekly/summary"), s("ops/nightly"), s("finance/top")];
@@ -188,7 +188,14 @@ test("a §20 refusal lands beside the field it names, or is a toast", () => {
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.interval_too_short" }), { field: "cron" });
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.timezone_invalid" }), { field: "timezone" });
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_found" }), { field: "pipeline" });
-  assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_released" }), { field: "pipeline" });
+  // #786 D.4: the pin is the version field's — an ineligible pin, a stored schema-1 payload, a
+  // version the payload lacks or misspells, a version the pipeline does not have.
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_released" }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.payload_schema_unsupported" }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.payload_invalid", details: { reason: "version_missing" } }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.payload_invalid", details: { reason: "version_current_refused" } }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_found", details: { pipeline: "a/p", version: 7 } }), { field: "version" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_found", details: { pipeline: "a/p" } }), { field: "pipeline" });
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.request_invalid", details: { field: "payload" } }), { field: "pipeline" });
   assert.equal(M.fieldForError({ code: "schedule.validation.request_invalid", details: { field: "If-Match" } }), null);
   assert.equal(M.fieldForError({ code: "schedule.limit.per_workspace" }), null);
@@ -301,3 +308,138 @@ test("collectBindings sends presetted keywords and passes literal bindings throu
    assert.equal(M.recipientsText([]), "");
    assert.deepEqual(M.fieldForError({ code: "schedule.validation.notifications_invalid" }), { field: "notifications" });
  });
+
+// #442b — the run's Notifications table (§20.11 deliveries, §20.13 resend).
+test("a delivery is resendable only when failed or uncertain", () => {
+  const states = ["pending", "accepted", "failed", "uncertain"];
+  assert.deepEqual(states.filter((state) => M.canResend({ state })), ["failed", "uncertain"]);
+  assert.equal(M.canResend(null), false);
+});
+
+test("every notice reads as its subject's state words, and an unknown wire value reads as itself", () => {
+  const notices = ["started", "completed", "failed", "could_not_start", "cancelled", "aborted", "unknown", "unknown_update", "blocked"];
+  notices.forEach((n) => assert.notEqual(M.noticeText(n), n, n));
+  assert.equal(M.noticeText("could_not_start"), "Could not start");
+  assert.equal(M.noticeText("later_value"), "later_value");
+});
+
+test("accepted is the relay's word and uncertain warns; a resend of an uncertain delivery says it may duplicate", () => {
+  assert.equal(M.deliveryBadge("accepted"), "ds-badge-success");
+  assert.equal(M.deliveryBadge("uncertain"), "ds-badge-warning");
+  assert.equal(M.deliveryBadge("failed"), "ds-badge-danger");
+  assert.equal(M.deliveryBadge("pending"), "ds-badge-default");
+  assert.equal(M.resendNotice({ state: "pending", warning: "may_duplicate" }).variant, "warning");
+  assert.match(M.resendNotice({ state: "pending", warning: "may_duplicate" }).message, /twice/);
+  assert.equal(M.resendNotice({ state: "pending" }).variant, "success");
+});
+
+// #641 — the condition filter's client half: the address bar's word is trusted only when it is
+// one of the three, a schedule stays in a filtered list only while the server's condition still
+// says that word (blocked wins on the server: a paused-and-blocked schedule reads "blocked"), and
+// the filtered empty state names the filter and the search.
+test("a condition word from the address bar is one of the three, else no filter", () => {
+  assert.deepEqual(M.CONDITIONS, ["enabled", "paused", "blocked"]);
+  ["enabled", "paused", "blocked"].forEach((w) => assert.equal(M.conditionFilter(w), w));
+  [null, undefined, "", "BLOCKED", "nope", " blocked", "blocked<b>", "constructor", "__proto__"].forEach((raw) =>
+    assert.equal(M.conditionFilter(raw), "", String(raw)),
+  );
+});
+
+test("a schedule matches the active filter while its condition is the filter's word - blocked wins", () => {
+  assert.equal(M.matchesCondition(s("a"), ""), true);
+  assert.equal(M.matchesCondition(s("a", { condition: "paused" }), ""), true);
+  assert.equal(M.matchesCondition(s("a", { condition: "blocked" }), "blocked"), true);
+  // Unblocked from the detail: it leaves the blocked list.
+  assert.equal(M.matchesCondition(s("a", { condition: "enabled" }), "blocked"), false);
+  // Paused AND blocked reads blocked: it is in the blocked list and not in the paused one.
+  const both = s("a", { enabled: false, blocked: { reason: "target_not_found" }, condition: "blocked" });
+  assert.equal(M.matchesCondition(both, "blocked"), true);
+  assert.equal(M.matchesCondition(both, "paused"), false);
+  // Resumed while still blocked: still blocked.
+  assert.equal(M.matchesCondition(s("a", { enabled: true, condition: "blocked" }), "blocked"), true);
+});
+
+test("the filtered empty state names the condition, and the search when there is one", () => {
+  assert.equal(M.filteredEmptyTitle("blocked", ""), "No blocked schedules.");
+  assert.equal(M.filteredEmptyTitle("paused", "nightly"), "No paused schedules match “nightly”.");
+  assert.equal(M.filteredEmptyTitle("", "nightly"), "No schedules match “nightly”");
+});
+
+// #725 — the last-run filter's client half: the address bar's word is trusted only when it is one
+// of the five (LastRunOutcome.wire's spellings), and the filtered empty state names the bucket,
+// alone or beside the condition, and the search. There is no matchesOutcome: a §20 schedule carries
+// no run state, and the verbs that re-render a row record no run (explorer.js's KDoc).
+test("an outcome word from the address bar is one of the five, else no filter", () => {
+  assert.deepEqual(M.OUTCOMES, ["succeeded", "failed", "in-progress", "did-not-run", "never-ran"]);
+  M.OUTCOMES.forEach((w) => assert.equal(M.outcomeFilter(w), w));
+  [null, undefined, "", "FAILED", "Failed", " failed", "in_progress", "never_ran", "failed<b>", "constructor", "__proto__", "blocked"].forEach(
+    (raw) => assert.equal(M.outcomeFilter(raw), "", String(raw)),
+  );
+});
+
+test("the condition and outcome words are disjoint - a word filters one select only", () => {
+  M.CONDITIONS.forEach((w) => assert.equal(M.outcomeFilter(w), "", w));
+  M.OUTCOMES.forEach((w) => assert.equal(M.conditionFilter(w), "", w));
+});
+
+test("the filtered empty state names the last run, beside the condition when both are set, and the search", () => {
+  assert.equal(M.filteredEmptyTitle("", "", "failed"), "No schedules whose last run failed.");
+  assert.equal(M.filteredEmptyTitle("", "", "never-ran"), "No schedules that never ran.");
+  assert.equal(M.filteredEmptyTitle("", "", "in-progress"), "No schedules with a run in progress.");
+  assert.equal(M.filteredEmptyTitle("blocked", "", "failed"), "No blocked schedules whose last run failed.");
+  assert.equal(M.filteredEmptyTitle("paused", "nightly", "did-not-run"), "No paused schedules whose last run did not run match “nightly”.");
+  assert.equal(M.filteredEmptyTitle("", "nightly", "succeeded"), "No schedules whose last run succeeded match “nightly”.");
+  // A word that is not a filter names nothing — never echoed into the title.
+  assert.equal(M.filteredEmptyTitle("", "nightly", "<b>x</b>"), "No schedules match “nightly”");
+});
+
+// ------------------------------------------------------------------ #786 D.4 the version picker
+
+test("pinnedVersionOf reads only a positive integer pin - schema 1's current and junk are no version", () => {
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: 3 } }), 3);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: "current" } }), null);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: "3" } }), null);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: 0 } }), null);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p", version: 1.5 } }), null);
+  assert.equal(M.pinnedVersionOf({ payload: { pipeline: "a/p" } }), null);
+  assert.equal(M.pinnedVersionOf(null), null);
+});
+
+const versions = (...rows) => rows.map(([version, status]) => ({ version, status }));
+
+test("versionChoices: every version with its status, the newest RELEASED preselected, a draft never the default over a release", () => {
+  const list = versions([3, "DRAFT"], [2, "RELEASED"], [1, "DISCARDED"]);
+  const dev = M.versionChoices(list, true, null);
+  assert.deepEqual(dev.options.map((o) => [o.value, o.label, o.eligible, o.disabled]), [
+    [3, "v3 · draft", true, false],
+    [2, "v2 · released", true, false],
+    [1, "v1 · discarded — not run here", false, true],
+  ]);
+  assert.equal(dev.selected, 2);
+  const hardened = M.versionChoices(list, false, null);
+  assert.deepEqual(hardened.options.map((o) => [o.value, o.label, o.disabled]), [
+    [3, "v3 · draft — drafts do not run here", true],
+    [2, "v2 · released", false],
+    [1, "v1 · discarded — not run here", true],
+  ]);
+  assert.equal(hardened.selected, 2);
+});
+
+test("versionChoices: a draft-only pipeline is pickable only where drafts run; nothing runnable selects nothing", () => {
+  assert.equal(M.versionChoices(versions([1, "DRAFT"]), true, null).selected, 1);
+  const hardened = M.versionChoices(versions([1, "DRAFT"]), false, null);
+  assert.equal(hardened.selected, null);
+  assert.equal(hardened.options[0].disabled, true);
+  assert.equal(M.versionChoices(versions([1, "DISCARDED"]), true, null).selected, null);
+  assert.equal(M.versionChoices([], true, null).selected, null);
+});
+
+test("versionChoices: an edit keeps the stored pin selected even when it no longer runs - never a silent repin", () => {
+  const list = versions([2, "RELEASED"], [1, "DISCARDED"]);
+  const edit = M.versionChoices(list, false, 1);
+  assert.equal(edit.selected, 1);
+  // The stored pin stays selectable so the form shows it; the save refuses it with its own words.
+  assert.deepEqual(edit.options.map((o) => [o.value, o.disabled]), [[2, false], [1, false]]);
+  // A stored pin the pipeline no longer lists falls back to the newest release.
+  assert.equal(M.versionChoices(list, false, 9).selected, 2);
+});

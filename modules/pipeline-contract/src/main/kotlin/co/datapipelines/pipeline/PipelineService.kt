@@ -1,5 +1,12 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.release.PipelineReleaseCoordination
+import co.datapipelines.pipeline.release.PipelineReleaseRequest
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -55,11 +62,12 @@ import java.util.UUID
  * today (`ArchitectureGuardTest` fails the build on a bare one). Single-statement writes keep
  * their data-modifying CTEs and gain nothing from a transaction.
  *
- * Two multi-statement writes are deliberately NOT transactional, and both are findings rather
- * than preferences — [update] (its 409 recovery reads AFTER catching a constraint violation,
- * which a transaction turns into `25P02`) and [discard] (its two statements are alternatives
- * selected by a foreign-key violation, not a composition). Each carries the reasoning on its
- * own KDoc; the round's handback lists them.
+ * Every pin-affecting write — [create], [update], [purge], [discardVersion], [restoreVersion],
+ * [purgeVersion], [purgeEntity], [switchCurrent] — is transactional since #517 and acquires the
+ * workspace writer guard ([ReleaseMutationGuard], release-dependencies record §4.3) as its first
+ * metadata statement, before any version row lock, so a release's re-resolution can never
+ * interleave with a write that changes what it resolved. [release] is not: its check gate opens
+ * customer connections, so the coordinator opens the one transaction itself, after the gate.
  *
  * No method here leases a customer datasource connection, and none may: `ConnectionLease`
  * refuses to lease while a metadata transaction is active on the thread (§E.2).
@@ -71,7 +79,7 @@ import java.util.UUID
  *
  * 1. **A `final` CLASS fails LOUDLY.** `kotlin("plugin.spring")` opens a class ANNOTATED with
  *    `@Transactional`; it does **not** open a class whose METHODS carry it, which is the shape
- *    used here (only some methods are transactional — see [update] and [discard] for why
+ *    used here (only some methods are transactional — [release] must not be, see its KDoc, so
  *    annotating the class instead would be wrong). Without `open` this compiled to
  *    `public final class PipelineService`, and a `@Transactional` bean Spring cannot subclass
  *    refuses to start the context at all: `AopConfigException: Cannot subclass final class`.
@@ -95,6 +103,7 @@ import java.util.UUID
 @Suppress(
     "TooManyFunctions", // the aggregate's one-stop use-case surface (S5/R6); the 101 verbs grew it
     "ThrowsCount", // each refusal is a distinct catalogued code the caller distinguishes — the boundary's shape
+    "LongParameterList", // one collaborator per seam; #877 §E.3 made the release coordinator required (no default)
 )
 open class PipelineService(
     private val pipelines: PipelineRepository,
@@ -105,10 +114,42 @@ open class PipelineService(
     private val draftTemplates: ExclusiveDraftTemplates,
     /** #320 — the dashboards that pin a release: a source pins `pipeline {name, version}` exactly (graph rule 1). */
     private val dashboards: PipelineVersionConsumers,
+    /** #786 B.4 — the live API versions that pin a pipeline version exactly (record §14, A39). */
+    private val endpointVersions: EndpointVersionConsumers,
+    /** #786 B.4 — the live schedules that run a pipeline version, paused and blocked included (record §14, A39). */
+    private val schedules: ScheduleConsumers,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
+    /**
+     * The release-dependencies coordinator (#517): every [release] runs through it and its one metadata transaction.
+     * Required since #877 §E.3 retired the native release — there is no release path without it, so a construction
+     * that never releases passes a coordinator that refuses (the test sources' `ReleaseCoordinationDoubles.REFUSING`).
+     */
+    private val coordination: PipelineReleaseCoordination,
+    /** The workspace writer guard (#517, record §4.3); [ReleaseMutationGuard.NONE] in a directly constructed test. */
+    private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /**
+     * The pinned template versions' statuses, read uncached (#517 round three): a restore rechecks its template pins
+     * against them under the guard. The default answers "absent" for every pin, so a construction that does not wire
+     * the real port refuses a template-pinning restore rather than passing it unchecked (fail closed).
+     */
+    private val templateStatuses: TemplateVersionStatuses = TemplateVersionStatuses { _, _, _ -> null },
+    /**
+     * Whether a pinned template is registered at all (#733): tells `template_not_found` from `template_version_not_found`
+     * by the entity row. The default answers "not registered" for every pin, so an unwired construction reports
+     * `template_not_found`, never a false "known" (fail closed).
+     */
+    private val templateIds: TemplateIds = TemplateIds { _, _ -> false },
+    /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
+    /** #873 §D.3 — the transitive restore recheck; [RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test. */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
 ) {
-    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
+    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards, endpointVersions, schedules)
+    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, templateIds, maxBlockers, deserializer, restoreGuard)
+
+    /** The writer guard, acquired first inside every pin-affecting write's transaction. */
+    private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.PIPELINE)
 
     /** Repository-owned, lens-filtered navigation metadata only. */
     open fun navigation(request: co.datapipelines.pipeline.NavigationRequest): List<co.datapipelines.pipeline.NavigationRow> =
@@ -118,6 +159,7 @@ open class PipelineService(
     data class ValidatedPipeline(
         val pipeline: Pipeline,
         val canonicalJson: String,
+        val writesManagedLake: Boolean = false,
     )
 
     /**
@@ -155,6 +197,9 @@ open class PipelineService(
         val version: Int,
         val bodyJson: String,
         val pipeline: Pipeline,
+        val bodyHash: String? = null,
+        val status: PipelineVersionStatus? = null,
+        val writesManagedLake: Boolean = false,
     )
 
     // -------------------------------------------------------------------------------------
@@ -178,7 +223,7 @@ open class PipelineService(
                 workspaceId,
                 allowDraftPipelineReferences = true,
             )
-        return ValidatedPipeline(pipeline, serializer.write(pipeline))
+        return ValidatedPipeline(pipeline, serializer.write(pipeline), validator.writesManagedLake(pipeline, workspaceId))
     }
 
     /**
@@ -195,7 +240,8 @@ open class PipelineService(
      * Transactional because it is two statements: the insert, then the read-back of the row
      * the database actually stored (its server-generated hash and timestamps). Without the
      * transaction a concurrent draft-write between them could hand the caller a version detail
-     * that never described the body it is being returned with.
+     * that never described the body it is being returned with. Guarded (#517) like every
+     * pin-affecting write.
      */
     @Transactional("metadataTransactionManager")
     open fun create(
@@ -207,6 +253,8 @@ open class PipelineService(
         // versioning §5.5: creation is authoring — a promotion receiver refuses it, before
         // anything is parsed or written.
         authoring.requirePipelineAuthoring()
+        // #517: the guard before validation, so the pin targets it checks cannot change before the insert.
+        lockWorkspace(workspaceId)
         val validated = validate(bodyJson, workspaceId)
         val record =
             pipelines.create(
@@ -221,6 +269,15 @@ open class PipelineService(
         // how a default or CHECK becomes invisible (metadata-db §6.1). It is the DRAFT detail
         // now, and it is BOTH the landed version and the draft pointer: one row, two roles.
         val draft = pipelines.findDraftDetail(workspaceId, record.id)
+        check(
+            pipelines.recordManagedLakeWrites(
+                workspaceId,
+                record.id,
+                requireNotNull(draft).version,
+                validated.canonicalJson,
+                validated.writesManagedLake,
+            ) == 1,
+        )
         return SavedPipeline(record, validated.canonicalJson, draft, draft)
     }
 
@@ -231,17 +288,17 @@ open class PipelineService(
      * A no-op write (the body already equals the released one, versioning §5.1) reports the
      * current RELEASED state and carries NO draft pointer: nothing was opened.
      *
-     * **Deliberately NOT transactional**, and this one is a finding rather than a preference.
-     * The draft write path recovers from a lost race by CATCHING the unique-index violation
-     * and then READING the winner's hash back to put in the 409's `details`
-     * (`PipelineRepository.mappingDraftRace`). On PostgreSQL an error aborts the whole
-     * transaction, so inside one that read fails with `25P02 current transaction is aborted`
-     * and the caller gets a raw data-access fault instead of the catalogued
-     * `pipeline.version.conflict` — the transaction would break the recovery it was supposed
-     * to protect. The write does not need one anyway: every precondition already rides its own
-     * statement's `WHERE` clause (versioning §4.2) and the partial unique index settles the
-     * race. Rewriting that recovery is a repository change, which this slice does not make.
+     * **Transactional and guarded since #517** (release-dependencies record §4.3): a pin save must
+     * not interleave with a release's re-resolution, so the workspace writer guard is taken first
+     * and held across validation (which reads every pin target) and the write. Until #517 this
+     * method was deliberately NOT transactional: the draft write recovers from a lost
+     * unique-index race by reading the winner back (`PipelineRepository.mappingDraftRace`), and
+     * on PostgreSQL that read fails with `25P02` inside an aborted transaction. The guard
+     * serialises every pipeline draft writer of the workspace, so that race is unreachable for
+     * guarded writers; should an unguarded writer ever lose it inside a transaction, the
+     * repository answers the catalogued `pipeline.version.conflict` without the winner read.
      */
+    @Transactional("metadataTransactionManager")
     open fun update(
         workspaceId: UUID,
         pipelineId: UUID,
@@ -250,6 +307,7 @@ open class PipelineService(
         actor: UUID,
         via: WriteSurface,
     ): SavedPipeline {
+        lockWorkspace(workspaceId)
         val validated = validate(bodyJson, workspaceId)
         val written =
             drafts.write(
@@ -264,6 +322,15 @@ open class PipelineService(
         // A no-op reports the current RELEASED state and must NOT carry a draft pointer: nothing
         // was opened. Otherwise the pointer is the row just written — `PipelineDraftService`
         // returns the draft it created or overwrote, so there is nothing to re-read.
+        check(
+            pipelines.recordManagedLakeWrites(
+                workspaceId,
+                pipelineId,
+                written.version.version,
+                written.bodyJson,
+                validated.writesManagedLake,
+            ) == 1,
+        )
         val draft = written.version.takeIf { it.status != PipelineVersionStatus.RELEASED }
         return SavedPipeline(written.record, written.bodyJson, written.version, draft)
     }
@@ -576,11 +643,20 @@ open class PipelineService(
         // 178b: under a narrowing lens a version that is not RELEASED does not exist — the
         // same null an unknown number gets, so a status cannot be probed by number (the
         // checks partial reads through here with a caller-chosen version).
-        if (!lens.isEverything && pipelines.findVersionDetail(workspaceId, record.id, version)?.status != PipelineVersionStatus.RELEASED) {
+        val snapshot = pipelines.findExecutionSnapshot(workspaceId, record.id, version) ?: return null
+        if (!lens.isEverything && snapshot.status != PipelineVersionStatus.RELEASED) {
             return null
         }
-        val body = pipelines.findVersionBody(workspaceId, record.id, version) ?: return null
-        return ExecutablePipeline(record, version, body, deserializer.readOrThrow(body))
+        val pipeline = deserializer.readOrThrow(snapshot.bodyJson)
+        return ExecutablePipeline(
+            record,
+            version,
+            snapshot.bodyJson,
+            pipeline,
+            snapshot.bodyHash,
+            snapshot.status,
+            validator.writesManagedLake(pipeline, workspaceId),
+        )
     }
 
     // -------------------------------------------------------------------------------------
@@ -590,21 +666,24 @@ open class PipelineService(
     /**
      * §5.10 — release the draft.
      *
-     * The preconditions (a draft exists, it re-validates, every template version it pins is
-     * RELEASED) and the 140 release-check gate run in [PipelineReleaseService]; the
-     * template-pin guard and the one-statement flip run in a metadata transaction there.
-     * This method is deliberately NOT `@Transactional` as a whole since 140: the gate's
-     * check runs open customer-datasource connections, and `ConnectionLease` refuses exactly
-     * that (`datasource.lease_in_transaction`) while a metadata transaction is open on the
-     * thread (056 §E.2).
+     * Every release runs through the release coordinator ([coordination], #517): it prepares the
+     * draft (a draft exists, it re-validates, the 140 release-check gate) outside any metadata
+     * transaction, walks the dependency closure, refuses on the guard (every dependency
+     * RELEASED or consented), and flips every node in ONE metadata transaction. This method is
+     * deliberately NOT `@Transactional`: the gate's check runs open customer-datasource
+     * connections, and `ConnectionLease` refuses exactly that (`datasource.lease_in_transaction`)
+     * while a metadata transaction is open on the thread (056 §E.2).
      *
      * [overrideChecksReason] is the §13.17 escape hatch: non-blank, ≥ 10 characters, audited
      * with the release when any check did not pass. Ignored for a version with no checks.
      *
-     * [releasePinnedTemplates] is 142's consent: the DRAFT template versions the body pins
-     * are released in the flip's transaction, templates first, and the result's
-     * `templatesReleased` names them for the surfaces' audit events. False (the default)
-     * keeps the §6 refusal exactly as before.
+     * [releasePinnedTemplates] is 142's consent (the legacy alias, record §6): the root's direct
+     * DRAFT template pins are released in the flip's transaction, templates first, and the
+     * result's `templatesReleased` names them for the surfaces' audit events. False (the
+     * default) keeps the §6 refusal.
+     *
+     * [plan] is the release-dependencies plan (#517, record §6); absent, the coordinator runs
+     * the compatible release.
      */
     open fun release(
         workspaceId: UUID,
@@ -613,8 +692,11 @@ open class PipelineService(
         actor: UUID,
         overrideChecksReason: String? = null,
         releasePinnedTemplates: Boolean = false,
+        plan: ReleasePlanRequest? = null,
     ): PipelineReleaseService.Released =
-        releases.release(workspaceId, pipelineId, expectedHash, actor, overrideChecksReason, releasePinnedTemplates)
+        coordination.release(
+            PipelineReleaseRequest(workspaceId, pipelineId, expectedHash, actor, overrideChecksReason, releasePinnedTemplates, plan),
+        )
 
     /**
      * §5.11 — purge the draft: the row and its executions are deleted (no tombstone since
@@ -629,7 +711,10 @@ open class PipelineService(
         workspaceId: UUID,
         pipelineId: UUID,
         expectedHash: String,
-    ): PipelineReleaseService.Purged = releases.purge(workspaceId, pipelineId, expectedHash)
+    ): PipelineReleaseService.Purged {
+        lockWorkspace(workspaceId)
+        return releases.purge(workspaceId, pipelineId, expectedHash)
+    }
 
     /**
      * §3.1 (101) — discard RELEASED version [version]: the row flips to DISCARDED, and the
@@ -642,8 +727,12 @@ open class PipelineService(
      * naming the pinners — the guard also rides the statement itself, so a pin that lands
      * between check and flip still refuses). An authoring write (§5.5).
      *
+     * Transactional and guarded (#517): the pin check runs under the workspace writer guard, so
+     * no pin save or release can land between it and the flip.
+     *
      * @throws co.datapipelines.typesystem.DatapipelinesException the codes above.
      */
+    @Transactional("metadataTransactionManager")
     open fun discardVersion(
         workspaceId: UUID,
         pipelineId: UUID,
@@ -651,6 +740,7 @@ open class PipelineService(
         actor: UUID,
     ): DiscardResult {
         authoring.requirePipelineAuthoring()
+        lockWorkspace(workspaceId)
         // AnyStatus: the entity may already be all-DISCARDED (every version discarded) — the
         // refusal is the TARGET's status (not_released), never a 404 that hides the version.
         val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
@@ -677,25 +767,32 @@ open class PipelineService(
      * §3.1 (101) — restore DISCARDED version [version] to RELEASED. Its original
      * `released_at`/`released_by` return untouched (§8's derivation depends on one release
      * stamp per version); the pointer moves only above-current-or-NULL (D60). No pin can
-     * exist on a DISCARDED version (the `pinned` guard blocked its discard), so restore is
-     * always safe. An authoring write (§5.5).
+     * exist ON a DISCARDED version (the `pinned` guard blocked its discard), but the pins it
+     * HOLDS may have been discarded or purged since: under the guard, [PipelineRestorePins]
+     * rechecks every outbound template and child pin first (#517 round three, record §12.1)
+     * and refuses a dangling one 400, a draft one 409. An authoring write (§5.5).
      *
      * Answers the statement's own pointer pair ([PipelineRestoreResult]) — the pair the
      * `pipeline.version.restored` audit row carries (enums.md §15, #379), never a re-read.
+     * Transactional and guarded (#517) like every pointer-affecting write.
      */
+    @Transactional("metadataTransactionManager")
     open fun restoreVersion(
         workspaceId: UUID,
         pipelineId: UUID,
         version: Int,
     ): PipelineRestoreResult {
         authoring.requirePipelineAuthoring()
+        lockWorkspace(workspaceId)
         // AnyStatus: restoring the first version of a DISCARDED entity is the one way back
         // (§3.5's `{X,X}` rows) — a live-only read would 404 the restore.
-        pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
+        val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
         val detail =
             pipelines.findVersionDetail(workspaceId, pipelineId, version)
                 ?: throw versionNotFound(pipelineId, version)
         if (detail.status != PipelineVersionStatus.DISCARDED) throw notDiscarded(pipelineId, version, detail.status)
+        val body = pipelines.findVersionBody(workspaceId, pipelineId, version) ?: throw versionNotFound(pipelineId, version)
+        restorePins.recheck(workspaceId, record, version, body)
 
         return pipelines.restoreVersion(
             workspaceId,
@@ -722,6 +819,7 @@ open class PipelineService(
         version: Int,
     ): PipelineReleaseService.Purged {
         authoring.requirePipelineAuthoring()
+        lockWorkspace(workspaceId)
         // AnyStatus: purging a DISCARDED entity's version is last_release (history is never
         // purged), not a 404 hiding it.
         val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
@@ -784,6 +882,7 @@ open class PipelineService(
         includeExclusiveDraftTemplates: Boolean = false,
     ): EntityPurgeResult {
         authoring.requirePipelineAuthoring()
+        lockWorkspace(workspaceId)
         // AnyStatus: a DISCARDED entity is addressable — its refusal is last_release (the
         // version shape), never a 404 that would hide the restore path (§3.5's `{X,X}` rows).
         val record = pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
@@ -826,13 +925,15 @@ open class PipelineService(
      * §3.4 (101) — the manual switch: `current = [version]`, which must be a LIVE,
      * posture-eligible version. NOT an authoring verb: this is the promotion receiver's
      * rollout/rollback lever, so no `requirePipelineAuthoring` here — D60 named the human
-     * the mover, and the receiver's human is included.
+     * the mover, and the receiver's human is included. Transactional and guarded (#517).
      */
+    @Transactional("metadataTransactionManager")
     open fun switchCurrent(
         workspaceId: UUID,
         pipelineId: UUID,
         version: Int,
     ): PipelineRecord {
+        lockWorkspace(workspaceId)
         // AnyStatus: a DISCARDED entity's versions are addressable — their switch answer is
         // not_eligible (the status check below), not a 404.
         pipelines.findByIdAnyStatus(workspaceId, pipelineId) ?: throw pipelineNotFound(pipelineId)
@@ -863,13 +964,6 @@ open class PipelineService(
         entityPurge: Boolean = false,
     ) = pinGuard.refuseIfPinned(workspaceId, record, version, entityPurge)
 
-    private fun pinned(
-        record: PipelineRecord,
-        version: Int,
-        pinners: List<TemplatePin>,
-        dashboardPins: List<DashboardPin> = emptyList(),
-    ): DatapipelinesException = pinGuard.pinned(record, version, pinners, dashboardPins)
-
     /**
      * The discard statement returned zero rows after the service-side guard passed: a pin
      * landed in between, or a concurrent discard won.
@@ -879,9 +973,8 @@ open class PipelineService(
         record: PipelineRecord,
         version: Int,
     ): DatapipelinesException {
-        val pinners = pipelines.findLiveParentsPinningVersion(workspaceId, record.name, version)
-        val dashboardPins = dashboards.liveVersionPins(workspaceId, record.name, version)
-        if (pinners.isNotEmpty() || dashboardPins.isNotEmpty()) return pinned(record, version, pinners, dashboardPins)
+        val pinners = pinGuard.pinnersOf(workspaceId, record, version)
+        if (!pinners.isEmpty) return pinGuard.pinned(record, version, pinners)
         val current = pipelines.findVersionDetail(workspaceId, record.id, version) ?: throw versionNotFound(record.id, version)
         return when (current.status) {
             PipelineVersionStatus.RELEASED -> {

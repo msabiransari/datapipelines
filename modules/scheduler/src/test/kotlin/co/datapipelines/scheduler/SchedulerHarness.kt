@@ -1,5 +1,6 @@
 package co.datapipelines.scheduler
 
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.github.kagkarlsson.scheduler.testhelper.ManualScheduler
@@ -34,7 +35,11 @@ internal class SchedulerHarness(
     val executor: FakeExecutor = FakeExecutor(),
     val capacity: FakeCapacityGate = FakeCapacityGate(),
     val properties: SchedulerProperties = SchedulerProperties(minIntervalSeconds = 60),
-    workerName: String = "instance-" + UUID.randomUUID().toString().take(4),
+    val deployment: NotificationDeployment = NotificationDeployment.UNKNOWN,
+    val mailer: CapturingMailer = CapturingMailer(),
+    val workerName: String = "instance-" + UUID.randomUUID().toString().take(4),
+    /** #841 (G0) — the service's metadata writer guard; [MetadataWriterGuard.NONE] unless a suite proves the seam. */
+    val writeGuard: MetadataWriterGuard = MetadataWriterGuard.NONE,
 ) {
     val clock: Clock = SettableJavaClock(settable)
     val registry = SimpleMeterRegistry()
@@ -42,12 +47,32 @@ internal class SchedulerHarness(
     val schedules = ScheduleRepository(SchedulerTestDb.jdbc, SchedulerAutoConfiguration.JSON)
     val runs = ScheduleRunRepository(SchedulerTestDb.jdbc, SchedulerAutoConfiguration.JSON)
     val transactions = TransactionTemplate(DataSourceTransactionManager(SchedulerTestDb.dataSource))
-    val ledger = RunLedger(runs, schedules, transactions, clock, metrics, workerName)
+    val notifications = NotificationRepository(SchedulerTestDb.jdbc)
+    val policy = NotificationPolicy(properties.notifications, deployment)
+    val outbox = NotificationOutbox(notifications, runs, policy, properties.notifications.backlogMax)
+    val ledger = RunLedger(runs, schedules, transactions, clock, metrics, outbox, workerName)
     val executors = JobExecutors(listOf(executor))
     val admission = SchedulerAdmission(properties.shutdownWait).also { it.start() }
     val dispatcher = ScheduleDispatcher(schedules, runs, ledger, transactions, clock, properties, metrics) { SchedulerTestDb.SYSTEM_ACTOR }
     val worker = ScheduledRunWorker(runs, schedules, executors, capacity, admission, ledger, transactions, clock, metrics)
     val reconciler = RunReconciler(runs, executors, ledger, clock, properties)
+    val deliveries = NotificationDeliveryRepository(SchedulerTestDb.jdbc)
+
+    /** The sender as the configuration wires it; [policy] defaults to this instance's — a test passes another to change it AT SEND. */
+    fun notifier(policy: NotificationPolicy = this.policy): ScheduleNotifier =
+        ScheduleNotifier(
+            deliveries,
+            runs,
+            policy,
+            properties.notifications,
+            mailer,
+            NotificationTemplates(),
+            transactions,
+            clock,
+            metrics,
+            properties.startGrace,
+            workerName,
+        )
 
     /** db-scheduler over the SAME database, the SAME clock and our JSON serializer — the starter's shape. */
     val manual: ManualScheduler =
@@ -73,6 +98,9 @@ internal class SchedulerHarness(
             queue,
             SchedulerAutoConfiguration.JSON,
             ScheduleTargetReads(SchedulerTestDb.jdbc),
+            policy,
+            notifications,
+            writeGuard,
         ) {
             SchedulerTestDb.SYSTEM_ACTOR
         }
@@ -127,7 +155,9 @@ internal class SettableJavaClock(
  */
 internal class FakeExecutor : JobExecutor {
     override val id: String = ID
-    override val payloadSchemaVersion: Int = 1
+
+    /** The schema this executor writes; a test raises it to model an upgraded executor over rows saved before (#786 D.2). */
+    @Volatile override var payloadSchemaVersion: Int = 1
 
     val prepared = CopyOnWriteArrayList<UUID>()
     val started = CopyOnWriteArrayList<UUID>()
@@ -150,11 +180,33 @@ internal class FakeExecutor : JobExecutor {
      */
     @Volatile var duringPrepare: ((Admission) -> Unit)? = null
 
+    /** #841 (G0) — how many times [validate] ran, and a hook that runs inside it (a test parks the save there). */
+    val validateCalls = AtomicInteger()
+
+    @Volatile var duringValidate: (() -> Unit)? = null
+
+    /** #786 D.2 — the stored schema number each [validate] call received, in call order. */
+    val validatedSchemas: MutableList<Int> = java.util.concurrent.CopyOnWriteArrayList()
+
+    /** #786 D.2 — the stored schema number each [prepare] call received, in call order. */
+    val preparedSchemas: MutableList<Int> = java.util.concurrent.CopyOnWriteArrayList()
+
     override fun validate(
         workspaceId: UUID,
         payload: JsonNode,
         parameters: JsonNode,
+        payloadSchemaVersion: Int,
     ): String {
+        validateCalls.incrementAndGet()
+        validatedSchemas += payloadSchemaVersion
+        if (payloadSchemaVersion != this.payloadSchemaVersion) {
+            throw ScheduleException(
+                ScheduleErrorCodes.PAYLOAD_SCHEMA_UNSUPPORTED,
+                "stored schema $payloadSchemaVersion",
+                mapOf("stored" to payloadSchemaVersion, "supported" to this.payloadSchemaVersion),
+            )
+        }
+        duringValidate?.invoke()
         val job = payload.path("job").asText()
         if (job.isBlank()) throw ScheduleException(ScheduleErrorCodes.PAYLOAD_INVALID, "no job", mapOf("reason" to "job_missing"))
         if (job == "missing") throw ScheduleException(ScheduleErrorCodes.TARGET_NOT_FOUND, "no such job", mapOf("job" to job))
@@ -163,6 +215,7 @@ internal class FakeExecutor : JobExecutor {
 
     override fun prepare(admission: Admission): Preparation {
         prepared += admission.runId
+        preparedSchemas += admission.payloadSchemaVersion
         duringPrepare?.also { duringPrepare = null }?.invoke(admission)
         refuseAtPrepare?.let { return it }
         return Preparation.Prepared(
@@ -219,6 +272,27 @@ internal class FakeCapacityGate(
             }
         }
     }
+}
+
+/**
+ * The mail port, capturing: every [NotificationMail] it is handed, answered from [script] in order
+ * (then [Accepted][MailOutcome.Accepted]); a [Throw] entry makes the port throw, which it promises not to.
+ */
+internal class CapturingMailer : NotificationMailer {
+    val sent = CopyOnWriteArrayList<NotificationMail>()
+    val script = java.util.concurrent.ConcurrentLinkedQueue<Any>()
+
+    override fun send(mail: NotificationMail): MailOutcome {
+        sent += mail
+        return when (val next = script.poll()) {
+            null -> MailOutcome.Accepted
+            is MailOutcome -> next
+            else -> error("scripted port failure")
+        }
+    }
+
+    /** A script entry that makes the port throw. */
+    object Throw
 }
 
 /** A narrowed viewer for the lens tests. */

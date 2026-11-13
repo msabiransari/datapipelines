@@ -82,30 +82,170 @@ class PipelineServiceIntegrationTest {
     private fun serviceWith(
         authoring: AuthoringGuard,
         draftTemplates: ExclusiveDraftTemplates = emptyDraftTemplates(),
+        validator: PipelineValidator = Fixtures.validator(),
     ): PipelineService {
-        val validator = Fixtures.validator()
+        // Per-ID, not one answer for everything: a BLANK id is not a template at all
+        // (a CALCULATOR or PIPELINE node's empty default ref), and the registry's honest
+        // answer for it is "no such version". Without that distinction the
+        // no-template-pin case (now `PipelineReleaseCoordinatorCasesTest` in `web`) could not go red — the empty ref
+        // would come back RELEASED along with the real one. The restore recheck (#517 round three) reads the same port.
+        val statuses = TemplateVersionStatuses { _, id, _ -> if (id.isBlank()) null else templateStatus }
+        val releases =
+            PipelineReleaseService(
+                repository,
+                validator,
+                authoring,
+                dashboards = recordingDashboards(),
+                endpointVersions = NoApiVersionPins,
+                schedules = NoSchedulePins,
+            )
         return PipelineService(
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, authoring),
-            releases =
-                PipelineReleaseService(
-                    repository,
-                    // Per-ID, not one answer for everything: a BLANK id is not a template at all
-                    // (a CALCULATOR or PIPELINE node's empty default ref), and the registry's honest
-                    // answer for it is "no such version". Without that distinction the
-                    // no-template-pin test below could not go red — the empty ref would come back
-                    // RELEASED along with the real one.
-                    TemplateVersionStatuses { _, id, _ -> if (id.isBlank()) null else templateStatus },
-                    validator,
-                    authoring,
-                    dashboards = recordingDashboards(),
-                ),
+            releases = releases,
             authoring = authoring,
             draftTemplates = draftTemplates,
             dashboards = recordingDashboards(),
+            endpointVersions = NoApiVersionPins,
+            schedules = NoSchedulePins,
+            // #877 §E.3 — this suite's releases are SET-UP (a RELEASED version to update, discard, restore or read); the
+            // release cases themselves run through the real coordinator in `web`.
+            coordination = ReleaseCoordinationDoubles.setUp(releases, statuses),
+            templateStatuses = statuses,
         )
     }
+
+    @Test
+    fun `managed write metadata is saved with the draft and changes without entering the portable body`() {
+        val managed = serviceWith(AuthoringGuard(true), validator = managedValidator())
+        val body = lakeBody("test/managed", append = true)
+        val saved = managed.create(WORKSPACE_ID, serializer.write(body), owner, WriteSurface.SESSION)
+        val snapshot = requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, saved.record.id, 1))
+        snapshot.writesManagedLake shouldBe true
+        snapshot.status shouldBe PipelineVersionStatus.DRAFT
+        snapshot.bodyJson.contains("writes_managed_lake") shouldBe false
+        repository.recordManagedLakeWrites(
+            WORKSPACE_ID,
+            saved.record.id,
+            1,
+            serializer.write(lakeBody("test/managed", false)),
+            false,
+        ) shouldBe
+            0
+        repository.recordManagedLakeWrites(UUID.randomUUID(), saved.record.id, 1, snapshot.bodyJson, false) shouldBe 0
+        repository.findExecutionSnapshot(UUID.randomUUID(), saved.record.id, 1) shouldBe null
+        requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, saved.record.id, 1)).writesManagedLake shouldBe true
+        managed.update(
+            WORKSPACE_ID,
+            saved.record.id,
+            serializer.write(lakeBody("test/managed", false)),
+            snapshot.bodyHash,
+            owner,
+            WriteSurface.SESSION,
+        )
+        requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, saved.record.id, 1)).writesManagedLake shouldBe false
+    }
+
+    @Test
+    fun `execute rechecks a mutable child instead of trusting either direction of a stale parent cache`() {
+        val managed = serviceWith(AuthoringGuard(true), validator = managedValidator())
+        val childBody = lakeBody("test/child", append = false)
+        val child = managed.create(WORKSPACE_ID, serializer.write(childBody), owner, WriteSurface.SESSION)
+        val parentBody =
+            Fixtures.pipeline(
+                name = "test/parent",
+                nodes =
+                    listOf(
+                        Fixtures
+                            .node(
+                                type = NodeType.PIPELINE,
+                            ).copy(source = "", template = TemplateRef(), pipeline = PipelineNodeRef("test/child", 1)),
+                    ),
+            )
+        val parent = managed.create(WORKSPACE_ID, serializer.write(parentBody), owner, WriteSurface.SESSION)
+        requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, parent.record.id, 1)).writesManagedLake shouldBe false
+        val childSnapshot = requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, child.record.id, 1))
+        managed.update(
+            WORKSPACE_ID,
+            child.record.id,
+            serializer.write(lakeBody("test/child", true)),
+            childSnapshot.bodyHash,
+            owner,
+            WriteSurface.SESSION,
+        )
+        requireNotNull(managed.findExecutable(WORKSPACE_ID, ReadLens.Everything, parent.record, 1)).writesManagedLake shouldBe true
+        val parentSnapshot = requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, parent.record.id, 1))
+        parentSnapshot.writesManagedLake shouldBe false
+        managed.update(WORKSPACE_ID, parent.record.id, serializer.write(parentBody), parentSnapshot.bodyHash, owner, WriteSurface.SESSION)
+        requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, parent.record.id, 1)).writesManagedLake shouldBe true
+        val changedChild = requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, child.record.id, 1))
+        managed.update(WORKSPACE_ID, child.record.id, serializer.write(childBody), changedChild.bodyHash, owner, WriteSurface.SESSION)
+        requireNotNull(managed.findExecutable(WORKSPACE_ID, ReadLens.Everything, parent.record, 1)).writesManagedLake shouldBe false
+    }
+
+    @Test
+    fun `body and managed write metadata roll back together in the metadata transaction`() {
+        val managed = serviceWith(AuthoringGuard(true), validator = managedValidator())
+        val transactions =
+            org.springframework.transaction.support.TransactionTemplate(
+                org.springframework.jdbc.datasource
+                    .DataSourceTransactionManager(requireNotNull(jdbc.jdbcTemplate.dataSource)),
+            )
+        shouldThrow<PlannedLakeRollback> {
+            transactions.executeWithoutResult {
+                val saved = managed.create(WORKSPACE_ID, serializer.write(lakeBody("test/rollback", true)), owner, WriteSurface.SESSION)
+                requireNotNull(repository.findExecutionSnapshot(WORKSPACE_ID, saved.record.id, 1)).writesManagedLake shouldBe true
+                throw PlannedLakeRollback()
+            }
+        }
+        repository.findByNameAnyStatus(WORKSPACE_ID, "test/rollback") shouldBe null
+    }
+
+    private fun managedValidator(): PipelineValidator =
+        Fixtures.validator(
+            datasources =
+                DatasourceRegistry { name, _ ->
+                    if (name ==
+                        "managed"
+                    ) {
+                        DatasourceFacts(co.datapipelines.typesystem.Dialect.LAKE, readonly = true, managedLake = true)
+                    } else {
+                        null
+                    }
+                },
+            templates = StubTemplates(defaultLookup = TemplateLookup.Found(co.datapipelines.typesystem.Dialect.DUCKDB)),
+            pipelines =
+                PipelineResolver { workspace, name, version ->
+                    repository.findByNameAnyStatus(workspace, name)?.let { record ->
+                        repository.findExecutionSnapshot(workspace, record.id, version)?.let { snapshot ->
+                            ResolvedPipeline(PipelineDeserializer().readOrThrow(snapshot.bodyJson), false, snapshot.status)
+                        }
+                    }
+                },
+            pipelineNames = PipelineNames { workspace, name -> repository.findByNameAnyStatus(workspace, name) != null },
+        )
+
+    private fun lakeBody(
+        name: String,
+        append: Boolean,
+    ): Pipeline {
+        val land =
+            Fixtures
+                .node(id = "land", source = "tempdb", output = NodeOutput.Tempdb("landed"))
+                .copy(delivery = DeliveryRef("feed", "batch"))
+        val sink =
+            Fixtures
+                .node(id = "append", source = "tempdb", dependsOn = listOf("land"))
+                .copy(output = NodeOutput.Datasource("managed", "sales.orders", WriteMode.APPEND))
+        return Fixtures.pipeline(
+            name = name,
+            nodes = if (append) listOf(land, sink) else listOf(land),
+            settings = PipelineSettings(tempdb = TempdbSettings(engine = co.datapipelines.typesystem.StagingEngine.DUCKDB)),
+        )
+    }
+
+    private class PlannedLakeRollback : RuntimeException()
 
     /** #320: the dashboard port, recording each question — there is none by default on purpose; this one answers [dashboardPins]. */
     private fun recordingDashboards(): PipelineVersionConsumers =
@@ -535,58 +675,6 @@ class PipelineServiceIntegrationTest {
         released.version.status shouldBe PipelineVersionStatus.RELEASED
         released.record.currentVersion shouldBe 2
         service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id).shouldBeNull()
-    }
-
-    @Test
-    fun `release refuses while a pinned template version is still a draft`() {
-        // versioning §6 — templates lock first. The gate reads the TemplateVersionStatuses port,
-        // which is how `pipeline-contract` asks `templates` a question without depending on it.
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
-        val draft =
-            service.update(
-                WORKSPACE_ID,
-                created.record.id,
-                body(renamed("Ready")),
-                checkNotNull(created.version).bodyHash,
-                owner,
-                WriteSurface.SESSION,
-            )
-        templateStatus = PipelineVersionStatus.DRAFT
-
-        val error =
-            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-                service.release(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash, owner)
-            }
-
-        error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED
-        withClue("nothing was released: the draft is still there") {
-            service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id) shouldNotBe null
-        }
-    }
-
-    @Test
-    fun `a node with no template pin does not block the release`() {
-        // §6 checks TEMPLATE pins, and a CALCULATOR node has none (a PIPELINE node likewise pins a
-        // child pipeline instead). Asking the registry about the empty default `@0` answers
-        // MISSING, which refused the release of every pipeline containing one — naming
-        // `template_id: ""`, a template that cannot exist. Latent since composition shipped (such a
-        // pipeline was born RELEASED and only a re-release met the check); load-bearing since D55,
-        // because now EVERY pipeline has to be released once.
-        //
-        // The port answers per-ID (see `serviceWith`): RELEASED for the real pin, MISSING for the
-        // calculator's empty ref — so a release that still asked about that ref fails this test.
-        val calculator = Fixtures.calculatorNode()
-        val withCalculator =
-            Fixtures.pipeline(
-                nodes = listOf(calculator, Fixtures.node(id = "reads", dependsOn = listOf(calculator.id))),
-            )
-        val created = service.create(WORKSPACE_ID, body(withCalculator), owner, WriteSurface.SESSION)
-
-        val released =
-            service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
-
-        released.version.status shouldBe PipelineVersionStatus.RELEASED
-        released.record.currentVersion shouldBe 1
     }
 
     @Test

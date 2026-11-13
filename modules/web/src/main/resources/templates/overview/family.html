@@ -202,7 +202,7 @@
           <ul class="app-overview-tasks" th:unless="${#lists.isEmpty(o.recent.tasks)}">
             <li th:each="t : ${o.recent.tasks}" th:attr="data-task=${t.key}">
               <a class="app-overview-task" hx-boost="true" th:href="@{${t.href}}">
-                <span class="app-overview-task-icon" th:attr="data-tone=${t.tone}" aria-hidden="true"><svg class="ds-icon ds-icon-sm"
+                <span class="app-overview-task-icon" th:attr="data-tone=${t.tone.wire}" aria-hidden="true"><svg class="ds-icon ds-icon-sm"
                       focusable="false"><use th:attr="href=${'/vendor/icons/lucide-sprite.svg#' + t.icon}"></use></svg></span>
                 <span class="app-overview-task-text"><b th:text="${t.title}">Review your drafts</b><small th:text="${t.text}">4 pipelines are working toward their first release.</small></span>
                 <svg class="ds-icon ds-icon-sm app-overview-task-arrow" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg>

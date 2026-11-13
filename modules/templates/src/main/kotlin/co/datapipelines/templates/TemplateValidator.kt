@@ -147,6 +147,22 @@ class TemplateValidator(
         return TemplateValidationResult(failures)
     }
 
+    /**
+     * The REFERENCE half of [validate] (#841 G0, the parameter-set `validatePinMetadata` precedent): the library imports
+     * resolve in [workspaceId] and every `implements` id is citable. Metadata reads only — no parse, no test suite, no
+     * render — so the draft writer re-runs it INSIDE the writer guard's transaction, where no purge, discard or
+     * citation change can land between this answer and the write. The full [validate] still runs first, outside.
+     */
+    fun validateReferences(
+        draft: TemplateDraft,
+        workspaceId: java.util.UUID,
+    ): TemplateValidationResult {
+        val failures = mutableListOf<TemplateValidationFailure>()
+        addImplementsFailure(draft, workspaceId, failures)
+        libraryResolver.validate(workspaceId, draft.imports, failures)
+        return TemplateValidationResult(failures)
+    }
+
     /** Runs §7 and throws [TemplateValidationException] if anything failed; returns [draft] otherwise. */
     fun validateOrThrow(
         draft: TemplateDraft,

@@ -21,7 +21,7 @@
   <!-- claim: docs/pipeline-contract.md §8 — write-back is a table, not a warehouse -->
   <!-- claim: docs/datasources.md §7 — the server holds the credentials, not the agent -->
   <!-- claim: docs/versioning.md §3 — a person releases what the agent drafted -->
-  <!-- claim: docs/ROADMAP.md §3 — scheduled extracts to your lake are later, not now -->
+  <!-- claim: docs/ROADMAP.md §3 — planned S3 output targets; scheduled extracts still need that write path -->
 
   <section class="section page-hero" aria-labelledby="fa-title">
     <div class="container">
@@ -45,7 +45,7 @@
     <div class="container">
       <p class="kicker">What each one is for</p>
       <h2 id="fa-jobs" class="ds-headline">A Fivetran or Airbyte alternative? Two products that share a vocabulary and not a job</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <p>
           Fivetran and Airbyte solve a real problem: the data your analytics needs lives in a dozen systems, and the
           warehouse needs it delivered, on time, in the right shape, every night. Their connectors handle the
@@ -107,21 +107,22 @@
     <div class="container">
       <p class="kicker">Where datapipelines stops</p>
       <h2 id="fa-stops" class="ds-headline">The four things to not ask of this tool</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/staging.md §3 -->
         <p>
           First, history. The query sees the source as it is now, and the scratch database is dropped after the run,
           if the source overwrites yesterday, yesterday is gone, and no query at the source will bring it back.
           History is the ELT tools' home ground; that is one of the reasons they exist.
         </p>
-        <!-- claim: docs/pipeline-contract.md §8 -->
+        <!-- claim: docs/pipeline-contract.md §8 (write-back), docs/scheduler.md §1 (schedule), docs/pipeline-contract.md §4.12 (SCRIPT nodes), docs/ROADMAP.md §3 (planned S3 output targets) -->
         <p>
           Second, the warehouse itself. Write-back here means a pipeline node can land its result in a table of a
           datasource you already run. Useful for feeding a BI tool, and explicitly not a columnar warehouse with a
-          modelling layer on top. Third, scheduling: pipelines run on demand, by an agent, a REST call or a person;
-          the scheduler is the planned roadmap item, and scheduled extracts to your own lake are later. The
-          roadmap page labels both as planned and later, undated. Fourth, transformation breadth: the work is SQL, plus JSONata and JavaScript
-          script nodes that are themselves a roadmap item. If the job is Python operators orchestrating a
+          modelling layer on top. Third, scheduling: a <a th:href="@{/pipeline-scheduling}">schedule</a> can rerun a
+          pipeline at a cron pattern's times, so a write-back can be refreshed nightly, but scheduled extracts to your
+          own lake are later, and the roadmap page labels them so, undated. Fourth, transformation breadth: the work
+          is SQL, plus JSONata and JavaScript <code>SCRIPT</code> nodes over the staged rows. If the job is Python
+          operators orchestrating a
           platform, the <a th:href="@{/compare/airflow}">Airflow comparison</a> says plainly that Airflow is the
           answer.
         </p>
@@ -176,7 +177,7 @@
         <figcaption>The demo pipeline <code>demo/top_company_by_borough</code> mid-run, with the lake read in place, the join staged, the result in the results dock. No warehouse between them.</figcaption>
         <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
       </figure>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/deployment.md §Appendix B -->
         <p>
           The demo stack runs this pattern end to end: <code>./app.sh --start --demo nyc,lake</code> brings up
@@ -193,14 +194,14 @@
     <div class="container">
       <p class="kicker">Asked before</p>
       <!-- claim: docs/staging.md §3 — does datapipelines copy my data -->
-      <!-- claim: docs/rest-api.md §19 — can it replace a nightly sync / can I use both -->
-      <!-- claim: docs/ROADMAP.md §3 — history the source overwrites -->
+      <!-- claim: docs/rest-api.md §19 — a released pipeline served as a GET endpoint alongside an ELT copy -->
+      <!-- claim: docs/ROADMAP.md §3 — planned S3 output targets for persistent extracts -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Fivetran and Airbyte questions, answered plainly')}"></div>
     </div>
   </section>
 
   <section class="section" aria-labelledby="fa-next">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="fa-next" class="ds-headline">Point it at your two databases this afternoon</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">

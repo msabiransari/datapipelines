@@ -10,7 +10,7 @@
     </ol>
   </nav>
 
-  <!--/* Site v2: the trust page — "AI agent database access, made safe". Written for the
+  <!--/* Site v2: the trust page — MCP server security, AI agent database access. Written for the
        person who has to say yes to letting an agent near production, in the words of the
        specs it summarises. The FAQ block is SiteFaqs.AGENTS_AND_SECURITY. */-->
   <!-- claim: docs/datasources.md §7 — credentials encrypted, never returned -->
@@ -54,7 +54,7 @@
         <article class="card">
           <!-- claim: docs/auth.md §7.5 -->
           <h3>One key, your role, one workspace</h3>
-          <p>An agent's key acts as you, with your role in one workspace, capped at author. It reaches the MCP server and nothing else. Every tool and every REST route declares the one permission it needs. The catalog is a spec, and a test keeps the code equal to it.</p>
+          <p>An agent's key is its own identity in one workspace, holding the role you chose when you created it, never more than your own. It reaches the MCP server and nothing else. Every tool and every REST route declares the one permission it needs. The catalog is a spec, and a test keeps the code equal to it.</p>
         </article>
         <article class="card">
           <!-- claim: docs/datasources.md §3 -->
@@ -84,7 +84,7 @@
     <div class="container">
       <p class="kicker">Keys, precisely</p>
       <h2 id="sec-keys" class="ds-headline">What a key can reach is a property of the key, not of the caller</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/auth.md §7.6 -->
         <p>
           A role is a column of a catalog that names every permission it holds: reading pipelines and schemas and
@@ -113,7 +113,7 @@
     <div class="container">
       <p class="kicker">Blast radius</p>
       <h2 id="sec-blast" class="ds-headline">What a runaway agent can and cannot do</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/dag-executor.md §5 -->
         <p>
           An agent that writes a bad query gets a bounded failure, not an outage: every statement carries a query

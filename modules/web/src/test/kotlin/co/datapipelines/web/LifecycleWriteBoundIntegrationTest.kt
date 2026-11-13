@@ -75,6 +75,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   UPDATE the emit returns within the bound with the counter incremented and the row still
  *   RUNNING (never a fabricated COMPLETED); at recovery the abandoned UPDATE lands — also
  *   asserted. The reap-by-sweep arm runs on the locked case, where no abandoned writer races it.
+ * - **Both writes late** (D, #325) — the paused database takes neither the insert nor the terminal
+ *   UPDATE; the emitter orders the UPDATE behind the unconfirmed insert, so at recovery the row
+ *   lands RUNNING and then SUCCESS, never left for the sweep.
+ * - **The result write late too** (E, #905) — the surface records the result columns while the insert
+ *   is in flight; the write is ordered behind the insert, and the terminal UPDATE keeps it, so the row
+ *   ends SUCCESS carrying its result.
  *
  * Private containers throughout: a paused SHARED Postgres would stall every later suite in this
  * JVM (the #266 rule). Red with the bound removed (both constructor args planted to
@@ -227,6 +233,99 @@ class LifecycleWriteBoundIntegrationTest {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------- D: paused database, BOTH writes late (#325)
+
+    @Test
+    fun `D - a terminal UPDATE behind an unconfirmed RUNNING insert lands after it at recovery - the row ends SUCCESS`() {
+        PrivatePostgres().use { pg ->
+            PrivateRedis().use { redis ->
+                Rig(pg, redis.template, callerSeconds = BOUND_SECONDS, statementSeconds = DISARMED_STATEMENT_SECONDS).use { rig ->
+                    bothWritesLateCase(pg, rig)
+                }
+            }
+        }
+    }
+
+    private fun bothWritesLateCase(
+        pg: PrivatePostgres,
+        rig: Rig,
+    ) {
+        val id = UUID.randomUUID()
+        // ONE emitter: it holds the unconfirmed insert's handle (a second rig.emitter(id) would not).
+        val emitter = rig.emitter(id)
+        pause(pg.container)
+        try {
+            runBlocking {
+                withContext(NonCancellable) {
+                    emitter.emit(rig.startedEvent(id))
+                    emitter.emit(rig.completedEvent(id))
+                }
+            }
+            withClue("the terminal write was counted once as unconfirmed") { rig.lifecycleWriteFailures() shouldBe 1.0 }
+        } finally {
+            unpause(pg.container)
+        }
+
+        // The insert lands at recovery and the UPDATE ordered behind it after it: never RUNNING for
+        // the sweep to mark ABORTED under a client that saw pipeline_completed.
+        awaitCondition { rig.executions.findById(Rig.WORKSPACE, id)?.status == ExecutionStatus.SUCCESS }
+        withClue("the deferred UPDATE is not counted a second time") { rig.lifecycleWriteFailures() shouldBe 1.0 }
+    }
+
+    // ------------------------------------------------- E: paused database, the result write behind the insert (#905)
+
+    @Test
+    fun `E - a result recorded behind an unconfirmed RUNNING insert survives - the row ends SUCCESS with its result columns`() {
+        PrivatePostgres().use { pg ->
+            PrivateRedis().use { redis ->
+                Rig(pg, redis.template, callerSeconds = BOUND_SECONDS, statementSeconds = DISARMED_STATEMENT_SECONDS).use { rig ->
+                    resultBehindLateInsertCase(pg, rig)
+                }
+            }
+        }
+    }
+
+    /**
+     * The D stall, plus the surface's result write (`recordResultColumns`) issued while the insert is still
+     * in flight: it must neither block the caller on the paused database nor match 0 rows, and the terminal
+     * UPDATE — which carries no result values and may land after it — must not overwrite it with NULL.
+     */
+    private fun resultBehindLateInsertCase(
+        pg: PrivatePostgres,
+        rig: Rig,
+    ) {
+        val id = UUID.randomUUID()
+        val emitter = rig.emitter(id)
+        pause(pg.container)
+        try {
+            runBlocking {
+                withContext(NonCancellable) {
+                    emitter.emit(rig.startedEvent(id))
+                    emitter.emit(rig.completedEvent(id))
+                }
+            }
+            withClue("the result write returns at once — it never waits on the paused database") {
+                assertTimeoutPreemptively(Duration.ofSeconds(TIMEOUT_SECONDS)) {
+                    emitter.writeBehindUnconfirmedInsert(id, "result columns write") {
+                        rig.executions.recordResult(id, RESULT_ROWS, RESULT_BYTES)
+                    }
+                }
+            }
+        } finally {
+            unpause(pg.container)
+        }
+
+        awaitCondition {
+            rig.executions.findById(Rig.WORKSPACE, id)?.let {
+                it.status == ExecutionStatus.SUCCESS && it.resultRowCount != null
+            } == true
+        }
+        val row = rig.executions.findById(Rig.WORKSPACE, id)!!
+        row.resultRowCount shouldBe RESULT_ROWS
+        row.resultSizeBytes shouldBe RESULT_BYTES
+        withClue("the result write is not counted") { rig.lifecycleWriteFailures() shouldBe 1.0 }
     }
 
     // ------------------------------------------------- helpers
@@ -448,6 +547,10 @@ class LifecycleWriteBoundIntegrationTest {
         const val A_CEILING_MS = 12_000L
 
         const val WRITERS = 4
+
+        /** E: the result the surface records behind the late insert. */
+        const val RESULT_ROWS = 3L
+        const val RESULT_BYTES = 4_096L
         const val REDIS_PORT = 6379
         const val POLL_MS = 50L
         const val TEN_SECONDS = 10L

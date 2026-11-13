@@ -65,6 +65,8 @@ data class ExecuteLaunch(
     /** The client's `DP-Result-Page-Rows` (R-EP4) — how many rows `data_ready` carries inline. */
     val resultPageRows: Int? = null,
     val idempotencyKey: String?,
+    val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
+    val lakeExecutionMetadata: co.datapipelines.pipeline.LakeExecutionMetadata? = null,
 ) {
     /** The surface-free half this launch carries into `application` (056/D6). */
     internal fun toLaunch(): ExecutionLaunch =
@@ -168,6 +170,7 @@ class ExecutionStreamLauncher(
      * ("not wired in this runtime"), exactly as [subPipelineRunner] fails a PIPELINE node.
      */
     private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
+    private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
@@ -357,10 +360,12 @@ class ExecutionStreamLauncher(
                         correlationId = request.correlationId,
                         triggeredVia = ExecutionTrigger.REST,
                         executedByKeyKind = request.principal.executedByKeyKind(),
+                        lakeAppendGrant = request.lakeAppendGrant,
+                        lakeExecutionMetadata = request.lakeExecutionMetadata,
                         executionId = executionId,
                     ),
                 )
-            recordResultColumns(result)
+            recordResultColumns(result, emitter)
         } catch (e: PipelineConcurrencyLimitException) {
             if (!emitter.emittedAny()) {
                 failBeforeStart(sse, emitter, e, releaseNeverStarted)
@@ -410,12 +415,21 @@ class ExecutionStreamLauncher(
      * them the cursor cannot tell "succeeded with a result" from "zero caller nodes". Bookkeeping
      * only: a failure here is logged, never fails the completed execution (dag-executor §10's
      * emitter policy applied to its sibling write).
+     *
+     * #905: the describe runs here; the write goes through the run's [emitter], which orders it
+     * behind a RUNNING insert that outlived its bound (otherwise it would match no row) and logs a
+     * write that matches no row or fails.
      */
-    private fun recordResultColumns(result: ExecutionResult) {
+    private fun recordResultColumns(
+        result: ExecutionResult,
+        emitter: WebEventEmitter,
+    ) {
         val ref = result.resultRef ?: return
         runCatching {
             val view = resultStore.describe(ref) ?: return
-            executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            emitter.writeBehindUnconfirmedInsert(result.executionId, RESULT_COLUMNS_WRITE) {
+                executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            }
         }.onFailure { log.warn("Result columns for execution {} not recorded.", result.executionId, it) }
     }
 
@@ -444,6 +458,7 @@ class ExecutionStreamLauncher(
             progress = executionProgress,
             subPipelineRunner = subPipelineRunner,
             scripts = scriptSupport,
+            lakeAppendPort = lakeAppendPort,
         )
 
     private companion object {
@@ -458,3 +473,9 @@ class ExecutionStreamLauncher(
  * #215 A.5) — so no launcher hard-codes a kind the credential does not have.
  */
 internal fun AuthenticatedPrincipal.executedByKeyKind(): ExecutedByKeyKind? = keyKind?.let { ExecutedByKeyKind.fromWire(it.wire) }
+
+/**
+ * #905 — the result-history write's name in the emitter's WARNs (`WebEventEmitter.writeBehindUnconfirmedInsert`),
+ * shared by the three surfaces that record it (this launcher, `RecordingExecutionRunner`, `SubPipelineExecutionRunner`).
+ */
+internal const val RESULT_COLUMNS_WRITE = "result columns write"

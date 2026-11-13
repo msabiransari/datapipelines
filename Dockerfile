@@ -8,17 +8,20 @@
 # ships wget (healthcheck below) and curl.
 FROM eclipse-temurin:21-jre
 
-RUN groupadd --system datapipelines && useradd --system --gid datapipelines datapipelines
+# Fixed account ids (#753) so a pod's numeric runAsUser can name them (deployment.md §3.1); the reference
+# chart's securityContext and ImageUserPinSpecDriftTest read this line and hold the three equal.
+RUN groupadd --system --gid 999 datapipelines && useradd --system --uid 999 --gid datapipelines datapipelines
 
 # dp-lake (089 §D): bundle the DuckDB extensions a LAKE datasource loads, so the runtime
 # never INSTALLs and a hardened deployment needs no egress to extensions.duckdb.org
-# (configuration.md §3.25). The version is the CORE version the pinned duckdb_jdbc reports
-# (`PRAGMA version` -> v1.5.5 for duckdb_jdbc 1.5.5.1), NOT the JDBC patch version — the
-# repository path 404s on the latter. A duckdb_jdbc upgrade must re-pin this ARG and the
-# `v<ver>` directory with it; the binaries are valid for exactly one core version.
+# (configuration.md §3.25). The version is the CORE of the catalog's duckdb-jdbc (its first
+# three components, what `PRAGMA version` reports), NOT the JDBC patch version — the repository
+# path 404s on the latter. The notices build refuses an ARG that is not that core (#781); a bump
+# follows deployment.md §3.1's runbook. The binaries are valid for exactly one core version.
 # `avro` is bundled because `LOAD iceberg` auto-loads it from the directory. The four add
 # ~108 MB uncompressed to the image (~39 MB downloaded at build). The extension repository
-# publishes no checksums for these artifacts, so the pin is the versioned URL itself.
+# publishes no checksums for these artifacts; deploy/duckdb-extensions.sha256 pins
+# the decompressed bytes for both platforms, and the extension RUN verifies them.
 # The platform directory follows the build's TARGETARCH (BuildKit fills it): `docker build`
 # on Apple Silicon produces a linux/arm64 image, whose DuckDB looks for linux_arm64
 # extensions — hard-coding linux_amd64 here made the runtime LOAD-only against an EMPTY
@@ -30,6 +33,7 @@ RUN groupadd --system datapipelines && useradd --system --gid datapipelines data
 # build, not just one iteration.
 ARG DUCKDB_CORE_VERSION=1.5.5
 ARG TARGETARCH
+COPY deploy/duckdb-extensions.sha256 /tmp/duckdb-extensions.sha256
 RUN case "$TARGETARCH" in \
       amd64) dp=linux_amd64 ;; \
       arm64) dp=linux_arm64 ;; \
@@ -39,7 +43,10 @@ RUN case "$TARGETARCH" in \
     for ext in httpfs aws iceberg avro; do \
       curl -fsSL "https://extensions.duckdb.org/v${DUCKDB_CORE_VERSION}/$dp/${ext}.duckdb_extension.gz" \
         | gunzip > "/opt/duckdb/extensions/v${DUCKDB_CORE_VERSION}/$dp/${ext}.duckdb_extension" || exit 1; \
-    done
+    done && \
+    cd /opt/duckdb/extensions && \
+    sha256sum -c --ignore-missing --strict /tmp/duckdb-extensions.sha256 && \
+    rm /tmp/duckdb-extensions.sha256
 
 # The knob the lake adapter reads (application.yml datapipelines.duckdb.extension-directory):
 # present here so a bare `docker run` of this image is LOAD-only out of the box. Compose's
@@ -74,6 +81,7 @@ RUN case "$TARGETARCH" in \
 ENV DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR=/opt/graaljs
 
 COPY modules/app/build/libs/datapipelines-*.jar /app/datapipelines.jar
+COPY modules/app/build/generated/third-party-notices/THIRD-PARTY-NOTICES /app/THIRD-PARTY-NOTICES
 
 # The JDBC driver drop-in (module-structure.md §5.4.1): the jar's PropertiesLauncher adds
 # every jar in LOADER_PATH to the classpath, so an operator mounts ojdbc11.jar or
@@ -89,6 +97,20 @@ COPY modules/app/build/libs/datapipelines-*.jar /app/datapipelines.jar
 # lane 8a), and the drop-in would silently vanish.
 RUN mkdir -p /app/lib && chmod 0555 /app/lib
 ENV LOADER_PATH=/app/lib,/opt/graaljs
+
+# #862 (review R4): the egress proxy's config renderer (EgressProxyConfigMain, deployment.md §4.3) runs from
+# THIS image as THIS image's user and writes exactly one file, /dp-egress-config/envoy.yaml. The directory is
+# the mountpoint of compose's egress-config named volume, owned by the app user 0755: Docker copies a fresh
+# volume's ownership and mode from the image directory it first mounts over (measured 2026-11-09, Docker 29:
+# a new volume mounted here is 999:999 0755; now pinned on the `useradd` line, #753), so the renderer needs
+# neither root nor a writable root filesystem, and Envoy (another uid) reads the 0644 file read-only. Nothing
+# else in the image is writable by the app user; the app itself never touches this path. The chart mounts an
+# emptyDir here instead (fsGroup).
+RUN mkdir -p /dp-egress-config && chown datapipelines:datapipelines /dp-egress-config && chmod 0755 /dp-egress-config
+
+# Keep fresh native thread stacks for JVMs hosting the script isolate (#685).
+# Runtime overrides that add other glibc tunables must retain this entry.
+ENV GLIBC_TUNABLES=glibc.pthread.stack_cache_size=0
 
 # Pre-install the isolate's native resources (D5) as root, at build time: on its first Engine,
 # polyglot unpacks the isolate library and libtruffleattach into a resource cache, by default
@@ -116,7 +138,7 @@ EXPOSE 8080
 # unhealthy short of a dead listener. /ready maps not-ready (startup, draining,
 # or a DOWN component) to 503 — that is the signal `service_healthy` dependants
 # need. Root-level, no auth (rest-api.md §11.1); actuator itself is confined to
-# the separate management port. busybox wget ships with the alpine base image.
+# the separate management port. wget ships in the Ubuntu base image (see the header comment).
 #
 # ACCEPTED TRADEOFF (012/F7): /ready couples CONTAINER health to DEPENDENCY
 # health (accepting && aggregated UP — db, redis, h2_factory). A dependency

@@ -325,8 +325,67 @@ class ApiErrorCatalogSpecDriftTest {
          * §13.21 gains `request.query_too_long` (400 — the shared search-needle refusal), landed in
          * the SAME commit as its constant, the catalog rows and the retirement. Re-derived from the
          * document's own parse.
+         *
+         * 377 → 379 with #442b: §13.19 gains `schedule.notification.not_found` (404, an explicit
+         * catalog row) and `schedule.notification.not_resendable` (409 — the `schedule.` family
+         * default, so no explicit row), landed in the SAME commit as their constants in
+         * `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` and the resend that raises them.
+         * 379 → 380 with #442c: schedule.notification.backlog_full (409, schedule family default).
+         *
+         * 380 → 416 with #517: the release-dependency switch (record §14, no deprecation window) —
+         * eight `<family>.release.*` rows in each of §13.9, §13.13, §13.20, §13.22 and §13.23 (40),
+         * minus the four rows they replace (the pipeline and parameter template-only refusals,
+         * renamed to `dependency_not_released`, and the visualization/dashboard
+         * `dependency_not_released` rows, rewritten in place). Re-derived from the document's own parse.
+         *
+         * 416 → 419 with #464: the new §13.24 gains `navigation.request.invalid` (400, the
+         * `navigation.` family default), `navigation.view.unavailable` and
+         * `navigation.metadata.too_large` (both 503, explicit catalog rows), landed in the SAME
+         * commit as their `PipelineErrorCodes.Navigation` constants. Re-derived from the document's
+         * own parse (this regex over the file: 416 at the base, 419 after).
+         *
+         * 419 → 420 with #778: §13.13's `pipeline.promotion.lake_table_unavailable` (409, an
+         * explicit catalog row), landed in the SAME commit as its `PipelineErrorCodes.Versioning`
+         * constant. Re-derived from the document's own parse (419 at the base, 420 after).
+         * 420 → 423 with #785 (re-derived at the merge after #778): the new §13.25 gains `lake.catalog.fenced`,
+         * `lake.catalog.restoring` and `lake.catalog.outcome_unknown`, all `—` rows
+         * (NEVER_RETURNED_LIVE: they arise inside DP's own catalog writes and no route reaches them
+         * before P8), landed in the SAME commit as their `PipelineErrorCodes.Lake` constants.
+         * 423 → 425 with #795: §13.5 gains `pipeline.staging.scratch_exhausted` and
+         * `pipeline.staging.scratch_limit_exceeded` (both 500, the `pipeline.staging.` family
+         * default — no explicit catalog row), landed in the SAME commit as their
+         * `PipelineErrorCodes.Staging` and `StagingErrorCodes` constants.
+         * 425 → 437 with #798: §13.25 gains the twelve `lake.definition.*` rows, all `—`, landed in the SAME
+         * commit as their `PipelineErrorCodes.Lake` constants. Re-derived from the document's own parse.
+         * 437 → 438 with #811: §13.25 gains `lake.definition.apply_unclassified` (`—`, NEVER_RETURNED_LIVE), landed
+         * in the SAME commit as its `PipelineErrorCodes.Lake` constant.
+         * #799 adds the delivery/append refusals, bringing the count to 475.
+         * 475 → 477 with #818: datasource.managed and lake.unavailable. Both lanes share lake.table.unavailable.
+         * The merged document, constants and catalog rows carry the same union.
+         * 477 → 480 with #841 (G0): `datasource.write.busy`, `endpoint.write.busy` and `schedule.write.busy`, all 409,
+         * landed in the SAME commit as their constants and catalog rows.
+         * 480 → 505 with #786: §13.14 gains the API version lifecycle, pin and authoring rows (11) and the API
+         * family's nine `endpoint.release.*` refusals; §13.9/§13.13/§13.20/§13.22/§13.23 each gain
+         * `<family>.release.metadata_unavailable` (503) — 20 + 5. Re-derived from the document's own parse with
+         * [STATUS_ROW_REGEX], landed in the SAME commit as the constants and catalog rows.
+         * 505 → 506 with #786: §13.14 gains `endpoint.version.confirm_mismatch` (400), the API purge dialog's typed
+         * confirm, landed in the SAME commit as its constant and catalog row.
+         * 506 → 507 with #786 R1: §13.14 gains `endpoint.version.last_release` (409, the `endpoint.version.` family
+         * default), the guarded entity deletion's refusal, landed in the SAME commit as its constant.
+         * 507 → 508 with #786 U2 (recounted with [STATUS_ROW_REGEX]): §13.19 gains
+         * `schedule.validation.payload_schema_unsupported` (400, the `schedule.validation.` family default), the
+         * stored schema-1 payload's refusal, landed in the SAME commit as its constants.
+         * 508 → 511 with #875 (G4, recounted with [STATUS_ROW_REGEX]): the new §13.26 Dependency trees gains
+         * `dependencies.request.invalid` (400), `dependencies.metadata.unavailable` (503) and
+         * `dependencies.response.too_large` (503), landed in the SAME commit as their constants, catalog rows and routes.
+         * 511 → 512 with #847 (recounted with [STATUS_ROW_REGEX] on the merged document): §13.7 gains
+         * `auth.secret_verification.unavailable` (503), landed in the SAME commit as its constants and
+         * catalog row.
+         * 512 → 513 with #803: §13.5 gains `pipeline.staging.scratch_blocked` (500, the `pipeline.staging.`
+         * family default — no explicit catalog row), the permanent scratch refusal beside leftover files, landed
+         * in the SAME commit as its `PipelineErrorCodes.Staging` and `StagingErrorCodes` constants.
          */
-        const val SECTION_13_ROW_COUNT = 377
+        const val SECTION_13_ROW_COUNT = 513
 
         /**
          * §12's distinct validation codes.

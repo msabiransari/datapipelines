@@ -5,6 +5,8 @@ plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     testImplementation(project(":modules:app"))
+    // #721: SiteShotsRailOrderTest pins the screenshot driver's rail table against AppNav.ITEMS.
+    testImplementation(project(":modules:web"))
 
     // Seeding the local admin needs a real Argon2id hash of the known password —
     // same declared-exception rationale as tests/integration-tests (§5.11's note).

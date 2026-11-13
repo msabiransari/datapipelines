@@ -55,14 +55,14 @@
           <p>Eight dialects, each with its own adapter and type mapping: the databases your applications actually write to, not a warehouse they were exported into.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/mcp-server.md §6.1 -->
+          <!-- claim: docs/mcp-server.md §6.2 -->
           <h3>An agent is the author</h3>
           <p>Introspect, create a template, create a pipeline, execute, read rows: the whole loop over MCP tools. dbt's authoring surface is a repository and a CLI, which is a different shape of collaboration.</p>
         </article>
         <article class="card">
-          <!-- claim: docs/datasources.md §5.7, docs/auth.md §10.1 -->
+          <!-- claim: docs/datasources.md §5.7, docs/auth.md §7.5, docs/auth.md §10.1 -->
           <h3>The credential story has to hold up</h3>
-          <p>Read-only datasources enforced at save and at execution, one revocable key per agent that holds no more than its person's role, and an audit log entry for every tool call.</p>
+          <p>Read-only datasources enforced at save and at execution, one revocable key per agent holding the role chosen at its creation, never more than its creator's own, and an audit log entry for every tool call.</p>
         </article>
       </div>
     </div>
@@ -76,7 +76,7 @@
         <li><strong>Not a testing framework.</strong> Pipelines validate structurally at save time; they do not assert facts about your data.</li>
         <li><strong>Not a warehouse tool.</strong> Snowflake, BigQuery and Databricks are not among the dialects. If that is where your data lives, dbt is the answer and we are not in the running.</li>
       </ul>
-      <p><a th:href="@{/compare/airflow}">The Airflow comparison &rarr;</a> &middot;
+      <p class="section-note"><a th:href="@{/compare/airflow}">The Airflow comparison &rarr;</a> &middot;
          <a th:href="@{/compare/dagster-vs-airflow}">Dagster vs Airflow, and where Prefect sits &rarr;</a> &middot;
          <a th:href="@{/federated-query}">The cross-database join &rarr;</a> &middot;
          <a th:href="@{/docs/datasources}">Supported dialects &rarr;</a></p>
@@ -86,16 +86,16 @@
   <section class="section band" aria-labelledby="faq-title">
     <div class="container">
       <p class="kicker">Asked before</p>
-      <!-- claim: docs/staging.md §1 — do I need a warehouse for this -->
-      <!-- claim: docs/datasources.md §4.1 — which sources can it read -->
-      <!-- claim: docs/mcp-server.md §6.1 — is an agent the author here -->
+      <!-- claim: docs/staging.md §1 — per-execution in-memory staging, not a warehouse prerequisite -->
+      <!-- claim: docs/datasources.md §4.1 — the supported dialect catalog and JDBC drivers -->
+      <!-- claim: docs/mcp-server.md §6.2 — tools create templates and pipelines and execute them -->
       <!-- claim: docs/datasources.md §5.7 — what is the credential story -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'The dbt comparison, in questions')}"></div>
     </div>
   </section>
 
   <section class="section" aria-labelledby="cta-title">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="cta-title" class="ds-headline">See the no-warehouse join on real data</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">

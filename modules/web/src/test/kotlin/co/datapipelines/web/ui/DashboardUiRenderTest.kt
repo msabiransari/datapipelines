@@ -174,7 +174,10 @@ class DashboardUiRenderTest {
         // carries the dashboard id, the only server value the glue reads. The DEFAULT
         // resolution writes NO version attribute (the glue's init stays "released").
         html shouldContain "/js/datapipelines-dashboard.js"
+        html shouldContain "/js/datapipelines-dashboard-chart.js"
         html shouldContain "/js/datapipelines-dashboard-plotly.js"
+        // The chart kind loads before its Plotly converter, which registers with it at load (record 2026-11-06 §5.2).
+        (html.indexOf("/js/datapipelines-dashboard-chart.js") < html.indexOf("/js/datapipelines-dashboard-plotly.js")) shouldBe true
         html shouldContain "/js/datapipelines-dashboard-table.js"
         html shouldContain "/js/datapipelines-dashboard-kpi.js"
         html shouldContain "/js/dashboards-page.js"
@@ -187,6 +190,18 @@ class DashboardUiRenderTest {
         html shouldContain "/js/workspace/tabs.js"
         html shouldContain "/js/dashboards/workspace.js"
         html shouldContain "id=\"dp-dialog\""
+        // #876 G6: the Dependencies tab, a mount over the selected version (name + version, never an id), its
+        // eight catalog entries last in the page's catalog.
+        html shouldContain "data-dp-tab=\"dependencies\""
+        Regex("<div class=\"dp-deps\" data-dp-deps data-family=\"dashboard\"[^>]*data-name=\"[^\"]+\"[^>]*data-version=\"\\d+\"")
+            .containsMatchIn(html) shouldBe true
+        Regex("id=\"dp-pane-dependencies\"[^>]*data-lazy-url").containsMatchIn(html) shouldBe false
+        val catalog = html.substringAfter("<template data-page-assets>").substringBefore("</template>")
+        Regex("src=\"(/[^\"]+)\"")
+            .findAll(catalog)
+            .map { it.groupValues[1] }
+            .toList()
+            .takeLast(RELEASE_DEPENDENCY_CATALOG.size) shouldBe RELEASE_DEPENDENCY_CATALOG
     }
 
     @Test

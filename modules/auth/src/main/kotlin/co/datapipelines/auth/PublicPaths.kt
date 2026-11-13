@@ -193,6 +193,24 @@ object PublicPaths {
                 "Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal.",
                 "145",
             ),
+            // 699: the three capability pages: scheduling, dashboards and parameter sets, described.
+            // Exact paths, never a glob: the application's own /schedules, /dashboards and
+            // /parameter-sets pages stay behind a session.
+            PublicPath(
+                "/pipeline-scheduling",
+                "Site capability page: GET-only constant content, no datastore and no principal on the request.",
+                "699",
+            ),
+            PublicPath(
+                "/sql-dashboards",
+                "Site capability page: GET-only constant content, no datastore and no principal on the request.",
+                "699",
+            ),
+            PublicPath(
+                "/reusable-parameter-sets",
+                "Site capability page: GET-only constant content, no datastore and no principal on the request.",
+                "699",
+            ),
             // 073: the in-product spec set, public. The viewer renders the Markdown packaged
             // in the jar — DocsCatalog's only collaborator is a ClassLoader, the controller
             // reads no principal and no workspace, and no route here reaches a datastore.
@@ -302,6 +320,15 @@ object PublicPaths {
                 "/favicon.ico",
                 "The site icon, requested by the browser on the login page before any credential exists.",
                 "P3d",
+            ),
+            // #860: the chart document v1 schemas, `ChartSchemaController` serving the validator's own classpath
+            // resources by an allowlist of file names (any other name is the 404 envelope). Public for the reason
+            // the skill pair is: an agent or a host checks its document against the contract BEFORE it saves one.
+            PublicPath(
+                "/schemas/**",
+                "The chart contract agents and hosts validate against, like /skill.md: the packaged v1 JSON Schemas, " +
+                    "no principal, no datastore.",
+                "860",
             ),
             // P8: Boot's BasicErrorController with the shipped defaults — no stack trace, no
             // exception message, so the body is {timestamp,status,error,path}. It must be

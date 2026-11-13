@@ -249,6 +249,56 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
+    @Order(9)
+    fun `a never-admissible refusal publishes no recovery and the dock names the key - 771`() {
+        startTrace()
+        val root = ready("dpcnever")
+        val board = seedBoard(root)
+        openBoard(board)
+        page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
+        // The server's never-admissible 429 (#762 shape): its message names the key, but so does the
+        // client's own fixed sentence — the dock assertions below discriminate on the client's wording,
+        // never the body's.
+        val body =
+            """{"error":{"code":"dashboard.refresh.saturated","message":"This dashboard needs 5 distinct executions per refresh, """ +
+                """and this instance admits at most 2 (datapipelines.executor.max-concurrent-executions-per-instance). """ +
+                """It is never admissible here until an operator raises that setting.","details":{"retry_after_seconds":30,""" +
+                """"reason":"never_admissible","invocations":5,"ceiling":2,""" +
+                """"key":"datapipelines.executor.max-concurrent-executions-per-instance"}}}"""
+        page.route("**/runtime/visualizations") { route ->
+            route.fulfill(
+                com.microsoft.playwright.Route
+                    .FulfillOptions()
+                    .setStatus(429)
+                    .setContentType("application/json")
+                    .setBody(body),
+            )
+        }
+        page.evaluate("() => window.__dpPage.instance.refresh({ scope: 'all' })")
+        page.waitForFunction(
+            """
+            () => window.__dpPage.notifications.some(
+              function (n) {
+                return n.code === 'dashboard.refresh.saturated' && n.recover === null && n.retryable === false;
+              },
+            )
+            """.trimIndent(),
+        )
+        // The dock's last line is the runtime's OWN fixed sentence (textContent, never the error
+        // body's): the client wording is present, the body-only wording is not.
+        page.waitForFunction(
+            """() => {
+              const rows = document.querySelectorAll('[data-dp-dock-list="events"] .dp-board-event');
+              if (!rows.length) return false;
+              const text = rows[rows.length - 1].querySelector('.dp-board-event-text');
+              return !!text
+                && text.textContent.indexOf('retrying cannot succeed until an operator raises that setting') !== -1
+                && text.textContent.indexOf('never admissible here') === -1;
+            }""",
+        )
+    }
+
+    @Test
     @Order(6)
     fun `two instances of one dashboard on one page keep isolated state`() {
         startTrace()
@@ -268,6 +318,7 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
                 dashboard: { id: '$board', version: 'released' },
                 container: second,
                 adapter: window.DatapipelinesDashboard.adapters(second),
+                charts: { library: 'plotly', instance: window.Plotly },
               });
               window.__dpPage2.instance = instance;
               instance.ready.then(function () { window.__dpPage2.ready = true; }, function () {});

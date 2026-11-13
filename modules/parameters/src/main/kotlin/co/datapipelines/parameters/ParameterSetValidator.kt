@@ -9,10 +9,16 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.pipeline.TemplateIds
 import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.ValidationResult
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleaseNodeStatus
+import co.datapipelines.pipeline.release.RestoreBlocker
+import co.datapipelines.pipeline.release.RestoreReach
 import co.datapipelines.typesystem.DeclarationRule
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCardinality
@@ -36,6 +42,12 @@ sealed interface ParameterSetValidation {
         val result: ValidationResult,
     ) : ParameterSetValidation
 }
+
+/** What [ParameterSetValidator.validateRestorePins] answered: the dangling pins (400) and the draft ones (409). */
+data class RestorePins(
+    val result: ValidationResult,
+    val drafts: List<RestoreBlocker>,
+)
 
 /**
  * The save-time validator (record §4) — every write of a parameter set passes it, and nothing it
@@ -71,6 +83,12 @@ class ParameterSetValidator(
     private val probe: SelectorProbe,
     /** The deployment's org tier — its keys are bindable without a dependency (P30). */
     private val org: OrgContext = OrgContext.DEFAULTS,
+    /**
+     * Whether a pinned template is registered at all (#737): the restore recheck's entity question. The default answers
+     * "not registered" for every pin, so an unwired construction reports `template_not_found`, never a false "known"
+     * (fail closed).
+     */
+    private val templateIds: TemplateIds = TemplateIds { _, _ -> false },
 ) {
     /** Judges an `INPUT`'s values: the engine's `max_length` default applies (P34 — the engine's, not a pipeline's). */
     private val inputValidator = ParameterValueValidator(config.valueLimits)
@@ -83,7 +101,8 @@ class ParameterSetValidator(
             expressionParser = ExpressionParser(config),
         )
 
-    private val pins = PinRules(templates, templateStatuses, datasources, org.keys + (ContextKeys.PLATFORM - ContextKeys.EXECUTION_ID))
+    private val pins =
+        PinRules(templates, templateStatuses, datasources, org.keys + (ContextKeys.PLATFORM - ContextKeys.EXECUTION_ID), templateIds)
 
     /**
      * Record §4 in order. With [dryRun] false, steps 5–6 are left to the caller — the write path skips
@@ -113,6 +132,63 @@ class ParameterSetValidator(
         } else {
             ParameterSetValidation.Invalid(failures.toResult())
         }
+    }
+
+    /** Rechecks only local pin metadata under the workspace writer guard; opens no customer connection. */
+    fun validatePinMetadata(
+        workspaceId: UUID,
+        body: ParameterSetBody,
+    ): ValidationResult {
+        val failures = ParameterSetFailures()
+        body.parameters.forEachIndexed { index, parameter ->
+            pins.checkMetadata(workspaceId, index, parameter, failures, requireLiveStatus = true)
+        }
+        return failures.toResult()
+    }
+
+    /**
+     * A RESTORE's recheck of the stored body's selector pins under the writer guard (#517 round three, record §12.1):
+     * the missing or DISCARDED pins as failures, the present-but-DRAFT ones as blockers. Metadata only; no render,
+     * no dry run, no customer connection.
+     *
+     * #873 §D.3: [below] are the not-RELEASED nodes the shared restore walk found beneath a live pin (an import of a
+     * selector template); a missing or DISCARDED one is the same `template_version_not_found` at its pin's field, with the
+     * full `path` and the intermediate nodes as `via`. The DRAFT ones stay the caller's 409.
+     */
+    fun validateRestorePins(
+        workspaceId: UUID,
+        body: ParameterSetBody,
+        below: List<RestoreReach> = emptyList(),
+    ): RestorePins {
+        val failures = ParameterSetFailures()
+        below.filter { it.dangling }.forEach { reach ->
+            val name = reach.identity.entityId.safeEcho()
+            failures.add(
+                ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND,
+                reach.directPath,
+                "Template '$name' version ${reach.identity.version}, reached through '${reach.path}', is " +
+                    "${reach.status.name}; a restore lands RELEASED and everything below its pins must be live.",
+                mapOf("template_id" to name, "template_version" to reach.identity.version) +
+                    (if (reach.status == ReleaseNodeStatus.DISCARDED) mapOf("reason" to "discarded") else emptyMap()) +
+                    mapOf("path" to reach.path, "via" to reach.viaDetails()),
+            )
+        }
+        val drafts =
+            body.parameters.mapIndexedNotNull { index, parameter ->
+                val ref = parameter.source?.template
+                val status = pins.restorePin(workspaceId, index, parameter, failures)
+                if (ref == null || status != PipelineVersionStatus.DRAFT) {
+                    null
+                } else {
+                    RestoreBlocker(
+                        ReleaseNodeIdentity(workspaceId, ReleaseFamily.TEMPLATE, ref.id, ref.version),
+                        ref.id,
+                        ReleaseNodeStatus.DRAFT,
+                        "parameters[$index].source.template",
+                    )
+                }
+            }
+        return RestorePins(failures.toResult(), drafts)
     }
 
     /** Steps 5–6 alone, on a body that passed steps 1–4 ([validate] with `dryRun = false`). */

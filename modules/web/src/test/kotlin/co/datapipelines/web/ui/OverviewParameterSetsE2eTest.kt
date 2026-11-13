@@ -311,11 +311,11 @@ class OverviewParameterSetsE2eTest {
                 now,
                 OverviewRenderSupport.ACTIVE_DAYS,
             )
-        val page = OverviewPage.of(OverviewPage.Family.PARAMETER_SETS, false, charts, RecentResult.Available(emptyList()), now)
+        val page = OverviewPage.of(OverviewFamily.PARAMETER_SETS, false, charts, RecentResult.Available(emptyList()), now)
         val doc = Jsoup.parse(OverviewRenderSupport.html(page))
 
         OverviewRenderSupport.assertStripSumsTo(doc, counted(ReadLens.Everything).objects)
-        OverviewRenderSupport.assertGuideWords(doc, OverviewPage.Family.PARAMETER_SETS, WORDS)
+        OverviewRenderSupport.assertGuideWords(doc, OverviewFamily.PARAMETER_SETS, WORDS)
     }
 
     private fun equalityTable(

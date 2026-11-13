@@ -2,8 +2,8 @@ package co.datapipelines.integration
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.logcapture.capturingLogEvents
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -48,17 +48,18 @@ import java.util.concurrent.TimeUnit
  * context in this JVM runs the default 365 days, so no other context's hourly tick can take
  * this suite's rows — the result below is this context's job alone. And this context's own
  * startup tick (a `fixedDelay` job's first run is at startup) is waited out before seeding, by
- * queueing a no-op on the ONE thread every `@Scheduled` job shares: it runs only after the
+ * queueing a no-op on the ONE thread the retention job shares with its siblings: it runs only after the
  * startup ticks queued ahead of it. Synchronised on the event, never on time.
  *
  * ## Which thread that is — measured here, not assumed
  * The jobs' own scheduler since #316: `SweepSchedulingConfiguration`'s `taskScheduler`, ONE thread
- * (`dp-scheduled`) that every `@Scheduled` job ticks on and nothing else uses. [drainStartupTicks]
+ * (`dp-scheduled`) that every `@Scheduled` job but the pool reaper ticks on (the reaper has its own,
+ * `dp-reaper`, since #818d) and nothing else uses. [drainStartupTicks]
  * reads the scheduler the processor actually holds and pins that it is that bean with one thread:
  * the drain is sound only on one thread. (Until #316 the pin read `sseLogScheduler` — the SSE log
  * streamer's `dp-sse-log` thread, which Spring fell back to while no `TaskScheduler` bean existed;
  * the retention tick's two-second budget, `AuditLogRetention.DEFAULT_TICK_BUDGET`, was sized for
- * sharing THAT thread and now bounds how long the sweep and the reaper wait behind it.)
+ * sharing THAT thread and now bounds how long the sweep waits behind it.)
  *
  * The tick is invoked directly rather than by lowering the delay: the cadence is a code constant
  * (not a key), and a test-only knob would be a key the product ships for a test.
@@ -141,15 +142,10 @@ class AuditLogRetentionE2eTest {
     private fun sweepTickLogs(): List<ILoggingEvent> {
         val sweep = applicationContext.getBean("executionEventRetentionScheduler")
         val logger = LoggerFactory.getLogger("co.datapipelines.auth.AuditLogRetention") as ch.qos.logback.classic.Logger
-        val appender = ListAppender<ILoggingEvent>().apply { start() }
-        logger.addAppender(appender)
-        try {
-            sweep.javaClass.getMethod("retain").invoke(sweep)
-        } finally {
-            logger.detachAppender(appender)
-        }
+        // A snapshot (#484): the booted application's threads log while the capture is attached.
+        val events = capturingLogEvents(logger) { sweep.javaClass.getMethod("retain").invoke(sweep) }
         val thread = Thread.currentThread().name
-        return appender.list.filter { it.threadName == thread }
+        return events.filter { it.threadName == thread }
     }
 
     /** The application registry's `datapipelines.audit.retention.purged` count (0 before the first tick). */

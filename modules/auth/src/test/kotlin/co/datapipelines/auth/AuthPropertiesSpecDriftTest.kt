@@ -41,6 +41,11 @@ class AuthPropertiesSpecDriftTest {
         val provider = AuthProperties.Provider()
         val defaults =
             mapOf(
+                "name" to provider.name,
+                "client-id" to provider.clientId,
+                "client-secret" to provider.clientSecret,
+                "issuer-uri" to provider.issuerUri,
+                "display-name" to provider.displayName,
                 "protocol" to provider.protocol,
                 "authorization-uri" to provider.authorizationUri,
                 "token-uri" to provider.tokenUri,
@@ -52,7 +57,7 @@ class AuthPropertiesSpecDriftTest {
                 "picture-hosts" to provider.pictureHosts,
             )
         val rows = documented.filterKeys { it.startsWith(PROVIDER_PREFIX) }
-        withClue("providers rows parsed from configuration.md §3.4") { rows.size shouldBeGreaterThanOrEqual 9 }
+        withClue("providers rows parsed from configuration.md §3.4") { rows.size shouldBeGreaterThanOrEqual defaults.size }
         rows.forEach { (key, value) ->
             val suffix = key.removePrefix(PROVIDER_PREFIX)
             check(defaults.containsKey(suffix)) { "Unknown documented provider row: $key" }
@@ -106,16 +111,33 @@ class AuthPropertiesSpecDriftTest {
         documented.getValue("datapipelines.audit.retention-days") shouldBe AuditProperties().retentionDays.toString()
     }
 
+    @Test
+    fun `long descriptions and escaped pipes parse without recursive regex backtracking`() {
+        val description = "long description ".repeat(10_000) + "an escaped \\| pipe"
+        val row = "| `datapipelines.auth.jwt.ttl-hours` | `24` | $description |"
+
+        val match = requireNotNull(ROW_REGEX.find(row))
+        match.groupValues[1] shouldBe "datapipelines.auth.jwt.ttl-hours"
+        match.groupValues[2] shouldBe "24"
+    }
+
+    @Test
+    fun `an extra description column still refuses the whole row`() {
+        ROW_REGEX.find("| `datapipelines.auth.jwt.ttl-hours` | `24` | description | extra |") shouldBe null
+    }
+
     private companion object {
         /**
          * A full `| \`datapipelines.*\` | \`default\` | description |` row of the §3 tables:
          * the description cell runs to end-of-line and may contain ESCAPED pipes (`\|`),
          * never a bare one — so a row with a different column count does not match at all
          * and its key disappears (fail-loud) rather than being read from the wrong cell.
+         * Escaped pipes match first; possessive repetition avoids recursive backtracking
+         * through long descriptions while preserving the exact column count.
          */
         val ROW_REGEX =
             Regex(
-                """^\|\s*`(datapipelines\.[a-z0-9.\-\[\]]+)`\s*\|\s*`?([A-Za-z0-9\-]+|\(empty\)|\(none\))`?\s*\|(?:[^|\n]|\\\|)*\|$""",
+                """^\|\s*`(datapipelines\.[a-z0-9.\-\[\]]+)`\s*\|\s*`?([A-Za-z0-9\-]+|\(empty\)|\(none\))`?\s*\|(?:\\\||[^|\n])*+\|$""",
             )
 
         const val CONFIG_SPEC_PATH = "docs/configuration.md"

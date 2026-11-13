@@ -2,17 +2,19 @@ package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
+import co.datapipelines.application.dependencies.DatasourceReferencesAdapter
+import co.datapipelines.application.dependencies.RegistryIncomingRows
 import co.datapipelines.auth.PromotionProperties
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContentCheck
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceAuditSink
 import co.datapipelines.datasources.DatasourceMetadataCache
-import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.datasources.DatasourceValidator
+import co.datapipelines.datasources.DatasourceWriteGuarding
 import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.LakeIntrospectionCache
@@ -24,12 +26,19 @@ import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.crypto.KeyProviderConfig
 import co.datapipelines.datasources.crypto.KeyProviders
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
+import co.datapipelines.dependencies.FamilyRegistry
+import co.datapipelines.lake.LakeProperties
+import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
+import co.datapipelines.pipeline.PipelineNames
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.TemplateDryRenderer
+import co.datapipelines.staging.DuckDbStagingFactory
+import co.datapipelines.staging.DuckDbStagingProperties
+import co.datapipelines.staging.EngineDispatchingStagingFactory
 import co.datapipelines.staging.H2StagingFactory
 import co.datapipelines.staging.H2StagingProperties
 import co.datapipelines.staging.StagingFactory
@@ -40,6 +49,7 @@ import co.datapipelines.web.pipelines.PipelineBodies
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.pipelines.repositoryPipelineResolver
 import co.datapipelines.web.templates.TemplateImportService
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.context.properties.bind.Bindable
 import org.springframework.boot.context.properties.bind.Binder
@@ -47,6 +57,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import java.nio.file.Path
 import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistry
 
 /**
@@ -83,8 +94,29 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
 // `datasourceUpdateService`.
 @Suppress("TooManyFunctions")
 class DomainConfiguration {
+    /**
+     * #841 (G0, dependency-graph record §15.1) — the datasource writers' guarding: the datasource's prerequisite key,
+     * then its affected workspaces, in the metadata transaction, on the ONE writer guard. Shared by the definition and
+     * grant repositories (and the freshness tick's bounded grant repository), never [DatasourceWriteGuarding.UNGUARDED].
+     */
     @Bean
-    fun datasourceRepository(jdbc: NamedParameterJdbcTemplate): DatasourceRepository = DatasourceRepository(jdbc)
+    fun datasourceWriteGuarding(
+        jdbc: NamedParameterJdbcTemplate,
+        transactionManager: org.springframework.transaction.PlatformTransactionManager,
+        writeGuard: co.datapipelines.typesystem.guard.MetadataWriterGuard,
+    ): DatasourceWriteGuarding =
+        DatasourceWriteGuarding(
+            jdbc,
+            org.springframework.transaction.support
+                .TransactionTemplate(transactionManager),
+            writeGuard,
+        )
+
+    @Bean
+    fun datasourceRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        writes: DatasourceWriteGuarding,
+    ): DatasourceRepository = DatasourceRepository(jdbc, writes = writes)
 
     /**
      * `datasource_workspaces` (metadata-db §4.16) — the table that replaced
@@ -93,8 +125,10 @@ class DomainConfiguration {
      * management half.
      */
     @Bean
-    fun datasourceGrantRepository(jdbc: NamedParameterJdbcTemplate): co.datapipelines.datasources.DatasourceGrantRepository =
-        co.datapipelines.datasources.DatasourceGrantRepository(jdbc)
+    fun datasourceGrantRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        writes: DatasourceWriteGuarding,
+    ): co.datapipelines.datasources.DatasourceGrantRepository = co.datapipelines.datasources.DatasourceGrantRepository(jdbc, writes)
 
     /** The D8 rules the REST datasource surface and the UI's form partial share (workspaces design §8). */
     @Bean
@@ -120,7 +154,9 @@ class DomainConfiguration {
         datasources: DatasourceRegistry,
         rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
         grants: co.datapipelines.datasources.DatasourceGrantRepository,
-    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding, grants)
+        // #841 (G0) — the registration and its grant commit together under the datasource writer guard.
+        writes: DatasourceWriteGuarding,
+    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding, grants, writes)
 
     /**
      * The ONE gated datasource-update path behind `PUT /api/v1/datasources/{name}` and the
@@ -151,9 +187,11 @@ class DomainConfiguration {
      * posture line (the `name` label's ONLY consumer — no code branches on it, pinned by
      * [DeploymentNameBranchingGuardTest]), the receiver-also-authors WARN — currently
      * now BOTH-SIDED (055 wired the promotion half through [PromotionProperties]) — and the refusal
-     * when an authoring-disabled deployment still holds drafts, naming them.
+     * when an authoring-disabled deployment still holds drafts, naming them. #762 adds the WARN
+     * naming saved dashboards this instance can never refresh.
      */
     @Bean
+    @Suppress("LongParameterList") // one collaborator per check; #762 added the two refresh ceilings
     fun authoringStartupCheck(
         environment: Environment,
         pipelines: PipelineRepository,
@@ -164,8 +202,23 @@ class DomainConfiguration {
         // #10 L1b: so do visualization and dashboard drafts (VisualizationConfiguration's repositories).
         visualizations: co.datapipelines.visualization.VisualizationRepository,
         dashboards: co.datapipelines.visualization.DashboardRepository,
+        // #762: the saved-dashboards WARN reads the refresh admission's own two ceilings.
+        slots: co.datapipelines.executor.ExecutionSlots,
+        dashboardRuntime: co.datapipelines.visualization.DashboardRuntimeConfig,
     ): AuthoringStartupCheck =
-        AuthoringStartupCheck(environment, pipelines, templates, parameterSets, visualizations, dashboards) { promotionProperties.receives }
+        AuthoringStartupCheck(environment, pipelines, templates, parameterSets, visualizations, dashboards, slots, dashboardRuntime) {
+            promotionProperties.receives
+        }
+
+    /**
+     * #785 — the managed lake's boot check (catalog shape, fence triggers, control row, the object store's HEAD and
+     * conditional PUT). A no-op unless `datapipelines.lake.enabled=true`, when `lake`'s auto-configuration
+     * declares the [co.datapipelines.lake.LakeBootCheck] it calls.
+     */
+    @Bean
+    fun lakeCatalogStartupCheck(
+        bootCheck: org.springframework.beans.factory.ObjectProvider<co.datapipelines.lake.LakeBootCheck>,
+    ): LakeCatalogStartupCheck = LakeCatalogStartupCheck(bootCheck)
 
     /**
      * The system service account (auth.md §4.5, R7), provisioned at boot. Unconditional: it
@@ -187,6 +240,18 @@ class DomainConfiguration {
         co.datapipelines.auth.InstanceDatasourceGrants { workspaceId, grantedBy ->
             grants.grantAllInstanceDatasourcesTo(workspaceId, grantedBy)
         }
+
+    /**
+     * #823 (owner ruling 2026-11-07) — the managed lake granted to a workspace inside the transaction that creates it.
+     * See `ManagedDatasourceGrants`. Resolved through an `ObjectProvider` at call time, not at wiring time: the
+     * registrar is built after Flyway and the lake boot check, and `WorkspaceService` must not pull that ordering in.
+     * The registrar owns the datasource's name and the system actor; this bean owns neither.
+     */
+    @Bean
+    fun managedDatasourceGrants(
+        registrar: org.springframework.beans.factory.ObjectProvider<ManagedLakeDatasourceRegistrar>,
+    ): co.datapipelines.auth.ManagedDatasourceGrants =
+        co.datapipelines.auth.ManagedDatasourceGrants { workspaceId -> registrar.ifAvailable?.grantTo(workspaceId) ?: false }
 
     /**
      * D-R11 — the `demo` workspace at first boot, and the example content into it. See
@@ -251,9 +316,9 @@ class DomainConfiguration {
      * The pipeline-name lookup a datasource delete needs (datasources §9, `datasource.in_use`).
      *
      * `datasources` cannot depend on `pipeline-contract` (§4.2), so it declares this port and the
-     * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which pushes the
-     * datasource filter to SQL via [PipelineRepository.findAnyVersionDatasourceRefs] — the
-     * ANY-VERSION scan (061/T79). The working-version scan it replaced here joined
+     * aggregation layer supplies it: since #877 §C an adapter over the datasource family's two
+     * inverse arms (`findIncoming`, paged to exhaustion, one bounded statement per page) — the
+     * ANY-VERSION rule (061/T79) the scans it replaced kept. The working-version scan replaced here joined
      * `current_version` only, so a released pipeline whose OLDER version pinned the datasource
      * was invisible: the delete succeeded and that version's next execution failed at connect.
      * A delete guard reads every version ever stored; the pipelines LISTING keeps the
@@ -269,42 +334,41 @@ class DomainConfiguration {
      * references saved while the datasource was global survive the re-bind. Reading the
      * row's binding here serves nothing anymore; the caller's workspace never mattered
      * (022 review F5) and the row's own binding no longer does either.
+     *
+     * Every reference carries the workspace it was found in. The LOCK counts all of them; a refusal NAMES only those its
+     * caller may read (`DatasourceUsages`, #873 §F.3 e — the delete refusal's details are scoped to the caller's
+     * workspaces).
      */
     @Bean
     fun datasourceReferences(
-        bodies: PipelineBodies,
+        /** #877 §C — the datasource family's two inverse arms (pipeline + parameter set) behind `findIncoming`. */
+        dependencyFamilyRegistry: ObjectProvider<FamilyRegistry>,
         workspaces: WorkspaceRepository,
     ): DatasourceReferences =
-        DatasourceReferences { name ->
-            workspaces.findAll().flatMap { workspace ->
-                bodies.anyVersionReferences(workspace.id, name).map { ref ->
-                    DatasourceReference(
-                        pipelineName = ref.pipelineName,
-                        pipelineVersion = ref.pipelineVersion,
-                        versionStatus = ref.versionStatus.name,
-                        nodeId = ref.nodeId,
-                    )
-                }
-            }
-        }
+        DatasourceReferencesAdapter(RegistryIncomingRows(dependencyFamilyRegistry::getObject)) { workspaces.findAll().map { it.id } }
 
     @Bean
     // Ten collaborators: 089's registry + extension directory met 094's pool metrics + ceiling
-    // and 109's view-outcome recorder at the merge. Each is a distinct seam the registry owns;
-    // splitting the bean would hide the wiring this class exists to make explicit (§8.4).
+    // and 109's view-outcome recorder at the merge; #818 adds the managed lake read and the
+    // generation age bound, #818d the reaper's pool closer. Each is a distinct seam the registry owns; splitting the bean would
+    // hide the wiring this class exists to make explicit (§8.4).
     @Suppress("LongParameterList")
     fun datasourceRegistry(
         repository: DatasourceRepository,
         encryptor: CredentialEncryptor,
         references: DatasourceReferences,
         invalidation: PoolInvalidationPublisher,
-        lakeTables: LakeTableCatalog,
+        lakeTableRepository: co.datapipelines.application.datasources.LakeTableRepository,
         lakeViewRecorder: LakeViewOutcomeRecorder,
         environment: Environment,
         poolMetrics: PoolLifecycleMetrics,
         datasourcesProperties: DatasourcesProperties,
         fileRootsProperties: co.datapipelines.datasources.DatasourceFileRootsProperties,
         executorProperties: ExecutorProperties,
+        managedLake: co.datapipelines.datasources.ManagedLakeCatalog,
+        lakeProperties: org.springframework.beans.factory.ObjectProvider<co.datapipelines.lake.LakeProperties>,
+        poolCloser: co.datapipelines.datasources.pooling.PoolCloser,
+        generationPins: co.datapipelines.datasources.pooling.ManagedGenerationPins,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
@@ -319,7 +383,9 @@ class DomainConfiguration {
             auditSink = DatasourceAuditSink.NONE,
             cache = DatasourceMetadataCache(),
             invalidation = invalidation,
-            lakeTables = lakeTables,
+            // #818b B: the registry PROJECTION, never the enriched `lakeTableCatalog` bean: a managed build reads the
+            // catalog once (its snapshot), and a node's CONNECT check reads no catalog (LakeConfiguration KDoc).
+            lakeTables = LakeConfiguration.projectionCatalog(lakeTableRepository),
             lakeViewRecorder = lakeViewRecorder,
             // configuration.md §3.25 (089 §D): the bundled DuckDB extension directory. Empty =
             // unset — the LAKE adapter keeps its explicit INSTALL+LOAD pairs (a bare `java -jar`
@@ -342,6 +408,22 @@ class DomainConfiguration {
             // §5.2: the retirement ceiling defaults to the node query timeout + 30 s, which is
             // why the two properties meet here rather than inside either binding class.
             retireCeiling = datasourcesProperties.ceiling(executorProperties.nodeQueryTimeoutSeconds),
+            // #824 (owner ruling 2026-11-07): a retired MANAGED generation's ceiling is derived from the node query
+            // timeout's MAXIMUM, the longest statement a managed node may legitimately be running.
+            managedRetireCeiling = datasourcesProperties.managedCeiling(executorProperties.nodeQueryTimeoutMaxSeconds),
+            // #818 (record §10 RULING 4): the managed reader generations' age bound, applied in the pool
+            // lookup. Unbound lake (disabled) = no bound; its managed rows then serve no view at all.
+            managedLake = managedLake,
+            maxGenerationAge =
+                lakeProperties.ifAvailable
+                    ?.takeIf { it.enabled }
+                    ?.reads
+                    ?.maxGenerationAgeSeconds
+                    ?.let(java.time.Duration::ofSeconds),
+            // #818d (record §10 RULING 4 amended, item 6): the reaper hands each close to the `dp-pool-close`
+            // threads (`PoolReaperSchedulingConfiguration.poolCloser`); application shutdown still closes in place.
+            poolCloser = poolCloser,
+            generationPins = generationPins,
         )
 
     /**
@@ -391,11 +473,23 @@ class DomainConfiguration {
      * the REST GET hot path keeps the cache.
      */
     @Bean
-    fun contractDatasourceRegistry(registry: DatasourceRegistry): ContractDatasourceRegistry =
+    fun contractDatasourceRegistry(
+        registry: DatasourceRegistry,
+        environment: Environment,
+    ): ContractDatasourceRegistry =
         ContractDatasourceRegistry { name, workspaceId ->
             // Every save is workspace-scoped, promotion included (136 §C / T285): the
             // visibility read is the grant predicate, and there is no workspace-less branch.
-            registry.getVisibleLive(name, workspaceId)?.let { DatasourceFacts(it.dialect, it.isReadonly) }
+            registry.getVisibleLive(name, workspaceId)?.let {
+                DatasourceFacts(
+                    it.dialect,
+                    it.isReadonly,
+                    managedLake =
+                        it.dialect == Dialect.LAKE &&
+                            environment.getProperty("${LakeProperties.PREFIX}.enabled", Boolean::class.java, false) &&
+                            name == environment.getProperty("${LakeProperties.PREFIX}.name", LakeProperties.DEFAULT_NAME),
+                )
+            }
         }
 
     /**
@@ -462,6 +556,7 @@ class DomainConfiguration {
         datasources: ContractDatasourceRegistry,
         dryRenderer: TemplateDryRenderer,
         pipelines: PipelineResolver,
+        repository: PipelineRepository,
         properties: PipelineProperties,
         orgContext: co.datapipelines.pipeline.OrgContext,
         executor: ExecutorProperties,
@@ -470,6 +565,8 @@ class DomainConfiguration {
             datasources,
             dryRenderer,
             pipelines,
+            // #723: §12.9 tells a missing pipeline from a missing version by the ENTITY row.
+            PipelineNames.of(repository),
             properties.maxCompositionDepth,
             orgContext,
             // 108: §12.8's ceiling on a node's own `settings.timeout_seconds`. The OPERATOR's
@@ -489,24 +586,27 @@ class DomainConfiguration {
         )
 
     /**
-     * The per-execution tempdb factory (staging §3).
+     * The per-execution tempdb factory (staging §3), dispatching on the pipeline's
+     * `settings.tempdb.engine` (staging §8.5, #795) — see [stagingFactoryFor] for the mapping.
      *
-     * The properties are the **already-resolved** effective values; the per-pipeline
-     * `max_memory_mb` override is applied by the executor, clamped to this ceiling
-     * (configuration.md §3.3). `maxConnections` (146 / #118) travels here too — this hand-written
-     * copy is the hop a new knob silently misses, which `StagingH2WiringTest` guards.
+     * The DuckDB bounds are `datapipelines.lake.admission.*`, bound here with [Binder] rather than
+     * by injecting `LakeProperties`: that bean exists only while `datapipelines.lake.enabled=true`
+     * (`LakeAutoConfiguration`), and a DuckDB staging database needs its bounds with or without a
+     * lake. Same prefix, same class, same defaults — so a lake deployment and a lake-less one read
+     * one set of numbers.
      */
     @Bean
-    fun stagingFactory(properties: StagingH2Properties): StagingFactory =
-        H2StagingFactory(
-            H2StagingProperties(
-                mode = properties.mode,
-                maxMemoryMb = properties.maxMemoryMb,
-                insertBatchSize = properties.insertBatchSize,
-                resultBatchSize = properties.resultBatchSize,
-                queryTimeoutSeconds = properties.queryTimeoutSeconds,
-                maxConnections = properties.maxConnections,
-            ),
+    fun stagingFactory(
+        properties: StagingH2Properties,
+        environment: Environment,
+    ): StagingFactory =
+        stagingFactoryFor(
+            properties,
+            Binder
+                .get(environment)
+                .bind(LAKE_ADMISSION_PREFIX, Bindable.of(LakeProperties.Admission::class.java))
+                .orElseGet { LakeProperties.Admission() },
+            DEFAULT_DUCKDB_SCRATCH_DIR,
         )
 
     /** Exposed so [PipelineBodies] and the controllers share one repository instance. */
@@ -524,6 +624,11 @@ class DomainConfiguration {
         validator: PipelineValidator,
         orgContext: co.datapipelines.pipeline.OrgContext,
         dryRenderer: TemplateDryRenderer,
+        // #517 — the import's metadata transaction and the workspace writer guard it acquires first.
+        metadataTransactionManager: org.springframework.transaction.PlatformTransactionManager,
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+        // #778 — the lake reference scanner, told of the RELEASED version each import lands (seam ruling 2026-11-02).
+        observer: co.datapipelines.pipeline.release.ReleasedVersionObserver,
     ): PipelineImportService =
         PipelineImportService(
             pipelines = pipelines,
@@ -533,6 +638,11 @@ class DomainConfiguration {
             // producing plausible wrong numbers on its first run.
             orgContext = orgContext,
             templates = dryRenderer,
+            transactions =
+                org.springframework.transaction.support
+                    .TransactionTemplate(metadataTransactionManager),
+            guard = guard,
+            observer = observer,
         )
 
     @Bean
@@ -543,8 +653,85 @@ class DomainConfiguration {
         // (owner ruling 2026-09-25: an import keeps what resolves here, drops the rest).
         citableFacts: co.datapipelines.templates.CitableFacts,
         citations: co.datapipelines.templates.TemplateImplementsRepository,
-    ): TemplateImportService = TemplateImportService(templates, validator, citableFacts, citations)
+        // #517 — one guarded metadata transaction per entry.
+        metadataTransactionManager: org.springframework.transaction.PlatformTransactionManager,
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+    ): TemplateImportService =
+        TemplateImportService(
+            templates,
+            validator,
+            citableFacts,
+            citations,
+            transactions =
+                org.springframework.transaction.support
+                    .TransactionTemplate(metadataTransactionManager),
+            guard = guard,
+        )
 }
+
+/** Where `datapipelines.lake.admission.*` lives; the staging bounds are read from it. */
+internal const val LAKE_ADMISSION_PREFIX = "${LakeProperties.PREFIX}.admission"
+
+/**
+ * The DuckDB staging scratch directory: `java.io.tmpdir/dp-staging`. P1 binds no key of its own
+ * (brief #795, stamped); an operator moves it by moving the JVM's temp directory.
+ */
+internal val DEFAULT_DUCKDB_SCRATCH_DIR: Path =
+    Path.of(System.getProperty("java.io.tmpdir"), "dp-staging").toAbsolutePath()
+
+/**
+ * The tempdb factory's mapping from bound configuration (staging §3, §8.5) — a function apart
+ * from the `@Bean` so the wiring tests drive it with bound values (an overload of the bean
+ * method's name would be a second factory-method candidate to Spring).
+ *
+ * - **H2** is built exactly as before #795: every [StagingH2Properties] field copied into the
+ *   staging module's own [H2StagingProperties]. The per-pipeline `max_memory_mb` override is applied
+ *   by the executor, clamped to `max-memory-mb` (configuration.md §3.3). `maxConnections` (146 /
+ *   #118) travels here too — this hand-written copy is the hop a new knob silently misses, which
+ *   `StagingH2WiringTest` guards.
+ * - **DuckDB** takes its bounds from [admission] — `staging-memory-limit` (the engine's locked
+ *   `memory_limit`), `staging-expansion-factor` and the `scratch-bytes` aggregate one
+ *   [co.datapipelines.staging.ScratchBudget] shares — and the engine-neutral knobs (batch sizes,
+ *   query timeout, connection cap) from `datapipelines.staging.h2.*`, so no DuckDB-only key exists.
+ *   Threads are [DuckDbStagingProperties.boundedThreads]. `StagingDuckDbWiringTest` guards the copy.
+ *
+ * Where the `max_memory_mb` clamp lands for DuckDB: the executor clamps the declared value to
+ * `max-memory-mb` and compares it with the measured `duckdb_memory()` sum after each staging
+ * operation, as on H2; the engine's `memory_limit` (`staging-memory-limit`) is locked before any
+ * author SQL runs, so no pipeline value can raise it (staging §8.5).
+ */
+internal fun stagingFactoryFor(
+    h2: StagingH2Properties,
+    admission: LakeProperties.Admission,
+    scratchDir: Path,
+): EngineDispatchingStagingFactory =
+    EngineDispatchingStagingFactory(
+        h2 =
+            H2StagingFactory(
+                H2StagingProperties(
+                    mode = h2.mode,
+                    maxMemoryMb = h2.maxMemoryMb,
+                    insertBatchSize = h2.insertBatchSize,
+                    resultBatchSize = h2.resultBatchSize,
+                    queryTimeoutSeconds = h2.queryTimeoutSeconds,
+                    maxConnections = h2.maxConnections,
+                ),
+            ),
+        duckDb =
+            DuckDbStagingFactory(
+                DuckDbStagingProperties(
+                    scratchDir = scratchDir,
+                    memoryLimitBytes = admission.stagingMemoryLimit.toBytes(),
+                    expansionFactor = admission.stagingExpansionFactor,
+                    scratchCapacityBytes = admission.scratchBytes.toBytes(),
+                    threads = DuckDbStagingProperties.boundedThreads(),
+                    insertBatchSize = h2.insertBatchSize,
+                    resultBatchSize = h2.resultBatchSize,
+                    queryTimeoutSeconds = h2.queryTimeoutSeconds,
+                    maxConnections = h2.maxConnections,
+                ),
+            ),
+    )
 
 /**
  * [KeyProviderConfig] over Spring's [Environment] — the aggregation layer supplying the

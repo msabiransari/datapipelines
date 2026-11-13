@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -317,6 +318,41 @@ class LocalPasswordServiceTest {
             .shouldBeNull()
         hasher.verify(users.findLocalCredential("a@company.com").shouldNotBeNull().passwordHash, OLD_PASSWORD).shouldBeTrue()
         auditEvents("auth.user.unlocked") shouldBe 1
+    }
+
+    /**
+     * #847 — a native verification fault on the CURRENT password is not a wrong current password:
+     * it propagates (503 at the boundary) before the shared lockout counter, the cache invalidation
+     * and the `auth.password.change_failed` row, and the credential is untouched.
+     */
+    @Test
+    fun `a native fault on the current password throws and counts, audits and changes nothing`() {
+        val user = localUser("a@company.com", OLD_PASSWORD)
+        val faulty =
+            LocalPasswordService(
+                users,
+                userService,
+                object : SecretHasher by hasher {
+                    override fun verify(
+                        encodedHash: String,
+                        raw: String,
+                    ): Boolean = throw SecretVerificationUnavailableException(Argon2SecretHasher.MEMORY_ALLOCATION_ERROR, null)
+                },
+                AuthCache(AuthProperties()),
+                audit,
+                AuthProperties(),
+                notices,
+            )
+
+        shouldThrow<SecretVerificationUnavailableException> { faulty.changeOwn(user.id, OLD_PASSWORD, NEW_PASSWORD) }
+
+        val credential = users.findLocalCredential("a@company.com").shouldNotBeNull()
+        credential.failedLoginCount shouldBe 0
+        credential.lockedUntil.shouldBeNull()
+        hasher.verify(credential.passwordHash, OLD_PASSWORD).shouldBeTrue()
+        auditEvents("auth.password.change_failed") shouldBe 0
+        auditEvents("auth.password.change_locked") shouldBe 0
+        auditEvents("auth.password.changed") shouldBe 0
     }
 
     private fun auditEvents(event: String): Int =

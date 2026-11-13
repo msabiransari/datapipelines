@@ -86,6 +86,39 @@ class WorkspaceIsolationSweepTest {
         leaks.joinToString("\n") shouldBe ""
     }
 
+    /**
+     * #875: the dependency tree routes name their root in the QUERY, so [sweepableRoutes] (path variables only) never
+     * reaches them. Here globex's workspace admin authors one root per family through REST (a datasource the instance's
+     * super admin registers for globex alone is the datasource root); the owner must get each tree — the non-vacuity
+     * half — and an ACME session asking for the same keys must get, status AND body, exactly the answer for keys that
+     * exist nowhere: the family's native 404.
+     */
+    @Test
+    fun `no dependency tree route hands an ACME session a GLOBEX root - foreign answers exactly as absent`() {
+        WorkspaceIsolationIntegrationTest.ensureSeeded()
+        val roots = globexTreeRoots()
+        val owner = { spec: RequestSpecification -> spec.cookie(SESSION_COOKIE, WorkspaceIsolationIntegrationTest.globexSession()) }
+        val acme = { spec: RequestSpecification -> spec.cookie(SESSION_COOKIE, WorkspaceIsolationIntegrationTest.acmeSession()) }
+
+        val failures =
+            DependencyTreeQueries.FAMILIES.flatMap { family ->
+                val path = roots.path(family)
+                val absent = DependencyTreeQueries.path(family, absentKey(family, roots.keys.getValue(family)))
+                val mine = call(Route("GET", path, TREE_HANDLER), owner)
+                val foreign = call(Route("GET", path, TREE_HANDLER), acme)
+                val control = call(Route("GET", absent, TREE_HANDLER), acme)
+                listOfNotNull(
+                    "globex GET $path -> ${mine.status}, but its owner must get the tree".takeUnless { mine.status == HTTP_OK },
+                    (
+                        "acme GET $path -> ${foreign.status} ${foreign.fingerprint.take(LEAK_EXCERPT)}, but a NONEXISTENT " +
+                            "root gives ${control.status} ${control.fingerprint.take(LEAK_EXCERPT)}"
+                    ).takeUnless { foreign == control && foreign.status == HTTP_NOT_FOUND },
+                )
+            }
+
+        failures.joinToString("\n") shouldBe ""
+    }
+
     @Test
     fun `no REST route answers an ACME MCP key at all - each refuses it by kind before any row is read`() {
         WorkspaceIsolationIntegrationTest.ensureSeeded()
@@ -239,6 +272,24 @@ class WorkspaceIsolationSweepTest {
                 }
             }
         }
+
+    /** #875: globex's dependency roots, authored once through REST by its workspace admin. */
+    private fun globexTreeRoots(): DependencyTreeQueries.Roots =
+        globexRoots ?: DependencyTreeQueries
+            .seed(
+                port,
+                WorkspaceIsolationIntegrationTest.globexSession(),
+                WorkspaceIsolationIntegrationTest.WS_GLOBEX,
+                prefix = "test/tree875/globex",
+                datasource = GLOBEX_DATASOURCE,
+                registrar = WorkspaceIsolationIntegrationTest.globexSuperAdminSession(),
+            ).also { globexRoots = it }
+
+    /** A well-formed key of [family] that exists in no workspace: the globex key with its own name swapped out. */
+    private fun absentKey(
+        family: String,
+        globexKey: String,
+    ): String = if (family == "schedule") ABSENT_SCHEDULE else globexKey.replace("globex", "nowhere")
 
     /** One answer: its status, and a fingerprint of its body with the request's own ids removed. */
     private data class Answer(
@@ -597,6 +648,10 @@ class WorkspaceIsolationSweepTest {
             )
         const val API_KEY_HEADER = "DP-API-Key"
         const val SESSION_COOKIE = "dp_session"
+        private const val TREE_HANDLER = "DependenciesController"
+        private const val GLOBEX_DATASOURCE = "tree875_globex"
+        private const val ABSENT_SCHEDULE = "0000875a-0000-4000-8000-000000000000"
+        private var globexRoots: DependencyTreeQueries.Roots? = null
         const val CSRF_COOKIE = "dp_csrf"
         const val CSRF_HEADER = "DP-CSRF-Token"
 
@@ -604,6 +659,7 @@ class WorkspaceIsolationSweepTest {
         const val HTTP_FORBIDDEN = 403
         const val USER_KEY_OFF_SURFACE = "mcp_key_off_surface"
         const val HTTP_NOT_FOUND = 404
+        private const val HTTP_OK = 200
         const val LEAK_EXCERPT = 300
 
         /** Shorter tokens ("1", "GET") would blank out half the page and hide a real difference. */

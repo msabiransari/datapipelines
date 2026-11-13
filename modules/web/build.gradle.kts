@@ -30,6 +30,11 @@ dependencies {
     // #10 L1b: the visualization/dashboard REST routes and the module's wiring (web/config/VisualizationConfiguration)
     // — the edge the root map allowed ahead, declared now that `web` compiles against it.
     implementation(project(":modules:visualization"))
+    // #785 — the managed lake: LakeCatalogStartupCheck calls its after-Flyway boot check (web/config).
+    implementation(project(":modules:lake"))
+    // #868 G1 — the release wiring: the production FamilyRegistry, GraphLimits and the ReleasePlanningDeadline seam
+    // (web/release/ReleaseConfiguration) are dependency-contract types.
+    implementation(project(":modules:dependency-contract"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.actuator)
@@ -66,6 +71,8 @@ dependencies {
     implementation(libs.slf4j.api)
 
     // --- Tests -------------------------------------------------------------------
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.kotlinx.coroutines.test)
     // Module-local integration tests: a Postgres container running app's real V1
@@ -89,6 +96,14 @@ dependencies {
     // raw text, so string content and injected markup are indistinguishable without a
     // parser). Test scope only; version pinned in libs.versions.toml.
     testImplementation(libs.jsoup)
+}
+
+// Owner-authored starter and dashboard runtime are own code, not third-party assets.
+val generateVendoredAssetNotices = tasks.register<VendoredAssetNoticesTask>("generateVendoredAssetNotices") {
+    manifest.set(layout.projectDirectory.file("src/main/resources/static/vendor/design-system/vendor-manifest.json"))
+    vendorDirectory.set(layout.projectDirectory.dir("src/main/resources/static/vendor"))
+    firstParty.set(listOf("design-system", "datapipelines-dashboard-runtime"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/vendored-asset-notices"))
 }
 
 // 033 — the spec set ships IN THE JAR: docs served in-product always describe the version
@@ -116,6 +131,7 @@ dependencies {
 // documentation. template-hierarchy-design.md proposes schema and contract that does not
 // exist yet, so shipping it would describe a version nobody runs.
 tasks.named<ProcessResources>("processResources") {
+    from(generateVendoredAssetNotices) { into("static/vendor") }
     from(rootProject.layout.projectDirectory.dir("docs")) {
         into("docs")
         include(
@@ -139,6 +155,8 @@ tasks.named<ProcessResources>("processResources") {
             "README.md",
             "rest-api.md",
             "ROADMAP.md",
+            // #699 — the scheduler's operating contract, under the Operations manual.
+            "scheduler.md",
             "staging.md",
             "templates.md",
             "type-system.md",
@@ -364,6 +382,7 @@ val websiteExportAssets =
         doFirst { exportDir.get().asFile.deleteRecursively() }
         from("src/main/resources/static/site") { into("site") }
         from("src/main/resources/static/vendor/design-system") { into("vendor/design-system") }
+        from(generateVendoredAssetNotices) { into("vendor") }
         // Site v2: site.css declares its own faces (Manrope, JetBrains Mono) by relative url();
         // the export's completeness check reads href/src, not CSS url(), so this copy is the
         // only thing standing between the static site and system-font fallback.

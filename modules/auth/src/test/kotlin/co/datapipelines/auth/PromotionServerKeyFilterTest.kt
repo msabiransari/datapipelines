@@ -49,6 +49,7 @@ class PromotionServerKeyFilterTest {
     private val errorWriter = AuthErrorWriter(ObjectMapper())
     private val clientAddressResolver = ClientAddressResolver(emptyList())
 
+    // raw-list-appender: synchronous — the filter runs on the test thread over mocks; no executor
     private val appender = ListAppender<ILoggingEvent>()
     private lateinit var logger: Logger
 
@@ -277,6 +278,38 @@ class PromotionServerKeyFilterTest {
         chain.request shouldBe null
         SecurityContextHolder.getContext().authentication shouldBe null
         verify(exactly = 0) { apiKeyRepository.touchUsage(any(), any(), any()) }
+    }
+
+    /**
+     * #847 — the store could not CHECK the key (a native verification fault). That is not "your key
+     * is wrong": the peer gets the 503 envelope, not `auth.promotion.key_invalid`, no audit row is
+     * written (nothing was judged), one ERROR line names no credential, and the chain stops.
+     */
+    @Test
+    fun `a native verification fault is a 503, never key_invalid, with no audit row and the chain stopped`() {
+        val response = MockHttpServletResponse()
+        val chain = MockFilterChain()
+        val fault =
+            SecretVerificationUnavailableException(
+                Argon2SecretHasher.MEMORY_ALLOCATION_ERROR,
+                IllegalStateException("Memory allocation error (-22)"),
+            )
+
+        filter(configuredKey = KEY, stored = null, refusal = fault)
+            .doFilter(promotionRequest(header = "dpk_ZZZZZZZZZZZZ.$SECRET_HALF"), response, chain)
+
+        response.status shouldBe 503
+        errorCodeOf(response) shouldBe AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
+        response.contentAsString shouldNotContain "emory"
+        chain.request shouldBe null
+        SecurityContextHolder.getContext().authentication shouldBe null
+        verify(exactly = 0) {
+            auditLogger.log(event = any(), userId = any(), keyId = any(), sourceIp = any(), userAgent = any(), details = any())
+        }
+        verify(exactly = 0) { apiKeyRepository.touchUsage(any(), any(), any()) }
+        val errors = appender.list.filter { it.level == Level.ERROR }
+        errors.size shouldBe 1
+        appender.list.forEach { it.formattedMessage shouldNotContain SECRET_HALF }
     }
 
     @Test

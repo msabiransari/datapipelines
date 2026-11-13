@@ -16,7 +16,7 @@ import java.util.UUID
  *
  *  - **Endpoints** through [EndpointPublishService.list] and [EndpointPublishService.listLegacy] —
  *    the console's two lists, behind the promoter lens — and the served version per pipeline
- *    from [PipelineNames.servedVersions], the console's own lookup.
+ *    from [PipelineNames.endpointPins], the console's own lookup.
  *  - **Keys** through [keysVisibleTo] — the Keys page's rule: the workspace's keys with
  *    `api_key.read`, otherwise the caller's own `mcp` keys.
  *
@@ -42,12 +42,12 @@ class ApiHomeReads(
         val workspaceId = principal.requireWorkspace().id
         val valid = publishing.list(principal)
         val legacy = publishing.listLegacy(principal)
-        val ids = valid.map { it.pipelineId }.toSet()
+        val pins = pipelineNames.endpointPins(workspaceId, valid.map { it.id })
         return EndpointInventory(
             valid = valid,
             legacyCount = legacy.size,
-            served = pipelineNames.servedVersions(workspaceId, ids),
-            names = pipelineNames.lookup(workspaceId, ids),
+            served = pins.served,
+            names = pins.names,
         )
     }
 
@@ -56,7 +56,7 @@ class ApiHomeReads(
         keysVisibleTo(principal, apiKeys.findByWorkspace(principal.requireWorkspace().id))
 }
 
-/** One endpoints read: the valid rows, how many legacy rows sit beside them, and each pipeline's served pointer and name. */
+/** One endpoints read: the valid rows, how many legacy rows sit beside them, and each ENDPOINT's served pin and pipeline name (#786). */
 data class EndpointInventory(
     val valid: List<PublishedEndpoint>,
     val legacyCount: Int,
@@ -65,7 +65,7 @@ data class EndpointInventory(
 ) {
     /** What the endpoint at [endpoint] answers with — the console's served cell, as a bucket. */
     fun stateOf(endpoint: PublishedEndpoint): EndpointState =
-        when (served[endpoint.pipelineId]?.draft) {
+        when (served[endpoint.id]?.draft) {
             null -> EndpointState.NOTHING_TO_SERVE
             true -> EndpointState.SERVING_DRAFT
             false -> EndpointState.SERVING_RELEASE
@@ -152,7 +152,7 @@ internal object ApiHomeWords {
                 "Open the console",
                 "Every published path, what it serves and how to call it.",
                 ApiOverviewController.CONSOLE,
-                "released",
+                OverviewPage.TaskTone.RELEASED,
             ),
             OverviewPage
                 .TaskRow(
@@ -161,7 +161,7 @@ internal object ApiHomeWords {
                     "Manage keys",
                     "See which keys are live, and which paths each one reaches.",
                     ApiOverviewController.KEYS_PAGE,
-                    "released",
+                    OverviewPage.TaskTone.RELEASED,
                 ).takeIf { keysReadable },
         )
 

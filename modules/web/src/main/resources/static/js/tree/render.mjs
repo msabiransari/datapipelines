@@ -9,6 +9,7 @@ export function icon(document, name) {
 /** Keyed reconciliation touches only groups whose children or status changed. */
 export function createTreeRenderer(host, state, options) {
   const document = host.ownerDocument;
+  const leafGlyph = ["file", "workflow", "code", "boxes", "chart-line", "sliders-horizontal"].includes(options.leafGlyph) ? options.leafGlyph : "file";
   const rows = new Map(); const groups = new Map(); const notices = new Map();
   const root = document.createElement("div"); root.className = "dp-tree-rows"; root.setAttribute("role", "tree");
   root.setAttribute("aria-label", options.label || "Items"); host.append(root); groups.set(null, root);
@@ -26,10 +27,14 @@ export function createTreeRenderer(host, state, options) {
     const control = document.createElement(node.kind === "folder" ? "button" : (options.getHref?.(node) ? "a" : "button"));
     if (control.tagName === "BUTTON") control.type = "button";
     control.tabIndex = -1; control.className = "dp-tree-activate";
-    control.append(icon(document, node.kind === "folder" ? "chevron-right" : "file"));
-    // #604 — the row's regions: the label is the title; the badges live in a trailing
-    // metadata region (present even when nothing shows, so the title's box never changes
-    // when a badge appears or leaves). The control stays the line's first child.
+    // #943 — a folder's disclosure marker (the explorer's chevron); CSS rotates it off the
+    // item's aria-expanded. A leaf has none: its row leaves the slot empty.
+    if (node.kind === "folder") { const chevron = icon(document, "chevron-right"); chevron.classList.add("dp-tree-chevron"); control.append(chevron); }
+    const glyph = icon(document, node.kind === "folder" ? "folder" : leafGlyph); glyph.classList.add("dp-tree-glyph");
+    control.append(glyph);
+    // #604/#701 — the row's regions: the label is the title, on one line, and yields width
+    // to the trailing metadata region that holds the badges. The region is present even when
+    // nothing shows, so the DOM contract holds. The control stays the line's first child.
     const label = document.createElement("span"); label.className = "dp-tree-title"; control.append(label);
     const meta = document.createElement("span"); meta.className = "dp-tree-meta"; control.append(meta);
     const version = document.createElement("span"); version.className = "ds-badge ds-badge-default dp-tree-version";
@@ -42,7 +47,7 @@ export function createTreeRenderer(host, state, options) {
     meta.append(version, draft, review); line.append(control);
     const group = document.createElement("div"); group.className = "dp-tree-group"; group.setAttribute("role", "group"); item.append(group);
     groups.set(node.key, group);
-    const row = { item, control, label, meta, version, draft, review, group, node };
+    const row = { item, control, label, meta, version, draft, review, glyph, group, node };
     control.addEventListener("click", event => {
       const live = row.node; focusedKey = live.key; item.focus();
       if (live.kind === "folder") { event.preventDefault(); toggle(live.key); }
@@ -52,6 +57,16 @@ export function createTreeRenderer(host, state, options) {
     rows.set(node.key, row); return row;
   }
   function toggle(key) { state.open.has(key) ? state.collapse(key) : state.expand(key); }
+  // #701 — a row's glyph (owner ruling 2026-10-24): a folder's follows its expansion in
+  // the same indent slot (folder closed / folder-open expanded), a leaf's allowlisted family glyph
+  // never changes. Rewriting the <use> href keeps icon() the only constructor and the
+  // vendored sprite the only source.
+  function setGlyph(row) {
+    const name = row.node.kind === "folder" ? (state.open.has(row.node.key) ? "folder-open" : "folder") : leafGlyph;
+    const href = `/vendor/icons/lucide-sprite.svg#${name}`;
+    const use = row.glyph.children[0];
+    if (use && use.getAttribute("href") !== href) use.setAttribute("href", href);
+  }
   function visibleRows() { return Array.from(root.querySelectorAll('[role="treeitem"]')).filter(item => !item.closest("[hidden]")); }
   function setTabs() {
     const visible = visibleRows();
@@ -116,6 +131,7 @@ export function createTreeRenderer(host, state, options) {
       if (node.kind === "folder") {
         const expanded = state.open.has(node.key); row.item.setAttribute("aria-expanded", String(expanded));
         row.group.hidden = !expanded; row.control.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${node.name}`);
+        setGlyph(row);
         if (expanded && (!shallow || fresh)) reconcile(node.key, depth + 1, shallow);
       } else { row.group.hidden = true; row.item.removeAttribute("aria-expanded"); }
       const current = group.children[index]; if (current !== row.item) group.insertBefore(row.item, current || null);
@@ -136,6 +152,7 @@ export function createTreeRenderer(host, state, options) {
     return groups.get(parent);
   }
   function render(scope) {
+    root.setAttribute("data-tree-searching", String(Boolean(state.query)));
     if (scope && !scope.searching && !state.query && groups.has(scope.parent) &&
         (scope.parent === null || (rows.has(scope.parent) && state.open.has(scope.parent)))) return renderLevel(scope.parent);
     const hadFocus = root.contains(document.activeElement);
@@ -150,6 +167,7 @@ export function createTreeRenderer(host, state, options) {
       if (row.node.kind === "folder") {
         row.item.setAttribute("aria-expanded", String(state.open.has(row.node.key)));
         row.group.hidden = !state.open.has(row.node.key);
+        setGlyph(row);
       }
     });
     setTabs();

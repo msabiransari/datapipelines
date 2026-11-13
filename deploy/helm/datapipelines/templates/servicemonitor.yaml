@@ -1,0 +1,24 @@
+{{- if and .Values.management.expose .Values.management.serviceMonitor.enabled }}
+{{/* Rendered behind the EXPLICIT serviceMonitor.enabled flag, deliberately not
+     behind a .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" probe: a
+     capability probe would make `helm template` output depend on the cluster it
+     runs against (whether the Prometheus operator's CRDs happen to be
+     installed), so the same values could render differently in CI, in a diff
+     and on the cluster. An explicit flag renders the same everywhere. */}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "datapipelines.fullname" . }}-management
+  {{- with .Values.management.serviceMonitor.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "datapipelines.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: management
+      path: /actuator/prometheus
+      interval: {{ .Values.management.serviceMonitor.interval }}
+{{- end }}

@@ -40,7 +40,7 @@
         design, not a limitation being worked around.
       </p>
       <!-- claim: docs/staging.md §3.1 -->
-      <p>
+      <p class="section-note">
         Each execution gets its own isolated instance at <code>jdbc:h2:mem:exec_{execution_id}</code>, with no
         <code>DB_CLOSE_DELAY</code>: the database exists exactly while a connection to it is open, so a leaked
         staging database is not a shape this can take. The connection the author's SQL runs on is a de-privileged
@@ -83,13 +83,13 @@
       </p>
 
       <h3>Node 1: the trips, from Postgres</h3>
-      <p>A <code>DQL</code> node against the <code>sample-trips</code> datasource, staged as <code>stg_trips_monthly</code>.</p>
+      <p class="section-note">A <code>DQL</code> node against the <code>sample-trips</code> datasource, staged as <code>stg_trips_monthly</code>.</p>
 
       <h3>Node 2: the zones, from SQLite</h3>
-      <p>A <code>DQL</code> node against the <code>sample-reference</code> datasource, staged as <code>stg_zones</code>.</p>
+      <p class="section-note">A <code>DQL</code> node against the <code>sample-reference</code> datasource, staged as <code>stg_zones</code>.</p>
 
       <h3>Node 3: the join, in staging</h3>
-      <p>Source <code>tempdb</code>. This is the pipeline's SQL, verbatim:</p>
+      <p class="section-note">Source <code>tempdb</code>. This is the pipeline's SQL, verbatim:</p>
       <div class="code-block">
         <pre><code>SELECT
     z.borough                                                AS borough,
@@ -105,12 +105,12 @@ ORDER BY SUM(t.total_revenue) DESC</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/staging.md §3.1 -->
-      <p>
+      <p class="section-note">
         Unquoted references to staged tables resolve because the staging database runs in PostgreSQL compatibility
         mode with lower-folded identifiers, the author style the specs themselves use. That parameter is a
         correctness invariant of the identifier scheme, not an operator preference.
       </p>
-      <p>
+      <p class="section-note">
         The demo family goes further: <code>nyc/mobility/rainy_vs_dry_ridership</code> joins the same Postgres
         trips to daily precipitation from a MySQL datasource and a calendar from SQLite, one query,
         nothing landed.
@@ -134,7 +134,7 @@ ORDER BY SUM(t.total_revenue) DESC</code></pre>
         <li><strong>This is not data virtualization as a platform, and not a federated query engine.</strong> A federated query engine plans one SQL statement across engines; there is no such planner here, no unified catalog and no query optimiser spanning sources. A cross-database query here is a pipeline: one node per source, each running native SQL where the data lives, and one join node over their results in staging, which is the part most teams actually needed.</li>
         <li><strong>It is not an ETL tool.</strong> Nothing is copied anywhere on a schedule. If you want a result written back to a database, that is a node you add on purpose.</li>
       </ul>
-      <p><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;
+      <p class="section-note"><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;
          <a th:href="@{/docs/staging}">Staging specification &rarr;</a> &middot;
          <a th:href="@{/docs/pipeline-contract}">Pipeline contract &rarr;</a></p>
     </div>
@@ -152,7 +152,7 @@ ORDER BY SUM(t.total_revenue) DESC</code></pre>
   </section>
 
   <section class="section" aria-labelledby="cta-title">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="cta-title" class="ds-headline">Run the join on the demo, then on your databases</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">

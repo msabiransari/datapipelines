@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * ## Why not H2's own `JdbcConnectionPool`
  *
- * Read against the pinned driver (2.3.232, `org.h2.jdbcx.JdbcConnectionPool`), and each point
+ * Read against the pinned driver (2.3.232, 2026-09-16, `org.h2.jdbcx.JdbcConnectionPool`), and each point
  * is the reason a thin adapter over it would have been larger than this class:
  *
  * - **Checkout busy-polls.** An exhausted `getConnection()` spins on `Thread.sleep(1)` for up to

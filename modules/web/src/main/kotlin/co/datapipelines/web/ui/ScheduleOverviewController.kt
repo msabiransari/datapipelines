@@ -33,8 +33,8 @@ import java.util.UUID
  * #639 — on the v2 frame (ui-screens §4.20a): the four tiles are the strip's metrics (each
  * help its note; enabled, paused and blocked dotted in their By condition bar's tone, so a dot and
  * its bar never disagree), the total is the View all badge, each chart is a bars panel with a
- * description and an info dialog, and Continue your work opens on See what runs next. There is no
- * Unblock row: the explorer has no condition filter for it to open.
+ * description and an info dialog. Continue your work includes Unblock while a schedule is blocked,
+ * opening the explorer with `condition=blocked`; See what runs next opens the unfiltered explorer.
  */
 @Controller
 class ScheduleOverviewController(

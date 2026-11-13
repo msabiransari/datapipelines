@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
@@ -46,7 +47,7 @@ class DocsRenderTest {
      * `processResources` used to take `include("*.md")` minus five excludes, so a new
      * Markdown file under `docs` was published — to the world, at `/docs/<slug>`, on the public site's
      * sitemap — the moment it landed, and the only thing between a contributor note and
-     * that was somebody remembering to add an exclude. The Gradle block now names its 24
+     * that was somebody remembering to add an exclude. The Gradle block now names its 25
      * files; this pins the COUNT, so both directions are visible: a doc added to the build
      * file without a decision here, and a doc silently dropped from packaging (which is how
      * an in-product link goes dead).
@@ -55,7 +56,7 @@ class DocsRenderTest {
      * on what actually shipped rather than on what the build file says.
      */
     @Test
-    fun `exactly the 24 allowlisted docs are packaged`() {
+    fun `exactly the 25 allowlisted docs are packaged`() {
         val packaged = catalog.index().flatMap { it.docs }.map { it.slug }
 
         packaged.size shouldBe PACKAGED_DOCS
@@ -68,6 +69,19 @@ class DocsRenderTest {
             "semantic-layer-research",
             "template-hierarchy-design",
         ).forEach { packaged shouldNotContain it }
+    }
+
+    /**
+     * #699 — the scheduler's contract is packaged AND grouped under the Operations manual: the
+     * marketing page `/pipeline-scheduling` links `/docs/scheduler`, so a dropped include is a
+     * dead link on the public site, and a doc moved to another group is a reader who cannot find it.
+     */
+    @Test
+    fun `the scheduler doc is packaged under the Operations manual and renders`() {
+        val operations = catalog.index().single { it.name == "Operations manual" }
+        operations.docs.map { it.slug } shouldContain "scheduler"
+        val doc = catalog.render("scheduler") ?: error("scheduler.md must be packaged (#699)")
+        doc.html shouldContain "TODAY"
     }
 
     @Test
@@ -199,8 +213,8 @@ class DocsRenderTest {
         ).withRoles().apply { fillLayoutChrome() }
 
     private companion object {
-        /** The 24 filenames modules/web/build.gradle.kts names, one per deliberate publish (24 since #10 L1a's dashboards.md). */
-        const val PACKAGED_DOCS = 24
+        /** The 25 filenames modules/web/build.gradle.kts names, one per deliberate publish (25 since #699's scheduler.md). */
+        const val PACKAGED_DOCS = 25
 
         val COMMENTS = Regex("<!--[\\s\\S]*?-->")
     }

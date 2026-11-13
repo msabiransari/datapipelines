@@ -9,7 +9,9 @@ import co.datapipelines.auth.PermissionResolverInstallation
 import co.datapipelines.auth.RolePermissionsResolver
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.scheduler.DeliveryOffReason
 import co.datapipelines.scheduler.MissedRunPolicy
+import co.datapipelines.scheduler.NotificationDeliveryState
 import co.datapipelines.scheduler.Occurrence
 import co.datapipelines.scheduler.RunDetail
 import co.datapipelines.scheduler.RunOrigin
@@ -61,6 +63,7 @@ class SchedulesControllerTest {
     private val service = mockk<ScheduleService>()
     private val audit = RecordingAudit()
     private val mapper = ObjectMapper()
+    private val lakeAuthorization = mockk<ScheduleLakeAppendAuthorization>(relaxed = true)
     private val user = UUID.randomUUID()
     private val workspace = UUID.randomUUID()
     private val scheduleId = UUID.randomUUID()
@@ -75,8 +78,10 @@ class SchedulesControllerTest {
         every {
             jdbc.query(any<String>(), any<Map<String, Any?>>(), any<RowMapper<Pair<UUID, String>>>())
         } answers { listOf(user to "Alice") }
+        // #442b — the deployment's computed delivery state; the default deployment's is off/disabled.
+        every { service.notificationDelivery() } returns NotificationDeliveryState(DeliveryOffReason.DISABLED)
         actorNames = ActorNames(jdbc)
-        controller = SchedulesController(service, audit, mapper, actorNames)
+        controller = SchedulesController(service, audit, mapper, actorNames, lakeAuthorization)
     }
 
     @BeforeEach
@@ -120,7 +125,7 @@ class SchedulesControllerTest {
             val data =
                 if (list) {
                     controller
-                        .list(null, null, null)
+                        .list(null, null, null, null, null)
                         .data.items
                         .single()
                 } else {
@@ -178,7 +183,7 @@ class SchedulesControllerTest {
             val data =
                 if (list) {
                     controller
-                        .list(null, null, null)
+                        .list(null, null, null, null, null)
                         .data.items
                         .single()
                 } else {
@@ -239,7 +244,7 @@ class SchedulesControllerTest {
         every { service.create(any(), any(), capture(request), null) } returns Written(schedule(), replayed = false)
 
         controller.create(
-            """{"name":"a/b","payload":{"pipeline":"a/p","version":"current"},"cron":"0 6 * * *","timezone":"UTC"}""",
+            """{"name":"a/b","payload":{"pipeline":"a/p","version":1},"cron":"0 6 * * *","timezone":"UTC"}""",
             null,
         )
 
@@ -265,6 +270,25 @@ class SchedulesControllerTest {
     }
 
     // ------------------------------------------------------------------------------ edit / delete
+
+    @Test
+    fun `a lake authority refusal prevents both create and update before persistence or audit`() {
+        // The persistence stand-ins would succeed if the guard were omitted: missing the check must be observable.
+        every { service.create(any(), any(), any(), any()) } returns Written(schedule(), replayed = false)
+        every { service.update(any(), any(), any(), any(), any()) } returns schedule()
+        every { lakeAuthorization.check(any(), any()) } throws
+            co.datapipelines.typesystem.DatapipelinesException(
+                co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_FORBIDDEN,
+                "Lake authority refused.",
+            )
+        shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { controller.create(BODY, null) }
+            .code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_FORBIDDEN
+        shouldThrow<co.datapipelines.typesystem.DatapipelinesException> { controller.update(scheduleId, BODY, "3") }
+            .code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Lake.APPEND_FORBIDDEN
+        verify(exactly = 0) { service.create(any(), any(), any(), any()) }
+        verify(exactly = 0) { service.update(any(), any(), any(), any(), any()) }
+        audit.events.shouldBeEmpty()
+    }
 
     @Test
     fun `edit reads the revision from If-Match - bare, quoted or weak - and audits`() {
@@ -366,10 +390,36 @@ class SchedulesControllerTest {
     fun `the list pages with one extra row to learn has_more`() {
         every { service.list(workspace, "finance/", 3, 0, any()) } returns List(3) { schedule() }
 
-        val data = controller.list(" finance/ ", 0, 2).data
+        val data = controller.list(" finance/ ", 0, 2, null, null).data
 
         data.items.size shouldBe 2
         data.pagination.hasMore shouldBe true
+    }
+
+    @Test
+    fun `the list hands the condition word to the service as given - the service owns its one validation`() {
+        every { service.list(workspace, null, 3, 0, any(), "blocked") } returns List(1) { schedule() }
+        every { service.list(workspace, null, 3, 0, any(), "nope") } throws
+            ScheduleException(ScheduleErrorCodes.REQUEST_INVALID, "refused", mapOf("field" to "condition"))
+
+        controller
+            .list(null, 0, 2, "blocked", null)
+            .data.items.size shouldBe 1
+        shouldThrow<ScheduleException> { controller.list(null, 0, 2, "nope", null) }.details["field"] shouldBe "condition"
+        verify(exactly = 1) { service.list(workspace, null, 3, 0, any(), "blocked") }
+    }
+
+    @Test
+    fun `the list hands the outcome word to the service beside the condition - the service owns its one validation`() {
+        every { service.list(workspace, null, 3, 0, any(), "blocked", "failed") } returns List(1) { schedule() }
+        every { service.list(workspace, null, 3, 0, any(), null, "nope") } throws
+            ScheduleException(ScheduleErrorCodes.REQUEST_INVALID, "refused", mapOf("field" to "outcome"))
+
+        controller
+            .list(null, 0, 2, "blocked", "failed")
+            .data.items.size shouldBe 1
+        shouldThrow<ScheduleException> { controller.list(null, 0, 2, null, "nope") }.details["field"] shouldBe "outcome"
+        verify(exactly = 1) { service.list(workspace, null, 3, 0, any(), "blocked", "failed") }
     }
 
     @Test
@@ -426,7 +476,7 @@ class SchedulesControllerTest {
         revision = revision,
         executorId = "pipeline",
         payloadSchemaVersion = 1,
-        payload = mapper.readTree("""{"pipeline":"finance/revenue","version":"current"}"""),
+        payload = mapper.readTree("""{"pipeline":"finance/revenue","version":1}"""),
         parameters = mapper.createObjectNode(),
         targetRef = "pipeline:finance/revenue",
         cron = "0 6 * * *",
@@ -457,7 +507,7 @@ class SchedulesControllerTest {
             scheduleRevision = 3,
             executorId = "pipeline",
             payloadSchemaVersion = 1,
-            payload = mapper.readTree("""{"pipeline":"finance/revenue","version":"current"}"""),
+            payload = mapper.readTree("""{"pipeline":"finance/revenue","version":1}"""),
             parameters = mapper.createObjectNode(),
             prepared = null,
             actorUserId = UUID.randomUUID(),
@@ -517,7 +567,7 @@ class SchedulesControllerTest {
         val RUN_ID: UUID = UUID.fromString("00000000-0000-0000-0000-00000000f00d")
         val EXECUTION_ID: UUID = UUID.fromString("00000000-0000-0000-0000-00000000e0ec")
         const val BODY =
-            """{"name":"finance/daily/revenue","payload":{"pipeline":"finance/revenue","version":"current"},""" +
+            """{"name":"finance/daily/revenue","payload":{"pipeline":"finance/revenue","version":1},""" +
                 """"cron":"0 6 * * *","timezone":"UTC"}"""
     }
 }

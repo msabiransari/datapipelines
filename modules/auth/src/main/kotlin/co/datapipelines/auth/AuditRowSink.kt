@@ -76,6 +76,9 @@ class AuditRowSink(
      * that the unbatched INSERT would have let through). Everything else propagates: an
      * `IllegalStateException` or any other runtime exception from the driver or the template, and
      * an `Error`.
+     *
+     * The batched path is outside every caller transaction by construction; inside one, `AuditLogger`
+     * never reaches this sink and a refused row propagates to the caller instead (#704).
      */
     override fun propagates(failure: Throwable): Boolean = failure !is DataAccessException && failure !is TransactionException
 

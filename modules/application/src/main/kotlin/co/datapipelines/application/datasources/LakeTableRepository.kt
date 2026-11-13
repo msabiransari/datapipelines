@@ -45,8 +45,8 @@ class LakeTableRepository(
             jdbc
                 .query(
                     """
-                    INSERT INTO lake_tables (datasource_id, namespace, name, format, location, partition_column, registered_by)
-                    VALUES (:datasourceId, :namespace, :name, :format, :location, :partitionColumn, :registeredBy)
+                    INSERT INTO lake_tables (datasource_id, namespace, name, format, location, partition_column, registered_by, origin)
+                    VALUES (:datasourceId, :namespace, :name, :format, :location, :partitionColumn, :registeredBy, 'external')
                     $RETURNING
                     """.trimIndent(),
                     params(datasourceId, registration, actor, namespaceArray),
@@ -68,8 +68,8 @@ class LakeTableRepository(
             jdbc
                 .query(
                     """
-                    INSERT INTO lake_tables (datasource_id, namespace, name, format, location, partition_column, registered_by)
-                    VALUES (:datasourceId, :namespace, :name, :format, :location, :partitionColumn, :registeredBy)
+                    INSERT INTO lake_tables (datasource_id, namespace, name, format, location, partition_column, registered_by, origin)
+                    VALUES (:datasourceId, :namespace, :name, :format, :location, :partitionColumn, :registeredBy, 'external')
                     ON CONFLICT (datasource_id, namespace, name) DO NOTHING
                     $RETURNING
                     """.trimIndent(),
@@ -157,14 +157,14 @@ class LakeTableRepository(
         const val SELECT_COLUMNS =
             """
             SELECT id, datasource_id, namespace, name, format, location, partition_column, registered_by, registered_at,
-                   last_error, last_error_at
+                   last_error, last_error_at, origin, revision_seq
               FROM lake_tables
             """
 
         const val RETURNING =
             """
             RETURNING id, datasource_id, namespace, name, format, location, partition_column, registered_by, registered_at,
-                      last_error, last_error_at
+                      last_error, last_error_at, origin, revision_seq
             """
 
         val MAPPER =
@@ -185,6 +185,10 @@ class LakeTableRepository(
                     registeredAt = rs.getTimestamp("registered_at").toInstant(),
                     lastError = rs.getString("last_error"),
                     lastErrorAt = rs.getTimestamp("last_error_at")?.toInstant(),
+                    origin =
+                        LakeTableOrigin.fromWireOrNull(rs.getString("origin"))
+                            ?: error("lake_tables row ${rs.getObject("id")} holds an unknown origin"),
+                    revisionSeq = rs.getLong("revision_seq").takeUnless { rs.wasNull() },
                 )
             }
     }

@@ -1,10 +1,8 @@
 package co.datapipelines.pipeline
 
+import co.datapipelines.pipeline.release.ReleasedDependency
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.annotation.Transactional
-import org.springframework.transaction.support.SimpleTransactionStatus
-import org.springframework.transaction.support.TransactionCallback
-import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
 
 /**
@@ -49,14 +47,16 @@ enum class ReleaseCallerOutput(
  *    save-time gate; nothing is released the validator would refuse.
  * 3. **Every template version pinned by the draft body is RELEASED** (versioning §6 —
  *    templates lock first). A pin on a DRAFT template version fails with
- *    `pipeline.release.template_not_released` naming the template and version; pinning a
+ *    `pipeline.release.dependency_not_released` naming the template and version; pinning a
  *    draft template from a draft pipeline is legal while iterating and only becomes an
- *    error here. Since 142 the caller may CONSENT to the cascade instead
- *    (`releasePinnedTemplates = true`): every DRAFT pin is released through the
- *    [TemplateReleaser] port in the SAME transaction as the flip, templates first — one
- *    consent, one transaction, and the result names what was released so the surfaces can
- *    audit each template as if released by hand. A DISCARDED or MISSING pin is never
- *    releasable and refuses exactly as before, flag or no flag.
+ *    error here. The caller may consent to releasing the draft dependencies with the pipeline
+ *    (#517's plan, or 142's `release_pinned_templates` alias).
+ *
+ * Since #877 (§E.3) this service owns no release path of its own: every release runs through the
+ * `web` release coordinator (`PipelineService` requires one), which walks the dependency closure,
+ * refuses on the guard and flips every node in ONE transaction. This class keeps the pipeline
+ * participant's seams the coordinator calls — [prepare], [revalidateStrict], [flip], [finish] and
+ * [warnings] — and the draft [purge].
  *
  * Releasing is never refused for the semantic link (transform-nodes design §8.2, 7e): a pin
  * that reads `needs_review` — it cites a retired learned fact — is released as asked and
@@ -70,7 +70,6 @@ enum class ReleaseCallerOutput(
  */
 open class PipelineReleaseService(
     private val pipelines: PipelineRepository,
-    private val templates: TemplateVersionStatuses,
     private val validator: PipelineValidator,
     private val authoring: AuthoringGuard,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
@@ -81,23 +80,6 @@ open class PipelineReleaseService(
      */
     private val checkGate: ReleaseCheckGate = ReleaseCheckGate.NONE,
     /**
-     * The 142 release cascade's write, as the port this module declares — `web` wires it over
-     * the template's own `TemplateReleaseService`. [TemplateReleaser.NONE] fails loudly if a
-     * cascade is ever asked of a construction that did not wire it; with the flag false (the
-     * default) the port is never touched, so pre-142 constructions behave as before.
-     */
-    private val templateReleaser: TemplateReleaser = TemplateReleaser.NONE,
-    /**
-     * The transaction the template-pin guard and the one-statement flip run in (see
-     * [release]). A `TransactionTemplate` over `metadataTransactionManager` in production;
-     * the default executes the action directly, which is what a directly-constructed test
-     * always did. Programmatic rather than annotated because the check gate MUST run outside
-     * the metadata transaction: its probes open customer-datasource connections, and
-     * `ConnectionLease` refuses exactly that with `datasource.lease_in_transaction` while a
-     * metadata transaction is open on the thread (056 §E.2).
-     */
-    private val transactions: TransactionOperations = DIRECT_TRANSACTIONS,
-    /**
      * 7e — which pinned template versions cite a retired fact (the `needs_review` read), as the
      * port this module declares; `web` wires it over the templates module's citation read.
      * [TemplateReviewMarks.NONE] keeps pre-7e constructions releasing with no warnings.
@@ -105,8 +87,12 @@ open class PipelineReleaseService(
     private val reviewMarks: TemplateReviewMarks = TemplateReviewMarks.NONE,
     /** Required dashboard pin evidence for purge; production supplies the workspace-scoped consumer. */
     private val dashboards: PipelineVersionConsumers,
+    /** #786 B.4 — the live API versions pinning a draft: a purge refuses them like a dashboard (record §14, A39). */
+    private val endpointVersions: EndpointVersionConsumers,
+    /** #786 B.4 — the live schedules running a draft (development posture's CURRENT draft) refuse its purge too. */
+    private val schedules: ScheduleConsumers,
 ) {
-    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
+    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards, endpointVersions, schedules)
 
     /** What a release produced: the bumped record, the released version, the released body. */
     data class Released(
@@ -147,47 +133,51 @@ open class PipelineReleaseService(
          * one-line change behind this field.
          */
         val callerOutput: ReleaseCallerOutput = ReleaseCallerOutput.NONE,
+        /**
+         * #517 (record §6) — every dependency the release flipped, in release order, whatever its family; the REST
+         * body appends it as `dependencies_released` only to a request that carried a plan, so a legacy request's
+         * bytes are unchanged.
+         */
+        val dependenciesReleased: List<ReleasedDependency> = emptyList(),
+        /**
+         * #517 (record §11) — true when the release coordinator already wrote every `*.version.released` row in the
+         * release's own transaction; the surfaces' after-commit audit then emits nothing for it.
+         */
+        val auditedInTransaction: Boolean = false,
     )
 
     /**
-     * Releases the pipeline's DRAFT at [expectedHash].
-     *
-     * Order of operations, and why the boundary sits where it does:
-     *
-     * 1. Authoring guard, draft read, body re-validation — plain reads.
-     * 2. **The release-check gate (140):** when the body carries `checks[]`, they run NOW,
-     *    fresh, `via = release`, OUTSIDE any metadata transaction (the probes open
-     *    customer-datasource connections; see [transactions]). Any `fail` or `error` verdict
-     *    refuses the release with `pipeline.check.failed` — unless [overrideChecksReason]
-     *    is a non-blank string of at least [OVERRIDE_REASON_MIN_CHARS] characters, in which
-     *    case the release proceeds and the result carries the overridden ids for the audit
-     *    event. A version with no checks skips the gate entirely: checks are opt-in.
-     * 3. The template-pin guard, the cascade and the flip, inside [transactions]: the guard's
-     *    reads are what the flip depends on, and re-running them in the flip's transaction
-     *    keeps the pre-140 guarantee that a pin cannot be released out from under the check.
-     *    With [releasePinnedTemplates] (142) every DRAFT pin is released through the
-     *    [TemplateReleaser] port FIRST, then the pipeline flips; any throw anywhere — a
-     *    template's own refusal, a stale hash on the flip, a concurrent write — unwinds the
-     *    transaction, so no template is left released with the pipeline still a draft.
-     *    Without the flag a DRAFT pin refuses as it always has; the refusal's details name the
-     *    first offending pin (unchanged) and, since 142, list every pin that is not RELEASED
-     *    under `pins_not_released`, so a client can tell whether consenting would help.
-     *
-     * @throws DatapipelinesException / [PipelineValidationException]:
-     *   `pipeline.version.not_draft`, §12 validation codes re-run on the draft body,
-     *   `pipeline.release.template_not_released`, `pipeline.check.failed`,
-     *   `pipeline.version.conflict` (stale hash), and — cascading — the template's own
-     *   refusals (`template.version.not_draft`, `template.version.conflict`, its validation).
+     * A release prepared OUTSIDE any metadata transaction (#517, record §4.1 step 4): the draft it found, the body
+     * that will become immutable, validated, and the release-check gate's verdict.
      */
-    @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued code
-    open fun release(
+    data class Prepared(
+        val workspaceId: UUID,
+        val pipelineId: UUID,
+        val draft: PipelineVersionDetail,
+        val bodyJson: String,
+        val pipeline: Pipeline,
+        val checksOverridden: List<String>,
+        val checksOverrideReason: String?,
+    )
+
+    /**
+     * A release's first steps, OUTSIDE any metadata transaction (#517, record §4.1 step 4): the authoring guard, the
+     * draft read, the body re-validated exactly as a save would (§5.3 precondition 3, so release can never launder an
+     * invalid draft) and the release-check gate (140). The gate runs the body's `checks[]` fresh, `via = release`, outside
+     * the transaction because its probes open customer-datasource connections, which `ConnectionLease` refuses with
+     * `datasource.lease_in_transaction` while a metadata transaction is open (056 §E.2). Any `fail` or `error` verdict
+     * refuses with `pipeline.check.failed` unless [overrideChecksReason] carries at least [OVERRIDE_REASON_MIN_CHARS]
+     * characters; a body with no checks skips the gate. With
+     * [allowDraftChildren] a DRAFT child pipeline pin passes validation — the coordinator flips that child first and
+     * re-validates strictly in its transaction ([revalidateStrict]).
+     */
+    open fun prepare(
         workspaceId: UUID,
         pipelineId: UUID,
-        expectedHash: String,
         actor: UUID,
-        overrideChecksReason: String? = null,
-        releasePinnedTemplates: Boolean = false,
-    ): Released {
+        overrideChecksReason: String?,
+        allowDraftChildren: Boolean = false,
+    ): Prepared {
         // §5.5: release is an authoring action — a promotion receiver refuses it.
         authoring.requirePipelineAuthoring()
 
@@ -195,52 +185,78 @@ open class PipelineReleaseService(
             pipelines.findDraftDetail(workspaceId, pipelineId)
                 ?: throw notDraft(pipelineId)
 
-        // The body that will become immutable — re-validate it exactly as a save would
-        // (§5.3 precondition 3), so release can never launder an invalid draft.
-        val bodyJson =
-            pipelines.findVersionBody(workspaceId, pipelineId, draft.version)
-                ?: throw notDraft(pipelineId)
+        val snapshot = pipelines.findDraftBodySnapshot(workspaceId, pipelineId, draft.version) ?: throw notDraft(pipelineId)
+        val bodyJson = snapshot.bodyJson
         val pipeline = deserializer.readOrThrow(bodyJson)
-        validator.validateOrThrow(pipeline, workspaceId)
+        validator.validateOrThrow(pipeline, workspaceId, allowDraftPipelineReferences = allowDraftChildren)
 
         val overridden = runCheckGate(workspaceId, pipelineId, draft.version, pipeline, actor, overrideChecksReason)
-
-        val released =
-            transactions.execute {
-                // §6: templates lock first — a DRAFT template pin blocks the pipeline's
-                // release unless the caller consented to the cascade (142). Checked — and,
-                // consenting, released — in the flip's transaction (see the KDoc above).
-                val cascaded =
-                    draftPinsToRelease(workspaceId, pipeline, releasePinnedTemplates)
-                        .map { ref -> templateReleaser.release(workspaceId, ref.id, ref.version, actor) }
-
-                val flipped =
-                    pipelines.releaseDraft(
-                        workspaceId = workspaceId,
-                        pipelineId = pipelineId,
-                        name = pipeline.name,
-                        displayName = pipeline.displayName,
-                        description = pipeline.description,
-                        expectedHash = expectedHash,
-                        actor = actor,
-                    ) ?: throw conflictAfterGuardFailure(workspaceId, pipelineId)
-                flipped to cascaded
-            }!!
-        val (flipped, cascaded) = released
-        // 7e: read AFTER the flip and outside its transaction — a warning describes what was
-        // released and can never unwind it.
-        val warnings = reviewWarnings(workspaceId, pipeline)
-        return Released(
-            flipped.record,
-            flipped.version,
+        return Prepared(
+            workspaceId,
+            pipelineId,
+            draft.copy(bodyHash = snapshot.bodyHash),
             bodyJson,
+            pipeline,
             overridden.first,
             overridden.second,
-            cascaded,
-            warnings,
-            callerOutputOf(pipeline, flipped.version),
         )
     }
+
+    /** Strict §12 validation of a prepared body, in the caller's transaction: children flipped in it now read RELEASED. */
+    open fun revalidateStrict(prepared: Prepared) {
+        validator.validateOrThrow(prepared.pipeline, prepared.workspaceId)
+    }
+
+    /**
+     * The one-statement flip of a prepared draft at exactly [expectedHash], in the release coordinator's transaction
+     * (#517). A stale hash or a vanished draft refuses with `pipeline.version.conflict` / `pipeline.version.not_draft`.
+     */
+    open fun flip(
+        prepared: Prepared,
+        expectedHash: String,
+        actor: UUID,
+    ): PipelineRepository.Released {
+        if (prepared.draft.bodyHash != expectedHash) throw conflictAfterGuardFailure(prepared.workspaceId, prepared.pipelineId)
+        return pipelines.releaseDraft(
+            workspaceId = prepared.workspaceId,
+            pipelineId = prepared.pipelineId,
+            name = prepared.pipeline.name,
+            displayName = prepared.pipeline.displayName,
+            description = prepared.pipeline.description,
+            expectedHash = prepared.draft.bodyHash,
+            actor = actor,
+            expectedVersion = prepared.draft.version,
+        ) ?: throw conflictAfterGuardFailure(prepared.workspaceId, prepared.pipelineId)
+    }
+
+    /**
+     * The release's result after its transaction committed: 7e's warnings are read AFTER the flip and outside its
+     * transaction — a warning describes what was released and can never unwind it. The coordinator (#517) builds the
+     * result inside its transaction for the strict audit row with [readWarnings] false, and adds [warnings] after commit.
+     */
+    open fun finish(
+        prepared: Prepared,
+        flipped: PipelineRepository.Released,
+        cascaded: List<TemplateRef>,
+        dependenciesReleased: List<ReleasedDependency> = emptyList(),
+        auditedInTransaction: Boolean = false,
+        readWarnings: Boolean = true,
+    ): Released =
+        Released(
+            flipped.record,
+            flipped.version,
+            prepared.bodyJson,
+            prepared.checksOverridden,
+            prepared.checksOverrideReason,
+            cascaded,
+            if (readWarnings) warnings(prepared) else emptyList(),
+            callerOutputOf(prepared.pipeline, flipped.version),
+            dependenciesReleased,
+            auditedInTransaction,
+        )
+
+    /** 7e's review warnings for a prepared body — read after the release committed, never inside it. */
+    open fun warnings(prepared: Prepared): List<ReleaseWarning> = reviewWarnings(prepared.workspaceId, prepared.pipeline)
 
     /**
      * #328 (D3) — the release's one word about its caller output, decided from the body the
@@ -285,64 +301,15 @@ open class PipelineReleaseService(
 
     /**
      * The body's template pins, distinct, in node order — only the nodes that HAVE one: a
-     * PIPELINE node pins a child pipeline and a CALCULATOR node a catalog function (see
-     * [draftPinsToRelease] for the defect the filter closed).
+     * PIPELINE node pins a child pipeline and a CALCULATOR node a catalog function; asking about
+     * their empty `@0` template would answer nothing true (`PromotionTwoDeploymentE2eTest` found
+     * the defect when the release guard asked it).
      */
     private fun templatePins(pipeline: Pipeline): List<TemplateRef> =
         pipeline.nodes
             .filter { it.type != NodeType.PIPELINE && it.type != NodeType.CALCULATOR }
             .map { it.template }
             .distinct()
-
-    /**
-     * The §6 pin guard, and the cascade's worklist (142): walks every template pin of the
-     * body in node order and answers the DRAFT pins the caller consented to release,
-     * deduplicated (two nodes pinning one version release it once). A pin that is not
-     * RELEASED and not a consented DRAFT refuses with `pipeline.release.template_not_released`
-     * — the first such pin in node order named at the top level exactly as before 142, every
-     * non-RELEASED pin listed under `pins_not_released`. The scan completes BEFORE any
-     * template is released, so a MISSING pin behind a DRAFT one never costs a rollback.
-     *
-     * Only the nodes that HAVE a template pin. A PIPELINE node pins a child pipeline and a
-     * CALCULATOR node evaluates a catalog function; neither declares a template, so
-     * `node.template` is the empty default there and asking the registry about `@0` answers
-     * MISSING — which refused the release of every pipeline containing one, naming
-     * `template_id: ""`. Latent since composition shipped and unmissable since D55, because
-     * now EVERY pipeline needs a release. Found by `PromotionTwoDeploymentE2eTest`, whose
-     * parent pipeline has a PIPELINE node.
-     */
-    private fun draftPinsToRelease(
-        workspaceId: UUID,
-        pipeline: Pipeline,
-        releasePinnedTemplates: Boolean,
-    ): List<TemplateRef> {
-        val pins = templatePins(pipeline).map { ref -> ref to templates.statusOf(workspaceId, ref.id, ref.version) }
-        val notReleased = pins.filter { (_, status) -> status != PipelineVersionStatus.RELEASED }
-        val blocking =
-            notReleased.firstOrNull { (_, status) -> !(releasePinnedTemplates && status == PipelineVersionStatus.DRAFT) }
-        if (blocking != null) {
-            val (ref, status) = blocking
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NOT_RELEASED,
-                message = "Template '${ref.id}' version ${ref.version} is not released; release the template first.",
-                details =
-                    mapOf(
-                        "template_id" to ref.id,
-                        "template_version" to ref.version,
-                        "template_status" to (status?.name ?: "MISSING"),
-                        "pins_not_released" to
-                            notReleased.map { (pin, pinStatus) ->
-                                mapOf(
-                                    "template_id" to pin.id,
-                                    "template_version" to pin.version,
-                                    "template_status" to (pinStatus?.name ?: "MISSING"),
-                                )
-                            },
-                    ),
-            )
-        }
-        return notReleased.map { (ref, _) -> ref }
-    }
 
     /**
      * The 140 gate: run the body's checks fresh (`via = release`) and refuse on any verdict
@@ -509,16 +476,5 @@ open class PipelineReleaseService(
          * one.
          */
         const val OVERRIDE_REASON_MIN_CHARS = 10
-
-        /**
-         * The default [TransactionOperations] for directly-constructed instances (tests):
-         * run the action straight through, with no transaction — exactly what an un-proxied
-         * service always did. Production wiring passes a `TransactionTemplate` over
-         * `metadataTransactionManager`.
-         */
-        private val DIRECT_TRANSACTIONS =
-            object : TransactionOperations {
-                override fun <T : Any?> execute(action: TransactionCallback<T>): T? = action.doInTransaction(SimpleTransactionStatus())
-            }
     }
 }

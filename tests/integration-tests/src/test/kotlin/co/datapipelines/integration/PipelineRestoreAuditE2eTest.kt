@@ -433,6 +433,22 @@ class PipelineRestoreAuditE2eTest {
             registry.add("datapipelines.scheduler.enabled") { "false" }
         }
 
+        private fun seedReleasedTemplate(
+            statement: java.sql.Statement,
+            name: String,
+        ) {
+            val id = UUID.randomUUID()
+            statement.execute(
+                "INSERT INTO templates (id, name, display_name, description, current_version, workspace_id, created_by) " +
+                    "VALUES ('$id', '$name', 'Restore audit', '', 1, '$WORKSPACE_ID', '$ADMIN_ID')",
+            )
+            statement.execute(
+                "INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, " +
+                    "body_hash, status, created_by, released_by, released_at) VALUES ('$id', 1, 'freemarker', 'POSTGRES', " +
+                    "FALSE, '[]'::jsonb, 'SELECT 1', 'seed-hash-pra', 'RELEASED', '$ADMIN_ID', '$ADMIN_ID', NOW())",
+            )
+        }
+
         @JvmStatic
         @BeforeAll
         fun seedAuthRows() {
@@ -466,6 +482,9 @@ class PipelineRestoreAuditE2eTest {
                         "INSERT INTO workspace_members (workspace_id, user_id, role)" +
                             " VALUES ('$OTHER_WORKSPACE_ID', '$OTHER_ADMIN_ID', 'workspace_admin') ON CONFLICT DO NOTHING",
                     )
+                    // #517 round three: a restore rechecks the body's template pins, so the templates the seeded
+                    // bodies pin exist, RELEASED at v1 — the restore under test is the audit's, not a dangling pin's.
+                    (1..2).forEach { v -> seedReleasedTemplate(statement, "pra/templates/read-$v.sql") }
                 }
             }
         }

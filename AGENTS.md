@@ -30,14 +30,13 @@ original integration dates; their GitHub timestamps represent the import date.
 
 ## Authorization: a handler or tool lands with its row (adopted 2026-09-20, roles design §4.9)
 
-- A new REST handler or MCP tool lands **in the same commit** as (1) its `ScopeMatrix` row —
-  the `RestOperation` it declares in `@RequiredScope`, or its entries in
-  `MCP_TOOL_MIN_SCOPE` / `MCP_TOOL_MIN_PERMISSION` — (2) its `docs/auth.md` §7.6 row, role-first
-  (the five role cells, the constant named in the REST row, the key scope in the scope table),
-  and (3) its `RoleWalkE2eTest` expectation, which is that doc row: the walk parses §7.6 and
-  asserts every route and tool against it, so a row with no code or code with no row is red.
-  `ScopeMatrixSpecDriftTest`, `MatrixRowReachabilityTest` and `ReadFloorTest` are the
-  build-time guards; a GET declares the LOWEST operation whose row admits it.
+- A new REST handler or MCP tool lands **in the same commit** as (1) its permission — `@RequiredScope(Permission.X)` on the
+  handler, or the `permission` of its `McpToolCatalog.Entry(name, mutating, permission)`; a new action also adds its `Permission`
+  constant and its role cells in `RolePermissions` — (2) its `docs/auth.md` §7.6 row, role-first (the five member-role cells, the
+  key-role columns, and the route or tool named in the Surfaces cell), and (3) its `RoleWalkE2eTest` expectation, which is that
+  doc row: the walk parses §7.6 and asserts every route and tool against it, so a row with no code or code with no row is red.
+  `ScopeMatrixSpecDriftTest`, `MatrixRowReachabilityTest` and `ReadFloorTest` are the build-time guards; a GET declares the LOWEST
+  permission whose row admits it.
 - A lane prompt for any feature that adds an action states the **roles** for every new action
   (which of viewer / author / promoter / workspace admin / super admin may perform it, and which
   guard pins it) — the store's `prompts/_TEMPLATE.md` carries the mandatory section. A prompt

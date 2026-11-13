@@ -155,7 +155,7 @@ object OverviewStacked {
 
     /** The inventory panel for a [ChartSet.LIFECYCLE] family: the strip, its foot, the two panels and their dialogs. */
     fun panel(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         charts: ChartInventory,
         lensed: Boolean,
     ): OverviewPage.InventoryPanel {
@@ -181,7 +181,7 @@ object OverviewStacked {
 
     /** Total, Live, In development, Actively developed — the first three from the same [Inventory] the foot reads. */
     fun metrics(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         charts: ChartInventory,
         lensed: Boolean,
     ): List<OverviewPage.Metric> {
@@ -204,7 +204,7 @@ object OverviewStacked {
 
     /** Live with changes (linked) and Retired (unlinked: a retired object has no page, its title says so). */
     fun foot(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         inventory: Inventory,
         lensed: Boolean,
     ): List<OverviewPage.Metric> =
@@ -223,7 +223,7 @@ object OverviewStacked {
         )
 
     private fun bucket(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         key: String,
         bucket: LifecycleBucket,
         inventory: Inventory,
@@ -242,7 +242,7 @@ object OverviewStacked {
 
     /** Five rows, one per [ReleaseBin]; No releases in the draft tone, the rest released; no row links (no such filter). */
     fun maturity(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         bins: List<MaturityBin>,
     ): Panel.Bars {
         val tallest = bins.maxOfOrNull { it.total } ?: 0L
@@ -285,7 +285,7 @@ object OverviewStacked {
      * numbers it states are the bins' sums.
      */
     fun releaseNote(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         bins: List<MaturityBin>,
     ): List<String> {
         if (bins.sumOf { it.total } == 0L) return listOf("No ${family.plural} yet.")
@@ -306,7 +306,7 @@ object OverviewStacked {
      * the window rules live in the activity dialog's sentence.
      */
     fun activity(
-        family: OverviewPage.Family,
+        family: OverviewFamily,
         activity: Activity,
     ): Panel.Columns {
         val busiest = activity.weeks.maxOf { it.events }

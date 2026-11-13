@@ -38,6 +38,8 @@ class ScheduleSummaryTest {
             mockk(relaxed = true),
             SchedulerAutoConfiguration.JSON,
             mockk(relaxed = true),
+            NotificationPolicy(properties.notifications, NotificationDeployment.UNKNOWN),
+            mockk(relaxed = true),
         ) { UUID.randomUUID() }
 
     @Test
@@ -54,6 +56,17 @@ class ScheduleSummaryTest {
         LastRunOutcome.FAILED.states shouldBe setOf(RunState.FAILED, RunState.ABORTED, RunState.UNKNOWN)
         LastRunOutcome.IN_PROGRESS.states shouldBe setOf(RunState.QUEUED, RunState.STARTING, RunState.RUNNING)
         LastRunOutcome.DID_NOT_RUN.states shouldBe setOf(RunState.NOT_STARTED, RunState.SKIPPED, RunState.CANCELLED)
+    }
+
+    @Test
+    fun `five distinct wire words that round-trip - the home's bar keys and the filter's words are one spelling`() {
+        // #725: the spelling the home's bars carried before the word moved onto the enum (ui-screens §4.20a).
+        LastRunOutcome.entries.map { it.wire } shouldContainExactly
+            listOf("succeeded", "failed", "in-progress", "did-not-run", "never-ran")
+        LastRunOutcome.entries.forEach { outcome -> LastRunOutcome.fromWire(outcome.wire) shouldBe outcome }
+        listOf("", "FAILED", "Failed", " failed", "in_progress", "never_ran", "blocked").forEach { raw ->
+            withClue("'$raw'") { LastRunOutcome.fromWire(raw) shouldBe null }
+        }
     }
 
     @Test

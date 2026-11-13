@@ -1,0 +1,19 @@
+{
+  "case" : "versions-over-limit",
+  "bounds" : {
+    "max_depth" : 32,
+    "max_versions" : 4,
+    "max_edges" : 4096,
+    "max_blockers" : 100,
+    "max_wire_bytes" : 1048576
+  },
+  "outcome" : "refused",
+  "refusal" : {
+    "code" : "pipeline.release.dependency_limit",
+    "message" : "Release blocked: the dependencies exceed the configured versions bound of 4.",
+    "details" : {
+      "limit" : "versions",
+      "maximum" : 4
+    }
+  }
+}

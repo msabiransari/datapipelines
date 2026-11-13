@@ -3,6 +3,7 @@ package co.datapipelines.pipeline
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCardinality
 import co.datapipelines.typesystem.ParameterConstraints
+import co.datapipelines.typesystem.StagingEngine
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.exc.InvalidNullException
@@ -239,6 +240,15 @@ private class WireValueScan(
         nodes.forEachIndexed { index, node ->
             scanNodeType(index, node)
             scanNodeOutput(index, node)
+            val delivery = node.path("delivery")
+            if (!delivery.isMissingNode && !delivery.isNull && !delivery.isObject) {
+                add(
+                    PipelineErrorCodes.Lake.DELIVERY_INVALID_NODE,
+                    "nodes[$index].delivery",
+                    "Delivery must be an object with feed and id fields.",
+                    emptyMap(),
+                )
+            }
         }
     }
 

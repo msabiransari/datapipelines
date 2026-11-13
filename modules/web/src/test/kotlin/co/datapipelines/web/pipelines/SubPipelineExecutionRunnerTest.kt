@@ -73,6 +73,7 @@ import java.util.UUID
  * maps outcomes; the executor's own behavior under those requests is dag's test surface
  * (`SubPipelineCompositionTest`).
  */
+@Suppress("LargeClass") // one runner contract: child requests, delivery, refusals and scalar mappings
 class SubPipelineExecutionRunnerTest {
     private val pipelines = mockk<PipelineRepository>()
     private val resultStore = mockk<ResultStore>()
@@ -132,6 +133,22 @@ class SubPipelineExecutionRunnerTest {
         }
         """.trimIndent()
 
+    private val childBodyWithScript =
+        """
+        {
+          "schema_version": 1,
+          "name": "test/monthly_revenue",
+          "display_name": "Monthly revenue",
+          "description": "",
+          "parameters": {},
+          "nodes": [
+            {"id": "score", "description": "score", "type": "SCRIPT",
+             "template": {"id": "test/score.jsonata", "version": 1},
+             "inputs": {}, "context_key": "child_score"}
+          ]
+        }
+        """.trimIndent()
+
     private fun childRecord() =
         PipelineRecord(
             id = childRecordId,
@@ -146,7 +163,13 @@ class SubPipelineExecutionRunnerTest {
 
     private fun stubRegistry(body: String = childBody) {
         every { pipelines.findByNameAnyStatus(any(), "test/monthly_revenue") } returns childRecord()
-        every { pipelines.findVersionBody(any(), childRecordId, 4) } returns body
+        every { pipelines.findExecutionSnapshot(any(), childRecordId, 4) } returns
+            co.datapipelines.pipeline.PipelineExecutionSnapshot(
+                body,
+                "a".repeat(64),
+                co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+                false,
+            )
     }
 
     private fun pipelineNode(
@@ -267,9 +290,15 @@ class SubPipelineExecutionRunnerTest {
             stubRegistry()
             val stub = ExecutorStub()
 
-            val result = runner(stub).run(pipelineNode(), context())
+            val grant = co.datapipelines.pipeline.LakeAppendGrant(parentUserId, "session", Instant.EPOCH)
+            val result = runner(stub).run(pipelineNode(), context().copy(lakeAppendGrant = grant))
 
             val request = stub.captured.single()
+            request.lakeAppendGrant shouldBe grant
+            request.lakeExecutionMetadata?.bodyJson shouldBe childBody
+            request.lakeExecutionMetadata?.bodyHash shouldBe "a".repeat(64)
+            request.lakeExecutionMetadata?.draft shouldBe true
+            verify(exactly = 0) { pipelines.findVersionBody(any(), any(), any()) }
             request.pipelineId shouldBe childRecordId
             request.pipelineVersion shouldBe 4
             request.userId shouldBe parentUserId
@@ -319,6 +348,33 @@ class SubPipelineExecutionRunnerTest {
     }
 
     /**
+     * #463 — the read-only fact follows the composition: a read-only parent (a dashboard source, a
+     * published GET endpoint) runs read-only children, so a child cannot be the way around the
+     * per-lease read-only mode; a writable parent's child stays writable.
+     */
+    @Test
+    fun `#463 - a read-only parent's child request is read-only`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(), context().copy(readOnly = true))
+
+            stub.captured.single().readOnly shouldBe true
+        }
+
+    @Test
+    fun `#463 - a writable parent's child request stays writable`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(), context().copy(readOnly = false))
+
+            stub.captured.single().readOnly shouldBe false
+        }
+
+    /**
      * F5 — the child minted `correlationId = UUID.randomUUID()`, so its `pipeline_executions` row,
      * its SSE payloads (via `SseEventProjection`) and its logs all carried an id unrelated to the
      * request that started the family. Correlation id is the one field designed to join exactly
@@ -337,6 +393,48 @@ class SubPipelineExecutionRunnerTest {
             // inherited again by any grandchild the child spawns.
             stub.captured.single().correlationId shouldBe parentCorrelationId
         }
+
+    /**
+     * #905 — a child's stored result is recorded through the child's emitter (ordered behind an
+     * unconfirmed RUNNING insert): a write that matches no row is the emitter's one WARN.
+     */
+    @Test
+    fun `a child result write that matches no row is one WARN from the child's emitter`() {
+        stubRegistry()
+        val stub = ExecutorStub()
+        stub.drive = { req -> stub.success(req).copy(resultRef = "dp:result:${req.executionId}") }
+        every { resultStore.describe(any()) } answers {
+            co.datapipelines.executor.StoredResultView(
+                key = firstArg(),
+                executionId = requireNotNull(stub.captured.single().executionId),
+                schema = emptyList(),
+                firstPage = emptyList(),
+                totalRows = 9,
+                bytes = 90,
+                expiresAt = Instant.EPOCH,
+            )
+        }
+        every { executionRepository.recordResult(any(), 9L, 90L, emptyList()) } returns false
+
+        val warns = emitterWarns { kotlinx.coroutines.runBlocking { runner(stub).run(pipelineNode(), context()) } }
+
+        val childId =
+            stub.captured
+                .single()
+                .executionId
+                .toString()
+        warns.filter { "not found by its result columns write" in it && childId in it }.size shouldBe 1
+    }
+
+    /** The run emitter's WARN lines while [block] runs (#905: the result write is the emitter's). */
+    private fun emitterWarns(block: () -> Unit): List<String> =
+        co.datapipelines.logcapture
+            .capturingLogEvents(
+                org.slf4j.LoggerFactory.getLogger(co.datapipelines.web.sse.WebEventEmitter::class.java)
+                    as ch.qos.logback.classic.Logger,
+                block = block,
+            ).filter { it.level == ch.qos.logback.classic.Level.WARN }
+            .map { it.formattedMessage }
 
     /**
      * A13 — the frozen reference time is inherited like the principal and the workspace: a
@@ -406,6 +504,50 @@ class SubPipelineExecutionRunnerTest {
 
             stub.captured.single().parameters["child_any"] shouldBe DecimalNode(java.math.BigDecimal("4.5"))
         }
+
+    @Test
+    fun `a ref mapped onto a child SCRIPT key takes the referenced scalar`() {
+        runTest {
+            stubRegistry(childBodyWithScript)
+            val stub = ExecutorStub()
+            val node = pipelineNode(parameters = mapOf("child_score" to TextNode("\${parent_score}")))
+
+            runner(stub).run(node, context(values = mapOf("parent_score" to 7)))
+
+            stub.captured.single().parameters["child_score"] shouldBe IntNode(7)
+        }
+    }
+
+    @Test
+    fun `a literal mapped onto a child SCRIPT key passes through unchanged`() {
+        runTest {
+            stubRegistry(childBodyWithScript)
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(parameters = mapOf("child_score" to IntNode(7))), context())
+
+            stub.captured.single().parameters["child_score"] shouldBe IntNode(7)
+        }
+    }
+
+    @Test
+    fun `an object ref mapped onto a child SCRIPT key is refused as a non scalar`() {
+        runTest {
+            stubRegistry(childBodyWithScript.replace("child_score", "child_obj"))
+            val stub = ExecutorStub()
+            val node = pipelineNode(parameters = mapOf("child_obj" to TextNode("\${parent_object}")))
+            val value = linkedMapOf("score" to 7)
+
+            val thrown =
+                shouldThrow<DatapipelinesException> {
+                    runner(stub).run(node, context(values = mapOf("parent_object" to value)))
+                }
+
+            thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
+            thrown.message shouldContain value.javaClass.simpleName
+            stub.captured shouldBe emptyList()
+        }
+    }
 
     /**
      * 078 A5-composition's NO AUTO-PASSTHROUGH ruling (owner 2026-09-05: hidden coupling): a

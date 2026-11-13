@@ -7,7 +7,10 @@ import java.sql.Connection
 import java.sql.SQLException
 import java.sql.SQLNonTransientConnectionException
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import javax.sql.DataSource
 
 /**
@@ -63,7 +66,16 @@ class LakeInstanceOwner private constructor(
     private val duplicateMethod: Method,
 ) : PoolInstanceOwner {
     /** This generation's identity — distinct per pool build, carried in every lifecycle log line. */
-    val generation: String = UUID.randomUUID().toString().substring(0, GENERATION_CHARS)
+    override val generation: String = UUID.randomUUID().toString()
+
+    /** Physical owner close confirmation, separate from the close-started flag. */
+    @Volatile
+    private var retainedClosed = false
+
+    /** Memory-only probe: a blocked driver call must never block the reader keeper. */
+    val holdsPhysicalHandles: Boolean get() = !retainedClosed || liveDuplicates > 0 || creating.get() > 0
+
+    private val creating = AtomicInteger()
 
     private val retired = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
@@ -93,14 +105,19 @@ class LakeInstanceOwner private constructor(
      *   caller (Hikari's connection creation) surfaces it as a lease failure; nothing reconnects.
      */
     fun duplicate(): Connection {
-        refusal()?.let { throw it }
-        val raw =
-            try {
-                duplicateMethod.invoke(connection) as Connection
-            } catch (e: InvocationTargetException) {
-                throw unwrapped(e)
-            }
-        return track(raw)
+        creating.incrementAndGet()
+        try {
+            refusal()?.let { throw it }
+            val raw =
+                try {
+                    duplicateMethod.invoke(connection) as Connection
+                } catch (e: InvocationTargetException) {
+                    throw unwrapped(e)
+                }
+            return track(raw)
+        } finally {
+            creating.decrementAndGet()
+        }
     }
 
     /**
@@ -177,6 +194,81 @@ class LakeInstanceOwner private constructor(
      * or whose in-flight close on another thread has not yet reported (tests, diagnostics).
      */
     val liveDuplicates: Int get() = synchronized(handles) { handles.size }
+
+    /**
+     * #818d (record §10 RULING 4 amended, item 6) — **interrupt first**: puts every physical handle this generation
+     * owns into its own close, each on its own thread, so every physical close is attempted independently — before the
+     * pool's Hikari shutdown, whose first act is a wait on connection creation.
+     *
+     * Why a close and not a bare interrupt, and why one thread per handle (read off the pinned duckdb_jdbc 1.5.5.1
+     * bytecode): `DuckDBConnection.interrupt()` is package-private and refuses to run unless the caller holds the
+     * connection's `connRefLock`; the public route to it is `close()`, which takes that lock, calls `interrupt()`
+     * FIRST, and only then closes the connection's statements — and a statement's close waits on the statement lock
+     * the running `execute` holds until the engine returns. So one handle's close returns only once its reader has
+     * stopped, and closing the handles one after another would hold the next reader's interrupt behind the previous
+     * reader's end. A thread per handle prevents serialization behind another physical close; the count is bounded by the generation's own
+     * handles (Hikari's `maximumPoolSize`, plus a creation straddling the retire).
+     *
+     * Only THIS generation's registry is walked: a handle of another generation or another datasource is in another
+     * owner's set and cannot be reached from here. [retire] runs first (the pool's close), so no handle joins after the
+     * snapshot. A handle Hikari is closing at the same moment is already `CLOSING` and its second close returns at
+     * once (the wrapper's phase); Hikari's later abort → refused → `close()` on a handle closed here does the same.
+     *
+     * A trickling HTTP reader can hold the driver lock indefinitely (duckdb-httpfs#519); these attempts
+     * provide no termination bound. Reader leases follow physical closure independently.
+     *
+     * The caller then waits at most [INTERRUPT_SETTLE_MILLIS] for the closes to finish — enough for every IDLE handle
+     * (a native disconnect), so a routine drained close leaves nothing in flight for the release to report; a handle
+     * whose reader is still stopping simply stays in flight past it, and the release hands it the last word
+     * (`IN_FLIGHT`). The wait never delays an interrupt: every one was issued before it began. Never throws.
+     */
+    override fun interruptReaders(): Int = interruptReaders(::startInterruptThread, INTERRUPT_SETTLE_MILLIS)
+
+    /** [interruptReaders] with its thread launch and settle wait injectable — the module's tests. */
+    internal fun interruptReaders(
+        launch: (String, Runnable) -> Unit,
+        settleMillis: Long,
+    ): Int {
+        val targets = synchronized(handles) { handles.toList() }
+        if (targets.isEmpty()) return 0
+        val settled = CountDownLatch(targets.size)
+        var inline = 0
+        targets.forEachIndexed { index, handle ->
+            val task =
+                Runnable {
+                    try {
+                        handle.close()
+                    } catch (
+                        // The wrapper already recorded the refusal and reports its exhaustion
+                        // (`lake.instance_handle_exhausted`); the interrupt itself was issued first.
+                        @Suppress("TooGenericExceptionCaught", "SwallowedException") ignored: Exception,
+                    ) {
+                        // nothing to add: see the comment on the catch
+                    } finally {
+                        settled.countDown()
+                    }
+                }
+            try {
+                launch("$INTERRUPT_THREAD_PREFIX$generation-$index", task)
+            } catch (
+                // `Thread.start` reports a process out of native threads this way: interrupt on this thread instead —
+                // serial, but still before Hikari's shutdown begins. Counted in the line below.
+                @Suppress("SwallowedException") e: OutOfMemoryError,
+            ) {
+                inline++
+                task.run()
+            }
+        }
+        LOG.info(
+            "event=lake.instance_readers_interrupted datasource={} generation={} handles={} inline={}",
+            datasourceName,
+            generation,
+            targets.size,
+            inline,
+        )
+        if (settleMillis > 0) runCatching { settled.await(settleMillis, TimeUnit.MILLISECONDS) }
+        return targets.size
+    }
 
     /** The driver's own exception out of the reflective call; an owner lost mid-call is named as such. */
     private fun unwrapped(e: InvocationTargetException): SQLException {
@@ -274,6 +366,7 @@ class LakeInstanceOwner private constructor(
         val ownerClosed =
             try {
                 connection.close()
+                retainedClosed = true
                 true
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
@@ -311,7 +404,23 @@ class LakeInstanceOwner private constructor(
         /** SQL standard class 08 — the connection-exception family every lease boundary already classifies. */
         private const val SQLSTATE_CONNECTION_FAILURE = "08003"
 
-        private const val GENERATION_CHARS = 8
+        /**
+         * #818d — how long [interruptReaders] waits for its closes before Hikari's shutdown proceeds. An idle handle's
+         * close is one native disconnect (milliseconds); a handle whose reader is still stopping outlives this and is
+         * handed to the release as `IN_FLIGHT`. Never part of the reader's lifetime: every interrupt is issued first.
+         */
+        const val INTERRUPT_SETTLE_MILLIS = 1_000L
+
+        /** The interrupt threads' name prefix, followed by `<generation>-<n>` — the line a thread dump shows. */
+        const val INTERRUPT_THREAD_PREFIX = "dp-pool-interrupt-"
+
+        /** One short-lived daemon thread per handle: it lives exactly as long as that handle's close. */
+        private fun startInterruptThread(
+            name: String,
+            task: Runnable,
+        ) {
+            Thread(task, name).apply { isDaemon = true }.start()
+        }
 
         /**
          * Opens the owner connection through [delegate] — the pool's own driver `DataSource`,

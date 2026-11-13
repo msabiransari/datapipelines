@@ -1,12 +1,13 @@
 // 104 §A — the splitter's PURE core: the clamp, the keyboard steps, the reset and the
-// stored-value guard. One module, two panes (the editor's dock by height, the explorers'
-// tree by width), so the arithmetic is written once and tested once — the same harness
-// decision dock.js's state table got (`node --test`, no DOM, no jsdom).
+// stored-value guard. One module, three panes (the editor's dock by height, the explorers'
+// tree by width, and since #783 the dashboard board's activity dock by height), so the
+// arithmetic is written once and tested once — the same harness decision dock.js's state
+// table got (`node --test`, no DOM, no jsdom).
 //
 // What is deliberately NOT here: `bind()`, the DOM adapter. Pointer capture, focus and
 // localStorage are browser facts, and the browser suites
-// (`PipelineEditorDockResizeBrowserTest`, `ExplorerPaneGeometryBrowserTest`) own them with
-// real pixel measurements. What IS here is every decision those adapters delegate.
+// (`PipelineEditorDockResizeBrowserTest`, `ExplorerPaneGeometryBrowserTest`,
+// `DashboardDockResizeBrowserTest`) own them with real pixel measurements. What IS here is every decision those adapters delegate.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -24,6 +25,17 @@ function load() {
 }
 
 const S = load();
+
+test("dock defaults are shared: the threshold, remembered zero and unmeasurable input", () => {
+  assert.equal(S.dockDefault(319.9, 320, null), S.COLLAPSED);
+  assert.equal(S.dockDefault(320, 320, null), S.OPEN);
+  assert.equal(S.dockDefault(100, 320, 0), S.OPEN);
+  assert.equal(S.dockDefault(100, 320, undefined), S.COLLAPSED);
+  for (const invalid of [NaN, Infinity, undefined, null, "100"]) {
+    assert.equal(S.dockDefault(invalid, 320, null), S.OPEN);
+    assert.equal(S.dockDefault(100, invalid, null), S.OPEN);
+  }
+});
 
 /* ------------------------------------------------------------------ sizeFor */
 
@@ -121,9 +133,50 @@ test("a remembered size is read back as a number, and rubbish is refused", () =>
 test("the pane keys are the ones the browser suites and the docs name", () => {
   assert.equal(S.KEYS.editorDock, "dp.pane.editor-dock");
   assert.equal(S.KEYS.explorerTree, "dp.pane.explorer-tree");
-  // The key SET is pinned, not just two members: a key with no pane (the editors' retired
+  assert.equal(S.KEYS.boardDock, "dp.pane.board-dock");
+  // The key SET is pinned, not just its members: a key with no pane (the editors' retired
   // side panes, #433/#535) must not come back quietly.
-  assert.deepEqual(Object.keys(S.KEYS).sort(), ["editorDock", "explorerTree"]);
+  assert.deepEqual(Object.keys(S.KEYS).sort(), ["boardDock", "editorDock", "explorerTree"]);
+});
+
+/* ------------------------------------------------------------ the board dock (#783) */
+
+test("board dock: the floor is the editor's 120 and the ceiling leaves the board two grid rows", () => {
+  assert.equal(S.DOCK_MIN, 120);
+  // dashboards.css `--dp-board-floor` = 2 x `--dashboard-row-unit` (80px).
+  assert.equal(S.BOARD_FLOOR, 160);
+  // A 472px board row beside a 200px pane: 672 shared, 160 of it the board's.
+  assert.deepEqual(S.boardDockBounds(472, 200), { min: 120, max: 512 });
+});
+
+test("board dock: a drag and the keyboard are clamped by those bounds, not 96–480", () => {
+  const b = S.boardDockBounds(472, 200);
+  const drag = (dy) => S.sizeFor({ axis: "y", invert: true, start: 200, dy, min: b.min, max: b.max });
+  assert.equal(drag(-150), 350);
+  // Past the retired page-local 480 cap: the board's floor is the only ceiling now.
+  assert.equal(drag(-300), 500);
+  assert.equal(drag(-5000), 512);
+  // Below the retired 96 floor: the shared 120 holds.
+  assert.equal(drag(5000), 120);
+  const key = (k, shiftKey = false) =>
+    S.stepFor({ axis: "y", invert: true, current: 200, key: k, shiftKey, min: b.min, max: b.max });
+  assert.equal(key("ArrowUp"), 216);
+  assert.equal(key("ArrowUp", true), 264);
+  assert.equal(key("ArrowDown"), 184);
+  assert.equal(key("Home"), 120);
+  assert.equal(key("End"), 512);
+});
+
+test("board dock: on a window too short for both floors the pane keeps 120, never less", () => {
+  // 100px of board row beside a 150px pane: the ceiling (90) is under the floor; the floor wins.
+  const b = S.boardDockBounds(100, 150);
+  assert.equal(b.max, 90);
+  assert.equal(S.sizeFor({ axis: "y", invert: true, start: 150, dy: -200, min: b.min, max: b.max }), 120);
+  assert.equal(S.stepFor({ axis: "y", invert: true, current: 150, key: "End", min: b.min, max: b.max }), 120);
+});
+
+test("board dock: an unmeasurable layout is read as 0, never NaN", () => {
+  assert.deepEqual(S.boardDockBounds(NaN, undefined), { min: 120, max: -160 });
 });
 
 test("the step sizes are the ones §A specifies", () => {

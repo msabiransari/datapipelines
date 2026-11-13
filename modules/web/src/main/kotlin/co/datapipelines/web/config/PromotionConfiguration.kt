@@ -99,6 +99,10 @@ class PromotionConfiguration {
         dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
         // O7 — the batch's family arms are count-bounded before any member binds.
         visualizationConfig: co.datapipelines.visualization.VisualizationConfig,
+        // #517 — the workspace writer guard the batch's transaction acquires first.
+        guard: co.datapipelines.pipeline.release.ReleaseMutationGuard,
+        // #778 — the promotion-time lake check, run last inside the batch's transaction (slice D-E).
+        lakeCheck: co.datapipelines.application.lake.LakePromotionCheck,
     ): PromotionReceiveService =
         PromotionReceiveService(
             inventory,
@@ -113,6 +117,8 @@ class PromotionConfiguration {
             visualizationPromotion,
             dashboardPromotion,
             visualizationConfig,
+            guard,
+            lakeCheck = lakeCheck,
         )
 
     /**
@@ -176,8 +182,14 @@ class PromotionConfiguration {
         co.datapipelines.web.visualizations
             .DashboardPromotion(repository, dashboards, transfer, releaseRules)
 
-    /** 074 — the endpoint half of a promotion batch, sender and receiver rules in one place. */
+    /**
+     * 074 — the endpoint half of a promotion batch, sender and receiver rules in one place.
+     *
+     * #786 F.2: the receiver-only import is constructed HERE, for this one collaborator — it is no bean, so no route, MCP
+     * tool or other service can be handed it (the reachability test and the handback's caller grep pin that).
+     */
     @Bean
+    @Suppress("LongParameterList") // a DI factory's arity is the container's business
     fun endpointPromotion(
         publishing: co.datapipelines.application.endpoints.EndpointPublishService,
         keys: co.datapipelines.application.endpoints.EndpointKeyService,
@@ -185,7 +197,34 @@ class PromotionConfiguration {
         bindings: co.datapipelines.application.endpoints.EndpointKeyBindingRepository,
         apiKeys: co.datapipelines.auth.ApiKeyRepository,
         pipelines: PipelineRepository,
-    ): EndpointPromotion = EndpointPromotion(publishing, keys, endpoints, bindings, apiKeys, pipelines)
+        versions: co.datapipelines.application.endpoints.PublishedEndpointVersionRepository,
+        pins: co.datapipelines.application.endpoints.EndpointPinValidator,
+        registry: co.datapipelines.application.endpoints.EndpointRegistry,
+        endpointsProperties: EndpointsProperties,
+        writeGuard: co.datapipelines.typesystem.guard.MetadataWriterGuard,
+    ): EndpointPromotion =
+        EndpointPromotion(
+            publishing,
+            co.datapipelines.application.endpoints.EndpointPromotionImport(
+                endpoints = endpoints,
+                versions = versions,
+                pipelines = pipelines,
+                pins = pins,
+                registry = registry,
+                timeouts =
+                    co.datapipelines.application.endpoints.EndpointPublishService.TimeoutBounds(
+                        defaultSeconds = endpointsProperties.timeoutDefaultSeconds,
+                        minSeconds = endpointsProperties.timeoutMinSeconds,
+                        maxSeconds = endpointsProperties.timeoutMaxSeconds,
+                    ),
+                writeGuard = writeGuard,
+            ),
+            keys,
+            endpoints,
+            bindings,
+            apiKeys,
+            pipelines,
+        )
 
     /** 178 — the lens's inventory counter rides the real registry; the cache's clock is the JVM's. */
     @Bean

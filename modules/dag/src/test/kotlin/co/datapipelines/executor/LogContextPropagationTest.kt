@@ -2,8 +2,8 @@ package co.datapipelines.executor
 
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.events.ExecutionStarted
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.scripting.EvaluationLimits
@@ -11,8 +11,8 @@ import co.datapipelines.scripting.JsonataEngine
 import co.datapipelines.scripting.ScriptEvaluationPool
 import co.datapipelines.scripting.ScriptLanguage
 import co.datapipelines.staging.Staging
-import co.datapipelines.staging.StagingEngine
 import co.datapipelines.staging.StagingFactory
+import co.datapipelines.typesystem.StagingEngine
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
@@ -153,14 +153,15 @@ class LogContextPropagationTest {
         vararg loggers: Logger,
         block: () -> Unit,
     ): List<List<ILoggingEvent>> {
-        val appenders = loggers.map { logger -> logger to ListAppender<ILoggingEvent>().apply { start() } }
+        // A snapshot (#484): the propagated lines are logged on the pool's thread.
+        val appenders = loggers.map { logger -> logger to SnapshotListAppender() }
         appenders.forEach { (logger, appender) -> logger.addAppender(appender) }
         try {
             block()
         } finally {
             appenders.forEach { (logger, appender) -> logger.detachAppender(appender) }
         }
-        return appenders.map { (_, appender) -> appender.list.toList() }
+        return appenders.map { (_, appender) -> appender.events() }
     }
 
     /**

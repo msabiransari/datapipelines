@@ -80,7 +80,7 @@ class ScheduleNotificationSettingsE2eTest {
             mapper.writeValueAsString(
                 mapOf(
                     "name" to NAMES.single(),
-                    "payload" to mapOf("pipeline" to NAMES.single(), "version" to "current"),
+                    "payload" to mapOf("pipeline" to NAMES.single(), "version" to 1),
                     "cron" to "0 3 1 1 *",
                     "timezone" to "UTC",
                 ),
@@ -167,7 +167,7 @@ class ScheduleNotificationSettingsE2eTest {
                         mapper.writeValueAsString(
                             mapOf(
                                 "name" to name,
-                                "payload" to mapOf("pipeline" to name, "version" to "current"),
+                                "payload" to mapOf("pipeline" to name, "version" to 1),
                                 "cron" to "0 3 1 1 *",
                                 "timezone" to "UTC",
                                 "notifications" to mapOf("recipients" to listOf("first@example.com", "second@example.com")),

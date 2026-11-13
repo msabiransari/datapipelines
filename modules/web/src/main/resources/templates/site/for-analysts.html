@@ -45,7 +45,7 @@
     <div class="container">
       <p class="kicker">The working loop</p>
       <h2 id="an-ask" class="ds-headline">Ask in your words, get a pipeline you can read</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/mcp-server.md §6.2 -->
         <p>
           You describe the question the way you would to a colleague: "rideshare share of trips per borough, split
@@ -109,7 +109,7 @@
     <div class="container">
       <p class="kicker">The join</p>
       <h2 id="an-join" class="ds-headline">The join you could never do in one tool</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/staging.md §3 -->
         <p>
           The question that breaks single-tool workflows, revenue by borough where the trips are in Postgres and
@@ -132,7 +132,7 @@
     <div class="container">
       <p class="kicker">The diagnosis</p>
       <h2 id="an-probe" class="ds-headline">The probe that says why it is slow</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/datasources.md §7C -->
         <p>
           Two agent tools turn "it feels slow" into a diagnosis. Catalogue statistics read one table's row
@@ -165,19 +165,25 @@
     <div class="container">
       <p class="kicker">The hand-off</p>
       <h2 id="an-release" class="ds-headline">Release when you trust it, and it is an API</h2>
-      <div class="prose">
+      <div class="prose text-columns">
         <!-- claim: docs/versioning.md §3 -->
         <p>
           When the numbers are the numbers, you release: a person's verb, an immutable version, a diff anyone can
           read next quarter when the figure is questioned. The draft stays a draft until then. The agent can
           iterate all day, but the version your team repeats is the one a person signed off.
         </p>
-        <!-- claim: docs/rest-api.md §19 -->
+        <!-- claim: docs/rest-api.md §19, docs/dashboards.md §5.1 -->
         <p>
           And the release is the last step of the analyst's job and the first step of everyone else's: publish the
-          endpoint and the finance team's script, the dashboard's refresh, or the PM's curl call all read the same
-          versioned answer, parameters bound and keys scoped, instead of asking you to re-run it every Monday. The
-          question stops being yours to carry, and the answer stops depending on your calendar.
+          endpoint and the finance team's script, the <a th:href="@{/sql-dashboards}">dashboard</a>'s refresh, or
+          the PM's curl call all read the same versioned answer, parameters bound and keys scoped, instead of asking
+          you to re-run it every Monday. The question stops being yours to carry, and the answer stops depending on
+          your calendar.
+        </p>
+        <!-- claim: docs/scheduler.md §1, docs/scheduler.md §3 — a schedule runs a pipeline at a cron pattern's occurrences in an IANA time zone -->
+        <p>
+          If the Monday run itself is the chore, a <a th:href="@{/pipeline-scheduling}">schedule</a> runs the pipeline
+          on a cron pattern in your time zone and keeps a history of every run.
         </p>
         <p>
           The quieter benefit compounds: because every analysis is a versioned document rather than a session that
@@ -201,7 +207,7 @@
   </section>
 
   <section class="section" aria-labelledby="an-next">
-    <div class="container">
+    <div class="container section-call">
       <h2 id="an-next" class="ds-headline">Give the agent your Monday question</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">

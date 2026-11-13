@@ -25,7 +25,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * builds the runner, the evaluator and the ONE `SelectorPool` from one `ParametersConfig`
  * (C27 — three constructions from one config is what keeps the statement-level and
  * evaluate-level limits from disagreeing), every frozen collaborator resolves, and the
- * `parameters.selectors.abandoned` gauge scrapes a REAL pool over a REAL registry (the
+ * `datapipelines.parameters.selectors.abandoned` gauge scrapes a REAL pool over a REAL registry (the
  * 194c pass, observation 4: the scrape is also the dead-thread prune's only caller — a
  * strict mock would make a missing call unobservable, so the pool here is real).
  */
@@ -81,7 +81,7 @@ class ParametersConfigurationWiringTest {
         configuration.parametersSelectorsAbandonedGauge(pool, meters)
 
         pool.abandoned.increment()
-        val gauge = meters.get("parameters.selectors.abandoned").gauge()
+        val gauge = meters.get("datapipelines.parameters.selectors.abandoned").gauge()
         gauge.value() shouldBe 1.0
 
         // Observation 4 (194c security pass): the scrape is the prune's caller. Plant a DEAD
@@ -105,6 +105,27 @@ class ParametersConfigurationWiringTest {
     @Configuration
     @Suppress("unused")
     class Collaborators {
+        /** #517 — the workspace writer guard the services now require; the graph, not the lock, is under test here. */
+        @Bean
+        fun releaseMutationGuard(): co.datapipelines.pipeline.release.ReleaseMutationGuard =
+            co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE
+
+        /** #873 §D — the transitive restore recheck the restores now take; the graph, not the walk, is under test here. */
+        @Bean
+        fun restoreDependencyGuard(): co.datapipelines.pipeline.release.RestoreDependencyGuard =
+            co.datapipelines.pipeline.release.RestoreDependencyGuard.DIRECT_ONLY
+
+        /** #517 round three — the bound a restore refusal's blockers list truncates at; the shipped default. */
+        @Bean
+        fun releaseBounds(): co.datapipelines.pipeline.release.ReleaseBounds =
+            co.datapipelines.pipeline.release
+                .ReleaseBounds()
+
+        /** #778 — the lake reference scanner's release seam; the graph, not the index, is under test here. */
+        @Bean
+        fun releasedVersionObserver(): co.datapipelines.pipeline.release.ReleasedVersionObserver =
+            co.datapipelines.pipeline.release.ReleasedVersionObserver.NONE
+
         private fun dataSource(): javax.sql.DataSource = io.mockk.mockk(relaxed = true)
 
         @Bean
@@ -158,6 +179,11 @@ class ParametersConfigurationWiringTest {
         @Bean
         fun templateVersionStatuses(): co.datapipelines.pipeline.TemplateVersionStatuses =
             co.datapipelines.pipeline.TemplateVersionStatuses { _, _, _ -> null }
+
+        // #737 — the restore recheck's entity question the validator takes; the production bean is
+        // PipelineLifecycleConfiguration's `templateIds`.
+        @Bean
+        fun templateIds(): co.datapipelines.pipeline.TemplateIds = co.datapipelines.pipeline.TemplateIds { _, _ -> false }
 
         @Bean
         fun templateReleaser(): co.datapipelines.pipeline.TemplateReleaser =

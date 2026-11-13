@@ -71,6 +71,25 @@ class ScheduleRepository(
                 rowMapper,
             ).singleOrNull()
 
+    /**
+     * The LIVE schedules of [workspaceId] among [ids], in ONE statement (#874 G3, dependency-graph record §7.1): the
+     * schedule family's graph batch read. An id that is deleted, of another workspace or absent is simply not returned;
+     * the order is unspecified. An empty [ids] sends no statement.
+     */
+    fun findLiveByIds(
+        workspaceId: UUID,
+        ids: Collection<UUID>,
+    ): List<Schedule> =
+        if (ids.isEmpty()) {
+            emptyList()
+        } else {
+            jdbc.query(
+                "SELECT * FROM schedules WHERE id = ANY(:ids) AND workspace_id = :ws AND deleted_at IS NULL",
+                mapOf("ids" to uuidArray(ids), "ws" to workspaceId),
+                rowMapper,
+            )
+        }
+
     /** [findLive] holding the row's lock — every run-inserting path takes it (the overlap guard, record §3). */
     fun lockLive(
         workspaceId: UUID,
@@ -102,17 +121,23 @@ class ScheduleRepository(
             ) { rs, n -> rowMapper.mapRow(rs, n)!! to rs.getString("idempotency_hash") }
             .singleOrNull()
 
-    /** The workspace's live schedules, by name, optionally under a folder [prefix] (the explorer's read). */
+    /**
+     * The workspace's live schedules, by name, optionally under a folder [prefix], in one
+     * [condition] (#641; null = every condition) and in one last-run [outcome] (#725; null = every
+     * outcome) — the explorer's read.
+     */
     fun listLive(
         workspaceId: UUID,
         prefix: String?,
         limit: Int,
         offset: Int,
+        condition: ScheduleCondition? = null,
+        outcome: LastRunOutcome? = null,
     ): List<Schedule> {
         val params = mutableMapOf<String, Any?>("ws" to workspaceId, "limit" to limit, "offset" to offset)
         return jdbc.query(
-            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)} " +
-                "ORDER BY name LIMIT :limit OFFSET :offset",
+            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)}" +
+                "${conditionClause(condition)}${outcomeClause(outcome, params)} ORDER BY name LIMIT :limit OFFSET :offset",
             params,
             rowMapper,
         )
@@ -130,6 +155,8 @@ class ScheduleRepository(
         prefix: String?,
         afterName: String?,
         limit: Int,
+        condition: ScheduleCondition? = null,
+        outcome: LastRunOutcome? = null,
     ): List<Schedule> {
         val params = mutableMapOf<String, Any?>("ws" to workspaceId, "limit" to limit)
         val afterClause =
@@ -140,8 +167,8 @@ class ScheduleRepository(
                 " AND name > :after"
             }
         return jdbc.query(
-            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)}$afterClause " +
-                "ORDER BY name LIMIT :limit",
+            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)}" +
+                "${conditionClause(condition)}${outcomeClause(outcome, params)}$afterClause ORDER BY name LIMIT :limit",
             params,
             rowMapper,
         )
@@ -160,6 +187,49 @@ class ScheduleRepository(
         params["prefix"] = prefix.replace("_", "\\_") + "/%"
         return " AND name LIKE :prefix"
     }
+
+    /**
+     * #641 — [Schedule.condition]'s rule as SQL: blocked wins (`blocked_at` set, whatever
+     * `enabled` says), paused is not enabled and not blocked, enabled is the dispatcher's own
+     * predicate (`enabled AND blocked_at IS NULL`). Chosen by `when` over [ScheduleCondition], so no
+     * input text reaches the statement; `ScheduleConditionFilterIntegrationTest` pins each word to
+     * the getter over the same rows.
+     */
+    private fun conditionClause(condition: ScheduleCondition?): String =
+        when (condition) {
+            null -> ""
+            ScheduleCondition.BLOCKED -> " AND blocked_at IS NOT NULL"
+            ScheduleCondition.PAUSED -> " AND blocked_at IS NULL AND NOT enabled"
+            ScheduleCondition.ENABLED -> " AND blocked_at IS NULL AND enabled"
+        }
+
+    /**
+     * #725 — [LastRunOutcome]'s bucket as SQL, over the SAME newest run [ScheduleRunRepository.latestStates]
+     * reads for the home's count: the run with the latest `created_at`, then `id`, inside the
+     * workspace ([LATEST_RUN_STATE], a correlated subquery over `idx_schedule_runs_schedule`). A
+     * bucket with states is that newest state `IN` the bucket's [LastRunOutcome.states], bound as a
+     * list (never interpolated); [LastRunOutcome.NEVER_RAN] is no run at all. Chosen by `when` over
+     * the enum, so no input text reaches the statement; `LastRunOutcomeFilterInvariantIntegrationTest`
+     * pins each bucket's rows to the summary's count over the same rows. Adds the bind to [params].
+     */
+    private fun outcomeClause(
+        outcome: LastRunOutcome?,
+        params: MutableMap<String, Any?>,
+    ): String =
+        when (outcome) {
+            null -> {
+                ""
+            }
+
+            LastRunOutcome.NEVER_RAN -> {
+                " AND NOT EXISTS (SELECT 1 FROM schedule_runs r WHERE r.workspace_id = :ws AND r.schedule_id = schedules.id)"
+            }
+
+            else -> {
+                params["outcomeStates"] = outcome.states.map { it.wire }
+                " AND ($LATEST_RUN_STATE) IN (:outcomeStates)"
+            }
+        }
 
     /** Live schedules in [workspaceId] — the B18 cap's count (L4). */
     fun countLive(workspaceId: UUID): Int =
@@ -233,6 +303,52 @@ class ScheduleRepository(
                 ),
                 rowMapper,
             ).singleOrNull()
+
+    /**
+     * #786 D.5 — every live schedule of [executorId] whose payload is stored in [schemaVersion], across workspaces, in
+     * workspace then name order: the upgrade's conversion selector. A deleted schedule is not selected — it never runs
+     * again, and the startup must not refuse over a row nobody can use.
+     */
+    fun listLiveAtSchema(
+        executorId: String,
+        schemaVersion: Int,
+    ): List<Schedule> =
+        jdbc.query(
+            """
+            SELECT * FROM schedules
+            WHERE executor_id = :executorId AND payload_schema_version = :schema AND deleted_at IS NULL
+            ORDER BY workspace_id, name, id
+            """.trimIndent(),
+            mapOf("executorId" to executorId, "schema" to schemaVersion),
+            rowMapper,
+        )
+
+    /**
+     * #786 D.5 — the in-place conversion's ONE write: the payload and its schema number, nothing else (parameters, cron,
+     * timezone, policy, notifications, `updated_by`/`updated_at` untouched), the revision bumped so an editor holding the
+     * old `If-Match` re-reads. Guarded by [expectedRevision] AND the stored [fromSchema]: false when a concurrent writer
+     * moved the revision or the row is already converted — the caller re-reads, never overwrites.
+     */
+    fun convertPayload(
+        id: UUID,
+        expectedRevision: Int,
+        fromSchema: Int,
+        payload: JsonNode,
+        toSchema: Int,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE schedules SET payload_json = CAST(:payload AS jsonb), payload_schema_version = :toSchema, revision = revision + 1
+            WHERE id = :id AND revision = :expected AND payload_schema_version = :fromSchema AND deleted_at IS NULL
+            """.trimIndent(),
+            mapOf(
+                "id" to id,
+                "expected" to expectedRevision,
+                "fromSchema" to fromSchema,
+                "toSchema" to toSchema,
+                "payload" to mapper.writeValueAsString(payload),
+            ),
+        ) == 1
 
     /** Soft delete (D-9.6/B17), guarded by the expected revision. False when the revision moved or it is gone. */
     fun softDelete(
@@ -397,6 +513,10 @@ class ScheduleRepository(
     @Suppress("SpreadOperator")
     private fun textArray(values: List<String>): SqlArrayValue = SqlArrayValue("text", *values.toTypedArray())
 
+    /** [findLiveByIds]'s key list, bound as ONE `uuid[]` parameter (the graph walk caps a batch at 256 ids). */
+    @Suppress("SpreadOperator")
+    private fun uuidArray(values: Collection<UUID>): SqlArrayValue = SqlArrayValue("uuid", *values.distinct().toTypedArray())
+
     private fun strings(
         rs: ResultSet,
         column: String,
@@ -410,6 +530,16 @@ class ScheduleRepository(
     }
 
     private fun json(text: String): JsonNode = mapper.readTree(text)
+
+    internal companion object {
+        /**
+         * The state of the `schedules` row's NEWEST run — [ScheduleRunRepository.latestStates]'s
+         * ordering (`created_at DESC, id DESC`) as a correlated subquery; null when it has none.
+         */
+        const val LATEST_RUN_STATE =
+            "SELECT r.state FROM schedule_runs r WHERE r.workspace_id = :ws AND r.schedule_id = schedules.id " +
+                "ORDER BY r.created_at DESC, r.id DESC LIMIT 1"
+    }
 }
 
 /** What [ScheduleRepository.insert] writes. */
