@@ -176,6 +176,64 @@ class LakeRulesTest {
         overflow.single() shouldStartWith LakeRules.SCRATCH_BYTES
     }
 
+    /**
+     * #804 R1 — the factor's domain is its consumer's: `LakeProperties.Admission.stagingExpansionFactor` binds an
+     * `Int`, so the validator admits exactly up to `Int.MAX_VALUE` and names the key one past it. Before R1 the
+     * rule read a positive `Long`: `2147483648` passed the report and then failed the binder with a bare
+     * `NumberFormatException`. The binder side of the same two values is `StagingDuckDbWiringTest` (web), which
+     * binds them at `LAKE_ADMISSION_PREFIX` exactly as the staging bean does.
+     *
+     * Enabled, the delivery bound re-reads the factor silently with the same domain: at `2147483648` it must not
+     * compute (a 4GB delivery against `Long.MAX` bytes of scratch divided by 2147483648 would be a second
+     * violation), so the report still names the key once.
+     */
+    @Test
+    fun `804 R1 - the expansion factor is admitted up to Int MAX_VALUE and named once past it`() {
+        val roomy = mapOf(LakeRules.STAGING_MEMORY_LIMIT to "1048576B", LakeRules.SCRATCH_BYTES to "9223372036854775807B")
+        violations(roomy + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483647")) shouldContainExactly emptyList()
+        violations(roomy + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483648")).single().let {
+            it shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+            it shouldContain "no greater than 2147483647"
+        }
+
+        val delivery = LakeRules.MAX_DELIVERY_BYTES to "4GB"
+        val atBound = roomy.toList() + delivery + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483647")
+        enabled(*atBound.toTypedArray()) shouldContainExactly emptyList()
+        val pastBound = roomy.toList() + delivery + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483648")
+        enabled(*pastBound.toTypedArray()).single() shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+    }
+
+    /**
+     * #804 R1 sweep — every size form the rule ADMITS for `staging-memory-limit` and `scratch-bytes` is one the
+     * consumer binds to `DataSize`: both parse with `DataSize.parse` and no unit annotation, so the validator's
+     * domain is the binder's less the non-positive values. [ADMITTED_SIZES] is the same list
+     * `StagingDuckDbWiringTest` binds; a form one side changes is red on the other.
+     */
+    @Test
+    fun `804 R1 - every admitted staging size form is one the binder accepts`() {
+        ADMITTED_SIZES.forEach { size ->
+            // Factor 1 and the largest scratch: only the size's own rule can speak.
+            violations(
+                mapOf(
+                    LakeRules.STAGING_MEMORY_LIMIT to size,
+                    LakeRules.STAGING_EXPANSION_FACTOR to "1",
+                    LakeRules.SCRATCH_BYTES to "9223372036854775807B",
+                ),
+            ).let { check(it.isEmpty()) { "memory limit '$size' refused: $it" } }
+            violations(
+                mapOf(
+                    LakeRules.STAGING_MEMORY_LIMIT to "1048576B",
+                    LakeRules.STAGING_EXPANSION_FACTOR to "1",
+                    LakeRules.SCRATCH_BYTES to size,
+                ),
+            ).let { check(it.isEmpty()) { "scratch '$size' refused: $it" } }
+        }
+        // And the forms DataSize.parse refuses are refused here too, never admitted to fail the binder.
+        listOf("1gb", "1 GB", "1.5GB", "9223372036854775807KB", "1PB").forEach { size ->
+            violations(mapOf(LakeRules.SCRATCH_BYTES to size)).single() shouldStartWith LakeRules.SCRATCH_BYTES
+        }
+    }
+
     /** #804 — a malformed staging key is named ONCE, enabled or not; the delivery bound re-reads it silently. */
     @Test
     fun `804 - a malformed staging key is named exactly once, and the lake keys it does not use stay ungated`() {
@@ -333,5 +391,15 @@ class LakeRulesTest {
     private fun repoFile(relative: String): File {
         val root = generateSequence(File(".").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
         return File(root, relative).also { check(it.isFile) { "missing $relative" } }
+    }
+
+    private companion object {
+        /**
+         * #804 R1 — size forms the staging admission admits, each at least 1 MiB: bare bytes, every unit, a sign,
+         * surrounding blanks, and the largest values short of `Long` overflow. `StagingDuckDbWiringTest` (web)
+         * carries the same list and binds each at `LAKE_ADMISSION_PREFIX`.
+         */
+        val ADMITTED_SIZES =
+            listOf("1048576", "1048576B", "1024KB", "1MB", "+1MB", " 2GB ", "20GB", "1TB", "9223372036854775807B", "8388607TB")
     }
 }
