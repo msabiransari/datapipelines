@@ -2284,9 +2284,9 @@ object PipelineErrorCodes {
         const val DEFINITION_AUTHORING_DISABLED = "lake.definition.authoring_disabled"
 
         /**
-         * #811 — the apply's commit step failed with an exception that is none of the catalog's classified refusals,
-         * so whether the commit landed is unknown. The row stays `applying` for `verifyApplying`; never recorded as
-         * `failed`, and a release that reached it returns it as its apply outcome.
+         * #811, #822 — a step of the apply failed with an exception that is none of the catalog's classified refusals:
+         * before the commit the row is `pending` again; from the commit on, or when the row could not be stamped, it is
+         * left for `verifyApplying`. Never recorded as `failed`, and a release that reached it returns it as its apply outcome.
          */
         const val DEFINITION_APPLY_UNCLASSIFIED = "lake.definition.apply_unclassified"
 
