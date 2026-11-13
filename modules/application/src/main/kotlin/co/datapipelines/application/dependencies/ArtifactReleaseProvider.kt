@@ -3,6 +3,9 @@ package co.datapipelines.application.dependencies
 import co.datapipelines.dependencies.Constraint
 import co.datapipelines.dependencies.DependencyProvider
 import co.datapipelines.dependencies.FamilyDescriptor
+import co.datapipelines.dependencies.FamilyKey
+import co.datapipelines.dependencies.IncomingQuery
+import co.datapipelines.dependencies.IncomingResult
 import co.datapipelines.dependencies.Lifecycle
 import co.datapipelines.dependencies.NodeFacts
 import co.datapipelines.dependencies.ObjectRequest
@@ -62,8 +65,23 @@ internal interface CeilingBound {
 abstract class ArtifactReleaseProvider<B : Any>(
     val family: ReleaseFamily,
     final override val ceiling: StatementCeiling,
+    /** #877 §B — the family's inverse arms ([IncomingArmCatalog]); none answers every `findIncoming` Unsupported. */
+    private val incoming: IncomingArms? = null,
 ) : DependencyProvider<StoredVersion<B>>,
     CeilingBound {
+    init {
+        require(incoming == null || incoming.target == ReleaseDependencyFamilies.keyOf(family)) {
+            "the ${family.wire} provider's inverse arms target ${incoming?.target}"
+        }
+    }
+
+    final override val incomingFrom: Set<FamilyKey> get() = incoming?.incomingFrom.orEmpty()
+
+    final override fun findIncoming(
+        query: IncomingQuery,
+        context: ResolveContext,
+    ): IncomingResult = incoming?.find(query, context) ?: IncomingResult.Unsupported
+
     /** The stored versions [keys] (pin key, version) name in [workspaceId], in ONE statement; absent keys are absent. */
     protected abstract fun read(
         workspaceId: UUID,

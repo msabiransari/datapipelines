@@ -8,6 +8,7 @@ import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.release.ReleasePlanRequest
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactRef
 import co.datapipelines.visualization.ArtifactVersion
@@ -53,7 +54,8 @@ class DashboardLifecycleDialogControllerTest {
     private val dashboards = mockk<DashboardService>()
     private val audit = mockk<AuditEventSink>(relaxed = true)
     private val dialogs = mockk<DashboardLifecycleDialogModel>(relaxed = true)
-    private val controller = DashboardLifecycleDialogController(dashboards, dialogs, audit)
+    private val previews = mockk<ReleasePreviews>(relaxed = true)
+    private val controller = DashboardLifecycleDialogController(dashboards, dialogs, audit, previews)
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -109,10 +111,10 @@ class DashboardLifecycleDialogControllerTest {
                 visualizationsReleased = listOf(ArtifactRef("finance/visualizations/cells", 1)),
             )
         every {
-            dashboards.release(workspaceId, dashboardId, "hash-2", any(), releasePinnedVisualizations = true)
+            dashboards.release(workspaceId, dashboardId, "hash-2", any(), releasePinnedVisualizations = false, plan = PLAN)
         } returns released
 
-        val answer = controller.release(dashboardId, bodyHash = "hash-2", releasePinnedVisualizations = true)
+        val answer = controller.release(dashboardId, bodyHash = "hash-2", treeHash = TREE_HASH, includeDependencies = INCLUDE)
 
         answer.headers["HX-Redirect"] shouldBe listOf("/dashboards/$dashboardId?tab=versions&ok=released_with_visualizations")
         // #873 §C.7 — the #332 rows are the coordinator's, written inside its transaction; the dialog writes none.
@@ -120,14 +122,28 @@ class DashboardLifecycleDialogControllerTest {
     }
 
     @Test
+    fun `876 - a release POST without the plan's tree_hash is plan_required and the service never runs`() {
+        authenticate()
+        every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns working()
+
+        val thrown =
+            assertThrows<DatapipelinesException> {
+                controller.release(dashboardId, bodyHash = "hash-2", treeHash = null, includeDependencies = INCLUDE)
+            }
+
+        thrown.code shouldBe "dashboard.release.plan_required"
+        verify(exactly = 0) { dashboards.release(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `a release without a cascade carries the plain released flash`() {
         authenticate()
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns working()
         every {
-            dashboards.release(workspaceId, dashboardId, "hash-2", any(), releasePinnedVisualizations = false)
+            dashboards.release(workspaceId, dashboardId, "hash-2", any(), releasePinnedVisualizations = false, plan = PLAN)
         } returns DashboardReleased(working(version = 2, status = PipelineVersionStatus.RELEASED), emptyList())
 
-        val answer = controller.release(dashboardId, bodyHash = "hash-2", releasePinnedVisualizations = false)
+        val answer = controller.release(dashboardId, bodyHash = "hash-2", treeHash = TREE_HASH, includeDependencies = INCLUDE)
 
         answer.headers["HX-Redirect"] shouldBe listOf("/dashboards/$dashboardId?tab=versions&ok=released")
     }
@@ -137,17 +153,17 @@ class DashboardLifecycleDialogControllerTest {
         authenticate()
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns working(hash = "hash-fresh")
         every {
-            dashboards.release(workspaceId, dashboardId, "hash-stale", any(), releasePinnedVisualizations = false)
+            dashboards.release(workspaceId, dashboardId, "hash-stale", any(), releasePinnedVisualizations = false, plan = PLAN)
         } throws DatapipelinesException(PipelineErrorCodes.Dashboard.VERSION_CONFLICT, "The draft changed since you loaded it.")
 
         val thrown =
             assertThrows<DatapipelinesException> {
-                controller.release(dashboardId, bodyHash = "hash-stale", releasePinnedVisualizations = false)
+                controller.release(dashboardId, bodyHash = "hash-stale", treeHash = TREE_HASH, includeDependencies = INCLUDE)
             }
 
         thrown.code shouldBe "dashboard.version.conflict"
-        verify(exactly = 1) { dashboards.release(workspaceId, dashboardId, "hash-stale", any(), any()) }
-        verify(exactly = 0) { dashboards.release(any(), any(), "hash-fresh", any(), any()) }
+        verify(exactly = 1) { dashboards.release(workspaceId, dashboardId, "hash-stale", any(), any(), any()) }
+        verify(exactly = 0) { dashboards.release(any(), any(), "hash-fresh", any(), any(), any()) }
         verify(exactly = 0) { audit.log(any(), any(), any(), any(), any(), any()) }
     }
 
@@ -156,7 +172,7 @@ class DashboardLifecycleDialogControllerTest {
         authenticate()
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns working(hash = "hash-fresh")
         every {
-            dashboards.release(workspaceId, dashboardId, "hash-stale", any(), releasePinnedVisualizations = false)
+            dashboards.release(workspaceId, dashboardId, "hash-stale", any(), releasePinnedVisualizations = false, plan = PLAN)
         } throws DatapipelinesException(PipelineErrorCodes.Dashboard.VERSION_CONFLICT, "The draft changed since you loaded it.")
 
         val response =
@@ -165,14 +181,17 @@ class DashboardLifecycleDialogControllerTest {
                     post("/partials/dashboards/$dashboardId/lifecycle/release")
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .param("bodyHash", "hash-stale")
+                        .param("tree_hash", TREE_HASH)
+                        .param("include_dependencies", INCLUDE[0])
+                        .param("include_dependencies", INCLUDE[1])
                         .header("HX-Request", "true"),
                 ).andExpect(status().isConflict)
                 .andReturn()
                 .response.contentAsString
 
         response shouldContain "dashboard.version.conflict"
-        verify(exactly = 1) { dashboards.release(workspaceId, dashboardId, "hash-stale", any(), any()) }
-        verify(exactly = 0) { dashboards.release(any(), any(), "hash-fresh", any(), any()) }
+        verify(exactly = 1) { dashboards.release(workspaceId, dashboardId, "hash-stale", any(), any(), any()) }
+        verify(exactly = 0) { dashboards.release(any(), any(), "hash-fresh", any(), any(), any()) }
     }
 
     @Test
@@ -187,7 +206,7 @@ class DashboardLifecycleDialogControllerTest {
             ).andExpect(status().isBadRequest)
 
         verify(exactly = 0) { dashboards.findWorking(any(), any(), any()) }
-        verify(exactly = 0) { dashboards.release(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { dashboards.release(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -196,7 +215,7 @@ class DashboardLifecycleDialogControllerTest {
         val hostile = "'\"; DROP TABLE dashboard_version; --<script>" + "x".repeat(5000)
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns working(hash = "hash-fresh")
         every {
-            dashboards.release(workspaceId, dashboardId, hostile, any(), releasePinnedVisualizations = false)
+            dashboards.release(workspaceId, dashboardId, hostile, any(), releasePinnedVisualizations = false, plan = PLAN)
         } throws DatapipelinesException(PipelineErrorCodes.Dashboard.VERSION_CONFLICT, "The draft changed since you loaded it.")
 
         mvc()
@@ -204,6 +223,9 @@ class DashboardLifecycleDialogControllerTest {
                 post("/partials/dashboards/$dashboardId/lifecycle/release")
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("bodyHash", hostile)
+                    .param("tree_hash", TREE_HASH)
+                    .param("include_dependencies", INCLUDE[0])
+                    .param("include_dependencies", INCLUDE[1])
                     .header("HX-Request", "true"),
             ).andExpect(status().isConflict)
     }
@@ -222,10 +244,10 @@ class DashboardLifecycleDialogControllerTest {
 
         val thrown =
             assertThrows<DatapipelinesException> {
-                controller.release(dashboardId, bodyHash = "hash-2", releasePinnedVisualizations = false)
+                controller.release(dashboardId, bodyHash = "hash-2", treeHash = TREE_HASH, includeDependencies = INCLUDE)
             }
         thrown.code shouldBe "dashboard.version.not_draft"
-        verify(exactly = 0) { dashboards.release(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { dashboards.release(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -233,7 +255,7 @@ class DashboardLifecycleDialogControllerTest {
         authenticate(method = AuthMethod.API_KEY)
         val thrown =
             assertThrows<DatapipelinesException> {
-                controller.release(dashboardId, bodyHash = "hash-2", releasePinnedVisualizations = false)
+                controller.release(dashboardId, bodyHash = "hash-2", treeHash = TREE_HASH, includeDependencies = INCLUDE)
             }
         thrown.code shouldBe "auth.session.required"
         verify(exactly = 0) { dashboards.findWorking(any(), any(), any()) }
@@ -341,5 +363,11 @@ class DashboardLifecycleDialogControllerTest {
         controller.restoreDialog(m6, dashboardId, version = 1) shouldBe "partials/dashboard-lifecycle-restore"
         val m7 = ExtendedModelMap()
         controller.purgeEntityDialog(m7, dashboardId) shouldBe "partials/dashboard-lifecycle-purge-entity"
+    }
+
+    private companion object {
+        const val TREE_HASH = "v1:0123456789abcdef"
+        val INCLUDE = listOf("n1", "n2")
+        val PLAN = ReleasePlanRequest(TREE_HASH, INCLUDE)
     }
 }

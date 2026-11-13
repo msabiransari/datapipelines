@@ -1,0 +1,11 @@
+{
+  "template" : {
+    "id" : "acme/t/lib.sql",
+    "version" : 1
+  },
+  "scan" : "working_version",
+  "pipeline_count" : 0,
+  "references" : [ ],
+  "parameter_set_references" : [ ],
+  "visualization_references" : [ ]
+}

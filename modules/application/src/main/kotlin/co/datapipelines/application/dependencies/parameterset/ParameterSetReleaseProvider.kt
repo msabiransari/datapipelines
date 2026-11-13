@@ -1,6 +1,7 @@
 package co.datapipelines.application.dependencies.parameterset
 
 import co.datapipelines.application.dependencies.ArtifactReleaseProvider
+import co.datapipelines.application.dependencies.IncomingArms
 import co.datapipelines.application.dependencies.StatementCeiling
 import co.datapipelines.application.dependencies.StoredVersion
 import co.datapipelines.application.dependencies.prerequisites.DatasourceEdges
@@ -39,7 +40,8 @@ class ParameterSetReleaseProvider(
     private val sets: ParameterSetRepository,
     private val templates: TemplateRepository,
     ceiling: StatementCeiling,
-) : ArtifactReleaseProvider<ParameterSetReleaseBody>(ReleaseFamily.PARAMETER_SET, ceiling) {
+    incoming: IncomingArms? = null,
+) : ArtifactReleaseProvider<ParameterSetReleaseBody>(ReleaseFamily.PARAMETER_SET, ceiling, incoming) {
     override fun read(
         workspaceId: UUID,
         keys: List<Pair<String, Int>>,

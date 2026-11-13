@@ -4,6 +4,9 @@ import co.datapipelines.application.dependencies.prerequisites.DatasourceEdges
 import co.datapipelines.application.dependencies.prerequisites.DatasourceReferenceReader
 import co.datapipelines.dependencies.DependencyProvider
 import co.datapipelines.dependencies.FamilyDescriptor
+import co.datapipelines.dependencies.FamilyKey
+import co.datapipelines.dependencies.IncomingQuery
+import co.datapipelines.dependencies.IncomingResult
 import co.datapipelines.dependencies.ObjectRequest
 import co.datapipelines.dependencies.Outcome
 import co.datapipelines.dependencies.Reference
@@ -11,10 +14,10 @@ import co.datapipelines.dependencies.ResolveContext
 import co.datapipelines.dependencies.SelectorKind
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionNode
 import co.datapipelines.pipeline.release.PipelineDependencySource
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseNodeIdentity
-import co.datapipelines.pipeline.release.ReleaseNodeStatus
 import co.datapipelines.pipeline.release.ResolvedNode
 
 /**
@@ -29,9 +32,11 @@ data class PipelineReleaseNode(
 )
 
 /**
- * The pipeline family's arm of G1's adapter (#873 §F.1): [PipelineDependencySource]'s read — the record, the version's
- * detail and, unless the version is DISCARDED, its body, three statements in that order, each under the family's
- * [StatementCeiling] — with the body ALSO fed to [DatasourceEdges.ofPipeline], so the version's outgoing references are
+ * The pipeline family's arm of G1's adapter (#873 §F.1), batched by #887: a `resolveMany` call reads the record, the
+ * version's detail and, unless the version is DISCARDED, its body for every requested version in ONE bounded statement
+ * per workspace ([PipelineRepository.findVersionNodesByName] through [BoundedGraphRead]) — the predicates of
+ * [PipelineDependencySource]'s three per-node reads, which stay that source's (its parity oracle) — and builds the node
+ * that source builds, with the body ALSO fed to [DatasourceEdges.ofPipeline], so the version's outgoing references are
  * its pins (template, child pipeline; the pin → reference mapping G1 pinned, [ReleaseDependencyFamilies.pinReferences])
  * followed by its datasource occurrences. The artifact references come first, so artifact discovery order — and every
  * `n<i>` the adapter assigns to an artifact node — is the order an artifact-only walk gives.
@@ -41,20 +46,21 @@ data class PipelineReleaseNode(
  *
  * The apply-time prerequisite check reads the datasource references of a batch of versions through
  * [PipelineReleaseProvider.datasourceReferences] instead (#873 R1): ONE bounded statement per batch
- * ([PipelineRepository.findLiveVersionBodiesByName]), never the three reads per version this arm's walk path keeps.
+ * ([PipelineRepository.findLiveVersionBodiesByName]) over the DRAFT and RELEASED versions only.
  */
 object PipelineReleaseFamily {
     fun descriptor(
         pipelines: PipelineRepository,
         ceiling: StatementCeiling,
         deserializer: PipelineDeserializer = PipelineDeserializer(),
+        incoming: IncomingArms? = null,
     ): FamilyDescriptor<PipelineReleaseNode> =
         FamilyDescriptor(
             key = ReleaseDependencyFamilies.keyOf(ReleaseFamily.PIPELINE),
             rootSelectors = setOf(SelectorKind.EXACT_VERSION),
             capabilities = ReleaseDependencyFamilies.CAPABILITIES,
             extractorSchemaVersion = ReleaseDependencyFamilies.EXTRACTOR_SCHEMA_VERSION,
-            provider = PipelineReleaseProvider(pipelines, deserializer, ceiling),
+            provider = PipelineReleaseProvider(pipelines, deserializer, ceiling, incoming),
             safeSummary = FamilyDescriptor.NO_SAFE_SUMMARY,
         )
 }
@@ -63,39 +69,72 @@ internal class PipelineReleaseProvider(
     private val pipelines: PipelineRepository,
     private val deserializer: PipelineDeserializer,
     override val ceiling: StatementCeiling,
+    /** #877 §B — the pipeline target's four inverse arms ([IncomingArmCatalog.pipeline]); none = Unsupported. */
+    private val incoming: IncomingArms? = null,
 ) : DependencyProvider<PipelineReleaseNode>,
     CeilingBound,
     DatasourceReferenceReader {
+    init {
+        require(incoming == null || incoming.target == KEY) { "the pipeline provider's inverse arms target ${incoming?.target}" }
+    }
+
+    override val incomingFrom: Set<FamilyKey> get() = incoming?.incomingFrom.orEmpty()
+
+    override fun findIncoming(
+        query: IncomingQuery,
+        context: ResolveContext,
+    ): IncomingResult = incoming?.find(query, context) ?: IncomingResult.Unsupported
+
+    /**
+     * #887 (record §7.1, §25.4 D12): one [Outcome] per request from ONE bounded statement per workspace in the call
+     * ([PipelineRepository.findVersionNodesByName] through [BoundedGraphRead]: a batch above the contract's ceiling is
+     * refused on entry, the statement runs under the context's live bound, a spent deadline refuses and a result read
+     * after expiry is discarded). Each row is turned into the node [PipelineDependencySource.resolve] builds for the same
+     * identity — the same facts and pins, so `TreeHash` v1 and the release goldens are unchanged — plus the version's
+     * datasource references. An absent pipeline or version, or one of another workspace, is [Outcome.Missing]; a request
+     * that is not an exact pipeline version is [Outcome.Unsupported].
+     */
     override fun resolveMany(
         requests: List<ObjectRequest>,
         context: ResolveContext,
-    ): Map<ObjectRequest, Outcome<PipelineReleaseNode>> = requests.associateWith { resolve(it, context) }
-
-    private fun resolve(
-        request: ObjectRequest,
-        context: ResolveContext,
-    ): Outcome<PipelineReleaseNode> {
-        val identity = ReleaseDependencyFamilies.identityOf(request)
-        if (identity == null || identity.family != ReleaseFamily.PIPELINE) return Outcome.Unsupported
-        val read = ReleaseDependencyFamilies.bounded(ReleaseFamily.PIPELINE, ceiling, context) { read(identity) } ?: return Outcome.Missing
-        return ReleaseDependencyFamilies.resolved(identity, read.node, body = read)
+    ): Map<ObjectRequest, Outcome<PipelineReleaseNode>> {
+        val identities = requests.associateWith(::pipelineIdentityOf)
+        val found = HashMap<ReleaseNodeIdentity, PipelineReleaseNode>()
+        identities.values
+            .filterNotNull()
+            .distinct()
+            .groupBy { it.workspaceId }
+            .forEach { (workspaceId, wanted) ->
+                val keys = wanted.map { it.entityId to it.version }
+                BoundedGraphRead
+                    .run(KEY, requests, context, ceiling) { pipelines.findVersionNodesByName(workspaceId, keys) }
+                    .forEach { row ->
+                        val identity = ReleaseNodeIdentity(workspaceId, ReleaseFamily.PIPELINE, row.name, row.version)
+                        found[identity] = node(identity, row)
+                    }
+            }
+        return requests.associateWith { request ->
+            when (val identity = identities[request]) {
+                null -> Outcome.Unsupported
+                else -> found[identity]?.let { ReleaseDependencyFamilies.resolved(identity, it.node, body = it) } ?: Outcome.Missing
+            }
+        }
     }
 
-    /** [PipelineDependencySource.resolve]'s three reads, keeping the body it parses for the datasource references. */
-    private fun read(identity: ReleaseNodeIdentity): PipelineReleaseNode? {
-        val record = pipelines.findByNameAnyStatus(identity.workspaceId, identity.entityId) ?: return null
-        val detail = pipelines.findVersionDetail(identity.workspaceId, record.id, identity.version) ?: return null
-        val status = PipelineDependencySource.statusOf(detail.status)
-        val body =
-            if (status == ReleaseNodeStatus.DISCARDED) {
-                null
-            } else {
-                deserializer.readOrThrow(pipelines.findVersionBody(identity.workspaceId, record.id, identity.version) ?: return null)
-            }
+    /**
+     * The node [PipelineDependencySource.resolve] builds from its three reads, built from their one row: a DISCARDED
+     * version carries no body, so no pin and no datasource reference.
+     */
+    private fun node(
+        identity: ReleaseNodeIdentity,
+        row: PipelineVersionNode,
+    ): PipelineReleaseNode {
+        val body = row.bodyJson?.let(deserializer::readOrThrow)
         val pins = body?.let { PipelineDependencySource.pinsOf(identity.workspaceId, it) }.orEmpty()
         val datasources = body?.let { DatasourceEdges.ofPipeline(identity.workspaceId, it) }.orEmpty()
+        val status = PipelineDependencySource.statusOf(row.status)
         return PipelineReleaseNode(
-            ResolvedNode(identity, record.name, status, detail.bodyHash, record.currentVersion, pins, record.id),
+            ResolvedNode(identity, row.name, status, row.bodyHash, row.currentVersion, pins, row.pipelineId),
             datasources,
         )
     }

@@ -179,6 +179,8 @@ class ReleaseArtifactSeed(
         status: PipelineVersionStatus = PipelineVersionStatus.RELEASED,
         templates: List<Pair<String, Int>> = emptyList(),
         children: List<Pair<String, Int>> = emptyList(),
+        /** The DQL nodes' datasource (#876: the release dialog's prerequisite fixture names its own). */
+        source: String = "pg",
     ) {
         jdbc.update(
             "INSERT INTO pipelines (id, name, display_name, owner_id, current_version, workspace_id)" +
@@ -199,7 +201,7 @@ class ReleaseArtifactSeed(
                             id = "n$index",
                             description = "",
                             type = NodeType.DQL,
-                            source = "pg",
+                            source = source,
                             template = TemplateRef(pin.first, pin.second),
                             output = NodeOutput.Caller,
                             dependsOn = emptyList(),

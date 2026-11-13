@@ -42,9 +42,10 @@ import java.util.concurrent.TimeUnit
  * INDEPENDENT connection (round 2, verdict R4).
  *
  * - **Strict audit, both entries.** Per root, through the planned REST entry (a `tree_hash` plan selecting the whole
- *   all-DRAFT closure) AND the compatibility entry (the release dialog's POST; the parameter set's REST route without a
- *   plan, as it has no dialog): the production strict sink, behind [FailingAuditConfiguration], throws a JAVA exception
- *   on the release's LAST row — the root's own, written after every flip and every dependency row. A witness trigger on
+ *   all-DRAFT closure) AND the family's release dialog POST carrying the same plan (`tree_hash` and repeated
+ *   `include_dependencies` form fields; every family has a dialog since #876 §F): the production strict sink, behind
+ *   [FailingAuditConfiguration], throws a JAVA exception on the release's LAST row — the root's own, written after
+ *   every flip and every dependency row. A witness trigger on
  *   the root's DRAFT → RELEASED flip proves the flips ran (`nextval` survives the rollback), and that every selected
  *   dependency was already RELEASED inside the transaction then. Every flip, pointer and audit row must roll back.
  *   Then the same request, unarmed, releases: exactly one persisted event per actual flip (the read is not filtered on
@@ -54,9 +55,12 @@ import java.util.concurrent.TimeUnit
  *   `pg_stat_activity` — then the discard commits and the guarded re-walk refuses (`plan_conflict` or
  *   `dependency_not_released`) with nothing flipped and no row. Reverting the plant, the same plan then releases.
  * - **A34 through the wired coordinator.** A dashboard binding the set's `region` is authored valid; a SQL plant past
- *   the save validator renames the set's parameter. The planned REST entry and the compatibility entry both refuse with
+ *   the save validator renames the set's parameter. The planned REST entry and the plan-less REST entry both refuse with
  *   the dashboard's native `parameter_unbound` located at the set edge (`path` and `edge_id`), nothing flipped; the
  *   plant reverted, the satisfied pair releases.
+ * - **The retired alias, refused on purpose (#876 round 3).** Per root, the dialog POST without a plan field and the
+ *   family's REST consent flag without a plan are refused `428 <family>.release.plan_required`; the database still
+ *   shows the root and every dependency DRAFT, and no release row was written.
  */
 @SpringBootTest(classes = [DatapipelinesApplication::class], webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(FailingAuditConfiguration::class)
@@ -124,36 +128,13 @@ class FamilyRootsAuditE2eTest {
     ): Case {
         val (root, edges) = fx.closure(family, "test/fra873/$family-$entry")
         val nodes = fx.nodeIds(root, edges).keys.toList()
-        if (entry == PLANNED) {
-            return Case(root, edges, nodes - root, PLAN_EVENTS.getValue(family), { fx.releaseWithPlan(root, edges) }, dialog = false)
-        }
-        // The compatibility consent is the family's legacy one (LegacyReleaseAlias): a template consents to nothing (its
-        // library releases first), a set and a visualization to their DRAFT template, a dashboard to its DRAFT
-        // visualization only — its set, source pipeline and the chart's template are released beforehand.
-        val prior =
-            when (family) {
-                "template" -> {
-                    listOf(nodes[1] to emptyList())
-                }
-
-                "dashboard" -> {
-                    val set = edges.single { it.path == "parameter_set" }.to
-                    val source = edges.single { it.path == "sources[0].pipeline" }.to
-                    val shape = edges.single { it.path == "transform.template" }.to
-                    listOf(set to edges.filter { it.from == set }, source to edges.filter { it.from == source }, shape to emptyList())
-                }
-
-                else -> {
-                    emptyList()
-                }
+        val send: () -> Response =
+            if (entry == PLANNED) {
+                { fx.releaseWithPlan(root, edges) }
+            } else {
+                { fx.releaseDialog(root, edges) }
             }
-        prior.forEach { (node, below) ->
-            val released = fx.releaseWithPlan(node, below)
-            withClue("prior release of ${node.name}: ${released.asString().take(EXCERPT)}") { released.statusCode shouldBe OK }
-        }
-        val flipped = nodes.filter { fx.row(it).status == "DRAFT" } - root
-        val events = flipped.map { EVENTS.getValue(it.family) } + EVENTS.getValue(family)
-        return Case(root, edges, flipped, events, { fx.releaseCompatible(root) }, dialog = family != "parameter_set")
+        return Case(root, edges, nodes - root, PLAN_EVENTS.getValue(family), send, dialog = entry != PLANNED)
     }
 
     // ---- the cases --------------------------------------------------------------------------------------------
@@ -179,13 +160,13 @@ class FamilyRootsAuditE2eTest {
     // annotation lines around @Order, so @Order must share its block with the test annotation and the fun.
     @CsvSource(
         "template, planned",
-        "template, compatible",
+        "template, dialog",
         "parameter_set, planned",
-        "parameter_set, compatible",
+        "parameter_set, dialog",
         "visualization, planned",
-        "visualization, compatible",
+        "visualization, dialog",
         "dashboard, planned",
-        "dashboard, compatible",
+        "dashboard, dialog",
     )
     @ParameterizedTest(name = "{0} through the {1} entry")
     @Order(2)
@@ -330,9 +311,9 @@ class FamilyRootsAuditE2eTest {
         val audit = lastAuditId()
 
         val planned = fx.releaseWithPlan(root, edges, previewed)
-        val compatible = fx.send("POST", "/api/v1/dashboards/${fx.row(root).uuid}/release", "", fx.row(root).hash)
+        val planless = fx.send("POST", "/api/v1/dashboards/${fx.row(root).uuid}/release", "", fx.row(root).hash)
 
-        listOf("planned" to planned, "compatible" to compatible).forEach { (entry, response) ->
+        listOf("planned" to planned, "planless" to planless).forEach { (entry, response) ->
             println("event=family_roots.a34 entry=$entry status=${response.statusCode} body=${response.asString().take(EXCERPT)}")
             withClue("$entry: ${response.asString().take(EXCERPT)}") {
                 response.statusCode shouldBe BAD_REQUEST
@@ -357,6 +338,40 @@ class FamilyRootsAuditE2eTest {
         val released = fx.releaseWithPlan(root, edges, previewed)
         withClue("the satisfied pair releases: ${released.asString().take(EXCERPT)}") { released.statusCode shouldBe OK }
         state(root, edges).values.map { it.status }.toSet() shouldBe setOf("RELEASED")
+    }
+
+    // The multiline source sits ABOVE @ParameterizedTest for the same reason as the order-2 case's.
+    @CsvSource(
+        "template, dialog",
+        "parameter_set, dialog",
+        "parameter_set, rest",
+        "visualization, dialog",
+        "visualization, rest",
+        "dashboard, dialog",
+        "dashboard, rest",
+    )
+    @ParameterizedTest(name = "{0} through the retired alias, {1} entry")
+    @Order(5)
+    fun `the retired alias is refused plan_required on purpose - the root and every dependency stay DRAFT, no row is written`(
+        family: String,
+        entry: String,
+    ) {
+        val (root, edges) = fx.closure(family, "test/fra873/alias-$family-$entry")
+        val before = state(root, edges)
+        before.values.map { it.status }.toSet() shouldBe setOf("DRAFT")
+        val audit = lastAuditId()
+
+        val refused = if (entry == "dialog") fx.releaseDialogWithoutPlan(root) else fx.releaseLegacyAlias(root)
+
+        withClue(refused.asString().take(EXCERPT)) {
+            refused.statusCode shouldBe PRECONDITION_REQUIRED
+            if (entry == "rest") refused.jsonPath().getString("error.code") shouldBe "${CODE_PREFIX.getValue(family)}.release.plan_required"
+            refused.header(HX_REDIRECT) shouldBe null
+        }
+        withClue("independent-connection read: nothing flipped, every pointer unmoved, no release row") {
+            state(root, edges) shouldBe before
+            auditAfter(audit) shouldBe emptyList()
+        }
     }
 
     /**
@@ -553,6 +568,7 @@ class FamilyRootsAuditE2eTest {
         private const val OK = 200
         private const val CREATED = 201
         private const val BAD_REQUEST = 400
+        private const val PRECONDITION_REQUIRED = 428
         private const val CONFLICT = 409
         private const val INTERNAL_ERROR = 500
         private const val EXCERPT = 800

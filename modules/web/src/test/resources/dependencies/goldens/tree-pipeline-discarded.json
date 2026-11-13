@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "correlation_id": "00000000-0000-4000-8000-000000000000",
+  "data": {
+    "schema_version": 1,
+    "roots": [
+      "n0"
+    ],
+    "nodes": [
+      {
+        "node_id": "n0",
+        "entity_id": "00000000-0000-4000-8000-000000000001",
+        "family": "pipeline",
+        "name": "test/tree875/golden/retired",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "artifact",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": "DISCARDED",
+        "operational": null,
+        "current_version": null,
+        "body_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+        "capabilities": {
+          "release": "ARTIFACT_RELEASE",
+          "promotion": "VERSIONED_ARTIFACT"
+        }
+      }
+    ],
+    "edges": [ ],
+    "diagnostics": [
+      {
+        "code": "DISCARDED",
+        "node_id": "n0",
+        "edge_id": null,
+        "message": "A referenced version is discarded; its own dependencies are not expanded."
+      }
+    ],
+    "complete": false,
+    "acyclic": null,
+    "observed_at": "2026-01-01T00:00:00Z"
+  }
+}

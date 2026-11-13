@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "correlation_id": "00000000-0000-4000-8000-000000000000",
+  "data": {
+    "schema_version": 1,
+    "roots": [
+      "n0"
+    ],
+    "nodes": [
+      {
+        "node_id": "n0",
+        "entity_id": "00000000-0000-4000-8000-000000000001",
+        "family": "visualization",
+        "name": "test/tree875/golden/chart",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "artifact",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": "DRAFT",
+        "operational": {
+          "evidence_ready": true
+        },
+        "current_version": null,
+        "body_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+        "capabilities": {
+          "release": "ARTIFACT_RELEASE",
+          "promotion": "VERSIONED_ARTIFACT"
+        }
+      },
+      {
+        "node_id": "n1",
+        "entity_id": "00000000-0000-4000-8000-000000000002",
+        "family": "template",
+        "name": "test/tree875/golden/shape.jsonata",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "artifact",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": "DRAFT",
+        "operational": null,
+        "current_version": null,
+        "body_hash": "0000000000000000000000000000000000000000000000000000000000000002",
+        "capabilities": {
+          "release": "ARTIFACT_RELEASE",
+          "promotion": "VERSIONED_ARTIFACT"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "e0",
+        "from": "n0",
+        "to": "n1",
+        "relationship": "TRANSFORM_TEMPLATE",
+        "source_path": "/transform/template",
+        "requested_selector": {
+          "kind": "exact_version",
+          "number": 1
+        },
+        "resolved_version": 1,
+        "constraints": [ ]
+      }
+    ],
+    "diagnostics": [ ],
+    "complete": true,
+    "acyclic": true,
+    "observed_at": "2026-01-01T00:00:00Z"
+  }
+}

@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
-import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRef
@@ -31,8 +30,8 @@ import java.util.UUID
 
 /**
  * #399 — the visualization dialogs answer the question BEFORE the button (094 §B), from the SAME reads the
- * service's guards make: the release's refusals in the service's order (cases, the transform pin, then the
- * evidence gate — which is not consulted while no case exists), the ONE consent for a DRAFT pin, the pin guard's
+ * service's guards make: the release's native refusals in the service's order (cases, then the evidence gate — which
+ * is not consulted while no case exists; the transform pin is the release plan's row since #876 §F.2), the pin guard's
  * pinners narrowed to the version, the discard's pointer fallback by the repository's D60 rule (the highest other
  * eligible version, a DRAFT only under the development posture), the restore's above-current-or-NULL move and the
  * entity purge's sole-draft rule.
@@ -42,7 +41,6 @@ class VisualizationLifecycleDialogModelTest {
     private val vizId = UUID.randomUUID()
     private val visualizations = mockk<VisualizationService>()
     private val dashboards = mockk<DashboardService>()
-    private var templateStatus: PipelineVersionStatus? = PipelineVersionStatus.RELEASED
     private var verdict: EvidenceVerdict = EvidenceVerdict.Pass
     private var evidenceCalls = 0
 
@@ -50,7 +48,6 @@ class VisualizationLifecycleDialogModelTest {
         VisualizationLifecycleDialogModel(
             visualizations = visualizations,
             dashboards = dashboards,
-            templateStatuses = TemplateVersionStatuses { _, _, _ -> templateStatus },
             evidence = ReleaseEvidence { _, _ -> verdict.also { evidenceCalls++ } },
             actors = mockk<ActorNames>().also { every { it.lookup(any()) } returns emptyMap() },
             authoring = AuthoringGuard(developmentPosture),
@@ -85,53 +82,51 @@ class VisualizationLifecycleDialogModelTest {
     // ------------------------------------------------------------------ release
 
     @Test
-    fun `a draft with cases, a released pin and green evidence releases - the button renders, no consent`() {
+    fun `a draft with cases and green evidence releases - the button renders and the plan is built`() {
         draftWith(cases = 2, pinned = true)
 
         val dlg = model().release(workspaceId, vizId)
 
         dlg.canRelease shouldBe true
-        dlg.needsConsent shouldBe false
-        dlg.pin?.label shouldBe "acme/templates/t@3"
+        dlg.hasDraft shouldBe true
         dlg.caseCount shouldBe 2
         evidenceCalls shouldBe 1
     }
 
     @Test
-    fun `a DRAFT transform pin is the ONE consent's row, not a refusal`() {
+    fun `#876 R1 - the transform pin is the plan's row, never a native refusal - cases and evidence decide alone`() {
+        // The model reads no template status at all (its constructor has no such port): a MISSING or DISCARDED pin is
+        // the release plan's blocking row, which ReleaseDialogModelTest and the dialog's render test pin.
         draftWith(cases = 1, pinned = true)
-        templateStatus = PipelineVersionStatus.DRAFT
 
         val dlg = model().release(workspaceId, vizId)
 
+        dlg.refusals shouldBe emptyList()
         dlg.canRelease shouldBe true
-        dlg.needsConsent shouldBe true
+        dlg.hasDraft shouldBe true
     }
 
     @Test
-    fun `no cases refuses tests_missing first, a missing pin refuses next, and the evidence gate is not consulted`() {
+    fun `no cases refuses tests_missing, and the evidence gate is not consulted`() {
         draftWith(cases = 0, pinned = true)
-        templateStatus = null
 
         val dlg = model().release(workspaceId, vizId)
 
-        dlg.refusals.map { it.code } shouldBe
-            listOf(VisualizationErrorCodes.RELEASE_TESTS_MISSING, VisualizationErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED)
-        dlg.refusals[1].message shouldContain "MISSING"
+        dlg.refusals.map { it.code } shouldBe listOf(VisualizationErrorCodes.RELEASE_TESTS_MISSING)
+        dlg.hasDraft shouldBe true
         evidenceCalls shouldBe 0
     }
 
     @Test
-    fun `a DISCARDED pin refuses, and a refused evidence verdict is listed with its own code`() {
+    fun `a refused evidence verdict is listed with its own code`() {
         draftWith(cases = 1, pinned = true)
-        templateStatus = PipelineVersionStatus.DISCARDED
         verdict = EvidenceVerdict.Refused("visualization.release.tests_red", "The latest run is RED.", emptyMap())
 
         val dlg = model().release(workspaceId, vizId)
 
         dlg.canRelease shouldBe false
-        dlg.refusals.map { it.code } shouldBe
-            listOf(VisualizationErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED, "visualization.release.tests_red")
+        dlg.hasDraft shouldBe true
+        dlg.refusals.map { it.code } shouldBe listOf("visualization.release.tests_red")
     }
 
     @Test
@@ -141,6 +136,7 @@ class VisualizationLifecycleDialogModelTest {
         val dlg = model().release(workspaceId, vizId)
 
         dlg.refusals.single().code shouldBe VisualizationErrorCodes.VERSION_NOT_DRAFT
+        dlg.hasDraft shouldBe false
         evidenceCalls shouldBe 0
     }
 

@@ -55,6 +55,41 @@ class EndpointVersionsPageRenderTest {
         doc.select("[data-api-entity] [data-api-keys] .app-chip").eachText() shouldContainExactly listOf("ci", "nightly")
     }
 
+    /**
+     * #876 G6 U3 — the Dependencies card belongs to the SELECTED version (record §13): it sits between the version card
+     * and the API card, closed, its pane naming the API's stored path (the URL without its one /api prefix) at the
+     * viewed version; another version's page names that version. No version to view, no card. The page's loader
+     * catalog lists the eight Dependencies entries after its own lifecycle script.
+     */
+    @Test
+    fun `the Dependencies card is the selected version's, between the version card and the API card, closed`() {
+        for (selected in listOf(2, 3)) {
+            val doc = page(page(selected = selected))
+            val stack = doc.select(".app-grid-stack > .ds-card")
+            stack.map {
+                when {
+                    it.hasAttr("data-api-selected") -> "version"
+                    it.selectFirst("[data-api-deps]") != null -> "dependencies"
+                    it.hasAttr("data-api-entity") -> "api"
+                    else -> "other"
+                }
+            } shouldContainExactly listOf("version", "dependencies", "api")
+            val section = doc.select("details[data-api-deps]").single()
+            section.hasAttr("open") shouldBe false
+            section.select("summary h2").text() shouldBe "Dependencies"
+            val pane = section.select("[data-dp-deps]").single()
+            pane.attr("data-family") shouldBe "api_endpoint"
+            pane.attr("data-name") shouldBe "/finance/v1/revenue"
+            pane.attr("data-version") shouldBe selected.toString()
+            pane.attr("data-dp-deps-state") shouldBe "idle"
+            pane.hasAttr("data-id") shouldBe false
+        }
+        page(page(selected = 2).copy(selected = null)).select("[data-api-deps], [data-dp-deps]").size shouldBe 0
+        val catalog = page(page(selected = 2)).select("template[data-page-assets]").single()
+        catalog.select("script").map { it.attr("src") } shouldContainExactly DEPENDENCY_CATALOG
+        catalog.select("script[data-page-mount]").map { it.attr("src") } shouldContainExactly listOf("/js/dependencies/mount.js")
+    }
+
     @Test
     fun `each verb renders on its own status and only for the row that admits it`() {
         verbs(page(selected = 3)) shouldContainExactly listOf("edit", "release", "purge")

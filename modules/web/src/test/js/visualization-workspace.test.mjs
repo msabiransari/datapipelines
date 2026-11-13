@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -17,9 +18,17 @@ const panes = js("workspace/panes.js");
 const viz = js("visualizations/workspace.js");
 const logic = panes.createLogic(viz.tabs, viz.defaultTab);
 
-test("the closed set is the server's five, Preview first and the default", () => {
-  assert.deepEqual(viz.tabs, ["preview", "overview", "evidence", "used-by", "versions"]);
+test("the closed set is the server's six, Preview first and the default", () => {
+  assert.deepEqual(viz.tabs, ["preview", "overview", "evidence", "used-by", "dependencies", "versions"]);
   assert.equal(viz.defaultTab, "preview");
+});
+
+test("the client set IS the server enum: VisualizationWorkspaceModel.Tab's wire values, in order (#876 sets move together)", () => {
+  const source = fs.readFileSync(path.resolve(here, "../../main/kotlin/co/datapipelines/web/ui/VisualizationWorkspaceModel.kt"), "utf8");
+  const body = source.slice(source.indexOf("enum class Tab("), source.indexOf("companion object", source.indexOf("enum class Tab(")));
+  const wires = Array.from(body.matchAll(/^\s+[A-Z_]+\("([a-z-]+)"\),?$/gm), (m) => m[1]);
+  assert.ok(wires.length >= 6, `non-vacuity: ${wires.length} enum entries read`);
+  assert.deepEqual(viz.tabs, wires);
 });
 
 test("the URL's tab reads only when the strip admits it; anything else is Preview", () => {
@@ -148,7 +157,7 @@ function makeEnv() {
   return env;
 }
 
-const TAB_NAMES = ["preview", "overview", "evidence", "used-by", "versions"];
+const TAB_NAMES = ["preview", "overview", "evidence", "used-by", "dependencies", "versions"];
 
 /** A Preview partial for [cases] case names: the data block, the selector and one section + board per case. */
 function previewPartial(pane, cases, selected = "0") {

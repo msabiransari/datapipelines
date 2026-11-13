@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.70
+**Status:** v1.71
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-13
 
 ---
 
@@ -554,7 +554,7 @@ DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL=https://uat.example.com
 DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY=<the same shared secret>
 ```
 
-`DATAPIPELINES_ENV` is **your** name for each deployment and nothing branches on it; the receiver records the sender's label as the `source_env` of what it received. `DATAPIPELINES_POSTURE` is what actually changes behaviour — `hardened` defaults `authoring-enabled` to `false`, which is the receiver's whole configuration. Set `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED` explicitly if this one box must do both ([Environments §1](environments.md#1-why-two-variables)).
+`DATAPIPELINES_ENV` is **your** name for each deployment and nothing branches on it; the receiver records the sender's label as the `source_env` of what it received. `DATAPIPELINES_POSTURE` is what actually changes behaviour — `hardened` defaults `authoring-enabled` to `false`, which is the receiver's whole configuration. A hardened box does not author: setting `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=true` there **refuses startup** ([Configuration §3.23](configuration.md#323-environment-and-posture)), so a box that must author runs the `development` posture ([Environments §2](environments.md#a-hardened-deployment-does-not-author-786)).
 
 Generate the secret the way every other one here is generated — `openssl rand -base64 32` — and set the identical value on both sides. It is a **bearer credential**: it belongs in `deploy/secrets.env` with the rest of the secrets, never inline in a compose file or a chart's values.
 
@@ -1003,11 +1003,20 @@ A schedule — or a queued run — whose pipeline is missing or has no current v
 does: one `event=scheduler.conversion.refused` ERROR line each (`kind=schedule`, or `kind=run` naming the run and its
 schedule; pipeline, `reason=missing_pipeline|no_versions|no_current`) and an `event=scheduler.conversion.refused_summary`
 line — on the previous version, release that pipeline or delete the schedule, then upgrade again. Every API, schedule
-and queued run is checked before anything is written, so a refusal leaves all of them unconverted. Every schedule and
-queued run converts in ONE transaction: a target that loses its current version during the conversion, or any write
-that fails, rolls back every schedule and run already converted in that start and refuses the start the same way —
-nothing is left half converted. A current version that is a DRAFT the deployment does
-not run converts to that draft pin and keeps refusing at run, as before.
+and queued run is checked before anything is written, so a refusal leaves all of them unconverted. A current version
+that is a DRAFT the deployment does not run converts to that draft pin and keeps refusing at run, as before.
+
+**One rollback boundary for the whole conversion (#895).** The APIs and the schedules convert in ONE transaction — the
+APIs first, then the schedules and their queued runs. A conversion that is refused or fails part-way — a target that
+loses its current version while the start converts, or any write that fails — rolls back everything that start
+converted: every API, schedule and queued run is left exactly as it was, nothing half converted, and the server refuses
+to start with the refusal lines above (or the failure's own error). Fix the cause and start again: the restart converts
+everything, in one piece. The migrations Flyway applied in that start are already committed and are **not** rolled
+back — only the conversion, which runs after them, is undone. If another writer touches the same rows during the start
+(for example a second instance on the same database), the whole conversion rolls back and is retried from fresh rows,
+at most three times, each retry logged as an `event=upgrade.conversion.retry` WARN line; a third loss refuses the start
+with the instruction to stop every other instance on the database. The success lines (`…converted`, `…converted_run`,
+`…summary`) are logged only after the conversion commits; a start that rolls back logs none of them.
 
 ### 8.3 Upgrade procedure (recommended)
 
@@ -1688,7 +1697,8 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-12 | v1.70 | #753/#754 image account ids and distribution | **§3.1:** the image's `datapipelines` account has fixed ids, UID/GID 999 (the id the unpinned system account already received), and the reference chart's application pod `securityContext` pins `runAsUser`/`runAsGroup`/`fsGroup` to the same 999 instead of 1000, an id the image never had; `ImageUserPinSpecDriftTest` holds the Dockerfile, the chart and this bullet equal. Chart 0.4.0 → 0.4.1. The section no longer claims a registry publish: nothing in this repository pushes the image; build it from a checkout and point Compose or the chart at it. |
+| 2026-11-12 | v1.71 | #753/#754 image account ids and distribution — renumbered at final sync after dependency-graph | **§3.1:** the image's `datapipelines` account has fixed ids, UID/GID 999 (the id the unpinned system account already received), and the reference chart's application pod `securityContext` pins `runAsUser`/`runAsGroup`/`fsGroup` to the same 999 instead of 1000, an id the image never had; `ImageUserPinSpecDriftTest` holds the Dockerfile, the chart and this bullet equal. Chart 0.4.0 → 0.4.1. The section no longer claims a registry publish: nothing in this repository pushes the image; build it from a checkout and point Compose or the chart at it. |
+| 2026-11-11 | v1.70 | #895 upgrade conversion, one rollback boundary | **§8.2:** the APIs and the schedules convert in ONE transaction, APIs first — a refused or failed conversion leaves every API, schedule and queued run as it was, and a restart after the fix converts everything; the migrations Flyway applied stay applied; a concurrent writer rolls the conversion back and it is retried from fresh rows up to three times (`event=upgrade.conversion.retry`); success lines are logged only after the commit. Replaces the schedules-only "ONE transaction" sentence of v1.68. |
 | 2026-11-11 | v1.69 | #889 demo API retirement through the lifecycle | **Appendix B, the demo API:** where authoring is enabled, blanking the key (or a manifest that drops a path) retires a released demo API through the API version verbs — draft purged, every released version discarded, the row kept; the revoked demo key gets `401`, another valid bound key `503 endpoint.pipeline_not_released` — instead of deleting it; a key set again releases a new version of the same API. Where authoring is disabled the managed key is revoked but the API is not retired and keeps serving to other valid bound keys — a known limitation tracked by #897, with the operator's workaround. |
 | 2026-11-11 | v1.68 | #786 schedules pin exact versions (U2) | **§8.2:** schedules join the upgrade's in-place conversion — each live schema-1 schedule (and its queued runs) is pinned to the version CURRENT names, only the version selector changing; a schedule whose pipeline has no current version refuses the start with `kind=schedule` lines; both kinds are checked before anything is written. |
 | 2026-11-10 | v1.67 | #786 API versions, exact pins (U1) | **§8.2:** the upgrade to API versions — stop the one server, apply, read the conversion report, or the refusal list with its fix (release the pipeline or delete the API on the previous version, then upgrade). No floor, no `Recreate`. Schedules join the same step in #786's second unit. |

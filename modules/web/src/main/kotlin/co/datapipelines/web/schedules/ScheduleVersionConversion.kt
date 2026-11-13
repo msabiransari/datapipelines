@@ -3,15 +3,13 @@ package co.datapipelines.web.schedules
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.scheduler.Schedule
-import co.datapipelines.scheduler.ScheduleErrorCodes
 import co.datapipelines.scheduler.ScheduleRepository
 import co.datapipelines.scheduler.ScheduleRun
 import co.datapipelines.scheduler.ScheduleRunRepository
-import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import co.datapipelines.web.endpoints.StartupConversionConflict
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.slf4j.LoggerFactory
-import org.springframework.transaction.support.TransactionOperations
 import java.util.UUID
 
 /**
@@ -34,18 +32,23 @@ import java.util.UUID
  *   naming the operator's fix; the startup runner refuses the server after every step's precondition was read, so
  *   nothing is written. A CURRENT the posture makes ineligible (a DRAFT pointer in a hardened deployment) is NOT a
  *   failure: it converts to that exact pin and keeps refusing at run exactly as before (`version_not_eligible`).
- * - **The whole step, ONE transaction, under the workspace guard** (#786 round 8: all conversion writes of one startup
- *   are one transaction; a failure rolls everything back). The guard is G0 class 2 — the one every pin writer and the
- *   version discard take — acquired ONCE, in sorted id order, over every workspace the step writes in: each candidate
- *   schedule's and each of its queued runs'. Under it the candidates, their queued runs and every target's CURRENT are
- *   re-read, then each schedule converts in workspace/name order: ONLY the payload's `version` selector is replaced
- *   (`"current"` → the integer) and `payload_schema_version` set to 2 — the schedule's under its revision CAS, each run's
- *   while it is still queued at schema 1. Parameters, bindings, the frozen reference, every other payload key and every
- *   other column are untouched. A CAS conflict (a concurrent pin-unchanged edit), or a candidate or run that appeared in
- *   a workspace the guard does not cover, rolls the WHOLE transaction back and the step retries from fresh rows; it never
- *   overwrites. A target that lost its CURRENT between the precondition and the guarded re-read refuses, and so does any
- *   write that fails: the one transaction rolls back every schedule and every queued run it had converted, earlier
- *   candidates included, and the startup fails with the store exactly as it found it.
+ * - **Inside the runner's ONE transaction** (#895: every API, schedule and queued run of one startup converts in one
+ *   transaction; a failure anywhere rolls every family back). This family owns no transaction and takes no lock:
+ *   [plan] reports every workspace it would write in — each candidate schedule's and each of its queued runs' — and
+ *   the runner acquires the workspace guard (G0 class 2, the one every pin writer and the version discard take) ONCE,
+ *   sorted, over the union of every family's workspaces, then the endpoint registry key. [Attempt.convert] then
+ *   re-reads the candidates, their queued runs and every target's CURRENT under those locks and converts each schedule
+ *   in workspace/name order: ONLY the payload's `version` selector is replaced (`"current"` → the integer) and
+ *   `payload_schema_version` set to 2 — the schedule's under its revision CAS, each run's while it is still queued at
+ *   schema 1. Parameters, bindings, the frozen reference, every other payload key and every other column are
+ *   untouched. A CAS conflict (a concurrent pin-unchanged edit), or a candidate or run that appeared in a workspace the
+ *   union does not cover, is a [StartupConversionConflict]: the runner rolls the WHOLE transaction back — the APIs
+ *   included — and replays every family from fresh rows; it never overwrites. A target that lost its CURRENT between
+ *   the precondition and the guarded re-read refuses, and so does any write that fails: the one transaction rolls back
+ *   every API, schedule and queued run this startup had converted, and the startup fails with the store exactly as it
+ *   found it.
+ * - **Commit-time effects.** The converted lines and the summary are [ScheduleConversionOutcome.publish], which the
+ *   runner calls once, after the joint commit — never for an attempt that rolled back.
  * - **Idempotent**: the selector is schema 1, so a rerun selects nothing, repins nothing and logs the zero summary.
  *
  * A deleted schedule is not selected, nor are its runs: the worker skips them (`schedule_deleted`) before preparing,
@@ -56,8 +59,6 @@ class ScheduleVersionConversion(
     private val schedules: ScheduleRepository,
     private val runs: ScheduleRunRepository,
     private val pipelines: PipelineRepository,
-    private val transactions: TransactionOperations,
-    private val writeGuard: MetadataWriterGuard,
 ) {
     private val log = LoggerFactory.getLogger(ScheduleVersionConversion::class.java)
 
@@ -78,18 +79,36 @@ class ScheduleVersionConversion(
         return refusals.size
     }
 
-    /**
-     * E.0 then the conversion. Throws [ScheduleConversionRefusedException] (after logging) when E.0 fails — before any
-     * write — or when a target lost its CURRENT between the precondition and the guarded re-read; any other failure of
-     * the step's one transaction propagates as thrown. Either way the transaction rolls back every schedule and queued
-     * run it had converted, so a refused startup leaves the store as it found it. The converted lines are logged only
-     * after the commit.
-     */
-    fun run(): ScheduleConversionReport {
-        precondition().takeIf { it.isNotEmpty() }?.let { refuse(it) }
-        val converted = convertAll()
+    /** One attempt's plan, read inside the runner's transaction before any lock: every workspace it would write in. */
+    fun plan(): Attempt = Attempt(workspacesOf(candidates()))
+
+    /** This family's part of one attempt of the runner's transaction. */
+    inner class Attempt internal constructor(
+        /** Every candidate schedule's workspace and each of its queued runs' — this family's share of the union. */
+        val workspaces: Set<UUID>,
+    ) {
+        /**
+         * Re-reads under the runner's guard and converts every candidate. Throws [StartupConversionConflict] when a CAS
+         * lost or a candidate or run sits in a workspace outside [guarded] (the runner rolls back and re-plans), and
+         * [ScheduleConversionRefusedException] (after logging it) when a target lost its CURRENT since the precondition;
+         * any other failure propagates as thrown. Either way the runner's transaction rolls back every write.
+         */
+        fun convert(guarded: Set<UUID>): ScheduleConversionOutcome {
+            val locked = candidates()
+            if (!guarded.containsAll(workspacesOf(locked))) {
+                throw StartupConversionConflict(
+                    "a schedule or queued run appeared outside the guarded workspaces; re-planning from fresh rows",
+                )
+            }
+            val converted = locked.map { convertLocked(it) }
+            return ScheduleConversionOutcome(ScheduleConversionReport(converted), this@ScheduleVersionConversion::publish)
+        }
+    }
+
+    /** The commit-time effects of [report]: one line per converted schedule and queued run, then the summary. */
+    private fun publish(report: ScheduleConversionReport) {
+        val converted = report.converted
         converted.forEach(::logConverted)
-        val report = ScheduleConversionReport(converted)
         log.info(
             "event=scheduler.conversion.summary converted={} released={} draft={} queued_runs={}",
             converted.size,
@@ -97,48 +116,15 @@ class ScheduleVersionConversion(
             converted.count { it.status != PipelineVersionStatus.RELEASED },
             converted.sumOf { it.queuedRuns },
         )
-        return report
     }
 
-    private fun convertAll(): List<ConvertedSchedule> {
-        repeat(MAX_ATTEMPTS) {
-            try {
-                return attempt()
-            } catch (_: ConversionConflict) {
-                // The whole transaction rolled back; the next attempt starts over from fresh rows.
-            }
-        }
-        // Every attempt lost a CAS to a concurrent edit. At startup nothing else writes schedules; refuse loudly.
-        error("the schedule conversion lost its revision CAS $MAX_ATTEMPTS times; every attempt rolled back, nothing was overwritten")
-    }
-
-    /**
-     * One attempt of the whole step in ONE transaction. Throws [ConversionConflict] (rolling the transaction back) when
-     * a CAS lost or a row appeared in a workspace the guard does not cover; a refusal or a failed write rolls back the
-     * same way and propagates.
-     */
-    private fun attempt(): List<ConvertedSchedule> =
-        requireNotNull(
-            transactions.execute {
-                // The guard covers every workspace this transaction writes in: the candidates' and their runs' (a run's
-                // workspace is copied from its schedule at materialisation, so in practice these coincide). ONE
-                // acquisition, sorted by the guard: a deterministic order, never an inversion with the live writers.
-                val guarded = workspacesOf(candidates())
-                if (guarded.isEmpty()) return@execute emptyList()
-                writeGuard.workspaces(guarded, ScheduleErrorCodes.WRITE_BUSY)
-                // Re-read UNDER the guard: what a concurrent writer committed while this transaction waited counts.
-                val locked = candidates()
-                // A row that appeared in an unguarded workspace while we waited: start over, everything rolled back.
-                if (!guarded.containsAll(workspacesOf(locked))) throw ConversionConflict()
-                locked.map(::convertLocked)
-            },
-        ) { "the conversion transaction returned no outcome" }
-
-    /** Converts [schedule] and its queued runs inside the step's transaction, under the guard [attempt] holds. */
+    /** Converts [schedule] and its queued runs inside the runner's transaction, under the guard the runner holds. */
     private fun convertLocked(schedule: Schedule): ConvertedSchedule {
         val target = pinOf(schedule.workspaceId, scheduleTarget(schedule)) { scheduleRefusalOf(schedule, it) }
         if (!schedules.convertPayload(schedule.id, schedule.revision, FROM_SCHEMA, pinned(schedule.payload, target.version), TO_SCHEMA)) {
-            throw ConversionConflict()
+            throw StartupConversionConflict(
+                "schedule ${schedule.id} lost its revision CAS to a concurrent edit; re-planning from fresh rows",
+            )
         }
         // Each run from ITS OWN payload copy and ITS OWN pipeline's CURRENT — never the schedule's version. A refusal
         // here throws after this and every earlier schedule's write: the whole transaction rolls back.
@@ -282,9 +268,6 @@ class ScheduleVersionConversion(
         }
     }
 
-    /** A lost CAS or an unguarded row: thrown inside the transaction so it rolls back, caught by [convertAll]. */
-    private class ConversionConflict : RuntimeException("the schedule conversion lost a race; retrying from fresh rows")
-
     private data class PipelineState(
         val pipeline: String,
         val exists: Boolean,
@@ -303,8 +286,6 @@ class ScheduleVersionConversion(
         /** The schema this step converts from (the pointer-following payload) and to (the exact pin). */
         const val FROM_SCHEMA = 1
         const val TO_SCHEMA = PipelineJobExecutor.PAYLOAD_SCHEMA_VERSION
-
-        private const val MAX_ATTEMPTS = 3
 
         /** A schedule's target: the pipeline its `target_ref` names. */
         private fun scheduleTarget(schedule: Schedule): String = schedule.targetRef.removePrefix(PipelineJobExecutor.TARGET_PREFIX)
@@ -378,6 +359,15 @@ data class ConvertedRun(
 data class ScheduleConversionReport(
     val converted: List<ConvertedSchedule>,
 )
+
+/** One attempt's [report] and its commit-time effects, which only the runner [publish]es. */
+class ScheduleConversionOutcome internal constructor(
+    val report: ScheduleConversionReport,
+    private val effects: (ScheduleConversionReport) -> Unit,
+) {
+    /** Logs the converted lines and the summary — call only after the joint COMMIT. */
+    fun publish() = effects(report)
+}
 
 /** E.0 refused: the server must not start. [refusals] names every row; nothing was written for them. */
 class ScheduleConversionRefusedException(

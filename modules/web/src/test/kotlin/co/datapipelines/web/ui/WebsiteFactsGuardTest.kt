@@ -246,6 +246,8 @@ class WebsiteFactsGuardTest {
                 // #353 — the two test-session tools' collaborators; never reached by these callers.
                 visualizationTestSessions = mockk<co.datapipelines.visualization.VisualizationTestSessionService>(),
                 visualizationTestLinks = co.datapipelines.visualization.TestSessionLinks(null),
+                // #877 §C — the ONE TemplateUsage bean the tools take; never queried here.
+                usage = mockk<co.datapipelines.application.templates.TemplateUsage>(),
             ).size
     }
 

@@ -19,6 +19,22 @@ interface DependencyProvider<B : Any> {
     ): Map<ObjectRequest, Outcome<B>>
 
     fun outgoing(resolved: Outcome.Resolved<B>): List<Reference>
+
+    /**
+     * The dependent families whose references INTO this family [findIncoming] answers (#877, record §14) — empty by
+     * default: a provider that declares none answers [IncomingResult.Unsupported] for every query.
+     */
+    val incomingFrom: Set<FamilyKey> get() = emptySet()
+
+    /**
+     * One page of the stored references from [IncomingQuery.dependents] INTO [IncomingQuery.target] (record §14; see
+     * [IncomingQuery] for the one-definition rule, the scopes and the unlensed contract). One statement per page.
+     * The default answers [IncomingResult.Unsupported] — never an empty page.
+     */
+    fun findIncoming(
+        query: IncomingQuery,
+        context: ResolveContext,
+    ): IncomingResult = IncomingResult.Unsupported
 }
 
 /** One request's answer from a [DependencyProvider] (§7.1). */

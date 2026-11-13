@@ -9,6 +9,9 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.release.CheckOverride
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleasePlanRequest
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.PointerMove
 import co.datapipelines.visualization.Purged
@@ -52,7 +55,8 @@ class VisualizationLifecycleDialogControllerTest {
     private val visualizations = mockk<VisualizationService>()
     private val audit = RecordingAudit()
     private val dialogs = mockk<VisualizationLifecycleDialogModel>()
-    private val controller = VisualizationLifecycleDialogController(visualizations, dialogs, audit)
+    private val previews = mockk<ReleasePreviews>(relaxed = true)
+    private val controller = VisualizationLifecycleDialogController(visualizations, dialogs, audit, previews)
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
@@ -84,10 +88,10 @@ class VisualizationLifecycleDialogControllerTest {
         // #416: the draft is at v3 / hash-3 NOW; the form posted hash-2, the one the dialog read.
         draftWorking(version = 3)
         val released = version(vizId, workspaceId, 2, PipelineVersionStatus.RELEASED, currentVersion = 2)
-        every { visualizations.release(workspaceId, vizId, "hash-2", any(), true) } returns
+        every { visualizations.release(workspaceId, vizId, "hash-2", any(), releasePinnedTemplates = false, plan = PLAN) } returns
             VisualizationReleased(released, listOf(TemplateRef("acme/templates/t", 3)))
 
-        val answer = controller.release(vizId, bodyHash = "hash-2", releasePinnedTemplates = true, from = "preview")
+        val answer = controller.release(vizId, bodyHash = "hash-2", treeHash = TREE_HASH, includeDependencies = INCLUDE, from = "preview")
 
         location(answer) shouldBe "/visualizations/$vizId?tab=preview&ok=released_with_templates"
         // #873 §C.7 — the #332 rows are the coordinator's, written inside its transaction; the dialog writes none.
@@ -98,10 +102,10 @@ class VisualizationLifecycleDialogControllerTest {
     fun `a release without a cascade says released, and no consent is sent unless posted`() {
         authenticate()
         draftWorking()
-        every { visualizations.release(workspaceId, vizId, "hash-2", any(), false) } returns
+        every { visualizations.release(workspaceId, vizId, "hash-2", any(), releasePinnedTemplates = false, plan = PLAN) } returns
             VisualizationReleased(version(vizId, workspaceId, 2, PipelineVersionStatus.RELEASED), emptyList())
 
-        location(controller.release(vizId, bodyHash = "hash-2", releasePinnedTemplates = false, from = null)) shouldBe
+        location(controller.release(vizId, bodyHash = "hash-2", treeHash = TREE_HASH, includeDependencies = INCLUDE, from = null)) shouldBe
             "/visualizations/$vizId?tab=versions&ok=released"
         audit.events.shouldBeEmpty()
     }
@@ -111,13 +115,13 @@ class VisualizationLifecycleDialogControllerTest {
         authenticate()
         every { visualizations.findWorking(workspaceId, ReadLens.Everything, vizId) } returns
             version(vizId, workspaceId, 1, PipelineVersionStatus.RELEASED, currentVersion = 1)
-        assertThrows<DatapipelinesException> { controller.release(vizId, "hash-2", false, null) }.code shouldBe
+        assertThrows<DatapipelinesException> { controller.release(vizId, "hash-2", TREE_HASH, INCLUDE, null) }.code shouldBe
             VisualizationErrorCodes.VERSION_NOT_DRAFT
 
         draftWorking()
-        every { visualizations.release(workspaceId, vizId, "hash-2", any(), false) } throws
+        every { visualizations.release(workspaceId, vizId, "hash-2", any(), releasePinnedTemplates = false, plan = PLAN) } throws
             DatapipelinesException(VisualizationErrorCodes.RELEASE_TESTS_MISSING, "no cases")
-        assertThrows<DatapipelinesException> { controller.release(vizId, "hash-2", false, null) }
+        assertThrows<DatapipelinesException> { controller.release(vizId, "hash-2", TREE_HASH, INCLUDE, null) }
         audit.events.shouldBeEmpty()
     }
 
@@ -125,14 +129,14 @@ class VisualizationLifecycleDialogControllerTest {
     fun `416 - a stale dialog hash is forwarded as posted, never replaced by the fresh draft's, and is the version conflict`() {
         authenticate()
         draftWorking(version = 3)
-        every { visualizations.release(workspaceId, vizId, "hash-stale", any(), false) } throws
+        every { visualizations.release(workspaceId, vizId, "hash-stale", any(), releasePinnedTemplates = false, plan = PLAN) } throws
             DatapipelinesException(PipelineErrorCodes.Visualization.VERSION_CONFLICT, "The draft changed since you loaded it.")
 
-        val thrown = assertThrows<DatapipelinesException> { controller.release(vizId, "hash-stale", false, null) }
+        val thrown = assertThrows<DatapipelinesException> { controller.release(vizId, "hash-stale", TREE_HASH, INCLUDE, null) }
 
         thrown.code shouldBe "visualization.version.conflict"
-        verify(exactly = 1) { visualizations.release(workspaceId, vizId, "hash-stale", any(), any()) }
-        verify(exactly = 0) { visualizations.release(any(), any(), "hash-3", any(), any()) }
+        verify(exactly = 1) { visualizations.release(workspaceId, vizId, "hash-stale", any(), any(), any()) }
+        verify(exactly = 0) { visualizations.release(any(), any(), "hash-3", any(), any(), any()) }
         audit.events.shouldBeEmpty()
     }
 
@@ -140,7 +144,7 @@ class VisualizationLifecycleDialogControllerTest {
     fun `416 - over HTTP the form's body_hash binds, and a stale one answers the 409 toast`() {
         authenticate()
         draftWorking(version = 3)
-        every { visualizations.release(workspaceId, vizId, "hash-stale", any(), false) } throws
+        every { visualizations.release(workspaceId, vizId, "hash-stale", any(), releasePinnedTemplates = false, plan = PLAN) } throws
             DatapipelinesException(PipelineErrorCodes.Visualization.VERSION_CONFLICT, "The draft changed since you loaded it.")
 
         val response =
@@ -149,14 +153,17 @@ class VisualizationLifecycleDialogControllerTest {
                     post("/partials/visualizations/$vizId/lifecycle/release")
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .param("body_hash", "hash-stale")
+                        .param("tree_hash", TREE_HASH)
+                        .param("include_dependencies", INCLUDE[0])
+                        .param("include_dependencies", INCLUDE[1])
                         .header("HX-Request", "true"),
                 ).andExpect(status().isConflict)
                 .andReturn()
                 .response.contentAsString
 
         response shouldContain "visualization.version.conflict"
-        verify(exactly = 1) { visualizations.release(workspaceId, vizId, "hash-stale", any(), any()) }
-        verify(exactly = 0) { visualizations.release(any(), any(), "hash-3", any(), any()) }
+        verify(exactly = 1) { visualizations.release(workspaceId, vizId, "hash-stale", any(), any(), any()) }
+        verify(exactly = 0) { visualizations.release(any(), any(), "hash-3", any(), any(), any()) }
     }
 
     @Test
@@ -171,7 +178,7 @@ class VisualizationLifecycleDialogControllerTest {
             ).andExpect(status().isBadRequest)
 
         verify(exactly = 0) { visualizations.findWorking(any(), any(), any()) }
-        verify(exactly = 0) { visualizations.release(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { visualizations.release(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -179,7 +186,7 @@ class VisualizationLifecycleDialogControllerTest {
         authenticate()
         draftWorking(version = 3)
         val hostile = "'\"; DROP TABLE visualization_version; --<script>" + "x".repeat(5000)
-        every { visualizations.release(workspaceId, vizId, hostile, any(), false) } throws
+        every { visualizations.release(workspaceId, vizId, hostile, any(), releasePinnedTemplates = false, plan = PLAN) } throws
             DatapipelinesException(PipelineErrorCodes.Visualization.VERSION_CONFLICT, "The draft changed since you loaded it.")
 
         mvc()
@@ -187,8 +194,96 @@ class VisualizationLifecycleDialogControllerTest {
                 post("/partials/visualizations/$vizId/lifecycle/release")
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("body_hash", hostile)
+                    .param("tree_hash", TREE_HASH)
+                    .param("include_dependencies", INCLUDE[0])
+                    .param("include_dependencies", INCLUDE[1])
                     .header("HX-Request", "true"),
             ).andExpect(status().isConflict)
+    }
+
+    // ------------------------------------------------------------------ #876 R1 / R3
+
+    @Test
+    fun `876 R1 - the GET builds the plan for every draft, whatever the native refusals say, and none without a draft`() {
+        authenticate()
+        val refused =
+            VisualizationLifecycleDialogModel.ReleaseDialog(
+                id = vizId,
+                name = VisualizationUiFixtures.NAME,
+                version = 2,
+                bodyHash = "hash-2",
+                updatedBy = "Ada",
+                updatedAgo = "now",
+                caseCount = 0,
+                refusals = listOf(VisualizationLifecycleDialogModel.Refusal(VisualizationErrorCodes.RELEASE_TESTS_MISSING, "none")),
+            )
+        val plan = ReleaseDialogFixtures.plan(ReleaseDialogFixtures.root("visualization", VisualizationUiFixtures.NAME, 2))
+        every { dialogs.release(workspaceId, vizId) } returns refused
+        every { previews.dialog(ReleaseFamily.VISUALIZATION, workspaceId, VisualizationUiFixtures.NAME, 2, any(), any()) } returns plan
+
+        val model = ExtendedModelMap()
+        controller.releaseDialog(model, vizId, null)
+        model["rd"] shouldBe plan
+
+        every { dialogs.release(workspaceId, vizId) } returns
+            refused.copy(
+                refusals = listOf(VisualizationLifecycleDialogModel.Refusal(VisualizationErrorCodes.VERSION_NOT_DRAFT, "no draft")),
+            )
+        val noDraft = ExtendedModelMap()
+        controller.releaseDialog(noDraft, vizId, null)
+        noDraft.containsAttribute("rd") shouldBe false
+        verify(exactly = 1) { previews.dialog(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `876 R3 - over HTTP each override pair binds raw, a comma in a reason stays one reason, a blank one is no override`() {
+        authenticate()
+        draftWorking()
+        val reason = "Upstream feed late, checked by hand, ok to ship"
+        val expected = ReleasePlanRequest(TREE_HASH, INCLUDE, listOf(CheckOverride("n2", reason)))
+        every { visualizations.release(workspaceId, vizId, "hash-2", any(), releasePinnedTemplates = false, plan = expected) } returns
+            VisualizationReleased(version(vizId, workspaceId, 2, PipelineVersionStatus.RELEASED), emptyList())
+
+        mvc()
+            .perform(
+                post("/partials/visualizations/$vizId/lifecycle/release")
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .param("body_hash", "hash-2")
+                    .param("tree_hash", TREE_HASH)
+                    .param("include_dependencies", INCLUDE[0])
+                    .param("include_dependencies", INCLUDE[1])
+                    .param("check_override_node", "n1")
+                    .param("check_override_reason", "   ")
+                    .param("check_override_node", "n2")
+                    .param("check_override_reason", reason)
+                    .header("HX-Request", "true"),
+            ).andExpect(status().isOk)
+
+        verify(exactly = 1) { visualizations.release(workspaceId, vizId, "hash-2", any(), false, expected) }
+    }
+
+    @Test
+    fun `876 R3 - over HTTP mismatched override counts are plan_invalid at check_overrides and the service never runs`() {
+        authenticate()
+        draftWorking()
+
+        val response =
+            mvc()
+                .perform(
+                    post("/partials/visualizations/$vizId/lifecycle/release")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("body_hash", "hash-2")
+                        .param("tree_hash", TREE_HASH)
+                        .param("check_override_node", "n1")
+                        .param("check_override_node", "n2")
+                        .param("check_override_reason", "a reason long enough")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().isBadRequest)
+                .andReturn()
+                .response.contentAsString
+
+        response shouldContain "visualization.release.plan_invalid"
+        verify(exactly = 0) { visualizations.release(any(), any(), any(), any(), any(), any()) }
     }
 
     private fun mvc() =
@@ -302,7 +397,7 @@ class VisualizationLifecycleDialogControllerTest {
 
         val calls: List<() -> Any> =
             listOf(
-                { controller.release(vizId, "hash-2", false, null) },
+                { controller.release(vizId, "hash-2", TREE_HASH, INCLUDE, null) },
                 { controller.purgeDraft(vizId, 2, "v2", null) },
                 { controller.purgeVersion(vizId, 2, "v2", null) },
                 { controller.discard(vizId, 1, null) },
@@ -346,5 +441,11 @@ class VisualizationLifecycleDialogControllerTest {
         ) {
             events += event to details
         }
+    }
+
+    private companion object {
+        const val TREE_HASH = "v1:0123456789abcdef"
+        val INCLUDE = listOf("n1", "n2")
+        val PLAN = ReleasePlanRequest(TREE_HASH, INCLUDE)
     }
 }

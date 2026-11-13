@@ -25,8 +25,8 @@ import io.modelcontextprotocol.spec.McpSchema
  *    refused: humans release, and humans discard releases — D4/D57 stay with the UI);
  *  - the draft was created by THIS key's user (templates carry a creator USER id, no key-id
  *    column — "this key created it" degrades to "this key's user");
- *  - NOTHING pins any version of it, ever — pipelines, parameter sets and (#320) visualizations,
- *    [TemplateUsage]'s every-version-ever scans (D4), not the working-version scan
+ *  - NOTHING pins any version of it, ever — pipelines, parameter sets, (#320) visualizations and (#877 §D, ruling
+ *    A.0 option 1) importing templates, [TemplateUsage]'s every-version-ever scans (D4), not the working-version scan
  *    `templates_used_by` answers.
  *
  * The purge itself is [TemplateRepository.purgeDraft] with the draft's current `body_hash` as
@@ -56,8 +56,9 @@ class TemplatesPurgeDraftTool(
             description =
                 "Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by " +
                     "this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, " +
-                    "no parameter-set version either (#194), and no visualization version (#320) " +
-                    "may reference any version of it (the refusal names the pinning pipelines, sets or visualizations " +
+                    "no parameter-set version either (#194), no visualization version (#320), and no template version " +
+                    "that imports it (#877) may reference any version of it (the refusal names the pinning pipelines, " +
+                    "sets, visualizations or importing templates " +
                     "your view admits; templates_used_by " +
                     "answers the working-version scan if you need to inspect them). The sole-draft purge takes " +
                     "the entity row with it. A template holding any RELEASED or discarded version, another " +
@@ -77,74 +78,79 @@ class TemplatesPurgeDraftTool(
         )
 
     /**
-     * The D4 guard, all three aggregates: every pipeline version ever, then every set version ever, then (#320) every
-     * visualization version ever.
+     * The D4 guard, all four aggregates: every pipeline version ever, then every set version ever, then (#320) every
+     * visualization version ever, then (#877 §D) every template version ever that imports it — a DRAFT importer
+     * included, which this guard let purge its library out from under it before (a guard correction, ruling A.0).
      * #300 (the 194d security pass, observation 11): BOTH scans run under the WHOLE workspace —
      * the web guard's rule, unlensed ([TemplateUsage.referencedAnywhere] under a narrowing view
      * dropped hidden sets, so a lensed caller could purge a template a hidden set still pins).
      * Only the ECHO narrows: the refusal names the pins the caller's view admits and flags that others exist
      * ("pins_hidden": true) — never a name, and never a count, of what the caller cannot see.
      */
-    @Suppress("ThrowsCount") // one refusal per aggregate that pins templates — each names its own arm and lens
     private fun refuseIfPinned(
         workspaceId: java.util.UUID,
         id: String,
         caller: co.datapipelines.application.lens.LensedView,
     ) {
-        val pinners = usage.pipelinesReferencedAnywhere(workspaceId, co.datapipelines.application.lens.LensedView.EVERYTHING, id)
-        if (pinners.isNotEmpty()) {
-            // The web service's `template.in_use` wire shape, verbatim: the refusal names the
-            // pipelines to go and change — the admitted ones; hidden ones are a flag.
-            val names = pinners.map { it.pipelineName }.distinct()
-            val (admitted, hidden) = splitByAdmission(names, caller.pipelines)
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Template.IN_USE,
-                message =
-                    "Version of template '$id' is pinned by " + pinnedBy("live pipeline version(s)", names.size, admitted, hidden) +
-                        "; discard or repoint them first.",
-                details =
-                    buildMap {
-                        put("template_id", id)
-                        put("pinned_by", admitted)
-                        if (hidden > 0) put("pins_hidden", true)
-                    },
-            )
-        }
-        val setPinners = usage.referencedAnywhere(workspaceId, co.datapipelines.application.lens.LensedView.EVERYTHING, id)
-        val visualizationPinners =
-            usage.visualizationsReferencedAnywhere(workspaceId, co.datapipelines.application.lens.LensedView.EVERYTHING, id)
-        if (setPinners.isNotEmpty()) {
-            val setNames = setPinners.map { it.setName }.distinct()
-            val (admitted, hidden) = splitByAdmission(setNames, caller.parameterSets)
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Template.IN_USE,
-                message =
-                    "Version of template '$id' is pinned by " + pinnedBy("parameter set version(s)", setNames.size, admitted, hidden) +
-                        "; discard or repoint them first.",
-                details =
-                    buildMap {
-                        put("template_id", id)
-                        put("referencing_parameter_sets", admitted)
-                        if (hidden > 0) put("pins_hidden", true)
-                    },
-            )
-        }
-        if (visualizationPinners.isNotEmpty()) {
-            val names = visualizationPinners.map { it.name }.distinct()
-            val (admitted, hidden) = splitByAdmission(names, caller.visualizations)
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Template.IN_USE,
-                message =
-                    "Version of template '$id' is pinned by " + pinnedBy("visualization version(s)", names.size, admitted, hidden) +
-                        "; discard or repoint them first.",
-                details =
-                    buildMap {
-                        put("template_id", id)
-                        put("referencing_visualizations", admitted)
-                        if (hidden > 0) put("pins_hidden", true)
-                    },
-            )
-        }
+        val everything = co.datapipelines.application.lens.LensedView.EVERYTHING
+        // The web service's `template.in_use` wire shape, verbatim: the refusal names the
+        // pipelines to go and change — the admitted ones; hidden ones are a flag.
+        refuseArm(
+            id,
+            usage.pipelinesReferencedAnywhere(workspaceId, everything, id).map { it.pipelineName },
+            caller.pipelines,
+            "live pipeline version(s)",
+            "pinned_by",
+        )
+        refuseArm(
+            id,
+            usage.referencedAnywhere(workspaceId, everything, id).map { it.setName },
+            caller.parameterSets,
+            "parameter set version(s)",
+            "referencing_parameter_sets",
+        )
+        refuseArm(
+            id,
+            usage.visualizationsReferencedAnywhere(workspaceId, everything, id).map { it.name },
+            caller.visualizations,
+            "visualization version(s)",
+            "referencing_visualizations",
+        )
+        refuseArm(
+            id,
+            usage.importedBy(workspaceId, id, null, co.datapipelines.pipeline.inverse.InverseScope.ANY).map { it.importerName },
+            caller.templates,
+            "template version(s)",
+            "referencing_templates",
+        )
+    }
+
+    /**
+     * One aggregate's `template.in_use` refusal, when [pinners] names anything: the [kind] sentence over the distinct
+     * names, the admitted ones under [detailsKey] (always present when the arm refuses), `pins_hidden` when [lens] hides one.
+     */
+    private fun refuseArm(
+        id: String,
+        pinners: List<String>,
+        lens: co.datapipelines.pipeline.ReadLens,
+        kind: String,
+        detailsKey: String,
+    ) {
+        val names = pinners.distinct()
+        if (names.isEmpty()) return
+        val (admitted, hidden) = splitByAdmission(names, lens)
+        throw DatapipelinesException(
+            code = PipelineErrorCodes.Template.IN_USE,
+            message =
+                "Version of template '$id' is pinned by " + pinnedBy(kind, names.size, admitted, hidden) +
+                    "; discard or repoint them first.",
+            details =
+                buildMap {
+                    put("template_id", id)
+                    put(detailsKey, admitted)
+                    if (hidden > 0) put("pins_hidden", true)
+                },
+        )
     }
 
     /** Split pinned names into what [lens] admits (echoed) and how many it hides (flagged, never echoed). */

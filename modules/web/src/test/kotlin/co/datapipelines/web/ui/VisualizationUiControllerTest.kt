@@ -119,6 +119,7 @@ class VisualizationUiControllerTest {
 
         open(tab = "versions")["activeTab"] shouldBe "versions"
         open(tab = "used-by")["activeTab"] shouldBe "used-by"
+        open(tab = "dependencies")["activeTab"] shouldBe "dependencies"
         open(tab = "<script>")["activeTab"] shouldBe "preview"
     }
 

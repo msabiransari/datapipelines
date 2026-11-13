@@ -1124,6 +1124,35 @@ object PipelineErrorCodes {
         const val METADATA_TOO_LARGE = "navigation.metadata.too_large"
     }
 
+    /**
+     * The session-only dependency tree routes, `GET /api/v1/dependencies/<family>` (#875 G4; rest-api "Dependency trees",
+     * dependency-graph record §11.1). Three segments, like [Navigation]: the refused thing is the tree request or the
+     * metadata read behind it, never an artifact family — a hidden or absent ROOT answers its family's own not-found code.
+     * Raised by `web`'s dependency tree service; the static messages echo no caller input. Only codes live here: every
+     * string constant of this object is a catalogued code to `PipelineErrorCodesSpecDriftTest` and to the MCP
+     * `core-error-codes` generator, so the `details.reason` tokens stay G1's `RefusalReason` and the `details` keys
+     * stay with the service.
+     */
+    object Dependencies {
+        /**
+         * 400: the request does not name one root the family's route can read. `details.field` names the query field
+         * (`name`, `id`, `version`) and `details.reason` one of G1's `RefusalReason` tokens — never the refused value.
+         */
+        const val REQUEST_INVALID = "dependencies.request.invalid"
+
+        /**
+         * 503, retryable: the metadata walk ran out of its deadline, a statement hit its bound, or a provider's read
+         * failed. No partial tree is answered. `Retry-After` names the wait; logged at WARN without a stack.
+         */
+        const val METADATA_UNAVAILABLE = "dependencies.metadata.unavailable"
+
+        /**
+         * 503: the projected tree is larger than `max-wire-bytes` although the walk stayed inside its traversal limits — the
+         * configured limits and byte budget disagree. Never a truncated tree; logged at ERROR with a stack.
+         */
+        const val RESPONSE_TOO_LARGE = "dependencies.response.too_large"
+    }
+
     /** §13.11 — rate limiting / idempotency. */
     object Limits {
         /** Single code for every layer — REST, MCP, login (D5). */

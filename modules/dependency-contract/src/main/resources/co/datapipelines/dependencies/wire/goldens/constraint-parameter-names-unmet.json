@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "entity_id": "00000000-0000-4000-8000-000000000001",
+      "family": "dashboard",
+      "name": "test/tree892/unmet/one/board",
+      "display_name": null,
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "entity_id": "00000000-0000-4000-8000-000000000002",
+      "family": "parameter_set",
+      "name": "test/tree892/unmet/one/filters",
+      "display_name": null,
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "0000000000000000000000000000000000000000000000000000000000000002",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n2",
+      "entity_id": "00000000-0000-4000-8000-000000000003",
+      "family": "pipeline",
+      "name": "test/tree892/unmet/source",
+      "display_name": null,
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "0000000000000000000000000000000000000000000000000000000000000003",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n3",
+      "entity_id": "00000000-0000-4000-8000-000000000004",
+      "family": "template",
+      "name": "test/tree892/unmet/query.sql",
+      "display_name": null,
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "0000000000000000000000000000000000000000000000000000000000000004",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n4",
+      "entity_id": "tree892_unmet",
+      "family": "datasource",
+      "name": "tree892_unmet",
+      "display_name": "Unmet names",
+      "subtype": "H2",
+      "version": {
+        "kind": "unversioned",
+        "number": null
+      },
+      "resolution": "resolved",
+      "lifecycle": null,
+      "operational": {
+        "readonly": false
+      },
+      "current_version": null,
+      "body_hash": null,
+      "capabilities": {
+        "release": "NONE",
+        "promotion": "NONE"
+      }
+    },
+    {
+      "node_id": "n5",
+      "entity_id": "00000000-0000-4000-8000-000000000005",
+      "family": "visualization",
+      "name": "test/tree892/unmet/chart",
+      "display_name": null,
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": {
+        "evidence_ready": true
+      },
+      "current_version": null,
+      "body_hash": "0000000000000000000000000000000000000000000000000000000000000005",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n6",
+      "entity_id": "00000000-0000-4000-8000-000000000006",
+      "family": "template",
+      "name": "test/tree892/unmet/shape.jsonata",
+      "display_name": null,
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 1
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "0000000000000000000000000000000000000000000000000000000000000006",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "PARAMETER_SET",
+      "source_path": "/parameter_set",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": [
+        {
+          "kind": "parameter_names",
+          "names": [
+            "region",
+            "since"
+          ],
+          "unmet_names": [
+            "since"
+          ]
+        }
+      ]
+    },
+    {
+      "edge_id": "e1",
+      "from": "n0",
+      "to": "n2",
+      "relationship": "SOURCE_PIPELINE",
+      "source_path": "/sources/0/pipeline",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": [ ]
+    },
+    {
+      "edge_id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "relationship": "TEMPLATE",
+      "source_path": "/nodes/0/template",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": [ ]
+    },
+    {
+      "edge_id": "e3",
+      "from": "n2",
+      "to": "n4",
+      "relationship": "DATASOURCE",
+      "source_path": "/nodes/0/source",
+      "requested_selector": {
+        "kind": "entity",
+        "number": null
+      },
+      "resolved_version": null,
+      "constraints": [
+        {
+          "kind": "datasource_access",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "edge_id": "e4",
+      "from": "n0",
+      "to": "n5",
+      "relationship": "VISUALIZATION",
+      "source_path": "/visualizations/0/visualization",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": [ ]
+    },
+    {
+      "edge_id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "relationship": "TRANSFORM_TEMPLATE",
+      "source_path": "/transform/template",
+      "requested_selector": {
+        "kind": "exact_version",
+        "number": 1
+      },
+      "resolved_version": 1,
+      "constraints": [ ]
+    }
+  ],
+  "diagnostics": [ ],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-01-01T00:00:00Z"
+}

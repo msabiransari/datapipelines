@@ -37,6 +37,8 @@ const MOUNTS = {
   "/js/template-editor/workspace.js": "TemplateWorkspaceMount",
   "/js/pipeline-editor/runtime.js": "PipelineWorkspaceMount",
   "/js/parameter-workspace/runtime.js": "ParameterWorkspaceMount",
+  // #876 G6: every artifact workspace's Dependencies pane, mounted from the same catalog as its workspace.
+  "/js/dependencies/mount.js": "DependenciesMount",
 };
 
 /** Validate first-party asset paths; user data never selects a script URL. */

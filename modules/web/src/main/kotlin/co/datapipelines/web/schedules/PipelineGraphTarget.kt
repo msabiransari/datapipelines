@@ -28,6 +28,9 @@ internal object PipelineGraphTarget {
     /** The payload field naming the target — the edge's `source_path` (a JSON Pointer into the payload). */
     const val PIPELINE_POINTER = "/pipeline"
 
+    /** The payload field holding a schema-2 payload's exact pin (#786 D.1) — what the inverse arm reads too (#877). */
+    const val VERSION_FIELD = "version"
+
     fun of(
         payloadSchemaVersion: Int,
         payload: JsonNode,
@@ -50,7 +53,7 @@ internal object PipelineGraphTarget {
 
     private fun current(payload: JsonNode): ExecutorTarget {
         val name = spelledName(payload)
-        val follows = payload.path("version").let { it.isTextual && it.asText() == PipelineJobExecutor.VERSION_CURRENT }
+        val follows = payload.path(VERSION_FIELD).let { it.isTextual && it.asText() == PipelineJobExecutor.VERSION_CURRENT }
         return if (name != null && PipelineNameGrammar.matches(name) && follows) {
             ExecutorTarget.Pipeline(name, Selector.Current, PIPELINE_POINTER)
         } else {
@@ -64,7 +67,7 @@ internal object PipelineGraphTarget {
             spelledVersion =
                 payload
                     .path(
-                        "version",
+                        VERSION_FIELD,
                     ).takeIf { it.isIntegralNumber }
                     ?.let { SchedulePipelineConsumers.exactPin(it.asText()) },
             sourcePath = PIPELINE_POINTER,

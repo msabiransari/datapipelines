@@ -22,6 +22,16 @@
   <script data-page-mount th:src="@{/js/visualizations/workspace.js}" defer></script>
   <!-- 102: the lifecycle dialogs' client half — the ONE per-screen container is #dp-dialog. -->
   <script th:src="@{/js/lifecycle-dialog.js}" defer></script>
+  <!-- #876 G6 — the Dependencies pane's renderer and its mount (record §13), last, after the workspace's own glue. -->
+  <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+  <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+  <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+  <script th:src="@{/js/dependencies/renderer.js}"></script>
+  <script th:src="@{/js/dependencies/tree-view.js}"></script>
+  <script th:src="@{/js/dependencies/plan-view.js}"></script>
+  <script th:src="@{/js/dependencies/list.js}"></script>
+  <script th:src="@{/js/dependencies/source.js}"></script>
+  <script data-page-mount th:src="@{/js/dependencies/mount.js}"></script>
 
   </template>
 
@@ -80,6 +90,8 @@
                 data-dp-tab="evidence" th:attr="aria-selected=${activeTab == 'evidence'} ? 'true' : 'false'">Evidence</button>
         <button type="button" class="dp-ws-tab" role="tab" id="viz-tab-used-by" aria-controls="viz-pane-used-by"
                 data-dp-tab="used-by" th:attr="aria-selected=${activeTab == 'used-by'} ? 'true' : 'false'">Used by</button>
+        <button type="button" class="dp-ws-tab" role="tab" id="viz-tab-dependencies" aria-controls="viz-pane-dependencies"
+                data-dp-tab="dependencies" th:attr="aria-selected=${activeTab == 'dependencies'} ? 'true' : 'false'">Dependencies</button>
         <button type="button" class="dp-ws-tab" role="tab" id="viz-tab-versions" aria-controls="viz-pane-versions"
                 data-dp-tab="versions" th:attr="aria-selected=${activeTab == 'versions'} ? 'true' : 'false'">Versions</button>
       </nav>
@@ -103,6 +115,15 @@
         <div class="dp-ws-pane" id="viz-pane-used-by" role="tabpanel" aria-labelledby="viz-tab-used-by"
              data-dp-pane="used-by" th:attr="hidden=${activeTab != 'used-by'} ? 'hidden' : null, data-lazy-url=@{/partials/visualizations/{id}/used-by(id=${visualizationId})}">
           <p class="dp-tab-note">Loading dashboards…</p>
+        </div>
+        <!-- #876 G6 — what THIS version depends on (record §13), the opposite direction of Used by. Not a lazy
+             partial: the pane is a dependencies/mount.js mount that fetches the tree the first time it is shown. -->
+        <div class="dp-ws-pane" id="viz-pane-dependencies" role="tabpanel" aria-labelledby="viz-tab-dependencies"
+             data-dp-pane="dependencies" th:attr="hidden=${activeTab != 'dependencies'} ? 'hidden' : null">
+          <div class="dp-deps" data-dp-deps data-family="visualization" data-dp-deps-state="idle"
+               th:attr="data-name=${visualizationName},data-version=${viewedVersion}">
+            <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this tab is opened.</p>
+          </div>
         </div>
         <div class="dp-ws-pane" id="viz-pane-versions" role="tabpanel" aria-labelledby="viz-tab-versions"
              data-dp-pane="versions" th:attr="hidden=${activeTab != 'versions'} ? 'hidden' : null, data-lazy-url=@{/partials/visualizations/{id}/versions(id=${visualizationId}, version=${viewedVersion})}">

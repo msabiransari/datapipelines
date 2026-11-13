@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "correlation_id": "00000000-0000-4000-8000-000000000000",
+  "data": {
+    "schema_version": 1,
+    "roots": [
+      "n0"
+    ],
+    "nodes": [
+      {
+        "node_id": "n0",
+        "entity_id": "tree875_golden_ro",
+        "family": "datasource",
+        "name": "tree875_golden_ro",
+        "display_name": "Dependency goldens",
+        "subtype": "H2",
+        "version": {
+          "kind": "unversioned",
+          "number": null
+        },
+        "resolution": "resolved",
+        "lifecycle": null,
+        "operational": {
+          "readonly": true
+        },
+        "current_version": null,
+        "body_hash": null,
+        "capabilities": {
+          "release": "NONE",
+          "promotion": "NONE"
+        }
+      }
+    ],
+    "edges": [ ],
+    "diagnostics": [ ],
+    "complete": true,
+    "acyclic": true,
+    "observed_at": "2026-01-01T00:00:00Z"
+  }
+}

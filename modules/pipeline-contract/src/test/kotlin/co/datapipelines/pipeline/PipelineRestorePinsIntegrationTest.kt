@@ -85,7 +85,6 @@ class PipelineRestorePinsIntegrationTest {
             releases =
                 PipelineReleaseService(
                     repository,
-                    statusesPort,
                     validator,
                     authoring,
                     dashboards = NoDashboards,
@@ -101,6 +100,7 @@ class PipelineRestorePinsIntegrationTest {
             templateIds = idsPort,
             maxBlockers = maxBlockers,
             restoreGuard = restoreGuard,
+            coordination = ReleaseCoordinationDoubles.REFUSING,
         )
 
     private fun seed(

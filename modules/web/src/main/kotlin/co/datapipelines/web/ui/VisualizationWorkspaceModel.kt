@@ -101,7 +101,7 @@ class VisualizationWorkspaceModel(
                 }
     }
 
-    /** The workspace's closed tab set (#399's floor: five, Preview the default). */
+    /** The workspace's closed tab set (#399's floor of five, plus #876's Dependencies; Preview the default). */
     enum class Tab(
         val wire: String,
     ) {
@@ -109,6 +109,9 @@ class VisualizationWorkspaceModel(
         OVERVIEW("overview"),
         EVIDENCE("evidence"),
         USED_BY("used-by"),
+
+        /** #876 G6: what the selected version depends on (record §13) — a dependencies/mount.js pane, not a partial. */
+        DEPENDENCIES("dependencies"),
         VERSIONS("versions"),
         ;
 

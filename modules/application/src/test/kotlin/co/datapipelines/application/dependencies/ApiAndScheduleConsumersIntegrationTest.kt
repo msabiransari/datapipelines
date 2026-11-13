@@ -6,6 +6,7 @@ import co.datapipelines.application.endpoints.LegacyEndpointColumns
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
+import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DashboardPin
 import co.datapipelines.pipeline.EndpointVersionPin
@@ -18,6 +19,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.SchedulePin
+import co.datapipelines.pipeline.release.PipelineReleaseCoordination
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
@@ -67,8 +69,30 @@ class ApiAndScheduleConsumersIntegrationTest {
         endpoints = PublishedEndpointRepository(jdbc)
         versions = PublishedEndpointVersionRepository(jdbc)
         pipelines = PipelineRepository(jdbc)
-        apiConsumers = EndpointVersionPipelineConsumers(versions)
-        scheduleConsumers = SchedulePipelineConsumers(jdbc, TARGET_PREFIX)
+        // #877 §C: both ports are adapters over the pipeline family's inverse arms, built the way production builds them.
+        val ceiling = PostgresStatementCeiling(dataSource)
+        val incoming =
+            RegistryIncomingRows(
+                FamilyRegistry(
+                    listOf(
+                        PipelineReleaseFamily.descriptor(
+                            PipelineRepository(ceiling.jdbc),
+                            ceiling,
+                            incoming =
+                                IncomingArmCatalog.pipeline(
+                                    PipelineRepository(ceiling.jdbc),
+                                    co.datapipelines.visualization.DashboardRepository(ceiling.jdbc),
+                                    PublishedEndpointVersionRepository(ceiling.jdbc),
+                                    ScheduleTargetQueries(ceiling.jdbc),
+                                    SCHEDULE_SHAPE,
+                                    ceiling,
+                                ),
+                        ),
+                    ),
+                ),
+            )
+        apiConsumers = EndpointVersionPipelineConsumers(incoming)
+        scheduleConsumers = SchedulePipelineConsumers(incoming, jdbc)
         service =
             PipelineService(
                 pipelines = pipelines,
@@ -80,6 +104,7 @@ class ApiAndScheduleConsumersIntegrationTest {
                 dashboards = NoDashboards,
                 endpointVersions = apiConsumers,
                 schedules = scheduleConsumers,
+                coordination = PipelineReleaseCoordination { error("this test never releases") },
             )
     }
 
@@ -404,5 +429,8 @@ class ApiAndScheduleConsumersIntegrationTest {
     private companion object {
         /** The pipeline executor's `target_ref` prefix, as `web` supplies it (`PipelineJobExecutor.TARGET_PREFIX`). */
         const val TARGET_PREFIX = "pipeline:"
+
+        /** The executor's payload grammar as `web` supplies it (`ReleaseConfiguration.SCHEDULE_TARGET`): schema 2 stores the version. */
+        val SCHEDULE_SHAPE = ScheduleTargetShape(TARGET_PREFIX, "version", "/pipeline", 2)
     }
 }

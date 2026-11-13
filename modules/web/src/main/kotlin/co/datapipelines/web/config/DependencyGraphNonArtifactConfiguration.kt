@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.dependencies.IncomingArmCatalog
 import co.datapipelines.application.dependencies.PostgresStatementCeiling
 import co.datapipelines.application.dependencies.datasource.DatasourceDependencyFamily
 import co.datapipelines.application.dependencies.schedule.ExecutorTargetExtractor
@@ -9,6 +10,8 @@ import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyKey
 import co.datapipelines.dependencies.FamilyRegistry
+import co.datapipelines.parameters.ParameterSetRepository
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.scheduler.JobExecutor
 import co.datapipelines.scheduler.ScheduleRepository
 import co.datapipelines.scheduler.SchedulerAutoConfiguration
@@ -38,7 +41,11 @@ class DependencyGraphNonArtifactConfiguration {
     /** Record §4 row `datasource`: an unversioned leaf by name; a graph read never tests connectivity. */
     @Bean
     fun datasourceDependencyFamily(ceiling: PostgresStatementCeiling): FamilyDescriptor<DatasourceGraphFacts> =
-        DatasourceDependencyFamily.descriptor(DatasourceRepository(ceiling.jdbc), ceiling)
+        DatasourceDependencyFamily.descriptor(
+            DatasourceRepository(ceiling.jdbc),
+            ceiling,
+            incoming = IncomingArmCatalog.datasource(PipelineRepository(ceiling.jdbc), ParameterSetRepository(ceiling.jdbc), ceiling),
+        )
 
     /** Record §4 row `schedule`: a revisioned workspace object with exactly one `EXECUTOR_TARGET` edge. */
     @Bean

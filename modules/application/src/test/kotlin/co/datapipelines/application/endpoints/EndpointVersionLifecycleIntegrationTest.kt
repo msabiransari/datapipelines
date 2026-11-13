@@ -18,10 +18,15 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -349,10 +354,28 @@ class EndpointVersionLifecycleIntegrationTest {
         service.version(principal(), api.id, 3).shouldBeNull()
         versions.findCurrent(api.id).shouldNotBeNull().version shouldBe 1
         val (entity, byPath) = versions.findByPath(workspaceId, api.pathPattern, 2).shouldNotBeNull()
-        entity shouldBe PublishedEndpointVersionRepository.EntityPointer(api.id, 1)
+        entity shouldBe PublishedEndpointVersionRepository.EntityRead(api.id, 1, enabled = true)
         byPath.version shouldBe 2
         versions.findByPath(UUID.randomUUID(), api.pathPattern, 2).shouldBeNull()
         withClue("E.2: no path leaves a version-less entity behind") { versions.countVersionless() shouldBe 0 }
+    }
+
+    @Test
+    fun `the inverse API-version pages walk the pins by keyset - limit + 1 rows, every occurrence once`() {
+        // #877 §B: rides v1 DRAFT, trips v1 RELEASED + v2 DRAFT — three API versions pinning daily@1, the page unit.
+        pipeline("acme/rides/daily", current = 1, PipelineVersionStatus.RELEASED)
+        publishing().create(principal(), "/acme/v1/rides", "acme/rides/daily", 1, 45, "Rides")
+        val trips = publishing().create(principal(), "/acme/v1/trips", "acme/rides/daily", 1, 45, "Trips")
+        release(trips.id, versions.find(trips.id, 1).shouldNotBeNull().bodyHash)
+        versions.insert(trips.id, 2, PipelineVersionStatus.DRAFT, EndpointVersionBody("acme/rides/daily", 1, 45, "Trips"), userId)
+        val request = InverseRequest(workspaceId, "acme/rides/daily", 1, InverseScope.LIVE, null, 1)
+
+        versions.findPipelinePinOccurrences(request) shouldHaveSize 2
+        val paged = InverseSql.exhaust(1) { after -> versions.findPipelinePinOccurrences(request.copy(after = after)) }
+        paged shouldContainExactly versions.findPipelinePinOccurrences(request.copy(limit = InverseSql.EXHAUST_PAGE))
+        paged.map { it.dependentName to it.dependentVersion } shouldContainExactlyInAnyOrder
+            listOf("/acme/v1/rides" to 1, "/acme/v1/trips" to 1, "/acme/v1/trips" to 2)
+        paged.map { it.sourcePath }.distinct() shouldContainExactly listOf(PublishedEndpointVersionRepository.PIN_PATH)
     }
 
     private fun release(

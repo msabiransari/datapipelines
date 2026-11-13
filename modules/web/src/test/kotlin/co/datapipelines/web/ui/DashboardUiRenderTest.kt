@@ -190,6 +190,18 @@ class DashboardUiRenderTest {
         html shouldContain "/js/workspace/tabs.js"
         html shouldContain "/js/dashboards/workspace.js"
         html shouldContain "id=\"dp-dialog\""
+        // #876 G6: the Dependencies tab, a mount over the selected version (name + version, never an id), its
+        // eight catalog entries last in the page's catalog.
+        html shouldContain "data-dp-tab=\"dependencies\""
+        Regex("<div class=\"dp-deps\" data-dp-deps data-family=\"dashboard\"[^>]*data-name=\"[^\"]+\"[^>]*data-version=\"\\d+\"")
+            .containsMatchIn(html) shouldBe true
+        Regex("id=\"dp-pane-dependencies\"[^>]*data-lazy-url").containsMatchIn(html) shouldBe false
+        val catalog = html.substringAfter("<template data-page-assets>").substringBefore("</template>")
+        Regex("src=\"(/[^\"]+)\"")
+            .findAll(catalog)
+            .map { it.groupValues[1] }
+            .toList()
+            .takeLast(RELEASE_DEPENDENCY_CATALOG.size) shouldBe RELEASE_DEPENDENCY_CATALOG
     }
 
     @Test

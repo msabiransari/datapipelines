@@ -56,6 +56,7 @@ class PipelinesSearchBoundTest {
             mockk<PipelineVersionConsumers>(),
             mockk<co.datapipelines.pipeline.EndpointVersionConsumers>(),
             mockk<co.datapipelines.pipeline.ScheduleConsumers>(),
+            coordination = co.datapipelines.web.NO_RELEASES,
         )
 
     private val mvc: MockMvc =

@@ -1,5 +1,6 @@
 package co.datapipelines.web.templates
 
+import co.datapipelines.application.lens.LensedView.Companion.EVERYTHING
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -85,8 +86,9 @@ class TemplateReleaseServiceTest {
         pipelines: List<co.datapipelines.pipeline.TemplatePin> = emptyList(),
         sets: List<co.datapipelines.parameters.ParameterSetPin> = emptyList(),
         visualizations: List<co.datapipelines.visualization.ArtifactPin> = emptyList(),
+        importers: List<co.datapipelines.application.templates.TemplateUsage.TemplateImportPin> = emptyList(),
     ) = co.datapipelines.application.templates.TemplateUsage
-        .Pins(pipelines, sets, visualizations)
+        .Pins(pipelines, sets, visualizations, importers)
 
     private fun stubTemplate(vararg versions: Int) {
         every { templates.existsId(workspaceId, "test/t.sql") } returns true
@@ -100,7 +102,7 @@ class TemplateReleaseServiceTest {
         stubTemplate(1)
         every { usage.everPins(workspaceId, "test/t.sql") } returns pins(sets = listOf(setPin()))
 
-        val error = shouldThrow<DatapipelinesException> { service.purgeEntity(workspaceId, "test/t.sql") }
+        val error = shouldThrow<DatapipelinesException> { service.purgeEntity(workspaceId, "test/t.sql", EVERYTHING) }
 
         error.code shouldBe PipelineErrorCodes.Template.IN_USE
         error.details["referencing_parameter_sets"] shouldBe listOf("acme/sales/pins_only")
@@ -113,7 +115,7 @@ class TemplateReleaseServiceTest {
         stubTemplate(1)
         every { usage.everPins(workspaceId, "test/t.sql") } returns pins(visualizations = listOf(vizPin(), vizPin()))
 
-        val error = shouldThrow<DatapipelinesException> { service.purgeEntity(workspaceId, "test/t.sql") }
+        val error = shouldThrow<DatapipelinesException> { service.purgeEntity(workspaceId, "test/t.sql", EVERYTHING) }
 
         error.code shouldBe PipelineErrorCodes.Template.IN_USE
         error.details["referencing_visualizations"] shouldBe listOf("acme/charts/revenue")
@@ -129,7 +131,7 @@ class TemplateReleaseServiceTest {
         every { usage.everPins(workspaceId, "test/t.sql") } returns
             pins(listOf(pipelinePin("acme/p")), listOf(setPin()), listOf(vizPin()))
 
-        val error = shouldThrow<DatapipelinesException> { service.purgeEntity(workspaceId, "test/t.sql") }
+        val error = shouldThrow<DatapipelinesException> { service.purgeEntity(workspaceId, "test/t.sql", EVERYTHING) }
 
         error.details["pinned_by"] shouldBe listOf("acme/p")
         error.details["referencing_parameter_sets"] shouldBe listOf("acme/sales/pins_only")
@@ -146,7 +148,7 @@ class TemplateReleaseServiceTest {
         every { usage.everPins(workspaceId, "test/t.sql") } returns pins()
         every { templates.deleteTemplateRow(workspaceId, "test/t.sql") } returns true
 
-        service.purgeEntity(workspaceId, "test/t.sql")
+        service.purgeEntity(workspaceId, "test/t.sql", EVERYTHING)
 
         verify(exactly = 1) { templates.deleteTemplateRow(workspaceId, "test/t.sql") }
     }
@@ -159,7 +161,7 @@ class TemplateReleaseServiceTest {
         every { templates.findDraftDetail(workspaceId, "test/t.sql") } returns draft(1)
         every { usage.everPins(workspaceId, "test/t.sql") } returns pins(sets = listOf(setPin()))
 
-        val error = shouldThrow<DatapipelinesException> { service.purge(workspaceId, "test/t.sql", "draft-hash-1") }
+        val error = shouldThrow<DatapipelinesException> { service.purge(workspaceId, "test/t.sql", "draft-hash-1", EVERYTHING) }
 
         error.code shouldBe PipelineErrorCodes.Template.IN_USE
         error.details["referencing_parameter_sets"] shouldBe listOf("acme/sales/pins_only")
@@ -173,7 +175,7 @@ class TemplateReleaseServiceTest {
         every { templates.findDraftDetail(workspaceId, "test/t.sql") } returns draft(2)
         every { usage.liveVersionPins(workspaceId, "test/t.sql", 2) } returns pins(visualizations = listOf(vizPin()))
 
-        val error = shouldThrow<DatapipelinesException> { service.purge(workspaceId, "test/t.sql", "draft-hash-2") }
+        val error = shouldThrow<DatapipelinesException> { service.purge(workspaceId, "test/t.sql", "draft-hash-2", EVERYTHING) }
 
         error.code shouldBe PipelineErrorCodes.Template.IN_USE
         error.details["referencing_visualizations"] shouldBe listOf("acme/charts/revenue")
@@ -188,7 +190,7 @@ class TemplateReleaseServiceTest {
         every { usage.everPins(workspaceId, "test/t.sql") } returns pins()
         every { templates.purgeDraft(workspaceId, "test/t.sql", "draft-hash-1", any()) } returns true
 
-        service.purge(workspaceId, "test/t.sql", "draft-hash-1")
+        service.purge(workspaceId, "test/t.sql", "draft-hash-1", EVERYTHING)
 
         verify(exactly = 1) { templates.purgeDraft(workspaceId, "test/t.sql", "draft-hash-1", any()) }
     }
@@ -198,13 +200,13 @@ class TemplateReleaseServiceTest {
         stubTemplate(1)
         every { templates.findVersionDetail(workspaceId, "test/t.sql", 1) } returns draft(1)
         every { usage.everPins(workspaceId, "test/t.sql") } returns pins(sets = listOf(setPin()))
-        shouldThrow<DatapipelinesException> { service.purgeVersion(workspaceId, "test/t.sql", 1) }.code shouldBe
+        shouldThrow<DatapipelinesException> { service.purgeVersion(workspaceId, "test/t.sql", 1, EVERYTHING) }.code shouldBe
             PipelineErrorCodes.Template.IN_USE
 
         stubTemplate(1, 2)
         every { templates.findVersionDetail(workspaceId, "test/t.sql", 2) } returns draft(2)
         every { usage.liveVersionPins(workspaceId, "test/t.sql", 2) } returns pins(listOf(pipelinePin()))
-        shouldThrow<DatapipelinesException> { service.purgeVersion(workspaceId, "test/t.sql", 2) }.code shouldBe
+        shouldThrow<DatapipelinesException> { service.purgeVersion(workspaceId, "test/t.sql", 2, EVERYTHING) }.code shouldBe
             PipelineErrorCodes.Template.IN_USE
 
         verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
@@ -216,11 +218,102 @@ class TemplateReleaseServiceTest {
         every { templates.findVersionDetail(workspaceId, "test/t.sql", 1) } returns draft(1).copy(status = PipelineVersionStatus.RELEASED)
         every { usage.liveVersionPins(workspaceId, "test/t.sql", 1) } returns pins(visualizations = listOf(vizPin()))
 
-        val error = shouldThrow<DatapipelinesException> { service.discardVersion(workspaceId, "test/t.sql", 1, actor) }
+        val error = shouldThrow<DatapipelinesException> { service.discardVersion(workspaceId, "test/t.sql", 1, actor, EVERYTHING) }
 
         error.code shouldBe PipelineErrorCodes.Template.IN_USE
         error.details["referencing_visualizations"] shouldBe listOf("acme/charts/revenue")
         verify(exactly = 0) { templates.discardVersion(any(), any(), any(), any(), any()) }
+    }
+
+    private fun importPin(
+        name: String,
+        version: Int = 1,
+    ) = co.datapipelines.application.templates.TemplateUsage.TemplateImportPin(
+        UUID.randomUUID(),
+        name,
+        version,
+        PipelineVersionStatus.RELEASED,
+        1,
+        "lib",
+    )
+
+    /** #877 §C.2 — a view that admits only [pipelines] and [templates] by name (everything else whole). */
+    private fun narrowed(
+        pipelines: Set<String> = emptySet(),
+        templates: Set<String> = emptySet(),
+    ) = co.datapipelines.application.lens.LensedView(
+        co.datapipelines.pipeline.ReadLens
+            .Only(pipelines),
+        co.datapipelines.pipeline.ReadLens
+            .Only(templates),
+    )
+
+    @Test
+    fun `discard refuses on a LIVE importer alone - referencing_templates names it (877 importer arm)`() {
+        stubTemplate(1)
+        every { templates.findVersionDetail(workspaceId, "test/t.sql", 1) } returns draft(1).copy(status = PipelineVersionStatus.RELEASED)
+        every { usage.liveVersionPins(workspaceId, "test/t.sql", 1) } returns
+            pins(importers = listOf(importPin("acme/t/report.sql", 2), importPin("acme/t/report.sql", 1)))
+
+        val error = shouldThrow<DatapipelinesException> { service.discardVersion(workspaceId, "test/t.sql", 1, actor, EVERYTHING) }
+
+        error.code shouldBe PipelineErrorCodes.Template.IN_USE
+        error.details shouldBe
+            mapOf("template_id" to "test/t.sql", "pinned_by" to emptyList<String>(), "referencing_templates" to listOf("acme/t/report.sql"))
+        error.message shouldBe
+            "Version of template 'test/t.sql' is pinned by 1 template version(s): acme/t/report.sql; discard or repoint them first."
+        verify(exactly = 0) { templates.discardVersion(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `purgeEntity refuses on any stored importer version - the ANY question (877)`() {
+        stubTemplate(1)
+        every { usage.everPins(workspaceId, "test/t.sql") } returns pins(importers = listOf(importPin("acme/t/old.sql")))
+
+        val error = shouldThrow<DatapipelinesException> { service.purgeEntity(workspaceId, "test/t.sql", EVERYTHING) }
+
+        error.details["referencing_templates"] shouldBe listOf("acme/t/old.sql")
+        verify(exactly = 0) { templates.deleteTemplateRow(any(), any()) }
+    }
+
+    @Test
+    fun `a pinner outside the caller's view still refuses - the echo carries admitted names and pins_hidden, no count`() {
+        stubTemplate(1)
+        every { usage.everPins(workspaceId, "test/t.sql") } returns
+            pins(
+                pipelines = listOf(pipelinePin("acme/p/shown"), pipelinePin("acme/p/secret"), pipelinePin("acme/p/secret")),
+                importers = listOf(importPin("acme/t/hidden.sql")),
+            )
+
+        val error =
+            shouldThrow<DatapipelinesException> {
+                service.purgeEntity(workspaceId, "test/t.sql", narrowed(pipelines = setOf("acme/p/shown")))
+            }
+
+        error.code shouldBe PipelineErrorCodes.Template.IN_USE
+        error.details shouldBe mapOf("template_id" to "test/t.sql", "pinned_by" to listOf("acme/p/shown"), "pins_hidden" to true)
+        error.message shouldBe
+            "Version of template 'test/t.sql' is pinned by live pipeline version(s): acme/p/shown and others outside your view and " +
+            "template version(s) outside your view; discard or repoint them first."
+        verify(exactly = 0) { templates.deleteTemplateRow(any(), any()) }
+    }
+
+    @Test
+    fun `a view that admits every pinner gets the refusal unchanged - no pins_hidden key`() {
+        stubTemplate(1)
+        every { usage.everPins(workspaceId, "test/t.sql") } returns
+            pins(listOf(pipelinePin("acme/p")), importers = listOf(importPin("acme/t/r.sql")))
+
+        val error =
+            shouldThrow<DatapipelinesException> {
+                service.purgeEntity(workspaceId, "test/t.sql", narrowed(setOf("acme/p"), setOf("acme/t/r.sql")))
+            }
+
+        error.details shouldBe
+            mapOf("template_id" to "test/t.sql", "pinned_by" to listOf("acme/p"), "referencing_templates" to listOf("acme/t/r.sql"))
+        error.message shouldBe
+            "Version of template 'test/t.sql' is pinned by 1 live pipeline version(s): acme/p and 1 template version(s): acme/t/r.sql; " +
+            "discard or repoint them first."
     }
 
     @Test

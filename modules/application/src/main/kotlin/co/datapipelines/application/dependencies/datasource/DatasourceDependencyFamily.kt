@@ -2,6 +2,7 @@ package co.datapipelines.application.dependencies.datasource
 
 import co.datapipelines.application.dependencies.BoundedGraphRead
 import co.datapipelines.application.dependencies.CeilingBound
+import co.datapipelines.application.dependencies.IncomingArms
 import co.datapipelines.application.dependencies.StatementCeiling
 import co.datapipelines.datasources.DatasourceGraphFacts
 import co.datapipelines.datasources.DatasourceRepository
@@ -10,6 +11,8 @@ import co.datapipelines.dependencies.Capabilities
 import co.datapipelines.dependencies.DependencyProvider
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyKey
+import co.datapipelines.dependencies.IncomingQuery
+import co.datapipelines.dependencies.IncomingResult
 import co.datapipelines.dependencies.NodeFacts
 import co.datapipelines.dependencies.ObjectRequest
 import co.datapipelines.dependencies.Operational
@@ -51,13 +54,14 @@ object DatasourceDependencyFamily {
     fun descriptor(
         datasources: DatasourceRepository,
         ceiling: StatementCeiling,
+        incoming: IncomingArms? = null,
     ): FamilyDescriptor<DatasourceGraphFacts> =
         FamilyDescriptor(
             key = KEY,
             rootSelectors = setOf(SelectorKind.ENTITY),
             capabilities = CAPABILITIES,
             extractorSchemaVersion = EXTRACTOR_SCHEMA_VERSION,
-            provider = DatasourceDependencyProvider(datasources, ceiling),
+            provider = DatasourceDependencyProvider(datasources, ceiling, incoming),
             safeSummary = FamilyDescriptor.NO_SAFE_SUMMARY,
         )
 
@@ -97,8 +101,23 @@ object DatasourceDependencyFamily {
 internal class DatasourceDependencyProvider(
     private val datasources: DatasourceRepository,
     override val ceiling: StatementCeiling,
+    /** #877 §B — the datasource target's two inverse arms ([IncomingArmCatalog.datasource]); none = Unsupported. */
+    private val incoming: IncomingArms? = null,
 ) : DependencyProvider<DatasourceGraphFacts>,
     CeilingBound {
+    init {
+        require(incoming == null || incoming.target == DatasourceDependencyFamily.KEY) {
+            "the datasource provider's inverse arms target ${incoming?.target}"
+        }
+    }
+
+    override val incomingFrom: Set<FamilyKey> get() = incoming?.incomingFrom.orEmpty()
+
+    override fun findIncoming(
+        query: IncomingQuery,
+        context: ResolveContext,
+    ): IncomingResult = incoming?.find(query, context) ?: IncomingResult.Unsupported
+
     override fun resolveMany(
         requests: List<ObjectRequest>,
         context: ResolveContext,

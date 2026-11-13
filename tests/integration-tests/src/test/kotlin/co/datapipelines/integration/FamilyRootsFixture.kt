@@ -78,6 +78,7 @@ internal class FamilyRootsFixture(
         name: String,
         template: Node,
         parameters: Map<String, Any> = emptyMap(),
+        checks: List<Map<String, Any?>> = emptyList(),
     ): Node {
         val node =
             mapOf(
@@ -90,7 +91,8 @@ internal class FamilyRootsFixture(
             )
         val document =
             mapOf("name" to name, "display_name" to "Family roots", "description" to "#873", "nodes" to listOf(node)) +
-                (if (parameters.isEmpty()) emptyMap() else mapOf("parameters" to parameters))
+                (if (parameters.isEmpty()) emptyMap() else mapOf("parameters" to parameters)) +
+                (if (checks.isEmpty()) emptyMap() else mapOf("checks" to checks))
         created(send("POST", "/api/v1/pipelines", mapper.writeValueAsString(document)))
         return Node("pipeline", name)
     }
@@ -168,12 +170,13 @@ internal class FamilyRootsFixture(
     fun dashboardClosure(
         prefix: String,
         bindRegion: Boolean = false,
+        sourceChecks: List<Map<String, Any?>> = emptyList(),
     ): Pair<Node, List<Edge>> {
         val selectorTemplate = sqlTemplate("$prefix/selector.sql", SELECTOR_BODY)
         val set = parameterSet("$prefix/set", selectorTemplate)
         val query = sqlTemplate("$prefix/query.sql")
         val declared = if (bindRegion) mapOf("region" to mapOf("type" to "STRING", "required" to false)) else emptyMap()
-        val source = pipeline("$prefix/source", query, declared)
+        val source = pipeline("$prefix/source", query, declared, sourceChecks)
         val shape = jsonataTemplate("$prefix/shape.jsonata")
         val chart = visualization("$prefix/chart", shape)
         val board = dashboard("$prefix/board", set, source, chart, if (bindRegion) listOf("region") else emptyList())
@@ -216,46 +219,85 @@ internal class FamilyRootsFixture(
         }
 
     /**
-     * The compatibility entry of [root] (#873 §C.3): the family's release DIALOG POST (template, visualization, dashboard —
-     * a session form with the CSRF double-submit) or, for a parameter set (no dialog until G6 U4), its REST route without
-     * a plan; each with its legacy consent flag set, at the root's stored hash.
+     * The family's release DIALOG POST carrying a plan (#876 §F: template, parameter set, visualization and dashboard each
+     * have one — a session form with the CSRF double-submit): the oracle's `tree_hash` and every node but the root as
+     * repeated `include_dependencies` fields, at the root's stored hash. The planned twin of [releaseWithPlan]. [include]
+     * narrows the ticked rows and [extra] adds fields (#876 round 4: the per-row `check_override_node` /
+     * `check_override_reason` pairs, the pipeline root's `overrideChecksReason`), each repeated in its list's order; with
+     * [htmx] the POST is an htmx request, so a refusal answers the toast that carries its code.
      */
-    fun releaseCompatible(root: Node): Response {
+    fun releaseDialog(
+        root: Node,
+        edges: List<Edge>,
+        treeHash: String = treeHash(root, edges),
+        include: List<String> = nodeIds(root, edges).filterKeys { it != root }.values.toList(),
+        extra: Map<String, List<String>> = emptyMap(),
+        htmx: Boolean = false,
+    ): Response =
+        form(
+            dialogPath(root),
+            dialogFields(root) + mapOf("tree_hash" to listOf(treeHash), "include_dependencies" to include) + extra,
+            htmx,
+        )
+
+    /**
+     * The dialog POST of [root] WITHOUT a plan field — and, for the families that read one before #876 round 3, with the
+     * retired consent field set. Refused `428 <family>.release.plan_required` on purpose: the dialog binds only
+     * `tree_hash` and `include_dependencies`, so the consent field is ignored and nothing flips.
+     */
+    fun releaseDialogWithoutPlan(root: Node): Response {
+        val retired =
+            when (root.family) {
+                "visualization" -> mapOf("release_pinned_templates" to listOf("true"))
+                "dashboard" -> mapOf("releasePinnedVisualizations" to listOf("true"))
+                else -> emptyMap()
+            }
+        return form(dialogPath(root), dialogFields(root) + retired)
+    }
+
+    /**
+     * The bare REST alias of [root] — its family's `release_pinned_*` consent flag and no plan, at the root's stored hash.
+     * Refused `428 <family>.release.plan_required` since #876 round 3. A template has no flag, so it has no alias.
+     */
+    fun releaseLegacyAlias(root: Node): Response {
         val row = row(root)
+        val flag =
+            when (root.family) {
+                "parameter_set", "visualization" -> "release_pinned_templates"
+                "dashboard" -> "release_pinned_visualizations"
+                else -> error("a ${root.family} release has no legacy consent flag")
+            }
+        return send("POST", "/api/v1/${ROUTES.getValue(root.family)}/${row.uuid}/release?$flag=true", "", row.hash)
+    }
+
+    private fun dialogPath(root: Node): String =
+        if (root.family == "template") {
+            "/partials/templates/lifecycle/release"
+        } else {
+            "/partials/${ROUTES.getValue(root.family)}/${row(root).uuid}/lifecycle/release"
+        }
+
+    /** The dialog's identity and hash fields: a template names itself (`bodyHash`); a visualization's is `body_hash`. */
+    private fun dialogFields(root: Node): Map<String, List<String>> {
+        val hash = row(root).hash
         return when (root.family) {
-            "template" -> {
-                form("/partials/templates/lifecycle/release", mapOf("name" to root.name, "bodyHash" to row.hash))
-            }
-
-            "parameter_set" -> {
-                send("POST", "/api/v1/parameter-sets/${row.uuid}/release?release_pinned_templates=true", "", row.hash)
-            }
-
-            "visualization" -> {
-                form(
-                    "/partials/visualizations/${row.uuid}/lifecycle/release",
-                    mapOf("body_hash" to row.hash, "release_pinned_templates" to "true"),
-                )
-            }
-
-            else -> {
-                form(
-                    "/partials/dashboards/${row.uuid}/lifecycle/release",
-                    mapOf("bodyHash" to row.hash, "releasePinnedVisualizations" to "true"),
-                )
-            }
+            "template" -> mapOf("name" to listOf(root.name), "bodyHash" to listOf(hash))
+            "visualization" -> mapOf("body_hash" to listOf(hash))
+            else -> mapOf("bodyHash" to listOf(hash))
         }
     }
 
     private fun form(
         path: String,
-        fields: Map<String, String>,
+        fields: Map<String, List<String>>,
+        htmx: Boolean = false,
     ): Response =
         given()
             .port(port)
             .asSession(session)
             .contentType(ContentType.URLENC)
-            .apply { fields.forEach { (key, value) -> formParam(key, value) } }
+            .apply { if (htmx) header("HX-Request", "true") }
+            .apply { fields.filterValues { it.isNotEmpty() }.forEach { (key, values) -> formParam(key, *values.toTypedArray()) } }
             .post(path)
 
     /** Releases [root] with a plan over [edges] selecting every node but the root, at the root's stored hash. */

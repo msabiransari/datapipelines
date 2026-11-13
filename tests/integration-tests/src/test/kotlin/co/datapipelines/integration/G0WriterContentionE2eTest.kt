@@ -266,7 +266,7 @@ class G0WriterContentionE2eTest {
                 ),
         )
 
-    /** A pipeline created over MCP and released (with its pinned template) over REST; its id. */
+    /** A pipeline created over MCP and released over REST, its pinned template already RELEASED (order 1); its id. */
     private fun releasedPipeline(
         name: String,
         templateId: String,
@@ -274,11 +274,7 @@ class G0WriterContentionE2eTest {
         val (created, isError) = callTool("pipelines_create", pipelineArguments(name, templateId))
         withClue("pipelines_create must succeed: $created") { isError shouldBe false }
         val id = created["id"].asText()
-        val released =
-            rest()
-                .header("If-Match", created["draft"]["body_hash"].asText())
-                .queryParam("release_pinned_templates", "true")
-                .post("/api/v1/pipelines/$id/release")
+        val released = rest().header("If-Match", created["draft"]["body_hash"].asText()).post("/api/v1/pipelines/$id/release")
         withClue(released.asString()) { released.statusCode shouldBe 200 }
         return id
     }
@@ -360,7 +356,6 @@ class G0WriterContentionE2eTest {
         val released =
             rest()
                 .header("If-Match", bodyHash)
-                .queryParam("release_pinned_templates", "true")
                 .post("/api/v1/pipelines/$id/release")
         withClue(released.asString()) { released.statusCode shouldBe 200 }
     }
@@ -449,7 +444,16 @@ class G0WriterContentionE2eTest {
     fun `the fixture - an H2 datasource, a released pipeline and its released template`() {
         DriverManager.getConnection(H2_JDBC_URL, H2_USER, H2_PASSWORD).use { it.createStatement().execute("SELECT 1") }
         registerDatasource(DATASOURCE)
-        template(TEMPLATE).second shouldBe false
+        val (template, templateFailed) = template(TEMPLATE)
+        templateFailed shouldBe false
+        // The shared template is released once, through its own route: the legacy cascade flag is refused since #876 r3.
+        val templateReleased =
+            rest()
+                .contentType(ContentType.JSON)
+                .header("If-Match", template["body_hash"].asText())
+                .body(mapper.writeValueAsString(mapOf("name" to TEMPLATE)))
+                .post("/api/v1/templates/release")
+        withClue(templateReleased.asString()) { templateReleased.statusCode shouldBe 200 }
         releasedPipeline(PIPELINE, TEMPLATE)
         // Non-vacuity of the probe: nobody waits on a fresh holder before any case starts.
         holdWorkspace().use { waitersOn(it.pid) shouldBe 0 }

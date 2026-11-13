@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import io.kotest.assertions.withClue
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -41,6 +42,37 @@ class SchedulesDetailRenderTest {
         detail shouldContain "<dt>Notifications</dt>"
         detail shouldContain "data-slot=\"notifications\""
         SchedulesRender.skeleton(html, "sch-tpl-run-row") shouldContain "data-slot=\"execution\""
+    }
+
+    /**
+     * #876 G6 U2 — every role that opens the page gets the Dependencies section in the detail skeleton, closed, the
+     * pane a schedule pane (detail.js fills `data-id` and `data-revision`; the skeleton carries neither, nor any name
+     * or version), and the page lists the eight Dependencies catalog entries in its loader catalog.
+     */
+    @Test
+    fun `every role's detail carries the closed Dependencies section and the page lists its catalog`() {
+        val ladder =
+            listOf(
+                "author" to SchedulesRender.AUTHOR,
+                "viewer" to SchedulesRender.VIEWER,
+                "promoter" to SchedulesRender.PROMOTER,
+            )
+        for ((role, roles) in ladder) {
+            val html = SchedulesRender.page(roles)
+            val detail = SchedulesRender.skeleton(html, "sch-tpl-detail")
+            withClue(role) {
+                val section = detail.substringAfter("<details class=\"dp-deps-section\" data-sch-deps>").substringBefore("</details>")
+                section shouldContain "<h3>"
+                section shouldContain "Dependencies</h3>"
+                section shouldContain "<div class=\"dp-deps\" data-dp-deps data-family=\"schedule\" data-dp-deps-state=\"idle\">"
+                Regex("<details[^>]*data-sch-deps[^>]*\\bopen\\b").containsMatchIn(detail) shouldBe false
+                section shouldNotContain "data-version"
+                section shouldNotContain "data-name"
+                val catalog = html.substringAfter("<template data-page-assets>").substringBefore("</template>")
+                Regex("src=\"(/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toList() shouldBe DEPENDENCY_CATALOG
+                catalog shouldContain "<script data-page-mount src=\"/js/dependencies/mount.js\">"
+            }
+        }
     }
 
     @Test

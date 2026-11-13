@@ -16,6 +16,7 @@ import co.datapipelines.dependencies.SelectorKind
 import co.datapipelines.dependencies.VersionKind
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
+import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
@@ -23,6 +24,7 @@ import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /**
  * Section F / A47 contract half: the §11.1 schema and its goldens. Every golden validates; every schema enum equals a
@@ -188,6 +190,104 @@ class WireContractTest {
         data.validate(camel).shouldNotBeEmpty()
     }
 
+    @Test
+    fun `unmet_names is optional, never empty, never null, never a duplicate, and only on a parameter_names constraint`() {
+        val data = WireFiles.validator()
+        val golden = WireFiles.data.getValue(UNMET_GOLDEN)
+        val unmet = golden.items("edges").flatMap { it.items("constraints") }.filter { it.has("unmet_names") }
+        withClue("the golden carries the property it exists for") { unmet.size shouldBe 1 }
+        unmet.forEach { c ->
+            val names = c.items("names").map { it.asText() }
+            val missing = c.items("unmet_names").map { it.asText() }
+            withClue("a subset of names, in names' order") { missing shouldBe names.filter { it in missing } }
+        }
+        val refused =
+            mapOf<String, (ObjectNode) -> Unit>(
+                "empty" to { it.putArray("unmet_names") },
+                "null" to { it.putNull("unmet_names") },
+                "duplicate" to { it.putArray("unmet_names").add("since").add("since") },
+                "blank name" to { it.putArray("unmet_names").add("") },
+                "64 characters" to { it.putArray("unmet_names").add("a".repeat(64)) },
+            )
+        refused.forEach { (case, edit) ->
+            val changed = golden.deepCopy<JsonNode>()
+            edit(constraintOf(changed, "parameter_names"))
+            withClue("unmet_names $case") { data.validate(changed).shouldNotBeEmpty() }
+        }
+        val elsewhere = WireFiles.data.getValue("constraint-datasource-access-read").deepCopy<JsonNode>()
+        constraintOf(elsewhere, "datasource_access").putArray("unmet_names").add("region")
+        withClue("unmet_names on a datasource_access constraint") { data.validate(elsewhere).shouldNotBeEmpty() }
+        val sixtyThree = golden.deepCopy<JsonNode>()
+        constraintOf(sixtyThree, "parameter_names").putArray("unmet_names").add("a".repeat(63))
+        withClue("63 characters is the native bound") { data.validate(sixtyThree).shouldBeEmpty() }
+    }
+
+    private fun constraintOf(
+        payload: JsonNode,
+        kind: String,
+    ): ObjectNode =
+        payload
+            .items("edges")
+            .flatMap { it.items("constraints") }
+            .first { it.path("kind").asText() == kind } as ObjectNode
+
+    @Test
+    fun `every node carries entity_id - a string exactly when it resolved, one id per object - counted`() {
+        var resolved = 0
+        var unresolved = 0
+        WireFiles.data.forEach { (case, json) ->
+            val idByObject = mutableMapOf<Pair<String, String>, String>()
+            json.items("nodes").forEach { node ->
+                val family = node.path("family").asText()
+                withClue("$case ${node.path("node_id").asText()}") {
+                    node.has("entity_id") shouldBe true
+                    val id = node.get("entity_id")
+                    if (node.path("resolution").asText() == Resolution.RESOLVED.wire) {
+                        resolved++
+                        id.isTextual shouldBe true
+                        id.asText() shouldBe expectedIdShape(family, node, id.asText())
+                        val previous = idByObject.putIfAbsent(family to node.path("name").asText(), id.asText())
+                        if (previous != null) previous shouldBe id.asText()
+                    } else {
+                        unresolved++
+                        id.isNull shouldBe true
+                    }
+                }
+            }
+            withClue("$case: two objects share an entity_id") { idByObject.values.toSet().size shouldBe idByObject.size }
+        }
+        withClue("resolved nodes checked") { resolved shouldBeGreaterThanOrEqual MIN_RESOLVED_NODES }
+        withClue("non-resolved nodes checked") { unresolved shouldBeGreaterThanOrEqual MIN_UNRESOLVED_NODES }
+    }
+
+    @Test
+    fun `the node shape refuses an entity_id on an unresolved node and a null one on a resolved node`() {
+        val data = WireFiles.validator()
+        val golden = WireFiles.data.getValue("resolution-missing")
+        val resolutions = golden.items("nodes").map { it.path("resolution").asText() }
+        assertSoftly {
+            mapOf(
+                Resolution.MISSING to "7d2c0000-0000-4000-8000-000000000001",
+                Resolution.RESOLVED to null,
+            ).forEach { (resolution, value) ->
+                val index = resolutions.indexOf(resolution.wire)
+                val changed = golden.deepCopy<JsonNode>()
+                (changed.path("nodes").get(index) as ObjectNode).put("entity_id", value)
+                withClue("a ${resolution.wire} node given entity_id $value") {
+                    val locations = data.validate(changed).map { it.instanceLocation.toString() }
+                    withClue(locations) { ("/nodes/$index/entity_id" in locations) shouldBe true }
+                }
+            }
+        }
+    }
+
+    /** A datasource's stable id is its flat global name (§5.1, deployment scope); every other family's is a lower-case UUID. */
+    private fun expectedIdShape(
+        family: String,
+        node: JsonNode,
+        id: String,
+    ): String = if (family == FamilyKey.DATASOURCE.wire) node.path("name").asText() else UUID.fromString(id).toString()
+
     private fun assertCovered(
         what: String,
         expected: List<String>,
@@ -195,6 +295,15 @@ class WireContractTest {
     ) {
         withClue("$what tokens outside the vocabulary") { (counts.keys - expected.toSet()).shouldBeEmpty() }
         expected.forEach { token -> withClue("$what '$token' appears in no golden") { (counts[token] ?: 0) shouldBeGreaterThanOrEqual 1 } }
+    }
+
+    private companion object {
+        /** Non-vacuity floors of the entity_id scan: the corpus has 90 resolved and 2 non-resolved nodes (#890). */
+        const val MIN_RESOLVED_NODES = 41
+        const val MIN_UNRESOLVED_NODES = 2
+
+        /** #892 (erratum (11)): the one golden carrying `unmet_names`. */
+        const val UNMET_GOLDEN = "constraint-parameter-names-unmet"
     }
 }
 

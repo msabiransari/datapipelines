@@ -2,13 +2,14 @@ package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
+import co.datapipelines.application.dependencies.DatasourceReferencesAdapter
+import co.datapipelines.application.dependencies.RegistryIncomingRows
 import co.datapipelines.auth.PromotionProperties
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContentCheck
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceAuditSink
 import co.datapipelines.datasources.DatasourceMetadataCache
-import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
@@ -19,13 +20,13 @@ import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.LakeIntrospectionCache
 import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.LakeViewOutcomeRecorder
-import co.datapipelines.datasources.ParameterSetDatasourceReference
 import co.datapipelines.datasources.PoolInvalidationPublisher
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.crypto.KeyProviderConfig
 import co.datapipelines.datasources.crypto.KeyProviders
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
+import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.AuthoringGuard
@@ -48,6 +49,7 @@ import co.datapipelines.web.pipelines.PipelineBodies
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.pipelines.repositoryPipelineResolver
 import co.datapipelines.web.templates.TemplateImportService
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.context.properties.bind.Bindable
 import org.springframework.boot.context.properties.bind.Binder
@@ -314,9 +316,9 @@ class DomainConfiguration {
      * The pipeline-name lookup a datasource delete needs (datasources §9, `datasource.in_use`).
      *
      * `datasources` cannot depend on `pipeline-contract` (§4.2), so it declares this port and the
-     * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which pushes the
-     * datasource filter to SQL via [PipelineRepository.findAnyVersionDatasourceRefs] — the
-     * ANY-VERSION scan (061/T79). The working-version scan it replaced here joined
+     * aggregation layer supplies it: since #877 §C an adapter over the datasource family's two
+     * inverse arms (`findIncoming`, paged to exhaustion, one bounded statement per page) — the
+     * ANY-VERSION rule (061/T79) the scans it replaced kept. The working-version scan replaced here joined
      * `current_version` only, so a released pipeline whose OLDER version pinned the datasource
      * was invisible: the delete succeeded and that version's next execution failed at connect.
      * A delete guard reads every version ever stored; the pipelines LISTING keeps the
@@ -339,38 +341,11 @@ class DomainConfiguration {
      */
     @Bean
     fun datasourceReferences(
-        bodies: PipelineBodies,
+        /** #877 §C — the datasource family's two inverse arms (pipeline + parameter set) behind `findIncoming`. */
+        dependencyFamilyRegistry: ObjectProvider<FamilyRegistry>,
         workspaces: WorkspaceRepository,
-        /** #873 §F.3 e — the parameter-set arm of the name lock, by the same any-version, every-workspace rule. */
-        sets: ParameterSetRepository,
     ): DatasourceReferences =
-        object : DatasourceReferences {
-            override fun referencesTo(datasourceName: String): List<DatasourceReference> =
-                workspaces.findAll().flatMap { workspace ->
-                    bodies.anyVersionReferences(workspace.id, datasourceName).map { ref ->
-                        DatasourceReference(
-                            pipelineName = ref.pipelineName,
-                            pipelineVersion = ref.pipelineVersion,
-                            versionStatus = ref.versionStatus.name,
-                            nodeId = ref.nodeId,
-                            workspaceId = workspace.id,
-                        )
-                    }
-                }
-
-            override fun parameterSetReferencesTo(datasourceName: String): List<ParameterSetDatasourceReference> =
-                workspaces.findAll().flatMap { workspace ->
-                    sets.findAnyVersionDatasourceRefs(workspace.id, datasourceName).map { ref ->
-                        ParameterSetDatasourceReference(
-                            parameterSetName = ref.parameterSetName,
-                            parameterSetVersion = ref.version,
-                            versionStatus = ref.status.name,
-                            path = ref.path,
-                            workspaceId = workspace.id,
-                        )
-                    }
-                }
-        }
+        DatasourceReferencesAdapter(RegistryIncomingRows(dependencyFamilyRegistry::getObject)) { workspaces.findAll().map { it.id } }
 
     @Bean
     // Ten collaborators: 089's registry + extension directory met 094's pool metrics + ceiling

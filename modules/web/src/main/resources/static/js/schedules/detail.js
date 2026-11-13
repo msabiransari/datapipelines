@@ -43,6 +43,7 @@
 
   function paneMessage(title, description) {
     var view = pane();
+    if (window.DependenciesMount) window.DependenciesMount.unmount(view);
     S.clear(view);
     var t = document.createElement("p");
     t.className = "ds-empty-title";
@@ -112,6 +113,11 @@
     var c = current();
     var s = c.schedule;
     var view = pane();
+    // A re-render of the SAME schedule (a verb's aftermath, a run that ended) keeps an opened Dependencies
+    // section open; it then loads once for the revision now shown. Another schedule starts closed.
+    var shown = view.querySelector("[data-schedule-detail]");
+    var depsOpen = !!shown && shown.getAttribute("data-schedule-id") === s.id &&
+      !!(shown.querySelector("[data-sch-deps]") || {}).open;
     var content = S.clone("sch-tpl-detail");
     var names = M().splitName(s.name);
     S.text(content, "folder", names.folder).setAttribute("title", s.name);
@@ -123,10 +129,14 @@
     renderOverview(content, s, c);
     renderOccurrences(content, s, c.occurrences);
     renderParameters(content, s);
+    renderDependencies(content, s, depsOpen);
     renderRuns(content, c);
 
+    if (window.DependenciesMount) window.DependenciesMount.unmount(view);
     S.clear(view);
     view.appendChild(content);
+    // #876 G6 U2: bind the cloned pane (the page's own catalog mount scans main once; a clone arrives later).
+    if (window.DependenciesMount && window.DependenciesMount.scan) window.DependenciesMount.scan(content);
     resolvePipelineLink(content, s);
     schedulePoll();
   }
@@ -261,6 +271,19 @@
       row.setAttribute("data-at", o.at);
       body.appendChild(row);
     });
+  }
+
+  /**
+   * #876 G6 U2 — the Dependencies section's pane (brief §A.6 selector table): the schedule's id is the only thing its
+   * request sends; the revision rides along for display. Attributes only, never markup.
+   */
+  function renderDependencies(root, s, open) {
+    var deps = root.querySelector("[data-dp-deps]");
+    if (!deps) return;
+    deps.setAttribute("data-id", s.id);
+    deps.setAttribute("data-revision", String(s.revision));
+    var section = root.querySelector("[data-sch-deps]");
+    if (section && open) section.open = true;
   }
 
   function renderParameters(root, s) {

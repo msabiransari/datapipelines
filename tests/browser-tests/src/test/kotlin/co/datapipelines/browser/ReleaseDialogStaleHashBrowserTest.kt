@@ -79,7 +79,8 @@ class ReleaseDialogStaleHashBrowserTest : VisualizationBrowserSuite() {
                     refused.status() shouldBe 409
                 }
                 page.locator("#toast .ds-toast").first().waitFor()
-                page.locator("#toast .ds-toast").first().innerText() shouldContain "$family.version.conflict"
+                // #876: the plan's tree_hash covers the root's draft, so the planner refuses first (it was $family.version.conflict).
+                page.locator("#toast .ds-toast").first().innerText() shouldContain "$family.release.plan_conflict"
                 fixture.state() shouldBe changed
                 println("event=release453.stale family=$family status=${refused.status()} state=$changed")
             }
