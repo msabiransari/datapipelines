@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.74 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.75 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-13
@@ -453,7 +453,7 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 | ERROR | `lake.definition.apply_unclassified` | A step of the apply failed with an exception that is not one of the catalog's refusals; nothing is thrown. Before the commit the row is `pending` and the attempt ends with `apply_deferred`; from the commit on, or when the row could not be stamped, it ends with `apply_unknown`; after a failed lease release or session close the attempt's own ending line stands. `operation` is always `lake.definition.apply`; `namespace` and `table` are `null` when the table's own row could not be read | `step` (where the failure was caught: `deadline`, `pre_commit`, `session_open`, `metadata_store`, `lease_release`, `session_close`, `commit`), `cause`, `sql_state` (the exception's class and first SQLSTATE, §3.4G; never its message or stack) |
 | INFO | `lake.definition.apply_superseded` | The attempt's conditional stamp changed no row, because a newer attempt owns the table. This attempt recorded nothing | — |
 
-The three audit events of the same lifecycle (`lake.definition.released`, `.applied`, `.apply_failed`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) are separate rows in `audit_log`. A log line is not an audit row, and the audit row does not replace the log line.
+The five audit events of the same lifecycle (`lake.definition.released`, `.applied`, `.apply_failed`, `.discarded`, `.draft_purged`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)) are separate rows in `audit_log`. A log line is not an audit row, and the audit row does not replace the log line.
 
 #### 3.4S Lake delivery, publication and settle events (#799)
 
@@ -785,7 +785,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-13 | v1.74 | 803 (#803) — renumbered at merge after #822's v1.73 | **§3.4**: the `staging` row names the DuckDB scratch sweep's INFO (paths removed for a provably dead owner) and WARN (leftover paths nobody can vouch for, with their total bytes, counted against `scratch-bytes`). |
+| 2026-11-13 | v1.75 | 803 (#803) — renumbered at merge after #822's v1.73 and #814's v1.74 | **§3.4**: the `staging` row names the DuckDB scratch sweep's INFO (paths removed for a provably dead owner) and WARN (leftover paths nobody can vouch for, with their total bytes, counted against `scratch-bytes`). |
+| 2026-11-13 | v1.74 | 814 (#814) | **§3.4R**: the lake definition lifecycle has five audit events — `lake.definition.discarded` and `.draft_purged` join `.released`, `.applied` and `.apply_failed` ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)). No log line added. |
 | 2026-11-13 | v1.73 | 822 (#822) | **§3.4R** `lake.definition.apply_unclassified` is logged by any step of the apply, not only the commit, and gains `step` (`deadline`, `pre_commit`, `session_open`, `metadata_store`, `lease_release`, `session_close`, `commit`); the `apply_deferred` and `apply_unknown` rows say which ending follows it. |
 | 2026-11-12 | v1.72 | 847 (#847) | **§4.1**: `datapipelines.auth.secret_verification.failed` (counter, `cause` = `memory` \| `encoding` \| `other`, registered eagerly) — a native secret-verification failure that is not a wrong secret, answered 503 `auth.secret_verification.unavailable`. |
 | 2026-11-12 | v1.71 | 325 (#325) | **§4.1**: `datapipelines.executions.lifecycle_write_failed` also counts — once — a terminal write deferred behind a RUNNING insert that outlived its bound; the deferred UPDATE's own failure or 0 rows is a WARN, not a second count. |
