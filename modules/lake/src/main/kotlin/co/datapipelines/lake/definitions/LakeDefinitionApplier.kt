@@ -80,12 +80,17 @@ class LakeDefinitionApplier(
             return LakeApplyOutcome.NotApplicable(now?.applyState, now?.currentDefinitionVersion)
         }
         held.namespace?.let { lease ->
-            preCommit(attempt) { catalogs.open(lease).use { it.createNamespace(row.namespace) } }?.let { return it }
+            preCommit(attempt) {
+                catalogs.open(lease).use { it.createNamespace(row.namespace) }
+                hooks.afterSessionClose(lease)
+            }?.let { return it }
         }
-        return catalogs.open(held.table).use { session ->
-            if (!leases.renew(held.table)) return@use pending(attempt, PipelineErrorCodes.Lake.CATALOG_FENCED)
-            run(attempt, session)
-        }
+        return catalogs
+            .open(held.table)
+            .use { session ->
+                if (!leases.renew(held.table)) return@use pending(attempt, PipelineErrorCodes.Lake.CATALOG_FENCED)
+                run(attempt, session)
+            }.also { hooks.afterSessionClose(held.table) }
     }
 
     /**
