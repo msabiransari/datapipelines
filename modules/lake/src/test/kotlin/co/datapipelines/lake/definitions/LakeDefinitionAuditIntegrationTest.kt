@@ -8,6 +8,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -140,7 +141,7 @@ class LakeDefinitionAuditIntegrationTest {
         ) shouldBe mapOf("status" to "RELEASED", "discarded_by" to null, "discarded_at" to null)
         h.table(id) shouldBe before
         before.currentDefinitionVersion shouldBe 2
-        h.audit.events.filter { it.event == LakeAuditEvents.DISCARDED }.shouldBeEmpty()
+        h.audit.events.map { it.event } shouldNotContain LakeAuditEvents.DISCARDED
     }
 
     @Test
@@ -151,7 +152,7 @@ class LakeDefinitionAuditIntegrationTest {
         h.definitions.findDraft(draft.tableId)?.bodyHash shouldBe draft.bodyHash
         h.definitions.findTable(draft.tableId)?.namespace shouldBe "sales"
         h.jdbc.queryForObject("SELECT count(*) FROM lake_namespaces WHERE name = 'sales'", Int::class.java) shouldBe 1
-        h.audit.events.filter { it.event == LakeAuditEvents.DRAFT_PURGED }.shouldBeEmpty()
+        h.audit.events.map { it.event } shouldNotContain LakeAuditEvents.DRAFT_PURGED
     }
 
     /** `sales.orders` with v1 and v2 RELEASED at the repository level (current = 2, `pending`, nothing applied). */
