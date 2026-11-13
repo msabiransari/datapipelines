@@ -8,9 +8,6 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
-import org.springframework.boot.env.YamlPropertySourceLoader
-import org.springframework.core.env.EnumerablePropertySource
-import org.springframework.core.io.FileSystemResource
 import java.io.File
 
 /**
@@ -19,7 +16,8 @@ import java.io.File
  * at its boundary, naming the key; no violation and no snapshot ever carries a credential's value.
  */
 class LakeRulesTest {
-    private val shipped: Map<String, String?> by lazy { LakeRules.KEYS.associateWith { defaultOf(it) } }
+    /** The shipped template, from [ConfigSnapshots.lakeDefaults] — one source for both suites. */
+    private val shipped: Map<String, String?> by lazy { ConfigSnapshots.lakeDefaults() }
 
     private fun violations(overrides: Map<String, String?>): List<String> =
         ConfigValidator.validate(ConfigSnapshots.valid().copy(lake = shipped + overrides)).violations
@@ -31,8 +29,11 @@ class LakeRulesTest {
     fun `every key has a shipped default, and a disabled lake is never judged`() {
         shipped.filterValues { it == null }.keys shouldContainExactly emptyList()
         violations(emptyMap()) shouldContainExactly emptyList()
-        // Disabled with nonsense everywhere: still nothing — a deployment without a lake is not refused for its keys.
-        violations(LakeRules.KEYS.filter { it != LakeRules.ENABLED }.associateWith { "nonsense" }) shouldContainExactly emptyList()
+        // Disabled with nonsense everywhere: still nothing — a deployment without a lake is not refused for its
+        // keys. The three DuckDB staging inputs are the #804 exception (staging consumes them with or without a
+        // lake), so they keep their shipped defaults here and have their own cases below.
+        val unconsumed = LakeRules.KEYS.filter { it !in LakeRules.STAGING_ADMISSION_KEYS && it != LakeRules.ENABLED }
+        violations(unconsumed.associateWith { "nonsense" }) shouldContainExactly emptyList()
     }
 
     @Test
@@ -121,6 +122,151 @@ class LakeRulesTest {
         enabled(LakeRules.MAINTENANCE_WINDOW to "22:30-01:15") shouldContainExactly emptyList()
         // A statement timeout of zero fails positivity, and nothing downstream divides by it.
         enabled(LakeRules.STATEMENT_TIMEOUT_SECONDS to "0") shouldHaveSize 1
+    }
+
+    /**
+     * #804 — the DuckDB staging admission is judged with the lake DISABLED, at every boundary:
+     * DuckDB's 1 MiB memory floor (exactly 1 MiB in, one byte below out), the one-reservation rule
+     * (`scratch ≥ memory × factor`; exactly one reservation in, one byte below out), and positivity.
+     * Before #804 the same lake-less deployments met only `DuckDbStagingProperties`' bare
+     * `IllegalArgumentException` at bean construction, and the reservation had no check at all.
+     */
+    @Test
+    fun `804 - the staging admission is judged with the lake disabled, at every boundary`() {
+        // The memory floor: 1 MiB exactly is admitted, 1048575 bytes and the issue's 512KB refuse.
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "1048576B")) shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "1048575B")).single().let {
+            it shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+            it shouldContain "at least 1 MiB"
+        }
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "512KB")).single().let {
+            it shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+            it shouldContain "at least 1 MiB"
+        }
+        // One default reservation, shipped 1GB × 3 = 3GB: exactly one reservation in, one byte below out.
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225472B")) shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225471B")).single().let {
+            it shouldStartWith LakeRules.SCRATCH_BYTES
+            it shouldContain "one DuckDB staging reservation"
+        }
+        // Positivity, judged without a lake too.
+        violations(mapOf(LakeRules.STAGING_EXPANSION_FACTOR to "0")).single() shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+        violations(mapOf(LakeRules.STAGING_EXPANSION_FACTOR to "soon")).single() shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "0")).single() shouldStartWith LakeRules.SCRATCH_BYTES
+        violations(mapOf(LakeRules.STAGING_MEMORY_LIMIT to "-1")).single() shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
+    }
+
+    /**
+     * #804 — the reservation bound cannot overflow: the memory sits at `Long.MAX_VALUE` with factor 2,
+     * where a naive `memory × factor` wraps around to -2 and would ADMIT the configuration; the
+     * delivered shape divides the scratch by the factor (the delivery bound's shape), which cannot wrap.
+     * (Factor 3 is a false comfort: `Long.MAX × 3` wraps to a small positive, still over the scratch,
+     * so a plant survives it — the falsification run pins factor 2.)
+     */
+    @Test
+    fun `804 - the reservation rule cannot overflow the memory times the factor`() {
+        val overflow =
+            violations(
+                mapOf(
+                    LakeRules.STAGING_MEMORY_LIMIT to "9223372036854775807B",
+                    LakeRules.SCRATCH_BYTES to "20GB",
+                    LakeRules.STAGING_EXPANSION_FACTOR to "2",
+                ),
+            )
+        overflow.single() shouldStartWith LakeRules.SCRATCH_BYTES
+    }
+
+    /**
+     * #804 R1 — the factor's domain is its consumer's: `LakeProperties.Admission.stagingExpansionFactor` binds an
+     * `Int`, so the validator admits exactly up to `Int.MAX_VALUE` and names the key one past it. Before R1 the
+     * rule read a positive `Long`: `2147483648` passed the report and then failed the binder with a bare
+     * `NumberFormatException`. The binder side of the same two values is `StagingDuckDbWiringTest` (web), which
+     * binds them at `LAKE_ADMISSION_PREFIX` exactly as the staging bean does.
+     *
+     * Enabled, the delivery bound re-reads the factor silently with the same domain: at `2147483648` it must not
+     * compute (a 4GB delivery against `Long.MAX` bytes of scratch divided by 2147483648 would be a second
+     * violation), so the report still names the key once.
+     */
+    @Test
+    fun `804 R1 - the expansion factor is admitted up to Int MAX_VALUE and named once past it`() {
+        val roomy = mapOf(LakeRules.STAGING_MEMORY_LIMIT to "1048576B", LakeRules.SCRATCH_BYTES to "9223372036854775807B")
+        violations(roomy + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483647")) shouldContainExactly emptyList()
+        violations(roomy + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483648")).single().let {
+            it shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+            it shouldContain "no greater than 2147483647"
+        }
+
+        val delivery = LakeRules.MAX_DELIVERY_BYTES to "4GB"
+        val atBound = roomy.toList() + delivery + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483647")
+        enabled(*atBound.toTypedArray()) shouldContainExactly emptyList()
+        val pastBound = roomy.toList() + delivery + (LakeRules.STAGING_EXPANSION_FACTOR to "2147483648")
+        enabled(*pastBound.toTypedArray()).single() shouldStartWith LakeRules.STAGING_EXPANSION_FACTOR
+    }
+
+    /**
+     * #804 R1 sweep — every size form the rule ADMITS for `staging-memory-limit` and `scratch-bytes` is one the
+     * consumer binds to `DataSize`: both parse with `DataSize.parse` and no unit annotation, so the validator's
+     * domain is the binder's less the non-positive values. [ADMITTED_SIZES] is the same list
+     * `StagingDuckDbWiringTest` binds; a form one side changes is red on the other.
+     */
+    @Test
+    fun `804 R1 - every admitted staging size form is one the binder accepts`() {
+        ADMITTED_SIZES.forEach { size ->
+            // Factor 1 and the largest scratch: only the size's own rule can speak.
+            violations(
+                mapOf(
+                    LakeRules.STAGING_MEMORY_LIMIT to size,
+                    LakeRules.STAGING_EXPANSION_FACTOR to "1",
+                    LakeRules.SCRATCH_BYTES to "9223372036854775807B",
+                ),
+            ).let { check(it.isEmpty()) { "memory limit '$size' refused: $it" } }
+            violations(
+                mapOf(
+                    LakeRules.STAGING_MEMORY_LIMIT to "1048576B",
+                    LakeRules.STAGING_EXPANSION_FACTOR to "1",
+                    LakeRules.SCRATCH_BYTES to size,
+                ),
+            ).let { check(it.isEmpty()) { "scratch '$size' refused: $it" } }
+        }
+        // And the forms DataSize.parse refuses are refused here too, never admitted to fail the binder.
+        listOf("1gb", "1 GB", "1.5GB", "9223372036854775807KB", "1PB").forEach { size ->
+            violations(mapOf(LakeRules.SCRATCH_BYTES to size)).single() shouldStartWith LakeRules.SCRATCH_BYTES
+        }
+    }
+
+    /** #804 — a malformed staging key is named ONCE, enabled or not; the delivery bound re-reads it silently. */
+    @Test
+    fun `804 - a malformed staging key is named exactly once, and the lake keys it does not use stay ungated`() {
+        // Disabled: exactly one refusal, from the always-on check.
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "lots")) shouldHaveSize 1
+        // Enabled: the same key is still named exactly once — the delivery bound re-reads it silently (#804).
+        enabled(LakeRules.SCRATCH_BYTES to "lots") shouldHaveSize 1
+        enabled(LakeRules.SCRATCH_BYTES to "lots").single() shouldStartWith LakeRules.SCRATCH_BYTES
+        // A malformed factor is named once, not twice — the delivery bound re-reads it silently (#804).
+        enabled(LakeRules.STAGING_EXPANSION_FACTOR to "0") shouldHaveSize 1
+        // Likewise a zero scratch alongside a valid delivery: one refusal, and no second from the bound.
+        enabled(LakeRules.SCRATCH_BYTES to "0", LakeRules.MAX_DELIVERY_BYTES to "7GB") shouldHaveSize 1
+
+        // The lake-specific keys stay enabled-gated: with the lake off and the staging inputs valid,
+        // nonsense storage and retention is still no violation — and with the staging inputs broken,
+        // the refusal names ONLY the staging inputs.
+        violations(
+            mapOf(
+                LakeRules.BUCKET to "",
+                LakeRules.PROTECTION_DAYS to "0",
+                LakeRules.STAGING_MEMORY_LIMIT to "1048576B",
+            ),
+        ) shouldContainExactly emptyList()
+        val mixed =
+            violations(
+                mapOf(
+                    LakeRules.BUCKET to "",
+                    LakeRules.PROTECTION_DAYS to "0",
+                    LakeRules.STAGING_MEMORY_LIMIT to "512KB",
+                ),
+            )
+        mixed shouldHaveSize 1
+        mixed.single() shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
     }
 
     @Test
@@ -242,25 +388,18 @@ class LakeRulesTest {
         judged(maxAge to "1029").single() shouldContain "node-query-timeout-max-seconds (1000) + 30 (1030)"
     }
 
-    private fun defaultOf(key: String): String? {
-        val raw = yaml[key]?.toString() ?: return null
-        return PLACEHOLDER_DEFAULT.find(raw)?.groupValues?.get(1) ?: raw
-    }
-
     private fun repoFile(relative: String): File {
         val root = generateSequence(File(".").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }
         return File(root, relative).also { check(it.isFile) { "missing $relative" } }
     }
 
-    private val yaml: Map<String, Any?> by lazy {
-        YamlPropertySourceLoader()
-            .load("application.yml", FileSystemResource(repoFile("modules/app/src/main/resources/application.yml")))
-            .filterIsInstance<EnumerablePropertySource<*>>()
-            .flatMap { source -> source.propertyNames.map { it to source.getProperty(it) } }
-            .toMap()
-    }
-
     private companion object {
-        val PLACEHOLDER_DEFAULT = Regex("""^\$\{[A-Z0-9_]+:(.*)}$""")
+        /**
+         * #804 R1 — size forms the staging admission admits, each at least 1 MiB: bare bytes, every unit, a sign,
+         * surrounding blanks, and the largest values short of `Long` overflow. `StagingDuckDbWiringTest` (web)
+         * carries the same list and binds each at `LAKE_ADMISSION_PREFIX`.
+         */
+        val ADMITTED_SIZES =
+            listOf("1048576", "1048576B", "1024KB", "1MB", "+1MB", " 2GB ", "20GB", "1TB", "9223372036854775807B", "8388607TB")
     }
 }
