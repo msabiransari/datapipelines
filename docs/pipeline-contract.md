@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.95 (revised — see Change Log)
+**Status:** v1.96 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-13
@@ -1159,6 +1159,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.staging.invalid_column_name` | 500 | Source column label fails identifier validation or duplicates another in the same result set ([Staging §4.5](staging.md#45-identifier-safety-normative)) |
 | `pipeline.staging.table_already_exists` | 500 | Staged CREATE TABLE targets a name already staged in this execution (defensive; save-time uniqueness is the primary guard) |
 | `pipeline.staging.scratch_exhausted` | 500 | A DuckDB staging database's scratch reservation does not fit in the aggregate (`datapipelines.lake.admission.scratch-bytes`); refused before any file exists, retryable once a running execution releases its reservation ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
+| `pipeline.staging.scratch_blocked` | 500 | A DuckDB staging database's scratch reservation can never fit: it exceeds the aggregate (`datapipelines.lake.admission.scratch-bytes`) less the leftover files in the scratch directory nobody can vouch for, or with none the aggregate itself; refused before any file exists, not retryable until an operator clears the scratch directory while no instance uses it or raises the aggregate ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
 | `pipeline.staging.scratch_limit_exceeded` | 500 | A DuckDB staging database outgrew its own scratch reservation: the engine refused a spill past `max_temp_directory_size`, or the database file, WAL and spill directory measured more than the reservation after a write ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
 
 ### 13.6 Type mapping
@@ -2041,6 +2042,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.96 | 803 (#803) — renumbered at merge after #822's v1.95 | §13.5 gains `pipeline.staging.scratch_blocked` (500, the `pipeline.staging.` family default — no explicit `ApiErrorCatalog` row): a DuckDB scratch reservation that can never fit beside the leftover files a factory's sweep counted, a type distinct from the retryable `scratch_exhausted` (details `execution_id`, `requested_bytes`, `leftover_bytes`, `capacity_bytes`). Landed with the constants in `StagingErrorCodes` and `PipelineErrorCodes.Staging`. §13 row count 512 → 513. |
 | 2026-11-13 | v1.95 | 822 (#822) | §13.25 `lake.definition.apply_unclassified`: any step of the apply, not only the commit step, returns it — `pending` before the commit, left for `verifyApplying` after it; a release throws nothing after its landing but `lake.definition.not_found`. No code added or removed. |
 | 2026-11-12 | v1.94 | 847 (#847) — renumbered at merge after #821's v1.89 — renumbered at final sync after dependency-graph | §13.7 gains `auth.secret_verification.unavailable` (503): a native Argon2 verification failure that is not a mismatch is no longer a silent wrong password. Landed with the constants in `AuthErrorCodes` and `PipelineErrorCodes.Auth` and the explicit `ApiErrorCatalog` row (§13 row count 508 → 509, recounted with the drift test's own regex). |
 | 2026-11-12 | v1.93 | #821 invariants count a table caller output — renumbered at final sync after dependency-graph | §13.18 `invariants_too_large`: the COMBINED count also includes a `table` caller output's gated rows (it writes no tempdb table; a tempdb output is counted once, as its written table). No code, code count or permission change. |

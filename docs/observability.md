@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.74 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.75 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-13
@@ -96,7 +96,7 @@ The switch is `datapipelines.observability.logging.format` ([configuration.md §
 |---|---|
 | `auth` | login success/failure, key issuance/revocation (via audit log, not general log); the §3.4B mail events |
 | `datasources` | datasource registered/updated/deleted, pool built/retired/reconciled, connection acquisition failures, and the §3.4A pool hard-close WARN |
-| `staging` | H2 instance created/closed, staging operation success (table name + row count), memory-limit warnings |
+| `staging` | H2 instance created/closed, staging operation success (table name + row count), memory-limit warnings; the DuckDB scratch sweep's INFO naming the paths it removed for a provably dead owner, and its one WARN naming every leftover path nobody can vouch for and their total bytes — counted against `scratch-bytes`, never deleted ([Staging §8.5](staging.md#85-the-duckdb-engine), #803); paths and byte counts only |
 | `dag` | execution started/completed/failed, node started/completed/failed, cancellation; the crash sweep's and the event retention's ticks — a failed tick names the store failure by `error` (its class) and `sql_state`, never its message (§3.4G's rule, #321) |
 | `templates` | template registered (id + version), render failures |
 | `mcp-server` | tool calls (tool name + caller), transport errors |
@@ -785,6 +785,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.75 | 803 (#803) — renumbered at merge after #822's v1.73 and #814's v1.74 | **§3.4**: the `staging` row names the DuckDB scratch sweep's INFO (paths removed for a provably dead owner) and WARN (leftover paths nobody can vouch for, with their total bytes, counted against `scratch-bytes`). |
 | 2026-11-13 | v1.74 | 814 (#814) | **§3.4R**: the lake definition lifecycle has five audit events — `lake.definition.discarded` and `.draft_purged` join `.released`, `.applied` and `.apply_failed` ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)). No log line added. |
 | 2026-11-13 | v1.73 | 822 (#822) | **§3.4R** `lake.definition.apply_unclassified` is logged by any step of the apply, not only the commit, and gains `step` (`deadline`, `pre_commit`, `session_open`, `metadata_store`, `lease_release`, `session_close`, `commit`); the `apply_deferred` and `apply_unknown` rows say which ending follows it. |
 | 2026-11-12 | v1.72 | 847 (#847) | **§4.1**: `datapipelines.auth.secret_verification.failed` (counter, `cause` = `memory` \| `encoding` \| `other`, registered eagerly) — a native secret-verification failure that is not a wrong secret, answered 503 `auth.secret_verification.unavailable`. |

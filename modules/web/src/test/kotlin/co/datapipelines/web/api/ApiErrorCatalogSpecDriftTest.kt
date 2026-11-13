@@ -381,8 +381,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 511 → 512 with #847 (recounted with [STATUS_ROW_REGEX] on the merged document): §13.7 gains
          * `auth.secret_verification.unavailable` (503), landed in the SAME commit as its constants and
          * catalog row.
+         * 512 → 513 with #803: §13.5 gains `pipeline.staging.scratch_blocked` (500, the `pipeline.staging.`
+         * family default — no explicit catalog row), the permanent scratch refusal beside leftover files, landed
+         * in the SAME commit as its `PipelineErrorCodes.Staging` and `StagingErrorCodes` constants.
          */
-        const val SECTION_13_ROW_COUNT = 512
+        const val SECTION_13_ROW_COUNT = 513
 
         /**
          * §12's distinct validation codes.

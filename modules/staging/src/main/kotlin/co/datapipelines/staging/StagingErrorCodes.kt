@@ -46,6 +46,13 @@ object StagingErrorCodes {
     const val SCRATCH_EXHAUSTED = "pipeline.staging.scratch_exhausted"
 
     /**
+     * A DuckDB staging database's scratch reservation can never fit: it exceeds the aggregate less
+     * the leftover files a crashed process left that nobody can vouch for (staging.md §8.5, #803).
+     * Not retryable; an operator clears the scratch directory or raises `scratch-bytes`.
+     */
+    const val SCRATCH_BLOCKED = "pipeline.staging.scratch_blocked"
+
+    /**
      * A DuckDB staging database outgrew its own scratch reservation (staging.md §8.5): the engine
      * refused a spill past `max_temp_directory_size`, or the database file, its WAL and the spill
      * directory together measured more than the reservation after a write.
