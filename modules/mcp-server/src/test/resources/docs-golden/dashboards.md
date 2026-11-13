@@ -55,7 +55,9 @@ Build in this order — each step's refusal names the path to fix.
 8. **Release and import are human verbs.** No tool releases anything, and no tool imports an exported
    envelope — `POST /api/v1/visualizations|dashboards/import` is a workspace-admin verb, and a
    promotion lands artifacts through the promotion wire, never through the import route. When the
-   tests are GREEN, tell the person the visualization and the dashboard are ready for review.
+   tests are GREEN, tell the person the visualization and the dashboard are ready for review. If the
+   dashboard is headed for a page outside this app, the `dashboards-embedding` reference is the step
+   after that release: the host page, the relay and the key.
 9. **Clean up** a draft you abandoned with `visualizations_purge_draft` / `dashboards_purge_draft`
    (`expected_hash` required). A visualization draft a live dashboard pins is refused
    `visualization.version.pinned` — the refusal names the dashboards.

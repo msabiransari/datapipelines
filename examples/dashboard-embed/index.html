@@ -1,0 +1,66 @@
+<!doctype html>
+<!--
+  The embedded-dashboard example: a static host page outside this app.
+
+  A host changes exactly FOUR values:
+    1. the Datapipelines origin — every /vendor, /css and /js asset below is written
+       against the placeholder https://dp.example.co; replace it with your
+       deployment's origin (the README says it once)
+    2. data-dp-proxy-base   — YOUR relay's base (here the placeholder https://app.example.co/dp)
+    3. data-dp-dashboard-id — the dashboard's UUID (here the all-zero placeholder)
+    4. the theme sheet      — themes/light.css if you serve another theme
+
+  The dashboard key never appears in this file: the relay attaches it server-side
+  (examples/dashboard-proxy/). Run the relay behind your own authentication.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Embedded dashboard</title>
+
+    <!-- The design system's sheets, in this order: the tokens, the theme, the base
+         layers, then the application and dashboard styles that read them. Every
+         Datapipelines asset carries the placeholder origin: on a separate host
+         origin a root-relative URL would resolve to the host and never load. -->
+    <link rel="stylesheet" href="https://dp.example.co/vendor/design-system/tokens.css" />
+    <link rel="stylesheet" href="https://dp.example.co/vendor/design-system/themes/light.css" />
+    <link rel="stylesheet" href="https://dp.example.co/vendor/design-system/base.css" />
+    <link rel="stylesheet" href="https://dp.example.co/vendor/design-system/primitives.css" />
+    <link rel="stylesheet" href="https://dp.example.co/css/app.css" />
+    <link rel="stylesheet" href="https://dp.example.co/css/dashboards.css" />
+    <link rel="stylesheet" href="https://dp.example.co/vendor/plotly/plotly.css" />
+
+    <!-- CSP-safe Plotly styling: Plotly checks for this empty template before it
+         injects inline styles; with it placed the chart rules come from plotly.css.
+         It must stand in <head> BEFORE any script. -->
+    <template id="plotly.js-style-global" class="no-inline-styles"></template>
+  </head>
+
+  <body>
+    <!-- The board container carries the two values a host configures. The sibling
+         div is the parameters pane (used when the dashboard has a parameter set). -->
+    <div
+      id="dashboard"
+      data-dp-embed
+      data-dp-proxy-base="https://app.example.co/dp"
+      data-dp-dashboard-id="00000000-0000-0000-0000-000000000000"
+      data-dp-parameters="parameters"
+    ></div>
+    <div id="parameters"></div>
+
+    <!-- Exactly one Plotly bundle, the "2d": every chart family the chart kind
+         ships is a 2D trace. The attribute is the declaration the runtime reads. -->
+    <script src="https://dp.example.co/vendor/plotly/plotly-2d.min.js" data-dp-plotly-bundle="2d"></script>
+
+    <!-- The runtime, then the chart kind's adapter and its Plotly converter, then
+         the table and KPI renderers, then the boot glue. The adapters and the
+         converter register themselves at script load, before init. -->
+    <script src="https://dp.example.co/js/datapipelines-dashboard.js"></script>
+    <script src="https://dp.example.co/js/datapipelines-dashboard-chart.js"></script>
+    <script src="https://dp.example.co/js/datapipelines-dashboard-plotly.js"></script>
+    <script src="https://dp.example.co/js/datapipelines-dashboard-table.js"></script>
+    <script src="https://dp.example.co/js/datapipelines-dashboard-kpi.js"></script>
+    <script src="embed.js"></script>
+  </body>
+</html>
