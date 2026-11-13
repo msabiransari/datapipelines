@@ -19,6 +19,16 @@
 GATE_CRASH_STRONG='finished with non-zero exit value|Gradle build daemon disappeared'
 GATE_CRASH_WEAK=(NoSuchFileException EOFException OutOfMemoryError)
 
+# The integration-suite fork decision (#974): the exclusive gate picks its own
+# -Pdp.test.forks.e2e= for :tests:integration-tests. Four forks need memory — the floor
+# below refuses the upgrade when MemAvailable at the gate's start cannot hold the run.
+# Default floor: 1.5 x the gate's own peak footprint (#974 run 2026-11-13T21:07:58Z,
+# PASS at four forks): peak summed java RSS 21822 MiB + containers 2261 MiB
+# = 24083 MiB; x 1.5 = 36124 -> 36 GB. (Box-wide MemAvailable drift swamped a
+# before-minus-lowest read, as in verification-lock.sh.)
+GATE_E2E_FORKS_DEFAULT=4
+GATE_E2E_MEM_FLOOR_DEFAULT_MB=36864
+
 # gate_crash_signature <log> — exit 0 iff the log carries any of the five signatures.
 gate_crash_signature() {
   grep -qE "NoSuchFileException|EOFException|OutOfMemoryError|$GATE_CRASH_STRONG" "${1:-}" 2>/dev/null
@@ -265,4 +275,66 @@ gate_classify_buildsrc() {
   else
     echo fail
   fi
+}
+
+# gate_e2e_mem_floor_mb — prints the integration-fork floor in MB; garbage falls back
+# to the default with a stderr line (same shape as verification::_mem_floor_mb).
+gate_e2e_mem_floor_mb() {
+  local raw="${GATE_E2E_MEM_FLOOR_MB-}"
+  if [ -z "$raw" ]; then
+    printf '%s\n' "$GATE_E2E_MEM_FLOOR_DEFAULT_MB"
+  elif [[ "$raw" =~ ^[0-9]{1,9}$ ]]; then
+    printf '%s\n' "$((10#$raw))"
+  else
+    echo "gate: GATE_E2E_MEM_FLOOR_MB='$raw' is not an integer of at most 9 digits; using the default ${GATE_E2E_MEM_FLOOR_DEFAULT_MB} MB" >&2
+    printf '%s\n' "$GATE_E2E_MEM_FLOOR_DEFAULT_MB"
+  fi
+}
+
+# gate_e2e_gb <mb> — whole GB, rounded up (the repo's 1 GB = 1024 MB convention,
+# as in verification-lock.sh's floor comment).
+gate_e2e_gb() {
+  printf '%s\n' "$(( (10#${1:-0} + 1023) / 1024 ))"
+}
+
+# gate_e2e_fork_args <mem_available_mb> <floor_mb> <raw_forks> [caller args...] — pure
+# decision for the integration-suite fork count (#974). Prints on stdout the ONE Gradle
+# argument to append (empty stdout = append nothing) and ALWAYS a stderr header line,
+# with a leading space like gate.sh's other header lines. Every branch returns 0: the
+# decision never reds the gate.
+#   - Caller wins first (#974): any caller arg carrying -Pdp.test.forks.e2e= leaves
+#     nothing to append — GATE_GRADLE_ARGS beats the gate's automatic choice.
+#   - <raw_forks>: empty means GATE_E2E_FORKS_DEFAULT silently; garbage or below 1
+#     falls back to it with ONE stderr line.
+#   - <mem_available_mb> unreadable, or below <floor_mb>: nothing appended, the header
+#     says why — a short machine gives a slower gate, never a red one.
+#   - Otherwise: -Pdp.test.forks.e2e=<forks>.
+gate_e2e_fork_args() {
+  local mem="$1" floor="$2" raw="$3"
+  shift 3
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == *-Pdp.test.forks.e2e=* ]]; then
+      echo " integration forks: caller-set (GATE_GRADLE_ARGS pins dp.test.forks.e2e)" >&2
+      return 0
+    fi
+  done
+  local forks="$GATE_E2E_FORKS_DEFAULT"
+  if [ -n "$raw" ]; then
+    if [[ "$raw" =~ ^[0-9]{1,9}$ ]] && [ "$((10#$raw))" -ge 1 ]; then
+      forks="$((10#$raw))"
+    else
+      echo "gate: GATE_E2E_FORKS='$raw' is not an integer of at least 1; using the default ${GATE_E2E_FORKS_DEFAULT}" >&2
+    fi
+  fi
+  if [[ ! "$mem" =~ ^[0-9]{1,9}$ ]]; then
+    echo " integration forks: repository default (MemAvailable unreadable, floor $(gate_e2e_gb "$floor") GB)" >&2
+    return 0
+  fi
+  if [ "$((10#$mem))" -lt "$((10#$floor))" ]; then
+    echo " integration forks: repository default (MemAvailable $(gate_e2e_gb "$mem") GB below floor $(gate_e2e_gb "$floor") GB)" >&2
+    return 0
+  fi
+  echo " integration forks: ${forks} (MemAvailable $(gate_e2e_gb "$mem") GB, floor $(gate_e2e_gb "$floor") GB)" >&2
+  printf -- '-Pdp.test.forks.e2e=%s\n' "$forks"
 }

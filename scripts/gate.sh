@@ -122,6 +122,9 @@ fi
 # `-P` reaches the project properties: `-D` system properties and
 # ORG_GRADLE_PROJECT_* env vars lose to the repo's gradle.properties (measured
 # 2026-09-19). Word-split on purpose; quote nothing that needs a space.
+# The gate also appends its own -Pdp.test.forks.e2e= argument for the integration
+# suite (below, #974) unless an argument here already sets one — a value in
+# GATE_GRADLE_ARGS beats the gate's automatic choice.
 # (`-Pdp.browser.ciPatience=true` is no longer appended: the browser suite does not
 # run in this gate; pregate.sh still passes it for the browser classes it selects.)
 read -r -a GATE_EXTRA_ARGS <<< "${GATE_GRADLE_ARGS:-}"
@@ -164,6 +167,17 @@ fails=0; crashes=0; skips=0
 # Stage verdict branches shared with the buildSrc stage below (018/F1+F2):
 # sourced so the branches are drivable by fixtures without running the gate.
 source "$ROOT/scripts/lib/gate-stages.sh"
+
+# The integration-suite fork count (#974): the gate is exclusive (#485), so it picks
+# its own -Pdp.test.forks.e2e= for :tests:integration-tests unless GATE_GRADLE_ARGS
+# already pins one (the check above wins first). Four forks need memory: when
+# MemAvailable at this point is below the floor (GATE_E2E_MEM_FLOOR_MB, default derived
+# from the #974 run — see gate-stages.sh) the gate runs the repository default and says
+# so in a header line: a short machine gives a slower gate, never a red one.
+mem_avail="$(awk '/^MemAvailable:/{print int($2/1024); exit}' /proc/meminfo 2>/dev/null)"
+fork_arg="$(gate_e2e_fork_args "$mem_avail" "$(gate_e2e_mem_floor_mb)" "${GATE_E2E_FORKS:-}" \
+  ${GATE_EXTRA_ARGS[@]+"${GATE_EXTRA_ARGS[@]}"}")"
+[ -n "$fork_arg" ] && GATE_EXTRA_ARGS+=("$fork_arg")
 
 for i in $(seq 1 "$CYCLES"); do
   c=$(run "$LOGDIR/cycle${i}-1-clean.log" clean)
