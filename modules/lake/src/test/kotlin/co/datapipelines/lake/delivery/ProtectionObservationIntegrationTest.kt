@@ -1,5 +1,6 @@
 package co.datapipelines.lake.delivery
 
+import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.LeaseKind
 import co.datapipelines.lake.settle.LakeSettlementSweep
@@ -21,7 +22,8 @@ class ProtectionObservationIntegrationTest {
             LakeTestDb.leases.release(initial.operationId)
         }
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "settle.orders")
-        val sweep = LakeSettlementSweep(h.named, h.leases(), h.settler(), mockk(), mockk(), mockk())
+        val sweep =
+            LakeSettlementSweep(h.named, h.leases(), h.settler(), mockk(), mockk(), mockk(), LakeProperties.DEFAULT_PROTECTION_DAYS)
         try {
             h.fencedConnection(lease).use { connection ->
                 connection.autoCommit = false
@@ -35,8 +37,9 @@ class ProtectionObservationIntegrationTest {
                 val backupWindow =
                     requireNotNull(
                         h.jdbc.queryForObject(
-                            "SELECT clock_timestamp() + protection_interval FROM lake_control WHERE id = 1",
+                            "SELECT clock_timestamp() + make_interval(days => ?)",
                             OffsetDateTime::class.java,
+                            sweep.protectionDays,
                         ),
                     )
                 connection.commit()

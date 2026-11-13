@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.21 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound)
+**Status:** v1.22 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -400,8 +400,8 @@ The `LakeSettlementScheduler` starts a tick 60 seconds after the previous one en
 rotating page of up to 100 managed tables and, per table, one page of up to 50 unsettled deliveries after that
 table's row cursor, under a ten-second work budget. The budget is minted from the database clock with a JVM
 monotonic mirror: its work checks read the mirror and send no statement, while every lease and verdict still compares
-against the database clock. It is checked before the protection page, the table page, each table (before and after
-the table's mode read), the table's target and delivery page reads, each delivery and each statement group inside it,
+against the database clock. It is checked before each of the protection step's two statements, the table page, each
+table (before and after the table's mode read), the table's target and delivery page reads, each delivery and each statement group inside it,
 the projection repair, and every statement group inside the P3 `applying` verification and the semantics repair. Once
 the budget is spent nothing new starts: a verification or repair stopped this way reaches no verdict and stamps
 nothing, releases any lease it took and leaves its row for a later tick.
@@ -415,7 +415,10 @@ nothing, releases any lease it took and leaves its row for a later tick.
 | The `last_sweep_at` heartbeat | 5 s | One statement with its own five-second timeout. |
 
 The tick's first mode read runs before the budget is minted, so a tick's whole wall clock is at most 31 seconds: 5, then
-10, then 16. A projection repair in flight at the deadline holds no lease: its transaction is followed by one
+10, then 16. The protection step is two statements, the window alignment and the stamp, each with its own five-second
+bound. The budget's clock starts before the statement that mints it, so that statement and the alignment can spend it
+all; the budget is therefore checked again before the stamp, and a stamp in flight at the deadline is one five-second
+statement, inside the first row of the table. A projection repair in flight at the deadline holds no lease: its transaction is followed by one
 invalidation publish, at most 2 s by `datapipelines.redis.command-timeout`'s default and 2 s more to reconnect, and the
 heartbeat, 15 s in all. Raising those Redis timeouts widens that one path.
 
@@ -479,8 +482,14 @@ more than 100 tables takes several ticks. The sweep settles deliveries, verifies
 under a table lease only when their applied definition differs, and records `lake_control.last_sweep_at`. Restoring
 and replaying modes keep the sweep silent.
 
-The sweep finalizes protection only for committed, visible supersessions, using the observation statement's
-`now() + protection_interval`; NULL remains protected until observed. It never lowers an existing deadline.
+The protection window is `datapipelines.lake.retention.protection-days`. In normal mode the sweep first makes
+`lake_control.protection_interval` equal to it, writing only when the two differ and then logging
+`lake.settle.protection_window_aligned`. It then finalizes protection only for committed, visible supersessions, using
+the observation statement's `now()` plus the configured `retention.protection-days`; NULL remains protected until
+observed. The column mirrors the setting for whoever reads the catalog; no deadline is computed from it, so an instance
+stamps with its own setting even when another instance aligned the row in between (every instance must carry the same
+value). A deadline already stamped is never changed, so lowering the setting affects only revisions finalized
+afterwards.
 Registry repair uses P3's monotone revision-sequence upsert. A changed row bumps `datasources.updated_at` in
 the same transaction; local pool retirement and peer invalidation follow the commit. A no-op repair rebuilds
 nothing. The authoritative catalog remains the source for managed reads; the registry is its display projection.
@@ -590,6 +599,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.22 | 939 (#939) | §8: the protection stamp is `now()` plus `datapipelines.lake.retention.protection-days`, no longer `lake_control.protection_interval`, which the normal-mode sweep keeps equal to the setting (a write only when they differ, `lake.settle.protection_window_aligned`); a stamped deadline is never changed. The budget is checked before each of the protection step's two statements; the 16 s overrun and the 31 s wall clock are unchanged. No migration. |
 | 2026-11-13 | v1.21 | 878 (#878) — renumbered at merge after #814's v1.20 | §3 and §7: every catalog connection carries pgjdbc's `socketTimeout` = `catalog.statement-timeout-seconds` + 5 s, read back before use; against a server that never answers a statement ends at that bound alone with `08006` (no cancel is sent: the catalog sets no `queryTimeout`), and opening ends with `08001` within B (`sslmode=disable`) or `min(sslResponseTimeout, B) + B` (default `prefer`). States what each apply and publication step leaves (pending, applying, FAILED, UNKNOWN), that nothing is replayed, and the URL settings refused when a session opens. |
 | 2026-11-13 | v1.20 | 814 (#814) | §2: discard writes `lake.definition.discarded` and purge-draft `lake.definition.draft_purged` in their own transactions (both verbs now take the acting user and `via`); an audit failure rolls the step back, a refusal writes no row (dp-lake record §12, erratum 2026-11-12). |
 | 2026-11-13 | v1.19 | 822 (#822) | §3: every failure of an apply step is returned as the attempt's outcome, never thrown after a release's landing: `pending` before the commit, unknown (left for a verify) from the commit on or when the row could not be stamped; a failed lease release or table session close keeps the outcome; a failed namespace session close ends the attempt `pending`. The state table's `pending` and unknown rows and the paragraph (now "An unclassified failure at any step") say so; the #822 sentence goes. |
