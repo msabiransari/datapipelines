@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.76 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.77 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-13
@@ -100,7 +100,7 @@ The switch is `datapipelines.observability.logging.format` ([configuration.md §
 | `dag` | execution started/completed/failed, node started/completed/failed, cancellation; the crash sweep's and the event retention's ticks — a failed tick names the store failure by `error` (its class) and `sql_state`, never its message (§3.4G's rule, #321) |
 | `templates` | template registered (id + version), render failures |
 | `mcp-server` | tool calls (tool name + caller), transport errors |
-| `web` | request log (method, path, status, duration), CORS preflight, SSE connections opened/closed |
+| `web` | request log (method, path, status, duration), CORS preflight, SSE connections opened/closed; `staging.scratch.health` on a scratch-health status change: WARN into a non-`UP` status (path, `usable_bytes` or `unknown` on a failed reading, `threshold_bytes`, reason), INFO on return to `UP` (path, reason with the usable and threshold bytes); never one per probe (§6.1, #806) |
 
 The tables below catalogue thirteen namespaces: `audit`, `dashboard`, `datasource`, `endpoint`, `execution`, `pipeline`, `shutdown`, `parameter`, `lake`, `mail`, `persistence`, `scheduler` and `retention`. All thirteen currently catalogued namespaces are enforced by `ObservabilityEventCatalogParityTest` (#439, #443): the `event=<namespace>.<name>` literals under `modules/<module>/src/main/kotlin` and the backticked names in these tables' event column must agree in both directions. Per-namespace non-vacuity floors prevent an empty extraction from passing. This is a source-text check (comments count), not an AST or runtime inventory; uncatalogued code namespaces remain outside it. Computed event identities in files logging an enforced namespace are refused. The two exact retained `audit_log write failed` formats in `AuditLogger.kt` (§3.4G) carry an audit-row identity in `event={}` rather than a structured-log identity; each exception is pinned to that file and required exactly once. `audit_event={}` is a separate field.
 
@@ -790,6 +790,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.77 | 806 merge review (#806) | **§3.4**: catalogue the web module's `staging.scratch.health` transition WARN and recovery INFO already described in §6.1. Every non-`UP` transition retains the usable-byte reading, including an unwritable directory; a failed reading reports `unknown`. |
 | 2026-11-13 | v1.76 | 806 (#806) | **§4.1**: four untagged byte gauges, `datapipelines.staging.scratch.capacity`, `.reserved`, `.leftover` (`NaN` until the leftover sweep has counted) and `.usable` (`NaN` when the reading throws), read at every scrape. **§6.1**: the `diskSpace` bullet's "nothing writes to local disk" reasoning corrected (DuckDB staging, #795), and the DuckDB scratch signal described — the status-only `duckdb_scratch` indicator on the management port's `/actuator/health`, never a `/health` component, its rows, and what its `UP` does and does not establish (owner ruling 2026-11-12 for the surface). §6.4 unchanged: the indicator carries no detail. |
 | 2026-11-13 | v1.75 | 803 (#803) — renumbered at merge after #822's v1.73 and #814's v1.74 | **§3.4**: the `staging` row names the DuckDB scratch sweep's INFO (paths removed for a provably dead owner) and WARN (leftover paths nobody can vouch for, with their total bytes, counted against `scratch-bytes`). |
 | 2026-11-13 | v1.74 | 814 (#814) | **§3.4R**: the lake definition lifecycle has five audit events — `lake.definition.discarded` and `.draft_purged` join `.released`, `.applied` and `.apply_failed` ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)). No log line added. |
