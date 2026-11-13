@@ -1,5 +1,6 @@
 package co.datapipelines.lake
 
+import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -9,6 +10,7 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.apache.iceberg.jdbc.UncheckedSQLException
 import org.junit.jupiter.api.Test
 import java.lang.reflect.InvocationHandler
@@ -78,14 +80,18 @@ class FencedPoolBoundTest {
 
     @Test
     fun `a statement bound outside 1 to 2147478 is refused before any connection opens`() {
-        listOf(2_147_479L, Long.MAX_VALUE, 0L, -1L).forEach { seconds ->
-            val connector = RecordingConnector()
-            val failure = shouldThrow<IllegalArgumentException> { pool(connector, statementTimeoutSeconds = seconds).run { it } }
-            withClue("statement bound $seconds") {
-                failure.message.orEmpty() shouldContain "datapipelines.lake.catalog.statement-timeout-seconds"
-                failure.message.orEmpty() shouldContain "1..2147478"
-                failure.message.orEmpty() shouldContain "was $seconds"
-                connector.opened.size shouldBe 0
+        // Soft: every value reports on its own, so a red run names each one that got through.
+        assertSoftly {
+            listOf(2_147_479L, Long.MAX_VALUE, 0L, -1L).forEach { seconds ->
+                val connector = RecordingConnector()
+                withClue("statement bound $seconds") {
+                    val failure = runCatching { pool(connector, statementTimeoutSeconds = seconds).run { it } }.exceptionOrNull()
+                    failure.shouldBeInstanceOf<IllegalArgumentException>()
+                    failure.message.orEmpty() shouldContain "datapipelines.lake.catalog.statement-timeout-seconds"
+                    failure.message.orEmpty() shouldContain "1..2147478"
+                    failure.message.orEmpty() shouldContain "was $seconds"
+                    connector.opened.size shouldBe 0
+                }
             }
         }
     }

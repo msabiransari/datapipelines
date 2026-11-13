@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.18 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end)
+**Status:** v1.19 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #878, the catalog connection's socket bound)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -162,6 +162,28 @@ catalog's refusals. That ends the attempt the same way: the row stays `applying`
 its landing has already committed. A verify settles the row from the revision log. Some failures outside the commit
 step still propagate after a release has landed
 ([#822](https://github.com/msabiransari/datapipelines/issues/822)).
+
+**A catalog server that never answers (#878).** Every catalog connection is opened with pgjdbc's `socketTimeout` =
+`datapipelines.lake.catalog.statement-timeout-seconds` + 5 s — B, 35 s as shipped — derived in one place (the fenced
+pool) and read back from the connection before the lease settings are sent; a connection that does not report B is
+closed and refused, never used. The server-side `statement_timeout` cannot end a statement on a server that accepts
+and never answers: the catalog sets no JDBC `queryTimeout`, so the driver sends no cancel, and the read ends at B
+alone with SQLState `08006` (measured: 8.0 s at a 3-second setting, pgjdbc 42.7.13, a paused server). An apply whose
+namespace create, table read or table create ends this way returns `pending` with `lake.catalog.outcome_unknown`, and
+the next attempt reads the catalog again before it decides; a table commit that ends this way stays `applying` for a
+verify (the table above); a table session that cannot be opened propagates and leaves `applying`
+([#822](https://github.com/msabiransari/datapipelines/issues/822)). Nothing is replayed (design record §8a).
+**Opening a connection.** The bound is on the socket before the first handshake read, so a silent server ends the
+open with `08001` (connect), not `08006` (an established session): within B under `sslmode=disable`, and within
+`min(sslResponseTimeout, B) + B` under the default `sslmode=prefer` — the SSL request's wait, then the driver's own
+attempt without TLS, which is handshake fallback and sends no catalog statement (measured at B = 6 s: 6.0 s and
+11.0 s). Each TCP connect is bounded separately by `connectTimeout` (the driver's default 10 s), and
+`gssEncMode=prefer` or `require` adds one `min(gssResponseTimeout, B)` wait per attempt. `sslmode`, `connectTimeout`
+and `sslResponseTimeout` are the inputs of this envelope; a catalog URL carrying `socketTimeout`, or a zero
+`connectTimeout`, `sslResponseTimeout` or `gssResponseTimeout` (zero means no timeout), is refused when a catalog
+session opens ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)). The assumptions: pgjdbc honours
+`socketTimeout` (read back on every connection) and applies it before the handshake (`ConnectionFactoryImpl.tryConnect`
+at 42.7.13).
 
 **What `applied` writes,** in one transaction with the stamp: the column semantics projection
 (`lake_column_semantics`, rebuilt from the definition: field id, name, DP and Iceberg type, required, doc, tags) and,
@@ -339,6 +361,17 @@ One Iceberg transaction appends all files and sets `dp.delivery.key`, `dp.operat
 classified authority refusals fail, while an unconfirmed commit stays UNKNOWN. Classification uses exception
 types and SQLSTATEs through the bounded cause chain, never localized messages. Periodic heartbeat preserves
 only a live lease, capped by the admitted deadline; loss, deadline or cancellation stops further mutations.
+
+**A catalog server that never answers (#878).** Publication's catalog session is bounded as §3 states: each read and
+the commit end at B = `catalog.statement-timeout-seconds` + 5 s with `08006`, and opening the session ends with
+`08001` within §3's envelope. Before the commit is entered — the session open, the table load, the first refresh —
+the delivery ends `FAILED` in phase `publish`: this operation sent no commit, and its files stay for maintenance.
+Once the commit is entered — its CAS, or a refresh before a later CAS retry — the delivery is `UNKNOWN` and settlement
+(§8) decides it from the revision log; nothing is replayed. The ended client says nothing about the server: a server
+that resumes before its own `statement_timeout` can still commit the statement the client gave up on, which is why the
+outcome is unknown rather than failed (measured once: the interrupted commit left no revision row, its backend
+cancelled by its `statement_timeout` when the server resumed). The bound changes no grace rule: commit completion was
+never clock-bounded (design record §8a), so `orphan-grace-hours` keeps its argument.
 
 ## 8. Settlement and recovery
 
@@ -549,6 +582,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.19 | 878 (#878) | §3 and §7: every catalog connection carries pgjdbc's `socketTimeout` = `catalog.statement-timeout-seconds` + 5 s, read back before use; against a server that never answers a statement ends at that bound alone with `08006` (no cancel is sent: the catalog sets no `queryTimeout`), and opening ends with `08001` within B (`sslmode=disable`) or `min(sslResponseTimeout, B) + B` (default `prefer`). States what each apply and publication step leaves (pending, applying, FAILED, UNKNOWN), that nothing is replayed, and the URL settings refused when a session opens. |
 | 2026-11-08 | v1.18 | 866 (#866) | §8: the abandoned metadata read's conditional stalled-store network-wait envelope is derived in `SettlementObjectReadEnd.stalledReadEndByMillis` from effective connect/socket values and Iceberg's configured retry policy: four request allowances plus all body and close reads, 420 400 ms with the shipped inputs. Pins the library assumptions and states residual phases without an end-to-end timer. Corrects the v1.15 row's one-timeout claim; the measured ~62 s remains an observation. |
 | 2026-11-08 | v1.17 | 858 (#858) | §8: the settlement tick's statements carry a socket bound (5 s + 5 s) through the runtime's own template, so against a server that accepts and never answers a statement ends with `08006` at max(10, 5 + 10) = 15 s; the exception for this tick is gone, and the paragraph states the limit's two assumptions and that a transaction's later statements and commit read under the bound. The conditional 16 s overrun and 31 s tick are unchanged. |
 | 2026-11-08 | v1.16 | 833 (#824) managed retire ceiling | §9 "The bound.": the staleness rule's ceiling term is the managed retire ceiling (`managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30); shipped 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s. |
