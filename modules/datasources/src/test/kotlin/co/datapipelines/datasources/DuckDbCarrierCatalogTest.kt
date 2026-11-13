@@ -63,8 +63,8 @@ class DuckDbCarrierCatalogTest {
                 "OR alias_of ILIKE '%logging%' OR description ILIKE '%SQL string%' OR description ILIKE '%query string%' " +
                 "OR description ILIKE '%execute%' ORDER BY 1, 2"
 
-        /** Distinct function names on DuckDB 1.5.5 (driver 1.5.5.1), lane #795 probe 11. */
-        const val REVIEWED_TOTAL = 943L
+        /** Distinct function names on DuckDB 1.5.6 (driver 1.5.6.0), re-measured 2026-11-13 (lane #936; five ICU collations left). */
+        const val REVIEWED_TOTAL = 938L
 
         val REVIEWED =
             listOf(

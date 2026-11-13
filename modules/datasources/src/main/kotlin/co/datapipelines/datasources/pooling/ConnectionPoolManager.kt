@@ -931,7 +931,7 @@ class ConnectionPoolManager(
          * engine-wide lock is shared by every pool on the same named or file engine, so a second
          * pool joining one (a rebuild beside a live generation, a second datasource on the same file)
          * would have its own `memory_limit`/`threads`/`temp_directory` refused — measured on the
-         * pinned 1.5.5.1 (`LakeSpillIntegrationTest`'s joining pool, both URL kinds). A lake keeps
+         * pinned 1.5.6.0, 2026-11-13 (`LakeSpillIntegrationTest`'s joining pool, both URL kinds). A lake keeps
          * external access by design, so the author-SQL guard on every lease is its control here.
          */
         private fun openLakeInstance(

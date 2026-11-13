@@ -23,7 +23,7 @@ import co.datapipelines.typesystem.Dialect
  * | POSTGRES | `postgresql-42.7.13.jar` | `org.postgresql.PGProperty` |
  * | MSSQL | `mssql-jdbc-12.10.2.jre11.jar` | `SQLServerDriver{String,Boolean,Object}Property` |
  * | MYSQL | `mysql-connector-j-9.7.0.jar` | `com.mysql.cj.conf.PropertyKey` |
- * | DUCKDB | `duckdb_jdbc-1.5.5.1.jar` | `org.duckdb.DuckDBDriver` |
+ * | DUCKDB | `duckdb_jdbc-1.5.6.0.jar` | `org.duckdb.DuckDBDriver` |
  * | SQLITE | `sqlite-jdbc-3.49.1.0.jar` | `org.sqlite.SQLiteConfig.Pragma` |
  * | ORACLE | `ojdbc11-23.7.0.25.01.jar` | `oracle.jdbc.OracleConnection` |
  *
@@ -207,7 +207,7 @@ internal object DialectRefusalSets {
     val H2 = setOf("init", "runscript", "auto_server")
 
     /**
-     * DuckDB 1.5.5.1 — two families.
+     * DuckDB 1.5.6.0 — two families (both re-probed 2026-11-13).
      *
      * **1. The driver's session-init-SQL-file family.** `org.duckdb.DuckDBDriver` declares
      * `SESSION_INIT_SQL_FILE_OPTION = "session_init_sql_file"` and

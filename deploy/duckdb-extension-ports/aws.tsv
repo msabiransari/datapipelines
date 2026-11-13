@@ -1,4 +1,4 @@
-# aws commit=efa54a9 baseline=84bab45d415d22042bd0b9081aea57f362da3f35 overlays=duckdb/duckdb-excel@f4c72b5ef04a03b3a78a95b5a2ee94ba93e3178d,duckdb/duckdb-iceberg@45163a28e0ed6a2071a82a1bf1dd432d0216cf9c,duckdb/extension-ci-tools@72e76e99cd7fee45a99739cd118ec2db64e034ec features=aws-sdk-cpp[cognito-identity,dynamodb,identity-management,kinesis,rds,s3,sso,sts];curl[non-http,openssl,ssl]
+# aws commit=28c853c baseline=84bab45d415d22042bd0b9081aea57f362da3f35 overlays=duckdb/duckdb-excel@f4c72b5ef04a03b3a78a95b5a2ee94ba93e3178d,duckdb/duckdb-iceberg@890b78a9cfae380396b435b033c27cdbdad04e42,duckdb/extension-ci-tools@3fd6109fc01555673b7c7123eba8d0d143fe8ce4 features=aws-sdk-cpp[cognito-identity,dynamodb,identity-management,kinesis,rds,s3,sso,sts];curl[non-http,openssl,ssl]
 aws-c-auth	0.9.4#0	Apache-2.0	https://github.com/awslabs/aws-c-auth/tree/v0.9.4	linked
 aws-c-cal	0.9.13#0	Apache-2.0	https://github.com/awslabs/aws-c-cal/tree/v0.9.13	linked
 aws-c-common	0.12.6#0	Apache-2.0 AND MIT	https://github.com/awslabs/aws-c-common/tree/v0.12.6	linked
@@ -13,23 +13,23 @@ aws-checksums	0.2.7#0	Apache-2.0	https://github.com/awslabs/aws-checksums/tree/v
 aws-crt-cpp	0.36.0#0	Apache-2.0	https://github.com/awslabs/aws-crt-cpp/tree/v0.36.0	linked
 aws-sdk-cpp	1.11.702#0	Apache-2.0 AND MIT AND Zlib	https://github.com/aws/aws-sdk-cpp/tree/1.11.702	linked
 curl	8.17.0#0	curl AND ISC AND BSD-3-Clause	https://github.com/curl/curl/tree/curl-8_17_0	linked
-duckdb	1.5.5	MIT	https://github.com/duckdb/duckdb/tree/v1.5.5	linked
-duckdb/concurrentqueue	1.5.5	(BSD-2-Clause OR BSL-1.0) AND Zlib	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/concurrentqueue	header-only
-duckdb/fast_float	1.5.5	MIT	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/fast_float	header-only
-duckdb/fmt	1.5.5	MIT	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/fmt	linked
-duckdb/fsst	1.5.5	MIT	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/fsst	linked
-duckdb/httplib	1.5.5	MIT	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/httplib	header-only
-duckdb/jaro_winkler	1.5.5	MIT	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/jaro_winkler	header-only
-duckdb/jemalloc	1.5.5	BSD-2-Clause	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/jemalloc	linked
-duckdb/libpg_query	1.5.5	BSD-3-Clause AND PostgreSQL	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/libpg_query	linked
-duckdb/mbedtls	1.5.5	Apache-2.0 OR GPL-2.0-or-later	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/mbedtls	linked
-duckdb/miniz	1.5.5	MIT	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/miniz	linked
-duckdb/pcg	1.5.5	MIT	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/pcg	header-only
-duckdb/yyjson	1.5.5	MIT	https://github.com/duckdb/duckdb/tree/v1.5.5/third_party/yyjson	linked
+duckdb	1.5.6	MIT	https://github.com/duckdb/duckdb/tree/v1.5.6	linked
+duckdb/concurrentqueue	1.5.6	(BSD-2-Clause OR BSL-1.0) AND Zlib	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/concurrentqueue	header-only
+duckdb/fast_float	1.5.6	MIT	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/fast_float	header-only
+duckdb/fmt	1.5.6	MIT	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/fmt	linked
+duckdb/fsst	1.5.6	MIT	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/fsst	linked
+duckdb/httplib	1.5.6	MIT	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/httplib	header-only
+duckdb/jaro_winkler	1.5.6	MIT	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/jaro_winkler	header-only
+duckdb/jemalloc	1.5.6	BSD-2-Clause	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/jemalloc	linked
+duckdb/libpg_query	1.5.6	BSD-3-Clause AND PostgreSQL	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/libpg_query	linked
+duckdb/mbedtls	1.5.6	Apache-2.0 OR GPL-2.0-or-later	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/mbedtls	linked
+duckdb/miniz	1.5.6	MIT	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/miniz	linked
+duckdb/pcg	1.5.6	MIT	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/pcg	header-only
+duckdb/yyjson	1.5.6	MIT	https://github.com/duckdb/duckdb/tree/v1.5.6/third_party/yyjson	linked
 openssl	3.6.0#0	Apache-2.0	https://github.com/openssl/openssl/tree/openssl-3.6.0	linked
 s2n	1.6.2#0	Apache-2.0	https://github.com/aws/s2n-tls/tree/v1.6.2	linked
 # why: vcpkg-cmake — CMake helper script port; installed for the host triplet, no code compiled into the binary
-vcpkg-cmake	2025-08-07#0	MIT	https://github.com/duckdb/extension-ci-tools/tree/72e76e99cd7fee45a99739cd118ec2db64e034ec/vcpkg_ports/vcpkg-cmake	build-only
+vcpkg-cmake	2025-08-07#0	MIT	https://github.com/duckdb/extension-ci-tools/tree/3fd6109fc01555673b7c7123eba8d0d143fe8ce4/vcpkg_ports/vcpkg-cmake	build-only
 # why: vcpkg-cmake-config — CMake config-fixup script port; host-only, no code compiled into the binary
 vcpkg-cmake-config	2024-05-23#0	MIT	https://github.com/microsoft/vcpkg/tree/84bab45d415d22042bd0b9081aea57f362da3f35/ports/vcpkg-cmake-config	build-only
 # why: vcpkg-cmake-get-vars — CMake toolchain-query script port; host-only, no code compiled into the binary

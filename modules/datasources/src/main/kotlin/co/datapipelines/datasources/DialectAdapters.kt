@@ -30,7 +30,7 @@ abstract class AbstractDialectAdapter(
      * pool's `readOnly` flag (workspaces §6 layer 2b) to every NEW physical connection at pool
      * init, so a driver that throws from `setReadOnly` fails the ENTIRE pool build of a
      * readonly datasource. The DuckDB driver is the known refusal ("Can't change read-only
-     * status on connection level", duckdb_jdbc 1.5.5.1 — found live by the 089 §F MinIO
+     * status on connection level", duckdb_jdbc 1.5.6.0, re-probed 2026-11-13 — found live by the 089 §F MinIO
      * suite), so the two DuckDB-family adapters override this to false and the D6 layer-2a
      * executor re-check carries their enforcement alone.
      *
@@ -344,7 +344,7 @@ class H2DialectAdapter : AbstractDialectAdapter(Dialect.H2, "h2") {
  * ## What actually holds the line
  *
  * Only **three** of the five survive a session-SQL override, and claiming otherwise would
- * misdescribe the defense. Verified against duckdb_jdbc 1.5.5.1 by [EmbeddedDialectBehaviorTest]:
+ * misdescribe the defense. Verified against duckdb_jdbc 1.5.6.0 by [EmbeddedDialectBehaviorTest] (2026-11-13):
  *
  *  - `allow_unsigned_extensions`, `allow_community_extensions` and `enable_external_access` are
  *    **runtime-locked** — a `SET … = true` from author SQL fails with *"cannot change … while
@@ -389,7 +389,7 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
 
     // DuckDB is Postgres-lineage: the pinned driver reports `information_schema` AND
     // `pg_catalog` as plain getSchemas() rows beside the user's `main` (verified against
-    // duckdb_jdbc 1.5.5.1) — the bare {information_schema} default leaked pg_catalog into the
+    // duckdb_jdbc 1.5.6.0, 2026-11-13) — the bare {information_schema} default leaked pg_catalog into the
     // schemas listing. A FLOOR, deliberately known-incomplete like Oracle's.
     //
     // The two DOTTED entries are 087's: once the listing carries catalogs, DuckDB's engine
@@ -421,7 +421,7 @@ class DuckdbDialectAdapter : AbstractDialectAdapter(Dialect.DUCKDB, "duckdb") {
             "enable_external_access" to "false",
             // #816 (§5.8, defense in depth beside the author-SQL guard): freezes every
             // configuration option at open, so author SQL cannot SET the toggles above back.
-            // Session state (`SET search_path`, `USE`) stays settable — measured on 1.5.5.1.
+            // Session state (`SET search_path`, `USE`) stays settable — measured on 1.5.6.0, 2026-11-13.
             "lock_configuration" to "true",
         )
 
@@ -844,10 +844,10 @@ class LakeDialectAdapter(
      *
      * With [extensionDirectory] set (configuration.md §3.25 — the shipped image sets it), the
      * statements are `SET extension_directory = '<dir>'` followed by BARE `LOAD`s, **never an
-     * `INSTALL`**. The spike measured the semantics this relies on: in DuckDB v1.5.5 `LOAD`
+     * `INSTALL`**. The spike measured the semantics this relies on (re-probed 2026-11-13): in DuckDB v1.5.6 `LOAD`
      * strictly loads already-present files — a missing one fails in ~1 ms with no download code
      * path running at all — so when the image pre-populates the directory (`httpfs`, `aws`,
-     * `iceberg`, `avro` under `<dir>/v1.5.5/linux_amd64/`), a lake pool connects with zero
+     * `iceberg`, `avro` under `<dir>/v1.5.6/linux_amd64/`), a lake pool connects with zero
      * egress. `avro` appears in this mode's Iceberg list because `LOAD iceberg` auto-loads it
      * from the directory, and an explicit `LOAD avro` first keeps a forgotten bundle's failure
      * message about avro, not about iceberg's init function. With the directory unset the

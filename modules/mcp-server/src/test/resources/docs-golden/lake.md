@@ -64,7 +64,7 @@ exactly ONE namespace, the server sets the search path at connect, so a template
 events_by_day` bare. With several namespaces there is no default — use the full three-part
 name, `FROM acme.analytics.events_by_day`.
 
-**Iceberg: register the metadata FILE, not the table root.** DuckDB 1.5.5 cannot
+**Iceberg: register the metadata FILE, not the table root.** DuckDB 1.5.6 cannot
 `iceberg_scan` a pyiceberg table by its root (its version-hint filenames never match the
 `%05d-<uuid>.metadata.json` files pyiceberg writes), so `location` is the table's CURRENT
 metadata file — `s3://bucket/table/metadata/00042-<uuid>.metadata.json`. A table that still

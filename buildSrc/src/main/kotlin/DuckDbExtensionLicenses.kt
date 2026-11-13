@@ -48,9 +48,9 @@ data class DuckDbExtensionNotice(
 
 /**
  * Reviewed for #747 against each component's licence and notice files at the pinned source in its
- * closure row: vcpkg ports at the merged-manifest resolution of DuckDB v1.5.5's extension build
+ * closure row: vcpkg ports at the merged-manifest resolution of DuckDB v1.5.6's extension build
  * (microsoft/vcpkg 84bab45d415d22042bd0b9081aea57f362da3f35 plus overlays), DuckDB's own third_party
- * code at v1.5.5 (every Linux loadable extension links duckdb_static), and code vendored inside ports.
+ * code at v1.5.6 (every Linux loadable extension links duckdb_static), and code vendored inside ports.
  * Public-domain parts (lookup3, st.c) carry attribution only. The closure files are the reconstruction;
  * read() refuses any shipped closure row without an entry here and any entry the closure lacks.
  */
@@ -58,7 +58,7 @@ object DuckDbExtensionLicenses {
     private const val CORE_TREE = "https://github.com/duckdb/duckdb/tree/v"
 
     /** The tag this inventory was reviewed at; [read] refuses it unless it is the Dockerfile's (= the catalog's) core. */
-    private const val CORE = "${CORE_TREE}1.5.5"
+    private const val CORE = "${CORE_TREE}1.5.6"
     private const val CORE_COMPONENTS = 3
     private const val AMAZON = "Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved."
     private const val BUILD_ONLY = "build-only"
@@ -240,14 +240,14 @@ object DuckDbExtensionLicenses {
             "httpfs" to
                 license(
                     "httpfs",
-                    "827222f",
+                    "4bc690d",
                     "2018-2025",
                     components("" to listOf("curl", "duckdb", "openssl"), "curl" to listOf("zlib"), "duckdb" to duckdbCore + "duckdb/re2"),
                 ),
             "aws" to
                 license(
                     "aws",
-                    "efa54a9",
+                    "28c853c",
                     "2018-2025",
                     components(
                         "" to listOf("aws-sdk-cpp", "curl", "duckdb", "openssl", "zlib"),
@@ -258,7 +258,7 @@ object DuckDbExtensionLicenses {
             "iceberg" to
                 license(
                     "iceberg",
-                    "45163a28",
+                    "890b78a9c",
                     "2018-2025",
                     components(
                         "" to listOf("avro-c", "aws-sdk-cpp", "curl", "duckdb", "openssl", "roaring"),

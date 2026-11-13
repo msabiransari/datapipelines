@@ -360,8 +360,8 @@ class DatasourceSchemaToolsTest {
 
     @Test
     fun `a closed duckdb connection during the current-schema read is the catalogued unreachable - never -32603`() {
-        // R5 F1 shape (a), DuckDB arm, through the FULL MCP path: duckdb_jdbc 1.5.5.1
-        // (verified 2026-08-16) reports
+        // R5 F1 shape (a), DuckDB arm, through the FULL MCP path: duckdb_jdbc 1.5.6.0
+        // (verified 2026-08-16 on 1.5.5.1, re-probed 2026-11-13) reports
         // a closed connection as a PLAIN SQLException — NULL SQLState, vendor code 0, message
         // "Connection was closed" — invisible to every state/type branch. Round 4's narrowed
         // catch let it escape RAW to the dispatcher (JSON-RPC -32603). The introspector must

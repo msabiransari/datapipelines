@@ -153,11 +153,11 @@ internal object TableStatsPlans {
 
     /**
      * DuckDB (embedded, non-LAKE): `duckdb_tables().estimated_size` for the row estimate
-     * (verified 1.5.5.1). Indexes come from TWO catalogs, merged by name with the constraint
+     * (verified 1.5.6.0, 2026-11-13). Indexes come from TWO catalogs, merged by name with the constraint
      * side winning: `duckdb_constraints()` carries PRIMARY KEY / UNIQUE constraints with the
      * key list as an ORDERED `constraint_column_names` array (unnested WITH ORDINALITY), while
      * explicit `CREATE INDEX` entries appear only in `duckdb_indexes()` — and, verified on
-     * 1.5.5.1, NOWHERE else: `duckdb_constraints()` does not list them. Their columns arrive
+     * 1.5.6.0, NOWHERE else: `duckdb_constraints()` does not list them. Their columns arrive
      * as the `expressions` text (`['"label"', fare]`), which the reader parses conservatively;
      * an expression that is not a plain column (a computed index's `(a + b)`) is dropped.
      * DuckDB keeps no per-column catalog statistics.

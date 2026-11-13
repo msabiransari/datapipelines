@@ -9,7 +9,7 @@ import java.net.URI
  * egress proxy's renderer ([EgressProxyConfigMain]), so every consumer derives the same host the engine puts on the
  * wire (deployment.md §4.3).
  *
- * The forms come from probe A (lane 862 evidence, DuckDB httpfs v1.5.5 driven through a recording proxy): a virtual
+ * The forms come from probe A (lane 862 evidence, measured 2026-11-08 with DuckDB httpfs v1.5.5 through a recording proxy): a virtual
  * host style authority prefixes the bucket; an explicitly declared non-default port travels verbatim; a CONNECT
  * tunnel always carries its port (an https store is therefore `host:443`); a plain-http store on its default port
  * puts a BARE host on the wire — and so does an explicitly declared `:80` (probe A2: the engine drops it from the

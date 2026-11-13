@@ -18,7 +18,7 @@ import java.sql.SQLException
  * ## Why it exists
  *
  * The locked configuration (`enable_external_access = false`, `lock_configuration = true`) refuses
- * every `SET` and every file access from an author connection, but on the pinned 1.5.5.1 the
+ * every `SET` and every file access from an author connection, but on the pinned 1.5.6.0 (re-probed 2026-11-13) the
  * functions named below are not settings, and the lock does not stop them. The defect is reported
  * to DuckDB through its private channel; its details stay out of this repository until the fix is
  * public. A parse-based refusal is not possible — DuckDB's `json_serialize_sql` parses SELECT-shaped

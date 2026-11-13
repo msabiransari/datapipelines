@@ -58,7 +58,7 @@ class TableStatsPlanTest {
 
     @Test
     fun `duckdb index expressions parse conservatively`() {
-        // Verified shapes of duckdb_indexes().expressions on duckdb_jdbc 1.5.5.1.
+        // Verified shapes of duckdb_indexes().expressions on duckdb_jdbc 1.5.6.0 (re-probed 2026-11-13).
         assertAll(
             { parseIndexExpressions("""['"label"', fare]""") shouldContainExactly listOf("label", "fare") },
             { parseIndexExpressions("[id]") shouldContainExactly listOf("id") },

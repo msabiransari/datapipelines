@@ -304,7 +304,7 @@ class DuckDbAuthorSqlGuardPoolTest {
 
         const val PROBE_TIMEOUT_SECONDS = 30
 
-        /** 158 on the pinned 1.5.5.1 (lane #816 evidence); the floor only guards a broken listing. */
+        /** 160 on the pinned 1.5.6.0, measured 2026-11-13 (lane #936 evidence); the floor only guards a broken listing. */
         const val SETTINGS_FLOOR = 150
 
         /** The two session-scoped settings the lock admits: DP's own `SET search_path` and `USE`. */

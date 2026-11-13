@@ -135,7 +135,7 @@ class DuckDbAuthorSqlGateTest {
 
     private companion object {
         /**
-         * The separators the pinned DuckDB 1.5.5.1 accepts between a function name and its `(`
+         * The separators the pinned DuckDB 1.5.6.0 accepts (2026-11-13) between a function name and its `(`
          * (lane #795 review sweep, U+0001–U+2FFFF; re-measured by `DuckDbAuthorSqlGuardSweepTest`).
          */
         val ENGINE_SEPARATORS: List<Int> =

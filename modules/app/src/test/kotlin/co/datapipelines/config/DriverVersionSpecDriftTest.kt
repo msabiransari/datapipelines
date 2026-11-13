@@ -44,11 +44,13 @@ class DriverVersionSpecDriftTest {
         withClue("literals that are not their row's version, dated provenance or owned") { report.red.shouldBeEmpty() }
     }
 
+    /** The hypothetical is derived from the pin (#936 D2), so no DuckDB bump edits this rehearsal. */
     @Test
-    fun `the DuckDB bump rehearsal - a catalog at 1_5_6_0 names the ARG, CORE and every unmarked statement`() {
+    fun `the DuckDB bump rehearsal - a catalog at the next patch names the ARG, CORE and every unmarked statement`() {
         val today = PinDrift.scan(ROWS, catalog(), files, ALLOW)
-        val bumped = PinDrift.scan(ROWS, catalog() + (DUCKDB.alias to "1.5.6.0"), files, ALLOW)
-        println("BUMP REHEARSAL (catalog duckdb-jdbc = 1.5.6.0): ${bumped.red.size} red\n" + bumped.red.joinToString("\n"))
+        val next = nextPatch(catalog().getValue(DUCKDB.alias))
+        val bumped = PinDrift.scan(ROWS, catalog() + (DUCKDB.alias to next), files, ALLOW)
+        println("BUMP REHEARSAL (catalog duckdb-jdbc = $next): ${bumped.red.size} red\n" + bumped.red.joinToString("\n"))
         val red = bumped.red.filter { it.alias == DUCKDB.alias }.map { "${it.path}:${it.line}" }
         red shouldContain "Dockerfile:${lineOf("Dockerfile", "ARG DUCKDB_CORE_VERSION=")}"
         red shouldContain "$LICENCES:${lineOf(LICENCES, "private const val CORE = ")}"
@@ -190,7 +192,22 @@ class DriverVersionSpecDriftTest {
         const val SCAN_FLOOR = 3_200
         const val PROVENANCE_FLOOR = 70
 
-        private const val VER = """(\d+\.\d+\.\d+(?:\.\d+)?)"""
+        /** A `duckdb-jdbc` version has four numeric components: the core's three and the driver's own patch. */
+        private const val JDBC_COMPONENTS = 4
+
+        /**
+         * The DuckDB rehearsal's hypothetical (#936 D2): [version] with its third component raised by one and its
+         * fourth set to 0 (2.7.4.1 → 2.7.5.0). Anything but four numeric components fails, naming the version.
+         */
+        fun nextPatch(version: String): String {
+            val parts = version.split('.')
+            check(parts.size == JDBC_COMPONENTS && parts.all { part -> part.isNotEmpty() && part.all(Char::isDigit) }) {
+                "duckdb-jdbc $version is not four numeric components"
+            }
+            return listOf(parts[0], parts[1], (parts[2].toInt() + 1).toString(), "0").joinToString(".")
+        }
+
+        private const val VER ="""(\d+\.\d+\.\d+(?:\.\d+)?)"""
 
         val DUCKDB =
             PinRow(

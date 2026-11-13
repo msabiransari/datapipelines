@@ -28,7 +28,7 @@ import kotlin.math.roundToLong
  * ## The LAKE branch
  *
  * A lake table's statistics are its Parquet footers: `parquet_metadata('<location>')` (DuckDB
- * 1.5.5, verified against the pinned driver) returns one row per (file, row group, column)
+ * 1.5.6, verified 2026-11-13 against the pinned driver) returns one row per (file, row group, column)
  * carrying `row_group_num_rows`, `stats_min_value`/`stats_max_value` (VARCHAR — the comparison
  * is done in Kotlin, numeric-aware, never SQL's lexical MIN/MAX), `stats_null_count` and
  * `num_values`. The row estimate is the sum over DISTINCT (file, row group); a registered
@@ -490,7 +490,7 @@ private fun extremeOf(
 
 /**
  * DuckDB's `duckdb_indexes().expressions` text to a column list — verified on duckdb_jdbc
- * 1.5.5.1 as `['"label"', fare]` for `CREATE UNIQUE INDEX ... ON t("label", fare)`. The parse
+ * 1.5.6.0 (2026-11-13) as `['"label"', fare]` for `CREATE UNIQUE INDEX ... ON t("label", fare)`. The parse
  * is conservative on purpose: a top-level comma split that respects the single-quoted repr;
  * an element is a column when it unwraps to a double-quoted identifier or a bare one, and is
  * DROPPED otherwise (a computed index's `'(a + b)'` names no column, and guessing one would

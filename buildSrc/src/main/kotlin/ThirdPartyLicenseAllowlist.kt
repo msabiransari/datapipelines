@@ -12,7 +12,7 @@ object ThirdPartyLicenseAllowlist {
             "LicenseRef-Oracle-FUTC" -> "https://www.oracle.com/downloads/licenses/oracle-free-license.html"
 
             // #747: utf8proc's Unicode data notice has no SPDX text; vendored from DuckDB's copy.
-            "LicenseRef-utf8proc-Unicode-data" -> "https://github.com/duckdb/duckdb/blob/v1.5.5/third_party/utf8proc/LICENSE"
+            "LicenseRef-utf8proc-Unicode-data" -> "https://github.com/duckdb/duckdb/blob/v1.5.6/third_party/utf8proc/LICENSE"
 
             else -> "https://spdx.org/licenses/$id.html"
         }
