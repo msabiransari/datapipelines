@@ -38,7 +38,12 @@ class DuckDbMemoryFormParityTest {
         url: String,
     ): Observed {
         val workDir = Files.createDirectories(dir.resolve("form-${label.replace(Regex("[^a-z0-9]+"), "-")}"))
-        val java = ProcessHandle.current().info().command().orElseThrow { IllegalStateException("no java command") }
+        val java =
+            ProcessHandle
+                .current()
+                .info()
+                .command()
+                .orElseThrow { IllegalStateException("no java command") }
         val process =
             ProcessBuilder(java, "-cp", System.getProperty("java.class.path"), Probe::class.java.name, url)
                 .directory(workDir.toFile())
@@ -53,8 +58,14 @@ class DuckDbMemoryFormParityTest {
         val catalog =
             output.lineSequence().firstOrNull { it.startsWith(CATALOG_PREFIX) }?.removePrefix(CATALOG_PREFIX)
                 ?: error("the probe for $label printed no catalog: $output")
-        return Observed(workDir.listDirectoryEntries().map { it.name }.sorted(), catalog)
+        return Observed(names(workDir), catalog)
     }
+
+    private fun names(directory: Path): List<String> =
+        directory
+            .listDirectoryEntries()
+            .map { it.name }
+            .sorted()
 
     @Test
     fun `the classifier's memory-or-file verdict equals what the pinned driver opens, for every case variant`() {
@@ -67,7 +78,7 @@ class DuckDbMemoryFormParityTest {
                 "memory, mixed case with a tail" to "jdbc:duckdb::Memory:x941",
                 "relative file" to "jdbc:duckdb:rel941.db",
             )
-        val workingDirBefore = Path.of("").toAbsolutePath().listDirectoryEntries().map { it.name }.sorted()
+        val workingDirBefore = names(Path.of("").toAbsolutePath())
 
         val driver = forms.mapValues { (label, url) -> observe(label, url) }
         driver.forEach { (form, seen) -> println("#941 observed for $form: files=${seen.files} catalog=${seen.catalog}") }
@@ -85,7 +96,7 @@ class DuckDbMemoryFormParityTest {
         classifier shouldBe driver.mapValues { (_, seen) -> seen.files }
 
         // The probe wrote only under the JUnit temporary directory, never into the test's own working directory.
-        Path.of("").toAbsolutePath().listDirectoryEntries().map { it.name }.sorted() shouldBe workingDirBefore
+        names(Path.of("").toAbsolutePath()) shouldBe workingDirBefore
     }
 
     @Test
