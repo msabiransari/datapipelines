@@ -1,8 +1,8 @@
 package co.datapipelines.lake.definitions
 
 import co.datapipelines.lake.LakeTableProperties
-import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.NullOrder
+import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
 import org.apache.iceberg.SortDirection
 import org.apache.iceberg.SortField
@@ -149,8 +149,7 @@ data class LakeSortFieldShape(
 
     companion object {
         /** The only sort field a body spells: [sourceId] by identity, ascending, nulls first. */
-        fun ascending(sourceId: Int): LakeSortFieldShape =
-            LakeSortFieldShape(sourceId, IDENTITY, SortDirection.ASC, NullOrder.NULLS_FIRST)
+        fun ascending(sourceId: Int): LakeSortFieldShape = LakeSortFieldShape(sourceId, IDENTITY, SortDirection.ASC, NullOrder.NULLS_FIRST)
 
         fun of(field: SortField): LakeSortFieldShape =
             LakeSortFieldShape(field.sourceId(), field.transform<Any, Any>().toString(), field.direction(), field.nullOrder())

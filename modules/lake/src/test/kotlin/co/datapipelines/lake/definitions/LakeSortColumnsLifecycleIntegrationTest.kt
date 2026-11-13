@@ -86,7 +86,10 @@ class LakeSortColumnsLifecycleIntegrationTest {
     ) {
         val foreign = LakeTestDb.lease(LeaseKind.TABLE, "$NS.$T")
         try {
-            h.service.release(id, version, h.actor, VIA).apply.shouldBeInstanceOf<LakeApplyOutcome.Busy>()
+            h.service
+                .release(id, version, h.actor, VIA)
+                .apply
+                .shouldBeInstanceOf<LakeApplyOutcome.Busy>()
         } finally {
             LakeTestDb.leases.release(foreign.operationId)
         }

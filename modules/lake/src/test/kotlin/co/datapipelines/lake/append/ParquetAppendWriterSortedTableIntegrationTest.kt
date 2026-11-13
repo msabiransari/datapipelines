@@ -31,7 +31,12 @@ class ParquetAppendWriterSortedTableIntegrationTest {
                 Types.NestedField.required(1, "id", Types.LongType.get()),
                 Types.NestedField.optional(2, "label", Types.StringType.get()),
             )
-        val order = SortOrder.builderFor(schema).asc("label", NullOrder.NULLS_FIRST).asc("id", NullOrder.NULLS_FIRST).build()
+        val order =
+            SortOrder
+                .builderFor(schema)
+                .asc("label", NullOrder.NULLS_FIRST)
+                .asc("id", NullOrder.NULLS_FIRST)
+                .build()
         h.withTable(schema, PartitionSpec.unpartitioned(), order) { table ->
             h.withInput("SELECT * FROM (VALUES (2::BIGINT, 'b'), (1::BIGINT, 'a'), (3::BIGINT, NULL)) t(id, label)") { input ->
                 val written = writer.write(table, input, UUID.randomUUID(), 1) {}
