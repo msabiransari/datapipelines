@@ -5,7 +5,7 @@ import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.datasources.DatasourceNameGrammar
 import co.datapipelines.dependencies.FamilyKey
-import co.datapipelines.dependencies.ResolvedIdentity
+import co.datapipelines.dependencies.Node
 import co.datapipelines.dependencies.wire.RefusalReason
 import co.datapipelines.dependencies.wire.RequestField
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -58,14 +58,15 @@ sealed interface RootLens {
         ): Boolean
 
         /**
-         * After the walk, from the RESOLVED root: the native id-keyed lensed version read of a family whose detail GET
-         * reads by id (the name half alone cannot see a narrowing lens's "RELEASED only" rule). Default: admitted.
+         * After the walk, authorize the captured RESOLVED root against its native lensed read, including its lifecycle
+         * and body hash or revision. Admitting only the identity can authorize a different state after a concurrent
+         * edit or release. The name half alone cannot see a narrowing lens's version rule. Default: admitted.
          */
         fun admitsResolved(
             principal: AuthenticatedPrincipal,
             view: LensedView,
             request: DependenciesRequest,
-            root: ResolvedIdentity,
+            root: Node,
         ): Boolean = true
     }
 }

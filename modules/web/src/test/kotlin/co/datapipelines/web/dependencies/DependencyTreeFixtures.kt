@@ -126,6 +126,8 @@ internal class StubFamily(
         request: ObjectRequest,
         lifecycle: Lifecycle? = Lifecycle.RELEASED,
         vararg targets: ObjectRequest,
+        versionInfo: VersionInfo? = null,
+        bodyHash: String? = null,
     ): ObjectRequest {
         val version = request.selector.number
         objects[request] =
@@ -133,9 +135,9 @@ internal class StubFamily(
                 ResolvedIdentity(key, OwnerScope.Workspace(TREE_WS), entityIdOf(request.address.lookupKey), version),
                 NodeFacts(
                     name = request.address.lookupKey,
-                    versionInfo = version?.let { VersionInfo.Artifact(it) } ?: VersionInfo.Unversioned,
+                    versionInfo = versionInfo ?: version?.let { VersionInfo.Artifact(it) } ?: VersionInfo.Unversioned,
                     lifecycle = lifecycle,
-                    bodyHash = "hash-${request.address.lookupKey}-$version",
+                    bodyHash = bodyHash ?: "hash-${request.address.lookupKey}-$version",
                 ),
                 targets.mapIndexed { i, target ->
                     Reference(
