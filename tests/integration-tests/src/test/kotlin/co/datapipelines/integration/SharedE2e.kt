@@ -79,8 +79,9 @@ internal object SharedE2e {
             .withDatabaseName(DATABASE)
             .withUsername(USER)
             .withPassword(PASSWORD)
-            // The context cache keeps every suite's context — and its Hikari pool — open
-            // until JVM exit; fifteen-odd cached pools exhaust Postgres's default 100
+            // The context cache keeps each cached context and its Hikari pool open until
+            // eviction (at most eight cached entries after #934). Fifteen-odd cached pools
+            // exhausted Postgres's default 100
             // connections mid-gate (observed as Flyway's "too many clients already"). A
             // shared server needs a shared-sized connection budget.
             .withCommand("postgres", "-c", "max_connections=400")
