@@ -459,9 +459,7 @@ class SettlementWorkBoundIntegrationTest {
                 "before target",
                 "before page",
                 "before row",
-            )
-                .withIndex()
-                .associate { (index, step) -> step to index + 1 }
+            ).withIndex().associate { (index, step) -> step to index + 1 }
         val STEPS_AFTER_THE_ROWS = mapOf("before projection" to 8, "before verification" to 9, "before repair" to 10)
         const val REPAIR = "INSERT INTO lake_tables (datasource_id"
 
