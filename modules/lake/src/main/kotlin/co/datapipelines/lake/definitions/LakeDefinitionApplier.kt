@@ -396,7 +396,11 @@ class LakeDefinitionApplier(
         code: String,
     ): LakeApplyOutcome =
         stamped(attempt) {
-            if (applies.finishPending(attempt.row.id, attempt.operationId) == 1) LakeApplyOutcome.Pending(code) else LakeApplyOutcome.Superseded
+            if (applies.finishPending(attempt.row.id, attempt.operationId) == 1) {
+                LakeApplyOutcome.Pending(code)
+            } else {
+                LakeApplyOutcome.Superseded
+            }
         }
 
     /** A stamp of the apply path; a failure of DP's metadata store there is [unknown] (3b). */

@@ -179,7 +179,13 @@ class LakeApplyFaultIntegrationTest {
         hooks.failClose = LeaseKind.TABLE
         val result = releaseV2(id)
         hooks.closesFailed.get() shouldBe 1
-        expect(id, result, LakeApplyOutcome.Applied(2, committed = true), LakeApplyState.APPLIED, Step("session_close", "IllegalStateException"))
+        expect(
+            id,
+            result,
+            LakeApplyOutcome.Applied(2, committed = true),
+            LakeApplyState.APPLIED,
+            Step("session_close", "IllegalStateException"),
+        )
     }
 
     @Test
@@ -226,7 +232,13 @@ class LakeApplyFaultIntegrationTest {
         val id = appliedV1()
         hooks.failClose = LeaseKind.TABLE
         val result = releaseV2(id)
-        expect(id, result, LakeApplyOutcome.Applied(2, committed = true), LakeApplyState.APPLIED, Step("session_close", "IllegalStateException"))
+        expect(
+            id,
+            result,
+            LakeApplyOutcome.Applied(2, committed = true),
+            LakeApplyState.APPLIED,
+            Step("session_close", "IllegalStateException"),
+        )
         h.revisions(NS, T) shouldBe 2
     }
 
@@ -328,7 +340,10 @@ class LakeApplyFaultIntegrationTest {
     }
 
     private fun dropTriggers() {
-        DbFault.entries.map { it.table }.distinct().forEach { h.jdbc.execute("DROP TRIGGER IF EXISTS $TRIGGER ON $it") }
+        DbFault.entries
+            .map { it.table }
+            .distinct()
+            .forEach { h.jdbc.execute("DROP TRIGGER IF EXISTS $TRIGGER ON $it") }
     }
 
     /**
