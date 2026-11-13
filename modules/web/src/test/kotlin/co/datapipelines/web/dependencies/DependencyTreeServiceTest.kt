@@ -6,7 +6,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.dependencies.FamilyKey
 import co.datapipelines.dependencies.GraphLimits
-import co.datapipelines.dependencies.ResolvedIdentity
+import co.datapipelines.dependencies.Node
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
@@ -311,7 +311,7 @@ class DependencyTreeServiceTest {
             principal: AuthenticatedPrincipal,
             view: LensedView,
             request: DependenciesRequest,
-            root: ResolvedIdentity,
+            root: Node,
         ) = resolved
     }
 

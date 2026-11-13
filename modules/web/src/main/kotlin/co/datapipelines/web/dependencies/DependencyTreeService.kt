@@ -41,7 +41,7 @@ import java.time.Clock
  *    [readIsolation], the context carrying one [Deadline] with the statement limit on it; no lens enters the walk; then,
  *    in the same transaction and under the same context, the [UnmetParameterNames] stage (#892) reads the parameter sets
  *    the walk RESOLVED for their `parameter_names` constraints;
- * 5. a root that did not resolve, or (lensed) a resolved root the family's native lensed version read hides, is the
+ * 5. a root that did not resolve, or (lensed) a captured root the family's native lensed read no longer admits, is the
  *    native not-found — byte-identical for absent and hidden (§12, no oracle);
  * 6. the projection (writing the stage's `unmet_names` marks), and the payload held to `max-wire-bytes` (record §11.1's
  *    payload-budget limit): over it, the tree reduced to the largest prefix of its nodes that fits, a `200` with
@@ -91,8 +91,9 @@ class DependencyTreeService(
         val walked = if (lensed == null || lensed.check.admitsRequest(principal, lensed.view, request)) walk(principal, request) else null
         val graph = walked?.graph
         val root = graph?.node(graph.roots.single())
-        val identity = root?.identity?.takeIf { root.resolution == Resolution.RESOLVED }
-        val visible = identity != null && (lensed == null || lensed.check.admitsResolved(principal, lensed.view, request, identity))
+        val visible =
+            root != null && root.resolution == Resolution.RESOLVED &&
+                (lensed == null || lensed.check.admitsResolved(principal, lensed.view, request, root))
         if (walked == null || !visible) throw notFound(row)
         return bounded(DependencyTreeProjection.project(walked.graph, walked.unmet))
     }
