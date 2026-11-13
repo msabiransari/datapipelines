@@ -667,6 +667,7 @@ object PipelineErrorCodes {
         const val INVALID_COLUMN_NAME = "pipeline.staging.invalid_column_name"
         const val TABLE_ALREADY_EXISTS = "pipeline.staging.table_already_exists"
         const val SCRATCH_EXHAUSTED = "pipeline.staging.scratch_exhausted"
+        const val SCRATCH_BLOCKED = "pipeline.staging.scratch_blocked"
         const val SCRATCH_LIMIT_EXCEEDED = "pipeline.staging.scratch_limit_exceeded"
     }
 

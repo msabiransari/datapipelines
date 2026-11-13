@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.72 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.73 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-13
 
 ---
 
@@ -96,7 +96,7 @@ The switch is `datapipelines.observability.logging.format` ([configuration.md §
 |---|---|
 | `auth` | login success/failure, key issuance/revocation (via audit log, not general log); the §3.4B mail events |
 | `datasources` | datasource registered/updated/deleted, pool built/retired/reconciled, connection acquisition failures, and the §3.4A pool hard-close WARN |
-| `staging` | H2 instance created/closed, staging operation success (table name + row count), memory-limit warnings |
+| `staging` | H2 instance created/closed, staging operation success (table name + row count), memory-limit warnings; the DuckDB scratch sweep's INFO naming the paths it removed for a provably dead owner, and its one WARN naming every leftover path nobody can vouch for and their total bytes — counted against `scratch-bytes`, never deleted ([Staging §8.5](staging.md#85-the-duckdb-engine), #803); paths and byte counts only |
 | `dag` | execution started/completed/failed, node started/completed/failed, cancellation; the crash sweep's and the event retention's ticks — a failed tick names the store failure by `error` (its class) and `sql_state`, never its message (§3.4G's rule, #321) |
 | `templates` | template registered (id + version), render failures |
 | `mcp-server` | tool calls (tool name + caller), transport errors |
@@ -785,6 +785,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.73 | 803 (#803) | **§3.4**: the `staging` row names the DuckDB scratch sweep's INFO (paths removed for a provably dead owner) and WARN (leftover paths nobody can vouch for, with their total bytes, counted against `scratch-bytes`). |
 | 2026-11-12 | v1.72 | 847 (#847) | **§4.1**: `datapipelines.auth.secret_verification.failed` (counter, `cause` = `memory` \| `encoding` \| `other`, registered eagerly) — a native secret-verification failure that is not a wrong secret, answered 503 `auth.secret_verification.unavailable`. |
 | 2026-11-12 | v1.71 | 325 (#325) | **§4.1**: `datapipelines.executions.lifecycle_write_failed` also counts — once — a terminal write deferred behind a RUNNING insert that outlived its bound; the deferred UPDATE's own failure or 0 rows is a WARN, not a second count. |
 | 2026-11-11 | v1.70 | #786 U2 | **§3.4**: four `scheduler.conversion.*` rows — the upgrade's in-place schedule conversion (`converted`, `summary`) and its E.0 refusal (`refused` with `kind=schedule`, `refused_summary`). |
