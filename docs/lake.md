@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.23 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #967, the truncate partition refusal)
+**Status:** v1.24 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -16,7 +16,7 @@ the error codes are [Pipeline Contract §13.25](pipeline-contract.md#1325-manage
 ## 1. The definition body
 
 A table's definition is versioned like every authored artifact: DRAFT, then RELEASED, then possibly DISCARDED
-(`lake_table_definition_versions`, one DRAFT per table). The body is a JSON object with three keys; any other key, at
+(`lake_table_definition_versions`, one DRAFT per table). The body is a JSON object with four keys; any other key, at
 any level, is refused. Parsing consumes one complete JSON value; trailing values are refused.
 
 ```json
@@ -28,7 +28,8 @@ any level, is refused. Parsing consumes one complete JSON value; trailing values
     {"id": 4, "name": "ordered_at", "type": "TIMESTAMP", "required": true}
   ],
   "partition": [{"field_id": 4, "transform": "day"}],
-  "identifier_field_ids": [1]
+  "identifier_field_ids": [1],
+  "sort_field_ids": [4, 1]
 }
 ```
 
@@ -44,6 +45,7 @@ any level, is refused. Parsing consumes one complete JSON value; trailing values
 | `fields[].tags` | At most 16 tags, each `[a-z0-9_]{1,63}`, unique. Tags are DP's semantics; they are not written to Iceberg |
 | `partition` | Optional, at most 8 objects `{field_id, transform}`. `transform` is `identity`, `year`, `month`, `day`, `hour`, `bucket[N]` or `truncate[N]` (N in 1–10,000, written without leading zeroes), and must be one Iceberg accepts for the column's type. The same field takes at most one time transform; no entry repeats. A numeric `truncate[N]` stays valid, but an append refuses the lowest values of the column's range that it cannot hold ([§7](#7-append-publication)) |
 | `identifier_field_ids` | Optional ids of required fields, each listed once; an approximate `DECIMAL` cannot be one |
+| `sort_field_ids` | The table's sort columns: 1–4 field ids of the body, each listed once, in significant order; a sort column may be optional. Required while the table has never been released (`missing`); an empty array is `empty`, more than 4 `too_many`, a non-integer `wrong_type`, an id no field has `unknown_field`, a repeat `duplicate`, and a `BINARY` field `unsupported_type`. An approximate `DECIMAL` is refused `unsupported_type` too, for now: the engine that will write the rows in order returns every `-0.0` of a floating sort key as `0.0` ([#971](https://github.com/msabiransari/datapipelines/issues/971) lifts this). Once the table has been released, the list is fixed: see below (`locked`) |
 
 Field-ID allocation for corrections after a rejected release has a remaining workflow limitation ([#820](https://github.com/msabiransari/datapipelines/issues/820)); the staged-shape check refuses a mismatch before commit.
 
@@ -66,8 +68,18 @@ The closed type list maps each DP logical type to exactly one Iceberg type:
 `NULL` is not a column type. Iceberg types with no DP spelling (`float`, `timestamp` without zone, `uuid`, `fixed`,
 nested types) cannot be defined, and a table holding one cannot be read back as a definition.
 
-**Not in the body:** the table's name and namespace (they are the table row's), sort order, Iceberg properties (DP
-sets a closed list itself, `dp.definition.version` among them) and the retention and maintenance policy (the table
+**Sort columns are fixed by the table's first release.** The first version EVER released (the lowest version with a
+release time, RELEASED or DISCARDED) fixes `sort_field_ids`: every later draft, and every later release, must carry
+exactly its list, the same ids in the same order, or is refused `locked`; another order needs a replacement table.
+Discarding that release frees nothing. Before the first release the author may change the list freely. A table first
+released without the key (a legacy table, stored before the key existed) stays without it: a draft that adds the key
+is `locked`, and the table stays unsorted. The order is always ascending with nulls first, per column; the first apply
+writes it as the Iceberg table's sort order, and nothing changes it afterwards (§4). A sort column cannot be dropped
+(its id would be `unknown_field`) and cannot leave the list (`locked`).
+
+**Not in the body:** the table's name and namespace (they are the table row's), Iceberg properties (DP sets a closed
+list itself, `dp.definition.version` among them, and one `write.metadata.metrics.column.<name>` = `truncate(16)` per
+sort column, so every writer keeps the sort columns' bounds) and the retention and maintenance policy (the table
 row's `policy_json`, filled from the lake's configured defaults when the table is created).
 
 **Validation before storage.** A body is parsed and checked before anything is written; the first broken rule is
@@ -92,6 +104,7 @@ promotion (P9). Lifecycle mutations lock the managed-table row before version ro
 | `1D cur=∅` | write (body, hash of `1D`) | dev | allowed: `1D` is overwritten in place | `1D cur=∅` |
 | `1D cur=∅` | write with another hash | dev | refused `lake.definition.version_conflict` | unchanged |
 | `1D cur=∅` | release(v1) | dev | allowed: `1R`, `cur=1`, `pending`; then applied (§3) | `1R cur=1` |
+| any draft `nD` | release(vn) of a draft whose stored `sort_field_ids` break the sort-column rule (§1) against the table's first version ever released — a draft stored before the rule, or none when the table was never released (`missing`) | dev | refused `lake.definition.invalid_body` (`details.path` `sort_field_ids`); nothing released, no audit row. The other rules held when the draft was stored and are not re-run | unchanged |
 | `1D cur=∅` | purge draft | dev | allowed: the draft goes; a table left with no version goes, and a namespace left empty goes | no table |
 | `1R cur=1` | write (body, hash of `1R`) | dev | allowed: copy-on-write opens `2D` | `1R 2D cur=1` |
 | `1R cur=1` | write with another hash | dev | refused `lake.definition.version_conflict` | unchanged |
@@ -203,8 +216,10 @@ when the lake's datasource row exists, the `lake_tables` registry row (`origin =
 
 ## 4. The supported-change policy
 
-An apply compares three shapes by field id: the Iceberg table's current one (S), the definition it was last applied
-from (named by its `dp.definition.version` property) and the intent (the current definition).
+An apply compares three shapes by field id: the Iceberg table's current one (S: its columns, partition fields,
+identifier fields and sort order, the order read whole, with each column's transform, direction and null order), the
+definition it was last applied from (named by its `dp.definition.version` property) and the intent (the current
+definition).
 
 1. S equals the intent and the property already names the version: nothing to do, `applied`.
 2. S equals the intent but the property names another version, or none: one commit sets only the property (no
@@ -213,6 +228,8 @@ from (named by its `dp.definition.version` property) and the intent (the current
    `failed`, `lake.definition.drift`, with `details.diff` listing the changes between that definition and S.
    The exit is rule 2: write the live shape as a new draft and release it. Build the draft on the version applied
    here; a rejected current release that holds other field ids is discarded first ([#820](https://github.com/msabiransari/datapipelines/issues/820)).
+   A sort order changed outside DP has no such exit, since the sort columns are fixed by the first release (§1): put
+   the order back with the tool that changed it, and the next apply finds the shapes equal.
 4. Otherwise the change from S to the intent is classified, and only a COMPATIBLE change is staged and committed.
 
 | Change | Class | Refusal |
@@ -231,6 +248,7 @@ from (named by its `dp.definition.version` property) and the intent (the current
 | narrow or otherwise change a type; change a decimal's scale | breaking | `lake.definition.breaking_change` |
 | make a column required | breaking | `lake.definition.breaking_change` |
 | change the identifier fields | breaking | `lake.definition.breaking_change` |
+| change the sort columns | breaking | `lake.definition.breaking_change` (authoring refuses it earlier, `lake.definition.invalid_body` with reason `locked`, §1) |
 
 Whether a table holds rows is read from its current snapshot. A table with no snapshot has none. Otherwise
 the snapshot summary's `total-records` decides, and a summary without that key counts as rows, the conservative answer
@@ -349,7 +367,9 @@ checked. The definition stays valid (owner ruling 2026-11-13). The refusal is te
 the value inside its type, decimal in apache/iceberg issue 17027, `int` and `long` in issue 13105 (closed as not
 planned) and 17027's discussion; a tripwire test in the lake module goes red when either changes.
 
-Files go under the table's `data/` prefix, using Zstandard Parquet, no declared sort order, and its applied
+Files go under the table's `data/` prefix, using Zstandard Parquet, stamped unsorted (sort order id 0, also on a
+table with sort columns: rows are written in arrival order until ordered appends ship, and a stamp never claims an
+order the file was not written in), and its applied
 partition transforms: identity, year, month, day, hour, bucket or truncate. Exceeding
 `max-open-partitions-per-append` fails. An empty result still creates a publication snapshot and permanent
 duplicate evidence, with no data file. The worker never deletes its files, even after a failure or unknown
@@ -612,7 +632,8 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-13 | v1.23 | 967 (#967) | §1 `partition` row and §7: the append's first scan refuses a value a numeric `truncate[N]` partition cannot hold (`lake.append.partition_value_out_of_range`, counts per partition field, never a value), after a required-null refusal and before any file is written; the definition stays valid. Temporary until apache/iceberg 17027 (decimal) and 13105 (int, long). |
+| 2026-11-13 | v1.24 | 967 (#967) — renumbered at the spec sync after #935's v1.23 | §1 `partition` row and §7: the append's first scan refuses a value a numeric `truncate[N]` partition cannot hold (`lake.append.partition_value_out_of_range`, counts per partition field, never a value), after a required-null refusal and before any file is written; the definition stays valid. Temporary until apache/iceberg 17027 (decimal) and 13105 (int, long). |
+| 2026-11-13 | v1.23 | 935 (#935) — renumbered at the spec sync after #939's v1.22 | §1: the body's fourth key, `sort_field_ids` (1–4 field ids, required before the first release, refused for `BINARY` and, for now, the approximate `DECIMAL`), fixed by the table's first release ever, also after its discard (`locked`); a legacy keyless table stays unsorted; the order (ascending, nulls first) is written to Iceberg at creation with one `write.metadata.metrics.column.<name>` = `truncate(16)` property per sort column. §2: a release is refused `invalid_body` when its stored draft breaks the sort-column rule. §4: S includes the sort order; changing the sort columns is breaking, a sort order changed outside DP is drift whose exit is to put it back. §7: files stay stamped unsorted on a sorted table (dp-lake record §11a call 36). |
 | 2026-11-13 | v1.22 | 939 (#939) | §8: the protection stamp is `now()` plus `datapipelines.lake.retention.protection-days`, no longer `lake_control.protection_interval`, which the normal-mode sweep keeps equal to the setting (a write only when they differ, `lake.settle.protection_window_aligned`); a stamped deadline is never changed. The budget is checked before each of the protection step's two statements; the 16 s overrun and the 31 s wall clock are unchanged. No migration. |
 | 2026-11-13 | v1.21 | 878 (#878) — renumbered at merge after #814's v1.20 | §3 and §7: every catalog connection carries pgjdbc's `socketTimeout` = `catalog.statement-timeout-seconds` + 5 s, read back before use; against a server that never answers a statement ends at that bound alone with `08006` (no cancel is sent: the catalog sets no `queryTimeout`), and opening ends with `08001` within B (`sslmode=disable`) or `min(sslResponseTimeout, B) + B` (default `prefer`). States what each apply and publication step leaves (pending, applying, FAILED, UNKNOWN), that nothing is replayed, and the URL settings refused when a session opens. |
 | 2026-11-13 | v1.20 | 814 (#814) | §2: discard writes `lake.definition.discarded` and purge-draft `lake.definition.draft_purged` in their own transactions (both verbs now take the acting user and `via`); an audit failure rolls the step back, a refusal writes no row (dp-lake record §12, erratum 2026-11-12). |

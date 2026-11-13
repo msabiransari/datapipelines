@@ -13,6 +13,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
 import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
+import org.apache.iceberg.SortOrder
 import org.apache.iceberg.types.Types
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -34,7 +35,7 @@ class LakeDefinitionBodiesTest {
         reason: String,
     ) {
         withClue(rule) {
-            val refusal = shouldThrow<DatapipelinesException> { LakeDefinitionBodies.parse(json, base = null) }
+            val refusal = shouldThrow<DatapipelinesException> { LakeDefinitionBodies.parse(json, base = null, lockBasis = null) }
             refusal.code shouldBe PipelineErrorCodes.Lake.DEFINITION_INVALID_BODY
             (refusal.details["path"] to refusal.details["reason"]) shouldBe (path to reason)
         }
@@ -46,39 +47,41 @@ class LakeDefinitionBodiesTest {
         rule: String,
         json: String,
     ) {
-        val parsed = withClue(rule) { LakeDefinitionBodies.parse(json, base = null) }
-        LakeDefinitionBodies.parse(LakeDefinitionBodies.toJson(parsed), base = null) shouldBe parsed
+        val parsed = withClue(rule) { LakeDefinitionBodies.parse(json, base = null, lockBasis = null) }
+        LakeDefinitionBodies.parse(LakeDefinitionBodies.toJson(parsed), base = null, lockBasis = null) shouldBe parsed
     }
 
     @Test
     fun `with a base, new fields take the ids after the base's highest - and only those`() {
-        val base = LakeDefinitionBodies.parse(ORDERS_V1, base = null)
+        val base = LakeDefinitionBodies.parse(ORDERS_V1, base = null, lockBasis = null)
         val next = { id: Int -> body(listOf(field(1, "id", "BIGINTEGER", "required" to true), field(id, "channel"))) }
-        LakeDefinitionBodies.parse(next(5), base).field(5)?.name shouldBe "channel"
-        val skipped = shouldThrow<DatapipelinesException> { LakeDefinitionBodies.parse(next(6), base) }
+        LakeDefinitionBodies.parse(next(5), base, lockBasis = base).field(5)?.name shouldBe "channel"
+        val skipped = shouldThrow<DatapipelinesException> { LakeDefinitionBodies.parse(next(6), base, lockBasis = base) }
         (skipped.details["path"] to skipped.details["reason"]) shouldBe ("fields[1].id" to "id_sequence")
     }
 
     @Test
     fun `the canonical JSON is stable - optional keys omitted, fixed key order`() {
-        val parsed = LakeDefinitionBodies.parse(ORDERS_V1, base = null)
+        val parsed = LakeDefinitionBodies.parse(ORDERS_V1, base = null, lockBasis = null)
         val canonical = LakeDefinitionBodies.toJson(parsed)
-        canonical shouldBe LakeDefinitionBodies.toJson(LakeDefinitionBodies.parse(canonical, base = null))
+        canonical shouldBe LakeDefinitionBodies.toJson(LakeDefinitionBodies.parse(canonical, base = null, lockBasis = null))
         canonical shouldNotContain "\"precision\":null"
         canonical.startsWith("{\"fields\":[{\"id\":1,\"name\":\"id\",\"type\":\"BIGINTEGER\",\"required\":true") shouldBe true
     }
 
     @Test
     fun `Schema to body to Schema round-trips equal by field id`() {
-        val parsed = LakeDefinitionBodies.parse(ORDERS_V1, base = null)
+        val parsed = LakeDefinitionBodies.parse(ORDERS_V1, base = null, lockBasis = null)
         val schema = LakeTableShape.schemaOf(parsed)
         val spec = LakeTableShape.specOf(parsed, schema)
-        val back = LakeDefinitionBodies.fromIceberg(schema, spec)
+        val order = LakeTableShape.sortOrderOf(parsed, schema)
+        val back = LakeDefinitionBodies.fromIceberg(schema, spec, order)
         back shouldBe parsed.copy(fields = parsed.fields.map { it.copy(tags = emptyList()) })
         val again = LakeTableShape.schemaOf(back)
         again.sameSchema(schema) shouldBe true
         schema.columns().map { it.fieldId() } shouldBe listOf(1, 2, 3, 4)
-        LakeTableShape.of(again, LakeTableShape.specOf(back, again)) shouldBe LakeTableShape.of(schema, spec)
+        LakeTableShape.of(again, LakeTableShape.specOf(back, again), LakeTableShape.sortOrderOf(back, again)) shouldBe
+            LakeTableShape.of(schema, spec, order)
     }
 
     @Test
@@ -98,13 +101,16 @@ class LakeDefinitionBodiesTest {
                 LakeFieldDefinition(11, "k", LogicalType.TIMESTAMP),
             )
         val body = LakeDefinitionBody(columns)
-        LakeDefinitionBodies.fromIceberg(LakeTableShape.schemaOf(body), PartitionSpec.unpartitioned()) shouldBe body
+        LakeDefinitionBodies.fromIceberg(LakeTableShape.schemaOf(body), PartitionSpec.unpartitioned(), SortOrder.unsorted()) shouldBe body
     }
 
     @Test
     fun `an Iceberg type outside the closed list is refused on the way back`() {
         val schema = Schema(Types.NestedField.optional(1, "local", Types.TimestampType.withoutZone()))
-        val refusal = shouldThrow<DatapipelinesException> { LakeDefinitionBodies.fromIceberg(schema, PartitionSpec.unpartitioned()) }
+        val refusal =
+            shouldThrow<DatapipelinesException> {
+                LakeDefinitionBodies.fromIceberg(schema, PartitionSpec.unpartitioned(), SortOrder.unsorted())
+            }
         (refusal.details["path"] to refusal.details["reason"]) shouldBe ("fields[0].type" to "unsupported_type")
     }
 
@@ -285,7 +291,7 @@ class LakeDefinitionBodiesTest {
             listOf(
                 Arguments.of("the orders fixture", ORDERS_V1),
                 Arguments.of("exactly the field cap", body((1..LakeDefinitionRules.MAX_FIELDS).map { field(it, "c$it") })),
-                Arguments.of("approximate DECIMAL", typed("DECIMAL")),
+                Arguments.of("approximate DECIMAL", body(listOf(field(1, "a"), field(2, "b", "DECIMAL")))),
                 Arguments.of("DECIMAL precision 15", typed("DECIMAL", "precision" to 15, "scale" to 15)),
                 Arguments.of(
                     "BIGDECIMAL precision 16 and 38",

@@ -3,6 +3,8 @@ package co.datapipelines.lake.definitions
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import org.apache.iceberg.NullOrder
+import org.apache.iceberg.SortDirection
 import org.apache.iceberg.types.Type
 import org.apache.iceberg.types.Types
 import org.junit.jupiter.api.Test
@@ -43,6 +45,32 @@ class LakeChangeClassifierTest {
         verdict.changeClass shouldBe LakeChangeClass.BREAKING
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("sortOrders")
+    fun `U6 - any difference in the sort order is one SORT_ORDER change, BREAKING, naming both orders`(
+        case: String,
+        current: List<LakeSortFieldShape>,
+        intent: List<LakeSortFieldShape>,
+    ) {
+        val verdict = LakeChangeClassifier.classify(shape(A, T, sort = current), shape(A, T, sort = intent), tableHasRows = true)
+        withClue("$case: ${verdict.changes}") {
+            verdict.changes.size shouldBe 1
+            val change = verdict.changes.single()
+            (change.kind to change.fieldId) shouldBe (LakeChangeKind.SORT_ORDER to null)
+            change.kind.wire shouldBe "sort_order"
+            change.detail shouldBe "sort order $current → $intent"
+            verdict.changeClass shouldBe LakeChangeClass.BREAKING
+        }
+    }
+
+    @Test
+    fun `U6 - equal sort orders add nothing`() {
+        val order = listOf(LakeSortFieldShape.ascending(2), LakeSortFieldShape.ascending(1))
+        val verdict = LakeChangeClassifier.classify(shape(A, T, sort = order), shape(A, T, sort = order.toList()), tableHasRows = true)
+        verdict.changes.shouldBeEmpty()
+        verdict.changeClass shouldBe LakeChangeClass.COMPATIBLE
+    }
+
     @Test
     fun `property - every shape compared with itself is COMPATIBLE with an empty change list`() {
         val random = Random(SEED)
@@ -60,6 +88,7 @@ class LakeChangeClassifierTest {
         private const val SEED = 798
         private const val SAMPLES = 500
         private const val MAX_COLUMNS = 12
+        private const val MAX_SORT_SAMPLE = 5
 
         private val TYPES: List<Type> =
             listOf(
@@ -85,7 +114,8 @@ class LakeChangeClassifierTest {
             vararg columns: LakeColumnShape,
             partition: List<LakePartitionShape> = emptyList(),
             identifiers: Set<Int> = emptySet(),
-        ) = LakeTableShape(columns.toList(), partition, identifiers)
+            sort: List<LakeSortFieldShape> = emptyList(),
+        ) = LakeTableShape(columns.toList(), partition, identifiers, sort)
 
         private fun case(
             row: String,
@@ -95,6 +125,33 @@ class LakeChangeClassifierTest {
             vararg kinds: LakeChangeKind,
             rows: Boolean = true,
         ) = Arguments.of(row, current, intent, rows, kinds.toSet(), changeClass)
+
+        private fun asc(id: Int) = LakeSortFieldShape.ascending(id)
+
+        @JvmStatic
+        fun sortOrders(): List<Arguments> =
+            listOf(
+                Arguments.of("another column", listOf(asc(1)), listOf(asc(2))),
+                Arguments.of("the same columns in another order", listOf(asc(1), asc(2)), listOf(asc(2), asc(1))),
+                Arguments.of("a column more", listOf(asc(1)), listOf(asc(1), asc(2))),
+                Arguments.of(
+                    "descending",
+                    listOf(asc(1)),
+                    listOf(LakeSortFieldShape(1, "identity", SortDirection.DESC, NullOrder.NULLS_FIRST)),
+                ),
+                Arguments.of(
+                    "nulls last",
+                    listOf(asc(1)),
+                    listOf(LakeSortFieldShape(1, "identity", SortDirection.ASC, NullOrder.NULLS_LAST)),
+                ),
+                Arguments.of(
+                    "a transform",
+                    listOf(asc(1)),
+                    listOf(LakeSortFieldShape(1, "bucket[4]", SortDirection.ASC, NullOrder.NULLS_FIRST)),
+                ),
+                Arguments.of("sorted to unsorted", listOf(asc(1)), emptyList<LakeSortFieldShape>()),
+                Arguments.of("unsorted to sorted", emptyList<LakeSortFieldShape>(), listOf(asc(1))),
+            )
 
         private val A = col(1, "a")
         private val T = col(2, "t", Types.TimestampType.withZone())
@@ -249,7 +306,8 @@ class LakeChangeClassifierTest {
                 }
             val partition = columns.filter { random.nextInt(4) == 0 }.map { LakePartitionShape(it.fieldId, "identity") }
             val identifiers = columns.filter { it.required && random.nextInt(3) == 0 }.map { it.fieldId }.toSet()
-            return LakeTableShape(columns, partition, identifiers)
+            val sort = columns.shuffled(random).take(random.nextInt(0, MAX_SORT_SAMPLE)).map { LakeSortFieldShape.ascending(it.fieldId) }
+            return LakeTableShape(columns, partition, identifiers, sort)
         }
     }
 }

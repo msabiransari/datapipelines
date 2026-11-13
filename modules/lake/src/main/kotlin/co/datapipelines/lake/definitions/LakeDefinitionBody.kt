@@ -5,10 +5,13 @@ import org.apache.iceberg.types.Type
 import org.apache.iceberg.types.Types
 
 /**
- * A managed table's definition body (lake.md §1, dp-lake design record §5.2): the schema intent (fields with stable
- * logical ids, types from the closed list, required, doc), the partition intent and the column tags. Not in the
- * body: sort order, retention/maintenance policy, Iceberg properties. The table's name and namespace are the row's,
- * never the body's (V54's `chk_lake_table_definition_versions_body`).
+ * A managed table's definition body (lake.md §1, dp-lake design record §5.2 and §11a call 36): the schema intent
+ * (fields with stable logical ids, types from the closed list, required, doc), the partition intent, the column tags
+ * and the sort columns. Not in the body: retention/maintenance policy, Iceberg properties. The table's name and
+ * namespace are the row's, never the body's (V54's `chk_lake_table_definition_versions_body`).
+ *
+ * [sortFieldIds] is the table's sort columns in order (1 to 4 field ids, each ascending with nulls first); empty
+ * when the body has no `sort_field_ids` key, which only a legacy table released before the key existed may have.
  *
  * Built only by [LakeDefinitionBodies.parse] (or [LakeDefinitionBodies.fromIceberg]), which validate it; the
  * constructor itself checks nothing.
@@ -17,6 +20,7 @@ data class LakeDefinitionBody(
     val fields: List<LakeFieldDefinition>,
     val partition: List<LakePartitionField> = emptyList(),
     val identifierFieldIds: List<Int> = emptyList(),
+    val sortFieldIds: List<Int> = emptyList(),
 ) {
     fun field(id: Int): LakeFieldDefinition? = fields.firstOrNull { it.id == id }
 }

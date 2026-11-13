@@ -130,6 +130,20 @@ class LakeDefinitionRepository(
                 VERSION_MAPPER,
             ).singleOrNull()
 
+    /**
+     * The table's first version EVER released: the lowest version whose `released_at` is set, whether it is still
+     * RELEASED or was DISCARDED since (a discard keeps `released_at`). Null when the table has never been released.
+     * Its body fixes the sort columns (lake.md §1, the lock).
+     */
+    fun findFirstRelease(tableId: UUID): LakeDefinitionVersion? =
+        jdbc
+            .query(
+                "SELECT $VERSION_COLUMNS FROM lake_table_definition_versions WHERE table_id = :table AND released_at IS NOT NULL " +
+                    "ORDER BY version LIMIT 1",
+                mapOf("table" to tableId),
+                VERSION_MAPPER,
+            ).singleOrNull()
+
     fun findDraft(tableId: UUID): LakeDefinitionVersion? =
         jdbc
             .query(

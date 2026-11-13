@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.LakeAppendInput
 import org.apache.iceberg.DataFile
 import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
+import org.apache.iceberg.SortOrder
 import org.apache.iceberg.Table
 import org.apache.iceberg.data.Record
 import org.apache.iceberg.data.parquet.GenericParquetReaders
@@ -33,6 +34,7 @@ internal class ParquetWriterHarness {
     fun withTable(
         schema: Schema,
         spec: PartitionSpec = PartitionSpec.unpartitioned(),
+        sortOrder: SortOrder = SortOrder.unsorted(),
         block: (Table) -> Unit,
     ) {
         val namespace = LakeTestDb.lease(LeaseKind.NAMESPACE, NAMESPACE)
@@ -44,7 +46,7 @@ internal class ParquetWriterHarness {
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "$NAMESPACE.orders")
         try {
             catalogs.open(lease).use { session ->
-                block(session.createTable(NAMESPACE, "orders", UUID.randomUUID(), schema, spec, 1))
+                block(session.createTable(NAMESPACE, "orders", UUID.randomUUID(), schema, spec, sortOrder, 1))
             }
         } finally {
             LakeTestDb.leases.release(lease.operationId)

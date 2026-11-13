@@ -7,6 +7,7 @@ import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldNotContain
 import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
+import org.apache.iceberg.SortOrder
 import org.apache.iceberg.Table
 import org.apache.iceberg.catalog.Namespace
 import org.apache.iceberg.catalog.TableIdentifier
@@ -192,7 +193,8 @@ class FencedPoolIntegrationTest {
         }
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "sales.$name", operationId = operation)
         catalogs().open(lease).use { session ->
-            val table: Table = session.createTable("sales", name, UUID.randomUUID(), SCHEMA, PartitionSpec.unpartitioned(), 1L)
+            val table: Table =
+                session.createTable("sales", name, UUID.randomUUID(), SCHEMA, PartitionSpec.unpartitioned(), SortOrder.unsorted(), 1L)
             table.updateProperties().set("seed", "1").commit()
         }
         revisionCount(name) shouldBe 2

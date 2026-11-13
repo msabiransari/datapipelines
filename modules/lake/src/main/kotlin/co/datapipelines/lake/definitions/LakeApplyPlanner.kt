@@ -10,7 +10,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The §7 decision of one apply (dp-lake design record §7, lake.md §3), before anything is committed:
- * - no table → create it (its fresh field ids must be the body's, or the create would silently renumber);
+ * - no table → create it with its sort order (its fresh field ids must be the body's, or the create would silently
+ *   renumber);
  * - S == intent(vN), `dp.definition.version` included → applied with no commit (the crash-between case);
  * - S == intent(vN) under another or no `dp.definition.version` → ONE commit that sets only the property (drift's
  *   remedy: the live shape adopted as vN; also a version that changes only tags, which are not part of a shape);
@@ -18,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *   it is handed back;
  * - REVIEWED / BREAKING → refused, no commit; anything else → drift, with a field-by-field diff.
  *
- * S is read from the table's current schema, default spec and properties; "last applied" is the version its
+ * S is read from the table's current schema, default spec, sort order and properties; "last applied" is the version its
  * `dp.definition.version` names, whose body [bodyOf] reads from the definition versions.
  */
 internal class LakeApplyPlanner(
@@ -45,7 +46,7 @@ internal class LakeApplyPlanner(
         val schema = LakeTableShape.schemaOf(intent)
         val counter = AtomicInteger()
         val fresh = TypeUtil.assignFreshIds(schema) { counter.incrementAndGet() }
-        val created = LakeTableShape.of(fresh, LakeTableShape.specOf(intent, fresh))
+        val created = LakeTableShape.of(fresh, LakeTableShape.specOf(intent, fresh), LakeTableShape.sortOrderOf(intent, fresh))
         if (created != LakeTableShape.of(intent)) {
             return drift(REASON_FIELD_IDS, null, LakeChangeClassifier.classify(LakeTableShape.of(intent), created, false).changes)
         }

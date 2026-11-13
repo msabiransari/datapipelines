@@ -3,6 +3,7 @@ package co.datapipelines.lake
 import org.apache.iceberg.CatalogProperties
 import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
+import org.apache.iceberg.SortOrder
 import org.apache.iceberg.Table
 import org.apache.iceberg.TableProperties
 import org.apache.iceberg.aws.s3.S3FileIO
@@ -194,8 +195,10 @@ class LakeCatalogSession internal constructor(
     }
 
     /**
-     * Creates `<namespace>.<table>` at `<storage root>/<namespace>/<tableId>/` (call 1) with the closed property
-     * list ([LakeTableProperties.create]). Needs this session's TABLE lease on `<namespace>.<table>`.
+     * Creates `<namespace>.<table>` at `<storage root>/<namespace>/<tableId>/` (call 1) with [sortOrder], the one
+     * order it keeps for life (call 36; [SortOrder.unsorted] for a legacy definition), and the closed property list
+     * ([LakeTableProperties.create], which names the sort columns' metrics). Needs this session's TABLE lease on
+     * `<namespace>.<table>`.
      */
     fun createTable(
         namespace: String,
@@ -203,6 +206,7 @@ class LakeCatalogSession internal constructor(
         tableId: UUID,
         schema: Schema,
         spec: PartitionSpec,
+        sortOrder: SortOrder,
         definitionVersion: Long,
     ): Table {
         LakeNames.requireName(namespace)
@@ -210,12 +214,17 @@ class LakeCatalogSession internal constructor(
         require(lease.kind == LeaseKind.TABLE && lease.name == LakeNames.tableLeaseName(namespace, table)) {
             "creating table $namespace.$table needs its table lease, not $lease"
         }
+        val sortColumns =
+            sortOrder.fields().map { field ->
+                requireNotNull(schema.findColumnName(field.sourceId())) { "sort field ${field.sourceId()} is not a column of $table" }
+            }
         return write { catalog ->
             catalog
                 .buildTable(TableIdentifier.of(Namespace.of(namespace), table), schema)
                 .withPartitionSpec(spec)
+                .withSortOrder(sortOrder)
                 .withLocation("$storageRoot/$namespace/$tableId")
-                .withProperties(LakeTableProperties.create(definitionVersion))
+                .withProperties(LakeTableProperties.create(definitionVersion, sortColumns))
                 .create()
         }
     }
@@ -241,17 +250,33 @@ object LakeNames {
     ): String = "$namespace.$table"
 }
 
-/** The CLOSED property list every table DP creates carries (§5.1, call 22). Nothing else, never author-editable. */
+/**
+ * The CLOSED property list every table DP creates carries (§5.1, call 22). Nothing else, never author-editable.
+ *
+ * Besides the five fixed keys, one `write.metadata.metrics.column.<name>` = `truncate(16)` per sort column (dp-lake
+ * design record §11a, P6 input (d) and its erratum): DP's written contract that a sort column keeps its bounds, readable
+ * by a writer that does not run Iceberg's own inference (which gives a sort column the same mode today). Written at
+ * creation and never changed; these keys are not part of the definition-owned state.
+ */
 object LakeTableProperties {
     /** DP's own key: the definition version the table's definition-owned state was applied from (P3). */
     const val DEFINITION_VERSION = "dp.definition.version"
 
-    fun create(definitionVersion: Long): Map<String, String> =
+    /** The metrics mode every sort column is given: Iceberg's default mode, written out. */
+    const val SORT_COLUMN_METRICS = "truncate(16)"
+
+    fun create(
+        definitionVersion: Long,
+        sortColumns: List<String>,
+    ): Map<String, String> =
         mapOf(
             TableProperties.COMMIT_NUM_RETRIES to "0",
             TableProperties.METADATA_DELETE_AFTER_COMMIT_ENABLED to "false",
             TableProperties.FORMAT_VERSION to "2",
             TableProperties.PARQUET_COMPRESSION to "zstd",
             DEFINITION_VERSION to definitionVersion.toString(),
-        )
+        ) + sortColumns.associate { metricsKey(it) to SORT_COLUMN_METRICS }
+
+    /** The table property that sets [column]'s metrics mode. */
+    fun metricsKey(column: String): String = TableProperties.METRICS_MODE_COLUMN_CONF_PREFIX + column
 }
