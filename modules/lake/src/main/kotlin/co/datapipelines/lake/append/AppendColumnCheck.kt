@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.LakeAppendColumn
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
 import org.apache.iceberg.types.Type
 import org.apache.iceberg.types.TypeUtil
@@ -33,10 +34,15 @@ data class AppendColumnPlan(
  * and zoned time types are refused because the managed schema cannot represent their full precision/zone.
  */
 class AppendColumnCheck {
-    /** Validates names/types and counts ALL nulls in required fields, before a writer can open a file. */
+    /**
+     * Validates names/types and counts ALL nulls in required fields, before a writer can open a file. The same
+     * scan counts every value a numeric `truncate` partition of [spec] cannot hold ([TruncatePartitionRangeCheck],
+     * #967); a required null is refused first. [checkActive] stays last: callers pass it as a trailing lambda.
+     */
     fun check(
         input: LakeAppendInput,
         schema: Schema,
+        spec: PartitionSpec = PartitionSpec.unpartitioned(),
         checkActive: () -> Unit = {},
     ): AppendColumnPlan {
         checkActive()
@@ -56,6 +62,7 @@ class AppendColumnCheck {
             check(columns.size == metadata.columnCount) { "Original query columns do not match the staged relation." }
             val plan = plan(columns, schema)
             val required = plan.bindings.filter { it.field.isRequired }
+            val ranges = TruncatePartitionRangeCheck.of(spec, plan.bindings)
             val nulls = linkedMapOf<String, Long>()
             var rowCount = 0L
             while (rows.next()) {
@@ -66,8 +73,17 @@ class AppendColumnCheck {
                         nulls.merge(binding.field.name(), 1L, Long::plus)
                     }
                 }
+                ranges.observe(rows)
             }
             if (nulls.isNotEmpty()) refuse(PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED, mapOf("null_counts" to nulls))
+            val outOfRange = ranges.counts()
+            if (outOfRange.isNotEmpty()) {
+                throw DatapipelinesException(
+                    PipelineErrorCodes.Lake.APPEND_PARTITION_VALUE_OUT_OF_RANGE,
+                    "The staged result has values a truncate partition cannot hold.",
+                    mapOf("out_of_range_counts" to outOfRange),
+                )
+            }
             result = plan.copy(rowCount = rowCount)
         }
         checkActive()

@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.22 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration)
+**Status:** v1.23 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #967, the truncate partition refusal)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -42,7 +42,7 @@ any level, is refused. Parsing consumes one complete JSON value; trailing values
 | `fields[].required` | Boolean, default `false` |
 | `fields[].doc` | At most 1,000 characters; no control character but newline and tab |
 | `fields[].tags` | At most 16 tags, each `[a-z0-9_]{1,63}`, unique. Tags are DP's semantics; they are not written to Iceberg |
-| `partition` | Optional, at most 8 objects `{field_id, transform}`. `transform` is `identity`, `year`, `month`, `day`, `hour`, `bucket[N]` or `truncate[N]` (N in 1–10,000, written without leading zeroes), and must be one Iceberg accepts for the column's type. The same field takes at most one time transform; no entry repeats |
+| `partition` | Optional, at most 8 objects `{field_id, transform}`. `transform` is `identity`, `year`, `month`, `day`, `hour`, `bucket[N]` or `truncate[N]` (N in 1–10,000, written without leading zeroes), and must be one Iceberg accepts for the column's type. The same field takes at most one time transform; no entry repeats. A numeric `truncate[N]` stays valid, but an append refuses the lowest values of the column's range that it cannot hold ([§7](#7-append-publication)) |
 | `identifier_field_ids` | Optional ids of required fields, each listed once; an approximate `DECIMAL` cannot be one |
 
 Field-ID allocation for corrections after a rejected release has a remaining workflow limitation ([#820](https://github.com/msabiransari/datapipelines/issues/820)); the staged-shape check refuses a mismatch before commit.
@@ -336,6 +336,19 @@ Missing optional fields become null; missing required fields, required nulls and
 types are refused. Decimal precision/scale must fit the applied Iceberg schema. Two scans of the stable result
 perform the required-null prepass and file writing without rerunning volatile author SQL.
 
+**A value a `truncate` partition cannot hold (#967).** Iceberg's `truncate[N]` keeps the column's type and rounds
+toward negative infinity, so at the lowest values of an `INTEGER`, `BIGINTEGER`, `DECIMAL(p,s)` or `BIGDECIMAL`
+column's range its result leaves the type: a decimal gains a digit (`DECIMAL(15,3)` `truncate[2]` of
+`-999999999999.999` is `-1000000000000.000`), which the catalog commit then fails on; an integer wraps far above
+the row (`INTEGER` `truncate[10]` of `-2147483648` is `2147483646`), which would publish a partition that a reader's
+pruning skips. Which values are hit depends on N (`truncate[3]` hits none of a decimal's; `truncate[2]` none of an
+integer's). The first scan therefore also applies Iceberg's own function to every such value, as it would be written,
+and refuses the delivery with `lake.append.partition_value_out_of_range` and a per-partition-field row count, after a
+required-null refusal and before any file is written. Strings, `identity`, `bucket` and the time transforms are not
+checked. The definition stays valid (owner ruling 2026-11-13). The refusal is temporary: it goes when Iceberg keeps
+the value inside its type, decimal in apache/iceberg issue 17027, `int` and `long` in issue 13105 (closed as not
+planned) and 17027's discussion; a tripwire test in the lake module goes red when either changes.
+
 Files go under the table's `data/` prefix, using Zstandard Parquet, no declared sort order, and its applied
 partition transforms: identity, year, month, day, hour, bucket or truncate. Exceeding
 `max-open-partitions-per-append` fails. An empty result still creates a publication snapshot and permanent
@@ -599,6 +612,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.23 | 967 (#967) | §1 `partition` row and §7: the append's first scan refuses a value a numeric `truncate[N]` partition cannot hold (`lake.append.partition_value_out_of_range`, counts per partition field, never a value), after a required-null refusal and before any file is written; the definition stays valid. Temporary until apache/iceberg 17027 (decimal) and 13105 (int, long). |
 | 2026-11-13 | v1.22 | 939 (#939) | §8: the protection stamp is `now()` plus `datapipelines.lake.retention.protection-days`, no longer `lake_control.protection_interval`, which the normal-mode sweep keeps equal to the setting (a write only when they differ, `lake.settle.protection_window_aligned`); a stamped deadline is never changed. The budget is checked before each of the protection step's two statements; the 16 s overrun and the 31 s wall clock are unchanged. No migration. |
 | 2026-11-13 | v1.21 | 878 (#878) — renumbered at merge after #814's v1.20 | §3 and §7: every catalog connection carries pgjdbc's `socketTimeout` = `catalog.statement-timeout-seconds` + 5 s, read back before use; against a server that never answers a statement ends at that bound alone with `08006` (no cancel is sent: the catalog sets no `queryTimeout`), and opening ends with `08001` within B (`sslmode=disable`) or `min(sslResponseTimeout, B) + B` (default `prefer`). States what each apply and publication step leaves (pending, applying, FAILED, UNKNOWN), that nothing is replayed, and the URL settings refused when a session opens. |
 | 2026-11-13 | v1.20 | 814 (#814) | §2: discard writes `lake.definition.discarded` and purge-draft `lake.definition.draft_purged` in their own transactions (both verbs now take the acting user and `via`); an audit failure rolls the step back, a refusal writes no row (dp-lake record §12, erratum 2026-11-12). |
