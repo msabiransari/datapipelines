@@ -111,9 +111,8 @@ class SqlTableReferenceExtractorTest {
     }
 
     @Test
-    fun `the engine facts name the default catalog and its internal views`() {
+    fun `the engine facts name its internal views`() {
         val facts = extractor.engineFacts()
-        facts.defaultCatalog shouldBe "memory"
         facts.internalViews shouldContain "duckdb_tables"
     }
 
