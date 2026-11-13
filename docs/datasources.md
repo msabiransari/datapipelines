@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.74 (frozen contract — additive-only changes after this point)
+**Status:** v2.75 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-11-13
@@ -174,8 +174,9 @@ matched case-sensitively, exactly as the driver reads them (#186b)** — H2's
 persistent file named literally (`jdbc:h2:TCP://h/x` would open `./TCP:/h/x.mv.db` under the
 process's working directory), so a mixed-case prefix is an unknown form and refused, for every
 role; SQLite's `:memory:`/`file:` are likewise case-sensitive (the xerial driver opens
-`FILE:x` as a literal file), while DuckDB's `:memory:` matches case-insensitively because its
-driver does. File-backed forms additionally
+`FILE:x` as a literal file), and so is DuckDB's `:memory:` (#941): its driver opens `:MEMORY:`
+or `:Memory:` as a literal file of that name, so a mixed-case variant is classified as that file
+and follows the file rules below. File-backed forms additionally
 need their path under a declared root — [`datapipelines.datasources.file-roots`](configuration.md#326-datasource-pools),
 default empty = refused for everyone. And because the registered credential to such an engine is
 its admin, the pool never uses it: connections to an in-process H2 datasource run as a freshly
@@ -1867,6 +1868,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v2.75 | #941 DuckDB `:memory:` is case-sensitive | §3.3's in-process paragraph: DuckDB's `:memory:` is matched exactly as its driver reads it, case-sensitively (duckdb_jdbc 1.5.5.1, measured in a forked JVM by `DuckDbMemoryFormParityTest`), no longer case-insensitively. A mixed-case variant (`:MEMORY:`, `:Memory:`) is the literal file the driver opens, so it is classified `InProcessFile` and passes the file-roots rule at save and at pool build like any other file form. The super-admin gate is unchanged (both forms are in-process). No wire change. |
 | 2026-11-13 | v2.74 | #881 demo workspace and the managed lake at first boot | **Text only, no behaviour change.** §3.3's Visibility paragraph and §8C.10 state, as observed in `DemoWorkspaceManagedLakeGrantE2eTest`, that the shipped `demo` workspace holds the managed lake's grant before the first freshness tick: the registrar's boot pass runs while the beans are created, before the seeder, and the seeder's instance-datasource grant includes the managed row (system actor, no `datasource.granted` row); a `demo` created while the lake was disabled is granted by the boot that enables it. |
 | 2026-11-13 | v2.73 | #790 lake reference default catalog | §8C.9 "Resolution": a three-part name is compared with the default catalog of the site's own datasource, derived from its URL (`memory` for the in-memory forms, the database name for a file), no longer with the parse engine's `memory`; an underivable catalog leaves a catalog-qualified name unresolved, never a guess. Scanner version 2, so the boot backfill re-scans what is indexed. No wire change. |
 | 2026-11-12 | v2.72 | #463 read-only execution at the connection — renumbered at final sync after dependency-graph | §5.7 layer 3: the read-only paths (dashboard sources, published GET endpoints, their children) add a per-lease read-only mode on every `DQL` node's connection, a property of the path, not of the flag; the pool flag stays advisory and the SELECT-only user stays the guarantee (the normative paragraph says so). §15.1 gains the `ReadOnlyConnectionMode.kt` row. Additive. |
