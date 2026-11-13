@@ -68,7 +68,7 @@ class ScheduledJobsStatementBoundsTest {
     private val jdbc = NamedParameterJdbcTemplate(recording)
 
     @Test
-    fun `lake settlement mode observation and protection finalization carry their five second bound and its socket bound`() {
+    fun `lake settlement mode read, window alignment and protection stamp carry the five second bound and its socket bound`() {
         val sweep =
             co.datapipelines.lake.settle.LakeSettlementSweep(
                 NamedParameterJdbcTemplate(
@@ -80,18 +80,21 @@ class ScheduledJobsStatementBoundsTest {
                 mockk(),
                 mockk(),
                 mockk(),
+                co.datapipelines.lake.LakeProperties.DEFAULT_PROTECTION_DAYS,
             )
         sweep.finalizeProtection()
         sweep.runOnce() // Recording result says non-normal: the mode guard itself still executes SQL.
+        recording.timeoutOf("UPDATE lake_control SET protection_interval") shouldBe SETTLEMENT_BOUND
         recording.timeoutOf("UPDATE lake_table_revisions r SET protected_until") shouldBe SETTLEMENT_BOUND
         recording.timeoutOf("SELECT mode =") shouldBe SETTLEMENT_BOUND
         recording.everyTimeout() shouldBe setOf(SETTLEMENT_BOUND)
+        recording.socketTimeoutOf("UPDATE lake_control SET protection_interval") shouldBe SETTLEMENT_SOCKET
         recording.socketTimeoutOf("UPDATE lake_table_revisions r SET protected_until") shouldBe SETTLEMENT_SOCKET
         recording.socketTimeoutOf("SELECT mode =") shouldBe SETTLEMENT_SOCKET
         recording.everySocketTimeout() shouldBe setOf(SETTLEMENT_SOCKET)
         // Set per statement, not once per connection: every statement's own call.
         recording.networkTimeoutCalls() shouldBe List(recording.statementCount()) { SETTLEMENT_SOCKET }
-        recording.statementCount() shouldBe 2
+        recording.statementCount() shouldBe 3
     }
 
     @Test

@@ -69,4 +69,14 @@ class LakeAppendConfigurationTest {
             context.getBean(LakeAppendPort::class.java).datasourceName shouldBe "lake"
         }
     }
+
+    @Test
+    fun `the production sweep carries the configured protection window`() {
+        runner
+            .withPropertyValues("datapipelines.lake.enabled=true", "datapipelines.lake.retention.protection-days=30")
+            .run { context ->
+                context.startupFailure shouldBe null
+                context.getBean(LakeAppendRuntime::class.java).sweep.protectionDays shouldBe 30
+            }
+    }
 }
