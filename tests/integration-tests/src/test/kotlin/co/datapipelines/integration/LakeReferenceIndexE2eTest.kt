@@ -54,6 +54,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - **The issue's acceptance:** the batch reading `lk.events` is refused by a receiver that has not registered it, with
  *   the catalogued 409 naming the pipeline and the table, and the receiver is byte-unchanged; the SAME batch lands once
  *   the table is registered there.
+ * - #790: on a FILE-backed lake datasource, a three-part name in the file's own catalog indexes under the one-segment
+ *   namespace (the datasource's default catalog is the file's name, not the parser's `memory`).
  *
  * Every assertion about what a deployment holds reads its DATABASE, not a service's report.
  */
@@ -200,6 +202,35 @@ class LakeReferenceIndexE2eTest {
         receiverJdbc.scalar("SELECT status FROM lake_reference_scans WHERE entity_id = '$id' AND version = 1") shouldBe "partial"
     }
 
+    @Test
+    @Order(8)
+    fun `a file-backed lake datasource - a three-part name in the file's own catalog indexes under the one-segment namespace`() {
+        val catalog = "f790$RUN"
+        val database = Files.createTempDirectory("lake-790-it").resolve("$catalog.db")
+        val (registered, registration) =
+            rest(
+                "POST",
+                "/api/v1/datasources",
+                """{"name": "$FILE_DATASOURCE", "display_name": "790 file lake", "dialect": "LAKE",
+                   "jdbc_url": "jdbc:duckdb:${database.toAbsolutePath()}", "credential": {"kind": "none"}}""",
+            )
+        withClue("the file-backed lake datasource must register: $registration") { registered shouldBe 201 }
+        createTemplate(FILE_TEMPLATE, "SELECT id FROM $catalog.lk.events")
+        val (id, hash) = createPipeline(FILE_PIPELINE, listOf("read_file" to FILE_TEMPLATE), source = FILE_DATASOURCE)
+        releaseTemplate(FILE_TEMPLATE)
+        release(id, hash).first shouldBe 200
+
+        val row =
+            sourceJdbc.row(
+                "SELECT written_catalog, resolved::text AS resolved, array_to_string(namespace, '.') AS ns, table_name " +
+                    "FROM lake_table_references WHERE entity_id = '$id' AND datasource_name = '$FILE_DATASOURCE'",
+            )
+        withClue("the file's catalog names the one-segment namespace: $row") {
+            row shouldBe mapOf("written_catalog" to catalog, "resolved" to "true", "ns" to "lk", "table_name" to "events")
+        }
+        sourceJdbc.scalar("SELECT scanner_version::text FROM lake_reference_scans WHERE entity_id = '$id'") shouldBe SCANNER_VERSION
+    }
+
     // ---- fixture helpers ----------------------------------------------------------------------
 
     private fun rest(
@@ -259,6 +290,7 @@ class LakeReferenceIndexE2eTest {
     private fun createPipeline(
         name: String,
         nodes: List<Pair<String, String>>,
+        source: String = DATASOURCE,
     ): Pair<String, String> {
         val document = mapper.createObjectNode().put("name", name)
         val array = document.putArray("nodes")
@@ -268,7 +300,7 @@ class LakeReferenceIndexE2eTest {
                 .put("id", nodeId)
                 .put("description", "read the lake events")
                 .put("type", "DQL")
-                .put("source", DATASOURCE)
+                .put("source", source)
                 .also { node ->
                     node.putObject("template").put("id", template).put("version", 1)
                     // One caller node per pipeline: every node before the last stages into tempdb.
@@ -381,6 +413,9 @@ class LakeReferenceIndexE2eTest {
         private val BRANCHING_TEMPLATE = "lk$RUN/events_branching.sql"
         private val PIPELINE = "lk$RUN/lake/events_read"
         private val FAILING_PIPELINE = "lk$RUN/lake/events_read_failing"
+        private val FILE_DATASOURCE = "lk790_$RUN"
+        private val FILE_TEMPLATE = "lk$RUN/events_file.sql"
+        private val FILE_PIPELINE = "lk$RUN/lake/events_read_file"
 
         private val CONTENT_TABLES =
             listOf(
@@ -394,7 +429,7 @@ class LakeReferenceIndexE2eTest {
             )
 
         /** `LakeReferenceScanService.SCANNER_VERSION` — spelled here, since this module cannot import it. */
-        private const val SCANNER_VERSION = "1"
+        private const val SCANNER_VERSION = "2"
 
         private val sourceDb = SharedE2e.scratchDatabase("lake_reference_778_src")
         private val receiverDb = SharedE2e.scratchDatabase("lake_reference_778_recv")

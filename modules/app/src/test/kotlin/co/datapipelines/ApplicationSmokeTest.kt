@@ -2,6 +2,8 @@ package co.datapipelines
 
 import co.datapipelines.config.SharedRedis
 import co.datapipelines.metrics.MeterCatalogue
+import co.datapipelines.web.health.ScratchPathKind
+import co.datapipelines.web.health.ScratchSpaceReader
 import co.datapipelines.web.ratelimit.RateLimiter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import com.fasterxml.jackson.databind.JsonNode
@@ -21,15 +23,20 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.client.TestRestTemplate
 import org.springframework.boot.test.web.server.LocalManagementPort
 import org.springframework.context.ApplicationContext
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
+import org.springframework.context.annotation.Primary
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.file.Path
 import java.security.SecureRandom
 import java.util.Base64
 
@@ -67,6 +74,7 @@ import java.util.Base64
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
+@Import(ApplicationSmokeTest.PinnedScratchSpace::class)
 class ApplicationSmokeTest {
     @Autowired
     private lateinit var rest: TestRestTemplate
@@ -271,6 +279,63 @@ class ApplicationSmokeTest {
         println("event=scrape.evidence app_port_actuator_prometheus=${appScrape.value()} management_env=$managementEnv")
         appScrape.is2xxSuccessful shouldBe false
         managementEnv shouldBe 401
+    }
+
+    /**
+     * #806 (owner ruling 2026-11-12): the `duckdb_scratch` indicator joins the management port's aggregate, status
+     * only — the body is `{"status":"UP"}`, no component, no path, no number — and the four scratch gauges are on
+     * the anonymous scrape. The space reader is pinned ([PinnedScratchSpace]), so the case never depends on the
+     * host's free disk; the pinned usable figure on the wire proves the gauge reads that bean. No DuckDB execution
+     * runs in this class, so the leftover sweep has not run and `leftover` is `NaN`, never `0`. The public `/health`
+     * keeping exactly three components is the first case above.
+     */
+    @Test
+    fun `806 - the management health stays status only and the scratch gauges are on the anonymous scrape`() {
+        val health = get(managementPort, "/actuator/health")
+        withClue("anonymous GET /actuator/health on the management port: ${health.body()}") {
+            health.statusCode() shouldBe 200
+            mapper
+                .readTree(health.body())
+                .fieldNames()
+                .asSequence()
+                .toList() shouldContainExactly listOf("status")
+            mapper.readTree(health.body())["status"].asText() shouldBe "UP"
+            health.body() shouldNotContain "dp-staging"
+            health.body().any(Char::isDigit) shouldBe false
+        }
+
+        val series = get(managementPort, "/actuator/prometheus").body().lines().filterNot { it.startsWith("#") }
+
+        fun value(family: String): Double {
+            val line = series.singleOrNull { it.startsWith("$family ") }
+            withClue("exactly one untagged `$family` series in the scrape") { line shouldNotBe null }
+            return checkNotNull(line).substringAfter(' ').trim().toDouble()
+        }
+        println("event=scrape.evidence scratch=" + series.filter { it.startsWith("datapipelines_staging_scratch_") })
+        value("datapipelines_staging_scratch_capacity_bytes") shouldBe (20L shl 30).toDouble()
+        value("datapipelines_staging_scratch_reserved_bytes") shouldBe 0.0
+        value("datapipelines_staging_scratch_leftover_bytes").isNaN() shouldBe true
+        value("datapipelines_staging_scratch_usable_bytes") shouldBe PinnedScratchSpace.USABLE.toDouble()
+    }
+
+    /** #806: the scratch readings pinned to a healthy directory with a fixed, ample usable figure. */
+    @TestConfiguration
+    class PinnedScratchSpace {
+        @Bean
+        @Primary
+        fun pinnedScratchSpaceReader(): ScratchSpaceReader =
+            object : ScratchSpaceReader {
+                override fun kind(path: Path): ScratchPathKind = ScratchPathKind.DIRECTORY
+
+                override fun canWrite(directory: Path): Boolean = true
+
+                override fun usableBytes(path: Path): Long = USABLE
+            }
+
+        companion object {
+            /** 1 TiB: above one default reservation (3 GiB) on any configuration this class boots. */
+            const val USABLE = 1L shl 40
+        }
     }
 
     /**

@@ -75,8 +75,10 @@ class ConfigValidator(
          * 45 since #818 added `LakeRules.checkLakeReads` (§3.36 — the managed reads' bounds, record §10 RULING 4).
          * 46 since #786 added `PostureRules.checkHardenedAuthoring` (§3.23 — a hardened deployment does not author).
          * 47 since #325 added `ExecutorRules.checkLifecycleWriteCeiling` (§3.2 — the lifecycle bound under the start wait).
+         * 48 since #804 added `LakeRules.checkStagingAdmission` (§3.36 — the DuckDB staging admission keys,
+         * judged whether or not the lake is enabled).
          */
-        internal const val CHECK_COUNT = 47
+        internal const val CHECK_COUNT = 48
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -170,6 +172,8 @@ class ConfigValidator(
             // §3.29 (#442b) — scheduler mail needs the transport and the base URL; its own file too.
             SchedulerNotificationRules.checkSchedulerNotifications(snapshot, violations)
             // §3.36 (#785) — the managed lake's keys, judged only when the lake is enabled; their own file too.
+            // §3.36 (#804) — EXCEPT the DuckDB staging admission, consumed and judged whether or not it is.
+            LakeRules.checkStagingAdmission(snapshot, violations)
             LakeRules.checkLakeStorage(snapshot, violations)
             LakeRules.checkLakeRetention(snapshot, violations)
             LakeRules.checkLakeAdmission(snapshot, violations)

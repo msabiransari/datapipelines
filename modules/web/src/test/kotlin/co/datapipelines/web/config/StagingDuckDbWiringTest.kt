@@ -13,11 +13,13 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.springframework.boot.context.properties.bind.BindException
 import org.springframework.boot.context.properties.bind.Bindable
 import org.springframework.boot.context.properties.bind.Binder
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource
 import org.springframework.core.env.AbstractEnvironment
 import org.springframework.core.env.MapPropertySource
+import org.springframework.util.unit.DataSize
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
@@ -87,6 +89,41 @@ class StagingDuckDbWiringTest {
         thrown.message.orEmpty() shouldContain "memoryLimitBytes"
     }
 
+    /**
+     * #804 R1 — the binder's domain for the factor, both sides of its upper boundary, at the bean's own prefix
+     * ([LAKE_ADMISSION_PREFIX]) and target (`LakeProperties.Admission`). The validator side of the same two values is
+     * `LakeRulesTest` (app): it admits `2147483647` and names the key at `2147483648`, so no value the §7 report
+     * admits reaches this bind failure.
+     */
+    @Test
+    fun `804 R1 - the expansion factor binds up to Int MAX_VALUE and fails the binder one past it`() {
+        admission(mapOf("$LAKE_ADMISSION_PREFIX.staging-expansion-factor" to "2147483647")).stagingExpansionFactor shouldBe
+            Int.MAX_VALUE
+        val failure =
+            shouldThrow<BindException> { admission(mapOf("$LAKE_ADMISSION_PREFIX.staging-expansion-factor" to "2147483648")) }
+        generateSequence<Throwable>(failure) { it.cause }.any { it is NumberFormatException } shouldBe true
+    }
+
+    /**
+     * #804 R1 sweep — every size form `LakeRulesTest.ADMITTED_SIZES` admits for `staging-memory-limit` and
+     * `scratch-bytes` binds to the consumer's `DataSize`, to the bytes `DataSize.parse` reads (the validator's parser).
+     */
+    @Test
+    fun `804 R1 - every size form the validator admits binds to the staging bean's DataSize`() {
+        ADMITTED_SIZES.forEach { size ->
+            val bound =
+                admission(
+                    mapOf(
+                        "$LAKE_ADMISSION_PREFIX.staging-memory-limit" to size,
+                        "$LAKE_ADMISSION_PREFIX.scratch-bytes" to size,
+                    ),
+                )
+            val expected = DataSize.parse(size.trim()).toBytes()
+            bound.stagingMemoryLimit.toBytes() shouldBe expected
+            bound.scratchBytes.toBytes() shouldBe expected
+        }
+    }
+
     @Test
     fun `each engine is built by its own delegate, and a DuckDB database leaves nothing behind`() {
         val factory = stagingFactoryFor(StagingH2Properties(), LakeProperties.Admission(), scratch)
@@ -97,7 +134,8 @@ class StagingDuckDbWiringTest {
         duck.shouldBeInstanceOf<DuckDbStaging>()
         duck.reservationBytes shouldBe 3 * GIB
         duck.close()
-        Files.list(scratch).use { it.toList() }.shouldBeEmpty()
+        // Nothing of the database is left; the factory's owner lock file stays for the process's life (#803).
+        Files.list(scratch).use { s -> s.filter { !it.fileName.toString().startsWith("dp-owner_") }.toList() }.shouldBeEmpty()
         factory.duckDb.budget.reservedBytes shouldBe 0L
     }
 
@@ -115,8 +153,22 @@ class StagingDuckDbWiringTest {
         return DomainConfiguration().stagingFactory(h2, environment) as EngineDispatchingStagingFactory
     }
 
+    /** The bean's own binding: [LAKE_ADMISSION_PREFIX] onto `LakeProperties.Admission`, as `stagingFactory` does. */
+    private fun admission(properties: Map<String, String>): LakeProperties.Admission {
+        val environment = object : AbstractEnvironment() {}
+        environment.propertySources.addFirst(MapPropertySource("test", properties))
+        return Binder
+            .get(environment)
+            .bind(LAKE_ADMISSION_PREFIX, Bindable.of(LakeProperties.Admission::class.java))
+            .orElseGet { LakeProperties.Admission() }
+    }
+
     private companion object {
         const val MIB = 1L shl 20
         const val GIB = 1L shl 30
+
+        /** #804 R1 — `LakeRulesTest.ADMITTED_SIZES` (app), verbatim: the forms the §7 report admits. */
+        val ADMITTED_SIZES =
+            listOf("1048576", "1048576B", "1024KB", "1MB", "+1MB", " 2GB ", "20GB", "1TB", "9223372036854775807B", "8388607TB")
     }
 }

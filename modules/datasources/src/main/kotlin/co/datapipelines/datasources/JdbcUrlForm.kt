@@ -27,12 +27,15 @@ import co.datapipelines.typesystem.Dialect
  *    [Form.Unknown], **refused** (fail-closed: a form nobody has classified is not one a rule
  *    can reason about).
  *
- * DuckDB is embedded always: `:memory:` (or the empty sub-name) is in-process memory — the
- * driver itself matches it case-INSENSITIVELY (`jdbc:duckdb::MEMORY:` opened no file when
- * probed against duckdb_jdbc 1.5.5.1), so this classifier does too — anything else a file,
- * including MotherDuck's `md:` form, which this product does not support and classifies
- * [Form.Unknown] (both cases, fail-closed) rather than wave through: `md:` reaches the network
- * on connect. SQLite is embedded always and case-SENSITIVE (xerial 3.49.1.0, probed:
+ * DuckDB is embedded always and case-SENSITIVE (#941; duckdb_jdbc 1.5.5.1, probed in a forked
+ * JVM by `DuckDbMemoryFormParityTest`): exactly `:memory:` (or the empty sub-name) is in-process
+ * memory, while `jdbc:duckdb::MEMORY:` and `::Memory:` create literal files named `:MEMORY:` and
+ * `:Memory:`, so a mixed-case variant is the file the driver opens. Named memory forms remain
+ * classified as files despite the driver's in-memory reading (#942); the parity test records
+ * that stricter classification separately. Other sub-names are classified as files except
+ * MotherDuck's `md:` form, which this product does not support and classifies [Form.Unknown]
+ * (both cases, fail-closed): `md:` reaches the network on connect.
+ * SQLite is embedded always and case-SENSITIVE (xerial 3.49.1.0, probed:
  * `jdbc:sqlite::MEMORY:` creates a literal file named `:MEMORY:`, `jdbc:sqlite:FILE:x` one named
  * `FILE:x`): exactly `:memory:` is memory, a `file:` URI or bare path is a file, the driver's
  * `:resource:` classpath form is [Form.Unknown]. Every other dialect (and `LAKE`, whose DuckDB
@@ -81,9 +84,9 @@ object JdbcUrlForm {
             }
 
             Dialect.DUCKDB -> {
-                if (subName.isBlank() ||
-                    subName.equals(":memory:", ignoreCase = true)
-                ) {
+                // Case-SENSITIVE, as the driver reads it (#941): a mixed-case `:MEMORY:` is a literal
+                // FILE, so matching it ignoring case would skip the roots check for a file it opens.
+                if (subName.isBlank() || subName == ":memory:") {
                     Form.InProcessMemory
                 } else {
                     duckdb(subName)

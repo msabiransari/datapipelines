@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.94 (revised — see Change Log)
+**Status:** v1.96 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-13
@@ -1159,6 +1159,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.staging.invalid_column_name` | 500 | Source column label fails identifier validation or duplicates another in the same result set ([Staging §4.5](staging.md#45-identifier-safety-normative)) |
 | `pipeline.staging.table_already_exists` | 500 | Staged CREATE TABLE targets a name already staged in this execution (defensive; save-time uniqueness is the primary guard) |
 | `pipeline.staging.scratch_exhausted` | 500 | A DuckDB staging database's scratch reservation does not fit in the aggregate (`datapipelines.lake.admission.scratch-bytes`); refused before any file exists, retryable once a running execution releases its reservation ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
+| `pipeline.staging.scratch_blocked` | 500 | A DuckDB staging database's scratch reservation can never fit: it exceeds the aggregate (`datapipelines.lake.admission.scratch-bytes`) less the leftover files in the scratch directory nobody can vouch for, or with none the aggregate itself; refused before any file exists, not retryable until an operator clears the scratch directory while no instance uses it or raises the aggregate ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
 | `pipeline.staging.scratch_limit_exceeded` | 500 | A DuckDB staging database outgrew its own scratch reservation: the engine refused a spill past `max_temp_directory_size`, or the database file, WAL and spill directory measured more than the reservation after a write ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
 
 ### 13.6 Type mapping
@@ -1789,7 +1790,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.definition.table_busy` | — | Another operation holds the table (its lease, or an apply in flight); nothing changed. |
 | `lake.definition.authoring_disabled` | — | This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. |
 | `lake.unavailable` | 503 | The catalog read a new managed reader generation is built from failed, so no generation was built (#818, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)). A live generation keeps serving until its age bound; a lease with none fails here. `details` carry `datasource` and the bounded `cause`. |
-| `lake.definition.apply_unclassified` | — | The apply's commit step failed with an exception that is not one of the catalog's refusals (#811), so whether the commit landed is unknown. The row stays `applying` until `verifyApplying` settles it from the revision log; it is never recorded as `failed`. A release that reached this outcome has landed, and it returns the outcome. |
+| `lake.definition.apply_unclassified` | — | A step of the apply failed with an exception that is not one of the catalog's refusals (#811, #822): before the commit the row is `pending` again, and from the commit on, or when the row could not be stamped, it is left for `verifyApplying` to settle from the revision log; it is never recorded as `failed`. A release that reached this outcome has landed, and it returns the outcome. |
 
 
 ### 13.26 Dependency trees
@@ -2041,6 +2042,8 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.96 | 803 (#803) — renumbered at merge after #822's v1.95 | §13.5 gains `pipeline.staging.scratch_blocked` (500, the `pipeline.staging.` family default — no explicit `ApiErrorCatalog` row): a DuckDB scratch reservation that can never fit beside the leftover files a factory's sweep counted, a type distinct from the retryable `scratch_exhausted` (details `execution_id`, `requested_bytes`, `leftover_bytes`, `capacity_bytes`). Landed with the constants in `StagingErrorCodes` and `PipelineErrorCodes.Staging`. §13 row count 512 → 513. |
+| 2026-11-13 | v1.95 | 822 (#822) | §13.25 `lake.definition.apply_unclassified`: any step of the apply, not only the commit step, returns it — `pending` before the commit, left for `verifyApplying` after it; a release throws nothing after its landing but `lake.definition.not_found`. No code added or removed. |
 | 2026-11-12 | v1.94 | 847 (#847) — renumbered at merge after #821's v1.89 — renumbered at final sync after dependency-graph | §13.7 gains `auth.secret_verification.unavailable` (503): a native Argon2 verification failure that is not a mismatch is no longer a silent wrong password. Landed with the constants in `AuthErrorCodes` and `PipelineErrorCodes.Auth` and the explicit `ApiErrorCatalog` row (§13 row count 508 → 509, recounted with the drift test's own regex). |
 | 2026-11-12 | v1.93 | #821 invariants count a table caller output — renumbered at final sync after dependency-graph | §13.18 `invariants_too_large`: the COMBINED count also includes a `table` caller output's gated rows (it writes no tempdb table; a tempdb output is counted once, as its written table). No code, code count or permission change. |
 | 2026-11-12 | v1.92 | #876 alias flip | **§13 `pipeline`, `parameter`, `visualization` and `dashboard` `.release.dependency_not_released`, no new code:** the rows stop saying a bare `release_pinned_templates=true` cascades; since #876 it is refused `<family>.release.plan_required` (428) and nothing flips (versioning §5.3). |

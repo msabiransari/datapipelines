@@ -102,9 +102,15 @@ class JdbcUrlFormTest {
     fun `DuckDB - memory is in-process memory, a file is an in-process file, MotherDuck is unknown`() {
         assertAll(
             { JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb::memory:") shouldBe JdbcUrlForm.Form.InProcessMemory },
-            // The driver itself matches :memory: case-INSENSITIVELY (probed against
-            // duckdb_jdbc 1.5.5.1: :MEMORY: opened no file) — the classifier follows it.
-            { JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb::MEMORY:") shouldBe JdbcUrlForm.Form.InProcessMemory },
+            // #941: the driver matches :memory: case-SENSITIVELY (duckdb_jdbc 1.5.5.1, probed by
+            // DuckDbMemoryFormParityTest: :MEMORY: creates a literal file named :MEMORY:) — so a
+            // mixed-case variant is that file, and the roots rule vets the name the driver opens.
+            { JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb::MEMORY:") shouldBe JdbcUrlForm.Form.InProcessFile(":MEMORY:") },
+            { JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb::Memory:") shouldBe JdbcUrlForm.Form.InProcessFile(":Memory:") },
+            {
+                JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb::Memory:;threads=1") shouldBe
+                    JdbcUrlForm.Form.InProcessFile(":Memory:")
+            },
             { JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb:") shouldBe JdbcUrlForm.Form.InProcessMemory },
             {
                 JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb:/srv/sample/us_trade.duckdb") shouldBe

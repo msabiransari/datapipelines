@@ -1,5 +1,6 @@
 package co.datapipelines.application.lake
 
+import co.datapipelines.datasources.DuckDbDefaultCatalog
 import co.datapipelines.datasources.LakeRegisteredTable
 import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.SqlTableReferenceExtractor
@@ -58,14 +59,34 @@ class LakeReferenceScanServiceTest {
     private val datasources =
         DatasourceRegistry { name, _ ->
             when (name) {
-                "lake" -> DatasourceFacts(Dialect.LAKE)
+                "lake", "shop", "gone", "motherduck" -> DatasourceFacts(Dialect.LAKE)
                 "pg" -> DatasourceFacts(Dialect.POSTGRES)
                 else -> null
             }
         }
+
+    /**
+     * The registry of record's URLs (#790), composed with the REAL derivation exactly as the wiring composes them: `gone`
+     * is admitted as LAKE above but has no row here (deleted in between), `motherduck`'s URL is a form the derivation
+     * does not know. Every name asked is recorded.
+     */
+    private val urls =
+        mapOf(
+            "lake" to "jdbc:duckdb::memory:",
+            "shop" to "jdbc:duckdb:/var/lib/lake/shop.db",
+            "motherduck" to "jdbc:duckdb:md:shop",
+            "pg" to "jdbc:postgresql://pg/db",
+        )
+    private val catalogsAsked = mutableListOf<String>()
+    private val defaultCatalogs =
+        LakeDefaultCatalogs { name, workspaceId ->
+            workspaceId shouldBe workspace
+            catalogsAsked += name
+            urls[name]?.let(DuckDbDefaultCatalog::of)
+        }
     private val registry =
         LakeTableCatalog { name ->
-            if (name == "lake") {
+            if (name in setOf("lake", "shop", "gone", "motherduck")) {
                 listOf(LakeRegisteredTable(listOf("lk"), "events", "parquet", "s3://b/events", null, null))
             } else {
                 emptyList()
@@ -80,6 +101,7 @@ class LakeReferenceScanServiceTest {
             parameterSets,
             selectors,
             datasources,
+            defaultCatalogs,
             registry,
             extractor,
             index,
@@ -174,6 +196,66 @@ class LakeReferenceScanServiceTest {
         scan.reasons shouldContainExactly listOf(LakeScanReason("node:broken", "render_failed", "e778/broken.sql@1"))
         verify(exactly = 0) { nodeSql.resolve(workspace, id, "warehouse", any(), any(), any(), any()) }
         verify(exactly = 1) { index.replace(scan) }
+    }
+
+    @Test
+    fun `a site the workspace-scoped lookup does not admit as LAKE stays excluded - its catalog is never asked`() {
+        val id = UUID.randomUUID()
+        pipeline(id, "warehouse" to "pg", "elsewhere" to "not-visible", "read" to "lake")
+        template("e778/read.sql", "SELECT * FROM memory.lk.events")
+        resolves(id, "read", rendered("SELECT * FROM memory.lk.events"))
+
+        val scan = scanner.scan(ScannedVersion(workspace, ReleaseFamily.PIPELINE, id, 1))
+
+        scan.references.map { it.site } shouldContainExactly listOf("node:read")
+        catalogsAsked shouldContainExactly listOf("lake")
+    }
+
+    @Test
+    fun `a file-backed datasource - its own catalog's three-part name indexes under the one-segment namespace`() {
+        val id = UUID.randomUUID()
+        pipeline(id, "read" to "shop")
+        template("e778/read.sql", "SELECT * FROM shop.lk.events")
+        resolves(id, "read", rendered("SELECT e.* FROM shop.lk.events e JOIN memory.lk.events m ON m.id = e.id"))
+
+        val scan = scanner.scan(ScannedVersion(workspace, ReleaseFamily.PIPELINE, id, 1))
+
+        scan.references.map { it.writtenCatalog to it.resolved } shouldContainExactly
+            listOf(
+                "shop" to LakeTableIdentity(listOf("lk"), "events"),
+                "memory" to LakeTableIdentity(listOf("memory", "lk"), "events"),
+            )
+        catalogsAsked shouldContainExactly listOf("shop")
+    }
+
+    @Test
+    fun `an admitted datasource the registry of record no longer holds - a catalog-qualified name is UNRESOLVED`() {
+        catalogUnknownAt("gone")
+    }
+
+    @Test
+    fun `an admitted datasource whose URL form is not known - a catalog-qualified name is UNRESOLVED`() {
+        catalogUnknownAt("motherduck")
+    }
+
+    /** #790 outcome 2 (owner ruling 2026-11-13): no `memory` fallback, no error; names without a catalog resolve as today. */
+    private fun catalogUnknownAt(datasource: String) {
+        val id = UUID.randomUUID()
+        pipeline(id, "read" to datasource)
+        template("e778/read.sql", "SELECT * FROM lk.events")
+        resolves(id, "read", rendered("SELECT * FROM memory.lk.events UNION ALL SELECT * FROM lk.events UNION ALL SELECT * FROM events"))
+
+        val scan = scanner.scan(ScannedVersion(workspace, ReleaseFamily.PIPELINE, id, 1))
+
+        scan.status shouldBe LakeScanStatus.EXACT
+        val written = scan.references.map { listOfNotNull(it.writtenCatalog, it.writtenSchema, it.writtenTable).joinToString(".") }
+        written.zip(scan.references.map { it.resolved }) shouldContainExactly
+            listOf(
+                "memory.lk.events" to null,
+                "lk.events" to LakeTableIdentity(listOf("lk"), "events"),
+                "events" to LakeTableIdentity(listOf("lk"), "events"),
+            )
+        catalogsAsked shouldContainExactly listOf(datasource)
     }
 
     @Test

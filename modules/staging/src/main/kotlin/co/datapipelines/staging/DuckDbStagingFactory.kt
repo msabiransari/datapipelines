@@ -6,12 +6,15 @@ import org.duckdb.DuckDBConnection
 import org.duckdb.DuckDBDriver
 import org.slf4j.LoggerFactory
 import java.io.IOException
+import java.nio.channels.FileChannel
+import java.nio.file.Files
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.util.Properties
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The DuckDB staging factory (staging.md §8.5): one file-backed database per execution, bounded,
@@ -19,10 +22,18 @@ import java.util.UUID
  *
  * ## Open sequence
  *
- * 1. **Reserve** the scratch bytes from [budget] — `scratch_exhausted` before any file exists.
+ * 0. **Sweep, once per factory, before its first admission** (the first [create] or
+ *    [prepareDelivery]; #803): remove what crashed processes left in the scratch directory when
+ *    their owner is provably dead, and debit from [budget] the bytes of what nobody can vouch for
+ *    ([DuckDbScratchHousekeeper]). Concurrent first calls run one sweep and all wait for it.
+ * 1. **Reserve** the scratch bytes from [budget] — `scratch_blocked` or `scratch_exhausted` before
+ *    any file exists.
  * 2. Create the scratch directory owner-only, or check that a pre-existing one belongs to the
- *    process user and grants nothing to group or other (POSIX, [DuckDbStagingFiles.prepareScratchDir]),
- *    and remove any leftover of this execution id.
+ *    process user and grants nothing to group or other (POSIX, [DuckDbStagingFiles.prepareScratchDir]);
+ *    hold this factory's owner lock; write the database's ownership marker, after removing a
+ *    leftover of this execution id only when its owner is provably dead or is this factory (an
+ *    earlier attempt, no longer open). A same-id leftover that is live or that nobody can vouch for
+ *    fails the open, every file left as it was ([DuckDbScratchHousekeeper.claim]).
  * 3. Open DP's own **root** connection on `<scratch dir>/exec_<id>.duckdb` with
  *    `allow_persistent_secrets=false` and streamed results, then apply, in order: `memory_limit`,
  *    `temp_directory` (beside the file), `max_temp_directory_size` = the reservation, `threads`,
@@ -33,10 +44,11 @@ import java.util.UUID
  *    off, `memory_limit` and `max_temp_directory_size` ([DuckDbConfigurationReadBack]); a database
  *    where any of them did not take is never handed out.
  *
- * Any failure after the reservation closes the root, deletes the files and releases the
- * reservation (`try`/`finally`). Setup failures surface as `creation_failed`; sanitized trusted
- * initialization refusals retain their domain code. Every lease afterwards is a
- * `duplicate()` of the locked root: it inherits the locked configuration and cannot change it
+ * Any failure after the reservation closes the root, deletes the files THAT attempt created (none
+ * when it failed before its marker was written) and releases the reservation (`try`/`finally`).
+ * Setup failures surface as `creation_failed`; sanitized trusted initialization refusals retain
+ * their domain code. Every lease afterwards is a `duplicate()` of the locked root: it inherits the
+ * locked configuration and cannot change it
  * (measured, lane #795 probe 12 — `SET`, `RESET` and `SET lock_configuration = false` are refused).
  *
  * `memory_limit` bounds DuckDB's buffer manager only, not the JVM heap and not every native
@@ -44,16 +56,32 @@ import java.util.UUID
  * acceptance work; this factory does not enforce it.
  *
  * @param budget the aggregate every database of this factory reserves from; one per factory.
+ * @param beforeSweep runs inside the sweep's critical section, before the sweep reads anything — a
+ *   test seam that holds a sweep open; nothing in production.
  * @param connect the JDBC open — `DriverManager` in production. A fault-injection seam for tests.
+ *   Kept LAST: callers pass it as a trailing lambda.
  */
 class DuckDbStagingFactory internal constructor(
     /** The resolved configuration; readable so wiring is testable. */
     val properties: DuckDbStagingProperties,
     val budget: ScratchBudget,
+    private val beforeSweep: () -> Unit = {},
     private val connect: (url: String, props: Properties) -> Connection,
 ) : StagingFactory {
     constructor(properties: DuckDbStagingProperties) :
-        this(properties, ScratchBudget(properties.scratchCapacityBytes), DriverManager::getConnection)
+        this(properties, ScratchBudget(properties.scratchCapacityBytes), connect = DriverManager::getConnection)
+
+    /** This factory's owner id in the scratch directory; memory only until the first open. */
+    private val ownerId = DuckDbScratchOwnership.newOwner()
+    private val housekeeper = DuckDbScratchHousekeeper(properties.scratchDir, ownerId, log)
+    private val sweepLock = Any()
+
+    @Volatile private var swept = false
+    private val ownerLock = Any()
+
+    /** The owner file's channel, open (and locked) for the life of the process once the first open ran. */
+    @Volatile private var ownerChannel: FileChannel? = null
+    private val openHere: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
 
     override fun create(
         executionId: UUID,
@@ -82,8 +110,45 @@ class DuckDbStagingFactory internal constructor(
         executionId: UUID,
         reservationBytes: Long,
     ): StagingPreparation {
+        sweepOnce(executionId)
         val reservation = budget.reserve(executionId, reservationBytes)
         return ReservedStagingPreparation(reservation) { initializer -> open(executionId, reservation, initializer) }
+    }
+
+    /**
+     * The startup sweep, once: concurrent first callers wait on [sweepLock], so no reservation is
+     * granted before the leftover debit. A refused directory is not read, the call fails as
+     * `creation_failed`, and the next admission tries again.
+     */
+    private fun sweepOnce(executionId: UUID) {
+        if (swept) return
+        synchronized(sweepLock) {
+            if (swept) return
+            beforeSweep()
+            val result =
+                try {
+                    housekeeper.sweep()
+                } catch (e: IOException) {
+                    throw creationFailed(executionId, e)
+                } catch (e: IllegalArgumentException) {
+                    throw creationFailed(executionId, e)
+                }
+            budget.countLeftovers(result.countedBytes)
+            swept = true
+        }
+    }
+
+    /** Marks [executionId] open in this factory; a second open of the same id is refused. */
+    private fun holdId(executionId: UUID) {
+        if (!openHere.add(executionId)) throw IOException("execution $executionId is already open in this factory")
+    }
+
+    /** Locks this factory's owner file once, after the directory was prepared. */
+    private fun holdOwnerFile() {
+        if (ownerChannel != null) return
+        synchronized(ownerLock) {
+            if (ownerChannel == null) ownerChannel = DuckDbScratchOwnership.lockOwnerFile(properties.scratchDir, ownerId)
+        }
     }
 
     private fun open(
@@ -93,16 +158,18 @@ class DuckDbStagingFactory internal constructor(
     ): DuckDbStaging {
         val files = DuckDbStagingFiles(properties.scratchDir, executionId)
         var root: DuckDBConnection? = null
-        var scratchValidated = false
+        var claimedId = false
+        var markerWritten = false
         var handedOut = false
         try {
             val failure: Exception =
                 try {
                     DuckDbStagingFiles.prepareScratchDir(properties.scratchDir)
-                    scratchValidated = true
-                    files.delete().forEach { (path, e) ->
-                        log.warn("stale DuckDB staging path {} could not be removed: {}", path, e.message)
-                    }
+                    holdOwnerFile()
+                    holdId(executionId)
+                    claimedId = true
+                    housekeeper.claim(files)
+                    markerWritten = true
                     val opened = connect("$URL_PREFIX${files.database}", openProperties()).unwrap(DuckDBConnection::class.java)
                     root = opened
                     applyLockedConfiguration(opened, files, reservation.bytes, initializer, executionId)
@@ -124,7 +191,10 @@ class DuckDbStagingFactory internal constructor(
                 }
             throw creationFailed(executionId, failure)
         } finally {
-            if (!handedOut && scratchValidated) abandon(executionId, root, files)
+            if (!handedOut) {
+                if (markerWritten) abandon(executionId, root, files)
+                if (claimedId) openHere.remove(executionId)
+            }
         }
     }
 
@@ -184,7 +254,8 @@ class DuckDbStagingFactory internal constructor(
                     e.message,
                 )
             }
-            files.delete().forEach { (path, e) ->
+            val failures = files.delete()
+            failures.forEach { (path, e) ->
                 log.warn(
                     "{}: DuckDB staging path {} of execution {} not deleted: {}",
                     StagingErrorCodes.CLEANUP_FAILED,
@@ -193,7 +264,11 @@ class DuckDbStagingFactory internal constructor(
                     e.message,
                 )
             }
+            // The marker outlives a failed delete: what is left stays this owner's, removed by a
+            // later same-id open here or by the first sweep after this process ends.
+            if (failures.isEmpty()) deleteMarker(files)
         } finally {
+            openHere.remove(executionId)
             reservation.release()
         }
     }
@@ -204,8 +279,20 @@ class DuckDbStagingFactory internal constructor(
         files: DuckDbStagingFiles,
     ) {
         runCatching { root?.close() }
-        files.delete().forEach { (path, e) ->
+        // Only what this attempt created: its marker was written exclusively and no database path
+        // existed before it (DuckDbScratchHousekeeper.claim), so the three paths are this attempt's.
+        val failures = files.delete()
+        failures.forEach { (path, e) ->
             log.warn("DuckDB staging path {} of failed open {} not deleted: {}", path, executionId, e.message)
+        }
+        if (failures.isEmpty()) deleteMarker(files)
+    }
+
+    private fun deleteMarker(files: DuckDbStagingFiles) {
+        try {
+            Files.deleteIfExists(files.marker)
+        } catch (e: IOException) {
+            log.warn("{}: DuckDB staging marker {} not deleted: {}", StagingErrorCodes.CLEANUP_FAILED, files.marker, e.message)
         }
     }
 

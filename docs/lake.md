@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.18 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end)
+**Status:** v1.21 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -109,8 +109,10 @@ promotion (P9). Lifecycle mutations lock the managed-table row before version ro
 | any | any verb on an unknown table or version | both | refused `lake.definition.not_found` | unchanged |
 | any | any verb | hard | refused `lake.definition.authoring_disabled` | unchanged |
 
-Release writes `lake.definition.released` in its transaction ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events));
-the apply that follows writes its own event. A release's answer carries the apply's outcome; a refused apply never
+Release writes `lake.definition.released`, discard `lake.definition.discarded` and purge-draft
+`lake.definition.draft_purged`, each in its own transaction with the acting user and the surface it came through
+([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)): a failed audit insert rolls the step back, and a
+refused step writes no row. The apply that follows a release writes its own event. A release's answer carries the apply's outcome; a refused apply never
 undoes the release (landed is not applied, dp-lake record ruling 8).
 
 ---
@@ -134,8 +136,8 @@ release / promotion landing ──► pending ──(attempt owns the row)──
 | `applying` | the attempt finds the table's shape already equal to the definition under another version stamp, or none (drift adopted, a tags-only version) | `applied`, one commit that sets only `dp.definition.version` |
 | `applying` | the attempt commits the change | `applied` |
 | `applying` | the change is refused (§4), drifted, or refused by Iceberg before the commit | `failed`, `apply_error_json` holds `code` and the detail |
-| `applying` | the namespace or table lease is busy past the wait, or the catalog fenced or restored | `pending` |
-| `applying` | the commit's outcome is unknown: the catalog connection failed while it was in flight, or the commit step failed with an error the catalog does not classify (`lake.definition.apply_unclassified`) | stays `applying`; a verify settles it |
+| `applying` | the namespace or table lease is busy past the wait, the catalog fenced or restored, or a step before the commit failed with an error the catalog does not classify (`lake.definition.apply_unclassified`) | `pending` |
+| `applying` | the attempt cannot say what it left: the catalog connection failed while the commit was in flight, the commit step failed with an error the catalog does not classify, or DP's metadata store failed at or after the `applying` mark so the row could not be stamped (`lake.definition.apply_unclassified`) | stays `applying`; a verify settles it |
 | `applying` | a verify finds no catalog revision by the attempt's operation | `pending` |
 | `applying` | a verify finds the attempt's revision | `applied` |
 
@@ -156,12 +158,40 @@ process dies after the commit, the row stays `applying`. A later attempt finds t
 attempt reads the revision log and stamps `applied` (a revision exists) or `pending` (none does). A verify leaves
 alone a row whose table lease is still held, or whose lease row another transaction holds past the lock timeout.
 
-**An unclassified failure of the commit.** The commit step can fail with an exception that is not one of the
-catalog's refusals. That ends the attempt the same way: the row stays `applying` and the attempt's outcome is
-`lake.definition.apply_unclassified`. A release that reaches it returns that outcome rather than throwing, because
-its landing has already committed. A verify settles the row from the revision log. Some failures outside the commit
-step still propagate after a release has landed
-([#822](https://github.com/msabiransari/datapipelines/issues/822)).
+**An unclassified failure at any step.** Any step of the apply can fail with an exception that is not one of the
+catalog's refusals: the release's deadline read, opening or closing a catalog session, loading or planning the table,
+the commit, or DP's own metadata store (the leases, the `applying` mark, the stamps). The attempt never throws it: the
+failure is logged once at ERROR naming the step ([Observability §3.4R](observability.md#34r-the-lake-table-definition-apply-events-798))
+and the attempt's outcome is `lake.definition.apply_unclassified`. Before the commit nothing was committed, so the row
+is put back to `pending`, or stays `pending` when it was never marked. From the commit on, or wherever the row could
+not be stamped, the outcome is unknown and the row is left for a verify, which settles an `applying` row from the
+revision log; a row whose mark never landed stays `pending` for the retry verb (P8). A failed lease release or table
+session close is logged and dropped: the leases end by their own deadline and the outcome stands. A namespace session
+that fails to close ends the attempt `pending` before the table step. A release that reaches any of these returns the
+outcome rather than throwing, because its landing has already committed; after the landing it refuses only a table or
+version that does not exist (`lake.definition.not_found`).
+
+**A catalog server that never answers (#878).** Every catalog connection is opened with pgjdbc's `socketTimeout` =
+`datapipelines.lake.catalog.statement-timeout-seconds` + 5 s — B, 35 s as shipped — derived in one place (the fenced
+pool) and read back from the connection before the lease settings are sent; a connection that does not report B is
+closed and refused, never used. The server-side `statement_timeout` cannot end a statement on a server that accepts
+and never answers: the catalog sets no JDBC `queryTimeout`, so the driver sends no cancel, and the read ends at B
+alone with SQLState `08006` (measured: 8.0 s at a 3-second setting, pgjdbc 42.7.13, a paused server). An apply whose
+session open, namespace create, table read or table create ends this way returns `pending` with
+`lake.catalog.outcome_unknown`, and the next attempt reads the catalog again before it decides (a create that did land
+is found by that read); a table commit that ends this way is unknown and stays `applying` for a verify (the table
+above). Nothing is replayed (design record §8a).
+**Opening a connection.** The bound is on the socket before the first handshake read, so a silent server ends the
+open with `08001` (connect), not `08006` (an established session): within B under `sslmode=disable`, and within
+`min(sslResponseTimeout, B) + B` under the default `sslmode=prefer` — the SSL request's wait, then the driver's own
+attempt without TLS, which is handshake fallback and sends no catalog statement (measured at B = 6 s: 6.0 s and
+11.0 s). Each TCP connect is bounded separately by `connectTimeout` (the driver's default 10 s), and
+`gssEncMode=prefer` or `require` adds one `min(gssResponseTimeout, B)` wait per attempt. `sslmode`, `connectTimeout`
+and `sslResponseTimeout` are the inputs of this envelope; a catalog URL carrying `socketTimeout`, or a zero
+`connectTimeout`, `sslResponseTimeout` or `gssResponseTimeout` (zero means no timeout), is refused when a catalog
+session opens ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)). The assumptions: pgjdbc honours
+`socketTimeout` (read back on every connection) and applies it before the handshake (`ConnectionFactoryImpl.tryConnect`
+at 42.7.13).
 
 **What `applied` writes,** in one transaction with the stamp: the column semantics projection
 (`lake_column_semantics`, rebuilt from the definition: field id, name, DP and Iceberg type, required, doc, tags) and,
@@ -339,6 +369,17 @@ One Iceberg transaction appends all files and sets `dp.delivery.key`, `dp.operat
 classified authority refusals fail, while an unconfirmed commit stays UNKNOWN. Classification uses exception
 types and SQLSTATEs through the bounded cause chain, never localized messages. Periodic heartbeat preserves
 only a live lease, capped by the admitted deadline; loss, deadline or cancellation stops further mutations.
+
+**A catalog server that never answers (#878).** Publication's catalog session is bounded as §3 states: each read and
+the commit end at B = `catalog.statement-timeout-seconds` + 5 s with `08006`, and opening the session ends with
+`08001` within §3's envelope. Before the commit is entered — the session open, the table load, the first refresh —
+the delivery ends `FAILED` in phase `publish`: this operation sent no commit, and its files stay for maintenance.
+Once the commit is entered — its CAS, or a refresh before a later CAS retry — the delivery is `UNKNOWN` and settlement
+(§8) decides it from the revision log; nothing is replayed. The ended client says nothing about the server: a server
+that resumes before its own `statement_timeout` can still commit the statement the client gave up on, which is why the
+outcome is unknown rather than failed (measured once: the interrupted commit left no revision row, its backend
+cancelled by its `statement_timeout` when the server resumed). The bound changes no grace rule: commit completion was
+never clock-bounded (design record §8a), so `orphan-grace-hours` keeps its argument.
 
 ## 8. Settlement and recovery
 
@@ -549,6 +590,9 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.21 | 878 (#878) — renumbered at merge after #814's v1.20 | §3 and §7: every catalog connection carries pgjdbc's `socketTimeout` = `catalog.statement-timeout-seconds` + 5 s, read back before use; against a server that never answers a statement ends at that bound alone with `08006` (no cancel is sent: the catalog sets no `queryTimeout`), and opening ends with `08001` within B (`sslmode=disable`) or `min(sslResponseTimeout, B) + B` (default `prefer`). States what each apply and publication step leaves (pending, applying, FAILED, UNKNOWN), that nothing is replayed, and the URL settings refused when a session opens. |
+| 2026-11-13 | v1.20 | 814 (#814) | §2: discard writes `lake.definition.discarded` and purge-draft `lake.definition.draft_purged` in their own transactions (both verbs now take the acting user and `via`); an audit failure rolls the step back, a refusal writes no row (dp-lake record §12, erratum 2026-11-12). |
+| 2026-11-13 | v1.19 | 822 (#822) | §3: every failure of an apply step is returned as the attempt's outcome, never thrown after a release's landing: `pending` before the commit, unknown (left for a verify) from the commit on or when the row could not be stamped; a failed lease release or table session close keeps the outcome; a failed namespace session close ends the attempt `pending`. The state table's `pending` and unknown rows and the paragraph (now "An unclassified failure at any step") say so; the #822 sentence goes. |
 | 2026-11-08 | v1.18 | 866 (#866) | §8: the abandoned metadata read's conditional stalled-store network-wait envelope is derived in `SettlementObjectReadEnd.stalledReadEndByMillis` from effective connect/socket values and Iceberg's configured retry policy: four request allowances plus all body and close reads, 420 400 ms with the shipped inputs. Pins the library assumptions and states residual phases without an end-to-end timer. Corrects the v1.15 row's one-timeout claim; the measured ~62 s remains an observation. |
 | 2026-11-08 | v1.17 | 858 (#858) | §8: the settlement tick's statements carry a socket bound (5 s + 5 s) through the runtime's own template, so against a server that accepts and never answers a statement ends with `08006` at max(10, 5 + 10) = 15 s; the exception for this tick is gone, and the paragraph states the limit's two assumptions and that a transaction's later statements and commit read under the bound. The conditional 16 s overrun and 31 s tick are unchanged. |
 | 2026-11-08 | v1.16 | 833 (#824) managed retire ceiling | §9 "The bound.": the staleness rule's ceiling term is the managed retire ceiling (`managed-retire-ceiling-seconds`, else `node-query-timeout-max-seconds` + 30); shipped 900 + 14 + 930 + 60 = 1904 ≤ 25 200 s. |
