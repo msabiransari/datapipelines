@@ -46,6 +46,7 @@ class DuckDbScratchHealthIndicator(
     private data class Verdict(
         val status: Status,
         val reason: String,
+        val usableBytes: Long? = null,
     )
 
     @Suppress("TooGenericExceptionCaught")
@@ -85,7 +86,7 @@ class DuckDbScratchHealthIndicator(
             else -> {
                 Verdict(Status.UP, "$target has $usable usable bytes; one default reservation is $thresholdBytes bytes")
             }
-        }
+        }.copy(usableBytes = usable)
     }
 
     private fun report(verdict: Verdict) {
@@ -93,9 +94,10 @@ class DuckDbScratchHealthIndicator(
             log.info("event=staging.scratch.health status=UP path={} reason=\"{}\"", space.directory, verdict.reason)
         } else {
             log.warn(
-                "event=staging.scratch.health status={} path={} threshold_bytes={} reason=\"{}\"",
+                "event=staging.scratch.health status={} path={} usable_bytes={} threshold_bytes={} reason=\"{}\"",
                 verdict.status.code,
                 space.directory,
+                verdict.usableBytes ?: "unknown",
                 thresholdBytes,
                 verdict.reason,
             )

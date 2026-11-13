@@ -196,6 +196,7 @@ class DuckDbScratchHealthIndicatorTest {
             appender.list.size shouldBe 2
             appender.list[1].level shouldBe Level.WARN
             appender.list[1].formattedMessage shouldContain "status=DOWN"
+            appender.list[1].formattedMessage shouldContain "usable_bytes=unknown"
 
             reader.throwOnUsable = false
             reader.usable[dir] = THRESHOLD
@@ -203,6 +204,28 @@ class DuckDbScratchHealthIndicatorTest {
             appender.list.size shouldBe 3
             appender.list[2].level shouldBe Level.INFO
             appender.list[2].formattedMessage shouldContain "status=UP"
+        } finally {
+            logger.detachAppender(appender)
+        }
+    }
+
+    @Test
+    fun `an unwritable directory warning includes the usable bytes even when space is sufficient`() {
+        val logger = LoggerFactory.getLogger(DuckDbScratchHealthIndicator::class.java) as Logger
+        // raw-list-appender: synchronous — the indicator is probed on the test thread only
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            healthyDirectory(usable = THRESHOLD * 10)
+            reader.writable.remove(dir)
+            val indicator = indicator()
+            repeat(3) { statusOf(indicator.health()) shouldBe Status.OUT_OF_SERVICE }
+            appender.list.size shouldBe 1
+            val warn = appender.list.single()
+            warn.level shouldBe Level.WARN
+            warn.formattedMessage shouldContain "path=$dir"
+            warn.formattedMessage shouldContain "usable_bytes=${THRESHOLD * 10}"
+            warn.formattedMessage shouldContain "threshold_bytes=$THRESHOLD"
         } finally {
             logger.detachAppender(appender)
         }
