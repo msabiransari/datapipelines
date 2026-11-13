@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.97 (revised — see Change Log)
+**Status:** v1.98 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-13
@@ -1756,6 +1756,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.append.null_in_required` | 400 | The staged result has null values in required columns; details contain every count. |
 | `lake.append.type_mismatch` | 400 | A staged native type cannot be stored without narrowing or coercion. |
 | `lake.append.too_many_partitions` | 400 | The append would open more distinct output partitions than admitted. It stops before opening the excess partition, commits nothing, and retains already written files for maintenance. |
+| `lake.append.partition_value_out_of_range` | 400 | The staged result has values a `truncate[N]` partition over an `INTEGER`, `BIGINTEGER`, `DECIMAL(p,s)` or `BIGDECIMAL` column cannot hold: Iceberg's own truncate, which rounds toward negative infinity, would give a partition value outside the column's type (a decimal one digit wider than the column, an integer that wraps above the row). Only the lowest values of a column's range can do this, depending on N. Raised by the append's first scan, after `lake.append.null_in_required` and before a data file is written or a catalog commit starts. `details.out_of_range_counts` maps each partition field, written `truncate[N](<column>)` (for example `truncate[2](amount)`), to its number of rows; never a value. Temporary, until Iceberg keeps the value inside its type ([Lake §7](lake.md#7-append-publication); apache/iceberg 17027, 13105). |
 | `lake.append.recipe_exists` | 500 | An attempt's immutable recipe key already exists. Bug signal: the PUT is not retried or overwritten; catalog publication has not started. |
 | `lake.append.forbidden` | 403 | The effective principal lacks `lake.append`; key authority comes from the key's own role, never its creator's identity or current role. |
 | `lake.append.recipe_write_failed` | 503 | The immutable recipe could not be written before the admission-fixed deadline. No catalog publication; storage messages and causes are stripped. |
@@ -2042,6 +2043,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.98 | 967 (#967) — renumbered at the spec sync after #935's v1.97 | §13.25 gains `lake.append.partition_value_out_of_range` (400): the append's first scan refuses a delivery with a value a numeric `truncate` partition cannot hold, before anything is written (owner ruling 2026-11-13, temporary until apache/iceberg 17027 and 13105). Landed with the constant in `PipelineErrorCodes.Lake` and the explicit `ApiErrorCatalog` row (§13 row count 513 → 514, recounted with the drift test's own regex). |
 | 2026-11-13 | v1.97 | 935 (#935) | §13.25 `lake.definition.invalid_body`: a release returns it too, when its stored draft breaks the sort-column rule of lake.md §1 (sort columns fixed by the table's first release); nothing is released and no audit row is written. No code added or removed. |
 | 2026-11-13 | v1.96 | 803 (#803) — renumbered at merge after #822's v1.95 | §13.5 gains `pipeline.staging.scratch_blocked` (500, the `pipeline.staging.` family default — no explicit `ApiErrorCatalog` row): a DuckDB scratch reservation that can never fit beside the leftover files a factory's sweep counted, a type distinct from the retryable `scratch_exhausted` (details `execution_id`, `requested_bytes`, `leftover_bytes`, `capacity_bytes`). Landed with the constants in `StagingErrorCodes` and `PipelineErrorCodes.Staging`. §13 row count 512 → 513. |
 | 2026-11-13 | v1.95 | 822 (#822) | §13.25 `lake.definition.apply_unclassified`: any step of the apply, not only the commit step, returns it — `pending` before the commit, left for `verifyApplying` after it; a release throws nothing after its landing but `lake.definition.not_found`. No code added or removed. |
