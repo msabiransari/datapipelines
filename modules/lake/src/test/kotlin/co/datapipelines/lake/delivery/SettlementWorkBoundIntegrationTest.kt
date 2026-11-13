@@ -180,12 +180,13 @@ class SettlementWorkBoundIntegrationTest {
         sent shouldBe
             mapOf(
                 "before protection" to listOf("heartbeat"),
-                "before tables" to listOf("protection", "heartbeat"),
-                "before mode" to listOf("protection", "tables", "heartbeat"),
-                "after mode" to listOf("protection", "tables", "mode", "heartbeat"),
-                "before target" to listOf("protection", "tables", "mode", "heartbeat"),
-                "before page" to listOf("protection", "tables", "mode", "target", "heartbeat"),
-                "before row" to listOf("protection", "tables", "mode", "target", "page", "heartbeat"),
+                "before stamp" to listOf("alignment", "heartbeat"),
+                "before tables" to listOf("alignment", "protection", "heartbeat"),
+                "before mode" to listOf("alignment", "protection", "tables", "heartbeat"),
+                "after mode" to listOf("alignment", "protection", "tables", "mode", "heartbeat"),
+                "before target" to listOf("alignment", "protection", "tables", "mode", "heartbeat"),
+                "before page" to listOf("alignment", "protection", "tables", "mode", "target", "heartbeat"),
+                "before row" to listOf("alignment", "protection", "tables", "mode", "target", "page", "heartbeat"),
             )
         sweepLines() shouldBe List(STEPS_BEFORE_THE_TABLE) { "tables=0 rows=0 changed=0 exhausted=true" } +
             List(STEPS_TO_THE_ROW.size - STEPS_BEFORE_THE_TABLE) { "tables=1 rows=0 changed=0 exhausted=true" }
@@ -199,7 +200,7 @@ class SettlementWorkBoundIntegrationTest {
             h.sweep(budgets = { spentAtCheck(spentAt) }).runOnce()
             sent[step] = sql.executed.map(::groupOf)
         }
-        val toThePage = listOf("protection", "tables", "mode", "target", "page")
+        val toThePage = listOf("alignment", "protection", "tables", "mode", "target", "page")
         sent shouldBe
             mapOf(
                 "before projection" to toThePage + "heartbeat",
@@ -228,7 +229,7 @@ class SettlementWorkBoundIntegrationTest {
         val sweep = h.sweep(budgets = { budget() })
 
         tick(sweep) shouldBe 0
-        budget = { spentAtCheck(2) }
+        budget = { spentAtCheck(STEPS_TO_THE_ROW.getValue("before tables")) }
         tick(sweep) shouldBe 0
         sql.executed.none { groupOf(it) == "tables" } shouldBe true
         budget = { fresh() }
@@ -365,6 +366,7 @@ class SettlementWorkBoundIntegrationTest {
     @Suppress("CyclomaticComplexMethod") // One flat lookup: a branch per group, in match order.
     private fun groupOf(statement: String): String =
         when {
+            statement.startsWith("UPDATE lake_control SET protection_interval") -> "alignment"
             statement.startsWith("UPDATE lake_table_revisions r SET protected_until") -> "protection"
             statement.startsWith("SELECT id FROM lake_tables_managed") -> "tables"
             statement.startsWith("SELECT mode = ") -> "mode"
@@ -441,14 +443,26 @@ class SettlementWorkBoundIntegrationTest {
         /** In one settlement call over an empty page: 1 before the target, 2 before the page, 3 before the projection. */
         const val PROJECTION_CHECK = 3
 
-        /** Every check of a tick over one table with no rows, in the order the tick meets them. */
-        const val SWEEP_CHECKS = 9
-        const val STEPS_BEFORE_THE_TABLE = 4
+        /**
+         * Every check of a tick over one table with no rows, in the order the tick meets them. #939: the protection step
+         * is the window alignment, then the stamp, with a check before each.
+         */
+        const val SWEEP_CHECKS = 10
+        const val STEPS_BEFORE_THE_TABLE = 5
         val STEPS_TO_THE_ROW =
-            listOf("before protection", "before tables", "before mode", "after mode", "before target", "before page", "before row")
+            listOf(
+                "before protection",
+                "before stamp",
+                "before tables",
+                "before mode",
+                "after mode",
+                "before target",
+                "before page",
+                "before row",
+            )
                 .withIndex()
                 .associate { (index, step) -> step to index + 1 }
-        val STEPS_AFTER_THE_ROWS = mapOf("before projection" to 7, "before verification" to 8, "before repair" to 9)
+        val STEPS_AFTER_THE_ROWS = mapOf("before projection" to 8, "before verification" to 9, "before repair" to 10)
         const val REPAIR = "INSERT INTO lake_tables (datasource_id"
 
         /**
