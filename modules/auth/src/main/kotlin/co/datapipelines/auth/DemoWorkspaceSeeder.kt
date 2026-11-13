@@ -15,8 +15,8 @@ import java.util.UUID
  * `create()` grants `demo` every instance datasource (owned by no workspace) through
  * [InstanceDatasourceGrants], the managed lake among them when it is enabled: the managed-lake
  * registrar registers that row while the beans are created, before this seeder runs from
- * `afterSingletonsInstantiated()`, so `demo` sees the lake from the moment it exists, without
- * waiting for the freshness tick (#881, pinned by `DemoWorkspaceManagedLakeGrantE2eTest`). A
+ * `afterSingletonsInstantiated()`, so its grant is installed during startup, before the first
+ * freshness tick (#881, pinned by `DemoWorkspaceManagedLakeGrantE2eTest`). A
  * `demo` created while the lake was disabled is granted by the boot that enables it. This
  * seeder does not call `WorkspaceService.create`, so the creation-time managed grant of #823
  * is not its path.

@@ -29,9 +29,9 @@ import java.util.Base64
 import java.util.UUID
 
 /**
- * #881 (dp-lake record §6, §10 D3; owner ruling 2026-11-07 on #823: a workspace never exists without the managed
- * lake's grant) — the shipped `demo` workspace holds the managed lake's grant from the moment it exists, without
- * waiting for the freshness tick.
+ * #881 (dp-lake record §6, §10 D3): the shipped `demo` receives the managed lake's grant during startup,
+ * before the first freshness tick. The ordinary-workspace creation transaction of #823 (owner ruling
+ * 2026-11-07) is separate from the demo seeder; these cases do not assert atomic workspace-and-grant visibility.
  *
  * The trace the issue missed: the managed-lake registrar is `@PostConstruct`, so on a fresh database it creates the
  * unowned managed row (and grants it to every workspace that exists then) before any `afterSingletonsInstantiated()`
