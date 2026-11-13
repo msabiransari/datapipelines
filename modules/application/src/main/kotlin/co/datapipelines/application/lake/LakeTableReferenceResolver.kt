@@ -9,7 +9,11 @@ import co.datapipelines.datasources.WrittenTableReference
  * `ns1`, schema `ns2`; a ONE-segment namespace is a schema of the default catalog; and the connection's `search_path`
  * names a schema only when the datasource registers exactly one namespace.
  *
- * - `c.s.t` → `[c, s]` (or `[s]` when `c` is the default catalog);
+ * The default catalog is the SITE'S DATASOURCE'S (#790): `memory` for an in-memory URL, the database name for a file —
+ * never the parse engine's. When it is not known (null), a catalog-qualified name is UNRESOLVED: a guessed catalog
+ * would be stored as a resolved identity and be silently wrong (owner ruling 2026-11-13).
+ *
+ * - `c.s.t` → `[c, s]` (or `[s]` when `c` is the default catalog; UNRESOLVED when the default catalog is unknown);
  * - `s.t` → `[s]`;
  * - `t` → `[ns]` when the datasource registers exactly one namespace `ns`, else UNRESOLVED.
  *
@@ -17,14 +21,17 @@ import co.datapipelines.datasources.WrittenTableReference
  * schemas (`information_schema`, `pg_catalog`), and its internal views (`duckdb_tables`, …) spelled bare or in `main`.
  *
  * The identity is spelled as the registry spells it when the registry holds it (identifiers match case-insensitively),
- * else as written. Pure: the registry's tables and the engine's facts are arguments.
+ * else as written. Pure: the registry's tables, the engine's facts and the default catalog are arguments.
  */
 object LakeTableReferenceResolver {
     sealed interface Resolution {
         /** The position names no table (CTE, system object): it writes no row. */
         data object NotATable : Resolution
 
-        /** A table position whose registry identity the written form does not determine (a bare name, several namespaces). */
+        /**
+         * A table position whose registry identity the written form does not determine (a bare name, several namespaces,
+         * or a catalog-qualified name on a datasource whose default catalog is unknown).
+         */
         data object Unresolved : Resolution
 
         data class Resolved(
@@ -36,6 +43,7 @@ object LakeTableReferenceResolver {
         reference: WrittenTableReference,
         registered: List<LakeTableIdentity>,
         engine: SqlTableReferenceExtractor.EngineFacts,
+        defaultCatalog: String?,
     ): Resolution {
         if (isSystemObject(reference, engine)) return Resolution.NotATable
         val catalog = reference.catalog
@@ -43,7 +51,11 @@ object LakeTableReferenceResolver {
         val namespace =
             when {
                 catalog != null && schema != null -> {
-                    if (catalog.equals(engine.defaultCatalog, ignoreCase = true)) listOf(schema) else listOf(catalog, schema)
+                    when {
+                        defaultCatalog == null -> return Resolution.Unresolved
+                        catalog.equals(defaultCatalog, ignoreCase = true) -> listOf(schema)
+                        else -> listOf(catalog, schema)
+                    }
                 }
 
                 schema != null -> {

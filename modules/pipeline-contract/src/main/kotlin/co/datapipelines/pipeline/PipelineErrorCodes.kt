@@ -667,6 +667,7 @@ object PipelineErrorCodes {
         const val INVALID_COLUMN_NAME = "pipeline.staging.invalid_column_name"
         const val TABLE_ALREADY_EXISTS = "pipeline.staging.table_already_exists"
         const val SCRATCH_EXHAUSTED = "pipeline.staging.scratch_exhausted"
+        const val SCRATCH_BLOCKED = "pipeline.staging.scratch_blocked"
         const val SCRATCH_LIMIT_EXCEEDED = "pipeline.staging.scratch_limit_exceeded"
     }
 
@@ -2284,9 +2285,9 @@ object PipelineErrorCodes {
         const val DEFINITION_AUTHORING_DISABLED = "lake.definition.authoring_disabled"
 
         /**
-         * #811 — the apply's commit step failed with an exception that is none of the catalog's classified refusals,
-         * so whether the commit landed is unknown. The row stays `applying` for `verifyApplying`; never recorded as
-         * `failed`, and a release that reached it returns it as its apply outcome.
+         * #811, #822 — a step of the apply failed with an exception that is none of the catalog's classified refusals:
+         * before the commit the row is `pending` again; from the commit on, or when the row could not be stamped, it is
+         * left for `verifyApplying`. Never recorded as `failed`, and a release that reached it returns it as its apply outcome.
          */
         const val DEFINITION_APPLY_UNCLASSIFIED = "lake.definition.apply_unclassified"
 

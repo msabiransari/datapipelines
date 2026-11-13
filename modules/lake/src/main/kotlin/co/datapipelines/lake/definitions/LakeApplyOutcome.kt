@@ -34,18 +34,22 @@ sealed interface LakeApplyOutcome {
     }
 
     /**
-     * Row `pending`: the attempt stopped before any commit ([code] names why: the fence, restoring mode, a lost lease),
-     * or a verify found that the interrupted attempt committed nothing ([code] null).
+     * Row `pending`: the attempt stopped before any commit ([code] names why: the fence, restoring mode, a lost lease;
+     * `lake.definition.apply_unclassified` for a failure no catalog classified, at any step before the commit, the
+     * release's deadline read included, #822), or a verify found that the interrupted attempt committed nothing
+     * ([code] null).
      */
     data class Pending(
         override val code: String?,
     ) : LakeApplyOutcome
 
     /**
-     * A commit's outcome is unknown. The row stays `applying` for [LakeDefinitionApplier.verifyApplying], which settles
-     * it from the revision log. [code] says why: `lake.catalog.outcome_unknown`, the catalog connection failed while
-     * the commit was in flight; `lake.definition.apply_unclassified`, the commit step failed with an exception the
-     * catalog does not classify (#811).
+     * The attempt cannot say what it left: a commit's outcome is unknown, or the row could not be stamped. The row is
+     * left for [LakeDefinitionApplier.verifyApplying], which settles an `applying` row from the revision log; a row whose
+     * `applying` mark never landed stays `pending` for the retry verb. [code] says why: `lake.catalog.outcome_unknown`,
+     * the catalog connection failed while the commit was in flight; `lake.definition.apply_unclassified`, the commit
+     * step failed with an exception the catalog does not classify (#811), or DP's metadata store failed at or after
+     * the `applying` mark — the mark, the lease renewal, a stamp, a put-back to `pending` (#822).
      */
     data class Unknown(
         override val code: String,

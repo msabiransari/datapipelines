@@ -1,10 +1,12 @@
 package co.datapipelines.web.lake
 
+import co.datapipelines.application.lake.LakeDefaultCatalogs
 import co.datapipelines.application.lake.LakePromotionCheck
 import co.datapipelines.application.lake.LakeReferenceIndexRepository
 import co.datapipelines.application.lake.LakeReferenceScanService
 import co.datapipelines.application.lake.LakeTableAvailability
 import co.datapipelines.application.lake.RegisteredLakeTableAvailability
+import co.datapipelines.datasources.DuckDbDefaultCatalog
 import co.datapipelines.datasources.LakeTableCatalog
 import co.datapipelines.datasources.SqlTableReferenceExtractor
 import co.datapipelines.parameters.ParameterSetRepository
@@ -44,6 +46,9 @@ class LakeReferenceConfiguration {
      * The scanner. The SQL a node runs comes from the SAME [NodeSqlResolver] the node-SQL view uses (constructed here,
      * as that controller does, over the workspace engines); a selector's from the [SelectorProbe] the receive
      * validation renders through. Both render only — no customer datasource is opened.
+     *
+     * A site's default catalog (#790) is its datasource's: the registry of record's live, workspace-scoped row — the same
+     * read the admitting lookup makes — and the catalog its URL text names ([DuckDbDefaultCatalog]); no connection.
      */
     @Bean
     @Suppress("LongParameterList") // one collaborator per seam the scan reads
@@ -54,6 +59,7 @@ class LakeReferenceConfiguration {
         parameterSets: ParameterSetRepository,
         selectors: SelectorProbe,
         datasources: DatasourceRegistry,
+        datasourcesOfRecord: co.datapipelines.datasources.DatasourceRegistry,
         registry: LakeTableCatalog,
         extractor: SqlTableReferenceExtractor,
         index: LakeReferenceIndexRepository,
@@ -66,6 +72,10 @@ class LakeReferenceConfiguration {
             parameterSets = parameterSets,
             selectors = selectors,
             datasources = datasources,
+            defaultCatalogs =
+                LakeDefaultCatalogs { name, workspaceId ->
+                    datasourcesOfRecord.getVisibleLive(name, workspaceId)?.jdbcUrl?.let(DuckDbDefaultCatalog::of)
+                },
             registry = registry,
             extractor = extractor,
             index = index,
