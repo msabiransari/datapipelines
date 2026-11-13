@@ -26,8 +26,8 @@ object BrowserShards {
     /** The project property carrying `<i>/<n>`; absent = the unfiltered suite. */
     const val PROPERTY = "dp.browser.shard"
 
-    /** Non-vacuity floor for the partition guard: 126 classes on 2026-10-22. */
-    const val MIN_CLASSES = 100
+    /** Non-vacuity floor for the partition guard: 153 classes on 2026-11-13 (was 100 over 126, 2026-10-22). */
+    const val MIN_CLASSES = 140
 
     private const val TEST_FILE_SUFFIX = "Test.kt"
 

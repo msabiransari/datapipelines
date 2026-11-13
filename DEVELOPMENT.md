@@ -849,10 +849,14 @@ for i in 1 2 3; do gh run download "$R" -n "browser-reports-$i" -D "$D/browser-$
 Read every exit: a missing root is exit 2, a root with no XML exit 3, and the same `TEST-*.xml`
 under two roots exit 4 with each named — a class counted twice, nothing summed. The invariant the
 lander checks: the browser line's `files=` equals the browser module's `*Test.kt` count at that SHA
-(`find tests/browser-tests/src/test/kotlin -name '*Test.kt' | wc -l`; 126 on 2026-10-22), the
+(`find tests/browser-tests/src/test/kotlin -name '*Test.kt' | wc -l`; 153 on 2026-11-13), the
 equality `verifyTestsExecuted` enforced when the suite ran unsharded, and `tests=` equals the
 previous unsharded total plus the cases the batch added. The legs are 1..`BROWSER_SHARDS`
-(`buildSrc/src/main/kotlin/BrowserShards.kt`); if that constant changes, so does the loop.
+(`buildSrc/src/main/kotlin/BrowserShards.kt`); if that constant changes, so does the loop. A leg's
+`browser-reports-<i>` also carries the #698 site-section captures (`reports/site-section-alignment/`),
+which the recount's globs never match. Each leg is its own runner, so its own Postgres (#933):
+`BrowserSuite.checkConnectionBudget` prints the shared server's client count once per class and
+fails a class above 340 — on the first run, read each leg's highest printed count against 340.
 
 **The breach suite is a task of its own (#289).** `JsonataBreachTest` and, since #8,
 `JavaScriptBreachTest` (with `JavaScriptMeasurementsTest`, the JavaScript engine's costs) live in
