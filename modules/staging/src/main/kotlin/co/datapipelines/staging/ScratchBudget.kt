@@ -15,8 +15,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  * may use on local disk (its file, WAL and spill directory) up front, the engine's
  * `max_temp_directory_size` is set to that reservation, and the staging database refuses to grow
  * past it (`scratch_limit_exceeded`). Reservations are released when the staging database closes,
- * exactly once. A reservation that does not fit is refused with [StagingScratchExhaustedException]
- * — retryable, because a running execution's close makes room.
+ * exactly once.
+ *
+ * Files a crashed process left in the scratch directory that nobody can prove dead are never
+ * deleted (owner ruling 2026-11-12, #803): their bytes, counted by the factory's startup sweep, are
+ * debited from what this aggregate admits ([leftoverBytes]). A request is then refused one of two
+ * ways, told apart by one rule:
+ *  - it does not fit even with every running reservation released — `requested > capacity −
+ *    leftover` — [StagingScratchBlockedException] (`scratch_blocked`): it can never succeed until an
+ *    operator acts, so it is not a [StagingScratchExhaustedException] and no caller retries it;
+ *  - it would fit once running reservations release — [StagingScratchExhaustedException]
+ *    (`scratch_exhausted`), retryable.
  *
  * Thread-safe: every read and write of the reserved total is under one monitor, and the critical
  * sections hold no I/O.
@@ -31,16 +40,36 @@ class ScratchBudget(
 
     private val lock = Any()
     private var reserved = 0L
+    private var leftover: Long? = null
 
-    /** The bytes currently held by unreleased reservations. */
+    /** The bytes currently held by unreleased reservations (running executions only, never leftovers). */
     val reservedBytes: Long
         get() = synchronized(lock) { reserved }
 
     /**
+     * The bytes of counted leftover files debited from the aggregate (staging.md §8.5): `null` until
+     * the factory's sweep has counted (none yet ran, or it was refused), then the count — `0` when the
+     * directory held nothing nobody could vouch for. Reading it does no I/O and never starts a sweep.
+     */
+    val leftoverBytes: Long?
+        get() = synchronized(lock) { leftover }
+
+    /**
+     * Debits [bytes] of counted leftovers, once per sweep; a factory sweeps once, so in production
+     * (one budget per factory) this is called once. Saturates instead of wrapping.
+     */
+    internal fun countLeftovers(bytes: Long) {
+        require(bytes >= 0) { "counted leftover bytes cannot be negative (got $bytes)" }
+        synchronized(lock) { leftover = saturatingAdd(leftover ?: 0L, bytes) }
+    }
+
+    /**
      * Reserves [bytes] for [executionId]'s staging database, or refuses.
      *
-     * @throws StagingScratchExhaustedException the reservation does not fit in what is left of
-     *   [capacityBytes]; nothing is reserved.
+     * @throws StagingScratchBlockedException the reservation exceeds [capacityBytes] less the counted
+     *   leftovers — it cannot fit even when every running reservation is released; nothing is reserved.
+     * @throws StagingScratchExhaustedException the reservation does not fit in what running
+     *   reservations leave of that; nothing is reserved.
      * @throws IllegalArgumentException [bytes] is not positive (a wiring defect, never author input).
      */
     fun reserve(
@@ -49,10 +78,15 @@ class ScratchBudget(
     ): ScratchReservation {
         require(bytes > 0) { "a staging scratch reservation must be positive (got $bytes bytes)" }
         synchronized(lock) {
-            // Compared as `bytes > capacity - reserved`, never `reserved + bytes > capacity`: a
-            // reservation near Long.MAX_VALUE must refuse, not overflow into a fit.
-            if (bytes > capacityBytes - reserved) {
-                throw StagingScratchExhaustedException(executionId, bytes, reserved, capacityBytes)
+            // Compared by subtraction, never `reserved + bytes > capacity`: a reservation near
+            // Long.MAX_VALUE must refuse, not overflow into a fit. capacity > 0 and 0 <= held, so
+            // `capacity - held` cannot wrap; past the first check it is positive and reserved fits in it.
+            val held = leftover ?: 0L
+            if (bytes > capacityBytes - held) {
+                throw StagingScratchBlockedException(executionId, bytes, held, capacityBytes)
+            }
+            if (bytes > capacityBytes - held - reserved) {
+                throw StagingScratchExhaustedException(executionId, bytes, reserved, capacityBytes, held)
             }
             reserved += bytes
         }
@@ -99,26 +133,65 @@ class ScratchReservation internal constructor(
 }
 
 /**
- * A DuckDB staging database's scratch reservation does not fit in the aggregate (staging.md §8.5).
- * Raised by [ScratchBudget.reserve] **before** any file exists; the details carry sizes and the
- * execution id only — the configured aggregate is operator configuration, not a secret.
+ * A DuckDB staging database's scratch reservation does not fit in what running reservations leave
+ * of the aggregate (staging.md §8.5) — retryable: a running execution's close makes room. Raised by
+ * [ScratchBudget.reserve] **before** any file exists; the details carry sizes and the execution id
+ * only — the configured aggregate is operator configuration, not a secret.
  */
 class StagingScratchExhaustedException(
     val executionId: UUID,
     val requestedBytes: Long,
     val reservedBytes: Long,
     val capacityBytes: Long,
+    /** Bytes of counted leftover files debited from the aggregate (#803); `0` when there are none. */
+    val leftoverBytes: Long = 0L,
 ) : DatapipelinesException(
         code = StagingErrorCodes.SCRATCH_EXHAUSTED,
         message =
-            "The staging scratch space cannot take another $requestedBytes bytes for execution $executionId: " +
-                "$reservedBytes of $capacityBytes bytes are reserved by running executions. Retry once one " +
-                "finishes, or raise datapipelines.lake.admission.scratch-bytes.",
+            "The staging scratch space cannot take another $requestedBytes bytes for execution $executionId now: " +
+                "$reservedBytes of $capacityBytes bytes are reserved by running executions" +
+                (if (leftoverBytes > 0) " and $leftoverBytes are held by leftover files in the scratch directory" else "") +
+                ". Retry once a running execution finishes, or raise datapipelines.lake.admission.scratch-bytes.",
         details =
             mapOf(
                 "execution_id" to executionId.toString(),
                 "requested_bytes" to requestedBytes,
                 "reserved_bytes" to reservedBytes,
+                "leftover_bytes" to leftoverBytes,
+                "capacity_bytes" to capacityBytes,
+            ),
+    )
+
+/**
+ * A DuckDB staging database's scratch reservation can never fit (staging.md §8.5, #803): it exceeds
+ * the aggregate less the bytes of leftover files nobody can vouch for, so no running execution's
+ * close makes room. Deliberately NOT a [StagingScratchExhaustedException], which the delivery path
+ * catches and polls on: this one fails the execution at once. Sizes and the execution id only —
+ * the leftover paths are in the server log's WARN, never here.
+ */
+class StagingScratchBlockedException(
+    val executionId: UUID,
+    val requestedBytes: Long,
+    val leftoverBytes: Long,
+    val capacityBytes: Long,
+) : DatapipelinesException(
+        code = StagingErrorCodes.SCRATCH_BLOCKED,
+        message =
+            if (leftoverBytes > 0) {
+                "The staging scratch space cannot take $requestedBytes bytes for execution $executionId: " +
+                    "$leftoverBytes of its $capacityBytes bytes are held by leftover files in the scratch directory " +
+                    "that a crashed process left and nobody can vouch for. An operator must clear the scratch directory " +
+                    "while no instance uses it, or raise datapipelines.lake.admission.scratch-bytes."
+            } else {
+                "The staging scratch space cannot take $requestedBytes bytes for execution $executionId: the request " +
+                    "exceeds the configured scratch capacity of $capacityBytes bytes " +
+                    "(datapipelines.lake.admission.scratch-bytes)."
+            },
+        details =
+            mapOf(
+                "execution_id" to executionId.toString(),
+                "requested_bytes" to requestedBytes,
+                "leftover_bytes" to leftoverBytes,
                 "capacity_bytes" to capacityBytes,
             ),
     )

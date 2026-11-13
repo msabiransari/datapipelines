@@ -2,6 +2,7 @@ package co.datapipelines.staging
 
 import com.sun.security.auth.module.UnixSystem
 import java.io.IOException
+import java.io.UncheckedIOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.NoSuchFileException
@@ -11,16 +12,17 @@ import java.nio.file.attribute.PosixFilePermission
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.UUID
 import kotlin.io.path.isDirectory
-import kotlin.io.path.name
 
 /**
  * The on-disk footprint of one DuckDB staging database (staging.md §8.5): the database file, its
- * write-ahead log beside it, and the spill directory beside both. Every name is derived from the
- * execution id alone — nothing from request input reaches a path.
+ * write-ahead log beside it, the spill directory beside both, and the ownership marker naming the
+ * factory that created them (#803). Every name is derived from the execution id alone — nothing from
+ * request input reaches a path.
  */
 internal class DuckDbStagingFiles(
     scratchDir: Path,
-    executionId: UUID,
+    /** The execution the database belongs to. */
+    val executionId: UUID,
 ) {
     private val stem = "exec_$executionId"
 
@@ -33,7 +35,20 @@ internal class DuckDbStagingFiles(
     /** The engine's `temp_directory`: where a sort, join or aggregate spills past `memory_limit`. */
     val tempDir: Path = scratchDir.resolve("$stem.tmp")
 
-    private val dir: Path = scratchDir
+    /**
+     * The ownership marker, written before [database] exists and removed after it: the owning
+     * factory's id ([DuckDbScratchOwnership]). Its name does not start with the database's stem.
+     */
+    val marker: Path = scratchDir.resolve(DuckDbScratchNames.marker(executionId))
+
+    /** The database's three top-level paths, the only ones [delete] removes. */
+    val paths: List<Path> = listOf(database, wal, tempDir)
+
+    /**
+     * [paths] and [marker]. Built with `listOf`: a `Path` is an `Iterable<Path>`, so `paths + marker`
+     * would append the marker's NAME ELEMENTS, not the marker.
+     */
+    val pathsWithMarker: List<Path> = listOf(database, wal, tempDir, marker)
 
     /**
      * Bytes on disk right now: file + WAL + every spill file. Read after each write and compared with
@@ -41,22 +56,18 @@ internal class DuckDbStagingFiles(
      */
     fun diskBytes(): Long = sizeOf(database) + sizeOf(wal) + (if (tempDir.isDirectory()) treeBytes(tempDir) else 0L)
 
-    /** Paths of this database that still exist: what [delete] must leave empty. */
-    fun leftovers(): List<Path> = Files.list(dir).use { entries -> entries.filter { it.name.startsWith(stem) }.toList() }
+    /** Which of [paths] exist (a symbolic link counts as existing; it is never followed). */
+    fun existing(): List<Path> = paths.filter { Files.exists(it, LinkOption.NOFOLLOW_LINKS) }
 
     /**
-     * Deletes every path of this database (any `exec_<id>` sibling, the spill directory recursively).
-     * Never throws for an I/O failure: it returns what it could not delete, for the caller to log.
+     * Deletes the database's three paths — the spill directory recursively — and nothing else: a
+     * lookalike name (`exec_<id>.duckdb.bak`) is never touched, nor is [marker] (its owner removes it
+     * once this returned no failure). Never follows a symbolic link. Never throws for an I/O failure:
+     * it returns what it could not delete, for the caller to log.
      */
     fun delete(): List<Pair<Path, IOException>> {
         val failures = mutableListOf<Pair<Path, IOException>>()
-        val targets =
-            try {
-                leftovers()
-            } catch (e: IOException) {
-                return listOf(dir to e)
-            }
-        targets.forEach { target ->
+        paths.forEach { target ->
             try {
                 deleteTree(target)
             } catch (e: IOException) {
@@ -64,13 +75,6 @@ internal class DuckDbStagingFiles(
             }
         }
         return failures
-    }
-
-    private fun deleteTree(path: Path) {
-        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
-            Files.list(path).use { children -> children.toList() }.forEach { deleteTree(it) }
-        }
-        Files.deleteIfExists(path)
     }
 
     private fun treeBytes(root: Path): Long =
@@ -98,17 +102,51 @@ internal class DuckDbStagingFiles(
          */
         fun prepareScratchDir(dir: Path) {
             require(!Files.isSymbolicLink(dir)) { "the DuckDB staging scratch directory $dir is a symbolic link" }
-            val posix = "posix" in dir.fileSystem.supportedFileAttributeViews()
             if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
-                if (posix) {
+                if (posix(dir)) {
                     Files.createDirectories(dir, PosixFilePermissions.asFileAttribute(OWNER_ONLY))
                 } else {
                     Files.createDirectories(dir)
                 }
             }
-            require(Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) { "the DuckDB staging scratch path $dir is not a directory" }
-            if (posix) requirePrivate(dir)
+            checkScratchDir(dir)
         }
+
+        /**
+         * [prepareScratchDir]'s checks of an EXISTING directory, creating nothing: not a symbolic
+         * link, a directory, and on POSIX the process user's and owner-only. The leftover sweep runs
+         * them before it reads anything in the directory (#803).
+         */
+        fun checkScratchDir(dir: Path) {
+            require(!Files.isSymbolicLink(dir)) { "the DuckDB staging scratch directory $dir is a symbolic link" }
+            require(Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) { "the DuckDB staging scratch path $dir is not a directory" }
+            if (posix(dir)) requirePrivate(dir)
+        }
+
+        /**
+         * Deletes [path] and, for a directory, everything inside it; never follows a symbolic link.
+         * Every I/O failure is an [IOException], including one met while listing a directory.
+         */
+        fun deleteTree(path: Path) {
+            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                listNames(path).forEach { deleteTree(path.resolve(it)) }
+            }
+            Files.deleteIfExists(path)
+        }
+
+        /**
+         * The names directly inside [dir]. A failure while iterating, which the stream reports as an
+         * [UncheckedIOException], is rethrown as an [IOException], so callers that map I/O failures
+         * to a fixed refusal see every one of them.
+         */
+        fun listNames(dir: Path): List<String> =
+            try {
+                Files.list(dir).use { entries -> entries.map { it.fileName.toString() }.toList() }
+            } catch (e: UncheckedIOException) {
+                throw IOException("could not list $dir", e)
+            }
+
+        private fun posix(dir: Path): Boolean = "posix" in dir.fileSystem.supportedFileAttributeViews()
 
         /**
          * The owner is compared by numeric uid, not by `user.name`: a process whose uid has no

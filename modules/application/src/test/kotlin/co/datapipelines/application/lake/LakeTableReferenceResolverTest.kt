@@ -1,10 +1,15 @@
 package co.datapipelines.application.lake
 
 import co.datapipelines.application.lake.LakeTableReferenceResolver.Resolution
+import co.datapipelines.datasources.DuckDbDefaultCatalog
 import co.datapipelines.datasources.SqlTableReferenceExtractor
 import co.datapipelines.datasources.WrittenTableReference
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 
 /**
  * The slice D-B resolution rules, one case per rule: what a written table position names on a LAKE connection, given
@@ -12,7 +17,7 @@ import org.junit.jupiter.api.Test
  */
 class LakeTableReferenceResolverTest {
     private val engine =
-        SqlTableReferenceExtractor.EngineFacts(defaultCatalog = "memory", internalViews = setOf("duckdb_tables", "pragma_version"))
+        SqlTableReferenceExtractor.EngineFacts(internalViews = setOf("duckdb_tables", "pragma_version"))
 
     private fun written(
         catalog: String?,
@@ -24,7 +29,8 @@ class LakeTableReferenceResolverTest {
     private fun resolve(
         reference: WrittenTableReference,
         vararg registered: LakeTableIdentity,
-    ) = LakeTableReferenceResolver.resolve(reference, registered.toList(), engine)
+        defaultCatalog: String? = "memory",
+    ) = LakeTableReferenceResolver.resolve(reference, registered.toList(), engine, defaultCatalog)
 
     private fun resolved(
         vararg namespace: String,
@@ -40,6 +46,46 @@ class LakeTableReferenceResolverTest {
     fun `three-part in the default catalog names a one-segment namespace`() {
         resolve(written("memory", "lk", "events")) shouldBe resolved("lk", table = "events")
         resolve(written("MEMORY", "lk", "events")) shouldBe resolved("lk", table = "events")
+    }
+
+    /**
+     * #790, one case per URL form: the default catalog is the DATASOURCE's, derived from its URL as the engine names it
+     * (`DuckDbDefaultCatalogTest` holds the derivation equal to the engine), so a three-part name in that catalog is
+     * the one-segment namespace on every form.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("urlForms")
+    fun `three-part in the datasource's OWN default catalog names a one-segment namespace, per URL form`(
+        form: String,
+        url: String,
+        catalog: String,
+    ) {
+        withClue(form) {
+            val defaultCatalog = DuckDbDefaultCatalog.of(url)
+            defaultCatalog shouldBe catalog
+            resolve(written(catalog, "lk", "events"), defaultCatalog = defaultCatalog) shouldBe resolved("lk", table = "events")
+            resolve(written(catalog.uppercase(), "lk", "events"), defaultCatalog = defaultCatalog) shouldBe resolved("lk", table = "events")
+        }
+    }
+
+    @Test
+    fun `memory_s_t on a file-backed datasource names the two-segment namespace - memory is not its catalog`() {
+        val defaultCatalog = DuckDbDefaultCatalog.of("jdbc:duckdb:/var/lib/lake/shop.db")
+        resolve(written("memory", "lk", "events"), defaultCatalog = defaultCatalog) shouldBe resolved("memory", "lk", table = "events")
+    }
+
+    @Test
+    fun `an unknown default catalog leaves a catalog-qualified name UNRESOLVED - no memory fallback`() {
+        resolve(written("memory", "lk", "events"), defaultCatalog = null) shouldBe Resolution.Unresolved
+        resolve(written("shop", "lk", "events"), defaultCatalog = null) shouldBe Resolution.Unresolved
+    }
+
+    @Test
+    fun `an unknown default catalog changes nothing for two-part and bare names - they need no catalog`() {
+        resolve(written(null, "lk", "events"), defaultCatalog = null) shouldBe resolved("lk", table = "events")
+        resolve(written(null, null, "events"), LakeTableIdentity(listOf("lk"), "events"), defaultCatalog = null) shouldBe
+            resolved("lk", table = "events")
+        resolve(written(null, null, "events", cte = true), defaultCatalog = null) shouldBe Resolution.NotATable
     }
 
     @Test
@@ -86,5 +132,16 @@ class LakeTableReferenceResolverTest {
     @Test
     fun `an internal view's name in a lake namespace is a table`() {
         resolve(written(null, "lk", "duckdb_tables")) shouldBe resolved("lk", table = "duckdb_tables")
+    }
+
+    companion object {
+        @JvmStatic
+        fun urlForms(): List<Arguments> =
+            listOf(
+                Arguments.of("anonymous", "jdbc:duckdb:", "memory"),
+                Arguments.of("anonymous memory", "jdbc:duckdb::memory:", "memory"),
+                Arguments.of("labelled memory", "jdbc:duckdb:memory:lbl790", "memory"),
+                Arguments.of("file", "jdbc:duckdb:/var/lib/lake/shop.db", "shop"),
+            )
     }
 }

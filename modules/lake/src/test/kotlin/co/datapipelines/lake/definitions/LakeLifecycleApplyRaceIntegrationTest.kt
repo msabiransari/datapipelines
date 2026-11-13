@@ -43,7 +43,7 @@ class LakeLifecycleApplyRaceIntegrationTest {
                 .release(id, 3, h.actor, WriteSurface.SESSION)
                 .apply
                 .shouldBeInstanceOf<LakeApplyOutcome.Busy>()
-            discardFailure = runCatching { h.service.discard(id, 2, h.actor) }.exceptionOrNull()
+            discardFailure = runCatching { h.service.discard(id, 2, h.actor, WriteSurface.SESSION) }.exceptionOrNull()
         }
 
         h.applier.apply(id, 2, deadline(), h.actor).shouldBeInstanceOf<LakeApplyOutcome.Applied>()
@@ -70,7 +70,7 @@ class LakeLifecycleApplyRaceIntegrationTest {
                     Int::class.java,
                     id,
                 ) shouldBe 2
-                discard = workers.submit { h.service.discard(id, 2, h.actor) }
+                discard = workers.submit { h.service.discard(id, 2, h.actor, WriteSurface.SESSION) }
                 awaitCondition("discard reaches its version update") {
                     blocked("UPDATE lake_table_definition_versions SET status = 'DISCARDED'")
                 }

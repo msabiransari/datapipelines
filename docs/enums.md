@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.49 (living document — updated as enums evolve)
+**Status:** v1.50 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -518,6 +518,8 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `lake.definition.released` | A table definition's DRAFT became RELEASED and the table's current definition. `details` also carries `via` (`session` \| `api_key` \| `mcp`) |
 | `lake.definition.applied` | An apply attempt stamped the table `applied`: the Iceberg table holds the current definition (committed by this attempt, or found already there after a crash). `details` also carries `operation_id` |
 | `lake.definition.apply_failed` | An apply attempt stamped the table `failed`: a reviewed or breaking change, drift, or a change Iceberg refused. `details` also carries `operation_id` and `code` (a `lake.definition.*` code, [Pipeline Contract §13.25](pipeline-contract.md#1325-managed-lake)). A retryable give-up (`pending`) writes no row |
+| `lake.definition.discarded` | A RELEASED definition version became DISCARDED (#814). `details` also carries `via` (`session` \| `api_key` \| `mcp`) and `current_version`: the table's current definition after the discard, the highest version still RELEASED, or null when none is left. A refused discard writes no row |
+| `lake.definition.draft_purged` | A table's DRAFT was deleted (#814). `version` is the draft's; `details` also carries `via` and `table_deleted`: true when the table was never released and its row went with the draft (its namespace row too, when that was its last table). A refused purge writes no row |
 
 **Lake delivery audit events** (same `audit_log` table, #799). Each event is written inside the transaction of its conditional delivery and attempt stamps. `user_id` is the execution's actor, or NULL for settlement. Details contain identifiers and outcomes only.
 
@@ -1251,6 +1253,7 @@ Stored in `lake_delivery_attempts.outcome` ([Metadata DB §4.54](metadata-db.md#
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.50 | 814 (#814) | **§15 lake definition audit events:** `lake.definition.discarded` (`via`, `current_version`) and `lake.definition.draft_purged` (`via`, `table_deleted`), each written inside its write's transaction (dp-lake record §12, erratum 2026-11-12); held to `LakeAuditEvents` by `LakeAuditEventsSpecDriftTest`, which now counts five events. |
 | 2026-11-11 | v1.49 | #894 endpoint-root audit provenance | **§15 `template.version.released`:** under an API root the cascaded row names the API — `cascade_from_api_endpoint_id` + the API's `cascade_from_version`, no `cascade_from_pipeline_id` (the owner's 2026-11-11 exception to the frozen release-dependencies record §11). Pipeline-root rows and every other event unchanged; rows written before #894 are not rewritten (`cascade_root.family` tells them apart). |
 | 2026-11-08 | v1.48 | 860 (#860) | **§31 `RendererKind`:** `chart` (the chart document v1, judged by the schema served at `/schemas/chart/1/`) replaces `plotly`, which is retired and refused as `visualization.validation.renderer_unsupported` with a message naming `chart`. **§32 `AssertionKind`:** `mark_count` replaces `trace_count`; `text_visible` on a chart is proven by the mechanical check or left unjudged, never refused. |
 | 2026-11-05 | v1.47 | 799 (#799) | New §49 delivery states, §50 failure phases and §51 attempt outcomes, matching V55's CHECKs and the Kotlin vocabularies; §15 gains the four strict delivery audit events. |
