@@ -45,7 +45,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterUtils
  * fallback), or [SelectorProbe.render] against the org tier, the date samples and a type sample per parent — (2) handed
  * to the engine's own parser ([SqlTableReferenceExtractor], `json_serialize_sql` on a parse-only connection), (3)
  * classified by its template body ([TemplateCompletenessClassifier]), and (4) resolved against the datasource's registry
- * ([LakeTableReferenceResolver]). A version's status is its weakest site's ([LakeScanStatus]).
+ * ([LakeTableReferenceResolver]) and its OWN default catalog ([LakeDefaultCatalogs], #790 — read from the URL, never
+ * the parse engine's). A version's status is its weakest site's ([LakeScanStatus]).
  *
  * ## What it never does
  *
@@ -65,6 +66,7 @@ class LakeReferenceScanService(
     private val parameterSets: ParameterSetRepository,
     private val selectors: SelectorProbe,
     private val datasources: DatasourceRegistry,
+    private val defaultCatalogs: LakeDefaultCatalogs,
     private val registry: LakeTableCatalog,
     private val extractor: SqlTableReferenceExtractor,
     private val index: LakeReferenceIndexRepository,
@@ -213,10 +215,13 @@ class LakeReferenceScanService(
             is SqlTableExtraction.Parsed -> {
                 val registered = registry.registeredTables(site.datasource).map { LakeTableIdentity(it.namespace, it.name) }
                 val engine = extractor.engineFacts()
+                // Only a catalog-qualified name needs it; read once per site, and only then.
+                val defaultCatalog by lazy { defaultCatalogs.defaultCatalogOf(site.datasource, version.workspaceId) }
                 val references =
                     extraction.tables.mapNotNull { written ->
+                        val catalog = if (written.catalog != null) defaultCatalog else null
                         val resolved =
-                            when (val resolution = LakeTableReferenceResolver.resolve(written, registered, engine)) {
+                            when (val resolution = LakeTableReferenceResolver.resolve(written, registered, engine, catalog)) {
                                 LakeTableReferenceResolver.Resolution.NotATable -> return@mapNotNull null
                                 LakeTableReferenceResolver.Resolution.Unresolved -> null
                                 is LakeTableReferenceResolver.Resolution.Resolved -> resolution.identity
@@ -271,9 +276,10 @@ class LakeReferenceScanService(
     companion object {
         /**
          * Bumped whenever the scanner's answer for the same content can change (a classifier narrowing, a resolver rule);
-         * the boot backfill re-scans every row below it (metadata-db §4.41 `scanner_version`).
+         * the boot backfill re-scans every row below it (metadata-db §4.41 `scanner_version`). 2 (#790): `c.s.t` resolves
+         * against the site's datasource's own default catalog, no longer the parse engine's `memory`.
          */
-        const val SCANNER_VERSION = 1
+        const val SCANNER_VERSION = 2
 
         /** The scanner's own reason kinds beside the classifier's ([TemplateCompletenessClassifier.Kind]). */
         const val KIND_RENDER_FAILED = "render_failed"

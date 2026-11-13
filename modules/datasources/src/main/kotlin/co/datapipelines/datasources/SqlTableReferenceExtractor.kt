@@ -75,9 +75,11 @@ class SqlTableReferenceExtractor(
     private var connection: Connection? = null
     private var engineFacts: EngineFacts? = null
 
-    /** The default catalog's name (`memory` for an anonymous in-memory instance) and the engine's internal view names. */
+    /**
+     * The engine's internal view names. No default catalog (#790): this parse-only engine's own is `memory`, which says
+     * nothing about the datasource a statement runs on — the scanner reads that datasource's ([DuckDbDefaultCatalog]).
+     */
     data class EngineFacts(
-        val defaultCatalog: String,
         val internalViews: Set<String>,
     )
 
@@ -95,7 +97,7 @@ class SqlTableReferenceExtractor(
             read(tree)
         }
 
-    /** The engine's own facts the resolver needs: the default catalog's name and its internal (system) view names. */
+    /** The engine's own facts the resolver needs: its internal (system) view names. */
     fun engineFacts(): EngineFacts =
         synchronized(lock) {
             engineFacts ?: readEngineFacts(connection()).also { engineFacts = it }
@@ -204,16 +206,11 @@ class SqlTableReferenceExtractor(
 
         private fun readEngineFacts(connection: Connection): EngineFacts =
             connection.createStatement().use { statement ->
-                val catalog =
-                    statement.executeQuery("SELECT current_database()").use { rows ->
-                        check(rows.next()) { "current_database() returned no row" }
-                        rows.getString(1)
-                    }
                 val views =
                     statement.executeQuery("SELECT view_name FROM duckdb_views() WHERE internal").use { rows ->
                         buildSet { while (rows.next()) add(rows.getString(1).lowercase()) }
                     }
-                EngineFacts(catalog.lowercase(), views)
+                EngineFacts(views)
             }
     }
 }

@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.72 (frozen contract — additive-only changes after this point)
+**Status:** v2.73 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-11-13
@@ -1585,7 +1585,14 @@ On boot, a backfill scans each released version that has no row, or a row from a
 - **Resolution** follows the LAKE connection's view naming (§8C.2): `a.b.t` is namespace
   `[a, b]`, and in the default catalog it is `[b]`; `s.t` is `[s]`. A bare `t` resolves only
   when the datasource's registry holds exactly ONE namespace. CTE names, system catalogs and
-  schemas, and the engine's internal views are not table positions.
+  schemas, and the engine's internal views are not table positions. The default catalog is the
+  site's DATASOURCE's, read from its URL without opening a connection: `memory` for the
+  anonymous URL and for `:memory:<label>` / `memory:<label>`, and for a file the name DuckDB
+  gives it (the last path segment up to its first `.`, so `/data/shop.db` is `shop`; a file
+  named `main`, `temp` or `system` is `main_db`, `temp_db`, `system_db`). When the catalog cannot
+  be read (the datasource is gone, or its URL is another form, such as `md:`), a name written
+  with a catalog is recorded unresolved and gets no availability check; one- and two-part names
+  resolve as above. Only a later scan corrects it: a new release, or the next scanner version.
 - **The status is honest about its reach.** `exact` means the body's output depends on no
   value: literal text, comments, and directives that print nothing (an `<#assign>`, or a macro
   definition that is never called), with no library imported. `partial` covers everything else:
@@ -1859,6 +1866,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v2.73 | #790 lake reference default catalog | §8C.9 "Resolution": a three-part name is compared with the default catalog of the site's own datasource, derived from its URL (`memory` for the in-memory forms, the database name for a file), no longer with the parse engine's `memory`; an underivable catalog leaves a catalog-qualified name unresolved, never a guess. Scanner version 2, so the boot backfill re-scans what is indexed. No wire change. |
 | 2026-11-12 | v2.72 | #463 read-only execution at the connection — renumbered at final sync after dependency-graph | §5.7 layer 3: the read-only paths (dashboard sources, published GET endpoints, their children) add a per-lease read-only mode on every `DQL` node's connection, a property of the path, not of the flag; the pool flag stays advisory and the SELECT-only user stays the guarantee (the normative paragraph says so). §15.1 gains the `ReadOnlyConnectionMode.kt` row. Additive. |
 | 2026-11-11 | v2.71 | #896 review F2 | **§3.1 example and v2.70 summary:** `global: false` is accepted on create below super admin; only `true` on create and either value on update require super admin. The example now agrees with §3.3 and `DatasourceWorkspaceRules`. |
 | 2026-11-11 | v2.70 | #896 docs: ownership and grants as they are since V23 | **Text only, no wire change.** §3.3's Visibility paragraph says what the repository's `GRANTED_PREDICATE` reads: exactly the datasources GRANTED to the active workspace, nothing by default — not "bound datasources plus all global ones"; owning is not seeing (a workspace-owned registration is granted to its owner, an instance datasource to nobody until a super admin grants it), and a super admin's inventory access is the grants surface. The §3.1 example comments, the §3.2 `workspace` field and the §3.3 `global`/`workspace`/`readonly` rows say what the surviving `global` wire flag means since V23 (an INSTANCE datasource, owned by no workspace) and that setting it true on create, either value on update, and every mutation of an instance datasource are super-admin-only; the same correction in §5.7 (`readonly`), §6.2 (the delete dialog), §8A.1 (`global: true` = `owner_workspace_id` NULL, granted to no workspace; `demo` gets its grants from the seeder), §8C (lake-table registry writes) and §8C.10 (the managed row is an instance datasource). |
