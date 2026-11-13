@@ -19,12 +19,14 @@ import java.util.UUID
 /**
  * #701 — the resource row re-cut to ONE line (owner ruling 2026-10-24; the record §5/§7
  * as amended in 4cf4f91d), MEASURED in the browser (ui-screens §3.4): the browser surface
- * is the overlay token, a row is 12px vertical / 8px horizontal padding and an 8px radius and ONE text line — the
+ * is the overlay token, a row is 8px vertical / 4px horizontal padding (#943: the explorer tree's
+ * spacing, a leaf's start padding also clearing the empty chevron slot) and an 8px radius and ONE text line — the
  * 12px title truncates with an ellipsis (the control's `title` carries the full canonical
  * name) and yields width to the badges, which share the line after it and never leave the
  * rail (#541); the glyph is centred on the line, a folder's following its expansion
  * (`folder` closed / `folder-open` open) and a leaf's carrying its family glyph, and neither ever
- * rotates. Rows sit 4px apart, hover tints the row, and selection is primary ink over the
+ * rotates; a folder also carries the rotating chevron before its glyph (#943). Rows touch (no gap,
+ * #943), hover tints the row, and selection is primary ink over the
  * selected surface (never the link blue).
  *
  * Every number is a computed style or a box read off the real page at 1440×900,
@@ -47,7 +49,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
           const item = line.parentElement;
           const title = control.querySelector('.dp-tree-title');
           const meta = control.querySelector('.dp-tree-meta');
-          const icon = control.querySelector('svg');
+          const icon = control.querySelector('svg.dp-tree-glyph');
           if (!title || !meta || !icon) return null;
           const cs = getComputedStyle(control), lcs = getComputedStyle(line);
           const tcs = getComputedStyle(title), mcs = getComputedStyle(meta);
@@ -203,7 +205,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
     }
 
     /** The resting state (#701): one line per row — a truncating title, its badges beside
-     *  it, the glyph centred, 12px vertical / 8px horizontal padding, an 8px radius, the 4px rhythm, the overlay
+     *  it, the glyph centred, 8px vertical / 4px horizontal padding, an 8px radius, rows touching (#943), the overlay
      *  surface, hover on a sibling, the folder glyph following its expansion. */
     @Suppress("LongMethod") // one document carries the ruling's geometry, truncation, glyph and badge measurements
     @Test
@@ -243,10 +245,12 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             matchesToken("surface.browserBg", "surface.surfaceOverlay")
             isTransparent("row.alpha.controlBg")
             isTransparent("row.alpha.lineBg")
-            near("row.alpha.padTop", 12.0, 0.05)
-            near("row.alpha.padRight", 8.0, 0.05)
-            near("row.alpha.padBottom", 12.0, 0.05)
-            near("row.alpha.padLeft", 8.0, 0.05)
+            near("row.alpha.padTop", 8.0, 0.05)
+            near("row.alpha.padRight", 4.0, 0.05)
+            near("row.alpha.padBottom", 8.0, 0.05)
+            // #943: a leaf clears the empty chevron slot (4px inset + 12px icon + 8px gap); a folder does not
+            near("row.alpha.padLeft", 24.0, 0.05)
+            near("row.folder.padLeft", 4.0, 0.05)
             near("row.alpha.radius", 8.0, 0.05)
             near("row.alpha.titleFontSize", 12.0, 0.05)
             near("row.alpha.titleLineHeight", 18.6, 0.1)
@@ -284,7 +288,7 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             // glyphs: the expanded folder is folder-open, a pipeline leaf carries workflow
             withClue("row.folder.iconHref") { (readings["row.folder.iconHref"] as String).endsWith("#folder-open") shouldBe true }
             withClue("row.alpha.iconHref") { (readings["row.alpha.iconHref"] as String).endsWith("#workflow") shouldBe true }
-            near("row.beta.itemTop", num("row.alpha.itemBottom") + 4.0, 0.5)
+            near("row.beta.itemTop", num("row.alpha.itemBottom"), 0.5)
             matchesToken("row.beta.hover.controlBg", "row.beta.surfaceHover")
         }
     }
@@ -380,12 +384,13 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
                 withClue("root has no tick") { readings["guide.parent.afterContent"] shouldBe "none" }
                 for (path in listOf("guide/a", "guide/b", "guide/c", "guide/a/leaf", "guide/c/leaf")) {
                     withClue("$path guide exists") { readings["$path.beforeContent"] shouldBe "\"\"" }
-                    near("$path.indent", 12.0)
+                    near("$path.indent", 16.0)
                     near("$path.guideX", num("$path.parentIconCenterX"))
                     near("$path.tickY", num("$path.rowCenterY"))
                     near("$path.tickEndX", num("$path.iconLeft"))
-                    near("$path.tickLength", 6.0, 0.1)
-                    near("$path.rowHeight", 42.6, 0.1)
+                    // #943: 10px to a folder's chevron; a leaf's runs on across the empty slot to its glyph
+                    near("$path.tickLength", if (path.endsWith("/leaf")) 30.0 else 10.0, 0.1)
+                    near("$path.rowHeight", 34.6, 0.1)
                     near("$path.guideWidth", 1.0, 0.1)
                     near("$path.tickHeight", 1.0, 0.1)
                     matchesToken("$path.guideColor", "$path.borderSubtle")
@@ -576,14 +581,14 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         } else {
             withClue("$label — the ruling accepts a 0px name here") { n("titleClientWidth").shouldBeGreaterThanOrEqual(0.0) }
         }
-        // the compact rows (every width): the indent is --space-3 (#784), the row insets --space-2,
-        // row gaps --space-1, badge gaps/sides --space-0-5
-        withClue("$label — compact indent") { n("indent") shouldBe n("space3") }
+        // the rows (every width, #943): the indent is --space-4, the row inset --space-1,
+        // the in-row gap --space-2, badge gaps/sides --space-0-5
+        withClue("$label — indent") { n("indent") shouldBe n("space4") }
         withClue("$label — family leaf glyph") {
             (row["iconHref"] as String).endsWith(if (row["family"] == "templates") "#code" else "#workflow") shouldBe true
         }
-        withClue("$label — horizontal row inset") { n("rowInset") shouldBe n("space2") }
-        withClue("$label — horizontal row gap") { n("rowGap") shouldBe n("space1") }
+        withClue("$label — horizontal row inset") { n("rowInset") shouldBe n("space1") }
+        withClue("$label — horizontal row gap") { n("rowGap") shouldBe n("space2") }
         withClue("$label — badge gap") { n("badgeGap") shouldBe n("spaceHalf") }
         withClue("$label — compact badge side padding") { n("badgePadLeft") shouldBe n("spaceHalf") }
     }
@@ -639,10 +644,10 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             titleClientWidth: title.clientWidth, titleScrollWidth: title.scrollWidth, titleTextOverflow: getComputedStyle(title).textOverflow,
             controlTitle: control.getAttribute('title'), labelTitle: title.getAttribute('title'),
             indent: group ? parseFloat(getComputedStyle(group).paddingInlineStart) : null,
-            iconHref: control.querySelector('use').getAttribute('href'),
-            rowInset: parseFloat(cs.paddingLeft), rowGap: parseFloat(cs.columnGap),
+            iconHref: control.querySelector('svg.dp-tree-glyph use').getAttribute('href'),
+            rowInset: parseFloat(cs.paddingRight), rowGap: parseFloat(cs.columnGap),
             badgeGap: parseFloat(getComputedStyle(meta).columnGap),
-            spaceHalf: tok('--space-0-5'), space1: tok('--space-1'), space2: tok('--space-2'), space3: tok('--space-3') };
+            spaceHalf: tok('--space-0-5'), space1: tok('--space-1'), space2: tok('--space-2'), space3: tok('--space-3'), space4: tok('--space-4') };
           probe.remove();
           return out;
         }""",

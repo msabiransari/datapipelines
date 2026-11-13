@@ -27,7 +27,10 @@ export function createTreeRenderer(host, state, options) {
     const control = document.createElement(node.kind === "folder" ? "button" : (options.getHref?.(node) ? "a" : "button"));
     if (control.tagName === "BUTTON") control.type = "button";
     control.tabIndex = -1; control.className = "dp-tree-activate";
-    const glyph = icon(document, node.kind === "folder" ? "folder" : leafGlyph);
+    // #943 — a folder's disclosure marker (the explorer's chevron); CSS rotates it off the
+    // item's aria-expanded. A leaf has none: its row leaves the slot empty.
+    if (node.kind === "folder") { const chevron = icon(document, "chevron-right"); chevron.classList.add("dp-tree-chevron"); control.append(chevron); }
+    const glyph = icon(document, node.kind === "folder" ? "folder" : leafGlyph); glyph.classList.add("dp-tree-glyph");
     control.append(glyph);
     // #604/#701 — the row's regions: the label is the title, on one line, and yields width
     // to the trailing metadata region that holds the badges. The region is present even when

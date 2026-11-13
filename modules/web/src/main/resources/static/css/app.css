@@ -1471,12 +1471,19 @@ button.app-busy::after {
 }
 
 .app-browser-tree {
-  /* #739: the browser's own guide geometry; the explorer's --tpl-* stays separate.
-     #784: the indent steps to --space-3 (12px) so the guide x lands at 2px and the
-     tick reads 6px — a visible elbow at 100% zoom. */
-  --dp-tree-indent: var(--space-3);
-  --dp-tree-inset: var(--space-2);
-  --dp-tree-row-h: calc(var(--space-3) * 2 + var(--app-text-name) * var(--app-leading-name));
+  /* #943 (owner 2026-11-13): the browser's rows take the EXPLORER tree's look (085 §A,
+     template-tree.css) — a chevron on folders, tight rows with no gap between them,
+     continuous guides and a tick that reaches the row's first icon. The geometry below
+     mirrors the explorer's --tpl-* derivation with the browser's own lengths; it amends
+     the spacing of #604 (4px row rhythm), #701/#739 (12px/8px row padding) and #784
+     (12px indent). --dp-tree-slot is the chevron's slot: a leaf leaves it empty so its
+     glyph sits in the folders' glyph column. --dp-tree-guide-x is the vertical guide's x
+     relative to a row's item: the PARENT's chevron centre, negative by construction. */
+  --dp-tree-indent: var(--space-4);
+  --dp-tree-inset: var(--gap-xs);
+  --dp-tree-gap: var(--gap-sm);
+  --dp-tree-slot: calc(var(--icon-xs) + var(--dp-tree-gap));
+  --dp-tree-row-h: calc(var(--gap-sm) * 2 + var(--app-text-name) * var(--app-leading-name));
   --dp-tree-guide-x: calc(var(--dp-tree-inset) + var(--icon-xs) / 2 - var(--dp-tree-indent));
 
   flex: 1;
@@ -1504,15 +1511,15 @@ button.app-busy::after {
   padding: var(--gap-xs) var(--gap-sm);
 }
 
-/* Record §5/§7 (#604, re-cut by #701 — owner ruling 2026-10-24): a browser row is ONE
-   line on the overlay surface. The control paints 12px vertical / 8px horizontal padding,
-   the 8px radius, the
+/* Record §5/§7 (#604, re-cut by #701 — owner ruling 2026-10-24; spacing re-cut by #943):
+   a browser row is ONE line on the overlay surface. The control paints the explorer's
+   8px vertical / 4px horizontal padding, the 8px radius, the
    hover tint and the selection tint; the line stays transparent so the surface shows
    through. The 12px title truncates with an ellipsis — the control's title attribute
    carries the full canonical name — and yields width to the badges, which stay on the
-   same line after it, never wrapping and never leaving the rail (#541). The glyph is
-   flex: none and vertically centred by the row's align-items; a folder's closed/open
-   glyph follows the renderer's aria-expanded. The line keeps display: block so the
+   same line after it, never wrapping and never leaving the rail (#541). The icons are
+   flex: none and vertically centred by the row's align-items; a folder's chevron rotates
+   and its closed/open glyph follows the renderer's aria-expanded. The line keeps display: block so the
    control fills the row and the #516 ring rides the line (kept below). */
 .app-browser .dp-tree-line {
   position: relative;
@@ -1524,12 +1531,39 @@ button.app-busy::after {
 .app-browser .dp-tree-activate {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--dp-tree-gap);
   min-width: 0;
-  padding: var(--space-3) var(--dp-tree-inset);
+  min-height: var(--dp-tree-row-h);
+  box-sizing: border-box;
+  padding: var(--gap-sm) var(--dp-tree-inset);
   border-radius: var(--radius-md);
   white-space: nowrap;
   text-align: start;
+}
+
+/* #943: a leaf keeps the chevron's slot EMPTY, so its family glyph sits where a sibling
+   folder's glyph sits and its name where that folder's name sits (the explorer's
+   .tpl-leaf rule, owner 2026-09-12). A folder row is the one that carries aria-expanded. */
+.app-browser .dp-tree-item:not([aria-expanded]) > .dp-tree-line > .dp-tree-activate {
+  padding-inline-start: calc(var(--dp-tree-inset) + var(--dp-tree-slot));
+}
+
+/* #943: the disclosure marker is the sprite's chevron-right, muted, rotated a quarter
+   turn while its folder is expanded (the explorer's .tpl-chevron). */
+.app-browser .dp-tree-chevron {
+  color: var(--text-muted);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.app-browser .dp-tree-item[aria-expanded="true"] > .dp-tree-line .dp-tree-chevron {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Open/closed is information, so the rotation stays; only the transition goes. */
+  .app-browser .dp-tree-chevron {
+    transition: none;
+  }
 }
 
 .app-browser .dp-tree-activate .ds-icon {
@@ -1575,11 +1609,6 @@ button.app-busy::after {
   background: var(--surface-selected);
 }
 
-/* #604: the record's 4px rhythm between rows on the browser surface. */
-.app-browser .dp-tree-item + .dp-tree-item {
-  margin-top: var(--space-1);
-}
-
 /* #516's keyboard ring stays on the row LINE (the generic .dp-tree-item:focus-visible
    rule draws it); inside the browser the focused line takes the card's radius, so the
    ring follows the control's rounded shape without moving off the line. */
@@ -1592,15 +1621,16 @@ button.app-busy::after {
    and sides. Previous spacing put the depth-10 three-badge row 26px outside the rail
    at 240px. No width threshold: #701's threshold hid a name on widening (131px at
    381px compact, 0px at 382px full). Vertical padding and the 4px row rhythm stay.
-   #784 amends the indent: 8px per level → --space-3 (12px), so the tick reads 6px;
-   the ruling's insets, gaps and badge sides stand. */
+   #784 amends the indent: 8px per level → --space-3 (12px), so the tick reads 6px.
+   #943 re-cuts the spacing to the explorer's: 16px per level, 4px row insets, no gap
+   between rows; the 2px badge gaps and sides stand. */
 .app-browser .dp-tree-group {
   padding-inline-start: var(--dp-tree-indent);
-  margin-block-start: var(--space-1);
 }
 
-/* The item wraps its subtree. Non-last guides span it and the next 4px gap; the last
-   stops at its OWN row centre. :not(:has(~ .dp-tree-item)) ignores trailing notices.
+/* The item wraps its subtree. Non-last guides span it whole, so siblings join in one
+   stroke (#943: no gap between rows); the last stops at its OWN row centre.
+   :not(:has(~ .dp-tree-item)) ignores trailing notices.
    Search keeps its server-provided hierarchy, but never paints browse guides. Controls
    paint hover/selection over the guide, as in the 085 §A explorer exemplar. */
 .app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item {
@@ -1612,14 +1642,14 @@ button.app-busy::after {
   position: absolute;
   inset-inline-start: var(--dp-tree-guide-x);
   top: 0;
-  bottom: calc(-1 * var(--space-1));
+  bottom: 0;
   width: var(--space-px);
   background: var(--border-subtle);
   pointer-events: none;
 }
 
 .app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:first-child::before {
-  top: calc(-1 * (var(--dp-tree-row-h) / 2 + var(--space-1)));
+  top: calc(-1 * var(--dp-tree-row-h) / 2);
 }
 
 .app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:not(:has(~ .dp-tree-item))::before {
@@ -1628,7 +1658,7 @@ button.app-busy::after {
 }
 
 .app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:first-child:not(:has(~ .dp-tree-item))::before {
-  height: calc(var(--dp-tree-row-h) + var(--space-1));
+  height: var(--dp-tree-row-h);
 }
 
 .app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item::after {
@@ -1640,6 +1670,11 @@ button.app-busy::after {
   height: var(--space-px);
   background: var(--border-subtle);
   pointer-events: none;
+}
+
+/* #943: a leaf's tick runs on across the empty chevron slot to its glyph. */
+.app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:not([aria-expanded])::after {
+  width: calc(var(--dp-tree-inset) + var(--dp-tree-slot) - var(--dp-tree-guide-x));
 }
 
 .app-browser .dp-tree-meta .ds-badge {
