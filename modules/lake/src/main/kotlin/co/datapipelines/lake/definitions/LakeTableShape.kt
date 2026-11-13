@@ -2,21 +2,30 @@ package co.datapipelines.lake.definitions
 
 import co.datapipelines.lake.LakeTableProperties
 import org.apache.iceberg.PartitionSpec
+import org.apache.iceberg.NullOrder
 import org.apache.iceberg.Schema
+import org.apache.iceberg.SortDirection
+import org.apache.iceberg.SortField
+import org.apache.iceberg.SortOrder
 import org.apache.iceberg.Table
 import org.apache.iceberg.types.Type
 import org.apache.iceberg.types.Types
 
 /**
- * The definition-owned state of a table (dp-lake design record §7): its columns by field id (name, type, required,
- * doc, in schema order), its partition fields and its identifier fields. The apply state machine compares shapes,
- * never metadata pointers: an Iceberg table and a body with equal shapes hold the same definition. Tags are DP's
- * own and are not part of a shape; nor are sort order, properties or snapshots.
+ * The definition-owned state of a table (dp-lake design record §7, §11a call 36 item 2): its columns by field id
+ * (name, type, required, doc, in schema order), its partition fields, its identifier fields and its sort order. The
+ * apply state machine compares shapes, never metadata pointers: an Iceberg table and a body with equal shapes hold
+ * the same definition. Tags are DP's own and are not part of a shape; nor are properties or snapshots.
+ *
+ * [sortOrder] is the order as Iceberg holds it, field by field (source id, transform, direction, null order), so an
+ * order changed outside DP to another direction or transform differs too; an unsorted table's is empty. The order id
+ * is not part of a shape.
  */
 data class LakeTableShape(
     val columns: List<LakeColumnShape>,
     val partition: List<LakePartitionShape>,
     val identifierFieldIds: Set<Int>,
+    val sortOrder: List<LakeSortFieldShape>,
 ) {
     fun column(fieldId: Int): LakeColumnShape? = columns.firstOrNull { it.fieldId == fieldId }
 
@@ -27,14 +36,16 @@ data class LakeTableShape(
                 body.fields.map { LakeColumnShape(it.id, it.name, it.icebergType, it.required, it.doc) },
                 body.partition.map { LakePartitionShape(it.fieldId, it.transform) },
                 body.identifierFieldIds.toSet(),
+                body.sortFieldIds.map(LakeSortFieldShape::ascending),
             )
 
-        /** The shape [table] holds now, read from its current schema and default spec. */
-        fun of(table: Table): LakeTableShape = of(table.schema(), table.spec())
+        /** The shape [table] holds now, read from its current schema, default spec and sort order. */
+        fun of(table: Table): LakeTableShape = of(table.schema(), table.spec(), table.sortOrder())
 
         fun of(
             schema: Schema,
             spec: PartitionSpec,
+            sortOrder: SortOrder,
         ): LakeTableShape =
             LakeTableShape(
                 schema.columns().map {
@@ -48,6 +59,7 @@ data class LakeTableShape(
                 },
                 spec.fields().map { LakePartitionShape(it.sourceId(), it.transform().toString()) },
                 schema.identifierFieldIds().toSet(),
+                sortOrder.fields().map(LakeSortFieldShape::of),
             )
 
         /** The Iceberg schema [body] creates a table with (ids as listed: Iceberg keeps 1..n of a first definition). */
@@ -73,6 +85,23 @@ data class LakeTableShape(
             body.partition.forEach { p ->
                 val name = requireNotNull(body.field(p.fieldId)) { "partition field ${p.fieldId} is not a field" }.name
                 LakeTransforms.addTo(builder, name, p.transform)
+            }
+            return builder.build()
+        }
+
+        /**
+         * The sort order [body] creates a table with, bound to [schema]: each sort column ascending, nulls first, both
+         * written out (call 36 item 2's fixed order); unsorted when the body has no sort columns (a legacy table).
+         */
+        fun sortOrderOf(
+            body: LakeDefinitionBody,
+            schema: Schema,
+        ): SortOrder {
+            if (body.sortFieldIds.isEmpty()) return SortOrder.unsorted()
+            val builder = SortOrder.builderFor(schema)
+            body.sortFieldIds.forEach { id ->
+                val name = requireNotNull(body.field(id)) { "sort column $id is not a field" }.name
+                builder.asc(name, NullOrder.NULLS_FIRST)
             }
             return builder.build()
         }
@@ -108,3 +137,24 @@ data class LakePartitionShape(
     val sourceId: Int,
     val transform: String,
 )
+
+/** One sort field of a [LakeTableShape], as Iceberg holds it: source field id, transform string, direction, null order. */
+data class LakeSortFieldShape(
+    val sourceId: Int,
+    val transform: String,
+    val direction: SortDirection,
+    val nullOrder: NullOrder,
+) {
+    override fun toString(): String = "$transform($sourceId) $direction $nullOrder"
+
+    companion object {
+        /** The only sort field a body spells: [sourceId] by identity, ascending, nulls first. */
+        fun ascending(sourceId: Int): LakeSortFieldShape =
+            LakeSortFieldShape(sourceId, IDENTITY, SortDirection.ASC, NullOrder.NULLS_FIRST)
+
+        fun of(field: SortField): LakeSortFieldShape =
+            LakeSortFieldShape(field.sourceId(), field.transform<Any, Any>().toString(), field.direction(), field.nullOrder())
+
+        private const val IDENTITY = "identity"
+    }
+}

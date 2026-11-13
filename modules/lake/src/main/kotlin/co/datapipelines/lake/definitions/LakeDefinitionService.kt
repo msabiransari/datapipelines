@@ -54,7 +54,7 @@ class LakeDefinitionService(
         requireAuthoring()
         requireName(namespace, "namespace")
         requireName(table, "table")
-        val body = LakeDefinitionBodies.parse(bodyJson, base = null)
+        val body = LakeDefinitionBodies.parse(bodyJson, base = null, lockBasis = null)
         return inTransaction {
             val namespaceId = definitions.namespaceId(namespace, actor)
             val tableId = UUID.randomUUID()
@@ -70,7 +70,8 @@ class LakeDefinitionService(
      * Writes the table's draft at [expectedHash] (`If-Match`). With a draft, it is overwritten when its hash is still
      * [expectedHash]; without one, a new draft opens from the current released version when THAT version's hash is
      * [expectedHash] (copy-on-write, versioning §3.3). A stale hash is `lake.definition.version_conflict`. The body is
-     * validated against the current released definition (its new fields take the next ids).
+     * validated against the current released definition (its new fields take the next ids), and its sort columns
+     * against the table's first version ever released (the lock, [LakeDefinitionRules.sortRules]).
      */
     fun writeDraft(
         tableId: UUID,
@@ -83,7 +84,12 @@ class LakeDefinitionService(
         return inTransaction {
             val table = definitions.findTableForUpdate(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
             val released = table.currentDefinitionVersion?.let { definitions.findVersion(tableId, it) }
-            val body = LakeDefinitionBodies.parse(bodyJson, base = released?.let { LakeDefinitionBodies.read(it.bodyJson) })
+            val body =
+                LakeDefinitionBodies.parse(
+                    bodyJson,
+                    base = released?.let { LakeDefinitionBodies.read(it.bodyJson) },
+                    lockBasis = lockBasis(tableId),
+                )
             val canonical = LakeDefinitionBodies.toJson(body)
             val draft = definitions.findDraft(tableId)
             when {
@@ -116,6 +122,11 @@ class LakeDefinitionService(
      * busy table, a catalog refusal, or an unknown commit outcome, which includes an exception the catalog does not
      * classify from the commit step (`Unknown`, `lake.definition.apply_unclassified`, #811).
      *
+     * Before the draft is flipped, its stored body is judged by the sort-column rule, and only it, against the table's
+     * first version ever released (none for a first release): a draft stored before the rule existed, or one whose
+     * table was released since it was written, is refused `lake.definition.invalid_body` like an authoring write, with
+     * nothing released and no audit row ([LakeDefinitionRules.sortRules]). The other rules held when it was stored.
+     *
      * Nothing is thrown after the landing committed (#822, record §7): a failure at any step of the apply — the
      * deadline read itself, which the applier performs, the catalog session, DP's metadata store — is returned as
      * `Pending` or `Unknown` (`lake.definition.apply_unclassified` unless the catalog classified it). Thrown after the
@@ -131,6 +142,10 @@ class LakeDefinitionService(
         requireAuthoring()
         inTransaction {
             val table = definitions.findTableForUpdate(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
+            definitions
+                .findVersion(tableId, version)
+                ?.takeIf { it.status == PipelineVersionStatus.DRAFT && (expectedHash == null || it.bodyHash == expectedHash) }
+                ?.let { draft -> LakeDefinitionRules.sortRules(LakeDefinitionBodies.read(draft.bodyJson), lockBasis(tableId)) }
             if (definitions.releaseDraft(tableId, version, expectedHash, actor) == 0) {
                 val row = definitions.findVersion(tableId, version) ?: throw LakeDefinitionErrors.notFound(tableId, version)
                 if (row.status == PipelineVersionStatus.DRAFT) throw LakeDefinitionErrors.versionConflict(tableId)
@@ -234,6 +249,10 @@ class LakeDefinitionService(
             )
         }
     }
+
+    /** The body of the table's first version ever released (the sort columns' lock), or null when there is none. */
+    private fun lockBasis(tableId: UUID): LakeDefinitionBody? =
+        definitions.findFirstRelease(tableId)?.let { LakeDefinitionBodies.read(it.bodyJson) }
 
     private fun requireAuthoring() {
         if (!authoring.developmentPosture) throw LakeDefinitionErrors.authoringDisabled()

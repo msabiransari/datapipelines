@@ -10,6 +10,7 @@ import org.apache.iceberg.DataFile
 import org.apache.iceberg.HasTableOperations
 import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
+import org.apache.iceberg.SortOrder
 import org.apache.iceberg.Table
 import org.apache.iceberg.TableProperties
 import org.apache.iceberg.data.GenericRecord
@@ -48,7 +49,7 @@ class LakeCatalogBootstrapIntegrationTest {
         catalogs.open(currentTableLease(operation)).use { session ->
             val table = session.loadTable("sales", "orders")
             table.location() shouldBe "s3://$BUCKET/lake/sales/$tableId"
-            val expected = LakeTableProperties.create(DEFINITION_VERSION) - TableProperties.FORMAT_VERSION
+            val expected = LakeTableProperties.create(DEFINITION_VERSION, emptyList()) - TableProperties.FORMAT_VERSION
             table.properties().entries.map { it.toPair() } shouldContainAll expected.entries.map { it.toPair() }
             // format-version is a reserved key: Iceberg applies it to the metadata instead of storing it as a property.
             (table as HasTableOperations).operations().current().formatVersion() shouldBe 2
@@ -96,7 +97,7 @@ class LakeCatalogBootstrapIntegrationTest {
         catalogs.open(fabricated).use { session ->
             val refused =
                 shouldThrow<LakeCatalogException.Fenced> {
-                    session.createTable("sales", "items", UUID.randomUUID(), SCHEMA, PartitionSpec.unpartitioned(), DEFINITION_VERSION)
+                    session.createTable("sales", "items", UUID.randomUUID(), SCHEMA, UNPARTITIONED, UNSORTED, DEFINITION_VERSION)
                 }
             refused.code shouldBe "lake.catalog.fenced"
             refused.message.orEmpty() shouldNotContain fabricated.token.toString()
@@ -127,7 +128,7 @@ class LakeCatalogBootstrapIntegrationTest {
         }
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "sales.orders", operationId = operation)
         catalogs.open(lease).use { session ->
-            session.createTable("sales", "orders", tableId, SCHEMA, PartitionSpec.unpartitioned(), DEFINITION_VERSION)
+            session.createTable("sales", "orders", tableId, SCHEMA, PartitionSpec.unpartitioned(), UNSORTED, DEFINITION_VERSION)
         }
     }
 
@@ -169,6 +170,8 @@ class LakeCatalogBootstrapIntegrationTest {
     private companion object {
         const val BUCKET = "dp-lake-bootstrap"
         const val DEFINITION_VERSION = 1L
+        val UNSORTED: SortOrder = SortOrder.unsorted()
+        val UNPARTITIONED: PartitionSpec = PartitionSpec.unpartitioned()
         val SCHEMA =
             Schema(
                 Types.NestedField.required(1, "id", Types.LongType.get()),

@@ -36,14 +36,15 @@ class LakeDefinitionPartitionReviewTest {
                 fields = listOf(LakeDefinitionFixtures.field(1, "value")),
                 partition = listOf(LakeDefinitionFixtures.partition(1, transform)),
             ),
-            null,
+            base = null,
+            lockBasis = null,
         )
 
     private fun assertRoundTrip(body: LakeDefinitionBody) {
         val schema = LakeTableShape.schemaOf(body)
         val spec = LakeTableShape.specOf(body, schema)
         withClue("a validated intent must equal its real Iceberg schema and partition spec") {
-            LakeTableShape.of(schema, spec) shouldBe LakeTableShape.of(body)
+            LakeTableShape.of(schema, spec, LakeTableShape.sortOrderOf(body, schema)) shouldBe LakeTableShape.of(body)
         }
         LakeApplyPlanner { null }.forNewTable(body) {}.shouldBeInstanceOf<LakeApplyPlanner.Plan.Commit>()
     }

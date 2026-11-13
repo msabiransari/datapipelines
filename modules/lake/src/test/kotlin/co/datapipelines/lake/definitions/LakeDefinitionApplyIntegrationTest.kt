@@ -45,7 +45,7 @@ class LakeDefinitionApplyIntegrationTest {
         val table = load()
         table.properties()[LakeTableProperties.DEFINITION_VERSION] shouldBe "1"
         table.location() shouldBe "s3://${LakeDefinitionsHarness.BUCKET}/lake/$NS/$id"
-        LakeTableShape.of(table) shouldBe LakeTableShape.of(LakeDefinitionBodies.parse(ORDERS_V1, null))
+        LakeTableShape.of(table) shouldBe LakeTableShape.of(LakeDefinitionBodies.parse(ORDERS_V1, null, null))
         h.table(id).let { (it.applyState to it.appliedVersionHere) shouldBe (LakeApplyState.APPLIED to 1) }
         h.audit.events.map { it.event } shouldContainExactly listOf(LakeAuditEvents.RELEASED, LakeAuditEvents.APPLIED)
         h.audit.events.all { it.inTransaction } shouldBe true
@@ -67,7 +67,7 @@ class LakeDefinitionApplyIntegrationTest {
         outcome shouldBe LakeApplyOutcome.Applied(2, committed = true)
         after shouldBe before + 1
         fieldIds shouldBe listOf(1, 2, 3, 4, 5)
-        LakeTableShape.of(load()) shouldBe LakeTableShape.of(LakeDefinitionBodies.parse(ORDERS_V2, null))
+        LakeTableShape.of(load()) shouldBe LakeTableShape.of(LakeDefinitionBodies.parse(ORDERS_V2, null, null))
         load().schema().findField(5).doc() shouldBe "sales channel"
     }
 
@@ -175,7 +175,7 @@ class LakeDefinitionApplyIntegrationTest {
         )
         outcome shouldBe LakeApplyOutcome.Applied(3, committed = true)
         h.revisions(NS, T) shouldBe before + 1
-        LakeTableShape.of(after) shouldBe LakeTableShape.of(LakeDefinitionBodies.parse(ADOPTED_PLUS_NOTE, null))
+        LakeTableShape.of(after) shouldBe LakeTableShape.of(LakeDefinitionBodies.parse(ADOPTED_PLUS_NOTE, null, null))
         after.schema().schemaId() shouldNotBe adopted.schema().schemaId()
         after.properties()[LakeTableProperties.DEFINITION_VERSION] shouldBe "3"
     }
