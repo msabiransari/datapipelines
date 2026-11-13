@@ -11,6 +11,16 @@ import java.util.UUID
  * single authority for it, on a fresh database and on every later boot, because it also seeds
  * the example content, which SQL cannot do — and it is **idempotent across restarts** (O-3).
  *
+ * ## What creation grants
+ * `create()` grants `demo` every instance datasource (owned by no workspace) through
+ * [InstanceDatasourceGrants], the managed lake among them when it is enabled: the managed-lake
+ * registrar registers that row while the beans are created, before this seeder runs from
+ * `afterSingletonsInstantiated()`, so `demo` sees the lake from the moment it exists, without
+ * waiting for the freshness tick (#881, pinned by `DemoWorkspaceManagedLakeGrantE2eTest`). A
+ * `demo` created while the lake was disabled is granted by the boot that enables it. This
+ * seeder does not call `WorkspaceService.create`, so the creation-time managed grant of #823
+ * is not its path.
+ *
  * ## O-3: a deactivated `demo` is never recreated
  * `demo` is deactivated like any other workspace, and a seeder that re-creates what an operator
  * deliberately turned off is a seeder that cannot be turned off. So the check is "does a row
