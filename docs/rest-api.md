@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.120 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116) and 2026-11-12 (v2.120) rows for the deliberate breaks)
+**Status:** v2.121 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116) and 2026-11-12 (v2.120) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-13
 
 ---
 
@@ -2235,7 +2235,11 @@ That rule is what makes `GET` safe here, and it is not a formality: `GET` is ret
 preloaded by browsers and followed by crawlers. It is checked when the API is created and at every draft save,
 and **re-checked on every serve** of the exact pipeline version the API's current version pins. The pin never
 moves when the pipeline's current version moves: a later pipeline release reaches the URL only through a new API
-version that pins it, released or switched to explicitly.
+version that pins it, released or switched to explicitly. Every serve also runs read-only at the connection (#463): each
+`DQL` datasource statement of the pinned version and of its composed children runs in the per-lease read-only mode,
+so on the dialects marked `DATABASE` in [DAG Executor §8.2](dag-executor.md#82-error-code-mapping)'s table the
+database itself refuses a write (`pipeline.node.query_execution_failed`), and on the others the rule above and a
+SELECT-only database user remain the guard.
 
 Every path variable must name a declared parameter of that version
 (`400 endpoint.path_variable_unknown`); the pipeline may declare more, and they come from the
@@ -3083,6 +3087,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v2.121 | #463 read-only execution at the connection — renumbered at final sync after dependency-graph | **§19.2:** one sentence — every serve runs each DQL datasource statement of the pinned version and its children in the per-lease read-only mode; the database refuses a write on the `DATABASE` dialects of the DAG Executor §8.2 table, the rule and a SELECT-only user stay the guard elsewhere. Additive. |
 | 2026-11-12 | v2.120 | #876 the bare release alias is refused | **Deliberate break, decided by the release-dependencies record §25.4 D15** ("when the new dialog posts tree_hash, flip"): a bare `release_pinned_templates=true` (§5.10 pipelines, §21 parameter sets, §22 visualizations) or `release_pinned_visualizations=true` (§23 dashboards) without a plan body is `428 <family>.release.plan_required` and nothing flips; a caller releasing dependencies sends the plan body (`tree_hash`, `include_dependencies`). A release with neither is unchanged. No route, permission or response field changed. |
 | 2026-11-12 | v2.119 | #902 API enabled on the tree node | **§25:** an `api_endpoint` node now carries `operational: { enabled }` — the API's `is_enabled` — as §25's grammar already promised; it was `null` on every walk before. Shown, never hashed: the body hash and the tree fingerprint are unchanged, and a node that did not resolve still carries `null`. No route, field, permission or `schema_version` change. |
 | 2026-11-12 | v2.118 | #892 unmet parameter names | **§25, additive:** a dashboard's `parameter_names` edge constraint gains the optional `unmet_names` — the bound names the reached set version does not declare, a subset of `names` in its order. It is absent when every name is met and when the set is `missing`, never `[]` or `null`, and it changes no other field. `schema_version` stays `1`. |

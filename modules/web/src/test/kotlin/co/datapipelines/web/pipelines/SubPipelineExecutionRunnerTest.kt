@@ -348,6 +348,33 @@ class SubPipelineExecutionRunnerTest {
     }
 
     /**
+     * #463 — the read-only fact follows the composition: a read-only parent (a dashboard source, a
+     * published GET endpoint) runs read-only children, so a child cannot be the way around the
+     * per-lease read-only mode; a writable parent's child stays writable.
+     */
+    @Test
+    fun `#463 - a read-only parent's child request is read-only`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(), context().copy(readOnly = true))
+
+            stub.captured.single().readOnly shouldBe true
+        }
+
+    @Test
+    fun `#463 - a writable parent's child request stays writable`() =
+        runTest {
+            stubRegistry()
+            val stub = ExecutorStub()
+
+            runner(stub).run(pipelineNode(), context().copy(readOnly = false))
+
+            stub.captured.single().readOnly shouldBe false
+        }
+
+    /**
      * F5 — the child minted `correlationId = UUID.randomUUID()`, so its `pipeline_executions` row,
      * its SSE payloads (via `SseEventProjection`) and its logs all carried an id unrelated to the
      * request that started the family. Correlation id is the one field designed to join exactly
@@ -366,6 +393,48 @@ class SubPipelineExecutionRunnerTest {
             // inherited again by any grandchild the child spawns.
             stub.captured.single().correlationId shouldBe parentCorrelationId
         }
+
+    /**
+     * #905 — a child's stored result is recorded through the child's emitter (ordered behind an
+     * unconfirmed RUNNING insert): a write that matches no row is the emitter's one WARN.
+     */
+    @Test
+    fun `a child result write that matches no row is one WARN from the child's emitter`() {
+        stubRegistry()
+        val stub = ExecutorStub()
+        stub.drive = { req -> stub.success(req).copy(resultRef = "dp:result:${req.executionId}") }
+        every { resultStore.describe(any()) } answers {
+            co.datapipelines.executor.StoredResultView(
+                key = firstArg(),
+                executionId = requireNotNull(stub.captured.single().executionId),
+                schema = emptyList(),
+                firstPage = emptyList(),
+                totalRows = 9,
+                bytes = 90,
+                expiresAt = Instant.EPOCH,
+            )
+        }
+        every { executionRepository.recordResult(any(), 9L, 90L, emptyList()) } returns false
+
+        val warns = emitterWarns { kotlinx.coroutines.runBlocking { runner(stub).run(pipelineNode(), context()) } }
+
+        val childId =
+            stub.captured
+                .single()
+                .executionId
+                .toString()
+        warns.filter { "not found by its result columns write" in it && childId in it }.size shouldBe 1
+    }
+
+    /** The run emitter's WARN lines while [block] runs (#905: the result write is the emitter's). */
+    private fun emitterWarns(block: () -> Unit): List<String> =
+        co.datapipelines.logcapture
+            .capturingLogEvents(
+                org.slf4j.LoggerFactory.getLogger(co.datapipelines.web.sse.WebEventEmitter::class.java)
+                    as ch.qos.logback.classic.Logger,
+                block = block,
+            ).filter { it.level == ch.qos.logback.classic.Level.WARN }
+            .map { it.formattedMessage }
 
     /**
      * A13 — the frozen reference time is inherited like the principal and the workspace: a

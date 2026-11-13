@@ -1,6 +1,7 @@
 package co.datapipelines.web.schedules
 
 import ch.qos.logback.classic.Logger
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionDetail
@@ -9,7 +10,6 @@ import co.datapipelines.scheduler.Schedule
 import co.datapipelines.scheduler.ScheduleRepository
 import co.datapipelines.scheduler.ScheduleRun
 import co.datapipelines.scheduler.ScheduleRunRepository
-import co.datapipelines.web.capturingLogEvents
 import co.datapipelines.web.endpoints.StartupConversionConflict
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper

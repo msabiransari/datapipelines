@@ -2,6 +2,7 @@ package co.datapipelines.executor
 
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
+import co.datapipelines.logcapture.capturingLogEvents
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain

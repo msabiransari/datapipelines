@@ -17,20 +17,22 @@ import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.SecretHasher
+import co.datapipelines.auth.SecretVerificationUnavailableException
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.Workspace
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.release.ReleaseFamily
-import co.datapipelines.web.capturingLogEvents
 import co.datapipelines.web.config.EndpointsProperties
 import co.datapipelines.web.config.KeyRequestBudget
 import co.datapipelines.web.release.ReleaseCoordinator
 import co.datapipelines.web.release.RootReleaseRequest
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -308,6 +310,32 @@ class DemoEndpointSeederTest {
         verify(exactly = 0) { apiKeyService.revokeWorkspaceEndpointKey(any(), any(), any()) }
         verify(exactly = 0) { keyService.bind(any(), any(), any()) }
         verify(exactly = 0) { keyService.unbind(any(), any(), any()) }
+    }
+
+    /**
+     * #847 — a native verification fault on the managed key is NOT "the hash does not match": the
+     * public demo key must not be silently revoked and re-minted by a server fault. The exception
+     * propagates and fails the boot instead; nothing is revoked, minted or rebound. The live row
+     * carries the CONFIGURED id, or the id-gated `verify` would never run.
+     */
+    @Test
+    fun `a native verification fault fails the boot instead of rotating the public demo key`() {
+        happyStubs()
+        every { endpointRepository.findByPath("/demo/nyc/mobility/revenue-by-borough") } returns
+            endpoint("/demo/nyc/mobility/revenue-by-borough", "nyc/mobility/revenue_by_borough")
+        every { endpointRepository.findByPath("/demo/nyc/mobility/taxi-vs-rideshare") } returns
+            endpoint("/demo/nyc/mobility/taxi-vs-rideshare", "nyc/mobility/taxi_vs_rideshare")
+        val managed = issued(key).record
+        managed.id shouldBe key.substringBefore('.')
+        every { keyRepository.findByWorkspaceAndName(demoId, "demo-public-key") } returns listOf(managed)
+        every { secretHasher.verify(managed.keyHash, key) } throws SecretVerificationUnavailableException(-22, null)
+
+        shouldThrow<SecretVerificationUnavailableException> { seeder().afterSingletonsInstantiated() }
+
+        verify(exactly = 1) { secretHasher.verify(managed.keyHash, key) }
+        verify(exactly = 0) { apiKeyService.revokeWorkspaceEndpointKey(any(), any(), any()) }
+        verify(exactly = 0) { keyService.issue(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { keyService.bind(any(), any(), any()) }
     }
 
     @Test

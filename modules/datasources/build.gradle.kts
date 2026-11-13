@@ -42,6 +42,8 @@ dependencies {
         runtimeOnly(libs.mysql.connector.j) // GPL + FOSS exception
     }
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     // Integration tests via Testcontainers (§13.2): real PG / MySQL / MSSQL containers exercise
     // each dialect's adapter, encryption round-trip and type mapping. The bundled drivers
     // (postgresql, mssql-jdbc, h2, …) are already on the test runtime via `runtimeOnly`; the
@@ -91,6 +93,12 @@ tasks.named<Test>("test") {
         .file(rootProject.file("docs/datasources.md"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("dialectChecklistSpec")
+    // #463 — `ReadOnlyEnforcementSpecDriftTest` reads dag-executor.md §8.2's read-only table the same
+    // way, so the same stale-green rule applies to it.
+    inputs
+        .file(rootProject.file("docs/dag-executor.md"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("readOnlyEnforcementSpec")
 }
 
 // #781 — the DuckDB driver version as RESOLVED, packaged beside the code that loads it, so what the

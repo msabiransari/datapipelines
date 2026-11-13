@@ -55,6 +55,9 @@ class AuthErrorSpecDriftTest {
                 AuthErrorCodes.PROMOTION_KEY_INVALID to PromotionKeyInvalidException().status,
                 AuthErrorCodes.API_KEY_EXPIRY_INVALID to ApiKeyExpiryInvalidException("unknown_preset").status,
                 AuthErrorCodes.KEY_NAME_TAKEN to KeyNameTakenException("probe", null).status,
+                // #847 — the native verification fault's envelope status.
+                AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE to
+                    SecretVerificationUnavailableException(Argon2SecretHasher.MEMORY_ALLOCATION_ERROR, null).status,
             )
         exceptionStatus.forEach { (code, status) ->
             (code to status) shouldBe (code to docStatus.getValue(code))

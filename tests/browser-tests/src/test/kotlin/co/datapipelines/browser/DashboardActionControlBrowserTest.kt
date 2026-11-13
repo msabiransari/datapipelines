@@ -4,6 +4,7 @@ import com.google.gson.JsonParser
 import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
+import com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat
 import com.microsoft.playwright.options.SelectOption
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.BeforeEach
@@ -20,6 +21,34 @@ class DashboardActionControlBrowserTest : DashboardBrowserSuite() {
 
     private val button = "#dp-board-filters [data-dp-action-control='apply']"
     private val limit = "#dp-board-filters [data-dp-parameter='limit'] input"
+    private val region = "#dp-board-filters [data-dp-parameter='region'] select"
+    private val lockedSentence = "Applying is paused while the parameters are checked."
+    private val invalidSentence = "Fix the parameter errors to apply."
+
+    /** #548 — what the runtime gate answers a programmatic press with: `resolved`, or the refusal code. */
+    private fun programmaticRefresh(): Any? =
+        page.evaluate("() => window.__dpPage.instance.refresh({ scope: 'all' }).then(() => 'resolved', (e) => e.code)")
+
+    /**
+     * #548 — whether Apply's described note is SHOWN: Playwright's `isVisible` counts the 1px clipped box of a
+     * visually-hidden element as visible, so the clip and the rendered width are read instead.
+     */
+    private fun noteShown(): Boolean =
+        page.evaluate(
+            """() => { const id = document.querySelector("$button").getAttribute('aria-describedby');
+              const note = id && document.getElementById(id);
+              if (!note) return false;
+              const style = getComputedStyle(note);
+              return style.clipPath === 'none' && note.getBoundingClientRect().width > 1 && style.visibility === 'visible'; }""",
+        ) as Boolean
+
+    /** #548 — Apply is available: no `aria-disabled`, no description. */
+    private fun assertApplyAvailable() {
+        val apply = page.locator(button)
+        apply.getAttribute("aria-disabled") shouldBe null
+        apply.getAttribute("aria-describedby") shouldBe null
+        assertThat(apply).hasAccessibleDescription("")
+    }
 
     private fun seedApplyBoard(root: String): String {
         val board = seedAcceptanceBoard(root)
@@ -106,28 +135,106 @@ class DashboardActionControlBrowserTest : DashboardBrowserSuite() {
     }
 
     @Test
-    fun `Apply during a held evaluation announces actions locked in the dock and sends no refresh`() {
+    fun `Apply is unavailable and described during a held evaluation, the gate refuses a programmatic press, and no refresh crosses`() {
         startTrace()
         val board = seedApplyBoard(ready("dpapplylock"))
         val bodies = refreshBodies()
         openBoard(board)
+        assertApplyAvailable()
         var held: Route? = null
         page.route("**/runtime/parameters") { route -> held = route }
         try {
             val seen = bodies.size
-            page.selectOption("#dp-board-filters [data-dp-parameter='region'] select", SelectOption().setLabel("United States"))
+            page.selectOption(region, SelectOption().setLabel("United States"))
             page.waitForCondition { held != null }
-            page.locator(button).click()
-            page.waitForFunction("() => window.__dpPage.notifications.some(n => n.code === 'actions.locked')")
-            val refusedLine =
-                page.locator("#dp-board-dock-pane-events .dp-board-event-text:text-is('the action could not start a refresh.')")
-            refusedLine.isVisible shouldBe true
+            val apply = page.locator(button)
+            assertThat(apply).hasAttribute("aria-disabled", "true")
+            assertThat(apply).hasAccessibleDescription(lockedSentence)
+            assertThat(apply).hasAccessibleName("Apply")
+            // V3: the transient state is described for assistive technology, not shown.
+            noteShown() shouldBe false
+            programmaticRefresh() shouldBe "actions.locked"
             bodies.size shouldBe seen
             requireNotNull(held).resume()
             held = null
             page.waitForFunction("() => window.__dpPage.instance._parameters.values.region === 'US' && !window.__dpPage.instance._lock")
+            assertApplyAvailable()
             bodies.size shouldBe seen
+            println("548-locked described='$lockedSentence' refreshes=${bodies.size - seen}")
         } finally {
+            held?.resume()
+            page.unroute("**/runtime/parameters")
+        }
+    }
+
+    @Test
+    fun `invalid parameters make Apply unavailable with the visible sentence until a valid retry - no refresh crosses`() {
+        startTrace()
+        val board = seedApplyBoard(ready("dpapplyinvalid"))
+        val bodies = refreshBodies()
+        openBoard(board)
+        val apply = page.locator(button)
+        val seen = bodies.size
+        // (a) an unbound leaf's commit starts no evaluation: Apply stays available.
+        page.fill(limit, "500")
+        page.keyboard().press("Tab")
+        page.waitForFunction("() => window.__dpPage.instance._adapter.readSelections().limit === 500 && !window.__dpPage.instance._lock")
+        assertApplyAvailable()
+        // (b) a parent commit sends the full selections, limit = 500 included; (c) the server answers invalid.
+        page.selectOption(region, SelectOption().setLabel("United States"))
+        page.waitForFunction("() => window.__dpPage.instance._parameters.valid === false && !window.__dpPage.instance._lock")
+        // (d) unavailable, the fixable state's sentence visible as its description, the gate refusing.
+        assertThat(apply).hasAttribute("aria-disabled", "true")
+        assertThat(apply).hasAccessibleDescription(invalidSentence)
+        assertThat(apply).hasAccessibleName("Apply")
+        val note = page.locator("#" + requireNotNull(apply.getAttribute("aria-describedby")))
+        note.textContent() shouldBe invalidSentence
+        note.isVisible shouldBe true
+        noteShown() shouldBe true
+        programmaticRefresh() shouldBe "parameters.invalid"
+        // (e) from the invalid state any commit re-evaluates (the retry branch); (f) valid again.
+        page.fill(limit, "42")
+        page.keyboard().press("Tab")
+        page.waitForFunction("() => window.__dpPage.instance._parameters.valid === true && !window.__dpPage.instance._lock")
+        assertApplyAvailable()
+        bodies.size shouldBe seen
+        println("548-invalid described='$invalidSentence' visible=true refreshes=${bodies.size - seen}")
+    }
+
+    @Test
+    fun `on a short window Enter on an unavailable Apply leaves the folded dock folded and sends nothing`() {
+        startTrace()
+        val board = seedApplyBoard(ready("dpapplyshort"))
+        page.setViewportSize(SHORT_W, SHORT_H)
+        val bodies = refreshBodies()
+        openBoard(board)
+        val dock = "#dp-board-dock[data-dp-dock-collapsed]"
+        // (a) the short window folds the dock automatically.
+        page.waitForSelector(dock)
+        // (b) the filters are a hidden drawer at this width: open it first.
+        page.locator("#dp-board-filters-trigger").click()
+        page.waitForFunction("() => document.getElementById('dp-board-filters-trigger').getAttribute('aria-expanded') === 'true'")
+        page.locator(button).isVisible shouldBe true
+        var held: Route? = null
+        page.route("**/runtime/parameters") { route -> held = route }
+        try {
+            val seen = bodies.size
+            // (c) a held evaluation closes the gate.
+            page.selectOption(region, SelectOption().setLabel("United States"))
+            page.waitForCondition { held != null }
+            // (d) keyboard focus on the unavailable button (the attribute, not the property: focus is kept).
+            page.locator(button).focus()
+            page.evaluate("() => document.activeElement && document.activeElement.getAttribute('data-dp-action-control')") shouldBe "apply"
+            assertThat(page.locator(button)).hasAttribute("aria-disabled", "true")
+            // (e) Enter dispatches a click; the composite stops it before the page's filters-panel listener.
+            page.locator(dock).count() shouldBe 1
+            page.keyboard().press("Enter")
+            page.evaluate("() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+            page.locator(dock).count() shouldBe 1
+            bodies.size shouldBe seen
+            println("548-short ${SHORT_W}x$SHORT_H folded-after-enter=true refreshes=${bodies.size - seen}")
+        } finally {
+            // (f)
             held?.resume()
             page.unroute("**/runtime/parameters")
         }
@@ -147,5 +254,11 @@ class DashboardActionControlBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => document.getElementById('dp-board-filters-trigger').getAttribute('aria-expanded') === 'true'")
         page.locator(button).isVisible shouldBe true
         documentOverflowsX() shouldBe false
+    }
+
+    private companion object {
+        /** The short window of `DashboardDockResizeBrowserTest` (#800): the dock starts folded here. */
+        const val SHORT_W = 1280
+        const val SHORT_H = 720
     }
 }

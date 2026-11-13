@@ -65,6 +65,8 @@ dependencies {
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers.junit.jupiter)
     testImplementation(libs.testcontainers.postgresql)
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     // Actual materialized input cursors exercise unsigned widths and microsecond temporal values.
     testRuntimeOnly(libs.duckdb.jdbc)
 }

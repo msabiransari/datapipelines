@@ -185,6 +185,12 @@ parquet = "1.17.1"
 # renders honestly as literal "- [ ]" without it.
 commonmark = "0.30.0"
 argon2-jvm = "2.12"
+# #847 — argon2-jvm's own JNA binding types (Argon2Library, Size_t) at COMPILE scope, so
+# Argon2SecretHasher can read the native verify code the library's boolean API hides. The
+# version argon2-jvm-nolibs 2.12's pom already pins (runtime scope) and auth's
+# runtimeClasspath already resolves; already in verification-metadata.xml. Not BOM-managed.
+# Nothing new enters the build.
+jna = "5.16.0"
 jjwt = "0.13.0"
 mockk = "1.14.11"
 kotest = "6.2.3"
@@ -322,6 +328,7 @@ duckdb-jdbc = { module = "org.duckdb:duckdb_jdbc", version.ref = "duckdb-jdbc" }
 
 # --- Auth / crypto (NOT BOM-managed) -----------------------------------------
 argon2-jvm = { module = "de.mkammerer:argon2-jvm", version.ref = "argon2-jvm" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 jjwt-api = { module = "io.jsonwebtoken:jjwt-api", version.ref = "jjwt" }
 jjwt-impl = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
 jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
@@ -354,9 +361,10 @@ micrometer-core = { module = "io.micrometer:micrometer-core" }
 # exporting registry is a deployment concern; library modules keep micrometer-core only.
 micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
 slf4j-api = { module = "org.slf4j:slf4j-api" }
-# Tests only, and only where no Spring Boot starter already brings it: modules/persistence's
-# suite records the writer's WARN lines with a ListAppender (#266b — a store's message must
-# never reach a log line). The version is the Spring Boot BOM's, the one every starter uses.
+# Test tooling: modules/log-capture exposes this as api for the shared snapshot capture (#756).
+# Its consumers use testImplementation only. modules/persistence also declares the backend for
+# its writer's WARN assertions (#266b — a store's message must never reach a log line).
+# The version is the Spring Boot BOM's, the one every starter uses.
 logback-classic = { module = "ch.qos.logback:logback-classic" }
 
 # --- Markdown rendering (033 docs-in-app; NOT BOM-managed) -------------------

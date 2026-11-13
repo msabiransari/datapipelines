@@ -3,6 +3,8 @@ plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     testImplementation(project(":modules:app"))
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
 
     // The tracer-bullet E2E seeds API keys via SQL, and the stored hash must be a real
     // Argon2id of the full key (auth.md §7.2). The P7 brief asked for auth's

@@ -7,9 +7,9 @@ import co.datapipelines.dependencies.FamilyKey
 import co.datapipelines.dependencies.GraphLimits
 import co.datapipelines.dependencies.Lifecycle
 import co.datapipelines.dependencies.ObjectRequest
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiExceptionHandler
-import co.datapipelines.web.capturingLogEvents
 import co.datapipelines.web.config.ReleaseDependencyProperties
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.kotest.assertions.withClue

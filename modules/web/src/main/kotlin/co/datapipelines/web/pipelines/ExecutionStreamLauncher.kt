@@ -365,7 +365,7 @@ class ExecutionStreamLauncher(
                         executionId = executionId,
                     ),
                 )
-            recordResultColumns(result)
+            recordResultColumns(result, emitter)
         } catch (e: PipelineConcurrencyLimitException) {
             if (!emitter.emittedAny()) {
                 failBeforeStart(sse, emitter, e, releaseNeverStarted)
@@ -415,12 +415,21 @@ class ExecutionStreamLauncher(
      * them the cursor cannot tell "succeeded with a result" from "zero caller nodes". Bookkeeping
      * only: a failure here is logged, never fails the completed execution (dag-executor §10's
      * emitter policy applied to its sibling write).
+     *
+     * #905: the describe runs here; the write goes through the run's [emitter], which orders it
+     * behind a RUNNING insert that outlived its bound (otherwise it would match no row) and logs a
+     * write that matches no row or fails.
      */
-    private fun recordResultColumns(result: ExecutionResult) {
+    private fun recordResultColumns(
+        result: ExecutionResult,
+        emitter: WebEventEmitter,
+    ) {
         val ref = result.resultRef ?: return
         runCatching {
             val view = resultStore.describe(ref) ?: return
-            executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            emitter.writeBehindUnconfirmedInsert(result.executionId, RESULT_COLUMNS_WRITE) {
+                executionRepository.recordResult(result.executionId, view.totalRows, view.bytes, view.schema)
+            }
         }.onFailure { log.warn("Result columns for execution {} not recorded.", result.executionId, it) }
     }
 
@@ -464,3 +473,9 @@ class ExecutionStreamLauncher(
  * #215 A.5) — so no launcher hard-codes a kind the credential does not have.
  */
 internal fun AuthenticatedPrincipal.executedByKeyKind(): ExecutedByKeyKind? = keyKind?.let { ExecutedByKeyKind.fromWire(it.wire) }
+
+/**
+ * #905 — the result-history write's name in the emitter's WARNs (`WebEventEmitter.writeBehindUnconfirmedInsert`),
+ * shared by the three surfaces that record it (this launcher, `RecordingExecutionRunner`, `SubPipelineExecutionRunner`).
+ */
+internal const val RESULT_COLUMNS_WRITE = "result columns write"

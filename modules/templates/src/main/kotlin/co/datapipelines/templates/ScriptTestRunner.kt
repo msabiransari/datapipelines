@@ -30,7 +30,10 @@ import java.time.Instant
  * service). Neither stages anything and neither touches the Context.
  *
  * The pool is a constructor parameter: evaluations never run on a request thread (record
- * §9.5). [evaluateTimeout] bounds one case/probe; [suiteTimeout] bounds the whole suite.
+ * §9.5). [evaluateTimeout] bounds one case/probe; [suiteTimeout] is one budget for the whole
+ * suite (#770): it starts before the runner compiles, every pool call of the suite is clipped to
+ * what remains, and a case finishing after it fails. [nanoClock] is the clock every deadline read
+ * goes through (a test seam; production passes nothing).
  */
 class ScriptTestRunner(
     private val engines: Map<ScriptLanguage, ScriptEngine>,
@@ -45,6 +48,7 @@ class ScriptTestRunner(
     private val maxStatements: Long? = null,
     private val maxResultBytes: Long? = null,
     private val maxInputBytes: Long? = null,
+    private val nanoClock: () -> Long = System::nanoTime,
 ) {
     /** One invariant's verdict on one evaluation (record §9.1's `{ name, passed, message }`). */
     data class InvariantVerdict(
@@ -101,8 +105,12 @@ class ScriptTestRunner(
     /**
      * Runs the template's whole suite (§8.1), in declaration order, and returns every
      * `template.test_failed` / `template.invariant_invalid` failure — empty when every case
-     * holds. The suite is bounded by [suiteTimeout]: a case starting past the deadline fails
-     * the save like any case failure.
+     * holds. [suiteTimeout] is a hard budget D taken BEFORE the compiles (#770): each pool call is
+     * clipped to what remains of it ([runCase]'s deadline), a clipped call that times out is the
+     * suite failure (never the case's own `pipeline.script.timeout` expectation), and a case whose
+     * work finishes after D fails as suite whatever its output — as does every later case, with no
+     * pool call. The return can still trail D by one clipped slot wait, one abandonment grace and
+     * the caller-thread work nothing interrupts (compiles, type gate, comparison).
      */
     fun runSuite(
         label: String,
@@ -119,33 +127,75 @@ class ScriptTestRunner(
                     co.datapipelines.pipeline.JAVASCRIPT_UNAVAILABLE_MESSAGE,
                 ),
             )
+        val deadline = nanoClock() + suiteTimeout.toNanos()
         val script = engine.compile(body)
         val compiledInvariants = invariants.map { it to jsonata().compile(it.expr) }
-        val deadline = System.nanoTime() + suiteTimeout.toNanos()
         val failures = mutableListOf<TemplateValidationFailure>()
         tests.forEach { case ->
-            if (System.nanoTime() > deadline) {
-                failures +=
-                    TemplateValidationFailure(
-                        code = PipelineErrorCodes.Template.TEST_FAILED,
-                        message =
-                            "The test suite did not finish within ${suiteTimeout.toSeconds()}s " +
-                                "(suite-timeout-seconds).",
-                        details = mapOf("timeout" to "suite", "suite_timeout_seconds" to suiteTimeout.toSeconds()),
-                    )
+            if (nanoClock() > deadline) {
+                failures += suiteTimedOut()
                 return@forEach
             }
-            val outcome = runCase("$label case '${case.name}'", engine, script, contract, compiledInvariants, case.input)
-            failures += verdictOf(case, outcome)
+            val outcome =
+                runCase("$label case '${case.name}'", engine, script, contract, compiledInvariants, case.input, deadlineNanos = deadline)
+            val verdict = if (outcome.isSuiteTimeout()) listOf(suiteTimedOut()) else verdictOf(case, outcome)
+            // The completion check: work that finished after D never passes, whatever it produced.
+            failures += if (nanoClock() > deadline) listOf(suiteTimedOut()) else verdict
         }
         return failures
     }
+
+    private fun suiteTimedOut() =
+        TemplateValidationFailure(
+            code = PipelineErrorCodes.Template.TEST_FAILED,
+            message = "The test suite did not finish within ${suiteTimeout.toSeconds()}s (suite-timeout-seconds).",
+            details = mapOf("timeout" to SUITE, "suite_timeout_seconds" to suiteTimeout.toSeconds()),
+        )
+
+    private fun RunOutcome.isSuiteTimeout() = this is RunOutcome.Refused && details["timeout"] == SUITE
+
+    /** One pool call's limits under the suite budget, and whether the clip is below [evaluateTimeout]. */
+    private data class Clip(
+        val limits: EvaluationLimits,
+        val binding: Boolean,
+    )
+
+    /**
+     * The limits for one pool call: unchanged with no deadline; null when less than
+     * [MIN_REMAINING_NANOS] of the budget remains (no pool call is made); otherwise the wall
+     * clock is `min(evaluateTimeout, D - now)`.
+     */
+    private fun clip(
+        limits: EvaluationLimits,
+        deadlineNanos: Long?,
+    ): Clip? {
+        if (deadlineNanos == null) return Clip(limits, binding = false)
+        val remaining = deadlineNanos - nanoClock()
+        return when {
+            remaining < MIN_REMAINING_NANOS -> null
+            remaining < evaluateTimeout.toNanos() -> Clip(limits.copy(wallClock = Duration.ofNanos(remaining)), binding = true)
+            else -> Clip(limits, binding = false)
+        }
+    }
+
+    /** The `timeout = suite` detail when a binding clip, not the script, is why the call timed out. */
+    private fun suiteDetail(
+        err: ScriptingException,
+        clip: Clip,
+    ): Map<String, Any?> = if (clip.binding && err.code == PipelineErrorCodes.Script.TIMEOUT) SUITE_DETAIL else emptyMap()
+
+    private fun suiteSpent(label: String) =
+        RunOutcome.Refused(PipelineErrorCodes.Script.TIMEOUT, "$label: the suite budget is spent", details = SUITE_DETAIL)
 
     /**
      * One case or probe (record §9.1): the §5.1 input check, one evaluation on the pool, the
      * §5.3 type gate, then every invariant over `{ rows, rejects, inputs }`. Invariants are
      * compiled by the caller — they do not vary per case. [now] is the production clock pin
      * (the execution's `current_timestamp`); a case's own `now` wins when present.
+     * [deadlineNanos] is the suite's D on [nanoClock] (#770; null — `templates_evaluate`, the
+     * editor's detail pass — leaves every limit as it is): each pool call is clipped to what
+     * remains, none is made below [MIN_REMAINING_NANOS], and a clipped call's timeout is a
+     * refusal carrying `details.timeout = suite`.
      */
     @Suppress("ReturnCount") // each §4.3/§5.1 guard is its own early refusal; the order is the contract
     fun runCase(
@@ -156,6 +206,7 @@ class ScriptTestRunner(
         compiledInvariants: List<Pair<ScriptInvariant, CompiledScript>>,
         input: ScriptTestInput,
         now: Instant? = null,
+        deadlineNanos: Long? = null,
     ): RunOutcome {
         val rows = input.rows.orEmpty()
         val inputs = input.inputs.orEmpty()
@@ -177,7 +228,7 @@ class ScriptTestRunner(
                 maxInputBytes = maxInputBytes,
                 console = ConsoleSink { console += it },
             )
-        val evaluated = evaluateOnPool(label, engine, script, contract, CaseContext(input, rows, inputs), limits)
+        val evaluated = evaluateOnPool(label, engine, script, contract, CaseContext(input, rows, inputs), limits, deadlineNanos)
         if (evaluated is RunOutcome.Refused) return evaluated.copy(console = console.toList())
 
         // Shape + gate the output (§5.3).
@@ -189,7 +240,7 @@ class ScriptTestRunner(
             }
 
         val verdicts =
-            runInvariants(label, contract, compiledInvariants, gated, rows, inputs, limits)
+            runInvariants(label, contract, compiledInvariants, gated, CaseContext(input, rows, inputs), limits, deadlineNanos)
         if (verdicts is RunOutcome.Refused) return verdicts.copy(console = console.toList())
         return RunOutcome.Evaluated(gated.output, gated.rejects, (verdicts as RunOutcome.Evaluated).invariants, console.toList())
     }
@@ -227,7 +278,9 @@ class ScriptTestRunner(
         contract: ScriptContract,
         case: CaseContext,
         limits: EvaluationLimits,
+        deadlineNanos: Long?,
     ): RunOutcome {
+        val bodyClip = clip(limits, deadlineNanos) ?: return suiteSpent(label)
         val inputObject =
             buildMap<String, Any?> {
                 if (contract.mode == ScriptMode.ROW) put("rows", case.rows)
@@ -235,9 +288,10 @@ class ScriptTestRunner(
                 put("meta", case.input.meta ?: mapOf("node_id" to "test", "context_key" to null))
             }
         return try {
-            RunOutcome.Evaluated(pool.run(limits, label) { engine.evaluate(script, inputObject, limits) }, emptyList(), emptyList())
+            val bodyLimits = bodyClip.limits
+            RunOutcome.Evaluated(pool.run(bodyLimits, label) { engine.evaluate(script, inputObject, bodyLimits) }, emptyList(), emptyList())
         } catch (err: ScriptingException) {
-            RunOutcome.Refused(err.code, err.message ?: err.code, details = err.details)
+            RunOutcome.Refused(err.code, err.message ?: err.code, details = err.details + suiteDetail(err, bodyClip))
         }
     }
 
@@ -247,25 +301,32 @@ class ScriptTestRunner(
         contract: ScriptContract,
         compiledInvariants: List<Pair<ScriptInvariant, CompiledScript>>,
         gated: Gated,
-        rows: List<Map<String, Any?>>,
-        inputs: Map<String, Any?>,
+        case: CaseContext,
         limits: EvaluationLimits,
+        deadlineNanos: Long?,
     ): RunOutcome {
         val invariantObject =
             mapOf(
                 "rows" to gatedRows(gated.output, contract),
                 "rejects" to gated.rejects,
-                "inputs" to productionInputs(contract, rows, inputs),
+                "inputs" to productionInputs(contract, case.rows, case.inputs),
             )
         val verdicts = mutableListOf<InvariantVerdict>()
         compiledInvariants.forEach { (invariant, compiled) ->
+            val invariantLabel = "$label invariant '${invariant.name}'"
+            val invariantClip = clip(limits, deadlineNanos) ?: return suiteSpent(invariantLabel)
             val verdict =
                 try {
-                    pool.run(limits, "$label invariant '${invariant.name}'") {
-                        jsonata().evaluate(compiled, invariantObject, limits)
+                    val invariantLimits = invariantClip.limits
+                    pool.run(invariantLimits, invariantLabel) {
+                        jsonata().evaluate(compiled, invariantObject, invariantLimits)
                     }
                 } catch (err: ScriptingException) {
-                    return RunOutcome.Refused(err.code, "invariant '${invariant.name}': ${err.message ?: err.code}")
+                    return RunOutcome.Refused(
+                        err.code,
+                        "invariant '${invariant.name}': ${err.message ?: err.code}",
+                        details = suiteDetail(err, invariantClip),
+                    )
                 }
             when (verdict) {
                 is Boolean -> {
@@ -707,5 +768,12 @@ class ScriptTestRunner(
     companion object {
         /** The bounded-diff cap of record §8.1. */
         private const val MAX_DETAIL_CHARS = 2_000
+
+        /** The `details.timeout` value of a suite-budget failure (#770). */
+        private const val SUITE = "suite"
+        private val SUITE_DETAIL: Map<String, Any?> = mapOf("timeout" to SUITE)
+
+        /** Below one millisecond of budget no pool call is made (the pool counts its waits in ms). */
+        private const val MIN_REMAINING_NANOS = 1_000_000L
     }
 }

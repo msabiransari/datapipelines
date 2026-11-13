@@ -1,10 +1,10 @@
 # Scheduler Specification
 
-**Status:** v1.12 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
+**Status:** v1.13 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-12
 
 ---
 
@@ -163,7 +163,7 @@ A run is admitted by a worker: capacity first (§7), then the executor prepares 
 
 ### 5.1 Not started means nothing ran
 
-A scheduled launch **fails closed**: the execution may begin only after its `RUNNING` record is written, under an id minted at the claim. So a launch that could not write its record is `not_started` / `record_unwritable` — no node ran — rather than a run in an unknown state. Every `not_started` run still has its trail, which says why. The barrier is now trivially true of the wire too (#306): the RUNNING row is committed before the first frame leaves the emitter, so the every-surface assumption "an id that reached a client resolves" holds for the scheduled path and the interactive ones alike. The insert itself is bounded (`datapipelines.executor.lifecycle-write-timeout-seconds`, #311): a past-bound insert is the same `recorded = false` refusal — fail-closed here, a WARN on the interactive paths.
+A scheduled launch **fails closed**: the execution may begin only after its `RUNNING` record is written, under an id minted at the claim. So a launch that could not write its record is `not_started` / `record_unwritable` — no node ran — rather than a run in an unknown state. Every `not_started` run still has its trail, which says why. The barrier is now trivially true of the wire too (#306): the RUNNING row is committed before the first frame leaves the emitter, so the every-surface assumption "an id that reached a client resolves" holds for the scheduled path and the interactive ones alike. The insert itself is bounded (`datapipelines.executor.lifecycle-write-timeout-seconds`, #311): a past-bound insert is the same `recorded = false` refusal — fail-closed here, a WARN on the interactive paths. The start barrier waits 30 s for the row, so boot refuses a bound above 25 s (#325, [Configuration §3.2](configuration.md#32-executor)): past it the barrier would give up first and the run would end `unknown` instead of `record_unwritable`. A past-bound insert may still land once the database answers; the refused run has no terminal event, so that RUNNING row is reaped by the stale sweep as ABORTED `pipeline.execution.instance_lost` beside the run's `record_unwritable` trail — stated, not fixed: the interactive paths order their terminal write behind such an insert ([DAG Executor §10.1](dag-executor.md#101-how-an-emitted-event-becomes-durable-266)), but a refused scheduled run has no terminal write to order.
 
 ### 5.2 What blocks
 
@@ -239,6 +239,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.13 | 325 (#325) | §5.1: the lifecycle-write bound is capped at 25 s below the 30 s start wait (else a fail-closed run ends `unknown`, not `record_unwritable`); a refused run's late RUNNING insert is reaped by the stale sweep beside its `record_unwritable` trail — stated, not fixed. |
 | 2026-11-11 | v1.12 | #786 U2 schedules pin exact versions | §1, §2.1: payload schema 2 — `{"pipeline", "version": <int>}` pins one exact version; `current`/`latest` refused by name; the pin is validated at save under the pinned pipeline's workspace guard (eligible: RELEASED, or DRAFT where authoring is enabled); a stored schema-1 payload is refused `payload_schema_unsupported`, never upgraded at read time; the upgrade converts live schema-1 schedules in place (only the version selector changes). §5: `not_started` gains `version_not_eligible` and `payload_schema_unsupported` (both block); `pointer_null` is schema-1 history. Round 7: the launch re-checks the pinned version's eligibility on the same read as the body (a prepared copy can outlive a repin and the old version's discard); the conversion pins each queued run to ITS OWN pipeline's CURRENT. |
 | 2026-11-05 | v1.11 | 799 (#799), ruling (c) | §6 adds lake append to the system actor’s fixed permission set; lake-writing schedule saves also require the caller’s lake append permission. |
 | 2026-10-25 | v1.10 | 442c (#442) | §2.3: notices use the run’s frozen target and reference timezone with known due/start/end and execution reference. §8.2: activation and rollback pointers. |

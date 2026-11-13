@@ -289,6 +289,8 @@
     this._parameters = null;
     this._baseline = null;
     this._lock = null;
+    // #548 — the action availability last handed to the adapter; undefined until the first publish.
+    this._gatePublished = undefined;
     // #374 — the parameters-only entry (initParameters): a parameter SET is evaluated by id and version, with no
     // dashboard configuration behind it. `_generation` numbers every attempt so a superseded one is nameable.
     this._parametersOnly = false;
@@ -644,13 +646,15 @@
         });
         self._adapter.renderActionControls(controls);
       }
+      // #548 — the buttons begin unavailable (`actions.not_ready`); every later gate write republishes.
+      self._syncGate();
 
       // Step 3 — the parameter state (an explicit no-op without a parameter set), awaited.
       var parameterSet = self._config.parameter_set;
       if (parameterSet && parameterSet.name) {
         var evaluated = await self._evaluateParameters("bootstrap");
         steps.push("parameters_rendered");
-        self._parameters = evaluated;
+        self._setGate({ _parameters: evaluated });
         self._baseline = { selections: self._snapshotSelections(evaluated), revision: evaluated.parameter_revision };
       } else {
         steps.push("parameters_rendered");
@@ -661,7 +665,7 @@
       steps.push("visualizations_mounted");
 
       // Step 4 — the initial actions, once and only once everything above held.
-      self._bootstrapped = true;
+      self._setGate({ _bootstrapped: true });
       var initial = (self._config.actions || []).filter(function (action) {
         return action && action.initial === true;
       });
@@ -718,9 +722,9 @@
       steps.push("layout_mounted");
       var evaluated = await self._evaluateParameters("bootstrap");
       steps.push("parameters_rendered");
-      self._parameters = evaluated;
+      self._setGate({ _parameters: evaluated });
       self._baseline = { selections: self._snapshotSelections(evaluated), revision: evaluated.parameter_revision };
-      self._bootstrapped = true;
+      self._setGate({ _bootstrapped: true });
       return undefined;
     })();
     this._ready.catch(function (error) {
@@ -869,7 +873,8 @@
       // #383 — the supersede also CLOSES the prior attempt's stream (the AbortController fires; the server's
       // disconnect grace then aborts the evaluation — the owner's §11.7 ruling over the spec's "never cancels").
       this._closeParameterStream(prior, "superseded");
-      this._lock = null;
+      // #548 — not published: the next statement acquires n+1's lock, so "available" here is never a real state.
+      this._setGate({ _lock: null }, false);
     }
     var self = this;
     var startedAt = this._env.now();
@@ -892,7 +897,7 @@
       resolve: null,
       reject: null,
     };
-    this._lock = attempt;
+    this._setGate({ _lock: attempt });
     attempt.timer = this._env.setTimeout(function () {
       self._lockExpired(attempt);
     }, attempt.deadline - startedAt);
@@ -1136,8 +1141,7 @@
         }
         attempt.finished = true;
         self._clearLockTimer(attempt);
-        self._lock = null;
-        self._parameters = evaluated;
+        self._setGate({ _lock: null, _parameters: evaluated });
         self._baseline = { selections: self._snapshotSelections(evaluated), revision: evaluated.parameter_revision };
         // #374 — the form's failure notice is a STATE, not an event: an applied response retires it, so the same
         // failure twice in a row (with a success between) is shown twice rather than deduplicated into silence.
@@ -1157,7 +1161,7 @@
         if (!attempt.finished && self._lock === attempt) {
           attempt.finished = true;
           self._clearLockTimer(attempt);
-          self._lock = null;
+          self._setGate({ _lock: null });
           self._publishNotification({
             scope: "parameters",
             severity: "error",
@@ -1182,7 +1186,7 @@
   DashboardInstance.prototype._lockExpired = function (attempt) {
     if (attempt.finished) return;
     attempt.finished = true;
-    if (this._lock === attempt) this._lock = null;
+    if (this._lock === attempt) this._setGate({ _lock: null });
     // #383 — the expired attempt's stream closes with it: the deadline releases the lock and stops the frames
     // (the evaluation itself runs on server-side; the grace governs its abort, as for every disconnect).
     this._closeParameterStream(attempt, "expired");
@@ -1210,11 +1214,66 @@
    * re-evaluation restores.
    */
   DashboardInstance.prototype._requireActionGate = function () {
-    if (this._disposed) throw this._fail("dashboard.disposed", "the instance is disposed");
-    if (this._lock) throw this._fail("actions.locked", "an action is refused while a parameter evaluation is pending");
-    if (!this._bootstrapped) throw this._fail("actions.not_ready", "the instance is not ready");
-    if (this._parameters && this._parameters.valid === false) {
-      throw this._fail("parameters.invalid", "the parameter state is invalid; submission stays blocked until it is valid again");
+    var code = this._gateRefusal();
+    if (code) throw this._fail(code, GATE_REFUSAL_MESSAGES[code]);
+  };
+
+  var GATE_REFUSAL_MESSAGES = {
+    "dashboard.disposed": "the instance is disposed",
+    "actions.locked": "an action is refused while a parameter evaluation is pending",
+    "actions.not_ready": "the instance is not ready",
+    "parameters.invalid": "the parameter state is invalid; submission stays blocked until it is valid again",
+  };
+
+  /**
+   * #548 — the gate's refusal code in its order, or null when it is open. `_requireActionGate` throws from it and
+   * `_syncGate` publishes from it, so what a button shows and what a press is told cannot diverge. An in-flight
+   * refresh is not an input: it never closes the gate (refreshes claim occurrences newest-wins).
+   */
+  DashboardInstance.prototype._gateRefusal = function () {
+    if (this._disposed) return "dashboard.disposed";
+    if (this._lock) return "actions.locked";
+    if (!this._bootstrapped) return "actions.not_ready";
+    if (this._parameters && this._parameters.valid === false) return "parameters.invalid";
+    return null;
+  };
+
+  /**
+   * #548 — the ONE writer of the gate's four inputs (a source scan pins it): assigns whichever of `_lock`,
+   * `_parameters`, `_bootstrapped`, `_disposed` the fields carry, then republishes the availability unless
+   * `publish === false` (disposal tears the adapter down; a supersede re-locks in its next statement).
+   */
+  DashboardInstance.prototype._setGate = function (fields, publish) {
+    var own = Object.prototype.hasOwnProperty;
+    if (own.call(fields, "_lock")) this._lock = fields._lock;
+    if (own.call(fields, "_parameters")) this._parameters = fields._parameters;
+    if (own.call(fields, "_bootstrapped")) this._bootstrapped = fields._bootstrapped;
+    if (own.call(fields, "_disposed")) this._disposed = fields._disposed;
+    if (publish !== false) this._syncGate();
+  };
+
+  /**
+   * #548 — hands the optional `renderActionAvailability({ available, reason })` hook the gate's state when its
+   * reason changed since the last call. A disposed instance publishes nothing; a throwing hook is isolated and
+   * reported (record §5.4), never silently swallowed — the gate itself is unaffected.
+   */
+  DashboardInstance.prototype._syncGate = function () {
+    if (this._disposed) return;
+    var reason = this._gateRefusal();
+    if (reason === this._gatePublished) return;
+    this._gatePublished = reason;
+    if (typeof this._adapter.renderActionAvailability !== "function") return;
+    try {
+      this._adapter.renderActionAvailability({ available: reason === null, reason: reason });
+    } catch (e) {
+      this._publishNotification({
+        scope: "actions",
+        severity: "warning",
+        code: "actions.availability_failed",
+        message: "the host's action availability handler failed",
+        retryable: false,
+        recover: null,
+      });
     }
   };
 
@@ -2139,7 +2198,7 @@
       // Ownership: if an evaluation was accepted while the reset's render ran, the NEWER applied
       // state owns the board — the baseline's values must not clobber its revision.
       if (self._disposed || self._parameters !== stateAtStart) return undefined;
-      self._parameters = Object.assign({}, self._parameters, { parameters: restored.parameters });
+      self._setGate({ _parameters: Object.assign({}, self._parameters, { parameters: restored.parameters }) });
       return undefined;
     });
   };
@@ -2210,7 +2269,7 @@
       this._closeParameterStream(this._lock, "disposed");
       this._clearLockTimer(this._lock);
       this._lock.finished = true;
-      this._lock = null;
+      this._setGate({ _lock: null }, false);
     }
     var names = Object.keys(this._occurrences);
     for (var n = 0; n < names.length; n++) {
@@ -2228,7 +2287,7 @@
     } catch (e) {
       /* isolated */
     }
-    this._disposed = true;
+    this._setGate({ _disposed: true }, false);
     if (this._init.container && this._init.container.removeAttribute) {
       this._init.container.removeAttribute(MOUNTED_ATTRIBUTE);
     }
@@ -2440,8 +2499,9 @@
 
   /**
    * Renderer registration: the first-party adapters call this at load — `kind`, the major `version`
-   * the wire's `renderer.version` is matched against, and `create(context) → {renderData, renderEmpty?,
-   * renderStatus?, resize?, dispose?}`; optionally `judge(occurrence, {charts}) → null | {code, message, details}`,
+   * the wire's `renderer.version` is matched against, and `create(context) → {renderData(occurrenceRef, rows,
+   * bindings), renderEmpty()?, renderStatus?, resize?, dispose?}` (#852: `rows` is the data frame's row count,
+   * `bindings` its columnar `{path: [values]}`); optionally `judge(occurrence, {charts}) → null | {code, message, details}`,
    * `needsBundle(occurrence) → "2d" | "3d"` and `libraries` (the chart kind's identities). A host registers its own
    * kind the same way, before init.
    */
@@ -2576,6 +2636,13 @@
     var notifications = [];
     var actionControls = [];
     var actionsRoot = null;
+    // #548 — the runtime gate's availability, as `renderActionAvailability` last reported it (open until it does),
+    // the rebuilt row's buttons and note, and the per-adapter counter its note ids are minted from.
+    var actionAvailability = { available: true, reason: null };
+    var actionButtons = [];
+    var actionsNote = null;
+    var actionsNoteId = null;
+    var actionsNoteCounter = 0;
     // Radio groups are named PER ADAPTER: two composites in one document (two boards, a preview
     // beside a board) must never share a native radio group — one instance's pick would clear the
     // other's. The token is stable for the adapter's lifetime, so re-renders regroup correctly.
@@ -2731,10 +2798,48 @@
       return root;
     }
 
+    /**
+     * #548 — why a button is unavailable, one fixed sentence per gate refusal (written with textContent). Owner
+     * decision V3: only the state the person can fix is shown; the transient two are described, not shown.
+     */
+    var ACTION_AVAILABILITY_SENTENCES = {
+      "actions.locked": "Applying is paused while the parameters are checked.",
+      "actions.not_ready": "The dashboard is still loading.",
+      "parameters.invalid": "Fix the parameter errors to apply.",
+    };
+    var ACTION_AVAILABILITY_SHOWN = { "parameters.invalid": true };
+
+    /**
+     * #548 — the row's buttons and note take the current availability. An unavailable button carries the
+     * ATTRIBUTE `aria-disabled` (never the `disabled` property: a person who just Tabbed onto Apply keeps focus)
+     * and is described by the note; an available one carries neither and the note is empty.
+     */
+    function applyActionAvailability() {
+      if (!actionsNote) return;
+      var available = actionAvailability.available;
+      var reason = available ? null : actionAvailability.reason;
+      var sentence = reason && Object.prototype.hasOwnProperty.call(ACTION_AVAILABILITY_SENTENCES, reason)
+        ? ACTION_AVAILABILITY_SENTENCES[reason]
+        : "";
+      actionsNote.textContent = sentence;
+      actionsNote.className = ACTION_AVAILABILITY_SHOWN[reason]
+        ? "dp-dashboard-actions-note"
+        : "dp-dashboard-actions-note dp-dashboard-actions-note-visually-hidden";
+      actionButtons.forEach(function (button) {
+        if (available) button.removeAttribute("aria-disabled");
+        else button.setAttribute("aria-disabled", "true");
+        if (!available && sentence) button.setAttribute("aria-describedby", actionsNoteId);
+        else button.removeAttribute("aria-describedby");
+      });
+    }
+
     /** Append after every parameter render; replacing controls never leaves a second action row. */
     function appendActionControls(root) {
       if (actionsRoot && actionsRoot.parentNode) actionsRoot.parentNode.removeChild(actionsRoot);
       actionsRoot = null;
+      actionButtons = [];
+      actionsNote = null;
+      actionsNoteId = null;
       if (!actionControls.length) return;
       actionsRoot = document.createElement("div");
       actionsRoot.className = "dp-dashboard-actions";
@@ -2745,11 +2850,23 @@
         button.setAttribute("data-dp-action-control", control.name);
         button.setAttribute("data-dp-action", control.action);
         button.textContent = control.label || control.name;
-        button.addEventListener("click", function () {
+        button.addEventListener("click", function (event) {
+          // #548 — a press the gate would refuse (keyboard, or programmatic: the design system's pointer-events
+          // already stop a mouse) ends here, and stops: the page's filters-panel listener must not unfold the dock.
+          if (!actionAvailability.available) {
+            if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+            return;
+          }
           if (listeners.action) listeners.action({ action: control.action, name: control.name, type: "action_control" });
         });
+        actionButtons.push(button);
         actionsRoot.appendChild(button);
       });
+      actionsNote = document.createElement("p");
+      actionsNoteId = "dp-actions-note-" + radioGroupToken + "-" + ++actionsNoteCounter;
+      actionsNote.setAttribute("id", actionsNoteId);
+      actionsRoot.appendChild(actionsNote);
+      applyActionAvailability();
       root.appendChild(actionsRoot);
     }
 
@@ -3185,6 +3302,14 @@
         actionControls = (controls || []).slice();
         if (actionControls.length || this.parametersRoot) appendActionControls(ensureParametersRoot(this));
       },
+      /** #548 — optional: whether the runtime gate would accept a press now, `{ available, reason }`. */
+      renderActionAvailability: function (availability) {
+        actionAvailability = {
+          available: !!(availability && availability.available),
+          reason: availability && typeof availability.reason === "string" ? availability.reason : null,
+        };
+        applyActionAvailability();
+      },
       /** Every parameter's current value — hidden and disabled included (D23) — in its WIRE type. */
       readSelections: function () {
         var out = {};
@@ -3206,10 +3331,13 @@
       onAction: function (callback) {
         listeners.action = callback;
       },
-      renderData: function (occurrence, refreshId, rows, bindings) {
-        var handle = implemented[occurrence.name];
+      // #852 — the handle's own three arguments (`rows` = the frame's row count, `bindings` = the
+      // columnar `{path: [values]}`). The runtime calls the mounted handle directly; this
+      // contract function forwards the same three to it.
+      renderData: function (occurrenceRef, rows, bindings) {
+        var handle = implemented[occurrenceRef.name];
         if (!handle) return Promise.resolve("no-data");
-        return Promise.resolve(handle.renderData(occurrence, refreshId, rows, bindings));
+        return Promise.resolve(handle.renderData(occurrenceRef, rows, bindings));
       },
       renderStatus: function (occurrence, status) {
         var handle = implemented[occurrence.name];

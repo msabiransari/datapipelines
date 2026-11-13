@@ -1,10 +1,13 @@
 package co.datapipelines.auth
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.ints.shouldBeExactly
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -159,7 +162,81 @@ class LocalAuthServiceTest {
         users.findById(user.id)?.lastLoginAt.shouldNotBeNull()
     }
 
+    // ------------------------------------- a native fault is not a wrong password (#847)
+
+    @Test
+    fun `the precomputed dummy hash carries the production hasher's own parameters`() {
+        LocalAuthService.DUMMY_HASH shouldStartWith
+            "\$argon2id\$v=19\$m=${Argon2SecretHasher.MEMORY_KIB},t=${Argon2SecretHasher.ITERATIONS},p=${Argon2SecretHasher.PARALLELISM}\$"
+    }
+
+    @Test
+    fun `the real hasher verifies the dummy hash against its fixed string and nothing else`() {
+        val real = Argon2SecretHasher()
+
+        real.verify(LocalAuthService.DUMMY_HASH, LocalAuthService.DUMMY_PLAINTEXT) shouldBe true
+        real.verify(LocalAuthService.DUMMY_HASH, WRONG_PASSWORD) shouldBe false
+    }
+
+    @Test
+    fun `no request runs a native hash - the service source computes no hash and holds no lazy value`() {
+        // A scan, not a call: a lazy value an earlier test warmed would pass any runtime probe.
+        val source = RepoFiles.read(SOURCE_PATH)
+
+        listOf(".hash(", "by lazy", "Argon2SecretHasher(").forEach { forbidden ->
+            withClue("LocalAuthService.kt must not contain `$forbidden` (#847: no request-time native hash)") {
+                source shouldNotContain forbidden
+            }
+        }
+    }
+
+    @Test
+    fun `a native verification fault answers the same on every path and counts as no attempt`() {
+        val known = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
+        users.setPassword(known.id, hasher.hash(CORRECT_PASSWORD), mustChange = false)
+        users.insert("oidc@company.com", "Oidc", null, "google", "sub-9", isAdmin = false)
+        val faulty = LocalAuthService(users, FaultingHasher(), properties, audit)
+
+        // Unknown email, OIDC-only account and a known unlocked account: the same type, every one.
+        listOf("nobody@company.com", "oidc@company.com", "alice@company.com").forEach { email ->
+            withClue(email) {
+                shouldThrow<SecretVerificationUnavailableException> {
+                    faulty.authenticate(email, CORRECT_PASSWORD, IP, AGENT)
+                }
+            }
+        }
+
+        // No failure recorded (recordLocalLoginFailure never ran), no lock, no audit row at all.
+        val credential = users.findLocalCredential("alice@company.com")
+        credential.shouldNotBeNull()
+        credential.failedLoginCount shouldBe 0
+        credential.lockedUntil shouldBe null
+        auditRows() shouldBeExactly 0
+    }
+
+    @Test
+    fun `a native fault on a known account never moves it toward the lock`() {
+        val known = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
+        users.setPassword(known.id, hasher.hash(CORRECT_PASSWORD), mustChange = false)
+        val faulty = LocalAuthService(users, FaultingHasher(), properties, audit)
+
+        repeat(MAX_FAILURES + 1) {
+            shouldThrow<SecretVerificationUnavailableException> { faulty.authenticate("alice@company.com", WRONG_PASSWORD, IP, AGENT) }
+        }
+
+        users.findLocalCredential("alice@company.com")?.failedLoginCount shouldBe 0
+        auditEvents("auth.login.bad_credentials") shouldBeExactly 0
+        auditEvents("auth.login.locked") shouldBeExactly 0
+        // The account still signs in once the native side recovers.
+        (service.authenticate("alice@company.com", CORRECT_PASSWORD, IP, AGENT) is LocalAuthService.LocalLoginResult.Success) shouldBe true
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private fun auditRows(): Int =
+        checkNotNull(jdbc.queryForObject("SELECT COUNT(*) FROM audit_log", emptyMap<String, Any>(), Int::class.java)) {
+            "COUNT(*) returned no row"
+        }
 
     private fun auditEvents(event: String): Int =
         checkNotNull(
@@ -187,7 +264,18 @@ class LocalAuthServiceTest {
         }
     }
 
+    /** The stand-in for a native fault: every verify throws, as an allocation failure would (no real memory pressure). */
+    private class FaultingHasher : SecretHasher {
+        override fun hash(raw: String): String = "hash:$raw"
+
+        override fun verify(
+            encodedHash: String,
+            raw: String,
+        ): Boolean = throw SecretVerificationUnavailableException(Argon2SecretHasher.MEMORY_ALLOCATION_ERROR, null)
+    }
+
     private companion object {
+        const val SOURCE_PATH = "modules/auth/src/main/kotlin/co/datapipelines/auth/LocalAuthService.kt"
         const val MAX_FAILURES = 3
         const val LOCK_MINUTES = 15L
         const val CORRECT_PASSWORD = "correct-horse-battery-staple"

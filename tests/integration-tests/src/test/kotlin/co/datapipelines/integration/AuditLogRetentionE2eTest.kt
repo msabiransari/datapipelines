@@ -3,6 +3,7 @@ package co.datapipelines.integration
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.logcapture.capturingLogEvents
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull

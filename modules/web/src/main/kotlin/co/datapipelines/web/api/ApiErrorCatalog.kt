@@ -435,6 +435,10 @@ object ApiErrorCatalog {
             // `auth.` code with no dotted family, so it is wired explicitly like the two 403s
             // above rather than resolving to the catalog's 500 for an unknown code.
             co.datapipelines.auth.AuthErrorCodes.PRINCIPAL_DEACTIVATED to HttpStatus.UNAUTHORIZED,
+            // #847 — the native secret verification could not answer: a server-side, transient fault,
+            // so 503. A bare three-segment `auth.` code with no family default, wired explicitly
+            // rather than resolving to the catalog's 500.
+            co.datapipelines.auth.AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             // 179 (D16) — a `user` key is minted by the login hook, never on demand. A 400 like
             // `auth.api_key.expiry_invalid`: the credential is fine, the KIND is not mintable on
             // a request surface.

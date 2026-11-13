@@ -18,8 +18,9 @@ check. A `sql`/`html` id passed to evaluate is `template.contract_invalid`
 an evaluation fails remain in `details.console`. A missing isolate refuses JavaScript with
 `script.js.unavailable`.
 
-The bounds: one case ≤ `datapipelines.script.evaluate-timeout-seconds`, the suite ≤
-`datapipelines.script.suite-timeout-seconds`; the JSONata depth bound
+The bounds: one case ≤ `datapipelines.script.evaluate-timeout-seconds`; a suite still running
+at `datapipelines.script.suite-timeout-seconds` fails (`details.timeout = suite`), though the
+call can return somewhat later; the JSONata depth bound
 `datapipelines.script.max-depth` (default `${script_max_depth}`) counts
 every evaluate entry and exit — nested expressions and non-tail lambda recursion alike, and
 set-level work over hundreds of rows evaluates at the default (#260) — while a tail-recursive
@@ -89,8 +90,8 @@ is on the COMBINED count, not on each table: the written outputs and rejects plu
 inputs (row mode adds the streamed input, and — for a caller output — the buffered caller
 rows and rejects) must together fit `datapipelines.script.max-input-rows`. An input and an
 output each just over half the cap fail together, though each alone is under it; past the
-combined count is `pipeline.script.invariants_too_large`. Known gap: a `table` caller
-output's gated rows are NOT part of the count (only its inputs are). No invariants declared
+combined count is `pipeline.script.invariants_too_large`. A `table` caller output's gated
+rows count with its inputs (a tempdb output is counted once, as its table). No invariants declared
 means no invariant read-back or combined read-back row bound; the table/value input caps
 above still apply. The run also stays bounded by
 `datapipelines.script.max-value-bytes`, `datapipelines.script.max-string-bytes`,

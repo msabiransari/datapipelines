@@ -378,8 +378,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 508 → 511 with #875 (G4, recounted with [STATUS_ROW_REGEX]): the new §13.26 Dependency trees gains
          * `dependencies.request.invalid` (400), `dependencies.metadata.unavailable` (503) and
          * `dependencies.response.too_large` (503), landed in the SAME commit as their constants, catalog rows and routes.
+         * 511 → 512 with #847 (recounted with [STATUS_ROW_REGEX] on the merged document): §13.7 gains
+         * `auth.secret_verification.unavailable` (503), landed in the SAME commit as its constants and
+         * catalog row.
          */
-        const val SECTION_13_ROW_COUNT = 511
+        const val SECTION_13_ROW_COUNT = 512
 
         /**
          * §12's distinct validation codes.

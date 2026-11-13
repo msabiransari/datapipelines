@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.59 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.60 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-13
 
 ---
 
@@ -356,7 +356,7 @@ CREATE INDEX idx_executions_heartbeat ON pipeline_executions(heartbeat_at)    --
 - **Lineage columns (V3).** A PIPELINE node's child execution records `parent_execution_id` + `parent_node_id` (NULL for roots); `root_execution_id` is the top ancestor. The migration backfills `root_execution_id = execution_id` for pre-existing rows and sets it NOT NULL from then on — one indexed query (`idx_executions_root`) returns the whole family and cancellation keys off it, with no NULL special-case anywhere. The repository binds `root_execution_id` as the record's own `execution_id` when the caller leaves it null, so roots never have to repeat their id.
 - **No `result_delivery` column.** Under D9 there is exactly one delivery path (every caller result is materialized in Redis and read through the cursor), so the old `'inline' | 'claim_check'` discriminator describes a fork that no longer exists. `result_row_count` and `result_size_bytes` remain as history/observability facts — they describe a result that is very likely already expired, and they are **not** a claim that the result is still retrievable. Retrievability is a Redis TTL question ([§9](#9-what-is-not-in-this-database)).
 - Both result columns are NULL for pipelines with zero caller nodes (legal under D1 — pure write-back pipelines).
-- `updated_at` is absent by design: the row's lifecycle is INSERT-on-start then one terminal UPDATE, and `completed_at` already carries that timestamp.
+- `updated_at` is absent by design: the row is inserted on start and receives a terminal UPDATE whose timestamp is `completed_at`; `recordResult` separately fills the result-history columns before or after that UPDATE without changing the completion timestamp ([DAG Executor §10.1](dag-executor.md#101-how-an-emitted-event-becomes-durable-266)).
 
 **Partitioning candidate:** Partition by month on `started_at` for large deployments. Note that the composite FK constrains this — a partitioned `pipeline_executions` still references an unpartitioned `pipeline_versions`, which Postgres supports; partitioning `pipeline_versions` would not.
 
@@ -2630,6 +2630,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.60 | #905 review F1 (no migration) — renumbered at final sync after dependency-graph | §4.6: correct the lifecycle note to include the separate result-history UPDATE, which does not change `completed_at`. |
 | 2026-11-11 | v1.59 | #896 docs: ownership and grants as they are since V23 | **No schema change.** Text that still described the V4 `workspace_id` model is corrected to the V23 model: the §3 relationship diagram shows `owner_workspace_id` (ownership; NULL = an instance datasource) and the `datasource_workspaces` grant rows (visibility); the §4.10 note on `workspace_id` becomes the `owner_workspace_id` note — ownership only, the global NAME namespace, visibility by `GRANTED_PREDICATE`, the V4 → V23 history kept as history; §4.11 no longer says datasources "bind by visibility only"; §4.16's backfill note names the `w.is_deleted = FALSE` filter (a soft-deleted workspace got no grant), and its revoke note says a removed grant advances `generation` once while the definition, credential and incarnation stay. |
 | 2026-11-11 | v1.58 | V59 (#874 G3) | **§4.10 `datasources` gains `incarnation_id`** (UUID, `DEFAULT gen_random_uuid()`, unique via `uq_datasources_incarnation`) **and `generation`** (BIGINT from 1, `chk_datasources_generation`) — the local identity beside the name key, both internal and never on the wire; the defaults fill every existing row in the migration's own statement. §5 gains the constraint's implicit index; V59 adds no explicit index. |
 | 2026-11-11 | v1.57 | #786 U2 (no migration) | **§4.22:** the `pipeline` payload is schema 2 — `{"pipeline", "version": <int>}`, the exact pin; schema 1 is refused at read, never re-read; the upgrade's startup conversion rewrites each live schema-1 row's `version` and `payload_schema_version` in place under its revision CAS, and each of its queued runs' payload copies. |

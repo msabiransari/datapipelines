@@ -744,6 +744,13 @@ object PipelineErrorCodes {
          * credential becomes a principal; a deactivated WORKSPACE keeps the 404 rule instead.
          */
         const val PRINCIPAL_DEACTIVATED = "auth.principal_deactivated"
+
+        /**
+         * §13.7 (#847) — 503: the native Argon2 verification of a password or key secret failed for a
+         * reason that is not a mismatch (allocation, a stored hash that does not decode). Fail closed,
+         * counted as no attempt, and answered identically on the unknown-email path.
+         */
+        const val SECRET_VERIFICATION_UNAVAILABLE = "auth.secret_verification.unavailable"
     }
 
     /** §13.8 — datasource. Defined in datasources.md §9–10; cataloged here (D5). */

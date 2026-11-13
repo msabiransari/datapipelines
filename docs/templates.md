@@ -1,9 +1,9 @@
 # Templates Specification
 
-**Status:** v1.25 (frozen contract — additive-only changes after this point)
+**Status:** v1.26 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-13
 
 ---
 
@@ -142,7 +142,7 @@ Example (the design record's own — a row-mode script over staged orders):
 }
 ```
 
-**Save and release run the suite (§8.1 of the record).** Every case runs through the real engine on the bounded evaluation pool under `datapipelines.script.evaluate-timeout-seconds`; its output passes the type gate against the contract (a `DECIMAL` output is rounded half-even to its declared scale, R1); the invariants run on it; the result is compared to `expect` after canonicalisation — exact equality or a refusal code, no tolerances. The suite checks `suite-timeout-seconds` before starting each case, after compilation; it does not interrupt a case already running or reject an overrun after the final case. See [Configuration §3.28](configuration.md#328-script-evaluation-7b-7). The first failure refuses the save with `template.test_failed` naming the case and the assertion (a diff bounded to 2 000 chars). **Release re-runs the suite** on the version being released — a suite that passed at save fails at release only if the engine changed, which is the case worth catching.
+**Save and release run the suite (§8.1 of the record).** Every case runs through the real engine on the bounded evaluation pool under `datapipelines.script.evaluate-timeout-seconds`; its output passes the type gate against the contract (a `DECIMAL` output is rounded half-even to its declared scale, R1); the invariants run on it; the result is compared to `expect` after canonicalisation — exact equality or a refusal code, no tolerances. `suite-timeout-seconds` is one budget for the whole suite: it starts before the runner compiles and covers every evaluation, each evaluation getting only what remains of it; a case that finishes after the budget fails with `template.test_failed`, `details.timeout = suite`, even with a matching output, and every later case fails the same way without running. The call can return later than the budget by a wait for a pool slot, one abandonment grace and work that is not interrupted (compilation, the type gate, the comparison); static validation before the suite and the editor's per-case detail pass are not under this budget. See [Configuration §3.28](configuration.md#328-script-evaluation-7b-7). The first failure refuses the save with `template.test_failed` naming the case and the assertion (a diff bounded to 2 000 chars). **Release re-runs the suite** on the version being released — a suite that passed at save fails at release only if the engine changed, which is the case worth catching.
 
 ### 3.4 Implements and drift
 
@@ -796,6 +796,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.26 | #770 — renumbered at final sync after dependency-graph | §3.3: `suite-timeout-seconds` is a hard budget for the whole save/release suite — it starts before compilation, every evaluation is clipped to what remains, and a case finishing after it fails `template.test_failed` with `details.timeout = suite` even when it matched. The elapsed time may trail the budget by a pool-slot wait, one grace and uninterrupted work (owner ruling 2026-11-10, option A). |
 | 2026-11-11 | v1.25 | #877 G7 importer arm | §5.4: a template version whose `imports` pin `t` is a reference too — every removing verb refuses `template.in_use` with `referencing_templates` (record §23.3 item 5); the refusal's echo narrows by the caller's view (`pins_hidden`). `templates_used_by` and the Used-by card are unchanged. |
 | 2026-11-02 | v1.24 | #787 | `.get_optional_template` / `.getOptionalTemplate` joins the §4.2 forbidden list (a by-key render-time load; only the synthesized imports may load) — refused at save (§7 `dangerous_construct`), and the loader now enforces the §6.3 declared import closure: a render resolves its own key and the `imports` it declares, nothing else. |
 | 2026-10-22 | v1.23 | 8b (#8) | The JavaScript statements body, immutable frame, isolate availability and pooled save verdict ship. |
