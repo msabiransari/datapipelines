@@ -1221,11 +1221,13 @@ arguments, not environment.
 `scripts/gate.sh` spends that exclusivity: it appends `-Pdp.test.forks.e2e=4` for the integration
 suite by itself, and a value in `GATE_GRADLE_ARGS` still wins when it already pins one. Four forks
 need memory: when `MemAvailable` at the gate's start is below `GATE_E2E_MEM_FLOOR_MB` — default
-36864 MB (36 GB), which is 1.5× the gate's own peak footprint of 24 GB (java 21822 MiB +
-containers 2261 MiB), measured on the #974 run of 2026-11-13 — the gate runs the repository
-default (`dp.test.forks.e2e=2`) instead and prints a header line saying so: a short machine gives
-a slower gate, never a red one. `GATE_E2E_FORKS` overrides the count upward or downward (garbage
-or a value below 1 falls back to 4 with one stderr line). The header always names what was chosen.
+24576 MB (24 GB), the gate's own measured peak footprint (java 21822 MiB + containers 2261 MiB,
+#974 run of 2026-11-13; the brief's 1.5× formula of 36 GB would refuse the machine the run was
+measured on, whose quiet start peaks near 28 GB available — owner ruling 2026-11-13) — the gate
+runs the repository default (`dp.test.forks.e2e=2`) instead and prints a header line saying so: a
+short machine gives a slower gate, never a red one. `GATE_E2E_FORKS` overrides the count upward or
+downward (garbage or a value below 1 falls back to 4 with one stderr line). The header always
+names what was chosen.
 
 **The pre-gate's build cache (#480).** Only `scripts/pregate.sh` uses it (§9.4). It is Gradle's
 local directory cache, `~/.gradle/caches/build-cache-1` (under `GRADLE_USER_HOME` when that is set),

@@ -939,7 +939,7 @@ fe_run '' 36864 ''
 fe_check F5a no-arg "$([ -z "$fe_out" ] && echo no-arg)"
 fe_check F5b ' integration forks: repository default (MemAvailable unreadable, floor 36 GB)' "$(fe_header)"
 
-fe_check F6a 36864 "$(GATE_E2E_MEM_FLOOR_MB=abc gate_e2e_mem_floor_mb 2>/dev/null)"
+fe_check F6a 24576 "$(GATE_E2E_MEM_FLOOR_MB=abc gate_e2e_mem_floor_mb 2>/dev/null)"
 GATE_E2E_MEM_FLOOR_MB=abc gate_e2e_mem_floor_mb 2> "$fe_err" > /dev/null
 fe_check F6b 1 "$(wc -l < "$fe_err")"
 fe_check F6c 5000 "$(GATE_E2E_MEM_FLOOR_MB=5000 gate_e2e_mem_floor_mb 2>/dev/null)"

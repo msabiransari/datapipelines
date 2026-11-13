@@ -22,12 +22,14 @@ GATE_CRASH_WEAK=(NoSuchFileException EOFException OutOfMemoryError)
 # The integration-suite fork decision (#974): the exclusive gate picks its own
 # -Pdp.test.forks.e2e= for :tests:integration-tests. Four forks need memory — the floor
 # below refuses the upgrade when MemAvailable at the gate's start cannot hold the run.
-# Default floor: 1.5 x the gate's own peak footprint (#974 run 2026-11-13T21:07:58Z,
-# PASS at four forks): peak summed java RSS 21822 MiB + containers 2261 MiB
-# = 24083 MiB; x 1.5 = 36124 -> 36 GB. (Box-wide MemAvailable drift swamped a
-# before-minus-lowest read, as in verification-lock.sh.)
+# Default floor: the gate's own measured peak footprint (#974 run 2026-11-13T21:07:58Z,
+# PASS at four forks): peak summed java RSS 21822 MiB + containers 2261 MiB = 24083 MiB.
+# The brief's 1.5x formula (36124 -> 36 GB) refuses the machine the run was measured on —
+# its quiet start had MemAvailable 28530 MiB — so it would never fire here; the owner set
+# the default to the measured footprint (2026-11-13): a quiet box admits four forks, a
+# busy one runs the repository default with a header line saying so.
 GATE_E2E_FORKS_DEFAULT=4
-GATE_E2E_MEM_FLOOR_DEFAULT_MB=36864
+GATE_E2E_MEM_FLOOR_DEFAULT_MB=24576
 
 # gate_crash_signature <log> — exit 0 iff the log carries any of the five signatures.
 gate_crash_signature() {
