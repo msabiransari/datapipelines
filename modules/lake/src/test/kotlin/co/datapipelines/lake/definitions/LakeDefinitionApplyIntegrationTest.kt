@@ -187,7 +187,7 @@ class LakeDefinitionApplyIntegrationTest {
         releaseNext(id, ORDERS_V2).code shouldBe PipelineErrorCodes.Lake.DEFINITION_DRIFT
         // The rejected v2 holds field id 5 for `channel`; the live table's 5 is `hand_added`, so the adoption builds on
         // the applied v1 once v2 is discarded (the field-ID limitation of #820).
-        h.service.discard(id, 2, h.actor)
+        h.service.discard(id, 2, h.actor, WriteSurface.SESSION)
         h.table(id).currentDefinitionVersion shouldBe 1
         val outcome = releaseNext(id, ADOPTED)
         println("(drift found by release) outcome = $outcome; table = ${h.table(id).applyState}")

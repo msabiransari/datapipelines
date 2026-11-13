@@ -14,7 +14,7 @@ class LakeAuditEventsSpecDriftTest {
     private val documented: Set<String> = documentedEvents()
 
     @Test
-    fun `the parse found the three lake definition events - no silent empty parse`() {
+    fun `the parse found the five lake definition events - no silent empty parse`() {
         documented.size shouldBe EXPECTED_EVENTS
     }
 
@@ -24,7 +24,7 @@ class LakeAuditEventsSpecDriftTest {
     }
 
     private companion object {
-        const val EXPECTED_EVENTS = 3
+        const val EXPECTED_EVENTS = 5
         const val SECTION_START = "## 15."
         const val SECTION_END = "## 16."
         val TABLE_VALUE = Regex("^\\|\\s*`([a-z0-9_]+(?:\\.[a-z0-9_]+)+)`\\s*\\|", RegexOption.MULTILINE)

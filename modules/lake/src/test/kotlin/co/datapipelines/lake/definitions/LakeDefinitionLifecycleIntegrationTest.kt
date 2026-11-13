@@ -160,26 +160,26 @@ class LakeDefinitionLifecycleIntegrationTest {
     fun `discard refuses the applied version, discards another and recomputes the current pointer`() {
         val v1 = h.service.createDraft("sales", "orders", ORDERS_V1, h.actor, WriteSurface.SESSION)
         h.service.release(v1.tableId, 1, h.actor, WriteSurface.SESSION)
-        val applied = shouldThrow<DatapipelinesException> { h.service.discard(v1.tableId, 1, h.actor) }
+        val applied = shouldThrow<DatapipelinesException> { h.service.discard(v1.tableId, 1, h.actor, WriteSurface.SESSION) }
         applied.code shouldBe PipelineErrorCodes.Lake.DEFINITION_APPLIED_VERSION
         val v2 = h.service.writeDraft(v1.tableId, ORDERS_V2, v1.bodyHash, h.actor, WriteSurface.SESSION)
         h.landWithoutApply(v1.tableId, v2.version)
         h.table(v1.tableId).let { (it.currentDefinitionVersion to it.applyState) shouldBe (2 to LakeApplyState.PENDING) }
-        h.service.discard(v1.tableId, 2, h.actor)
+        h.service.discard(v1.tableId, 2, h.actor, WriteSurface.SESSION)
         h.table(v1.tableId).let { (it.currentDefinitionVersion to it.applyState) shouldBe (1 to LakeApplyState.APPLIED) }
-        val notReleased = shouldThrow<DatapipelinesException> { h.service.discard(v1.tableId, 2, h.actor) }
+        val notReleased = shouldThrow<DatapipelinesException> { h.service.discard(v1.tableId, 2, h.actor, WriteSurface.SESSION) }
         (notReleased.code to notReleased.details["status"]) shouldBe (PipelineErrorCodes.Lake.DEFINITION_NOT_RELEASED to "DISCARDED")
     }
 
     @Test
     fun `purge-draft of a never-released table removes the table and its empty namespace`() {
         val v1 = h.service.createDraft("sales", "orders", ORDERS_V1, h.actor, WriteSurface.SESSION)
-        val stale = shouldThrow<DatapipelinesException> { h.service.purgeDraft(v1.tableId, "0".repeat(64)) }
+        val stale = shouldThrow<DatapipelinesException> { h.service.purgeDraft(v1.tableId, h.actor, WriteSurface.SESSION, "0".repeat(64)) }
         stale.code shouldBe PipelineErrorCodes.Lake.DEFINITION_VERSION_CONFLICT
-        h.service.purgeDraft(v1.tableId, v1.bodyHash)
+        h.service.purgeDraft(v1.tableId, h.actor, WriteSurface.SESSION, v1.bodyHash)
         h.definitions.findTable(v1.tableId) shouldBe null
         h.jdbc.queryForObject("SELECT count(*) FROM lake_namespaces", Int::class.java) shouldBe 0
-        val none = shouldThrow<DatapipelinesException> { h.service.purgeDraft(v1.tableId) }
+        val none = shouldThrow<DatapipelinesException> { h.service.purgeDraft(v1.tableId, h.actor, WriteSurface.SESSION) }
         none.code shouldBe PipelineErrorCodes.Lake.DEFINITION_NOT_FOUND
     }
 
@@ -187,10 +187,10 @@ class LakeDefinitionLifecycleIntegrationTest {
     fun `purge-draft of a released table keeps the table - and refuses when there is no draft`() {
         val v1 = h.service.createDraft("sales", "orders", ORDERS_V1, h.actor, WriteSurface.SESSION)
         h.service.release(v1.tableId, 1, h.actor, WriteSurface.SESSION)
-        val noDraft = shouldThrow<DatapipelinesException> { h.service.purgeDraft(v1.tableId) }
+        val noDraft = shouldThrow<DatapipelinesException> { h.service.purgeDraft(v1.tableId, h.actor, WriteSurface.SESSION) }
         noDraft.code shouldBe PipelineErrorCodes.Lake.DEFINITION_NOT_DRAFT
         h.service.writeDraft(v1.tableId, ORDERS_V3, v1.bodyHash, h.actor, WriteSurface.SESSION).version shouldBe 2
-        h.service.purgeDraft(v1.tableId)
+        h.service.purgeDraft(v1.tableId, h.actor, WriteSurface.SESSION)
         h.table(v1.tableId).currentDefinitionVersion shouldBe 1
     }
 
@@ -204,8 +204,8 @@ class LakeDefinitionLifecycleIntegrationTest {
                 { receiver.createDraft("sales", "other", ORDERS_V1, h.actor, WriteSurface.SESSION) },
                 { receiver.writeDraft(id, ORDERS_V2, authoring.bodyHash, h.actor, WriteSurface.SESSION) },
                 { receiver.release(id, 1, h.actor, WriteSurface.SESSION) },
-                { receiver.discard(id, 1, h.actor) },
-                { receiver.purgeDraft(id) },
+                { receiver.discard(id, 1, h.actor, WriteSurface.SESSION) },
+                { receiver.purgeDraft(id, h.actor, WriteSurface.SESSION) },
             )
         writes.forEach { write ->
             val refusal = shouldThrow<DatapipelinesException> { write() }
