@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.19 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path)
+**Status:** v1.20 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -109,8 +109,10 @@ promotion (P9). Lifecycle mutations lock the managed-table row before version ro
 | any | any verb on an unknown table or version | both | refused `lake.definition.not_found` | unchanged |
 | any | any verb | hard | refused `lake.definition.authoring_disabled` | unchanged |
 
-Release writes `lake.definition.released` in its transaction ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events));
-the apply that follows writes its own event. A release's answer carries the apply's outcome; a refused apply never
+Release writes `lake.definition.released`, discard `lake.definition.discarded` and purge-draft
+`lake.definition.draft_purged`, each in its own transaction with the acting user and the surface it came through
+([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)): a failed audit insert rolls the step back, and a
+refused step writes no row. The apply that follows a release writes its own event. A release's answer carries the apply's outcome; a refused apply never
 undoes the release (landed is not applied, dp-lake record ruling 8).
 
 ---
@@ -555,6 +557,7 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.20 | 814 (#814) | §2: discard writes `lake.definition.discarded` and purge-draft `lake.definition.draft_purged` in their own transactions (both verbs now take the acting user and `via`); an audit failure rolls the step back, a refusal writes no row (dp-lake record §12, erratum 2026-11-12). |
 | 2026-11-13 | v1.19 | 822 (#822) | §3: every failure of an apply step is returned as the attempt's outcome, never thrown after a release's landing: `pending` before the commit, unknown (left for a verify) from the commit on or when the row could not be stamped; a failed lease release or table session close keeps the outcome; a failed namespace session close ends the attempt `pending`. The state table's `pending` and unknown rows and the paragraph (now "An unclassified failure at any step") say so; the #822 sentence goes. |
 | 2026-11-08 | v1.18 | 866 (#866) | §8: the abandoned metadata read's conditional stalled-store network-wait envelope is derived in `SettlementObjectReadEnd.stalledReadEndByMillis` from effective connect/socket values and Iceberg's configured retry policy: four request allowances plus all body and close reads, 420 400 ms with the shipped inputs. Pins the library assumptions and states residual phases without an end-to-end timer. Corrects the v1.15 row's one-timeout claim; the measured ~62 s remains an observation. |
 | 2026-11-08 | v1.17 | 858 (#858) | §8: the settlement tick's statements carry a socket bound (5 s + 5 s) through the runtime's own template, so against a server that accepts and never answers a statement ends with `08006` at max(10, 5 + 10) = 15 s; the exception for this tick is gone, and the paragraph states the limit's two assumptions and that a transaction's later statements and commit read under the bound. The conditional 16 s overrun and 31 s tick are unchanged. |

@@ -25,9 +25,21 @@ internal data class RecordedAudit(
     val inTransaction: Boolean,
 )
 
-/** A recording sink (never a strict mock: a missing call must be observable as an absent record). */
+/** What [RecordingAuditSink] throws for the event it was told to fail ([RecordingAuditSink.failOn]). */
+internal class AuditSinkFailure(
+    event: String,
+) : RuntimeException("the audit sink refused $event")
+
+/**
+ * A recording sink (never a strict mock: a missing call must be observable as an absent record). [failOn], when set,
+ * makes the call for that event throw [AuditSinkFailure] and record nothing, as a failed `audit_log` insert would: the
+ * seam that shows an audited write rolls back with its audit row (#814).
+ */
 internal class RecordingAuditSink : AuditEventSink {
     val events = mutableListOf<RecordedAudit>()
+
+    @Volatile
+    var failOn: String? = null
 
     override fun log(
         event: String,
@@ -37,6 +49,7 @@ internal class RecordingAuditSink : AuditEventSink {
         userAgent: String?,
         details: Map<String, Any?>,
     ) {
+        if (event == failOn) throw AuditSinkFailure(event)
         events += RecordedAudit(event, userId, details, TransactionSynchronizationManager.isActualTransactionActive())
     }
 }

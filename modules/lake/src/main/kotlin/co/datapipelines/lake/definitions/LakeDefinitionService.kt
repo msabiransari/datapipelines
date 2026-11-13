@@ -20,7 +20,8 @@ data class LakeReleaseResult(
  * The managed lake definitions' lifecycle (lake.md §2): create, write, release, discard and purge-draft of a table's
  * definition versions. Every write is an authoring write, refused on a receiver with
  * `lake.definition.authoring_disabled` (promotion imports land RELEASED versions without this service, P9).
- * Authorization is the surfaces' (P8): every method takes the acting user and the surface it came through.
+ * Authorization is the surfaces' (P8): every write takes the acting user and the surface it came through (`actor`,
+ * `via`); release, discard and purge-draft each write their audit row inside their own transaction (#814).
  *
  * Each lifecycle step is one transaction; the release's apply runs AFTER its transaction commits (leases autocommit,
  * and a failed apply never rolls the landing back, dp-lake design record §7).
@@ -157,11 +158,16 @@ class LakeDefinitionService(
      * version this environment has applied is refused (`lake.definition.applied_version`). Discard is also refused
      * while any apply is in flight (`lake.definition.table_busy`): a newer release may already have moved the pointer
      * beyond the version that attempt is still applying.
+     *
+     * `lake.definition.discarded` is audited in the same transaction, after the pointer's recompute, with the pointer
+     * it left (`current_version`, null when no released version is left): an audit failure rolls the discard back
+     * (record §12, #814). A refused discard writes no audit row.
      */
     fun discard(
         tableId: UUID,
         version: Int,
         actor: UUID,
+        via: WriteSurface,
     ) {
         requireAuthoring()
         inTransaction {
@@ -175,25 +181,57 @@ class LakeDefinitionService(
                 throw LakeDefinitionErrors.notReleased(tableId, version, row.status.name)
             }
             definitions.recomputeCurrent(tableId)
+            val current = definitions.findTable(tableId)?.currentDefinitionVersion
+            audit.log(
+                LakeAuditEvents.DISCARDED,
+                userId = actor,
+                details =
+                    mapOf(
+                        "table_id" to tableId.toString(),
+                        "namespace" to table.namespace,
+                        "table" to table.name,
+                        "version" to version,
+                        "via" to via.wire,
+                        "current_version" to current,
+                    ),
+            )
         }
     }
 
     /**
      * Deletes the table's draft (at [expectedHash] when given). A table left with no version at all (it was never
      * released) is deleted with it, and its namespace row when that was its last table.
+     *
+     * `lake.definition.draft_purged` is audited in the same transaction, after the last delete, with the draft's
+     * version and whether the table row went with it (`table_deleted`): an audit failure rolls the purge back (record
+     * §12, #814). A refused purge writes no audit row.
      */
     fun purgeDraft(
         tableId: UUID,
+        actor: UUID,
+        via: WriteSurface,
         expectedHash: String? = null,
     ) {
         requireAuthoring()
         inTransaction {
             val table = definitions.findTableForUpdate(tableId) ?: throw LakeDefinitionErrors.notFound(tableId)
-            if (definitions.deleteDraft(tableId, expectedHash) == 0) {
-                if (definitions.findDraft(tableId) == null) throw LakeDefinitionErrors.notDraft(tableId, null, null)
-                throw LakeDefinitionErrors.versionConflict(tableId)
-            }
-            if (definitions.deleteTableIfVersionless(tableId) == 1) definitions.deleteNamespaceIfEmpty(table.namespaceId)
+            val draft = definitions.findDraft(tableId) ?: throw LakeDefinitionErrors.notDraft(tableId, null, null)
+            if (definitions.deleteDraft(tableId, expectedHash) == 0) throw LakeDefinitionErrors.versionConflict(tableId)
+            val tableDeleted = definitions.deleteTableIfVersionless(tableId) == 1
+            if (tableDeleted) definitions.deleteNamespaceIfEmpty(table.namespaceId)
+            audit.log(
+                LakeAuditEvents.DRAFT_PURGED,
+                userId = actor,
+                details =
+                    mapOf(
+                        "table_id" to tableId.toString(),
+                        "namespace" to table.namespace,
+                        "table" to table.name,
+                        "version" to draft.version,
+                        "via" to via.wire,
+                        "table_deleted" to tableDeleted,
+                    ),
+            )
         }
     }
 
