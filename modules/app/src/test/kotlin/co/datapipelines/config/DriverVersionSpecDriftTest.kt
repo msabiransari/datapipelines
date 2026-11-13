@@ -207,7 +207,7 @@ class DriverVersionSpecDriftTest {
             return listOf(parts[0], parts[1], (parts[2].toInt() + 1).toString(), "0").joinToString(".")
         }
 
-        private const val VER ="""(\d+\.\d+\.\d+(?:\.\d+)?)"""
+        private const val VER = """(\d+\.\d+\.\d+(?:\.\d+)?)"""
 
         val DUCKDB =
             PinRow(
