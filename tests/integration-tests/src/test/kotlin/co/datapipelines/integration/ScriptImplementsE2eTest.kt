@@ -237,10 +237,12 @@ class ScriptImplementsE2eTest {
         successor: String,
     ): String {
         val (id, hash) = pipeline
-        val released =
-            rest(ALICE_SESSION)
-                .post("/api/v1/pipelines/$id/release?release_pinned_templates=true", "", expect = 200, ifMatch = hash)
-                .body()["data"]
+        // The pinned templates are released through their own route first: the legacy cascade flag is refused since #876 r3.
+        listOf(STAGE_TEMPLATE, SCRIPT).forEach { template ->
+            val templateHash = mcp(ALICE_KEY.plaintext, "templates_get", mapOf("id" to template))["body_hash"].asText()
+            rest(ALICE_SESSION).post("/api/v1/templates/release", """{"name": "$template"}""", expect = 200, ifMatch = templateHash)
+        }
+        val released = rest(ALICE_SESSION).post("/api/v1/pipelines/$id/release", "", expect = 200, ifMatch = hash).body()["data"]
         println("event=implements.e2e.release payload=${mapper.writeValueAsString(released["warnings"])}")
         val warning = released["warnings"].single()
         assertAll(

@@ -41,6 +41,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.slf4j.api)
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     testImplementation(libs.kotlinx.coroutines.test)
     // H2 backs both the real per-execution tempdb and the stand-in "source database" in unit
     // tests, so the executor is exercised against a real driver rather than a mocked Connection.
@@ -58,11 +60,26 @@ dependencies {
     // 086 A2: `StatementCancelDialectTest` MEASURES `Statement.cancel()` — dag-executor.md
     // §8.3.2's table is a measurement, and a claim about a driver read out of its documentation is
     // worth nothing (the reason `datasources` takes these same engines' jars for its own dialect
-    // tests). Only the EMBEDDED engines are automated here: no container, no image pull, ~26 s.
-    // Postgres and MySQL are measured too, but not from this module — §8.3.2 records their rows
-    // with the runs that produced them and says so, because a server container is a poor trade for
-    // one table row in the round whose purpose was deleting a flaky gate. Both jars are already on
-    // this module's runtime classpath transitively; these two lines put them on testCompile.
+    // tests). Only its EMBEDDED engines are automated: no container, no image pull, ~26 s. Its
+    // Postgres and MySQL cancel rows are measured too, but not by that class — §8.3.2 records them
+    // with the runs that produced them and says so. Both jars are already on this module's runtime
+    // classpath transitively; these two lines put them on testCompile.
     testImplementation(libs.sqlite.jdbc)
     testImplementation(libs.duckdb.jdbc)
+    // #463: the read-only executor tests refuse a write through the real executor on each dialect
+    // the read-only mode enforces, MySQL included (`ReadOnlyMysqlSourceIntegrationTest` on this
+    // module's own `SharedMysql`). Same catalog aliases and pins as `datasources`; the driver is
+    // not bundled by default (-Pmysql), so it joins the TEST runtime only.
+    testImplementation(libs.testcontainers.mysql)
+    testRuntimeOnly(libs.mysql.connector.j)
+}
+
+// Dependency-locking exclusion, copied from modules/datasources (the authority for the pattern):
+// mysql-connector-j is on this module's runtime classpath only under -Pmysql (through datasources'
+// flag-gated `runtimeOnly`), but ONE committed gradle.lockfile must validate both flag states, so
+// the driver is ignored by the lock state. Side effect: the copy on the always-present TEST runtime
+// classpath is also unvalidated — accepted, as there; its version is still BOM-pinned, and every
+// other artifact in every configuration stays locked.
+dependencyLocking {
+    ignoredDependencies.add("com.mysql:mysql-connector-j")
 }

@@ -183,6 +183,12 @@ jobs:
         # browser suite took the step to 60–68 min and three runs hit the old 70.
         timeout-minutes: 100
         run: ./gradlew build ktlintCheck detekt --continue -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
+      # #862: the pre-build chart check has no jar. Repeat after build so Secret-resolved
+      # app/proxy inputs also execute the shipped renderer, rather than skipping that witness.
+      - name: verify Helm inputs with the packaged egress renderer
+        env:
+          HELM_CHECK_RENDERER_JAR: modules/app/build/libs/datapipelines-app.jar
+        run: ./scripts/helm-check.sh
       # koverVerify writes only verify.err; the line-level XML the artifact below needs comes from
       # the report task, run AFTER the build so a failed verification still leaves the report.
       # It must NEVER run a test (#290): Kover 0.9.9's report tasks depend on every instrumented

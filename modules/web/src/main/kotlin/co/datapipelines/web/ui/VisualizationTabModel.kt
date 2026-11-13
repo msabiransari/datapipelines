@@ -63,14 +63,20 @@ class VisualizationTabModel(
         return PREVIEW_VIEW
     }
 
-    /** The Preview block's JSON — the capability builder over the workspace's key, no expiry. */
+    /** The Preview block's JSON — the capability builder over the workspace's key, no expiry, the chart's `columns`. */
     fun previewJson(
         loaded: ArtifactVersion<VisualizationBody>,
         cases: List<co.datapipelines.visualization.PreviewCase>,
     ): String =
         ScriptSafeJson.forScriptBlock(
             ArtifactJson.mapper.writeValueAsString(
-                PreviewViews.page(loaded, cases, configurationKey(loaded), expiresAt = null),
+                PreviewViews.page(
+                    loaded,
+                    cases,
+                    configurationKey(loaded),
+                    expiresAt = null,
+                    columns = visualizations.chartColumns(loaded.record.workspaceId, loaded.body),
+                ),
             ),
         )
 

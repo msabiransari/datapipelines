@@ -221,6 +221,9 @@ class PipelineWorkspaceController(
         PARAMETERS("parameters"),
         RUNS("runs"),
         USAGE("usage"),
+
+        /** #876 G6: what the viewed version depends on (record §13) — a dependencies/mount.js pane. */
+        DEPENDENCIES("dependencies"),
         VERSIONS("versions"),
         ;
 

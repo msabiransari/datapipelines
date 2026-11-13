@@ -2,17 +2,19 @@ package co.datapipelines.web.config
 
 import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
+import co.datapipelines.application.dependencies.DatasourceReferencesAdapter
+import co.datapipelines.application.dependencies.RegistryIncomingRows
 import co.datapipelines.auth.PromotionProperties
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContentCheck
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceAuditSink
 import co.datapipelines.datasources.DatasourceMetadataCache
-import co.datapipelines.datasources.DatasourceReference
 import co.datapipelines.datasources.DatasourceReferences
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.datasources.DatasourceValidator
+import co.datapipelines.datasources.DatasourceWriteGuarding
 import co.datapipelines.datasources.DefaultDatasourceRegistry
 import co.datapipelines.datasources.DialectAdapters
 import co.datapipelines.datasources.LakeIntrospectionCache
@@ -24,7 +26,9 @@ import co.datapipelines.datasources.crypto.CredentialEncryptor
 import co.datapipelines.datasources.crypto.KeyProviderConfig
 import co.datapipelines.datasources.crypto.KeyProviders
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
+import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.lake.LakeProperties
+import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceFacts
 import co.datapipelines.pipeline.PipelineNames
@@ -45,6 +49,7 @@ import co.datapipelines.web.pipelines.PipelineBodies
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.pipelines.repositoryPipelineResolver
 import co.datapipelines.web.templates.TemplateImportService
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.context.properties.bind.Bindable
 import org.springframework.boot.context.properties.bind.Binder
@@ -89,8 +94,29 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
 // `datasourceUpdateService`.
 @Suppress("TooManyFunctions")
 class DomainConfiguration {
+    /**
+     * #841 (G0, dependency-graph record §15.1) — the datasource writers' guarding: the datasource's prerequisite key,
+     * then its affected workspaces, in the metadata transaction, on the ONE writer guard. Shared by the definition and
+     * grant repositories (and the freshness tick's bounded grant repository), never [DatasourceWriteGuarding.UNGUARDED].
+     */
     @Bean
-    fun datasourceRepository(jdbc: NamedParameterJdbcTemplate): DatasourceRepository = DatasourceRepository(jdbc)
+    fun datasourceWriteGuarding(
+        jdbc: NamedParameterJdbcTemplate,
+        transactionManager: org.springframework.transaction.PlatformTransactionManager,
+        writeGuard: co.datapipelines.typesystem.guard.MetadataWriterGuard,
+    ): DatasourceWriteGuarding =
+        DatasourceWriteGuarding(
+            jdbc,
+            org.springframework.transaction.support
+                .TransactionTemplate(transactionManager),
+            writeGuard,
+        )
+
+    @Bean
+    fun datasourceRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        writes: DatasourceWriteGuarding,
+    ): DatasourceRepository = DatasourceRepository(jdbc, writes = writes)
 
     /**
      * `datasource_workspaces` (metadata-db §4.16) — the table that replaced
@@ -99,8 +125,10 @@ class DomainConfiguration {
      * management half.
      */
     @Bean
-    fun datasourceGrantRepository(jdbc: NamedParameterJdbcTemplate): co.datapipelines.datasources.DatasourceGrantRepository =
-        co.datapipelines.datasources.DatasourceGrantRepository(jdbc)
+    fun datasourceGrantRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        writes: DatasourceWriteGuarding,
+    ): co.datapipelines.datasources.DatasourceGrantRepository = co.datapipelines.datasources.DatasourceGrantRepository(jdbc, writes)
 
     /** The D8 rules the REST datasource surface and the UI's form partial share (workspaces design §8). */
     @Bean
@@ -126,7 +154,9 @@ class DomainConfiguration {
         datasources: DatasourceRegistry,
         rules: co.datapipelines.web.datasources.DatasourceWorkspaceRules,
         grants: co.datapipelines.datasources.DatasourceGrantRepository,
-    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding, grants)
+        // #841 (G0) — the registration and its grant commit together under the datasource writer guard.
+        writes: DatasourceWriteGuarding,
+    ): DatasourceCreateService = DatasourceCreateService(datasources, rules::resolveCreateBinding, grants, writes)
 
     /**
      * The ONE gated datasource-update path behind `PUT /api/v1/datasources/{name}` and the
@@ -286,9 +316,9 @@ class DomainConfiguration {
      * The pipeline-name lookup a datasource delete needs (datasources §9, `datasource.in_use`).
      *
      * `datasources` cannot depend on `pipeline-contract` (§4.2), so it declares this port and the
-     * aggregation layer supplies it. The scan is bounded by [PipelineBodies], which pushes the
-     * datasource filter to SQL via [PipelineRepository.findAnyVersionDatasourceRefs] — the
-     * ANY-VERSION scan (061/T79). The working-version scan it replaced here joined
+     * aggregation layer supplies it: since #877 §C an adapter over the datasource family's two
+     * inverse arms (`findIncoming`, paged to exhaustion, one bounded statement per page) — the
+     * ANY-VERSION rule (061/T79) the scans it replaced kept. The working-version scan replaced here joined
      * `current_version` only, so a released pipeline whose OLDER version pinned the datasource
      * was invisible: the delete succeeded and that version's next execution failed at connect.
      * A delete guard reads every version ever stored; the pipelines LISTING keeps the
@@ -304,24 +334,18 @@ class DomainConfiguration {
      * references saved while the datasource was global survive the re-bind. Reading the
      * row's binding here serves nothing anymore; the caller's workspace never mattered
      * (022 review F5) and the row's own binding no longer does either.
+     *
+     * Every reference carries the workspace it was found in. The LOCK counts all of them; a refusal NAMES only those its
+     * caller may read (`DatasourceUsages`, #873 §F.3 e — the delete refusal's details are scoped to the caller's
+     * workspaces).
      */
     @Bean
     fun datasourceReferences(
-        bodies: PipelineBodies,
+        /** #877 §C — the datasource family's two inverse arms (pipeline + parameter set) behind `findIncoming`. */
+        dependencyFamilyRegistry: ObjectProvider<FamilyRegistry>,
         workspaces: WorkspaceRepository,
     ): DatasourceReferences =
-        DatasourceReferences { name ->
-            workspaces.findAll().flatMap { workspace ->
-                bodies.anyVersionReferences(workspace.id, name).map { ref ->
-                    DatasourceReference(
-                        pipelineName = ref.pipelineName,
-                        pipelineVersion = ref.pipelineVersion,
-                        versionStatus = ref.versionStatus.name,
-                        nodeId = ref.nodeId,
-                    )
-                }
-            }
-        }
+        DatasourceReferencesAdapter(RegistryIncomingRows(dependencyFamilyRegistry::getObject)) { workspaces.findAll().map { it.id } }
 
     @Bean
     // Ten collaborators: 089's registry + extension directory met 094's pool metrics + ceiling

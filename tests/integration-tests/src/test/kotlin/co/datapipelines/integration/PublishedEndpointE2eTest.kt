@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
+import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.hamcrest.Matchers.equalTo
@@ -458,7 +459,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .asSession(ADMIN_SESSION)
-            .body("""{"path": "/api/echo/v1/normalised", "pipeline": "test/trade_summary"}""")
+            .body("""{"path": "/api/echo/v1/normalised", "pipeline": "test/trade_summary", "pipeline_version": 1}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -476,7 +477,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .asSession(ADMIN_SESSION)
-            .body("""{"path": "/v1/revenue/today", "pipeline": "test/trade_summary"}""")
+            .body("""{"path": "/v1/revenue/today", "pipeline": "test/trade_summary", "pipeline_version": 1}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -492,7 +493,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .asSession(ADMIN_SESSION)
-            .body("""{"path": "/writes/v1/things", "pipeline": "test/writes_things"}""")
+            .body("""{"path": "/writes/v1/things", "pipeline": "test/writes_things", "pipeline_version": 1}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -511,7 +512,7 @@ class PublishedEndpointE2eTest {
             // `/nyc/revenue/{anything}` would be refused as an undeclared path variable (400)
             // before it ever reached the conflict check. This one is a legal path that happens to
             // collide, which is exactly what `endpoint.path_conflict` is for.
-            .body("""{"path": "/nyc/v1/revenue/manhattan", "pipeline": "test/revenue_by_borough"}""")
+            .body("""{"path": "/nyc/v1/revenue/manhattan", "pipeline": "test/revenue_by_borough", "pipeline_version": 1}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -526,7 +527,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .asSession(ADMIN_SESSION)
-            .body("""{"path": "/nyc/v1/by/{ghost}", "pipeline": "test/revenue_by_borough"}""")
+            .body("""{"path": "/nyc/v1/by/{ghost}", "pipeline": "test/revenue_by_borough", "pipeline_version": 1}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -590,6 +591,376 @@ class PublishedEndpointE2eTest {
     }
 
     // -------------------------------------------------------------------------------------
+    // #786 A06 — an API serves its EXACT pin, never the pipeline's current
+    // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `an API pinned to pipeline v2 serves v2 while the pipeline's current is v3 (A06)`() {
+        // Three RELEASED versions of one pipeline; the pipeline's own current is v3.
+        val id = pipeline(pinnedPipelineBody("v1"))
+        releaseNext(id, "v2")
+        releaseNext(id, "v3")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .get("/api/v1/pipelines/$id")
+            .then()
+            .statusCode(200)
+            .body("data.current_version", equalTo(3))
+        // Under /nyc: the endpoint key's existing binding covers it.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"path": "/nyc/v1/a06-pinned", "pipeline": "test/a06_pinned", "pipeline_version": 2, "timeout_seconds": 60}""")
+            .`when`()
+            .post("/api/v1/endpoints")
+            .then()
+            .statusCode(201)
+
+        val executionId =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, endpointKey)
+                .`when`()
+                .get("/api/nyc/v1/a06-pinned")
+                .then()
+                .statusCode(200)
+                .extract()
+                .header("DP-Execution-Id")
+        // The execution record says which pipeline version RAN: the pin, not the pipeline's current.
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .get("/api/v1/executions/$executionId")
+            .then()
+            .statusCode(200)
+            .body("data.pipeline_version", equalTo(2))
+    }
+
+    // -------------------------------------------------------------------------------------
+    // #786 C.4 — an API restore rechecks its pin (record §25.4 "For API restore")
+    // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `restoring an API version whose pinned pipeline version was discarded is 400 and changes nothing (C4)`() {
+        val name = "test/c4_restore"
+        val pipelineId = pipeline(pinnedPipelineBody("v1", name))
+        releaseNext(pipelineId, "v2", name)
+        val apiId =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body("""{"path": "/nyc/v1/c4-restore", "pipeline": "$name", "pipeline_version": 1, "timeout_seconds": 60}""")
+                .`when`()
+                .post("/api/v1/endpoints")
+                .then()
+                .statusCode(201)
+                .extract()
+                .jsonPath()
+                .getString("data.id")
+        val apiHash = apiVersion(apiId, 1).getString("data.body_hash")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .header("If-Match", apiHash)
+            .`when`()
+            .post("/api/v1/endpoints/$apiId/release")
+            .then()
+            .statusCode(200)
+            .body("data.status", equalTo("RELEASED"))
+        lifecycle("/api/v1/endpoints/$apiId/versions/1/discard").statusCode(200)
+        // A DISCARDED API version protects nothing: the pipeline version it pins may now be discarded.
+        lifecycle("/api/v1/pipelines/$pipelineId/versions/1/discard").statusCode(200)
+
+        lifecycle("/api/v1/endpoints/$apiId/versions/1/restore")
+            .statusCode(400)
+            .body("error.code", equalTo("endpoint.pipeline_version.not_found"))
+            .body("error.details.pipeline", equalTo(name))
+            .body("error.details.pipeline_version", equalTo(1))
+            .body("error.details.path", equalTo("pipeline_version"))
+        apiVersion(apiId, 1).getString("data.status") shouldBe "DISCARDED"
+
+        // Control: once the pinned version is live again, the same restore lands RELEASED — no repin, no release.
+        lifecycle("/api/v1/pipelines/$pipelineId/versions/1/restore").statusCode(200)
+        lifecycle("/api/v1/endpoints/$apiId/versions/1/restore").statusCode(200)
+        val restored = apiVersion(apiId, 1)
+        restored.getString("data.status") shouldBe "RELEASED"
+        restored.getInt("data.pipeline_version") shouldBe 1
+        restored.getString("data.body_hash") shouldBe apiHash
+    }
+
+    @Test
+    fun `deleting a released API is refused last_release over REST and MCP, and a draft-only API is deleted (#786 R1)`() {
+        val name = "test/r1_guarded_delete"
+        pipeline(pinnedPipelineBody("v1", name))
+        val apiId = createApi("/nyc/v1/r1-released", name)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .header("If-Match", apiVersion(apiId, 1).getString("data.body_hash"))
+            .`when`()
+            .post("/api/v1/endpoints/$apiId/release")
+            .then()
+            .statusCode(200)
+
+        deleteApi("/nyc/v1/r1-released")
+            .statusCode(409)
+            .body("error.code", equalTo("endpoint.version.last_release"))
+            .body("error.details.endpoint_id", equalTo(apiId))
+            .body("error.details.version", equalTo(1))
+            .body("error.details.status", equalTo("RELEASED"))
+        val overMcp = mcpTool("endpoints_delete", mapOf("path" to "/nyc/v1/r1-released"))
+        overMcp.getBoolean("result.isError") shouldBe true
+        overMcp.getString("result.content[0].text").contains("endpoint.version.last_release") shouldBe true
+        // Nothing went: the entity still resolves by path, its released version and its current pointer are intact.
+        apiVersion(apiId, 1).getString("data.status") shouldBe "RELEASED"
+        apiVersion(apiId, 1).getBoolean("data.is_current") shouldBe true
+
+        // Controls: a draft-only API is deleted by either transport.
+        createApi("/nyc/v1/r1-draft-rest", name)
+        deleteApi("/nyc/v1/r1-draft-rest").statusCode(204)
+        createApi("/nyc/v1/r1-draft-mcp", name)
+        val deleted = mcpTool("endpoints_delete", mapOf("path" to "/nyc/v1/r1-draft-mcp"))
+        deleted.getBoolean("result.isError") shouldBe false
+        deleted.getString("result.content[0].text").contains("\"deleted\":true") shouldBe true
+        listOf("/nyc/v1/r1-draft-rest", "/nyc/v1/r1-draft-mcp").forEach { gone ->
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .queryParam("path", gone)
+                .`when`()
+                .get("/api/v1/endpoints")
+                .then()
+                .statusCode(404)
+        }
+    }
+
+    private fun createApi(
+        path: String,
+        pipeline: String,
+    ): String =
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"path": "$path", "pipeline": "$pipeline", "pipeline_version": 1, "timeout_seconds": 60}""")
+            .`when`()
+            .post("/api/v1/endpoints")
+            .then()
+            .statusCode(201)
+            .extract()
+            .jsonPath()
+            .getString("data.id")
+
+    private fun deleteApi(path: String) =
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .queryParam("path", path)
+            .`when`()
+            .delete("/api/v1/endpoints")
+            .then()
+
+    @Test
+    fun `an unreadable API release plan body is the house malformed_json 400 and releases nothing`() {
+        val name = "test/c2_release_body"
+        pipeline(pinnedPipelineBody("v1", name))
+        val apiId =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body("""{"path": "/nyc/v1/c2-release-body", "pipeline": "$name", "pipeline_version": 1, "timeout_seconds": 60}""")
+                .`when`()
+                .post("/api/v1/endpoints")
+                .then()
+                .statusCode(201)
+                .extract()
+                .jsonPath()
+                .getString("data.id")
+        val apiHash = apiVersion(apiId, 1).getString("data.body_hash")
+        // The request mapper's nesting bound is 100 (#291, RequestNestingDepthE2eTest pins it): one level past it.
+        val overBound = "[".repeat(NESTING_BOUND + 1) + "]".repeat(NESTING_BOUND + 1)
+        listOf("""{"tree_hash": """ to "not valid JSON", overBound to "nesting depth").forEach { (body, says) ->
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .header("If-Match", apiHash)
+                .body(body)
+                .`when`()
+                .post("/api/v1/endpoints/$apiId/release")
+                .then()
+                .statusCode(400)
+                .body("error.code", equalTo("pipeline.execution.invalid_parameter_type"))
+                .body("error.details.reason", equalTo("malformed_json"))
+                .body("error.message", org.hamcrest.Matchers.containsString(says))
+        }
+        apiVersion(apiId, 1).getString("data.status") shouldBe "DRAFT"
+    }
+
+    // -------------------------------------------------------------------------------------
+    // #786 Skill — endpoints_create over MCP carries the exact pin (A06 over MCP)
+    // -------------------------------------------------------------------------------------
+
+    @Test
+    fun `endpoints_create over MCP pins the exact pipeline_version and the pin holds when CURRENT moves (A06 over MCP)`() {
+        val name = "test/mcp_a06"
+        val pipelineId = pipeline(pinnedPipelineBody("v1", name))
+        releaseNext(pipelineId, "v2", name)
+        val created = mcpTool("endpoints_create", mapOf("path" to "/nyc/v1/mcp-a06", "pipeline" to name, "pipeline_version" to 1))
+        created.getBoolean("result.isError") shouldBe false
+        releaseNext(pipelineId, "v3", name)
+
+        val apiId =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .queryParam("path", "/nyc/v1/mcp-a06")
+                .`when`()
+                .get("/api/v1/endpoints")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .getString("data.id")
+        val v1 = apiVersion(apiId, 1)
+        v1.getString("data.status") shouldBe "DRAFT"
+        v1.getInt("data.pipeline_version") shouldBe 1
+        // Authoring-enabled deployment: the draft is current and serves once enabled and bound (/nyc is bound).
+        val executionId =
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, endpointKey)
+                .`when`()
+                .get("/api/nyc/v1/mcp-a06")
+                .then()
+                .statusCode(200)
+                .extract()
+                .header("DP-Execution-Id")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .get("/api/v1/executions/$executionId")
+            .then()
+            .statusCode(200)
+            .body("data.pipeline_version", equalTo(1))
+    }
+
+    @Test
+    fun `endpoints_create over MCP without pipeline_version is refused and creates nothing`() {
+        val refused = mcpTool("endpoints_create", mapOf("path" to "/nyc/v1/mcp-unpinned", "pipeline" to "test/a06_pinned"))
+        // The SDK validates the call against the tool's input schema before the tool runs: a tool result with isError.
+        refused.getBoolean("result.isError") shouldBe true
+        refused.getString("result.content[0].text").contains("required property 'pipeline_version' not found") shouldBe true
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .queryParam("path", "/nyc/v1/mcp-unpinned")
+            .`when`()
+            .get("/api/v1/endpoints")
+            .then()
+            .statusCode(404)
+    }
+
+    /** One JSON-RPC `tools/call` over `/mcp` with the workspace's MCP key; the whole response. */
+    private fun mcpTool(
+        name: String,
+        arguments: Map<String, Any?>,
+    ) = given()
+        .port(port)
+        .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+        .contentType(ContentType.JSON)
+        .accept("application/json, text/event-stream")
+        .body(mapOf("jsonrpc" to "2.0", "id" to 1, "method" to "tools/call", "params" to mapOf("name" to name, "arguments" to arguments)))
+        .`when`()
+        .post("/mcp")
+        .then()
+        .statusCode(200)
+        .extract()
+        .jsonPath()
+
+    private fun apiVersion(
+        apiId: String,
+        version: Int,
+    ) = given()
+        .port(port)
+        .asSession(ADMIN_SESSION)
+        .`when`()
+        .get("/api/v1/endpoints/$apiId/versions/$version")
+        .then()
+        .statusCode(200)
+        .extract()
+        .jsonPath()
+
+    private fun lifecycle(path: String) =
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .post(path)
+            .then()
+
+    private fun pinnedPipelineBody(
+        label: String,
+        name: String = "test/a06_pinned",
+    ) = """
+        {"schema_version": 1, "name": "$name", "display_name": "A06 pinned",
+         "description": "786 A06 $label.", "parameters": {},
+         "nodes": [{"id": "summary", "description": "All rows", "type": "DQL",
+                    "source": "ep-source", "template": {"id": "test/trade_summary.sql", "version": 1},
+                    "depends_on": []}]}
+        """.trimIndent()
+
+    /** Saves the next draft of [id] over its released current and releases it: the pipeline's current moves on. */
+    private fun releaseNext(
+        id: String,
+        label: String,
+        name: String = "test/a06_pinned",
+    ) {
+        val current =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .`when`()
+                .get("/api/v1/pipelines/$id")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .getString("data.body_hash")
+        val draftHash =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .header("If-Match", current)
+                .body(pinnedPipelineBody(label, name))
+                .`when`()
+                .put("/api/v1/pipelines/$id")
+                .then()
+                .statusCode(200)
+                .body("data.status", equalTo("DRAFT"))
+                .extract()
+                .jsonPath()
+                .getString("data.body_hash")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .header("If-Match", draftHash)
+            .`when`()
+            .post("/api/v1/pipelines/$id/release")
+            .then()
+            .statusCode(200)
+            .body("data.status", equalTo("RELEASED"))
+    }
+
+    // -------------------------------------------------------------------------------------
     // Fixture
     // -------------------------------------------------------------------------------------
 
@@ -628,7 +999,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .asSession(ADMIN_SESSION)
-            .body("""{"path": "$path", "pipeline": "$pipeline", "timeout_seconds": 60}""")
+            .body("""{"path": "$path", "pipeline": "$pipeline", "pipeline_version": 1, "timeout_seconds": 60}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -644,7 +1015,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .asSession(ADMIN_SESSION)
-            .body("""{"path": "$path", "pipeline": "$pipeline", "timeout_seconds": $timeoutSeconds}""")
+            .body("""{"path": "$path", "pipeline": "$pipeline", "pipeline_version": 1, "timeout_seconds": $timeoutSeconds}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()
@@ -799,8 +1170,8 @@ class PublishedEndpointE2eTest {
     }
 
     /**
-     * Creates the pipeline and RELEASES it — an endpoint serves the latest RELEASED version and
-     * nothing else (§5.1), and since D55 a create lands a DRAFT, so a fixture that only created
+     * Creates the pipeline and RELEASES it — an API pins an exact version and serves it only when
+     * eligible (§5.1, #786), and since D55 a create lands a DRAFT, so a fixture that only created
      * would be publishing over something this surface is right to refuse. The release is the human
      * step the product requires, done here the way a person does it.
      */
@@ -907,6 +1278,9 @@ class PublishedEndpointE2eTest {
 
     companion object {
         private const val API_KEY_HEADER = "DP-API-Key"
+
+        /** The request mapper's nesting bound (#291): `RequestNestingDepthE2eTest` reads it off the injected mapper. */
+        private const val NESTING_BOUND = 100
         private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
         private const val OTHER_WORKSPACE = "defa0000-0000-0000-0000-0000000000ee"
         private val ADMIN_USER: String = UUID.randomUUID().toString()

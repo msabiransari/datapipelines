@@ -110,8 +110,9 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
         val closing = releasedPipeline(page, "$root/jobs/close")
         createSchedule(page, "$root/nightly/rows", "$root/jobs/rows")
         val blocked = createSchedule(page, "$root/monthly/close", "$root/jobs/close")
-        // Blocked the way a person meets it: its pipeline's release discarded, then a Run now that cannot start.
-        send(page, "POST", "/api/v1/pipelines/$closing/versions/1/discard").status shouldBe 200
+        // Blocked the way a person meets it: its pipeline's release discarded (legacy data since #786 B.4,
+        // which protects a release a live schedule runs), then a Run now that cannot start.
+        plantLegacyDiscardedRelease(closing)
         openSchedules("?id=$blocked")
         detail().waitFor()
         page.locator("[data-verb='schedule-run']").click()
@@ -190,8 +191,9 @@ class OverviewSchedulesBrowserTest : SchedulesBrowserSuite() {
             null,
             Page.WaitForFunctionOptions().setTimeout(60_000.0),
         )
-        // A real run that did not start: its release discarded, then a Run now the worker refuses.
-        send(page, "POST", "/api/v1/pipelines/$closing/versions/1/discard").status shouldBe 200
+        // A real run that did not start: its release discarded (legacy data since #786 B.4), then a Run now
+        // the worker refuses.
+        plantLegacyDiscardedRelease(closing)
         openSchedules("?id=$stopped")
         detail().waitFor()
         page.locator("[data-verb='schedule-run']").click()

@@ -1157,6 +1157,7 @@ class RoleVisibilityRenderTest {
 
     private fun WebContext.needsReviewReleaseModel() {
         val retired = co.datapipelines.pipeline.RetiredFactCitation("fact-old", "superseded", "fact-new")
+        setVariable("rd", ReleaseDialogFixtures.plan(ReleaseDialogFixtures.root("pipeline", "nyc/weather/probe", 3)))
         setVariable(
             "dlg",
             PipelineLifecycleDialogModel.ReleaseDialog(

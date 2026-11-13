@@ -8,6 +8,8 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.pipeline.release.ReleaseBounds
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.templates.BindFailure
 import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.templates.Template
@@ -35,6 +37,7 @@ import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.writeSurface
 import co.datapipelines.web.pipelines.IfMatchHeader
 import co.datapipelines.web.pipelines.LifecycleVerbs
+import co.datapipelines.web.release.ReleasePlanBody
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.http.HttpStatus
@@ -101,6 +104,8 @@ class TemplatesController(
     /** 7b — the evaluate route's service (script-nodes §9.2), the MCP tool's twin. */
     private val evaluate: co.datapipelines.application.templates.TemplateEvaluateService,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
+    /** #873 §C.1 — the configured release bounds (configuration §3.35); the plan body is read within `max-wire-bytes`. */
+    private val releaseBounds: ReleaseBounds = ReleaseBounds(),
 ) {
     /** §8.1 — create; the server assigns version 1 RELEASED (and the id when the body omits one). */
     @PostMapping
@@ -304,6 +309,11 @@ class TemplatesController(
      * exists, re-validation on the draft content, `template.version.conflict` on a stale
      * hash. Templates lock before pipelines (versioning §6). UI-driven (D4).
      * The name is the body's `name` field (§9.6).
+     *
+     * #873 §C.1: the body's other fields are an optional release plan (`tree_hash`, `include_dependencies`,
+     * `check_overrides`, read as the pipeline route reads them) — a DRAFT import is then a dependency the plan may select;
+     * a body of `name` alone is no plan, and a DRAFT import refuses `template.release.dependency_not_released`. The
+     * coordinator writes every audit row inside the one transaction (§C.7) — this handler writes none.
      */
     @PostMapping("/release")
     @RequiredScope(Permission.TEMPLATE_RELEASE)
@@ -313,14 +323,19 @@ class TemplatesController(
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val released = releases.release(workspaceId, nameOf(body), IfMatchHeader.required(ifMatch), principal.userId)
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
-            principal,
-            workspaceId,
-            LifecycleVerbs.templateReleaseDetails(principal, released.detail.templateId, released.detail.version),
-        )
+        val expectedHash = IfMatchHeader.required(ifMatch)
+        val tree = objectOf(body)
+        val name = nameOf(tree)
+        // The route's `name` is its address (§9.6), not a plan field: the rest of the body is the plan (#873 §C.1).
+        val planFields = tree.deepCopy().also { it.remove("name") }
+        val plan =
+            ReleasePlanBody.parse(
+                planFields.takeIf { it.size() > 0 }?.toString(),
+                ReleaseFamily.TEMPLATE,
+                releaseBounds,
+                ApiErrors::malformedTemplateBody,
+            )
+        val released = releases.release(workspaceId, name, expectedHash, principal.userId, plan)
         return ApiResponse.of(withDraftPointer(released.template, null))
     }
 
@@ -340,7 +355,7 @@ class TemplatesController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val name = nameOf(body)
-        releases.purge(workspaceId, name, IfMatchHeader.required(ifMatch))
+        releases.purge(workspaceId, name, IfMatchHeader.required(ifMatch), lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_PURGED,
@@ -364,7 +379,7 @@ class TemplatesController(
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
         val request = versionVerbRequestOf(body)
-        val detail = releases.discardVersion(workspaceId, request.name, request.version, principal.userId)
+        val detail = releases.discardVersion(workspaceId, request.name, request.version, principal.userId, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_DISCARDED,
@@ -405,7 +420,7 @@ class TemplatesController(
     ) {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        releases.purgeVersion(workspaceId, name, version)
+        releases.purgeVersion(workspaceId, name, version, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_PURGED,
@@ -481,7 +496,7 @@ class TemplatesController(
         @RequestParam name: String,
     ) {
         val principal = LifecycleVerbs.requireSession()
-        releases.purgeEntity(principal.requireWorkspace().id, name)
+        releases.purgeEntity(principal.requireWorkspace().id, name, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_ENTITY_PURGED,

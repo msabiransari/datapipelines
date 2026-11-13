@@ -294,8 +294,18 @@ class JarSmokeE2eTest {
     @Test
     fun `the bare jar reports the absent isolate once and refuses javascript while jsonata saves`() {
         val bootLog = requireNotNull(appLog).readText()
-        bootLog.lineSequence().count { it.contains("script.js: isolate not installed") } shouldBe 1
-        bootLog.lineSequence().filter { it.contains("script.js:") }.joinToString("\n") shouldNotContain "503"
+        val json =
+            com.fasterxml.jackson.databind
+                .ObjectMapper()
+        // Check event messages: a structured timestamp can itself contain the digits 503 (#884).
+        val scriptMessages =
+            bootLog
+                .lineSequence()
+                .filter { it.contains("script.js:") }
+                .map { json.readTree(it).required("message").asText() }
+                .toList()
+        scriptMessages.count { it.contains("script.js: isolate not installed") } shouldBe 1
+        scriptMessages.joinToString("\n") shouldNotContain "503"
         val contract =
             mapOf(
                 "mode" to "row",

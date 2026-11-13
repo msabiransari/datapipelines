@@ -253,3 +253,33 @@ test("a mount waits for the page's own swapped-in scripts: a restore's replayed 
   await mounting;
   assert.equal(editorMounts.length, before + 1, "the mount runs once the replayed script has executed");
 });
+
+// #876 G6 — the Dependencies pane rides each workspace's own catalog: its mount is named in MOUNTS, runs once per
+// catalog node after the workspace's mount, and a second workspace reuses the executed modules.
+const DEPENDENCIES = [
+  "/vendor/dagre/dagre.min.js",
+  "/vendor/cytoscape/cytoscape.min.js",
+  "/vendor/cytoscape/cytoscape-dagre.js",
+  "/js/dependencies/renderer.js",
+  "/js/dependencies/tree-view.js",
+  "/js/dependencies/list.js",
+  "/js/dependencies/source.js",
+  ["/js/dependencies/mount.js", true],
+];
+const dependencyMounts = [];
+outcomes.set("/js/dependencies/mount.js", { run: () => { window.DependenciesMount = main => dependencyMounts.push({ main, executed: executed.slice() }); } });
+
+test("the Dependencies mount is a named page mount: once per catalog node, after its modules, never re-executed", async () => {
+  const main = mainWith(catalogOf(DEPENDENCIES));
+  await assets.mountPage(main); await settle();
+  await assets.mountPage(main); await settle();
+  assert.equal(main.notices.length, 0, "the mount is in MOUNTS (an unnamed mount would post 'Page mount is unavailable')");
+  assert.equal(dependencyMounts.length, 1, "one mount per catalog node");
+  assert.equal(dependencyMounts[0].main, main);
+  const own = DEPENDENCIES.slice(3).map(entry => (Array.isArray(entry) ? entry[0] : entry));
+  assert.deepEqual(dependencyMounts[0].executed.filter(source => own.includes(source)), own, "modules execute in catalog order before the mount");
+  const before = executed.length;
+  await assets.mountPage(mainWith(catalogOf(DEPENDENCIES))); await settle();
+  assert.equal(dependencyMounts.length, 2, "a second workspace (or a history restore) mounts again");
+  assert.equal(executed.length, before, "and executes nothing again");
+});

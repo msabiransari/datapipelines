@@ -11,6 +11,7 @@ import co.datapipelines.pipeline.PipelineRestoreResult
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.ReleasePlanRequest
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
@@ -53,6 +54,7 @@ class PipelineLifecycleDialogControllerTest {
     private val dialogs = mockk<PipelineLifecycleDialogModel>()
     private val audit = RecordingAudit()
     private val releaseFlash = ReleaseFlash()
+    private val previews = mockk<ReleasePreviews>(relaxed = true)
 
     private lateinit var mvc: MockMvc
 
@@ -72,7 +74,7 @@ class PipelineLifecycleDialogControllerTest {
             )
         mvc =
             MockMvcBuilders
-                .standaloneSetup(PipelineLifecycleDialogController(pipelines, dialogs, audit, releaseFlash))
+                .standaloneSetup(PipelineLifecycleDialogController(pipelines, dialogs, audit, releaseFlash, previews))
                 .setControllerAdvice(UiExceptionHandler())
                 .build()
     }
@@ -85,7 +87,7 @@ class PipelineLifecycleDialogControllerTest {
     @Test
     fun `release - the editor surface answers HX-Redirect, and a release that cascaded nothing holds no names`() {
         every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
-        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER) } returns
+        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER, null, false, PLAN) } returns
             PipelineReleaseService.Released(record(currentVersion = 3), draftDetail().copy(status = PipelineVersionStatus.RELEASED), "{}")
         val session = MockHttpSession()
 
@@ -95,6 +97,9 @@ class PipelineLifecycleDialogControllerTest {
                     .session(session)
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("bodyHash", "h3")
+                    .param("tree_hash", TREE_HASH)
+                    .param("include_dependencies", "n1")
+                    .param("include_dependencies", "n2")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=released"))
 
@@ -105,7 +110,7 @@ class PipelineLifecycleDialogControllerTest {
     @Test
     fun `release - 142 - the editor surface names the cascade in its flash code`() {
         every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail() andThen null
-        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER, null, true) } returns
+        every { pipelines.release(WORKSPACE, PIPELINE, "h3", USER, null, false, PLAN) } returns
             PipelineReleaseService.Released(
                 record(currentVersion = 3),
                 draftDetail().copy(status = PipelineVersionStatus.RELEASED),
@@ -120,7 +125,9 @@ class PipelineLifecycleDialogControllerTest {
                     .session(session)
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .param("bodyHash", "h3")
-                    .param("releasePinnedTemplates", "true")
+                    .param("tree_hash", TREE_HASH)
+                    .param("include_dependencies", "n1")
+                    .param("include_dependencies", "n2")
                     .header("HX-Request", "true"),
             ).andExpect(header().string("HX-Redirect", "/pipelines/$PIPELINE?ok=released_with_templates"))
 
@@ -138,7 +145,7 @@ class PipelineLifecycleDialogControllerTest {
     fun `release - 416 - a stale dialog hash reaches the service as posted, never the fresh draft's, and answers 409`() {
         // The draft is at h3 NOW; the dialog that was submitted read h2 earlier.
         every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail()
-        every { pipelines.release(WORKSPACE, PIPELINE, "h2-stale", USER, null, false) } throws
+        every { pipelines.release(WORKSPACE, PIPELINE, "h2-stale", USER, null, false, PLAN) } throws
             DatapipelinesException(
                 code = PipelineErrorCodes.Versioning.VERSION_CONFLICT,
                 message = "The draft changed since you loaded it.",
@@ -152,6 +159,9 @@ class PipelineLifecycleDialogControllerTest {
                         .session(MockHttpSession())
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .param("bodyHash", "h2-stale")
+                        .param("tree_hash", TREE_HASH)
+                        .param("include_dependencies", "n1")
+                        .param("include_dependencies", "n2")
                         .header("HX-Request", "true"),
                 ).andExpect(status().isConflict)
                 .andExpect(header().string("HX-Retarget", "#toast"))
@@ -159,9 +169,30 @@ class PipelineLifecycleDialogControllerTest {
                 .response.contentAsString
 
         response shouldContain "pipeline.version.conflict"
-        verify(exactly = 1) { pipelines.release(WORKSPACE, PIPELINE, "h2-stale", USER, null, false) }
-        verify(exactly = 0) { pipelines.release(any(), any(), "h3", any(), any(), any()) }
+        verify(exactly = 1) { pipelines.release(WORKSPACE, PIPELINE, "h2-stale", USER, null, false, PLAN) }
+        verify(exactly = 0) { pipelines.release(any(), any(), "h3", any(), any(), any(), any()) }
         audit.events shouldBe emptyList()
+    }
+
+    @Test
+    fun `release - 876 - the bare cascade alias without the plan's tree_hash is plan_required 428 and nothing is released`() {
+        every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail()
+
+        val response =
+            mvc
+                .perform(
+                    post("/partials/pipelines/$PIPELINE/lifecycle/release")
+                        .session(MockHttpSession())
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("bodyHash", "h3")
+                        .param("releasePinnedTemplates", "true")
+                        .header("HX-Request", "true"),
+                ).andExpect(status().`is`(428))
+                .andReturn()
+                .response.contentAsString
+
+        response shouldContain "pipeline.release.plan_required"
+        verify(exactly = 0) { pipelines.release(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -174,14 +205,14 @@ class PipelineLifecycleDialogControllerTest {
             ).andExpect(status().isBadRequest)
 
         verify(exactly = 0) { pipelines.findDraft(any(), any(), any()) }
-        verify(exactly = 0) { pipelines.release(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { pipelines.release(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `release - 416 - a hostile hash value reaches the service verbatim and is the conflict, never a 500`() {
         val hostile = "'\"; DROP TABLE pipeline_version; --<script>" + "x".repeat(5000)
         every { pipelines.findDraft(WORKSPACE, any(), PIPELINE) } returns draftDetail()
-        every { pipelines.release(WORKSPACE, PIPELINE, hostile, USER, null, false) } throws
+        every { pipelines.release(WORKSPACE, PIPELINE, hostile, USER, null, false, PLAN) } throws
             DatapipelinesException(
                 code = PipelineErrorCodes.Versioning.VERSION_CONFLICT,
                 message = "The draft changed since you loaded it.",
@@ -194,6 +225,9 @@ class PipelineLifecycleDialogControllerTest {
                         .session(MockHttpSession())
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .param("bodyHash", hostile)
+                        .param("tree_hash", TREE_HASH)
+                        .param("include_dependencies", "n1")
+                        .param("include_dependencies", "n2")
                         .header("HX-Request", "true"),
                 ).andExpect(status().isConflict)
                 .andReturn()
@@ -212,13 +246,16 @@ class PipelineLifecycleDialogControllerTest {
                     post("/partials/pipelines/$PIPELINE/lifecycle/release")
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .param("bodyHash", "h3")
+                        .param("tree_hash", TREE_HASH)
+                        .param("include_dependencies", "n1")
+                        .param("include_dependencies", "n2")
                         .header("HX-Request", "true"),
                 ).andExpect(status().is4xxClientError)
                 .andReturn()
                 .response.contentAsString
 
         response shouldContain PipelineErrorCodes.Versioning.NOT_DRAFT
-        verify(exactly = 0) { pipelines.release(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { pipelines.release(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -538,5 +575,7 @@ class PipelineLifecycleDialogControllerTest {
         val WORKSPACE: UUID = UUID.fromString("00000000-0000-0000-0000-000000000010")
         val PIPELINE: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")
         val USER: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001")
+        const val TREE_HASH = "v1:0123456789abcdef"
+        val PLAN = ReleasePlanRequest(TREE_HASH, listOf("n1", "n2"))
     }
 }

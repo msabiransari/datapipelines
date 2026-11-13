@@ -27,14 +27,18 @@ class SchedulesFormRenderTest {
     }
 
     @Test
-    fun `the form offers the server's zones by region and fixes the version to current`() {
+    fun `the form offers the server's zones by region and a required exact version picker`() {
         val form = SchedulesRender.skeleton(SchedulesRender.page(), "sch-tpl-form")
         form shouldContain "<optgroup label=\"America\">"
         form shouldContain "<option value=\"America/New_York\">America/New_York</option>"
         form shouldContain "<option value=\"UTC\">UTC</option>"
         (form.split("<option value=\"").size - 1 >= ScheduleTimezones.GROUPS.sumOf { it.zones.size }) shouldBe true
-        // Slice 1 accepts `current` only: no numeric version control exists.
-        form shouldNotContain "name=\"version\""
+        // #786 D.4: the job pins an exact version, picked from the pipeline's versions — a required
+        // select, described by its help and its own error slot (the refusals that name the version land there).
+        form shouldContain "<select id=\"sch-f-version\" name=\"version\" class=\"ds-input\" required"
+        form shouldContain "aria-describedby=\"sch-f-version-help sch-f-version-error\""
+        form shouldContain "data-field-error=\"version\""
+        form shouldNotContain "follows the current version"
         // The five presets and the custom pattern, each writing the ONE cron field.
         listOf("hourly", "daily", "weekly", "monthly", "custom").forEach { p -> withClue(p) { form shouldContain "value=\"$p\"" } }
         form shouldContain "id=\"sch-f-cron\""

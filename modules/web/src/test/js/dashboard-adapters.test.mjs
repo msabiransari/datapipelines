@@ -1,6 +1,6 @@
 // The dashboard adapters (#10, the implementation spec's §10.3): the composite adapter's contract
-// functions, the Plotly substitution/escaping/theme mapping, and the table/KPI renderers' text-only
-// DOM. Node's built-in runner; the fake DOM is the same shape the runtime tests install.
+// functions and the table/KPI renderers' text-only DOM. Node's built-in runner; the fake DOM is the
+// same shape the runtime tests install.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -130,7 +130,7 @@ function uninstallDom() {
 }
 
 // #543 — fixture transport, but the real bootstrap, composite and action gate.
-async function actionBoard({ adapter, config: overrides = {} } = {}) {
+async function actionBoard({ adapter, config: overrides = {}, wrap } = {}) {
   const runtime = require(resolveStatic("datapipelines-dashboard.js"));
   if (!runtime._internal.renderers().table) {
     runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
@@ -144,13 +144,40 @@ async function actionBoard({ adapter, config: overrides = {} } = {}) {
     action_controls: [{ name: "apply", label: "Apply", action: "refresh_all" }],
   }, overrides);
   const composite = adapter || runtime.adapters(container, { parametersContainer: panel });
+  // #548 — `wrap` sees the adapter before init and a holder whose `instance` is set before bootstrap's first await.
+  const holder = {};
+  if (wrap) wrap(composite, holder);
   const instance = runtime.init({
     server: { fixtures: { config } }, dashboard: { id: "actions-board", version: "released" },
     container, adapter: composite,
   });
+  holder.instance = instance;
   await instance.ready;
   return { instance, adapter: composite, container, panel };
 }
+
+// #548 — what the one gate would throw right now: the oracle is the gate itself, never the published value.
+function gateRefusal(instance) {
+  try {
+    instance._requireActionGate();
+    return null;
+  } catch (error) {
+    return error.code;
+  }
+}
+
+// #548 — the composite's described note for a button: the element `aria-describedby` names, or null.
+function describedNote(panel, button) {
+  const id = button.getAttribute("aria-describedby");
+  if (!id) return null;
+  return panel.querySelectorAll(".dp-dashboard-actions-note").find((note) => note.getAttribute("id") === id) || null;
+}
+
+const AVAILABILITY_SENTENCES = {
+  "actions.locked": "Applying is paused while the parameters are checked.",
+  "actions.not_ready": "The dashboard is still loading.",
+  "parameters.invalid": "Fix the parameter errors to apply.",
+};
 
 test("#543: a configured explicit control renders its authored label as text in the pane and survives every parameter render", async () => {
   installDom();
@@ -255,10 +282,16 @@ test("#543: a button press during a real pending evaluation is refused, then a v
       return originalStream.call(this, body, handlers);
     };
     const pending = instance._evaluateParameters("parent_change");
-    board.panel.querySelector(".dp-dashboard-action-control").fire("click");
+    // #548 — the press while the gate is closed is suppressed in the composite: the button says why instead.
+    const lockedButton = board.panel.querySelector(".dp-dashboard-action-control");
+    assert.equal(lockedButton.getAttribute("aria-disabled"), "true", "a pending evaluation makes Apply unavailable");
+    assert.equal(describedNote(board.panel, lockedButton)?.textContent, AVAILABILITY_SENTENCES["actions.locked"]);
+    lockedButton.fire("click");
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(streamBodies.length, 0, "no refresh crosses a pending evaluation");
-    assert.ok(notices.some((notice) => notice.code === "actions.locked"));
+    await assert.rejects(instance.refresh({ scope: "all" }), (error) => error.code === "actions.locked",
+      "the runtime gate stays authoritative for a programmatic press");
+    assert.equal(streamBodies.length, 0, "the refused programmatic press sends nothing");
     resolveEvaluation(compositeState());
     await pending;
     board.panel.querySelector(".dp-dashboard-action-control").fire("click");
@@ -268,10 +301,16 @@ test("#543: a button press during a real pending evaluation is refused, then a v
     const invalid = instance._evaluateParameters("parent_change");
     resolveEvaluation(compositeState({ valid: false }));
     await invalid;
-    board.panel.querySelector(".dp-dashboard-action-control").fire("click");
+    const invalidButton = board.panel.querySelector(".dp-dashboard-action-control");
+    assert.equal(invalidButton.getAttribute("aria-disabled"), "true", "invalid parameters make Apply unavailable");
+    assert.equal(describedNote(board.panel, invalidButton)?.textContent, AVAILABILITY_SENTENCES["parameters.invalid"]);
+    invalidButton.fire("click");
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(streamBodies.length, 1, "invalid parameters still refuse a press");
-    assert.ok(notices.some((notice) => notice.code === "parameters.invalid"));
+    await assert.rejects(instance.refresh({ scope: "all" }), (error) => error.code === "parameters.invalid");
+    assert.equal(streamBodies.length, 1, "the refused programmatic press sends nothing");
+    assert.ok(!notices.some((notice) => notice.code === "actions.locked" || notice.code === "parameters.invalid"),
+      "a suppressed press publishes no refusal: the button already said why");
   } finally {
     if (instance) instance.dispose();
     uninstallDom();
@@ -315,173 +354,281 @@ for (const withHook of [true, false]) {
   });
 }
 
+// ------------------------------------------------------------------------------- #548 action availability
+
+test("#548: the published availability equals the gate's refusal at every transition", async () => {
+  installDom();
+  let instance;
+  try {
+    const published = [];
+    const board = await actionBoard({
+      wrap(composite, holder) {
+        const original = composite.renderActionAvailability;
+        composite.renderActionAvailability = function (availability) {
+          published.push({ availability, gate: gateRefusal(holder.instance) });
+          return original.call(this, availability);
+        };
+      },
+    });
+    instance = board.instance;
+    const last = () => published.at(-1).availability;
+    const agrees = (step) => {
+      for (const entry of published) {
+        assert.equal(entry.availability.reason, entry.gate, `${step}: a publish disagreed with the gate at its moment`);
+        assert.equal(entry.availability.available, entry.gate === null, `${step}: available mirrors the reason`);
+      }
+      assert.equal(last().reason, gateRefusal(instance), `${step}: the last publish is the gate now`);
+    };
+    // Bootstrap: unavailable from the first draw of the buttons, then open once ready.
+    assert.deepEqual(published.map((entry) => entry.availability.reason), ["actions.not_ready", null]);
+    agrees("bootstrap");
+
+    let resolveEvaluation;
+    instance._call = () => new Promise((resolve) => { resolveEvaluation = resolve; });
+    const pending = instance._evaluateParameters("parent_change");
+    assert.equal(last().reason, "actions.locked");
+    agrees("pending evaluation");
+    resolveEvaluation(compositeState());
+    await pending;
+    assert.equal(last().reason, null);
+    agrees("valid answer");
+
+    const invalid = instance._evaluateParameters("parent_change");
+    resolveEvaluation(compositeState({ valid: false }));
+    await invalid;
+    assert.equal(last().reason, "parameters.invalid");
+    agrees("invalid answer");
+
+    const retry = instance._evaluateParameters("retry");
+    assert.equal(last().reason, "actions.locked");
+    resolveEvaluation(compositeState());
+    await retry;
+    assert.equal(last().reason, null);
+    agrees("valid retry");
+
+    const expiring = instance._evaluateParameters("parent_change");
+    assert.equal(last().reason, "actions.locked");
+    // The timer's own path, without waiting for it: the deadline expires the attempt it was armed for.
+    const expired = instance._lock;
+    instance._clearLockTimer(expired);
+    instance._lockExpired(expired);
+    assert.equal(last().reason, null, "a lock timeout reopens the gate over the last applied (valid) state");
+    agrees("lock timeout");
+    resolveEvaluation(compositeState({ valid: false }));
+    await assert.rejects(expiring, (error) => error.code === "parameters.superseded");
+    assert.equal(last().reason, null, "the late answer after the timeout changes nothing");
+    agrees("late answer");
+
+    // The supersede path is the parameters-only form's; its transport is held, the lock handling is the runtime's.
+    instance._parametersOnly = true;
+    instance._init.parameterSet = { id: "ps-548", version: 1 };
+    instance._streamEvaluateParameters = () => new Promise(() => {});
+    const before = published.length;
+    instance._evaluateParameters("commit");
+    instance._evaluateParameters("commit");
+    assert.deepEqual(published.slice(before).map((entry) => entry.availability.reason), ["actions.locked"],
+      "a supersede never publishes the instant between releasing n and acquiring n+1");
+    agrees("supersede");
+    const superseding = instance._lock;
+    instance._clearLockTimer(superseding);
+    instance._lockExpired(superseding);
+    instance._parametersOnly = false;
+    assert.equal(last().reason, null);
+
+    const quiet = published.length;
+    await instance.reset();
+    assert.equal(published.length, quiet, "reset keeps the applied validity, so nothing is republished");
+    agrees("reset");
+
+    instance._fixtureStream = () => ({ close() {} });
+    const refreshing = instance.refresh({ scope: "all" });
+    assert.equal(gateRefusal(instance), null, "an in-flight refresh does not close the gate");
+    assert.equal(last().reason, null);
+    agrees("in-flight refresh");
+    refreshing.catch(() => {});
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("#548: the runtime assigns the gate's four inputs only through _setGate and the constructor", () => {
+  const fs = require("node:fs");
+  const source = fs.readFileSync(resolveStatic("datapipelines-dashboard.js"), "utf8");
+  const span = (start, end) => {
+    const from = source.indexOf(start);
+    assert.notEqual(from, -1, `the scan anchor '${start}' must exist`);
+    const to = source.indexOf(end, from);
+    assert.notEqual(to, -1);
+    return [from, to + end.length];
+  };
+  const constructor = span("function DashboardInstance(initOptions, env) {", "\n  }\n");
+  const setter = span("DashboardInstance.prototype._setGate = function", "\n  };\n");
+  const inside = (index, [from, to]) => index >= from && index < to;
+  const writes = [...source.matchAll(/\b(?:this|self)\._(lock|bootstrapped|disposed|parameters)\b\s*=(?!=)/g)];
+  const stray = writes.filter((m) => !inside(m.index, constructor) && !inside(m.index, setter))
+    .map((m) => `${m[0]} at line ${source.slice(0, m.index).split("\n").length}`);
+  assert.deepEqual(stray, [], "every gate-input write goes through _setGate");
+  const initialisers = writes.filter((m) => inside(m.index, constructor)).map((m) => m[1]).sort();
+  assert.deepEqual(initialisers, ["bootstrapped", "disposed", "lock", "parameters"], "non-vacuity: the constructor's four initialisers");
+  const calls = (source.match(/\._setGate\(/g) || []).length;
+  assert.ok(calls >= 10, `non-vacuity: at least ten _setGate( call sites, found ${calls}`);
+});
+
+test("#548: before ready the composite's button is unavailable with the loading sentence; after ready both are gone", async () => {
+  installDom();
+  let instance;
+  try {
+    let snapshot = null;
+    const board = await actionBoard({
+      config: { visualizations: [{ name: "chart", renderer: { kind: "table", version: "1" }, config: {} }] },
+      wrap(composite, holder) {
+        const mount = composite.mountVisualization;
+        composite.mountVisualization = function (...args) {
+          const button = composite.parametersRoot.querySelector(".dp-dashboard-action-control");
+          const note = describedNote(composite.parametersRoot, button);
+          snapshot = {
+            disabled: button.getAttribute("aria-disabled"),
+            note: note && note.textContent,
+            hidden: note && note.className.includes("dp-dashboard-actions-note-visually-hidden"),
+            gate: gateRefusal(holder.instance),
+          };
+          return mount.apply(this, args);
+        };
+      },
+    });
+    instance = board.instance;
+    assert.deepEqual(snapshot, { disabled: "true", note: "The dashboard is still loading.", hidden: true, gate: "actions.not_ready" });
+    const button = board.panel.querySelector(".dp-dashboard-action-control");
+    assert.equal(button.getAttribute("aria-disabled"), null, "ready: available");
+    assert.equal(button.getAttribute("aria-describedby"), null, "ready: no description");
+    assert.equal(board.panel.querySelector(".dp-dashboard-actions-note").textContent, "", "ready: the note is empty");
+    assert.equal(button.disabled, false, "never the disabled property: focus stays on the button");
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("#548: every parameter re-render rebuilds the buttons with the current availability; only the invalid sentence shows", async () => {
+  installDom();
+  let instance;
+  try {
+    const board = await actionBoard();
+    instance = board.instance;
+    board.adapter.renderActionAvailability({ available: false, reason: "parameters.invalid" });
+    await board.adapter.renderParameters(compositeState({ valid: false }));
+    let button = board.panel.querySelector(".dp-dashboard-action-control");
+    let note = describedNote(board.panel, button);
+    assert.equal(button.getAttribute("aria-disabled"), "true", "a re-render keeps the button unavailable");
+    assert.equal(note.textContent, AVAILABILITY_SENTENCES["parameters.invalid"]);
+    assert.equal(note.className, "dp-dashboard-actions-note", "the fixable state's sentence is visible");
+    assert.equal(note.parentNode.className, "dp-dashboard-actions", "the note lives in the actions row");
+    assert.equal(note.innerHTML, null, "the sentence is text, never markup");
+    const firstId = note.getAttribute("id");
+    assert.match(firstId, /^dp-actions-note-[0-9a-f-]+-\d+$/, "the id is the adapter token and a counter, never data");
+
+    for (const reason of ["actions.locked", "actions.not_ready"]) {
+      board.adapter.renderActionAvailability({ available: false, reason });
+      await board.adapter.renderParameters(compositeState({ parameter_revision: 5 }));
+      button = board.panel.querySelector(".dp-dashboard-action-control");
+      note = describedNote(board.panel, button);
+      assert.equal(button.getAttribute("aria-disabled"), "true");
+      assert.equal(note.textContent, AVAILABILITY_SENTENCES[reason]);
+      assert.ok(note.className.includes("dp-dashboard-actions-note-visually-hidden"), `${reason} is described, not shown`);
+      assert.notEqual(note.getAttribute("id"), firstId, "a rebuilt note takes a fresh id");
+    }
+
+    board.adapter.renderActionAvailability({ available: true, reason: null });
+    await board.adapter.renderParameters(compositeState({ parameter_revision: 6 }));
+    button = board.panel.querySelector(".dp-dashboard-action-control");
+    assert.equal(button.getAttribute("aria-disabled"), null);
+    assert.equal(button.getAttribute("aria-describedby"), null);
+    assert.equal(board.panel.querySelectorAll(".dp-dashboard-actions-note").length, 1, "one note per actions row");
+    assert.equal(board.panel.querySelector(".dp-dashboard-actions-note").textContent, "");
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("#548: a press while unavailable calls nothing and stops the click; a press while available is forwarded", async () => {
+  installDom();
+  let instance;
+  try {
+    const board = await actionBoard();
+    instance = board.instance;
+    const actions = [];
+    board.adapter.onAction((payload) => actions.push(payload));
+    const press = () => {
+      const event = { stopped: false, stopPropagation() { this.stopped = true; } };
+      board.panel.querySelector(".dp-dashboard-action-control").fire("click", event);
+      return event.stopped;
+    };
+    board.adapter.renderActionAvailability({ available: false, reason: "actions.locked" });
+    assert.equal(press(), true, "an unavailable press stops before the page's filters-panel listener");
+    assert.deepEqual(actions, [], "an unavailable press reaches no listener");
+    board.panel.querySelector(".dp-dashboard-action-control").fire("click");
+    assert.deepEqual(actions, [], "a press with no event object is suppressed as well");
+    board.adapter.renderActionAvailability({ available: true, reason: null });
+    assert.equal(press(), false, "an available press propagates as before");
+    assert.deepEqual(actions, [{ action: "refresh_all", name: "apply", type: "action_control" }]);
+  } finally {
+    if (instance) instance.dispose();
+    uninstallDom();
+  }
+});
+
+for (const variant of ["recorded", "absent", "throwing"]) {
+  test(`#548: an adapter whose renderActionAvailability is ${variant} boots and keeps the gate`, async () => {
+    installDom();
+    let instance;
+    try {
+      const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+      const notices = [];
+      const calls = [];
+      const adapter = Object.fromEntries(runtime._internal.REQUIRED_ADAPTER_FUNCTIONS.map((name) => [name, () => {}]));
+      adapter.notify = (notice) => { notices.push(notice); };
+      adapter.renderActionControls = () => {};
+      if (variant === "recorded") adapter.renderActionAvailability = (availability) => { calls.push(availability); };
+      if (variant === "throwing") adapter.renderActionAvailability = () => { throw new Error("host bug"); };
+      ({ instance } = await actionBoard({ adapter }));
+      assert.equal(gateRefusal(instance), null, "the board is ready and its gate open");
+      let resolveEvaluation;
+      instance._call = () => new Promise((resolve) => { resolveEvaluation = resolve; });
+      const pending = instance._evaluateParameters("parent_change");
+      await assert.rejects(instance.refresh({ scope: "all" }), (error) => error.code === "actions.locked");
+      resolveEvaluation(compositeState());
+      await pending;
+      assert.equal(gateRefusal(instance), null);
+      const failures = notices.filter((n) => n.code === "actions.availability_failed");
+      if (variant === "recorded") {
+        assert.deepEqual(calls, [
+          { available: false, reason: "actions.not_ready" },
+          { available: true, reason: null },
+          { available: false, reason: "actions.locked" },
+          { available: true, reason: null },
+        ], "called after the controls and on every change of reason, never twice for the same one");
+      }
+      if (variant === "throwing") {
+        assert.equal(failures.length, 1, "a throwing hook is reported once, never silently swallowed");
+        assert.equal(failures[0].scope, "actions");
+        assert.equal(failures[0].severity, "warning");
+      } else {
+        assert.equal(failures.length, 0);
+      }
+    } finally {
+      if (instance) instance.dispose();
+      uninstallDom();
+    }
+  });
+}
+
 // --------------------------------------------------------------------------------------------------- tests
 
-test("the plotly substitution lands bound arrays at their paths and escapes every bound value", async () => {
-  const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-  const stored = {
-    data: [{ type: "bar", x: null, y: null, marker: {} }],
-    layout: { title: { text: "Stored title" } },
-  };
-  const out = plotly._internal.substitute(
-    stored,
-    {
-      "data[0].x": ['<img src=x onerror="alert(1)">', "2026-01"],
-      "data[0].y": [10, 20],
-      "layout.title.text": "<a href='javascript:alert(1)'>steal</a>",
-    },
-    plotly._internal.escapeMarkup,
-  );
-  // The stored configuration is never mutated.
-  assert.equal(stored.data[0].x, null);
-  assert.equal(stored.layout.title.text, "Stored title");
-  // Bound strings arrive escaped: the img, its handler and the javascript: URL are TEXT.
-  assert.equal(out.data[0].x[0], "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;".replace(/&quot;/g, '"') === "" ? "" : "&lt;img src=x onerror=\"alert(1)\"&gt;".replace("<", "&lt;").replace(">", "&gt;") || out.data[0].x[0]);
-  assert.ok(!out.data[0].x[0].includes("<"), "no raw < from data: " + out.data[0].x[0]);
-  assert.ok(out.data[0].x[0].startsWith("&lt;img"), "the tag is escaped text: " + out.data[0].x[0]);
-  assert.equal(out.data[0].y[0], 10, "numbers pass through unescaped");
-  assert.ok(!out.layout.title.text.includes("<a href"), "the javascript: anchor is escaped text: " + out.layout.title.text);
-  // A path that resolves nowhere is skipped, never invented.
-  const skipped = plotly._internal.substitute({ data: [] }, { "data[5].x": [1] }, plotly._internal.escapeMarkup);
-  assert.deepEqual(skipped.data, []);
-});
-
-test("the xss trio renders as text through the plotly adapter's escaping", async () => {
-  const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-  for (const nasty of ['<img onerror="alert(1)">', '<a href="javascript:alert(1)">click</a>', "<b>bold</b>"]) {
-    const escaped = plotly._internal.escapeMarkup(nasty);
-    assert.ok(!escaped.includes("<"), nasty + " survived as markup: " + escaped);
-    assert.ok(!escaped.includes("<a") && !escaped.includes("<img") && !escaped.includes("<b>"), "no element survives: " + escaped);
-  }
-});
-
-test("the theme mapping reads the chart tokens through a probe and never invents a colour", async () => {
-  installDom();
-  try {
-    const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-    let probes = 0;
-    const realCreate = globalThis.document.createElement;
-    globalThis.document.createElement = (tag) => {
-      probes += 1;
-      return realCreate(tag);
-    };
-    globalThis.document.body.removeChild = () => {};
-    const theme = plotly._internal.themeLayout({ tokens: { series: "categorical" } });
-    assert.ok(probes > 0, "the tokens were resolved through probe elements");
-    // getComputedStyle answers color(srgb …); the mapping normalises to rgb() for Plotly's validation.
-    assert.match(theme.paper_bgcolor, /^rgb\(/, String(theme.paper_bgcolor));
-    assert.match(theme.plot_bgcolor, /^rgb\(/);
-    assert.ok(Array.isArray(theme.colorway) && theme.colorway.length === 6, "the six series hues");
-    for (const colour of theme.colorway) assert.match(colour, /^rgb\(/);
-    // An unknown token name changes nothing (the open map is ignored).
-    const unknown = plotly._internal.themeLayout({ tokens: { series: "striped" } });
-    assert.equal(unknown.colorway, undefined, "only the known names are honoured");
-    // Without a DOM there is no colour and no invention.
-    delete globalThis.document;
-    const bare = plotly._internal.themeLayout({});
-    assert.deepEqual(bare, {});
-  } finally {
-    uninstallDom();
-  }
-});
-
-test("#386: the size defaults sit UNDER the author — compact margin, automargin on the axes, the stored keys win", async () => {
-  const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-  const { withSizeDefaults, mergeLayout, COMPACT_MARGIN, COMPACT_TITLED_TOP } = plotly._internal;
-  // Absent margin: the compact one, every side — never Plotly's own (the key would be absent).
-  const bare = withSizeDefaults({});
-  assert.deepEqual(bare.margin, { l: COMPACT_MARGIN.l, r: COMPACT_MARGIN.r, t: COMPACT_MARGIN.t, b: COMPACT_MARGIN.b, pad: 0 });
-  assert.ok(COMPACT_MARGIN.t < 20 && COMPACT_MARGIN.l < 20, "compact means well under Plotly's 80/100: " + JSON.stringify(COMPACT_MARGIN));
-  assert.equal(bare.xaxis.automargin, true, "x automargin defaults on");
-  assert.equal(bare.yaxis.automargin, true, "y automargin defaults on");
-  assert.deepEqual(withSizeDefaults(undefined).margin, bare.margin, "no stored layout at all is the same case");
-  // A title opens the top margin (both title shapes), an empty one does not.
-  assert.equal(withSizeDefaults({ title: { text: "Units" } }).margin.t, COMPACT_TITLED_TOP);
-  assert.equal(withSizeDefaults({ title: "Units" }).margin.t, COMPACT_TITLED_TOP);
-  assert.equal(withSizeDefaults({ title: { text: "" } }).margin.t, COMPACT_MARGIN.t);
-  // The author's margin wins KEY BY KEY: t survives, the absent sides take the compact default.
-  const stored = { margin: { t: 120 }, title: { text: "Units" }, xaxis: { automargin: false, title: { text: "Month" } } };
-  const merged = withSizeDefaults(stored);
-  assert.equal(merged.margin.t, 120, "the stored top margin survives the defaults");
-  assert.equal(merged.margin.l, COMPACT_MARGIN.l, "an absent side is compact");
-  assert.equal(merged.xaxis.automargin, false, "the author's automargin=false stands");
-  assert.equal(merged.xaxis.title.text, "Month", "the rest of the axis is untouched");
-  assert.equal(merged.yaxis.automargin, true, "the other axis still defaults on");
-  assert.equal(stored.margin.l, undefined, "the stored configuration is never mutated");
-  assert.equal(stored.yaxis, undefined);
-  // A numbered axis the author declared defaults on too.
-  assert.equal(withSizeDefaults({ yaxis2: { overlaying: "y" } }).yaxis2.automargin, true);
-  // The theme still wins over the author's COLOURS and leaves the size keys alone (the opposite precedence).
-  const themed = mergeLayout(merged, { paper_bgcolor: "rgb(1,2,3)", xaxis: { gridcolor: "rgb(4,5,6)" } });
-  assert.equal(themed.paper_bgcolor, "rgb(1,2,3)");
-  assert.equal(themed.xaxis.gridcolor, "rgb(4,5,6)");
-  assert.equal(themed.xaxis.automargin, false, "the theme does not touch automargin");
-  assert.equal(themed.margin.t, 120, "the theme does not touch the margin");
-});
-
-test("#386: the plotly renderer hands Plotly the compact margin and automargin on every render", async () => {
-  installDom();
-  try {
-    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
-    const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-    plotly.register(runtime);
-    const calls = [];
-    globalThis.window.Plotly = {
-      react: (el, data, layout, config) => {
-        calls.push({ layout });
-        return Promise.resolve();
-      },
-      Plots: { resize: () => {} },
-      purge: () => {},
-    };
-    const host = fakeElement("div");
-    const handle = runtime._internal.renderers().plotly.create({
-      host,
-      occurrence: { name: "v", config: { data: [{ type: "bar", x: null }], layout: { margin: { r: 40 } } }, presentation: null },
-    });
-    assert.equal(await handle.renderData({ name: "v" }, 2, { "data[0].x": [1, 2] }), "rendered");
-    const layout = calls[0].layout;
-    assert.equal(layout.margin.t, plotly._internal.COMPACT_MARGIN.t, "no title: the compact top");
-    assert.equal(layout.margin.r, 40, "the stored right margin wins");
-    assert.equal(layout.xaxis.automargin, true);
-    assert.equal(layout.yaxis.automargin, true);
-  } finally {
-    uninstallDom();
-  }
-});
-
-test("the plotly renderer resolves rendered on the plot and answers no-data for empty rows", async () => {
-  installDom();
-  try {
-    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
-    const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-    plotly.register(runtime);
-    const host = fakeElement("div");
-    const handle = runtime._internal.renderers().plotly.create({
-      host,
-      occurrence: { name: "v", config: { data: [{ type: "bar", x: null }] }, presentation: null },
-    });
-    assert.equal(await handle.renderData({ name: "v" }, 0, {}), "no-data");
-    // A fake Plotly: react records the call; the afterplot event races the promise — both settle.
-    const calls = [];
-    globalThis.window.Plotly = {
-      react: (el, data, layout, config) => {
-        calls.push({ data, layout, config });
-        return Promise.resolve();
-      },
-      Plots: { resize: () => {} },
-      purge: () => {},
-    };
-    const outcome = await handle.renderData({ name: "v" }, 2, { "data[0].x": ["<b>not markup</b>", "y"] });
-    assert.equal(outcome, "rendered");
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].data[0].x[0], "&lt;b&gt;not markup&lt;/b&gt;", "the bound markup arrives escaped");
-    assert.ok(calls[0].config.responsive, "the shipped config defaults hold");
-    assert.equal(calls[0].config.displaylogo, false);
-  } finally {
-    uninstallDom();
-  }
-});
+// The plotly kind retired (design record 2026-11-06 §5.1): its substitution, escaping, theme and #386 size tests went
+// with it. The chart kind's equivalents — every Plotly sink escaped, the tokens, Q-L4, rendered/no-data — are in
+// dashboard-chart.test.mjs.
 
 test("the table renderer builds text-only cells, formats, caps at page_size, and answers no-data", async () => {
   installDom();
@@ -616,6 +763,40 @@ test("#459: KPI values and comparison use native binding paths", async () => {
   }
 });
 
+// #852 — the composite's adapter-level renderData has the handle's three arguments and forwards
+// exactly those: (occurrenceRef, rows, bindings), `rows` the frame's row count.
+test("#852: the composite's renderData forwards exactly (occurrenceRef, rows, bindings) to the mounted handle", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    let recorded = null;
+    runtime.registerRenderer({
+      kind: "args-recorder-852",
+      version: "1",
+      create: () => ({
+        renderData: function () {
+          recorded = Array.from(arguments);
+          return Promise.resolve("rendered");
+        },
+      }),
+    });
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: [{ name: "chart", x: 0, y: 0, w: 6, h: 4 }] });
+    await adapter.mountVisualization(
+      { name: "chart", renderer: { kind: "args-recorder-852", version: "1" }, config: {} },
+      { kind: "args-recorder-852", version: "1" },
+    );
+    const ref = { name: "chart", type: "visualization", occurrence: { name: "chart" } };
+    const bindings = { x: [1, 2, 3] };
+    assert.equal(await adapter.renderData(ref, 3, bindings), "rendered");
+    assert.deepEqual(recorded, [ref, 3, bindings], "the handle receives the three arguments, no more");
+    adapter.dispose();
+  } finally {
+    uninstallDom();
+  }
+});
+
 test("the composite adapter builds the grid, mounts renderers by kind and renders status text-only", async () => {
   installDom();
   try {
@@ -623,8 +804,8 @@ test("the composite adapter builds the grid, mounts renderers by kind and render
     runtime._internal.resetRenderers();
     const mounted = [];
     runtime.registerRenderer({
-      kind: "plotly",
-      version: "4",
+      kind: "stub",
+      version: "1",
       create: (context) => {
         mounted.push(context.occurrence.name);
         return { renderData: () => Promise.resolve("rendered"), dispose: () => {} };
@@ -634,7 +815,7 @@ test("the composite adapter builds the grid, mounts renderers by kind and render
     const adapter = runtime.adapters(container);
     await adapter.mountLayout({ columns: 12, grid: [{ name: "chart", x: 0, y: 0, w: 6, h: 4 }] });
     assert.equal(container.children[0].style.gridTemplateColumns, "repeat(12, minmax(0, 1fr))");
-    await adapter.mountVisualization({ name: "chart", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
+    await adapter.mountVisualization({ name: "chart", renderer: { kind: "stub", version: "1" }, config: {} }, { kind: "stub", version: "1" });
     assert.deepEqual(mounted, ["chart"]);
     // An unknown kind refuses at mount.
     await assert.rejects(
@@ -739,16 +920,16 @@ test("#412: host width crossings re-place and resize once per crossing, then dis
     runtime._internal.resetRenderers();
     const resized = [];
     runtime.registerRenderer({
-      kind: "plotly",
-      version: "4",
+      kind: "stub",
+      version: "1",
       create: (context) => ({ renderData: () => Promise.resolve("rendered"), resize: () => resized.push(context.occurrence.name) }),
     });
     const container = fakeElement("div");
     container.clientWidth = 640;
     const adapter = runtime.adapters(container);
     await adapter.mountLayout({ columns: 12, grid: SEEDED_GRID });
-    await adapter.mountVisualization({ name: "revenue", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
-    await adapter.mountVisualization({ name: "slowchart", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
+    await adapter.mountVisualization({ name: "revenue", renderer: { kind: "stub", version: "1" }, config: {} }, { kind: "stub", version: "1" });
+    await adapter.mountVisualization({ name: "slowchart", renderer: { kind: "stub", version: "1" }, config: {} }, { kind: "stub", version: "1" });
     const stored = { revenue: "1 / span 6 / 1 / span 4", cells: "7 / span 6 / 1 / span 4", total: "1 / span 3 / 5 / span 2", slowchart: "4 / span 9 / 5 / span 2" };
     for (const [name, expected] of Object.entries(stored)) assert.equal(placement(container, name), expected, name + " at 640 host px");
     assert.equal(observer.observed(), 1, "the composite host is observed");
@@ -1163,14 +1344,14 @@ test("composite dispose removes the mounted DOM; a host sibling stands; re-mount
   try {
     const runtime = require(resolveStatic("datapipelines-dashboard.js"));
     runtime._internal.resetRenderers();
-    runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+    runtime.registerRenderer({ kind: "stub", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
     const container = fakeElement("div");
     const neighbour = fakeElement("div");
     neighbour.setAttribute("id", "host-owned");
     container.appendChild(neighbour);
     const adapter = runtime.adapters(container);
     await adapter.mountLayout({ columns: 12, grid: [] });
-    await adapter.mountVisualization({ name: "v", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
+    await adapter.mountVisualization({ name: "v", renderer: { kind: "stub", version: "1" }, config: {} }, { kind: "stub", version: "1" });
     await adapter.renderParameters(compositeState());
     const mountedSets = () => container.querySelectorAll(".dp-dashboard").length;
     assert.equal(mountedSets(), 1, "one layout mounted");

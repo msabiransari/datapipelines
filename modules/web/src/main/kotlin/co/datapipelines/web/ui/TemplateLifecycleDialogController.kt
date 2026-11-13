@@ -1,9 +1,11 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
@@ -12,6 +14,8 @@ import co.datapipelines.web.templates.TemplateReleaseService
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
+import org.springframework.util.LinkedMultiValueMap
+import org.springframework.util.MultiValueMap
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -44,6 +48,10 @@ class TemplateLifecycleDialogController(
     private val templates: TemplateRepository,
     private val dialogs: TemplateLifecycleDialogModel,
     private val audit: AuditEventSink,
+    /** #877 §C.2 — the caller's view, which narrows a `template.in_use` refusal's echo (never the guard's decision). */
+    private val lens: PromoterLens,
+    /** #876 §F.2 — the release dialog's plan: the session plan and its prerequisites, one planning read. */
+    private val previews: ReleasePreviews,
 ) : ShellPage {
     // ------------------------------------------------------------------ release
 
@@ -54,8 +62,14 @@ class TemplateLifecycleDialogController(
         @RequestParam name: String,
         @RequestParam(required = false) from: String?,
     ): String {
-        LifecycleVerbs.requireSession()
-        model.addAttribute("dlg", dialogs.release(currentPrincipal().requireWorkspace().id, name))
+        val principal = LifecycleVerbs.requireSession()
+        val workspaceId = principal.requireWorkspace().id
+        val dlg = dialogs.release(workspaceId, name)
+        model.addAttribute("dlg", dlg)
+        // #876 §F.2 — the plan the dialog renders and posts back: a template's imports are its dependencies.
+        if (dlg.refusal == null) {
+            model.addAttribute("rd", previews.dialog(ReleaseFamily.TEMPLATE, workspaceId, name, dlg.version, principal.userId))
+        }
         model.addAttribute("from", from ?: FROM_WORKSPACE)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
@@ -68,28 +82,29 @@ class TemplateLifecycleDialogController(
     fun release(
         @RequestParam name: String,
         @RequestParam bodyHash: String,
+        @RequestParam(name = "tree_hash", required = false) treeHash: String?,
+        @RequestParam(name = "include_dependencies", required = false) includeDependencies: List<String>?,
+        /** #876 §F.2 — the optional per-node check overrides, read raw (ReleaseDialogPost pairs them by index). */
+        @RequestParam form: MultiValueMap<String, String> = LinkedMultiValueMap(),
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        // #416 — [bodyHash] is the hash the DIALOG read (§4.2). The draft is read here only to
-        // refuse the no-draft case; its CURRENT hash is never the one released, so a draft that
-        // changed after the dialog opened is a stale hash and the service answers
-        // template.version.conflict.
+        // #416 — [bodyHash] is the hash the DIALOG read (§4.2: you release what you tested). The draft is read here
+        // only to refuse the no-draft case; its CURRENT hash is never the one released. A draft that changed after the
+        // dialog opened is refused before anything flips: the plan's tree_hash covers the root's draft, so the planner
+        // answers template.release.plan_conflict first; the service's own template.version.conflict still answers a
+        // current plan posted with a stale bodyHash.
         templates.findDraftDetail(workspaceId, name)
             ?: throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.VERSION_NOT_DRAFT,
                 message = "This template has no draft to release.",
                 details = mapOf("template_id" to name),
             )
-        val released = releases.release(workspaceId, name, bodyHash, principal.userId)
-        // T187 — the release is the D4 human step; it is audited on every surface that offers it.
-        LifecycleVerbs.audit(
-            audit,
-            LifecycleVerbs.TEMPLATE_AUDIT_VERSION_RELEASED,
-            principal,
-            workspaceId,
-            LifecycleVerbs.templateReleaseDetails(principal, released.detail.templateId, released.detail.version),
-        )
+        // #876 §F.2 — the plan its GET rendered, into the SAME plan object the REST route parses.
+        val plan = ReleaseDialogPost.plan(ReleaseFamily.TEMPLATE, treeHash, includeDependencies, form)
+        releases.release(workspaceId, name, bodyHash, principal.userId, plan)
+        // T187 — the release is audited on every surface that offers it: by the coordinator, inside the one
+        // transaction (#873 §C.7); this handler writes none.
         return redirect(versionsTab(name, "released"))
     }
 
@@ -121,7 +136,7 @@ class TemplateLifecycleDialogController(
         val workspaceId = principal.requireWorkspace().id
         requireTypedConfirm(confirm, "v$version")
         val soleDraft = templates.listVersions(workspaceId, name).size == 1
-        releases.purgeVersion(workspaceId, name, version)
+        releases.purgeVersion(workspaceId, name, version, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_PURGED,
@@ -169,7 +184,7 @@ class TemplateLifecycleDialogController(
     ): ResponseEntity<String> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        releases.discardVersion(workspaceId, name, version, principal.userId)
+        releases.discardVersion(workspaceId, name, version, principal.userId, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_VERSION_DISCARDED,
@@ -243,7 +258,7 @@ class TemplateLifecycleDialogController(
         // The typed confirm names the TEMPLATE (§9.6 keeps the name out of paths; the dialog
         // showed it as the thing to type).
         requireTypedConfirm(confirm, name)
-        releases.purgeEntity(workspaceId, name)
+        releases.purgeEntity(workspaceId, name, lens.viewFor(principal))
         LifecycleVerbs.audit(
             audit,
             LifecycleVerbs.TEMPLATE_AUDIT_ENTITY_PURGED,

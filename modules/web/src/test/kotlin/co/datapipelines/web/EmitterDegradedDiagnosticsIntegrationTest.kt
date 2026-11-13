@@ -8,6 +8,7 @@ import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.persistence.BatchingWriter
 import co.datapipelines.web.config.SseProperties
 import co.datapipelines.web.sse.BatchedEventRecorder

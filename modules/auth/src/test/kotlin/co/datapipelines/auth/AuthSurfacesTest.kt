@@ -76,6 +76,36 @@ class AuthEntryPointT31Test {
         response.getHeader("Location") shouldBe "/login?error=inactive"
     }
 
+    /**
+     * #847 — a native verification fault is a server outage, not a logout: a browser navigating a
+     * page gets the 503 envelope for every Accept, never a redirect to `/login`.
+     */
+    @Test
+    fun `a recorded native verification fault is a 503 for every Accept and never redirects`() {
+        listOf("text/html", "text/html,application/xhtml+xml", "application/json", null).forEach { accept ->
+            listOf("/pipelines", "/", "/api/v1/pipelines", "/mcp").forEach { uri ->
+                val request = MockHttpServletRequest("GET", uri)
+                accept?.let { request.addHeader("Accept", it) }
+                request.setAttribute(
+                    AuthAttributes.AUTH_ERROR,
+                    SecretVerificationUnavailableException(Argon2SecretHasher.MEMORY_ALLOCATION_ERROR, null),
+                )
+                val response = MockHttpServletResponse()
+                entryPoint.commence(
+                    request,
+                    response,
+                    org.springframework.security.authentication
+                        .InsufficientAuthenticationException("unauthenticated"),
+                )
+                io.kotest.assertions.withClue("$uri Accept=$accept") {
+                    response.status shouldBe 503
+                    response.getHeader("Location") shouldBe null
+                    response.contentAsString.contains(AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE) shouldBe true
+                }
+            }
+        }
+    }
+
     @Test
     fun `an API client whose session was refused as deactivated gets the 401 envelope with the code`() {
         val request = MockHttpServletRequest("GET", "/api/v1/pipelines")

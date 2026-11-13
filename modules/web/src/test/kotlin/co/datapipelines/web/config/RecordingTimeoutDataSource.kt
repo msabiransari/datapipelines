@@ -18,6 +18,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
+import java.sql.Statement
 import java.time.OffsetDateTime
 import java.util.UUID
 import javax.sql.DataSource
@@ -36,8 +37,16 @@ internal class RecordingTimeoutDataSource(
     private val lakeName: String = SCHEDULED_JOBS_TEST_LAKE,
     /** #867 — when set, a query's row answers `name` with it, so the managed read's row maps to a named table. */
     private val tableName: String? = null,
+    /**
+     * #841 R4 — also answer and record plain (unprepared) statements, as `JdbcTemplate` sends a query without
+     * arguments (the writer guard's `SHOW`). Off by default, so the other cases' counts are unchanged.
+     */
+    private val recordPlainStatements: Boolean = false,
 ) : DataSource by mockk(relaxed = true) {
     private val statements = mutableListOf<Pair<String, IntArray>>()
+
+    /** Per statement, parallel to [statements]: the String parameters bound to it (#841 R4: the budget's settings). */
+    private val parameters = mutableListOf<MutableList<String>>()
 
     /** Per statement, parallel to [statements]: the connection's network timeout when the statement ran. */
     private val sockets = mutableListOf<IntArray>()
@@ -54,7 +63,26 @@ internal class RecordingTimeoutDataSource(
             networkCalls += secondArg<Int>()
         }
         every { connection.networkTimeout } answers { network[0] }
+        if (recordPlainStatements) every { connection.createStatement() } answers { plainStatement(connection, network) }
         return connection
+    }
+
+    /** A plain statement: recorded when it executes its SQL, answering one row as a prepared one does. */
+    private fun plainStatement(
+        owner: Connection,
+        network: IntArray,
+    ): Statement {
+        val timeout = intArrayOf(UNBOUNDED)
+        return mockk(relaxed = true) {
+            every { setQueryTimeout(any()) } answers { timeout[0] = firstArg() }
+            every { connection } returns owner
+            every { executeQuery(any()) } answers {
+                statements += firstArg<String>() to timeout
+                sockets += intArrayOf(network[0])
+                parameters += mutableListOf<String>()
+                oneRow()
+            }
+        }
     }
 
     private fun statement(
@@ -64,10 +92,13 @@ internal class RecordingTimeoutDataSource(
     ): PreparedStatement {
         val timeout = intArrayOf(UNBOUNDED)
         val socket = intArrayOf(NO_SOCKET_BOUND)
+        val bound = mutableListOf<String>()
         statements += sql to timeout
         sockets += socket
+        parameters += bound
         return mockk(relaxed = true) {
             every { setQueryTimeout(any()) } answers { timeout[0] = firstArg() }
+            every { setString(any(), any()) } answers { bound += secondArg<String>() }
             every { connection } returns owner
             every { executeUpdate() } answers {
                 socket[0] = network[0]
@@ -89,6 +120,8 @@ internal class RecordingTimeoutDataSource(
             every { getString("referencing_table") } returns "executions"
             every { getString("referencing_column") } returns "executed_by"
             every { getObject("id", UUID::class.java) } returns UUID.randomUUID()
+            // #841 R4: the guarded repair's discovery read finds one workspace lacking the grant, so every phase runs.
+            every { getObject(1, UUID::class.java) } returns LACKING_WORKSPACE
             every { getArray("namespace").array } returns arrayOf(lakeName, "sales")
             tableName?.let { every { getString("name") } returns it }
         }
@@ -142,9 +175,14 @@ internal class RecordingTimeoutDataSource(
 
     fun statementCount(): Int = statements.size
 
+    /** #841 R4 — every statement in order: its first SQL line, its String parameters and its socket bound when it ran. */
+    fun trace(): List<Triple<String, List<String>, Int>> =
+        statements.indices.map { Triple(firstLines()[it], parameters[it].toList(), sockets[it][0]) }
+
     fun clear() {
         statements.clear()
         sockets.clear()
+        parameters.clear()
         networkCalls.clear()
     }
 
@@ -154,6 +192,9 @@ internal class RecordingTimeoutDataSource(
 
         /** No `setNetworkTimeout` call: the driver's own 0, an unbounded socket read. */
         const val NO_SOCKET_BOUND = 0
+
+        /** The one workspace a recorded discovery read answers. */
+        val LACKING_WORKSPACE: UUID = UUID.fromString("00000000-0000-0000-0000-000000000841")
     }
 }
 

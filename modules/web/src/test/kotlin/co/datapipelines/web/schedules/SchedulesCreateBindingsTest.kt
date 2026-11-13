@@ -13,6 +13,7 @@ import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineRepository
@@ -91,6 +92,7 @@ class SchedulesCreateBindingsTest {
                             PipelineJobExecutor(
                                 pipelines = pipelines,
                                 pipelineService = pipelineService,
+                                authoring = AuthoringGuard(false),
                                 workspaces = workspaces,
                                 users = users,
                                 runner = mockk<RecordingExecutionRunner>(),
@@ -201,7 +203,7 @@ class SchedulesCreateBindingsTest {
         val refused =
             shouldThrow<ScheduleException> {
                 controller.create(
-                    """{"name":"a/b","payload":{"pipeline":"a/p","version":"current","reference_at":"2026-01-01T00:00:00Z"},""" +
+                    """{"name":"a/b","payload":{"pipeline":"a/p","version":1,"reference_at":"2026-01-01T00:00:00Z"},""" +
                         """"cron":"0 6 * * *","timezone":"America/New_York"}""",
                     null,
                 )
@@ -217,7 +219,7 @@ class SchedulesCreateBindingsTest {
         bindings: String,
         parameters: String = "{}",
     ): String =
-        """{"name":"a/b","payload":{"pipeline":"a/p","version":"current","parameter_bindings":$bindings},""" +
+        """{"name":"a/b","payload":{"pipeline":"a/p","version":1,"parameter_bindings":$bindings},""" +
             """"parameters":$parameters,"cron":"0 6 * * *","timezone":"America/New_York"}"""
 
     private fun record() =

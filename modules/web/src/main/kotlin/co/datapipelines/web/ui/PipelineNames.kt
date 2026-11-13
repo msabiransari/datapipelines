@@ -20,6 +20,7 @@ data class ServedVersion(
 )
 
 private const val DRAFT_STATUS = "DRAFT"
+private const val DISCARDED_STATUS = "DISCARDED"
 
 /**
  * T114: the execution lists render the pipeline's DISPLAY name, but [ExecutionRecord]
@@ -54,37 +55,45 @@ class PipelineNames(
     }
 
     /**
-     * The version each published endpoint SERVES, keyed by pipeline id — the pointer
-     * (`pipelines.current_version`) and its status.
+     * The pipeline version each published endpoint SERVES and that pipeline's name, keyed by ENDPOINT id (#786): the
+     * API's current version's EXACT pin and whether either half is a DRAFT — the serve path's chain
+     * (`PublishedEndpointServeService`), never the pipeline's own pointer. A DRAFT is served only under the development
+     * posture (Versioning D63), so when either names a draft the console must SAY draft. An API with no current version,
+     * or whose pin names a missing or DISCARDED version, serves nothing and is absent from [Pins.served]; its pinned
+     * name still appears in [Pins.names] when the pipeline exists.
      *
-     * A published endpoint pins a pipeline, never a version, and the serve path resolves the
-     * pointer per request (`PublishedEndpointServeService`): a RELEASED version always, a DRAFT
-     * only under development posture (Versioning D63). The pointer is sticky and event-driven
-     * (D60), so it is exactly what a call to that endpoint will run — and when it names a draft
-     * the console must SAY draft, not report "no release" about an endpoint that is answering.
-     *
-     * A pipeline whose pointer is NULL (nothing eligible: never released, or every release
-     * discarded) yields no entry, and the template renders that — an endpoint can outlive the
-     * release it was published against, and that is worth seeing rather than papering over.
-     *
-     * ONE batch query, same rule as [lookup]: the table has as many rows as the workspace has
-     * endpoints, and a query per row is how a list page becomes slow without anyone noticing.
+     * ONE query for the whole page, never one per row (T114).
      */
-    fun servedVersions(
+    fun endpointPins(
         workspaceId: UUID,
-        pipelineIds: Collection<UUID>,
-    ): Map<UUID, ServedVersion> {
-        if (pipelineIds.isEmpty()) return emptyMap()
-        return jdbc
-            .query(
-                "SELECT p.id, p.current_version, v.status" +
-                    " FROM pipelines p JOIN pipeline_versions v" +
-                    " ON v.pipeline_id = p.id AND v.version = p.current_version" +
-                    " WHERE p.workspace_id = :workspaceId AND p.id IN (:ids)",
-                mapOf("workspaceId" to workspaceId, "ids" to pipelineIds.toSet()),
-            ) { rs, _ ->
-                rs.getObject("id", UUID::class.java) to
-                    ServedVersion(rs.getInt("current_version"), rs.getString("status") == DRAFT_STATUS)
-            }.toMap()
+        endpointIds: Collection<UUID>,
+    ): Pins {
+        if (endpointIds.isEmpty()) return Pins(emptyMap(), emptyMap())
+        val names = HashMap<UUID, PipelineName>()
+        val served = HashMap<UUID, ServedVersion>()
+        jdbc.query(
+            "SELECT e.id, av.status AS api_status, av.pipeline_version, p.name, p.display_name, v.status AS pipeline_status" +
+                " FROM published_endpoints e" +
+                " JOIN published_endpoint_versions av ON av.endpoint_id = e.id AND av.version = e.current_version" +
+                " JOIN pipelines p ON p.workspace_id = e.workspace_id AND p.name = av.pipeline_name" +
+                " LEFT JOIN pipeline_versions v ON v.pipeline_id = p.id AND v.version = av.pipeline_version" +
+                " WHERE e.workspace_id = :workspaceId AND e.id IN (:ids)",
+            mapOf("workspaceId" to workspaceId, "ids" to endpointIds.toSet()),
+        ) { rs ->
+            val id = rs.getObject("id", UUID::class.java)
+            names[id] = PipelineName(name = rs.getString("name"), displayName = rs.getString("display_name"))
+            val pipelineStatus = rs.getString("pipeline_status")
+            if (pipelineStatus != null && pipelineStatus != DISCARDED_STATUS && rs.getString("api_status") != DISCARDED_STATUS) {
+                val draft = rs.getString("api_status") == DRAFT_STATUS || pipelineStatus == DRAFT_STATUS
+                served[id] = ServedVersion(rs.getInt("pipeline_version"), draft)
+            }
+        }
+        return Pins(names, served)
     }
+
+    /** [endpointPins]' answer: each endpoint's pinned pipeline name and, when it serves, the served version. */
+    data class Pins(
+        val names: Map<UUID, PipelineName>,
+        val served: Map<UUID, ServedVersion>,
+    )
 }

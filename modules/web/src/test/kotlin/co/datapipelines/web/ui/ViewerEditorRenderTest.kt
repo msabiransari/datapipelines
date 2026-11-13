@@ -80,6 +80,28 @@ class ViewerEditorRenderTest {
         mainOf(html) shouldNotContain "rel=\"stylesheet\""
     }
 
+    /**
+     * #876 G6: the Dependencies tab is a dependencies/mount.js pane over the VIEWED version — the template's name and
+     * version as selector attributes, hidden until opened — with its stylesheet in the head (§3.0) and its eight
+     * catalog entries last in the page's on-mount catalog.
+     */
+    @Test
+    fun `the Dependencies pane carries the viewed name and version and rides the head sheet and the catalog`() {
+        val html = render("templates/workspace") { page(viewedEditable = true) }
+
+        html.substringBefore("</head>") shouldContain "href=\"/css/dependencies.css\""
+        val pane = Regex("<div class=\"dp-deps\" data-dp-deps data-family=\"template\"[^>]*>").find(html)?.value.orEmpty()
+        pane shouldContain "data-name=\""
+        Regex("data-version=\"\\d+\"").containsMatchIn(pane) shouldBe true
+        Regex("id=\"tw-pane-dependencies\"[^>]*hidden").containsMatchIn(html) shouldBe true
+        val catalog = html.substringAfter("<template data-page-assets=\"on-mount\">").substringBefore("</template>")
+        Regex("src=\"(/[^\"]+)\"")
+            .findAll(catalog)
+            .map { it.groupValues[1] }
+            .toList()
+            .takeLast(RELEASE_DEPENDENCY_CATALOG.size) shouldBe RELEASE_DEPENDENCY_CATALOG
+    }
+
     @Test
     fun `the topbar's Release label is ONE text node - a span inside the flex button spreads it apart`() {
         // 398b live walk: `Release v<span>3</span>…` inside `.ds-button` (inline-flex with a gap)
@@ -119,6 +141,7 @@ class ViewerEditorRenderTest {
                 "button#tw-tab-overview",
                 "button#tw-tab-runs",
                 "button#tw-tab-used",
+                "button#tw-tab-dependencies",
                 "button#tw-tab-versions",
             )
     }

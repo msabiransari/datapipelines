@@ -256,6 +256,12 @@ class ExecutionRepository(
      * object as sent — and `dag-executor.md` §8 says so. `COALESCE` keeps the insert-time value
      * when no snapshot is supplied, so a caller that does not pass one changes nothing.
      *
+     * #905 — the result columns take the same `COALESCE`: [resultRowCount] / [resultSizeBytes] are
+     * written when passed and otherwise keep what the row holds. The emitter's terminal UPDATE passes
+     * neither, and it can land AFTER [recordResult] (it is deferred behind an unconfirmed RUNNING
+     * insert, #325) — a plain assignment would overwrite the recorded result with NULL, which every
+     * reader takes for "no caller result". `result_schema_json` is [recordResult]'s alone.
+     *
      * @return true when a row was updated; false when [executionId] is unknown.
      */
     @Suppress("LongParameterList")
@@ -281,8 +287,8 @@ class ExecutionRepository(
                    node_stats_json = CAST(:nodeStatsJson AS jsonb),
                    failed_node_id = :failedNodeId,
                    error_json = CAST(:errorJson AS jsonb),
-                   result_row_count = :resultRowCount,
-                   result_size_bytes = :resultSizeBytes
+                   result_row_count = COALESCE(CAST(:resultRowCount AS BIGINT), result_row_count),
+                   result_size_bytes = COALESCE(CAST(:resultSizeBytes AS BIGINT), result_size_bytes)
              WHERE execution_id = :executionId
             """.trimIndent(),
             mapOf(
@@ -300,12 +306,15 @@ class ExecutionRepository(
         ) == 1
 
     /**
-     * Fills the §4.6 result-history columns **after** [complete] (P7 additive API).
+     * Fills the §4.6 result-history columns (P7 additive API), before or after [complete] — the
+     * terminal update keeps what this writes (#905), so the two need no order between them.
      *
      * The terminal event that completes the row carries no result size, and the emitter
      * fires before `PipelineExecutor.execute` returns the `resultRef` — so the surface
      * that receives the `ExecutionResult` describes the stored result and lands
-     * `result_row_count` / `result_size_bytes` here. Without them the REST cursor and
+     * `result_row_count` / `result_size_bytes` here. The row must exist: behind a RUNNING insert
+     * that outlived its bound the web surfaces order this write behind it
+     * (`WebEventEmitter.writeBehindUnconfirmedInsert`, #905). Without them the REST cursor and
      * the §10.2 metadata cannot distinguish "succeeded with a result" from "zero caller
      * nodes" — both would read as NULL.
      *

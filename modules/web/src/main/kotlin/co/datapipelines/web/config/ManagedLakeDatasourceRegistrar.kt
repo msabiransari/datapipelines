@@ -34,7 +34,9 @@ import java.util.UUID
  *
  * ## What it writes
  * One row named `lake.name`: dialect LAKE, `dialect.catalog.kind = s3`, `dialect.managed = true`, read-only,
- * the store's region, endpoint and URL style, `memory_limit = reads.memory-limit`, and — when
+ * the store's region and endpoint as [EgressStoreTarget] derives them (#862: declared always, so the engine dials
+ * exactly the authority the boot probe checks and the proxy allowlists), the store's URL style,
+ * `memory_limit = reads.memory-limit`, and — when
  * `reads.egress-proxy` is set — `egress_proxy` (#845), which the adapter turns into `SET http_proxy` ahead of the
  * §15a lockdown. Adding or changing that key RESYNCs the row on the next boot. The URL is the anonymous
  * in-memory engine, so the §15a lock on each generation reaches no other pool. The credential is the reader
@@ -178,12 +180,23 @@ class ManagedLakeDatasourceRegistrar(
                     storage.hasStaticCredentials -> storage.accessKey to storage.secretKey
                     else -> null to null
                 }
+            // #862: the secret carries the DERIVED endpoint and the EFFECTIVE region, always — one form covers
+            // engine, boot probe and proxy renderer ([EgressStoreTarget], probe A: the engine would resolve a
+            // blank endpoint itself to s3.<region>.amazonaws.com; declaring it keeps every consumer on the same
+            // authority the proxy allowlists). Blank endpoint ⇒ the regional AWS https form.
+            val target =
+                EgressStoreTarget.derive(
+                    endpoint = storage.endpoint,
+                    region = storage.region,
+                    bucket = storage.bucket,
+                    pathStyle = storage.pathStyle,
+                )
             val dialect =
                 buildMap<String, Any?> {
                     put("catalog.kind", LakeProperties.KIND_S3)
                     put(MANAGED_DIALECT_KEY, "true")
-                    storage.region.takeIf { it.isNotBlank() }?.let { put("region", it) }
-                    storage.endpoint.takeIf { it.isNotBlank() }?.let { put("endpoint", it) }
+                    put("region", target.region)
+                    put("endpoint", target.duckdbEndpoint)
                     put("url_style", if (storage.pathStyle) "path" else "vhost")
                     put("memory_limit", duckdbSize(properties.reads.memoryLimit))
                     // #845: the egress proxy the adapter points `http_proxy` at; absent when configuration sets none.

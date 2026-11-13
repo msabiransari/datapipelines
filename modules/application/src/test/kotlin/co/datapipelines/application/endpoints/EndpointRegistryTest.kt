@@ -1,5 +1,6 @@
 package co.datapipelines.application.endpoints
 
+import co.datapipelines.pipeline.PipelineVersionStatus
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -103,12 +104,10 @@ class EndpointRegistryTest {
             id = UUID.randomUUID(),
             workspaceId = UUID.fromString("defa0000-0000-0000-0000-000000000001"),
             pathPattern = pattern,
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 30,
-            description = "",
             isEnabled = true,
             createdBy = UUID.fromString("00000000-0000-0000-0000-000000000001"),
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
+            current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody("test/pipeline", 1, 30, "")),
         )
 }

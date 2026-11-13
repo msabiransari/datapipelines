@@ -321,6 +321,15 @@ object PublicPaths {
                 "The site icon, requested by the browser on the login page before any credential exists.",
                 "P3d",
             ),
+            // #860: the chart document v1 schemas, `ChartSchemaController` serving the validator's own classpath
+            // resources by an allowlist of file names (any other name is the 404 envelope). Public for the reason
+            // the skill pair is: an agent or a host checks its document against the contract BEFORE it saves one.
+            PublicPath(
+                "/schemas/**",
+                "The chart contract agents and hosts validate against, like /skill.md: the packaged v1 JSON Schemas, " +
+                    "no principal, no datastore.",
+                "860",
+            ),
             // P8: Boot's BasicErrorController with the shipped defaults — no stack trace, no
             // exception message, so the body is {timestamp,status,error,path}. It must be
             // reachable anonymously or an unauthenticated error becomes a redirect loop

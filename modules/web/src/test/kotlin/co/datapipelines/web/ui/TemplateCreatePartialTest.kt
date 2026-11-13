@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
+import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.templates.TemplateValidationException
@@ -51,10 +52,9 @@ class TemplateCreatePartialTest {
         pipelines: PipelineRepository,
     ): co.datapipelines.application.templates.TemplateUsage =
         co.datapipelines.application.templates.TemplateUsage(
+            co.datapipelines.application.dependencies
+                .IncomingRows { _, _, _, _, _ -> emptyList() },
             TemplateUsageService(templates, pipelines),
-            io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(relaxed = true),
-            pipelines,
-            io.mockk.mockk<co.datapipelines.visualization.ArtifactDependents>(relaxed = true),
         )
 
     private val repository = mockk<TemplateRepository>()
@@ -68,6 +68,7 @@ class TemplateCreatePartialTest {
             validator,
             authoring,
             co.datapipelines.web.EVERYTHING_LENS,
+            TemplateDraftService(repository, AuthoringGuard(true), mockk(relaxed = true)),
         )
 
     private val userId = UUID.randomUUID()

@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "roots": [
+    "n0"
+  ],
+  "nodes": [
+    {
+      "node_id": "n0",
+      "entity_id": "a3264f9f-02a6-59e2-87d0-e03a289638b9",
+      "family": "parameter_set",
+      "name": "test_widget/filters",
+      "display_name": "Filters",
+      "subtype": null,
+      "version": {
+        "kind": "artifact",
+        "number": 2
+      },
+      "resolution": "resolved",
+      "lifecycle": "DRAFT",
+      "operational": null,
+      "current_version": null,
+      "body_hash": "86fb8a708c6822e52f93b07c618fa1316a0741c58815c35feaa33aba0b79510c",
+      "capabilities": {
+        "release": "ARTIFACT_RELEASE",
+        "promotion": "VERSIONED_ARTIFACT"
+      }
+    },
+    {
+      "node_id": "n1",
+      "entity_id": "test_widget_warehouse",
+      "family": "datasource",
+      "name": "test_widget_warehouse",
+      "display_name": "Test Widget Warehouse",
+      "subtype": null,
+      "version": {
+        "kind": "unversioned",
+        "number": null
+      },
+      "resolution": "resolved",
+      "lifecycle": null,
+      "operational": {
+        "readonly": true
+      },
+      "current_version": null,
+      "body_hash": null,
+      "capabilities": {
+        "release": "NONE",
+        "promotion": "NONE"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "e0",
+      "from": "n0",
+      "to": "n1",
+      "relationship": "PARAMETER_SOURCE_DATASOURCE",
+      "source_path": "/parameters/1/source/datasource",
+      "requested_selector": {
+        "kind": "entity",
+        "number": null
+      },
+      "resolved_version": null,
+      "constraints": [
+        {
+          "kind": "datasource_dialect",
+          "dialect": "postgresql"
+        }
+      ]
+    }
+  ],
+  "diagnostics": [],
+  "complete": true,
+  "acyclic": true,
+  "observed_at": "2026-11-10T00:00:00Z"
+}

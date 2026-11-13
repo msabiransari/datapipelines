@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.108 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.121 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116) and 2026-11-12 (v2.120) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-03
+**Last updated:** 2026-11-13
 
 ---
 
@@ -315,7 +315,7 @@ outcome is "already in that state".
 POST /pipelines/{id}/release
 If-Match: <the draft's body_hash>
 [?override_checks_reason=<text — only when a check is failing>]
-[?release_pinned_templates=true — the legacy consent: release the DRAFT template versions the body pins directly]
+[?release_pinned_templates=true — the legacy consent; since #876 refused 428 pipeline.release.plan_required without a plan]
 [Content-Type: application/json — optional release plan body (#517):]
 [{"tree_hash": "<preview digest>", "include_dependencies": ["n1", "n2"], "check_overrides": [{"node_id": "n1", "reason": "…"}]}]
 ```
@@ -357,10 +357,10 @@ At most `max-blockers` are listed in closure discovery order; the rest set `bloc
 Three request shapes consent to flipping dependencies:
 
 - **No plan, no flag** — only the pipeline flips; every dependency must already be RELEASED.
-- **`release_pinned_templates=true`, no plan (the legacy alias)** — the root's DIRECT DRAFT template pins are
-  released at their pinned versions in the SAME transaction as the pipeline flip, templates first. A deeper
-  DRAFT (a child pipeline, a child's template) is a `not_included` blocker. The alias is admitted without a
-  plan until the release dialog sends `tree_hash` (#522); a successful response carries release 142's bytes.
+- **`release_pinned_templates=true`, no plan (the legacy alias)** — refused `428 pipeline.release.plan_required`
+  and nothing flips, since #876 (the release dialogs send `tree_hash`; versioning §5.3's arming rule). From 142 to
+  #876 it released the root's DIRECT DRAFT template pins at their pinned versions with the pipeline; a caller that
+  released that way now sends a plan body.
 - **A plan body** — `tree_hash` is the preview digest of the closure the caller reviewed, and
   `include_dependencies` lists the DRAFT nodes it consents to flip (each a node of that snapshot, none twice,
   never the root, only DRAFTs). Every reachable DRAFT must be selected. `check_overrides` gives a node its own
@@ -392,7 +392,9 @@ in that same transaction, strictly (an audit store that refuses the row refuses 
 a dependency's own preconditions, a stale `If-Match`, a concurrent write, the audit row — rolls the whole
 release back. The audit rows of one release share `release_id`, carry `scope: "version"`, the cascaded rows
 `cascade_root: {family, id, version}`, and the pipeline's row `dependencies_released`; the 142 keys stay —
-each cascaded template row keeps `cascade_from_pipeline_id` / `cascade_from_version`, and the pipeline's row
+each cascaded template row keeps `cascade_from_pipeline_id` / `cascade_from_version` (under an API root — §19's
+`POST /api/v1/endpoints/{id}/release` — since #894 `cascade_from_api_endpoint_id` / the API's `cascade_from_version`
+instead; earlier rows are not rewritten, `cascade_root.family` tells them apart), and the pipeline's row
 `templates_released: [{template_id, version}]` (empty when nothing cascaded). The same role holds both release
 verbs (auth §7.6), so neither the flag nor a plan grants a new capability.
 UI-driven in practice — agents never release (versioning D4); no MCP tool exists. Over REST
@@ -444,7 +446,10 @@ refuses before the pin check), plus `409 pipeline.version.pinned`: live parent p
 pinning the exact draft, and live dashboard versions pinning it. A sole-draft purge takes the
 entity and checks stored dashboard pins to any version (DISCARDED included for a dashboard with
 a live version); parent scope remains live/exact. `details.pinned_by` names `{pipeline, version, node}`;
-`details.referencing_dashboards` names `{dashboard, version, status}` when non-empty. Refusal
+`details.referencing_dashboards` names `{dashboard, version, status}` when non-empty; since #786
+`details.referencing_api_versions` (`{path, version, status, pipeline_version}`) and
+`details.referencing_schedules` (`{schedule, pipeline_version}`) name the live API versions and schedules the
+same way (any version for a sole-draft purge). Refusal
 precedes all deletion and preserves executions, hash and pointer.
 
 ### 5.12 Discard pipeline version
@@ -458,7 +463,7 @@ its executions and promotion history stay — and the sticky pointer recomputes 
 WAS the pointer (D60: highest eligible live version, else NULL; a DRAFT is eligible only
 under development posture). Refusals: `409 pipeline.version.not_released` (a draft is
 purged, never discarded; an already-discarded version needs restore), `409
-pipeline.version.pinned` (a live parent version — or, since #320, a live dashboard version whose source — exact-pins v; `details.pinned_by` names the pipelines, `details.referencing_dashboards` the dashboards), `404
+pipeline.version.pinned` (a live parent version — or, since #320, a live dashboard version whose source — exact-pins v; `details.pinned_by` names the pipelines, `details.referencing_dashboards` the dashboards; since #786 a live API version pinning v or a live schedule running it refuses too, `details.referencing_api_versions` / `details.referencing_schedules`), `404
 pipeline.execution.not_found` (unknown version), `403 pipeline.authoring.disabled`
 (hardened). **Session-only**; audited as `pipeline.version.discarded` (pointer
 before/after in `details`).
@@ -1374,6 +1379,8 @@ A script entry may carry `implements` (7e). The import keeps the ids that resolv
 
 Datasources are environment-specific connections. See [Datasources spec](datasources.md) for the entity model.
 
+**The writer guard (#841).** Every datasource write — register, update, credential change, delete, and a grant or revoke — takes the datasource's own guard, then every workspace the change is visible in ([release-dependencies design §4.4](superpowers/specs/2026-10-13-release-dependencies-design.md#44-the-metadata-writer-protocol-amended-2026-11-10-841-g0)). A wait past [`lock-wait-seconds`](configuration.md) answers `409 datasource.write.busy` (`details.lock_wait_seconds`; nothing was written — retry).
+
 ### 9.1 Register datasource
 
 ```
@@ -1411,7 +1418,7 @@ Content-Type: application/json
 
 `introspection_include_schemas` (optional, [Datasources §3.3](datasources.md#33-field-reference)) exempts exact schema names from the §9.7 system-schema exclusion; entries are legal schema identifiers — letters, digits, `_`, `$`, `#`, lowercase (entries outside the alphabet — wildcards, quoted identifiers, qualified `db.schema` names — are rejected with `400 datasource.validation.properties_invalid`), and the stored list is normalized on save — trim, lowercase, drop blank-after-trim entries, deduplicate (first-seen order) — so what a GET projects always survives an unmodified PUT round-trip. Omitted from the response when empty.
 
-**Workspace binding (workspaces D8):** the optional `global` (boolean, admin-only — creating shared infrastructure is an admin act) and `workspace` (string, a workspace the caller can access) fields set the binding; with neither, the datasource binds to the caller's ACTIVE workspace. `readonly` (boolean, default `false`) forbids the three write-shaped pipeline uses ([Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)). A non-admin sending `global: true`, binding to a workspace they are not in, or any member write while `member-datasources-enabled` is off, is `400 datasource.validation.workspace_forbidden`. Datasource NAMES stay a flat global namespace: a collision with another workspace's datasource is still `409 datasource.validation.duplicate_name` (by design — `name` is the PK and the pool-registry key).
+**Ownership (workspaces D8; RBAC design §4, D-R7):** the optional `global` (boolean — `true` requires super admin and registers an INSTANCE datasource, owned by no workspace; `false` is accepted on create below super admin) and `workspace` (string, the OWNING workspace — one the caller can access) fields set the owner; with neither, the ACTIVE workspace owns it. Ownership is not visibility: a workspace-owned registration is granted to its owner in the same transaction, while an instance datasource is granted to no workspace until a super admin grants it (`/api/v1/datasources/{name}/grants`, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) `datasource.grant`). `readonly` (boolean, default `false`) forbids the three write-shaped pipeline uses ([Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)). Anyone below super admin sending `global: true`, naming a workspace they cannot access, or writing while `member-datasources-enabled` is off — and anyone sending `global: true` with `workspace` — is `400 datasource.validation.workspace_forbidden`. Datasource NAMES stay a flat global namespace: a collision with another workspace's datasource is still `409 datasource.validation.duplicate_name` (by design — `name` is the PK and the pool-registry key).
 
 Response: `201 Created` with the datasource entity (excluding password).
 
@@ -1421,7 +1428,7 @@ Response: `201 Created` with the datasource entity (excluding password).
 GET /datasources?dialect={dialect}&offset=0&limit=50
 ```
 
-Returns the §4.3 pagination envelope (§2 principle 6 — list endpoints paginate). **Workspace-scoped** (workspaces §5.3): the listing shows the active workspace's bound datasources plus all global ones; the predicate runs in the repository's SQL, so `total` counts exactly what the caller can see. A workspace-bound datasource of another workspace is absent — not filtered client-side, not paged-past.
+Returns the §4.3 pagination envelope (§2 principle 6 — list endpoints paginate). **Workspace-scoped by grant** (RBAC design §4, D-R7): the listing shows exactly the datasources GRANTED to the active workspace (a `datasource_workspaces` row, [Metadata DB §4.16](metadata-db.md#416-datasource_workspaces)), a super admin's included; the predicate runs in the repository's SQL, so `total` counts exactly what the caller can see. A datasource not granted to the active workspace — whoever owns it — is absent: not filtered client-side, not paged-past.
 
 **`facts` and `definitions` on every row (138 §B, additive).** Each item carries the two learned-fact blocks §9.7A defines — `facts`, the datasource-wide kinds (window, sampling), and `definitions`, the active workspace's rules (`definition`, `exclusion`, `preference`) that name this datasource — as the MCP `datasources_list` has since 136: a rule is read BEFORE the tables are chosen, so it rides the call every client makes first. Both are `[]` when nothing is recorded, never absent.
 
@@ -1431,7 +1438,7 @@ Returns the §4.3 pagination envelope (§2 principle 6 — list endpoints pagina
 GET /datasources/{name}
 ```
 
-Returns everything except the credential SECRET — neither `password` nor `credential.secret` — plus the additive `credential` (`{kind, username?}`, §3.4), `workspace` (the bound workspace's name, `null` = global), `readonly` (workspaces design §9) and `last_test` fields. `password_set` is derived from `credential.kind`: `false` exactly for `kind: "none"`, which genuinely has no stored credential. Top-level `username` is still returned and is `null` for the kinds that have none. `last_test` is the outcome of the last connection test — `{"tested_at": "...", "ok": true|false, "message": "..."}`, or `null` when the datasource has never been probed ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)); it is also on every `GET /datasources` row, which is what lets a reader see a credential has stopped working without running an execution. A name bound to another workspace behaves as not-found (`404 datasource.not_found`).
+Returns everything except the credential SECRET — neither `password` nor `credential.secret` — plus the additive `credential` (`{kind, username?}`, §3.4), `workspace` (the OWNING workspace's name, `null` = an instance datasource — ownership, not visibility), `readonly` (workspaces design §9) and `last_test` fields. `password_set` is derived from `credential.kind`: `false` exactly for `kind: "none"`, which genuinely has no stored credential. Top-level `username` is still returned and is `null` for the kinds that have none. `last_test` is the outcome of the last connection test — `{"tested_at": "...", "ok": true|false, "message": "..."}`, or `null` when the datasource has never been probed ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)); it is also on every `GET /datasources` row, which is what lets a reader see a credential has stopped working without running an execution. A datasource not granted to the active workspace behaves as not-found (`404 datasource.not_found`), whoever owns it.
 
 **`pool` (094, additive).** Beside `properties`, the response carries the connection pool's EFFECTIVE settings — one entry per tunable HikariCP key ([Datasources §5](datasources.md#5-connection-pool-configuration)) as `{"value", "unit", "source"}`, where `source` is `configured` (this row set it), `dialect_default`, `application_default` or `hikari_default`. The keys keep HikariCP's camelCase spelling, deliberately: they are the exact identifiers a caller writes back under `properties.hikari.*`. This is NOT a duplicate of `properties.hikari` — that map is what the row STORES and is empty for almost every datasource, while `pool` is what the pool RUNS with, which is what a pool-acquisition timeout is explained by.
 
@@ -1449,7 +1456,7 @@ Returns everything except the credential SECRET — neither `password` nor `cred
 PUT /datasources/{name}
 ```
 
-Updates connection details. The credential secret is optional — omit `credential.secret` (or the legacy `password`) to keep the stored one. `credential.kind` is part of the body like every other field: changing it to `none` clears the stored credential, and changing it to ANY other kind requires a secret in the same request — `400 datasource.validation.password_missing` otherwise, because keeping the stored secret would relabel it as something it is not ([Datasources §3.4](datasources.md#34-credential-kinds)). The body is the §9.1 shape (name immutable); `introspection_include_schemas` is replaced wholesale when present and dropped to empty when absent. The `global`/`readonly` flags are optional — absent keeps the stored value, present attempts a gated write: `global` (either direction) and mutating a global datasource are admin-only, and `readonly` on a GLOBAL datasource is admin-only (workspaces design §6 last paragraph); a member may flip `readonly` on their workspace-bound datasource when the D8 gate is on. An accepted flag write crosses the same registry save path as every update — the connection pool is RETIRED and rebuilds under the new settings at the next lease. Retired, not closed (094, [Datasources §5.2](datasources.md#52-pool-lifecycle)): the old pool stops taking new leases immediately and closes once the statements already running on it finish, so an update never cuts a query that is mid-flight. Errors: `400 datasource.validation.workspace_forbidden` for the refusals.
+Updates connection details. The credential secret is optional — omit `credential.secret` (or the legacy `password`) to keep the stored one. `credential.kind` is part of the body like every other field: changing it to `none` clears the stored credential, and changing it to ANY other kind requires a secret in the same request — `400 datasource.validation.password_missing` otherwise, because keeping the stored secret would relabel it as something it is not ([Datasources §3.4](datasources.md#34-credential-kinds)). The body is the §9.1 shape (name immutable); `introspection_include_schemas` is replaced wholesale when present and dropped to empty when absent. The `global`/`readonly` flags are optional — absent keeps the stored value, present attempts a gated write: `global` (either direction) and any mutation of an INSTANCE datasource (owned by no workspace), a `readonly` flip included, are super-admin-only (workspaces design §6 last paragraph); below super admin, `readonly` on a workspace-owned datasource is flipped by whoever may update it while `member-datasources-enabled` is on. An accepted flag write crosses the same registry save path as every update — the connection pool is RETIRED and rebuilds under the new settings at the next lease. Retired, not closed (094, [Datasources §5.2](datasources.md#52-pool-lifecycle)): the old pool stops taking new leases immediately and closes once the statements already running on it finish, so an update never cuts a query that is mid-flight. Errors: `400 datasource.validation.workspace_forbidden` for the refusals.
 
 ### 9.5 Delete datasource
 
@@ -1457,11 +1464,13 @@ Updates connection details. The credential secret is optional — omit `credenti
 DELETE /datasources/{name}
 ```
 
-Fails with `datasource.in_use` if any non-deleted pipeline references it **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED alike ([Datasources §6.2](datasources.md#62-in-use-check-on-delete)). Pipeline versions are immutable and executable by explicit version, so a reference from a released v1 that a later v2 dropped is a real reference; the guard that read each pipeline's current version only let that delete through and failed v1's next execution at connect.
+Fails with `datasource.in_use` if any non-deleted pipeline or parameter set, in any workspace, references it **in any version it has ever stored** — DRAFT, RELEASED and DISCARDED alike ([Datasources §6.2](datasources.md#62-in-use-check-on-delete)); a parameter set references it through a selector's `parameters[i].source.datasource` (#873). Pipeline versions are immutable and executable by explicit version, so a reference from a released v1 that a later v2 dropped is a real reference; the guard that read each pipeline's current version only let that delete through and failed v1's next execution at connect.
 
-`details` carries `datasource_name`, `referencing_pipelines` (the distinct pipeline names) and `references` — one entry per referencing node, `{"pipeline", "node_id", "pipeline_version", "version_status"}` — the same shape `template.in_use` uses (§8.6), because the version is what tells the operator which body to go and edit.
+`details` carries `datasource_name`, `referencing_pipelines` (the distinct pipeline names), `referencing_parameter_sets` (the distinct set names, #873) and `references` — one entry per referencing node, `{"kind": "pipeline", "pipeline", "node_id", "pipeline_version", "version_status"}`, then one per referencing selector, `{"kind": "parameter_set", "parameter_set", "parameter_set_version", "version_status", "path"}` — the same shape `template.in_use` uses (§8.6), because the version is what tells the operator which body to go and edit.
 
-D8-gated like update: deleting a global datasource requires admin; a member needs the `member-datasources-enabled` gate for a bound one.
+The delete refusal's details are scoped to the caller's workspaces (#873): a super admin's lists name every workspace's references; anyone else's name only those in the workspace the request acts in. The refusal still fires when only another workspace's bodies use the name — then the lists are empty and the message is `Datasource '<name>' is in use and cannot be deleted.`, identical however many references lie outside.
+
+D8-gated like update: deleting an INSTANCE datasource requires super admin; below super admin, deleting a workspace-owned one needs `member-datasources-enabled` on.
 
 A successful delete **retires** the pool on the deleting instance and, over the §5.7 invalidation channel, on every other one (094, [Datasources §5.2](datasources.md#52-pool-lifecycle)): new leases miss it at once, and each instance closes its pool when the queries already running on it finish — or at `datapipelines.datasources.retire-ceiling-seconds` if one hangs. A delete therefore never cuts a running execution.
 
@@ -2167,7 +2176,7 @@ The whole batch rolls back on any of the above. The sender's own refusals — `p
 
 ## 19. Published Endpoints
 
-A released pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
+One exact version of a read-only pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
 response is the `data_ready` payload — the first page plus the cursor — with no event handling on
 the client (this section is the contract). Ruling R-EP5: the **category** is the engineer's
 namespace — a business domain, a team, a product line — and the product's own API is simply its
@@ -2202,10 +2211,18 @@ precedence is deliberately NOT offered in v1: because ambiguity cannot be publis
 pattern can match a request, and a reader of the registry can tell what a URL does by finding the
 one row it matches. `UNIQUE (path_pattern)` is deployment-wide — a URL is global.
 
+Publish and unpublish run under the workspace's writer guard, then the deployment-wide registry key, so the
+ambiguity check reads every committed path (#841, [release-dependencies design §4.4](superpowers/specs/2026-10-13-release-dependencies-design.md#44-the-metadata-writer-protocol-amended-2026-11-10-841-g0)).
+A wait past [`lock-wait-seconds`](configuration.md) answers `409 endpoint.write.busy` (`details.lock_wait_seconds`;
+nothing was published or removed — retry).
+
 ### 19.2 What may be published
 
-The pipeline must exist in the endpoint's workspace and have a **released** version, and it must
-be **side-effect-free**: every node of the current released version is `DQL` with `output.target`
+The API pins **one exact pipeline version** (`pipeline_version`, #786; dependency-graph record §24).
+That version must exist in the endpoint's workspace — a missing or DISCARDED one is
+`400 endpoint.pipeline_version.not_found` — and be eligible under the deployment's posture: RELEASED always, a
+DRAFT only where authoring is enabled (`409 endpoint.pipeline_version.not_eligible`). It must
+be **side-effect-free**: every node of the pinned version is `DQL` with `output.target`
 in {`tempdb`, `caller`}, a `DML`/`DDL` node whose `source` is `tempdb`, or a `PIPELINE` node whose
 pinned child satisfies the same rule transitively. `tempdb` is the execution's own in-memory H2,
 created for the run and discarded with it — a statement against it cannot outlive the request, so
@@ -2215,9 +2232,14 @@ read's type — refuses publication with `409 endpoint.pipeline_not_readonly` na
 the datasource.
 
 That rule is what makes `GET` safe here, and it is not a formality: `GET` is retried on timeout,
-preloaded by browsers and followed by crawlers. It is **re-checked on every serve**, because an
-endpoint pins a pipeline and serves its latest released version — a later release can put a write
-under a live URL.
+preloaded by browsers and followed by crawlers. It is checked when the API is created and at every draft save,
+and **re-checked on every serve** of the exact pipeline version the API's current version pins. The pin never
+moves when the pipeline's current version moves: a later pipeline release reaches the URL only through a new API
+version that pins it, released or switched to explicitly. Every serve also runs read-only at the connection (#463): each
+`DQL` datasource statement of the pinned version and of its composed children runs in the per-lease read-only mode,
+so on the dialects marked `DATABASE` in [DAG Executor §8.2](dag-executor.md#82-error-code-mapping)'s table the
+database itself refuses a write (`pipeline.node.query_execution_failed`), and on the others the rule above and a
+SELECT-only database user remain the guard.
 
 Every path variable must name a declared parameter of that version
 (`400 endpoint.path_variable_unknown`); the pipeline may declare more, and they come from the
@@ -2232,7 +2254,7 @@ and a session is `401`. Authorisation is the key's hierarchical bindings
 `api_caller`) serves what is bound to it, the MCP key is refused here by kind, and so **a published
 path with no binding on any ancestor serves no one until a key is bound to it** (#215 B3).
 
-The accepted parameters are the released version's declared ones: **path variables** bind by
+The accepted parameters are the pinned pipeline version's declared ones: **path variables** bind by
 name, and the **query string** supplies the rest. Validation is strict and **reports every defect
 at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carries
 `{parameter, code, message}` per problem, because a client fixes a request once:
@@ -2297,7 +2319,54 @@ answers a **promoter** through the lens (178, [Auth §11A.1](auth.md#11a1-the-40
 listed iff its pipeline is visible to that principal, so a hidden pipeline never leaks through
 the endpoint that publishes it.
 
-Both bodies (publish, and the binding in `POST /endpoints/bindings`) are read through the strict request mapper (#333): a number or boolean where a string is declared (`path`, `pipeline`, `description`, `path_prefix`, `api_key_name`, `api_key_id`) or a string or float for `timeout_seconds` is `400 pipeline.execution.invalid_parameter_type` with `details.reason: "wrong_type"` and `details.path`; an unknown key is `reason: "unknown_key"`; a missing required key is `reason: "missing"`. Before #333 a missing `path` answered `endpoint.path_invalid` with `reason: malformed_json`.
+**Create (#786).** `POST /api/v1/endpoints` takes `path`, `pipeline`, **`pipeline_version`** (REQUIRED, an integer of
+at least 1 — the exact pin, an authored input like a pipeline node's `template_version`), `timeout_seconds` and
+`description`, and answers `201` with the entity. It writes the entity and its **v1 DRAFT** in one transaction —
+no path leaves an entity without a version — and that draft is the API's current version: on an authoring-enabled
+deployment it serves under the normal runtime checks (the entity is enabled, the caller's key is bound, the pinned
+pipeline version is eligible). Creation is an authoring operation: a deployment with authoring disabled refuses it
+with `409 endpoint.authoring_disabled`, and there is no release to perform there. A promotion receiver creates an
+absent API through its own receiver-only import (§18), never through this route.
+
+**Delete (#786).** `DELETE /api/v1/endpoints?path=` is the **guarded entity deletion** (versioning §3.2, the
+parameter-set entity rule): an API is deleted — with its versions — only while every version it holds is a DRAFT.
+A RELEASED version, current or not, or a DISCARDED one refuses `409 endpoint.version.last_release` (`details`: this
+API's blocking `version` and its `status`) and nothing is removed: the entity, its current pointer, its versions and
+its key bindings all stay. Discard is per version (below); an API that was ever released keeps its history. The
+check reads the versions under the entity row lock in the transaction that deletes, after the writer guard and the
+registry key, so no release lands between the check and the delete. A legacy row (below) never serves and stays
+deletable whatever its converted version's status.
+
+**Versions (#786).** An API is versioned like a pipeline (record §24): each version is an immutable body — `pipeline`,
+`pipeline_version`, `timeout_seconds`, `description` — with a `status` (DRAFT, RELEASED, DISCARDED) and a
+`body_hash`; at most one DRAFT exists, and the entity's current pointer names the version that serves. The
+resources are addressed by the entity id (a path contains `/`):
+
+| Route | Permission | What it does |
+|---|---|---|
+| `GET /api/v1/endpoints/{id}/versions` | `endpoint.read` | Every version, newest first: `version`, `status`, `pipeline`, `pipeline_version`, `timeout_seconds`, `description`, `body_hash`, `is_current`, `eligible` (under the caller's posture), `created_at`, `released_at`. Never bindings or key data — those are the entity's |
+| `GET /api/v1/endpoints/{id}/versions/{version}` | `endpoint.read` | One version, the same fields; `404 endpoint.version.not_found` for an unknown number or an API the caller cannot see — one answer for both |
+| `PUT /api/v1/endpoints/{id}/draft` | `endpoint.publish` | Save the working draft — a repin, or new serve settings. `If-Match` is the body hash the edit is based on (the draft, or the current version when there is none; `409 endpoint.version.conflict` otherwise). The pin is checked as at create. An `mcp` key may call it |
+
+The lifecycle verbs are **session-only** (a key is `403 auth.session.required`), like a pipeline's (§5.10–§5.14),
+and every one of them — like create and the draft save — refuses on an authoring-disabled deployment regardless
+of role:
+
+| Route | Permission | What it does |
+|---|---|---|
+| `POST /api/v1/endpoints/{id}/release` | `endpoint.release` | Release the working draft through the shared release planner (`If-Match` = the draft's hash; an optional plan body carries `tree_hash`, `include_dependencies`, `check_overrides`). A DRAFT pipeline version below it is `409 endpoint.release.dependency_not_released` unless the plan releases it; the release moves the current pointer to the released version |
+| `POST /api/v1/endpoints/{id}/draft/discard` | `endpoint.version.manage` | Purge the working draft (`If-Match`; there is no discarded-draft status); the sole version takes the entity, `204` |
+| `POST /api/v1/endpoints/{id}/versions/{version}/discard` | `endpoint.version.manage` | Discard a RELEASED version (`409 endpoint.version.not_released` otherwise); answers `version`, `current_version_before`, `current_version_after` — the pointer recomputes by the pipeline rule |
+| `POST /api/v1/endpoints/{id}/versions/{version}/restore` | `endpoint.version.manage` | Restore a DISCARDED version to RELEASED after rechecking its pin transitively: a missing or DISCARDED pinned version is `400 endpoint.pipeline_version.not_found`, a DRAFT one is `409 endpoint.release.dependency_not_released` (`reason: not_released`); nothing is written on a refusal |
+| `DELETE /api/v1/endpoints/{id}/versions/{version}` | `endpoint.version.manage` | Purge a DRAFT version (`409 endpoint.version.not_draft` otherwise); the sole version takes the entity, `204` |
+| `POST /api/v1/endpoints/{id}/current` | `endpoint.version.manage` | Switch the API's current version, body `{"version": n}`: the target must be eligible under the posture (`409 endpoint.version.not_eligible`) and its pin is rechecked. This explicit switch is how an older pin serves again |
+
+An API version pins a pipeline version, so the pipeline's own discard and purge refuse while a live (DRAFT or
+RELEASED) API version pins it — `409 pipeline.version.pinned` with `details.referencing_api_versions` (§5.11, §5.12, §5.14).
+Audit kinds: `endpoint.draft_saved`, `endpoint.released`, `endpoint.version_discarded`, `endpoint.version_restored`,
+`endpoint.version_purged`, `endpoint.current_switched` ([Enums](enums.md)).
+
+The create, draft and binding bodies are read through the strict request mapper (#333): a number or boolean where a string is declared (`path`, `pipeline`, `description`, `path_prefix`, `api_key_name`, `api_key_id`) or a string or float for `timeout_seconds` or `pipeline_version` is `400 pipeline.execution.invalid_parameter_type` with `details.reason: "wrong_type"` and `details.path`; an unknown key is `reason: "unknown_key"`; a missing required key is `reason: "missing"`. Before #333 a missing `path` answered `endpoint.path_invalid` with `reason: malformed_json`.
 
 **Legacy rows (#274).** A stored row whose `path_pattern` predates the current grammar — fewer
 than three segments, saved before R-EP5 — is **retired, never fatal**: it cannot boot-refuse the
@@ -2307,7 +2376,7 @@ listing answers it after the valid rows with the keys `path`, `pipeline`, `enabl
 carries none of the valid shape's parse-derived fields (`path_variables`, `bindings`,
 timestamps), because there is no parse. Once V41 has run its `enabled` is `false`; a single read
 (`?path=`) resolves valid rows only and answers the legacy path `404`, like the serve path. The
-one verb the legacy row supports is **`DELETE`** — the same unpublish route, unchanged — which
+one verb the legacy row supports is **`DELETE`** — the same unpublish route, exempt from its version rule — which
 removes it; republishing at a current-grammar path is the replacement. The API console page lists
 the row flagged with the same reason and offers only that verb. The flag is the parse verdict taken on every read, not the `retired_reason` column (an audit marker); a legacy `path` (and its `url`) is echoed as stored up to the grammar's 200 characters and cut there (#286 — `path_pattern` is `TEXT` with no CHECK, so only a database write can store a longer one; every API write has been held to 200 since the registry was born, so every row the product wrote is echoed exactly and stays addressable by `DELETE ?path=`, and a longer one is unpublished by its full stored path; the cut falls on a code-point boundary, and such a row's `reason` is the length sentence — it never quotes more of the stored path than the echo shows (#298) — and the console offers no Unpublish on it (#293)), and a row malformed in a way V41's two-segment predicate does not name is listed `legacy: true` with `enabled: true` and is never served either. A **promotion** batch (§10.5) never carries a legacy row — the target's grammar would refuse it — and the sender logs the omission (`event=endpoint.promotion_legacy_omitted`, the count over the promoted pipelines, never a path); the promotion result does not list it.
 
@@ -2343,7 +2412,7 @@ The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool
 | 406 | An `Accept` this surface cannot satisfy |
 | 429 | Rate limit or concurrency limit, with `Retry-After` |
 | 500 / 502 | Pipeline failure, mapped by [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) (datasource connection failures are `502`) |
-| 503 | The pipeline has no released version, or is no longer side-effect-free |
+| 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version |
 
 ### 19.7 Not in v1
 
@@ -2417,8 +2486,8 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 | `name` | string | A folder path, `finance/daily/revenue` — the pipeline/template name grammar, unique among the workspace's live schedules; rename/move keeps the id and the history |
 | `revision` | int | Starts at 1; every edit, pause, resume, unblock and delete a person makes bumps it (a block the scheduler sets does not) |
 | `executor` | string | The registered executor (`pipeline`) |
-| `payload_schema_version` | int | The executor's payload schema version (1) |
-| `payload` | object | The executor's payload. For `pipeline`: `{"pipeline": "<name>", "version": "current"}` — `current` follows the pipeline's current-version pointer at each run, drafts included; nothing else is accepted in v1. Since slice 3 the payload MAY also carry the optional, additive `parameter_bindings` object (§20.2) |
+| `payload_schema_version` | int | The executor's payload schema version: `2` for `pipeline` since #786 (a schedule saved before it was converted in place at the upgrade; a leftover `1` is refused `schedule.validation.payload_schema_unsupported`, never re-read) |
+| `payload` | object | The executor's payload. For `pipeline` (schema 2): `{"pipeline": "<name>", "version": <int ≥ 1>}` — the EXACT pipeline version every run executes, never what the current-version pointer names at run time; `"current"` and `"latest"` are refused by name. The version must exist and be eligible under the deployment's posture (RELEASED; a DRAFT only where authoring is enabled). The payload MAY also carry the optional, additive `parameter_bindings` object (§20.2) |
 | `parameters` | object | Literal values for the pipeline's declared parameters, validated by the binder an interactive run uses |
 | `target_ref` | string | The executor's reference to what it runs (`pipeline:<name>`) |
 | `cron` | string | Five fields, Unix style (`minute hour day-of-month month day-of-week`) |
@@ -2466,14 +2535,16 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 `POST /schedules` — `schedule.create`. Body: `name`, `payload`, `cron`, `timezone` (required); `executor` (default `pipeline`), `parameters` (default `{}`), `missed_run_policy` (default `skip`). Optional `Idempotency-Key`, held durably: a replay of the same request answers `200` with the original schedule; a replay with a different body is `409 idempotency.key_reused_for_different_request`. `201` with the schedule and its `ETag`. Refusals: the `schedule.validation.*` family, `409 schedule.name_taken`, `409 schedule.limit.per_workspace`, and a parameter refusal exactly as an interactive run's (§13.4).
 
+**The writer guard (#841).** A create takes the workspace's writer guard FIRST, validates the target under it, then saves, all in one transaction: a pinned version discarded or purged by a write already holding the guard is seen by the validation, and the create is refused with that target code (`schedule.validation.target_not_found` / `target_not_released`), never saved against a target that just stopped existing; a discard that comes second sees the new pin and refuses `409 pipeline.version.pinned` (#786 D.3). An update that changes the executor or the payload (the pin) takes the same guard; a pin-unchanged edit does not. A wait past [`lock-wait-seconds`](configuration.md) answers `409 schedule.write.busy` (`details.lock_wait_seconds`; nothing was saved — retry).
+
 **`notifications`** (#442a) is optional: absent or JSON null creates no recipients and events `failure`, `unknown`, `blocked` (start/success off). A present object accepts optional `recipients` (list of strings) and `events` (list of the five event names); an omitted member uses its create default. Example: `{"recipients":["a@example.com"],"events":["failure","unknown","blocked"]}`. Addresses are trimmed, domains lower-cased and duplicates removed case-insensitively, preserving first spelling and order; events deduplicate. One WHATWG valid e-mail address grammar, at most 254 characters, refuses header injection. The configured recipient limit defaults to 20. The idempotency hash includes normalized effective settings; case-only duplicates and reordered event choices replay the same meaning. Pre-V49 create keys still replay when the effective notification settings are the old defaults (no recipients and the three default events); different settings cannot match that legacy hash. A schedule's `notifications` in a response is `{recipient_count, events, delivery}`, plus `recipients` for a `schedule.update` holder only; `delivery` is the DEPLOYMENT's computed state, never stored (#442b, [Scheduler §2.3](scheduler.md#23-notification-settings-442)): `{"state":"on"}`, or `{"state":"off","reason":…}` with `disabled` (the enable flag is false — the default), `mail_unconfigured` or `no_allowlist` (the `development` posture with an empty recipient-domain allowlist). Settings are saved in every state; while off nothing is queued or sent.
 
 A refused `notifications` object is `400 schedule.validation.notifications_invalid` (#442a; the catalogue row is pipeline-contract §13.19). `details` contains only `{field, reason}`: `notifications`, `notifications.recipients`, an indexed recipient or event field; `not_an_object`, `not_a_list`, `not_a_string`, `syntax`, `too_long`, `too_many`, `unknown_event`, and `domain_not_allowed` (#442b: a recipient outside a non-empty `recipient-domains` allowlist, [Configuration §3.29](configuration.md#329-scheduler-9)). No address is echoed
 
-**`payload.parameter_bindings`** (#9 slice 3) — an optional, ADDITIVE key of payload schema 1. One binding per declared `DATE` parameter:
+**`payload.parameter_bindings`** (#9 slice 3) — an optional, ADDITIVE key of the payload (schema 1, and schema 2 since #786). One binding per declared `DATE` parameter:
 
 ```json
-{"pipeline": "<name>", "version": "current",
+{"pipeline": "<name>", "version": 3,
  "parameter_bindings": {
    "as_of_date":    {"source": "keyword", "name": "TODAY"},
    "previous_date": {"source": "keyword", "name": "YESTERDAY"},
@@ -2495,7 +2566,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 ### 20.5 Edit a schedule
 
-`PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule), `parameter_bindings` included — replacing the saved bindings wholesale, like every other body field. A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
+`PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule), `parameter_bindings` included — replacing the saved bindings wholesale, like every other body field. A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. An edit that changes the executor or its payload re-validates the target under the workspace's writer guard, exactly as a create does (§20.2); an edit that keeps them stays on the revision check alone. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
 
 **Additive frozen-contract rule (#442a):** absent or JSON-null `notifications` KEEPS the stored settings, so clients written before this field cannot wipe them. A present object replaces each supplied member; an omitted member keeps its stored value. `recipients: []` turns mail off; `events: []` selects no events. Neither omission resets a member to its create default.
 
@@ -2509,7 +2580,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 ### 20.8 Unblock
 
-`POST /schedules/{id}/unblock` — `schedule.pause`. A schedule blocks when a run's outcome is `unknown` (nobody can say whether its work happened) or an executor refusal asks for it (the pipeline has no current version, the parameters no longer bind, …). Unblock re-validates the saved payload and parameters first — a refusal there is the same `400` a save would get — then clears the block, recomputes `next_due_at` from now and writes an `unblocked` row on the blocking run's trail. `409 schedule.not_blocked` when it is not blocked.
+`POST /schedules/{id}/unblock` — `schedule.pause`. A schedule blocks when a run's outcome is `unknown` (nobody can say whether its work happened) or an executor refusal asks for it (the pinned version is no longer eligible, the parameters no longer bind, the stored payload is schema 1, …). Unblock re-validates the saved payload and parameters first — a refusal there is the same `400` a save would get — then clears the block, recomputes `next_due_at` from now and writes an `unblocked` row on the blocking run's trail. `409 schedule.not_blocked` when it is not blocked.
 
 ### 20.9 Upcoming occurrences
 
@@ -2527,7 +2598,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 ### 20.12 Run now
 
-`POST /schedules/{id}/run` — `schedule.run`. Records a manual run (`origin = manual`, `requested_by` = you) and answers `202` with it; it then runs like any other — as the system identity, through the same capacity and admission. Allowed on a paused schedule; refused on a blocked one (`409 schedule.blocked`) and while one of its runs is queued, starting or running (`409 schedule.run.overlap`). Optional `Idempotency-Key`, durable: the same key answers `200` with the original run.
+`POST /schedules/{id}/run` — `schedule.run`. Records a manual run (`origin = manual`, `requested_by` = you) and answers `202` with it; it then runs like any other — as the system identity, through the same capacity and admission. Allowed on a paused schedule; refused on a blocked one (`409 schedule.blocked`) and while one of its runs is queued, starting or running (`409 schedule.run.overlap`); a schedule whose stored payload is in a schema the executor no longer runs (a leftover schema 1, #786) is refused `400 schedule.validation.payload_schema_unsupported` and records nothing. Optional `Idempotency-Key`, durable: the same key answers `200` with the original run.
 
 ### 20.13 Resend a notification
 
@@ -2555,7 +2626,7 @@ Reads follow the working-version rule ([Versioning §7.1](versioning.md#71-autho
 | `GET /api/v1/parameter-sets/{id}/versions` | `parameter_set.read` | Version metadata, newest first; no bodies. |
 | `GET /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.read` | One version. A version other than RELEASED is 404 under a narrowing lens (the promoter's). |
 | `PUT /api/v1/parameter-sets/{id}` | `parameter_set.update` | The draft write (copy-on-write, then in-place; `If-Match` required). The hash precondition is checked BEFORE the body is parsed. An identical body is a no-op and reports the current state. |
-| `POST /api/v1/parameter-sets/{id}/release?release_pinned_templates=` | `parameter_set.release` | Release (lock) the draft. Every pinned template version must be RELEASED (`409 parameter.release.dependency_not_released`, `details.pins_not_released`) — or, with `release_pinned_templates=true`, is released WITH the set in one transaction, templates first (142). Release re-runs the §4 source validation against the pins as they are now. |
+| `POST /api/v1/parameter-sets/{id}/release?release_pinned_templates=` | `parameter_set.release` | Release (lock) the draft. Every pinned template version must be RELEASED (`409 parameter.release.dependency_not_released`, `details.pins_not_released`) — or is released WITH the set in one transaction, templates first, through a release plan body (§5.10's fields; since #876 a bare `release_pinned_templates=true` is `428 parameter.release.plan_required`). Release re-runs the §4 source validation against the pins as they are now. |
 | `POST /api/v1/parameter-sets/{id}/draft/discard` | `parameter_set.version.manage` | Purge the DRAFT (versioning §5.4); the sole draft takes the set with it. Session-only. **`409 parameter.in_use`** while a dashboard pins it (#320) — see the note below the table. |
 | `POST /api/v1/parameter-sets/{id}/versions/{version}/discard` | `parameter_set.version.manage` | Discard a RELEASED version (reversible); the pointer falls back per D60. `409 parameter.in_use` while a live dashboard version pins it (#320). |
 | `POST /api/v1/parameter-sets/{id}/versions/{version}/restore` | `parameter_set.version.manage` | Restore a DISCARDED version; the pointer moves only above-current-or-NULL. Its selector-template pins are re-judged first under the writer guard (#517): missing or DISCARDED → `400 parameter.validation.template_not_found` / `template_version_not_found`; DRAFT → `409 parameter.release.dependency_not_released` (§5.10's shape, `reason: not_released`). |
@@ -2675,13 +2746,13 @@ Reads follow the working-version rule ([Versioning §7.1](versioning.md#71-autho
 
 | Route | Permission | What |
 |---|---|---|
-| `POST /api/v1/visualizations` | `visualization.create` | Create: read and validate the document in full (the renderer's configuration schema, the bindings, the transform pin — a DRAFT pin is accepted at save — and the test cases), land version 1 **DRAFT** with a server-assigned id. `201`. |
+| `POST /api/v1/visualizations` | `visualization.create` | Create: read and validate the document in full (the renderer's configuration schema, the bindings, the transform pin — a DRAFT pin is accepted at save — and the test cases), land version 1 **DRAFT** with a server-assigned id. `201` with the full JSON (the `GET /{id}` fields) plus `warnings` — always present: `[]` on a clean save, else one `{code, path, library}` per chart field the declared library draws only in part (`chart.degraded.<field>`, [Dashboards §2.1.2](dashboards.md#212-renderer-schemas)); recomputed on every save, never stored, never document text. The save has landed either way. |
 | `GET /api/v1/visualizations` | `visualization.read` | The flat listing (offset/limit) — every visualization the caller's lens admits at its listed version, paged against a lens-true `total` (#312's shape) — or, with `?prefix=`, ONE level of the tree: `folders` (with `visualization_count`) and the level's `visualizations`. `total` counts visualizations, never folders; `has_more` is `offset + page size < total` on both. `?prefix=` (empty) is the ROOT. |
 | `GET /api/v1/visualizations/{id}` | `visualization.read` | The working version's full JSON: the document + `id`, `name`, `version`, `status`, `body_hash`, `current_version`, `created_at`, `updated_at`, `draft`. |
 | `GET /api/v1/visualizations/{id}/versions` | `visualization.read` | Version metadata, newest first; no bodies. RELEASED ones only under a narrowing lens. |
 | `GET /api/v1/visualizations/{id}/versions/{version}` | `visualization.read` | One version. A version other than RELEASED is `404` under a narrowing lens. |
-| `PUT /api/v1/visualizations/{id}` | `visualization.update` | The draft write (copy-on-write after a release, then in place; `If-Match` required and checked BEFORE the body is parsed). A document naming another visualization is `400 visualization.validation.name_invalid` (`reason: immutable`) — nothing is renamed. |
-| `POST /api/v1/visualizations/{id}/release?release_pinned_templates=` | `visualization.release` | Release the draft at `If-Match` ([Dashboards §3.1](dashboards.md#31-releasing-a-visualization)): at least one test case, the rules re-run against the pin as it is NOW, the transform pin RELEASED — or released WITH the visualization under `release_pinned_templates=true` (D61, the 142 cascade) — then, in ONE transaction, the evidence gate (#352): the LATEST test run of the exact draft must be GREEN and the mechanical test must pass again now — the refusal ladder is below the table. The answer names `templates_released`. |
+| `PUT /api/v1/visualizations/{id}` | `visualization.update` | The draft write (copy-on-write after a release, then in place; `If-Match` required and checked BEFORE the body is parsed). A document naming another visualization is `400 visualization.validation.name_invalid` (`reason: immutable`) — nothing is renamed. `200` with the full JSON plus `warnings`, as `POST` answers it. |
+| `POST /api/v1/visualizations/{id}/release?release_pinned_templates=` | `visualization.release` | Release the draft at `If-Match` ([Dashboards §3.1](dashboards.md#31-releasing-a-visualization)): at least one test case, the rules re-run against the pin as it is NOW, the transform pin RELEASED — or released WITH the visualization through a release plan body (D61; since #876 a bare `release_pinned_templates=true` is `428 visualization.release.plan_required`) — then, in ONE transaction, the evidence gate (#352): the LATEST test run of the exact draft must be GREEN and the mechanical test must pass again now — the refusal ladder is below the table. The answer names `templates_released`. |
 | `POST /api/v1/visualizations/{id}/draft/discard` | `visualization.version.manage` | Purge the DRAFT at `If-Match` (versioning §5.4); the sole draft takes the visualization. `204`. Session-only. |
 | `POST /api/v1/visualizations/{id}/versions/{version}/discard` | `visualization.version.manage` | Discard a RELEASED version (reversible); the pointer falls back per D60. Session-only. |
 | `POST /api/v1/visualizations/{id}/versions/{version}/restore` | `visualization.version.manage` | Restore a DISCARDED version; the pointer moves only above-current-or-NULL. Session-only. |
@@ -2745,7 +2816,7 @@ The seven lifecycle permissions govern the same thirteen routes as §22.2 under 
 
 | Route | Permission | What |
 |---|---|---|
-| `POST /api/v1/dashboards/{id}/release?release_pinned_visualizations=` | `dashboard.release` | Release the draft at `If-Match` ([Dashboards §3.2](dashboards.md#32-releasing-a-dashboard)): the rules re-run against the dependencies as they are NOW; the pinned set release RELEASED; every pinned visualization RELEASED — or, under `release_pinned_visualizations=true`, released through ITS OWN release (its gate, and its template drafts NOT consented by this flag — they need that visualization's own `release_pinned_templates`); every source release RELEASED and read-only. Otherwise `409 dashboard.release.dependency_not_released` naming every dependency. One transaction; the answer names `visualizations_released`. Until L4 a DRAFT visualization cannot be released, so the consented cascade answers the visualization's `409 visualization.release.tests_missing`. |
+| `POST /api/v1/dashboards/{id}/release?release_pinned_visualizations=` | `dashboard.release` | Release the draft at `If-Match` ([Dashboards §3.2](dashboards.md#32-releasing-a-dashboard)): the rules re-run against the dependencies as they are NOW; the pinned set release RELEASED; every pinned visualization RELEASED — or released through ITS OWN release under a release plan body that selects it (§5.10's fields; since #876 a bare `release_pinned_visualizations=true` is `428 dashboard.release.plan_required`); every source release RELEASED and read-only. Otherwise `409 dashboard.release.dependency_not_released` naming every dependency. One transaction; the answer names `visualizations_released`. Until L4 a DRAFT visualization cannot be released, so the consented cascade answers the visualization's `409 visualization.release.tests_missing`. |
 | `POST /api/v1/dashboards/{id}/validate` | `dashboard.update` | Validate the WORKING version against the dependencies' CURRENT state — the §3.2 rules, no write (the agent's loop before a human releases). The verdict is the answer: `200` with `id`, `name`, `version`, `status`, `body_hash`, `valid` and `failures` (each `{code, path, message, details}` — the 400's failure shape, exhaustive). An AUTHOR verb — the implementation spec's §6.2 names `dashboard.read`; the owner ruled it `dashboard.update` (2026-09-29) because the validator reads the pinned pipelines', set's and visualizations' statuses unlensed, so a viewer and a promoter are refused `403 auth.role_required` before the handler. No body. |
 | `GET /api/v1/dashboards/{id}/export` | `dashboard.read` | The export envelope (§12, [Dashboards §3.3](dashboards.md#33-export-and-import)): the dashboard's payload, each pinned visualization's OWN envelope inside it, and the manifest naming the pinned pipelines and set BY REFERENCE — a dashboard export assumes they were promoted first. Lensed before the export (§22.2's mould). The bundled closure — each pinned visualization and its templates — is the dashboard's pins, not lensed; the root is (#344). Audited `dashboard.exported`. |
 | `POST /api/v1/dashboards/import` | `dashboard.import` | Import the envelope ([Dashboards §3.3](dashboards.md#33-export-and-import)): every bundled visualization (D61), then the dashboard; the exported ids KEPT. The same §13.21 read + READER bind as §22.2's import — the two dashboard bounds hold, a non-array `visualizations` refuses, and the bundle is count-bounded (O7: at most `max-visualizations-per-dashboard` entries, `body_invalid` `reason: too_many` before any member binds). ONE transaction around templates → visualizations → dashboard (F1 of the L1c pass): a refused dashboard leaves NOTHING landed. Lands RELEASED, judged by the RELEASE rules (O2): a pinned set or visualization that exists here but is not RELEASED refuses `409 dashboard.release.dependency_not_released`; a pin the deployment lacks is `400 dashboard.import.missing_dependency`; an id another workspace's artifact holds is `409 dashboard.import.id_taken` (C29). The workspace-admin verb (the owner's ruling, exactly `visualization.import`'s row). Audited `dashboard.imported` — and one `visualization.imported` row per LANDED bundled visualization, each naming its id, its version and its own envelope manifest's evidence flag (F1's record honesty: nothing landed is unaudited). |
@@ -2783,7 +2854,7 @@ field missing / of the wrong type, is `400 dashboard.validation.body_invalid` wi
 
 | Route | Request | Answer |
 |---|---|---|
-| `GET /{id}/runtime/config` | — | `200` `{configuration_id, renderer: {bundle}, dashboard: {id, name, version, status}, layout, parameter_set, visualizations: [{name, display_name, description, artifact: {id, name, version}, renderer: {kind, version}, config, bindings, presentation, timeout_seconds}], groups, actions, action_controls, parameter_scopes, parameter_state, timeouts: {refresh_seconds, parameter_lock_seconds, render_seconds}, budgets: {max_bytes_per_source, max_bytes_per_refresh}}` — `renderer.bundle` is `"2d"` or `"3d"`, derived from the pinned visualizations' trace types ([Dashboards §6.4](dashboards.md#64-the-two-bundles)): the page loads exactly one Plotly bundle, the one this field names. `display_name`/`description` (#473) are the pinned VERSION's own presentation words — the card headings read them, version-scoped, never the artifact record's name; `description` is JSON null when the body omits it |
+| `GET /{id}/runtime/config` | — | `200` `{configuration_id, renderer: {bundle}, dashboard: {id, name, version, status}, layout, parameter_set, visualizations: [{name, display_name, description, artifact: {id, name, version}, renderer: {kind, version}, config, bindings, columns, presentation, timeout_seconds}], groups, actions, action_controls, parameter_scopes, parameter_state, timeouts: {refresh_seconds, parameter_lock_seconds, render_seconds}, budgets: {max_bytes_per_source, max_bytes_per_refresh}}` — `renderer.bundle` names the one Plotly bundle the page loads ([Dashboards §6.4](dashboards.md#64-the-two-bundles)); every v1 kind needs the 2D bundle, so it is `"2d"` (`"3d"` stays reserved for a later chart family). `columns` rides on a `chart` occurrence only: `{field: LogicalType}` for every encoded field, read from the same contract the save rules read (the pinned transform's output table, else the one input's columns) — the types the runtime orders categories and aggregates measures by; `{}` when the contract cannot be known (several inputs without a transform, or a pin that no longer resolves). A `table` or `kpi` occurrence carries no `columns`. `display_name`/`description` (#473) are the pinned VERSION's own presentation words — the card headings read them, version-scoped, never the artifact record's name; `description` is JSON null when the body omits it |
 | `POST /{id}/runtime/parameters` | `{configuration_id, instance_id, selections, intent}` (`intent`: `bootstrap` \| `parent_change` \| `retry`) | `200` the parameter engine's evaluate response ([§21.3](#213-evaluate)) unchanged, plus `overrides_applied`, `parents`, `parameter_revision` |
 | `POST /{id}/runtime/visualizations` | `{configuration_id, instance_id, refresh_id, parameter_revision, selections, scope, targets}` — `refresh_id` a fresh v4 UUID the client mints; `scope` `all` \| `targets`; `selections` at most 64 KiB | `200` `text/event-stream` (below) |
 | `POST /{id}/runtime/refreshes/{refresh_id}/abort` | `{instance_id}` | `202` `{refresh_id, status: "abort_requested"}` — no wait. An abort arriving while the refresh is still STARTING (no row yet) is the same `202` when the in-flight start is the caller's own — same workspace and dashboard, their principal AND client instance, or `execution.cancel_all` — and the refresh then ends `ABORTED` before any source runs |
@@ -2882,10 +2953,153 @@ browser persistence. Clients must reject foreign/stale responses even after abor
 
 ---
 
+## 25. Dependency trees
+
+`GET /api/v1/dependencies/<family>` is eight literal session-only reads, one per family:
+`pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint`, `schedule`
+and `datasource`. Each route declares its family's existing READ permission ([Auth §7.6](auth.md)):
+`pipeline.read`, `template.read`, `parameter_set.read`, `visualization.read`, `dashboard.read`,
+`endpoint.read`, `schedule.read` and `datasource.read` respectively. The workspace comes from the
+principal. Keys gain no surface: a key of any kind is refused `403 endpoint.key_kind_refused` before
+the handler, and an unauthenticated call gets the platform's existing 401. An unknown segment, and the bare
+`/api/v1/dependencies`, are unmapped paths that get the application's ordinary answer for one. Every
+response uses the §4.1 envelope with the graph object as `data`, and `Cache-Control: no-store`. Every
+refusal uses the §4.2 envelope and is catalogued in
+[pipeline-contract §13.26](pipeline-contract.md#1326-dependency-trees). The read issues no mutation
+consent, probe or remote request. The authorized release dialog still uses its root's own `If-Match` and
+`tree_hash` consent.
+
+**Request.** The family is the path, so a `family` query field is not read; one supplied anyway is
+ignored, as is any field the table does not name. Values are form-encoded (`+` is a space).
+
+| Query field | Rule |
+|---|---|
+| any value | at most 200 characters and valid UTF-8, checked before any grammar; otherwise `details.reason = value_too_long` |
+| `name` | required for `pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint` and `datasource`; forbidden for `schedule`. The family's own native name grammar decides it, never a repository lookup: pipeline and template names follow [pipeline-contract §3.2](pipeline-contract.md) and [Templates §3.2](templates.md), which parameter sets, visualizations and dashboards share. An API's name is its immutable path ([§19.1](#19-published-endpoints)), and a datasource name is `[a-z0-9_-]{1,63}` ([Datasources §3.3](datasources.md)). Slashes stay in the value. A refused name is `name_invalid` |
+| `id` | required instead of `name` for `schedule`, in the canonical 36-character lower-case UUID form, otherwise `id_invalid`. `id` on any other family is `selector_incompatible` |
+| `version` | required for the six artifact families; forbidden for `schedule` and `datasource` (`selector_incompatible`). Decimal digits only, no sign or leading zeros, `1 ≤ n ≤ 2147483647`. An absent, non-integer, `current` or out-of-range value is `version_invalid` |
+
+The family's key field absent, a field the family forbids, `name` with `id`, or a field given twice is
+`selector_incompatible`. The checks run in this order: length and encoding, then selector shape, then
+the native grammar, then the version. The first failure answers `400 dependencies.request.invalid`
+with `details.field` (`name`, `id` or `version`) and `details.reason`. The message is static and the
+refused value is never echoed. `family_unknown` stays a schema token that these routes never produce.
+
+**Root.** The root is read in the caller's workspace, through the same providers the release planner
+reads. A promoter's lens decides the root only. A root the lens does not admit answers like a missing
+one. An API root is judged at the version asked, through the native versioned read: a version that pins a
+pipeline the lens hides answers like a missing one, even when the API's current version is visible. Inside an admitted tree the lens narrows nothing, so a dependency the promotion target already has
+still appears. When the promotion view itself cannot be computed, the seven lensed families answer
+`503 navigation.view.unavailable` with `Retry-After: 5`
+([pipeline-contract §13.24](pipeline-contract.md#1324-navigation-trees)). The `datasource` route has no lens.
+A datasource tree is visible when the datasource is granted to the active workspace. A missing root,
+one in another workspace, an ungranted datasource and a root the lens hides all answer the family's own
+existing not-found code and 404 with the same body: `pipeline.execution.not_found`, `template.not_found`,
+`parameter.not_found`, `visualization.not_found`, `dashboard.not_found`, `endpoint.not_found`,
+`schedule.not_found` and `datasource.not_found`.
+
+**Response 200** — the whole safe bounded closure, also when it is incomplete:
+
+```text
+{ schema_version: 1, correlation_id: uuid,
+  data: { schema_version: 1, roots: [node_id], nodes: [Node], edges: [Edge], diagnostics: [Diagnostic],
+          complete: boolean, acyclic: true | false | null, observed_at: ISO-8601 UTC } }
+Node       = { node_id, entity_id: string | null, family, name | null, display_name | null, subtype | null,
+               version: { kind: "artifact" | "revision" | "unversioned", number: integer | null },
+               resolution: "resolved" | "missing" | "unsupported",
+               lifecycle: "DRAFT" | "RELEASED" | "DISCARDED" | null,
+               operational: Operational | null, current_version: integer | null, body_hash: string | null,
+               capabilities: { release: "ARTIFACT_RELEASE" | "NONE", promotion: "VERSIONED_ARTIFACT" | "NONE" } }
+Operational = schedule      { condition: "enabled" | "paused" | "blocked" }
+            | api_endpoint  { enabled: boolean }
+            | datasource    { readonly: boolean }
+            | visualization { evidence_ready: boolean }
+            | null for pipeline, template, parameter_set, dashboard
+Edge       = { edge_id, from: node_id, to: node_id, relationship: Relationship,
+               source_path: JSON pointer into the dependent's stored body (e.g. "/nodes/3/template") | null,
+               requested_selector: { kind: "exact_version" | "current" | "entity", number: integer | null },
+               resolved_version: integer | null, constraints: [Constraint] }
+Relationship = "TEMPLATE" | "CHILD_PIPELINE" | "DATASOURCE" | "IMPORT" | "PARAMETER_SOURCE_TEMPLATE"
+             | "PARAMETER_SOURCE_DATASOURCE" | "TRANSFORM_TEMPLATE" | "PARAMETER_SET" | "SOURCE_PIPELINE"
+             | "VISUALIZATION" | "PIPELINE_PIN" | "EXECUTOR_TARGET"
+Constraint = { kind: "parameter_names", names: [string], unmet_names?: [string] }
+           | { kind: "datasource_access", mode: "read" | "write" }
+           | { kind: "datasource_dialect", dialect: string }
+Diagnostic = { code: "MISSING" | "DISCARDED" | "UNSUPPORTED_FAMILY" | "CYCLE" | "LIMIT" | "INCOMPLETE_VIEW",
+               node_id | null, edge_id | null, message }
+```
+
+An `api_endpoint` node's `operational.enabled` is the API's `is_enabled` on every walk, read with the
+version itself; it is shown and never hashed, and a node that did not resolve carries `operational: null`.
+
+`entity_id` is the stable id of a resolved node's object: an entity UUID, or a datasource's name. It is
+`null` for every other resolution. `node_id` and `edge_id` are opaque local locators, never authority.
+`acyclic` is `true` or `false` only when the whole closure was enumerated (`complete: true`); otherwise
+it is `null`. A dependency the caller cannot resolve (absent, in another workspace, or an ungranted
+datasource) appears once as a `missing` node. It carries the name its parent spells, `entity_id: null`
+and no facts, and the absent and hidden cases are byte-identical. The routes run no probe to tell
+them apart and remove no node. `source_path` is `null` when a reference has no single field (a body
+read as a whole). The payload never carries a stored body, SQL, parameter values, an internal
+fingerprint or a hidden count.
+
+A dashboard's `PARAMETER_SET` edge carries one `parameter_names` constraint: the set parameters its
+`{parameter}` source bindings use, each once, sorted. A literal binding adds nothing. When the set version
+the edge reached does not declare some of those names, the constraint also carries `unmet_names`: those
+names, each once, in the order `names` uses — always a subset of `names`.
+
+```json
+"constraints": [ { "kind": "parameter_names", "names": ["region", "since"], "unmet_names": ["since"] } ]
+```
+
+`unmet_names` is absent when every name is met, and also when the set was not read: a set node that is
+`missing` (absent, in another workspace, or otherwise not visible) never carries it, so the payload says
+nothing more about a set you cannot read. It is never `[]` and never `null`. It is shown for a `DISCARDED` set
+too. It is a fact about the edge, not a refusal: it never changes `complete`, `acyclic` or `diagnostics`.
+It describes the set as read for this request, so an open draft edited meanwhile is reflected on the next
+request. A save already refuses a binding the pinned set lacks; an unmet name appears when the pinned set's
+open draft is edited afterwards. Releasing such a dashboard is still refused, at that edge, as before.
+
+| Case | Answer |
+|---|---|
+| Incompatible selector shape, native grammar refused, non-UUID `id`, bad or out-of-range `version`, a value over 200 characters or not UTF-8 | `400 dependencies.request.invalid` with `details.field` and `details.reason` |
+| Unauthenticated, or a key of any kind | the platform's existing 401, or `403 endpoint.key_kind_refused` |
+| Root missing, in another workspace, ungranted, or not admitted by the promoter's lens | that family's existing not-found code and 404, identical for missing and hidden roots |
+| A traversal limit (depth, nodes, edges, diagnostics, payload budget) reached | `200` with `complete: false`, `acyclic: null` and a `LIMIT` diagnostic naming the limit. Over the payload budget (`max-wire-bytes`) the tree is reduced, reading nothing more: the roots and the longest prefix of its nodes (in node order) that fits, the edges between kept nodes and the diagnostics naming only kept nodes and edges, ids unchanged, then one `LIMIT` naming `wire_bytes` |
+| Unsupported nodes inside the closure | `200` with an `UNSUPPORTED_FAMILY` diagnostic and `complete: false` |
+| A DISCARDED version in the closure, the root included | `200` with a `DISCARDED` diagnostic on its node; its own dependencies are not expanded, so `complete: false` and `acyclic: null` |
+| The metadata walk exceeds `metadata-timeout-seconds`, a statement exceeds `statement-timeout-seconds`, or a provider read fails | `503 dependencies.metadata.unavailable`, `Retry-After: 5`, no partial tree; logged once at WARN without a stack |
+| The projected payload is still over `max-wire-bytes` after the tree was reduced to its roots | `503 dependencies.response.too_large`, no partial tree; logged at ERROR with the stack |
+| Any other failure | the platform's existing generic 500 envelope |
+
+The bounds are the `datapipelines.release.dependencies.*` keys
+([Configuration](configuration.md)), the same ones the release planner reads. The walk reads in one
+read-only READ COMMITTED transaction. Every provider statement is bounded by the lesser of
+`statement-timeout-seconds` and the time left on the one `metadata-timeout-seconds` deadline.
+
+Every case above that the routes produce is pinned by an enveloped golden answer, one file per case, in
+`modules/web/src/test/resources/dependencies/goldens/`. Two rows have none: unsupported nodes (every production
+family is readable, so no route reaches one; the dependency contract's own fixture pins that payload) and the generic
+500 (the platform's handler, pinned where it is defined).
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v2.121 | #463 read-only execution at the connection — renumbered at final sync after dependency-graph | **§19.2:** one sentence — every serve runs each DQL datasource statement of the pinned version and its children in the per-lease read-only mode; the database refuses a write on the `DATABASE` dialects of the DAG Executor §8.2 table, the rule and a SELECT-only user stay the guard elsewhere. Additive. |
+| 2026-11-12 | v2.120 | #876 the bare release alias is refused | **Deliberate break, decided by the release-dependencies record §25.4 D15** ("when the new dialog posts tree_hash, flip"): a bare `release_pinned_templates=true` (§5.10 pipelines, §21 parameter sets, §22 visualizations) or `release_pinned_visualizations=true` (§23 dashboards) without a plan body is `428 <family>.release.plan_required` and nothing flips; a caller releasing dependencies sends the plan body (`tree_hash`, `include_dependencies`). A release with neither is unchanged. No route, permission or response field changed. |
+| 2026-11-12 | v2.119 | #902 API enabled on the tree node | **§25:** an `api_endpoint` node now carries `operational: { enabled }` — the API's `is_enabled` — as §25's grammar already promised; it was `null` on every walk before. Shown, never hashed: the body hash and the tree fingerprint are unchanged, and a node that did not resolve still carries `null`. No route, field, permission or `schema_version` change. |
+| 2026-11-12 | v2.118 | #892 unmet parameter names | **§25, additive:** a dashboard's `parameter_names` edge constraint gains the optional `unmet_names` — the bound names the reached set version does not declare, a subset of `names` in its order. It is absent when every name is met and when the set is `missing`, never `[]` or `null`, and it changes no other field. `schema_version` stays `1`. |
+| 2026-11-11 | v2.117 | #875 dependency trees (G4) | **New §25 Dependency trees, additive:** the eight session-only routes `GET /api/v1/dependencies/<family>`, each with its family's READ permission, return the bounded dependency closure of one root (`name` + `version`, `id` for a schedule, `name` alone for a datasource) as the frozen dependency-graph wire contract. Refusals are catalogued in pipeline-contract §13.26; a hidden or missing root answers its family's own not-found. No key kind is admitted. A DISCARDED version is a terminal node (`complete: false`, `acyclic: null`). A tree over `max-wire-bytes` is reduced to the longest prefix of its nodes that fits and answers `200` with a `wire_bytes` `LIMIT`; only a tree whose roots alone do not fit answers `503 dependencies.response.too_large`. Each case the routes produce is pinned by an enveloped golden. |
+| 2026-11-11 | v2.116 | #894 endpoint-root audit provenance — a deliberate break | **§5.10** (the audit paragraph): a template row an API release cascades carries `cascade_from_api_endpoint_id` and the API's `cascade_from_version`, and no longer `cascade_from_pipeline_id` holding the API's id (owner ruling 2026-11-11, an explicit exception to the frozen release-dependencies record §11). A pipeline release's rows are unchanged; rows written before #894 are not rewritten. No route, field, permission or role changed. |
+| 2026-11-11 | v2.115 | #896 review F2 | **§9.1:** distinguish `global: true` (super-admin-only) from `global: false` (accepted on create below super admin); the update rule in §9.4 still requires super admin for either value. No wire or authorization change. |
+| 2026-11-11 | v2.114 | #896 review F1 | **§9.3:** a by-name read is not-found when the datasource is not granted to the active workspace, whoever owns it. Ownership by another workspace alone does not make a granted datasource invisible. |
+| 2026-11-11 | v2.113 | #896 docs: datasource ownership and grants as they are since V23 | **Text only, no wire change.** §9.1's binding paragraph says what `global`/`workspace` set since V23 — the OWNER (`global: true` = an instance datasource, owned by no workspace) — and that visibility is the grant (a workspace-owned registration is granted to its owner; an instance datasource to nobody until a super admin grants it); its refusal sentence names super admin and `global: true` with `workspace`. §9.2's listing is the datasources GRANTED to the active workspace, not "bound plus all global ones"; §9.3's `workspace` field is the owning workspace's name; §9.4/§9.5's D8 gates say an INSTANCE datasource's mutation (a `readonly` flip and a delete included) needs super admin. |
+| 2026-11-11 | v2.112 | #786 U2 schedules pin exact versions — a deliberate break | **§20.1, §20.2, §20.8:** the pipeline payload is schema 2, `{"pipeline", "version": <int ≥ 1>}`: a schedule runs one exact version; `"version": "current"` (schema 1) is refused `400 schedule.validation.payload_invalid` (`details.reason=version_current_refused`), `latest` by name, a missing or non-integer version too; the pin must exist (`target_not_found`) and be eligible under the posture (`target_not_released`). `payload_schema_version` reads `2`; a leftover schema-1 row is refused `400 schedule.validation.payload_schema_unsupported` on update, unblock and Run now. The upgrade converts every live schedule in place (only the version selector changes). A pin-changing update joins the create's writer guard. |
+| 2026-11-11 | v2.111 | #786 U1 R1 (API versions — guarded entity deletion) | **§19.5:** `DELETE /api/v1/endpoints` is the guarded entity deletion — an API holding a RELEASED (current or not) or DISCARDED version is refused `409 endpoint.version.last_release` with nothing removed (entity, pointer, versions, bindings); a draft-only API and a legacy row are deleted as before. MCP `endpoints_delete` answers the same ([MCP §6.2.26](mcp-server.md#6226-endpoints_delete)). A new refusal on an existing route; no route, field or permission change. |
+| 2026-11-10 | v2.110 | #841 metadata writer protocol (G0) — renumbered at merge after #860's v2.109 | **§9, §19, §20.2, §20.5:** datasource writes (register, update, credential, delete, grant, revoke), endpoint publish/unpublish, a schedule create and a target-changing schedule edit run under the metadata writer guard (release-dependencies design §4.4); an exhausted wait is `409 datasource.write.busy` / `endpoint.write.busy` / `schedule.write.busy` (`details.lock_wait_seconds`, nothing written). A schedule create validates its target under the guard. Additive: new refusals on existing routes, no route or field change. |
+| 2026-11-08 | v2.109 | 860 (#860) | Additive. **§22.2:** a visualization's `POST` and `PUT` answer `warnings` beside the full JSON, always present (`[]` on a clean save, else `{code, path, library}` per partly drawn chart field). **§23.3:** each `chart` occurrence of `GET /{id}/runtime/config` carries `columns`, `{field: LogicalType}` of its encoded fields; `renderer.bundle` is `"2d"` for every v1 kind. |
 | 2026-11-03 | v2.108 | #782 logout CSRF | **§16.4:** the root-level browser logout has a narrow same-origin Fetch Metadata exemption; other callers retain double-submit validation. A refused browser navigation gets the 403 page and preserves its session; machine callers keep JSON. |
 | 2026-11-01 | v2.107 | 758 (#758) | **§24:** fixes the tree search whitespace alphabet on both client and server, after the shared raw-term bound; names the code points and empty-term browse behavior. |
 | 2026-10-27 | v2.106 | 464 (#464) | §24: the tree routes' refusals carry catalogued codes ([pipeline-contract §13.24](pipeline-contract.md#1324-navigation-trees)) instead of the stand-in `pipeline.execution.aborted`: `400 navigation.request.invalid`, `503 navigation.view.unavailable` (now with `Retry-After: 5`, no `details`) and `503 navigation.metadata.too_large`. Statuses are unchanged. |

@@ -1,16 +1,22 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
+import io.restassured.http.ContentType
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.TestMethodOrder
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.boot.WebApplicationType
 import org.springframework.boot.builder.SpringApplicationBuilder
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.context.ConfigurableApplicationContext
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
@@ -40,10 +46,17 @@ import kotlin.io.path.writeText
  * SQL between boots — a non-demo endpoint the seeder did not create, so the demo key's
  * binding refusal can be answered by a path that genuinely EXISTS (an unknown path would 404
  * for anyone, proving nothing).
+ *
+ * #889 — retirement is the API lifecycle's (#786 R1: an API holding release history is never deleted). The examples
+ * carry TWO pipelines so a manifest that drops one exercises retirement beside a path that keeps serving; an
+ * independent `endpoint` key bound to both demo paths (minted through the real issuance service, not managed by the
+ * seeder) proves the retirement itself stops serving, not merely the managed key's revocation. Retirement keeps the
+ * row with every version DISCARDED; the assertions read that contract and the real requests' refusals.
  */
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@ExtendWith(OutputCaptureExtension::class)
 class DemoApiKeyE2eTest {
     private var context: ConfigurableApplicationContext? = null
 
@@ -187,21 +200,72 @@ class DemoApiKeyE2eTest {
             .statusCode(200)
     }
 
-    // ------------------------------------------------------------------ boot 4: the kill switch
+    // ------------------------------------------------------------------ boot 4: a manifest drops a released API (#889)
 
     @Test
     @Order(6)
-    fun `a blank key setting is the kill switch - the public API is retracted`() {
+    fun `a manifest that drops a released demo API retires it through the version verbs - the row stays, nothing serves`(
+        output: CapturedOutput,
+    ) {
+        independentKey = mintIndependentKey()
+        // Before: the independent key is valid and the soon-dropped API serves it.
+        get(SECOND_PATH, independentKey).statusCode(200)
+
+        boot(key = KEY_TWO, examples = examplesWithoutSecond)
+
+        withClue("the dropped API keeps its row, holds no servable version, and points at none") {
+            rowCount(SECOND_PATH) shouldBe 1L
+            servableVersions(SECOND_PATH) shouldBe 0L
+            currentVersion(SECOND_PATH) shouldBe null
+        }
+        // The real requests: the independent key and the managed one are both refused — the API itself is retracted.
+        get(SECOND_PATH, independentKey).statusCode(503).body("error.code", equalTo(PIPELINE_NOT_RELEASED))
+        get(SECOND_PATH, KEY_TWO).statusCode(503)
+        // The API the manifest still names is untouched.
+        get(DEMO_PATH, KEY_TWO).statusCode(200)
+        withClue("one INFO retirement line for the dropped path, no retirement failure") {
+            output.out.lines().count { it.contains("event=demo.endpoint_retired path=$SECOND_PATH") } shouldBe 1
+            output.out.contains("event=demo.endpoint_retire_failed") shouldBe false
+        }
+    }
+
+    @Test
+    @Order(7)
+    fun `the next boot leaves an already-retired API alone - no ERROR line and no write`(output: CapturedOutput) {
+        val before = versionRows(SECOND_PATH) to entityUpdatedAt(SECOND_PATH)
+
+        boot(key = KEY_TWO, examples = examplesWithoutSecond)
+
+        (versionRows(SECOND_PATH) to entityUpdatedAt(SECOND_PATH)) shouldBe before
+        withClue("the retired path is not mentioned by the seeder, and nothing failed") {
+            output.out.lines().count { it.contains("event=demo.endpoint_") && it.contains(SECOND_PATH) } shouldBe 0
+            output.out.contains("event=demo.endpoint_retire_failed") shouldBe false
+        }
+        get(SECOND_PATH, independentKey).statusCode(503)
+    }
+
+    // ------------------------------------------------------------------ boot 6: the kill switch
+
+    @Test
+    @Order(8)
+    fun `a blank key setting is the kill switch - the public API is retracted`(output: CapturedOutput) {
         boot(key = "")
 
         scalar<Long>(
             "SELECT COUNT(*) FROM api_keys WHERE kind = 'endpoint'" +
                 " AND name = 'demo-public-key' AND is_revoked = FALSE",
         ) shouldBe 0L
-        scalar<Long>(
-            "SELECT COUNT(*) FROM published_endpoints pe JOIN workspaces w ON w.id = pe.workspace_id" +
-                " WHERE w.name = 'demo' AND pe.path_pattern = '$DEMO_PATH'",
-        ) shouldBe 0L
+        // #889 — reconciled with the history-retaining lifecycle (#786 R1): a released demo API is never deleted, so
+        // its row stays; retracted means no servable version and no current pointer. Was: the row count is 0.
+        withClue("the released demo API is retired, not deleted") {
+            rowCount(DEMO_PATH) shouldBe 1L
+            servableVersions(DEMO_PATH) shouldBe 0L
+            currentVersion(DEMO_PATH) shouldBe null
+        }
+        withClue("one INFO retirement line, no retirement failure") {
+            output.out.lines().count { it.contains("event=demo.endpoint_retired path=$DEMO_PATH") } shouldBe 1
+            output.out.contains("event=demo.endpoint_retire_failed") shouldBe false
+        }
 
         given()
             .port(port)
@@ -216,6 +280,44 @@ class DemoApiKeyE2eTest {
             .get("/api$DEMO_PATH")
             .then()
             .statusCode(401)
+        // The retraction is the API's own, not only the managed key's: a valid key still bound to the path is refused.
+        get(DEMO_PATH, independentKey).statusCode(503).body("error.code", equalTo(PIPELINE_NOT_RELEASED))
+    }
+
+    @Test
+    @Order(9)
+    fun `the guarded deletion still refuses the retired API for a workspace admin - the seeder bypassed nothing`() {
+        given()
+            .port(port)
+            .asSession(workspaceAdminSession())
+            .queryParam("path", DEMO_PATH)
+            .`when`()
+            .delete("/api/v1/endpoints")
+            .then()
+            .statusCode(409)
+            .body("error.code", equalTo(VERSION_LAST_RELEASE))
+
+        rowCount(DEMO_PATH) shouldBe 1L
+    }
+
+    // ------------------------------------------------------------------ boot 7: the key set again
+
+    @Test
+    @Order(10)
+    fun `a key set again revives both retired APIs through a new released version`() {
+        boot(key = KEY_FOUR)
+
+        listOf(DEMO_PATH, SECOND_PATH).forEach { path ->
+            withClue(path) {
+                rowCount(path) shouldBe 1L
+                scalar<Long>(
+                    "SELECT COUNT(*) FROM published_endpoint_versions v JOIN published_endpoints e ON e.id = v.endpoint_id" +
+                        " WHERE e.path_pattern = '$path' AND v.status = 'RELEASED'",
+                ) shouldBe 1L
+                currentVersion(path) shouldBe 2
+                get(path, KEY_FOUR).statusCode(200)
+            }
+        }
     }
 
     // ------------------------------------------------------------------ helpers
@@ -247,9 +349,80 @@ class DemoApiKeyE2eTest {
         )
     }
 
+    /** A real request to the demo path under [key]. */
+    private fun get(
+        path: String,
+        key: String,
+    ) = given()
+        .port(port)
+        .header(API_KEY_HEADER, key)
+        .`when`()
+        .get("/api$path")
+        .then()
+
+    private fun rowCount(path: String): Long =
+        scalar(
+            "SELECT COUNT(*) FROM published_endpoints pe JOIN workspaces w ON w.id = pe.workspace_id" +
+                " WHERE w.name = 'demo' AND pe.path_pattern = '$path'",
+        )
+
+    /** The versions that could serve: RELEASED always, a DRAFT in the development posture this suite runs. */
+    private fun servableVersions(path: String): Long =
+        scalar(
+            "SELECT COUNT(*) FROM published_endpoint_versions v JOIN published_endpoints e ON e.id = v.endpoint_id" +
+                " WHERE e.path_pattern = '$path' AND v.status IN ('RELEASED', 'DRAFT')",
+        )
+
+    private fun currentVersion(path: String): Int? = scalar("SELECT current_version FROM published_endpoints WHERE path_pattern = '$path'")
+
+    /** Every version row of the API at [path], whole, in version order — what a write would change. */
+    private fun versionRows(path: String): List<Map<String, Any?>> =
+        rows(
+            "SELECT v.* FROM published_endpoint_versions v JOIN published_endpoints e ON e.id = v.endpoint_id" +
+                " WHERE e.path_pattern = '$path' ORDER BY v.version",
+        )
+
+    private fun entityUpdatedAt(path: String): Any? = scalar("SELECT updated_at FROM published_endpoints WHERE path_pattern = '$path'")
+
+    /**
+     * A member who is a workspace admin of `demo` and nothing more (not a super admin), seeded once by SQL, and a session
+     * for them signed with the suite's own secret — the REST surface's caller, the way a person reaches it.
+     */
+    private fun workspaceAdminSession(): String {
+        connection().use { c ->
+            c.createStatement().use { s ->
+                s.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)" +
+                        " VALUES ('$WS_ADMIN_USER', '$WS_ADMIN_EMAIL', 'Demo API E2E workspace admin', 'test', 'demo-api-e2e-ws-admin'," +
+                        " TRUE, FALSE) ON CONFLICT (id) DO NOTHING",
+                )
+                s.execute(
+                    "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$demoId', '$WS_ADMIN_USER', 'workspace_admin')" +
+                        " ON CONFLICT DO NOTHING",
+                )
+            }
+        }
+        return E2eSession.jwt(jwtSecret, WS_ADMIN_USER, WS_ADMIN_EMAIL, workspace = "demo")
+    }
+
+    /** An `endpoint` key the seeder does not manage, bound to both demo paths, minted over the real REST issuance route. */
+    private fun mintIndependentKey(): String =
+        given()
+            .port(port)
+            .asSession(workspaceAdminSession())
+            .contentType(ContentType.JSON)
+            .body("""{"name": "independent-e2e-key", "kind": "endpoint", "bindings": ["$DEMO_PATH", "$SECOND_PATH"]}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(201)
+            .extract()
+            .jsonPath()
+            .getString("data.key")
+
     /** The non-demo endpoint row, created by nobody the seeder manages. */
     private fun insertForeignEndpoint() {
-        val pipelineId = scalar<UUID>("SELECT id FROM pipelines WHERE workspace_id = '$demoId'")
+        val pipelineId = scalar<UUID>("SELECT id FROM pipelines WHERE workspace_id = '$demoId' AND name = '$EXAMPLE_PIPELINE'")
         val creatorId = scalar<UUID>("SELECT id FROM users WHERE email = '$ADMIN_EMAIL'")
         connection().use { c ->
             c.createStatement().use { s ->
@@ -280,11 +453,16 @@ class DemoApiKeyE2eTest {
     @Suppress("UNCHECKED_CAST")
     private fun <T> scalar(sql: String): T = rows(sql).single().values.first() as T
 
-    private fun boot(key: String) {
+    private fun boot(
+        key: String,
+        examples: java.nio.file.Path = examplesFile,
+    ) {
         context?.close()
         val args =
-            (baseProperties() + mapOf("datapipelines.bootstrap.demo-api-key" to key))
-                .map { (k, v) -> "--$k=$v" }
+            (
+                baseProperties() +
+                    mapOf("datapipelines.bootstrap.demo-api-key" to key, "datapipelines.bootstrap.examples-file" to examples.toString())
+            ).map { (k, v) -> "--$k=$v" }
                 .toTypedArray()
         val newContext =
             SpringApplicationBuilder(DatapipelinesApplication::class.java)
@@ -301,17 +479,29 @@ class DemoApiKeyE2eTest {
 
     private var demoId: UUID = UUID.fromString("de000000-0000-0000-0000-000000000001")
 
+    /** #889 — the independent bound key's plaintext, minted in the first retirement case. */
+    private var independentKey: String = ""
+
     companion object {
         private const val API_KEY_HEADER = "DP-API-Key"
         private const val DEMO_PATH = "/demo/test/demo-api-e2e-example"
+        private const val SECOND_PATH = "/demo/test/demo-api-e2e-second"
         private const val FOREIGN_PATH = "/test/v1/bootstrap-e2e-example"
         private const val KEY_ONE = "dpk_E2EKEYONEAAA.ONEKEYISPUBLICBYDESIGNDEMOONLYE2E222222222222222"
         private const val KEY_TWO = "dpk_E2EKEYTWOBBA.TWOKEYISPUBLICBYDESIGNDEMOONLYE2E222222222222222"
+        private const val KEY_FOUR = "dpk_E2EKEYFOURDD.FOURKEYISPUBLICBYDESIGNDEMOONLYE2E22222222222222"
 
         private const val ADMIN_EMAIL = "demo-api-e2e-admin@example.com"
+        private const val WS_ADMIN_EMAIL = "demo-api-e2e-ws-admin@example.com"
+        private const val WS_ADMIN_USER = "de000000-0000-0000-0000-0000000088a9"
+
+        /** The catalogued codes the real responses carry (pipeline-contract §13), as literals — this suite is black-box. */
+        private const val PIPELINE_NOT_RELEASED = "endpoint.pipeline_not_released"
+        private const val VERSION_LAST_RELEASE = "endpoint.version.last_release"
         private const val BOOT_RO = "demo-api-e2e-readonly"
         private const val EXAMPLE_TEMPLATE = "test/demo_api_e2e_example.sql"
         private const val EXAMPLE_PIPELINE = "test/demo_api_e2e_example"
+        private const val SECOND_PIPELINE = "test/demo_api_e2e_second"
 
         private val random = SecureRandom()
         private val jwtSecret = randomSecret()
@@ -333,44 +523,51 @@ class DemoApiKeyE2eTest {
                     global: true
                 """.trimIndent(),
             )
-        private val examplesFile: java.nio.file.Path =
-            writeFile(
-                "examples.json",
-                """
+
+        /** One seeded pipeline as the examples file states it; both read the same seeded datasource and template. */
+        private fun pipelineJson(name: String): String =
+            """
+            {
+              "schema_version": 1,
+              "name": "$name",
+              "display_name": "Demo API E2E example",
+              "description": "Reads the seeded read-only datasource",
+              "parameters": {},
+              "nodes": [
                 {
-                  "templates": [
-                    {
-                      "id": "$EXAMPLE_TEMPLATE",
-                      "dialect": "H2",
-                      "display_name": "Demo API E2E example",
-                      "description": "Seeded into the demo workspace",
-                      "imports": [],
-                      "body": "SELECT 1 AS n"
-                    }
-                  ],
-                  "pipelines": [
-                    {
-                      "schema_version": 1,
-                      "name": "$EXAMPLE_PIPELINE",
-                      "display_name": "Demo API E2E example",
-                      "description": "Reads the seeded read-only datasource",
-                      "parameters": {},
-                      "nodes": [
-                        {
-                          "id": "read_sample",
-                          "description": "DQL read from the seeded read-only datasource",
-                          "type": "DQL",
-                          "source": "$BOOT_RO",
-                          "template": {"id": "$EXAMPLE_TEMPLATE", "version": 1},
-                          "output": {"target": "caller"},
-                          "depends_on": []
-                        }
-                      ]
-                    }
-                  ]
+                  "id": "read_sample",
+                  "description": "DQL read from the seeded read-only datasource",
+                  "type": "DQL",
+                  "source": "$BOOT_RO",
+                  "template": {"id": "$EXAMPLE_TEMPLATE", "version": 1},
+                  "output": {"target": "caller"},
+                  "depends_on": []
                 }
-                """.trimIndent(),
-            )
+              ]
+            }
+            """.trimIndent()
+
+        private fun examplesJson(vararg pipelines: String): String =
+            """
+            {
+              "templates": [
+                {
+                  "id": "$EXAMPLE_TEMPLATE",
+                  "dialect": "H2",
+                  "display_name": "Demo API E2E example",
+                  "description": "Seeded into the demo workspace",
+                  "imports": [],
+                  "body": "SELECT 1 AS n"
+                }
+              ],
+              "pipelines": [${pipelines.joinToString(",") { pipelineJson(it) }}]
+            }
+            """.trimIndent()
+
+        private val examplesFile: java.nio.file.Path = writeFile("examples.json", examplesJson(EXAMPLE_PIPELINE, SECOND_PIPELINE))
+
+        /** #889 — the same examples with the second pipeline dropped: the manifest-removal trigger. */
+        private val examplesWithoutSecond: java.nio.file.Path = writeFile("examples-without-second.json", examplesJson(EXAMPLE_PIPELINE))
 
         private fun writeFile(
             name: String,
@@ -411,7 +608,6 @@ class DemoApiKeyE2eTest {
                 "datapipelines.auth.base-url" to "http://localhost:8080",
                 "datapipelines.auth.bootstrap-admin-email" to ADMIN_EMAIL,
                 "datapipelines.bootstrap.datasources-file" to datasourcesFile.toString(),
-                "datapipelines.bootstrap.examples-file" to examplesFile.toString(),
                 "datapipelines.endpoints.key-request-budget.window-seconds" to "3600",
                 "datapipelines.endpoints.key-request-budget.max-requests" to "3",
             )

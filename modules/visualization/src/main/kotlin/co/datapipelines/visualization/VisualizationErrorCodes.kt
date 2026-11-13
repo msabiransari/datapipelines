@@ -109,6 +109,9 @@ object VisualizationErrorCodes {
     /** §13.22 — 409: the promotion peer lacks the full-closure envelope capability. */
     const val RELEASE_BUNDLE_UNSUPPORTED = "visualization.release.bundle_unsupported"
 
+    /** §13.22 — 503: the release-planning metadata deadline expired (#786, record §25.4 erratum (6)); `Retry-After: 5`, no partial plan. */
+    const val RELEASE_METADATA_UNAVAILABLE = "visualization.release.metadata_unavailable"
+
     // ---- import, authoring ------------------------------------------------------------------------------
 
     /** 409 — the exported id belongs to another visualization on this server (C29: never re-issued). */

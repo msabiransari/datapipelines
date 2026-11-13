@@ -20,7 +20,7 @@ class VisualizationReleaseCascadeRollbackE2eTest {
     private var port: Int = 0
 
     @Test
-    fun `stale A with GREEN B rolls back the eligible template cascade - matching B commits both`() {
+    fun `stale A with GREEN B is refused at preparation before any flip - matching B commits both`() {
         VisualizationReleaseCascadeFixtures(port, JWT_SECRET).use { fixture ->
             fixture.prepare()
             val templateBefore = fixture.templateState()
@@ -28,13 +28,13 @@ class VisualizationReleaseCascadeRollbackE2eTest {
             templateBefore[0] shouldBe "DRAFT"
             templateBefore[2] shouldBe null
             visualizationBefore shouldBe listOf("DRAFT", fixture.hash, null, "1")
-            val refused = fixture.release(fixture.staleHash, consent = true)
+            val refused = fixture.release(fixture.staleHash, plan = true)
             checkStatus(refused, 409)
             refused.jsonPath().getString("error.code") shouldBe "visualization.version.conflict"
             val templateAfter = fixture.templateState()
             val visualizationAfter = fixture.visualizationState()
             println("event=cascade453.stale template=$templateAfter visualization=$visualizationAfter")
-            withClue("the production outer transaction must roll back the already executed template release") {
+            withClue("the stale expected hash is refused in prepare, before the release transaction: no template flip ran") {
                 templateAfter shouldBe templateBefore
             }
             visualizationAfter shouldBe visualizationBefore
@@ -43,7 +43,7 @@ class VisualizationReleaseCascadeRollbackE2eTest {
     }
 
     @Test
-    fun `matching B with GREEN evidence and consent independently commits both releases and pointers`() {
+    fun `matching B with GREEN evidence and a plan independently commits both releases and pointers`() {
         VisualizationReleaseCascadeFixtures(port, JWT_SECRET).use { fixture ->
             fixture.prepare()
             committed(fixture, fixture.templateState(), fixture.visualizationState())
@@ -51,17 +51,35 @@ class VisualizationReleaseCascadeRollbackE2eTest {
     }
 
     @Test
-    fun `matching B without consent retains dependency refusal and commits neither release`() {
+    fun `matching B without a plan retains dependency refusal and commits neither release`() {
         VisualizationReleaseCascadeFixtures(port, JWT_SECRET).use { fixture ->
             fixture.prepare()
             val templateBefore = fixture.templateState()
             val visualizationBefore = fixture.visualizationState()
-            val refused = fixture.release(fixture.hash, consent = false)
+            val refused = fixture.release(fixture.hash, plan = false)
             checkStatus(refused, 409)
             refused.jsonPath().getString("error.code") shouldBe "visualization.release.dependency_not_released"
             fixture.templateState() shouldBe templateBefore
             fixture.visualizationState() shouldBe visualizationBefore
-            println("event=cascade453.no_consent template=$templateBefore visualization=$visualizationBefore")
+            println("event=cascade453.no_plan template=$templateBefore visualization=$visualizationBefore")
+        }
+    }
+
+    @Test
+    fun `the legacy flag without a plan is refused plan_required on purpose and commits neither release`() {
+        VisualizationReleaseCascadeFixtures(port, JWT_SECRET).use { fixture ->
+            fixture.prepare()
+            val templateBefore = fixture.templateState()
+            val visualizationBefore = fixture.visualizationState()
+            val refused = fixture.releaseWithLegacyFlag(fixture.hash)
+            checkStatus(refused, 428)
+            refused.jsonPath().getString("error.code") shouldBe "visualization.release.plan_required"
+            withClue("read at the tables: the template and the visualization are still DRAFT, unchanged") {
+                templateBefore[0] shouldBe "DRAFT"
+                fixture.templateState() shouldBe templateBefore
+                fixture.visualizationState() shouldBe visualizationBefore
+            }
+            println("event=cascade453.legacy_flag template=$templateBefore visualization=$visualizationBefore")
         }
     }
 
@@ -70,7 +88,7 @@ class VisualizationReleaseCascadeRollbackE2eTest {
         template: List<String?>,
         visualization: List<String?>,
     ) {
-        val released = fixture.release(fixture.hash, consent = true)
+        val released = fixture.release(fixture.hash, plan = true)
         checkStatus(released, 200)
         val pins = released.jsonPath().getList<String>("data.templates_released.template_id")
         pins shouldBe listOf(fixture.template)

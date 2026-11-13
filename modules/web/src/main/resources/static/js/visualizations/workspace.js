@@ -22,7 +22,7 @@
    * one-bundle rule). The pure half (caseIndexFrom) is exported for `node --test`.
    */
 
-  var TABS = ["preview", "overview", "evidence", "used-by", "versions"];
+  var TABS = ["preview", "overview", "evidence", "used-by", "dependencies", "versions"];
   var DEFAULT_TAB = "preview";
 
   var logic = {

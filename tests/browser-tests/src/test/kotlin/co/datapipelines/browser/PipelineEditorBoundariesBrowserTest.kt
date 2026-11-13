@@ -293,6 +293,7 @@ class PipelineEditorBoundariesBrowserTest : BrowserSuite() {
                 name: args.name, displayName: 'Boundary source', dialect: 'POSTGRES',
                 jdbcUrl: args.url, credentialKind: 'password', username: args.user, password: args.password,
                 description: 'generate_series source for the 150 browser proof',
+                ...args.pool,
               });
               const res = await fetch('/partials/datasources', {
                 method: 'POST', credentials: 'same-origin',
@@ -305,6 +306,7 @@ class PipelineEditorBoundariesBrowserTest : BrowserSuite() {
                 "url" to SharedBrowserE2e.jdbcUrl.substringBefore("?"),
                 "user" to SharedBrowserE2e.username,
                 "password" to SharedBrowserE2e.password,
+                "pool" to SharedBrowserE2e.SOURCE_DATASOURCE_POOL_FIELDS,
             ),
         ) as List<String>
     }

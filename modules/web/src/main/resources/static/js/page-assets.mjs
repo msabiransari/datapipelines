@@ -13,6 +13,7 @@ const mounted = new WeakMap(); // catalog node -> its one mount attempt
 /** The global each singleton provides: a source whose global already exists never executes again. */
 const PROVIDED = {
   "/js/datapipelines-dashboard.js": "DatapipelinesDashboard",
+  "/js/datapipelines-dashboard-chart.js": "DatapipelinesDashboardChart",
   "/js/datapipelines-dashboard-plotly.js": "DatapipelinesDashboardPlotly",
   "/js/datapipelines-dashboard-table.js": "DatapipelinesDashboardTable",
   "/js/datapipelines-dashboard-kpi.js": "DatapipelinesDashboardKpi",
@@ -36,6 +37,8 @@ const MOUNTS = {
   "/js/template-editor/workspace.js": "TemplateWorkspaceMount",
   "/js/pipeline-editor/runtime.js": "PipelineWorkspaceMount",
   "/js/parameter-workspace/runtime.js": "ParameterWorkspaceMount",
+  // #876 G6: every artifact workspace's Dependencies pane, mounted from the same catalog as its workspace.
+  "/js/dependencies/mount.js": "DependenciesMount",
 };
 
 /** Validate first-party asset paths; user data never selects a script URL. */

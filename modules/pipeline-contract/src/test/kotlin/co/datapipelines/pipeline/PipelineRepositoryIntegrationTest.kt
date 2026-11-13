@@ -1,12 +1,17 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -515,9 +520,10 @@ class PipelineRepositoryIntegrationTest {
 
         repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "pg-prod").map { it.pipelineName } shouldContainExactly
             listOf("reader", "writer")
-        // `tempdb` is the reserved literal, not a datasource — it can never match one by name.
-        repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "tempdb").map { it.pipelineName } shouldContainExactly
-            listOf("writer")
+        // `tempdb` is the reserved literal, not a datasource — it can never match one by name. #877: the scan is the
+        // inverse arm, which follows the outgoing extraction's rule (`DatasourceEdges.ofPipeline` never emits `tempdb`),
+        // so the reserved literal is no reference in either direction (it was a textual match before).
+        repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "tempdb") shouldContainExactly emptyList()
         repository.findAnyVersionDatasourceRefs(WORKSPACE_ID, "never-used") shouldContainExactly emptyList()
     }
 
@@ -1709,6 +1715,29 @@ class PipelineRepositoryIntegrationTest {
         val anyPins = repository.findAnyVersionTemplatePins(WORKSPACE_ID, "test/t.sql")
         anyPins.map { it.pipelineVersion to it.versionStatus to it.pinnedVersion } shouldContainExactly
             listOf(2 to PipelineVersionStatus.RELEASED to 2, 1 to PipelineVersionStatus.RELEASED to 1)
+    }
+
+    @Test
+    fun `the inverse template-pin pages walk a repeated pin by keyset - limit + 1 rows, every occurrence once`() {
+        // #877 §B: p1 pins t@1 from two nodes of ONE version, p2 from one — three occurrences, the page unit.
+        val pin = TemplateRef("test/t.sql", 1)
+        val twice =
+            Fixtures.pipeline(
+                name = "p1",
+                nodes = listOf(Fixtures.node(id = "fetch", template = pin), Fixtures.node(id = "load", template = pin)),
+            )
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(twice, owner), serializer.write(twice), owner)
+        val once = Fixtures.pipeline(name = "p2", nodes = listOf(Fixtures.node(id = "fetch", template = pin)))
+        repository.createReleased(WORKSPACE_ID, NewPipeline.from(once, owner), serializer.write(once), owner)
+        val request = InverseRequest(WORKSPACE_ID, "test/t.sql", 1, InverseScope.LIVE, null, 1)
+
+        repository.findTemplatePinOccurrences(request) shouldHaveSize 2
+        val paged = InverseSql.exhaust(1) { after -> repository.findTemplatePinOccurrences(request.copy(after = after)) }
+        val whole = repository.findTemplatePinOccurrences(request.copy(limit = InverseSql.EXHAUST_PAGE))
+        paged shouldContainExactly whole
+        paged.map { it.dependentName to it.sourcePath } shouldContainExactlyInAnyOrder
+            listOf("p1" to "nodes[0].template", "p1" to "nodes[1].template", "p2" to "nodes[0].template")
+        paged.filter { it.dependentName == "p1" }.map { it.elementId } shouldContainExactly listOf("fetch", "load")
     }
 
     @Test

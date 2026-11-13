@@ -76,6 +76,7 @@ class PublicPathsTest {
                 "/css/**",
                 "/js/**",
                 "/favicon.ico",
+                "/schemas/**",
                 "/error",
                 // 353: the two capability-authenticated routes (the preview page, the screenshot upload).
                 "/visualizations/*/preview",
@@ -157,9 +158,10 @@ class PublicPathsTest {
          * 119 added the pricing page (37 -> 38) and the semantic-layer page (38 -> 39);
          * 145 the two hub pages (39 -> 41); 173 the llms.txt pair (41 -> 43); 353 the visualization test
          * preview page and the screenshot upload, the first capability-authenticated routes (43 -> 45);
-         * 699 the three capability pages, exact paths (45 -> 48).
+         * 699 the three capability pages, exact paths (45 -> 48); 860 the chart schemas, the last static pattern
+         * (48 -> 49).
          * (Kotlin block comments nest, so the glob's spelling is written without its star.)
          */
-        const val DOCUMENTED_ROWS = 48
+        const val DOCUMENTED_ROWS = 49
     }
 }

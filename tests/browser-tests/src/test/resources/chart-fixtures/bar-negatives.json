@@ -1,0 +1,212 @@
+{
+ "variant": "negatives",
+ "note": "stacked: positives up from zero, negatives down from zero",
+ "spec": {
+  "display_name": "Negatives",
+  "description": "Monthly amount, stacked by channel, in UTC months.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "month",
+      "type": "DATE"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "units",
+      "type": "INTEGER"
+     },
+     {
+      "name": "payload",
+      "type": "BINARY",
+      "nullable": true
+     },
+     {
+      "name": "segment",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "stack": "zero",
+     "format": "compact",
+     "axis": {
+      "grid": true
+     }
+    },
+    "color": {
+     "field": "channel",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Channel",
+     "legend": {
+      "orient": "bottom"
+     }
+    }
+   },
+   "title": {
+    "text": "Monthly amount by channel",
+    "subtitle": "Stacked"
+   }
+  }
+ },
+ "bindings": {
+  "region": [
+   "North",
+   "North",
+   "South",
+   "South",
+   "West",
+   "West"
+  ],
+  "channel": [
+   "Online",
+   "Retail",
+   "Online",
+   "Retail",
+   "Online",
+   "Retail"
+  ],
+  "amount": [
+   500.0,
+   -200.0,
+   -300.0,
+   -100.0,
+   200.0,
+   400.0
+  ]
+ },
+ "expect": {
+  "vertical": true,
+  "stack": "zero",
+  "categories": [
+   "North",
+   "South",
+   "West"
+  ],
+  "categories_full": [
+   "North",
+   "South",
+   "West"
+  ],
+  "series": [
+   "Online",
+   "Retail"
+  ],
+  "values": [
+   [
+    500.0,
+    -300.0,
+    200.0
+   ],
+   [
+    -200.0,
+    -100.0,
+    400.0
+   ]
+  ],
+  "exact": [
+   [
+    null,
+    null,
+    null
+   ],
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  "intervals": [
+   [
+    [
+     0,
+     500.0
+    ],
+    [
+     -300.0,
+     0
+    ],
+    [
+     0,
+     200.0
+    ]
+   ],
+   [
+    [
+     -200.0,
+     0
+    ],
+    [
+     -400.0,
+     -300.0
+    ],
+    [
+     200.0,
+     600.0
+    ]
+   ]
+  ],
+  "totals": [
+   {
+    "pos": 500.0,
+    "neg": -200.0
+   },
+   {
+    "pos": 0,
+    "neg": -400.0
+   },
+   {
+    "pos": 600.0,
+    "neg": 0
+   }
+  ],
+  "bars": 6,
+  "data_warnings": 0,
+  "degraded": {
+   "plotly": [],
+   "echarts": [
+    "color.title"
+   ],
+   "chartjs": [],
+   "apexcharts": [
+    "color.title"
+   ],
+   "vegalite": []
+  },
+  "hover": [],
+  "label_texts": []
+ }
+}

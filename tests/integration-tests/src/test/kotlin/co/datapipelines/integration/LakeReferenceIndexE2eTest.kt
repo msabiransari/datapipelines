@@ -87,6 +87,8 @@ class LakeReferenceIndexE2eTest {
         createTemplate(EXACT_TEMPLATE, "SELECT id FROM lk.events")
         createTemplate(BRANCHING_TEMPLATE, "<#if true>SELECT id FROM lk.events<#else>SELECT id FROM lk.retired</#if>")
         val (id, hash) = createPipeline(PIPELINE, listOf("read_exact" to EXACT_TEMPLATE, "read_branch" to BRANCHING_TEMPLATE))
+        releaseTemplate(EXACT_TEMPLATE)
+        releaseTemplate(BRANCHING_TEMPLATE)
         release(id, hash).first shouldBe 200
 
         val scan =
@@ -284,7 +286,18 @@ class LakeReferenceIndexE2eTest {
         return data.path("id").asText() to data.path("draft").path("body_hash").asText()
     }
 
-    /** Releases the pipeline's draft and its pinned template drafts (the cascade), one transaction. */
+    /** Releases the DRAFT template [id] v1 through its own route, at its stored hash (the legacy cascade flag is gone, #876 r3). */
+    private fun releaseTemplate(id: String) {
+        val hash =
+            sourceJdbc.scalar(
+                "SELECT tv.body_hash FROM template_versions tv JOIN templates t ON t.id = tv.template_id " +
+                    "WHERE t.name = '$id' AND tv.version = 1",
+            )
+        val (status, body) = rest("POST", "/api/v1/templates/release", """{"name": "$id"}""", mapOf("If-Match" to hash))
+        withClue("template $id must release: $body") { status shouldBe 200 }
+    }
+
+    /** Releases the pipeline's draft alone, no flag and no plan: every template it pins must already be RELEASED. */
     private fun release(
         id: String,
         hash: String,
@@ -294,7 +307,6 @@ class LakeReferenceIndexE2eTest {
                 .port(port)
                 .asSession(SESSION)
                 .header("If-Match", hash)
-                .queryParam("release_pinned_templates", "true")
                 .`when`()
                 .post("/api/v1/pipelines/$id/release")
                 .then()

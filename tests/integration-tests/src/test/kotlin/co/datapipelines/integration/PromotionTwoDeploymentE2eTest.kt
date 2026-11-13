@@ -342,6 +342,65 @@ class PromotionTwoDeploymentE2eTest {
         assertEquals(before, uatRowCounts(), "uat changed despite a refused batch")
     }
 
+    /**
+     * #841 (G0) R3 — the receive is a pin-affecting writer that takes uat's workspace writer guard FIRST in the batch's
+     * transaction. A raw connection on uat's database holds the workspace row (`FOR NO KEY UPDATE`, as a release in
+     * flight holds it); the push is observed WAITING on it from a fresh connection (`pg_blocking_pids`), exhausts the
+     * production bound (5 s) and answers `pipeline.release.busy` with nothing landed. Once the row is free the same
+     * batch lands (the successful control) — a pipeline of its own, so Order 50's unlanded `TX_OK` stays unlanded.
+     */
+    @Test
+    @Order(46)
+    fun `a receive while uat's workspace row is held answers pipeline release busy and lands nothing - then lands`() {
+        createPipelineOn(portDev, TX_GUARDED, dqlNode("read", DATASOURCE, LEAF_TEMPLATE))
+        val batch =
+            """
+            {"source_env":"dev","key_fingerprint":"none","workspace":"$WORKSPACE","templates":[],
+             "pipelines":[${devPipelinePayload(TX_GUARDED)}]}
+            """.trimIndent()
+        val before = uatRowCounts()
+
+        val refused =
+            DriverManager.getConnection(postgresUat.jdbcUrl, postgresUat.username, postgresUat.password).use { holder ->
+                holder.autoCommit = false
+                holder.prepareStatement("SELECT id FROM workspaces WHERE id = ?::uuid FOR NO KEY UPDATE").use { ps ->
+                    ps.setString(1, WORKSPACE_ID_TEXT)
+                    ps.execute()
+                }
+                val holderPid =
+                    holder.createStatement().use { s ->
+                        s.executeQuery("SELECT pg_backend_pid()").use {
+                            it.next()
+                            it.getInt(1)
+                        }
+                    }
+                val push =
+                    java.util.concurrent.CompletableFuture
+                        .supplyAsync { pushTo(portUat, key = SERVER_KEY, body = batch) }
+                val deadline =
+                    System.nanoTime() +
+                        java.util.concurrent.TimeUnit.SECONDS
+                            .toNanos(GUARD_PROBE_SECONDS)
+                val waiters = "SELECT count(*) FROM pg_stat_activity WHERE $holderPid = ANY(pg_blocking_pids(pid))"
+                while (uatJdbc.scalar(waiters).toInt() < 1) {
+                    assertTrue(!push.isDone, "the receive answered without waiting: ${if (push.isDone) push.join().body() else ""}")
+                    assertTrue(System.nanoTime() < deadline, "the receive never waited on the held workspace row")
+                    Thread.sleep(GUARD_PROBE_INTERVAL_MS)
+                }
+                push.get(GUARD_WRITER_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS).also { holder.rollback() }
+            }
+
+        assertEquals(409, refused.statusCode(), "the held receive must be busy: ${refused.body()}")
+        val error = mapper.readTree(refused.body()).path("error")
+        assertEquals("pipeline.release.busy", error.path("code").asText())
+        assertEquals(mapper.readTree("""{"lock_wait_seconds": 5}"""), error.path("details"))
+        assertEquals(before, uatRowCounts(), "uat changed despite a busy receive")
+
+        val landed = pushTo(portUat, key = SERVER_KEY, body = batch)
+        assertEquals(200, landed.statusCode(), "the successful control: ${landed.body()}")
+        assertEquals(1, uatPipelineCount(TX_GUARDED), "the control batch did not land on uat")
+    }
+
     // ------------------------------------------------------------------ 6. the MINTED server key (091)
 
     @Test
@@ -841,12 +900,13 @@ class PromotionTwoDeploymentE2eTest {
         val body =
             """
             {"name": "$name", "display_name": "Promotion viz", "description": "promotion round trip",
-             "renderer": {"kind": "plotly", "version": "4"},
+             "renderer": {"kind": "chart", "version": "1"},
              "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                 {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-             "config": {"data": [{"type": "bar", "x": [], "y": []}], "layout": {}},
-             "bindings": {"data[0].x": "month", "data[0].y": "amount"},
-             "presentation": {"title": "Revenue", "tokens": {"series": "categorical"}},
+             "config": {"title": {"text": "Revenue"}, "mark": {"type": "bar"},
+                        "encoding": {"x": {"field": "month", "type": "temporal", "sort": "ascending"},
+                                     "y": {"field": "amount", "type": "quantitative", "aggregate": "sum"}}},
+             "bindings": {"amount": "amount", "month": "month"},
              "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
                                   "assertions": [{"kind": "rendered"}]}]}}
             """.trimIndent()
@@ -1421,6 +1481,12 @@ class PromotionTwoDeploymentE2eTest {
         private const val TX_TEMPLATE = "test/promo_e2e_tx.sql"
         private const val TX_OK = "test/promo_e2e_tx_ok"
         private const val TX_BAD = "test/promo_e2e_tx_bad"
+
+        /** #841 R3 — the busy-receive case's own pipeline (Order 46), and its named allowances. */
+        private const val TX_GUARDED = "test/promo_e2e_tx_guarded"
+        private const val GUARD_PROBE_SECONDS = 4L
+        private const val GUARD_PROBE_INTERVAL_MS = 20L
+        private const val GUARD_WRITER_TIMEOUT_SECONDS = 30L
 
         private val httpClient: HttpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()
 

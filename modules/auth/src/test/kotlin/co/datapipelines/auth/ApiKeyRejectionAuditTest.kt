@@ -1,15 +1,24 @@
 package co.datapipelines.auth
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import co.datapipelines.logcapture.capturingLogEvents
+import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.mock.web.MockFilterChain
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.security.authentication.InsufficientAuthenticationException
 import org.springframework.security.core.context.SecurityContextHolder
 
 /**
@@ -92,7 +101,58 @@ class ApiKeyRejectionAuditTest {
         stashed.status shouldBe HTTP_UNAUTHORIZED
     }
 
+    /**
+     * #847 — the server could not CHECK the secret (a native verification fault). Not a rejection:
+     * no `auth.api_key.rejected` row, one ERROR line without the credential, and the caller gets the
+     * 503 envelope from the entry point, never `auth.api_key.invalid`.
+     */
+    @Test
+    fun `a native verification fault is a 503 with no audit row and an ERROR line that carries no credential`() {
+        val service = mockk<ApiKeyService>()
+        every { service.validate(any()) } throws
+            SecretVerificationUnavailableException(
+                Argon2SecretHasher.MEMORY_ALLOCATION_ERROR,
+                IllegalStateException("Memory allocation error (-22)"),
+            )
+        val writer = AuthErrorWriter(ObjectMapper())
+        val unavailable = ApiKeyFilter(service, apiKeyRepository, auditLogger, ClientAddressResolver(emptyList()), writer)
+        val request = MockHttpServletRequest("GET", "/api/v1/pipelines")
+        request.remoteAddr = "10.0.0.7"
+        request.addHeader(ApiKeyCredential.HEADER, WELL_SHAPED_KEY)
+
+        val events =
+            capturingLogEvents(LoggerFactory.getLogger(ApiKeyFilter::class.java) as Logger) {
+                unavailable.doFilter(request, MockHttpServletResponse(), MockFilterChain())
+            }
+
+        verify(exactly = 0) {
+            auditLogger.log(event = any(), userId = any(), keyId = any(), sourceIp = any(), userAgent = any(), details = any())
+        }
+        SecurityContextHolder.getContext().authentication shouldBe null
+        val errors = events.filter { it.level == Level.ERROR }
+        errors shouldHaveSize 1
+        errors.single().formattedMessage shouldContain "event=auth.secret_verification.unavailable"
+        events.forEach { event ->
+            event.formattedMessage shouldNotContain WELL_SHAPED_KEY
+            event.formattedMessage shouldNotContain SECRET_PART
+            event.throwableProxy?.message.orEmpty() shouldNotContain SECRET_PART
+        }
+
+        // The entry point answers the stashed fault: 503, the catalogued envelope, no native text.
+        val response = MockHttpServletResponse()
+        AuthEntryPoint(writer).commence(request, response, InsufficientAuthenticationException("unauthenticated"))
+        response.status shouldBe HTTP_SERVICE_UNAVAILABLE
+        val body = ObjectMapper().readTree(response.contentAsString)
+        body.path("error").path("code").asText() shouldBe AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
+        body.path("correlation_id").asText().isNotBlank() shouldBe true
+        response.contentAsString shouldNotContain "emory"
+        response.contentAsString shouldNotContain "-22"
+    }
+
     private companion object {
+        const val SECRET_PART = "S3cretPartOfTheKeyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        const val WELL_SHAPED_KEY = "dpk_ABCDEFGHIJKL.$SECRET_PART"
+        const val HTTP_SERVICE_UNAVAILABLE = 503
         const val MALFORMED_FLOOD = 500
         const val HTTP_UNAUTHORIZED = 401
     }

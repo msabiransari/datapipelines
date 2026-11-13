@@ -74,7 +74,9 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
      * The glue the fulfilled page loads as a FILE (the CSP allows no inline script): it boots the
      * runtime with the first-party composite adapter and exposes what the assertions read. The
      * renderers are wrapped at registration time so a case can COUNT renders — the mechanical
-     * count, never an impression.
+     * count, never an impression. #860: the wrapper keeps every property of the registration
+     * (the chart kind's `libraries`, `judge` and `needsBundle` included) and replaces `create`
+     * only, and init declares `charts` as the product's pages do.
      */
     protected val hostGlueJs =
         """
@@ -87,9 +89,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
           var real = runtime._internal.renderers();
           Object.keys(real).forEach(function (kind) {
             var implementation = real[kind];
-                wrapped[kind] = {
-                  kind: implementation.kind,
-                  version: implementation.version,
+                wrapped[kind] = Object.assign({}, implementation, {
                   create: function (context) {
                     var handle = implementation.create(context);
                     var wrappedHandle = {
@@ -102,7 +102,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                 if (handle.dispose) wrappedHandle.dispose = function () { return handle.dispose(); };
                 return wrappedHandle;
               },
-            };
+            });
           });
           Object.keys(wrapped).forEach(function (kind) { runtime._internal.replaceRenderer(kind, wrapped[kind]); });
           try {
@@ -111,6 +111,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
               dashboard: { id: params.get('id'), version: 'released' },
               container: container,
               adapter: runtime.adapters(container),
+              charts: window.Plotly ? { library: 'plotly', instance: window.Plotly } : undefined,
               options: {
                 onNotification: function (n) { window.__dp.notifications.push(n); },
               },
@@ -158,6 +159,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
               <main id="board"></main>
               <script src="/vendor/plotly/plotly-$bundle.min.js" data-dp-plotly-bundle="$bundle"></script>
               <script src="/js/datapipelines-dashboard.js"></script>
+              <script src="/js/datapipelines-dashboard-chart.js"></script>
               <script src="/js/datapipelines-dashboard-plotly.js"></script>
               <script src="/js/datapipelines-dashboard-table.js"></script>
               <script src="/js/datapipelines-dashboard-kpi.js"></script>
@@ -247,25 +249,24 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         createTemplate("test/${root}_table.sql", "SELECT g AS n FROM generate_series(1, 5) g")
         createTemplate("test/${root}_kpi.sql", "SELECT 42 AS v")
         createTemplate("test/${root}_slow.sql", "SELECT 1 AS x, 999 AS y FROM (SELECT pg_sleep(3)) s")
-        createTemplate("test/${root}_surface.sql", "SELECT 1 AS a, 2 AS b, 3 AS c UNION ALL SELECT 2, 3, 4 UNION ALL SELECT 3, 2, 1")
         createPipeline("$root/pipelines/chart", "test/${root}_chart.sql", datasource)
         createPipeline("$root/pipelines/table", "test/${root}_table.sql", datasource)
         createPipeline("$root/pipelines/kpi", "test/${root}_kpi.sql", datasource)
         createPipeline("$root/pipelines/slow", "test/${root}_slow.sql", datasource)
-        createPipeline("$root/pipelines/surface", "test/${root}_surface.sql", datasource)
         releasePipelines(
             listOf(
                 "$root/pipelines/chart",
                 "$root/pipelines/table",
                 "$root/pipelines/kpi",
                 "$root/pipelines/slow",
-                "$root/pipelines/surface",
             ),
         )
         val chart =
-            seedVisualization("$root/visualizations/chart", plotlyBody("""{"type":"bar","x":null,"y":null}""", "x", "y", "INTEGER"))
+            seedVisualization("$root/visualizations/chart", ChartBrowserFixtures.barBody("x", "INTEGER", "y"))
+        // The 2-row slot #386's plot-area floor measures (DashboardGridRowUnitBrowserTest): the figure main's Plotly seed
+        // drew, without axis titles — a chart's default band title is a second line under the ticks (#860 handback).
         val slowChart =
-            seedVisualization("$root/visualizations/slowchart", plotlyBody("""{"type":"bar","x":null,"y":null}""", "x", "y", "INTEGER"))
+            seedVisualization("$root/visualizations/slowchart", ChartBrowserFixtures.barBody("x", "INTEGER", "y", axisTitles = false))
         val cells =
             seedVisualization(
                 "$root/visualizations/cells",
@@ -368,7 +369,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         releasePipelines(listOf("$root/pipelines/by_country"))
         val setId = createAndReleaseParameterSet("$root/parameters/geo")
         val chart =
-            seedVisualization("$root/visualizations/by_country", plotlyBody("""{"type":"bar","x":null,"y":null}""", "c", "c", "STRING"))
+            seedVisualization("$root/visualizations/by_country", ChartBrowserFixtures.barBody("c", "STRING", value = null))
         return seedDashboard(
             "$root/boards/geo",
             sources = listOf("s1" to "$root/pipelines/by_country"),
@@ -428,7 +429,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         releasePipelines(listOf("$root/pipelines/by_granularity"))
         val setId = createAndReleaseControlsSet("$root/parameters/controls")
         val chart =
-            seedVisualization("$root/visualizations/by_granularity", plotlyBody("""{"type":"bar","x":null,"y":null}""", "g", "g", "STRING"))
+            seedVisualization("$root/visualizations/by_granularity", ChartBrowserFixtures.barBody("g", "STRING", value = null))
         return seedDashboard(
             "$root/boards/controls",
             sources = listOf("s1" to "$root/pipelines/by_granularity"),
@@ -505,7 +506,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         releasePipelines(listOf("$root/pipelines/acceptance"))
         val setName = createAndReleaseAcceptanceSet("$root/parameters/acceptance", cities, datasource)
         val chart =
-            seedVisualization("$root/visualizations/acceptance", plotlyBody("""{"type":"bar","x":null,"y":null}""", "g", "g", "STRING"))
+            seedVisualization("$root/visualizations/acceptance", ChartBrowserFixtures.barBody("g", "STRING", value = null))
         val board =
             seedDashboard(
                 "$root/boards/acceptance",
@@ -529,7 +530,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         return board
     }
 
-    /** The acceptance set through its REAL routes; its selector template is released WITH it (`release_pinned_templates`). */
+    /** The acceptance set through its REAL routes; its selector template is released WITH it (the dialog's plan, #876). */
     private fun createAndReleaseAcceptanceSet(
         name: String,
         cities: String,
@@ -563,52 +564,20 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                     headers, body: JSON.stringify(body) });
                   if (!created.ok) return { error: created.status + ' ' + (await created.text()).slice(0, 300) };
                   const document_ = await created.json();
-                  const released = await fetch('/api/v1/parameter-sets/' + document_.data.id + '/release?release_pinned_templates=true',
-                    { method: 'POST', credentials: 'same-origin',
-                      headers: Object.assign({}, headers, { 'If-Match': document_.data.body_hash }), body: '' });
-                  if (!released.ok) return { error: 'release ' + released.status + ' ' + (await released.text()).slice(0, 300) };
-                  return { id: document_.data.id };
+                  return { id: document_.data.id, hash: document_.data.body_hash };
                 }""",
                 mapOf("name" to name, "set" to set),
             ) as Map<*, *>
         check(result["error"] == null) { "the parameter set $name failed: ${result["error"]}" }
+        val id = result["id"] as String
+        PlannedRelease.release(
+            page,
+            "/partials/parameter-sets/$id/lifecycle/release",
+            "/api/v1/parameter-sets/$id/release",
+            result["hash"] as String,
+        )
         return name
     }
-
-    /** A board whose pinned visualization is a SURFACE trace — the server answers renderer.bundle "3d". */
-    protected fun seedSurfaceBoard(root: String): String {
-        val datasource = registerSourceDatasource()
-        createTemplate("test/${root}_surface_src.sql", "SELECT 1 AS a, 2 AS b, 3 AS c UNION ALL SELECT 2, 3, 4 UNION ALL SELECT 3, 2, 1")
-        createPipeline("$root/pipelines/surface", "test/${root}_surface_src.sql", datasource)
-        releasePipelines(listOf("$root/pipelines/surface"))
-        val surface =
-            seedVisualization(
-                "$root/visualizations/surface",
-                """{"display_name":"Surface","renderer":{"kind":"plotly","version":"4"},""" +
-                    """"inputs":{"main":{"columns":[{"name":"a","type":"INTEGER","nullable":false},""" +
-                    """{"name":"b","type":"INTEGER","nullable":false},""" +
-                    """{"name":"c","type":"INTEGER","nullable":false}]}},""" +
-                    """"config":{"data":[{"type":"surface","x":null,"y":null,"z":null}],"layout":{}},""" +
-                    """"bindings":{"data[0].x":"a","data[0].y":"b","data[0].z":"c"}}""",
-            )
-        return seedDashboard(
-            "$root/boards/surface",
-            sources = listOf("surface" to "$root/pipelines/surface"),
-            occurrences = listOf(Triple("hill", surface, "surface")),
-            initial = true,
-        )
-    }
-
-    private fun plotlyBody(
-        trace: String,
-        xColumn: String,
-        yColumn: String,
-        type: String,
-    ): String =
-        """{"display_name":"Chart","renderer":{"kind":"plotly","version":"4"},""" +
-            """"inputs":{"main":{"columns":[{"name":"$xColumn","type":"$type","nullable":false},""" +
-            """{"name":"$yColumn","type":"$type","nullable":false}]}},""" +
-            """"config":{"data":[$trace],"layout":{}},"bindings":{"data[0].x":"$xColumn","data[0].y":"$yColumn"}}"""
 
     /** The suite's own Postgres as the source — the 151 convention; in-page fetch with the CSRF pair. */
     @Suppress("UNCHECKED_CAST")
@@ -628,6 +597,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                     name: args.name, displayName: 'Dashboard browser source', dialect: 'POSTGRES',
                     jdbcUrl: args.url, credentialKind: 'password', username: args.user, password: args.password,
                     description: 'the L3a conformance source',
+                    ...args.pool,
                   });
                   const res = await fetch('/partials/datasources', {
                     method: 'POST', credentials: 'same-origin',
@@ -640,6 +610,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                     "url" to SharedBrowserE2e.jdbcUrl.substringBefore("?"),
                     "user" to SharedBrowserE2e.username,
                     "password" to SharedBrowserE2e.password,
+                    "pool" to SharedBrowserE2e.SOURCE_DATASOURCE_POOL_FIELDS,
                 ),
             ) as List<String>
         check(failures.isEmpty()) { "the datasource registration failed: $failures" }

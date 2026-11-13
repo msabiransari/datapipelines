@@ -4,14 +4,16 @@
  *  - Name: free text with the workspace's existing folders suggested; the grammar is the
  *    server's (PipelineNameGrammar — the ONE grammar, record A2) and its refusal is shown
  *    beside the field. Nothing here re-implements it (template-hierarchy §9.5).
- *  - Pipeline: suggestions from §5.7's search over the pipelines the reader may read; the job
- *    is `{pipeline, version: "current"}` — the only payload slice 1 accepts.
+ *  - Pipeline: suggestions from §5.7's search over the pipelines the reader may read.
+ *  - Version (#786 D.4): the pipeline's exact versions from §5.4, newest first, each with its
+ *    status; one this deployment does not run is disabled with its reason (model.versionChoices).
+ *    The job is `{pipeline, version: <n>}` — payload schema 2; every run executes exactly n.
  *  - When: presets that WRITE a five-field pattern (hourly / daily / weekly / monthly) or a
  *    custom pattern, a timezone (the browser's own preselected on create), and a live preview
  *    of the next five from §20.3 — the dispatcher's own function, so the DST rule shown is
  *    the one that will fire.
- *  - Parameters: the declared parameters of the version the pipeline's current pointer names
- *    NOW (the version §20.2 validates against), as literal values (R7). A DATE parameter's
+ *  - Parameters: the declared parameters of the PICKED version (the version §20.2 validates
+ *    against), as literal values (R7). A DATE parameter's
  *    field also offers the binding source (slice 3, §20.2): Fixed value (default) / Today /
  *    Yesterday — a preset travels in `payload.parameter_bindings` and each run resolves it on
  *    the schedule's frozen reference; the selection round-trips on edit.
@@ -67,7 +69,7 @@
   function openCreate() {
     var dlg = S.clone("sch-tpl-form");
     if (!dlg) return;
-    S.state.form = { mode: "create", attempt: null, declared: {}, pipelineVersion: null };
+    S.state.form = { mode: "create", attempt: null, declared: {}, pipelineVersion: null, pipelineId: null };
     S.openDialog(dlg);
     wire(dlg);
     chooseZone(el("sch-f-timezone"), browserZone());
@@ -84,7 +86,7 @@
         var s = r.data;
         var dlg = S.clone("sch-tpl-form");
         if (!dlg) return;
-        S.state.form = { mode: "edit", id: s.id, etag: r.etag, revision: s.revision, declared: {}, pipelineVersion: null, saved: s };
+        S.state.form = { mode: "edit", id: s.id, etag: r.etag, revision: s.revision, declared: {}, pipelineVersion: null, pipelineId: null, saved: s };
         S.openDialog(dlg);
         wire(dlg);
         S.text(dlg, "title", "Edit schedule");
@@ -114,7 +116,7 @@
     el("sch-f-cron").value = s.cron;
     applyPreset(d.preset, true);
     f().savedBindings = (s.payload && s.payload.parameter_bindings) || {};
-    loadParameters(M().pipelineOf(s), s.parameters || {}, f().savedBindings);
+    loadParameters(M().pipelineOf(s), s.parameters || {}, f().savedBindings, M().pinnedVersionOf(s));
   }
 
   function pad(n) {
@@ -149,7 +151,14 @@
       var name = pipeline.value.trim();
       // A different pipeline means different parameters: the previous pipeline's bindings do
       // not carry over (its declared names are not this one's).
-      if (name && name !== (f() && f().parametersFor)) loadParameters(name, currentTexts(), {});
+      if (name && name !== (f() && f().parametersFor)) loadParameters(name, currentTexts(), {}, null);
+    });
+    // A different VERSION of the same pipeline: its own declarations; typed values and the
+    // bindings chosen so far are kept (the save checks them against this version).
+    dlg.querySelector("#sch-f-version").addEventListener("change", function (event) {
+      clearError("version");
+      var v = parseInt(event.target.value, 10);
+      if (!isNaN(v)) loadVersion(v, currentTexts());
     });
     dlg.querySelector("#sch-f-name").addEventListener("input", function () { clearError("name"); });
   }
@@ -253,16 +262,20 @@
   // ------------------------------------------------------------------ pipeline and parameters
 
   /**
-   * The release-first sentence (#280) — the catalogue's `schedule.validation.target_not_released`
-   * user message, shown at the PIPELINE field the moment the typed or picked pipeline resolves
-   * with no current version. The save's own refusal lands in the same slot with the same words
-   * (one sentence, two sources — the server stays the authority); the browser suite pins the two
-   * equal end to end. The suggestion list cannot carry this honestly: a list entry's DRAFT
-   * status also covers a RELEASED pipeline with a draft in flight, so marking or filtering it
-   * would lie about pipelines that CAN be scheduled.
+   * The release-first sentence (#280, #786) — shown at the PIPELINE field the moment the typed or
+   * picked pipeline resolves with NO version this deployment runs (the version picker is then
+   * empty). The save of such a pipeline refuses at the version field instead (no version picked,
+   * or the picked one `target_not_released`) — the server stays the authority. The suggestion
+   * list cannot carry this honestly: a list entry's DRAFT status also covers a RELEASED pipeline
+   * with a draft in flight, so marking or filtering it would lie about pipelines that CAN be
+   * scheduled.
    */
-  var RELEASE_FIRST_TEXT =
-    "This pipeline has no released version yet. Release it (or switch its current version), then schedule it.";
+  var RELEASE_FIRST_TEXT = "This pipeline has no released version yet. Release it, then schedule it.";
+
+  /** Whether this deployment runs DRAFT versions (the server's posture, stamped on the page root). */
+  function draftsEligible() {
+    return !!(S.state.root && S.state.root.getAttribute("data-drafts-eligible") === "true");
+  }
 
   function searchPipelines(text) {
     var state = f();
@@ -285,7 +298,7 @@
           });
           // A name typed (or picked) in full needs no separate "change" to load its parameters.
           var exact = state.found.filter(function (p) { return p.name === el("sch-f-pipeline").value.trim(); })[0];
-          if (exact && state.parametersFor !== exact.name) loadParameters(exact.name, currentTexts(), {});
+          if (exact && state.parametersFor !== exact.name) loadParameters(exact.name, currentTexts(), {}, null);
         })
         .catch(function () { /* suggestions are a convenience; the save is the authority */ });
     }, SEARCH_DELAY_MS);
@@ -323,59 +336,69 @@
     S.text(S.dialog(), "params-status", text);
   }
 
+  /** The picker's options (model.versionChoices); an empty list leaves nothing to pick. */
+  function renderVersions(choices) {
+    var select = el("sch-f-version");
+    if (!select) return;
+    S.clear(select);
+    choices.options.forEach(function (c) {
+      var o = document.createElement("option");
+      o.value = String(c.value);
+      o.textContent = c.label;
+      o.disabled = !!c.disabled;
+      o.setAttribute("data-status", c.status);
+      select.appendChild(o);
+    });
+    if (choices.selected !== null) select.value = String(choices.selected);
+  }
+
   /**
-   * The declared parameters of the version the pipeline's CURRENT pointer names — what §20.2
-   * binds the values against at save (PipelineJobExecutor.validate) and what each run
+   * The pipeline's versions into the picker, then the declared parameters of the selected one —
+   * what §20.2 binds the values against at save (PipelineJobExecutor.validate) and what each run
    * re-binds. `values` prefill the fields (a saved schedule's literals, or what was typed);
    * `bindings` are the saved `parameter_bindings` — keyword presets re-open selected (§20.5's
-   * round-trip), literal bindings show their value as the fixed text.
+   * round-trip), literal bindings show their value as the fixed text. `pinned` is the saved
+   * schedule's exact version (edit), selected when the pipeline still holds it.
    */
   function loadParameters(
     name,
     values,
     bindings,
+    pinned,
   ) {
     var state = f();
     if (!state || !name) return;
     state.parametersFor = name;
     state.savedBindings = bindings || {};
+    state.pipelineId = null;
+    renderVersions({ options: [], selected: null });
     var seq = (state.paramSeq = (state.paramSeq || 0) + 1);
-    paramStatus("Reading " + name + "'s parameters…");
+    paramStatus("Reading " + name + "'s versions…");
     API()
       .findPipelines(name)
       .then(function (r) {
         var hit = ((r.data || {}).items || []).filter(function (p) { return p.name === name; })[0];
         if (!hit) throw { notFound: true };
-        return API().pipeline(hit.id).then(function (p) {
-          var working = p.data;
-          var current = working.current_version;
-          if (current === null || current === undefined) return { none: true };
-          if (working.version === current) return { body: working, version: current };
-          return API().pipelineVersion(hit.id, current).then(function (v) { return { body: v.data, version: current }; });
-        });
+        return API().pipelineVersions(hit.id).then(function (v) { return { id: hit.id, versions: v.data || [] }; });
       })
       .then(function (found) {
         if (seq !== state.paramSeq || !S.dialog()) return;
-        if (found.none) {
+        var choices = M().versionChoices(found.versions, draftsEligible(), pinned);
+        renderVersions(choices);
+        state.pipelineId = found.id;
+        if (choices.selected === null) {
           // #280 — the release-first words go to the pipeline field's OWN slot (aria-invalid
-          // like a save refusal), not the parameters area; the save would refuse with the
-          // same sentence either way.
+          // like a save refusal), not the parameters area.
           showError("pipeline", RELEASE_FIRST_TEXT);
+          state.declared = {};
+          state.pipelineVersion = null;
           renderParameters({}, values, {}, "");
           return;
         }
-        // A pipeline WITH a current version resolved: any pick-time release-first error the
+        // A pipeline WITH a runnable version resolved: any pick-time release-first error the
         // field carried is stale, wherever it came from (the save is the authority).
         clearError("pipeline");
-        state.pipelineVersion = found.version;
-        var declared = {};
-        M().declaredParameters(found.body.parameters).forEach(function (d) { declared[d.name] = d.spec; });
-        state.declared = declared;
-        var count = Object.keys(declared).length;
-        renderParameters(declared, values, state.savedBindings, count
-          ? (count === 1 ? "The parameter" : "The " + count + " parameters") + " v" + found.version +
-            " (its current version) declares — a blank field takes the declared default."
-          : "v" + found.version + " (its current version) declares no parameters.");
+        loadVersion(choices.selected, values, seq);
       })
       .catch(function (err) {
         if (seq !== state.paramSeq || !S.dialog()) return;
@@ -385,7 +408,35 @@
         clearError("pipeline");
         renderParameters({}, values, {}, err && err.notFound
           ? "No pipeline named " + name + " that you can read in this workspace."
-          : "The pipeline's parameters could not be read; the save still checks them.");
+          : "The pipeline's versions could not be read; the save still checks the version and parameters.");
+      });
+  }
+
+  /** One version's declared parameters into the parameter fields (`seq` continues a pipeline read). */
+  function loadVersion(version, values, seq) {
+    var state = f();
+    if (!state || !state.pipelineId) return;
+    if (seq === undefined) seq = state.paramSeq = (state.paramSeq || 0) + 1;
+    var pipelineId = state.pipelineId;
+    paramStatus("Reading v" + version + "'s parameters…");
+    API()
+      .pipelineVersion(pipelineId, version)
+      .then(function (v) {
+        if (seq !== state.paramSeq || !S.dialog()) return;
+        state.pipelineVersion = version;
+        var declared = {};
+        M().declaredParameters((v.data || {}).parameters).forEach(function (d) { declared[d.name] = d.spec; });
+        state.declared = declared;
+        var count = Object.keys(declared).length;
+        renderParameters(declared, values, state.savedBindings, count
+          ? (count === 1 ? "The parameter" : "The " + count + " parameters") + " v" + version +
+            " declares — a blank field takes the declared default."
+          : "v" + version + " declares no parameters.");
+      })
+      .catch(function () {
+        if (seq !== state.paramSeq || !S.dialog()) return;
+        state.declared = {};
+        renderParameters({}, values, {}, "v" + version + "'s parameters could not be read; the save still checks them.");
       });
   }
 
@@ -410,7 +461,7 @@
     S.clear(box);
     paramStatus(status);
     var names = Object.keys(declared).sort();
-    // A saved value the current version no longer declares stays VISIBLE (and is sent as it
+    // A saved value the picked version no longer declares stays VISIBLE (and is sent as it
     // is): dropping it silently would change the schedule behind the author's back.
     Object.keys(values || {}).forEach(function (k) {
       if (names.indexOf(k) === -1 && values[k] !== "" && values[k] !== undefined) names.push(k);
@@ -425,7 +476,7 @@
       var help = [];
       if (spec && spec.description) help.push(spec.description);
       if (spec && spec.default !== undefined && spec.default !== null) help.push("Default: " + M().parameterText(spec.default));
-      if (!spec) help.push("The pipeline's current version does not declare this parameter.");
+      if (!spec) help.push("The picked version does not declare this parameter.");
       S.text(field, "help", help.join(" · "));
       var input = field.querySelector("[data-param-input]");
       var select = field.querySelector("[data-param-select]");
@@ -474,13 +525,16 @@
 
   // ------------------------------------------------------------------ errors
 
+  /** The input a field-placed refusal marks invalid and focuses. */
+  var INPUT_BY_FIELD = { name: "sch-f-name", pipeline: "sch-f-pipeline", version: "sch-f-version", cron: "sch-f-cron", timezone: "sch-f-timezone" };
+
   function showError(field, message) {
     var dlg = S.dialog();
     var p = dlg && dlg.querySelector('[data-field-error="' + field + '"]');
     if (!p) return false;
     p.textContent = message;
     p.hidden = false;
-    var input = { name: "sch-f-name", pipeline: "sch-f-pipeline", cron: "sch-f-cron", timezone: "sch-f-timezone" }[field];
+    var input = INPUT_BY_FIELD[field];
     if (input && el(input)) {
       el(input).classList.add("ds-input-error");
       el(input).setAttribute("aria-invalid", "true");
@@ -495,7 +549,7 @@
       p.hidden = true;
       p.textContent = "";
     }
-    var input = { name: "sch-f-name", pipeline: "sch-f-pipeline", cron: "sch-f-cron", timezone: "sch-f-timezone" }[field];
+    var input = INPUT_BY_FIELD[field];
     if (input && el(input)) {
       el(input).classList.remove("ds-input-error");
       el(input).removeAttribute("aria-invalid");
@@ -503,7 +557,7 @@
   }
 
   function clearAllErrors() {
-    ["name", "pipeline", "cron", "timezone", "missed_run_policy", "parameters", "notifications"].forEach(clearError);
+    ["name", "pipeline", "version", "cron", "timezone", "missed_run_policy", "parameters", "notifications"].forEach(clearError);
     var dlg = S.dialog();
     Array.prototype.forEach.call(dlg.querySelectorAll("[data-param-error]"), function (p) {
       p.hidden = true;
@@ -533,7 +587,7 @@
       return;
     }
     if (!showError(target.field, err.userMessage || err.message)) S.toastError(err, "The schedule was not saved");
-    var input = { name: "sch-f-name", pipeline: "sch-f-pipeline", cron: "sch-f-cron", timezone: "sch-f-timezone" }[target.field];
+    var input = INPUT_BY_FIELD[target.field];
     if (input && el(input)) el(input).focus();
   }
 
@@ -567,7 +621,11 @@
       var b = saved[name];
       if (b && b.source === "keyword" && !(name in bindings) && !(name in texts) && !(name in sources)) bindings[name] = b;
     });
-    var payload = { pipeline: el("sch-f-pipeline").value.trim(), version: "current" };
+    // #786: the EXACT version picked; none picked sends none, so the save refuses it at the
+    // version field with its own words (`version_missing`) instead of the browser guessing one.
+    var payload = { pipeline: el("sch-f-pipeline").value.trim() };
+    var version = parseInt(el("sch-f-version").value, 10);
+    if (!isNaN(version)) payload.version = version;
     if (Object.keys(bindings).length) payload.parameter_bindings = bindings;
     return {
       name: el("sch-f-name").value.trim(),

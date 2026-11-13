@@ -51,7 +51,7 @@ class DashboardCardsBrowserTest : DashboardBrowserSuite() {
         page.locator("#dp-board .dp-dashboard-kpi-number").first().waitFor()
 
         // The card carries the pin (moved off the viz div), and the heading its label points at
-        // reads the pinned VERSION's display name — the fixture's plotly body says "Chart", the
+        // reads the pinned VERSION's display name — the fixture's chart body says "Chart", the
         // table and KPI bodies say their own names.
         val headings =
             page.evaluate(

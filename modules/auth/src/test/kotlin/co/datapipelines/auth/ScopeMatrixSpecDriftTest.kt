@@ -104,9 +104,10 @@ class ScopeMatrixSpecDriftTest {
          * engine's nine (#194 lane D, the record's §9.3 table verbatim) + the dashboards' fourteen lifecycle rows
          * (#10 L1b: `visualization.*` and `dashboard.*` — read, create, update, version.manage, delete, release,
          * switch_version; the two imports landed with L1c, `dashboard.execute` with L2 and `dashboard.key.bind`
-         * with L5), re-derived.
+         * with L5), re-derived. 103 since #786 added `endpoint.release` and `endpoint.version.manage` (an API's release
+         * and its version lifecycle).
          */
-        const val PERMISSION_COUNT = 101
+        const val PERMISSION_COUNT = 103
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

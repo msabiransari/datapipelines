@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.55 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.60 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-13
 
 ---
 
@@ -54,7 +54,8 @@ users ──1:N── workspace_members
 
 workspaces ──1:N── pipelines (workspace_id)
 workspaces ──1:N── templates (workspace_id)
-workspaces ──0:N── datasources (workspace_id; NULL = global)
+workspaces ──0:N── datasources (owner_workspace_id: the OWNING workspace; NULL = an instance datasource — ownership, not visibility, V23)
+datasources ──1:N── datasource_workspaces ──N:1── workspaces (the GRANT rows: a datasource is visible to exactly the workspaces granted it — §4.16)
 workspaces ──1:N── api_keys (workspace_id)
 
 pipelines ──1:N── pipeline_versions
@@ -355,7 +356,7 @@ CREATE INDEX idx_executions_heartbeat ON pipeline_executions(heartbeat_at)    --
 - **Lineage columns (V3).** A PIPELINE node's child execution records `parent_execution_id` + `parent_node_id` (NULL for roots); `root_execution_id` is the top ancestor. The migration backfills `root_execution_id = execution_id` for pre-existing rows and sets it NOT NULL from then on — one indexed query (`idx_executions_root`) returns the whole family and cancellation keys off it, with no NULL special-case anywhere. The repository binds `root_execution_id` as the record's own `execution_id` when the caller leaves it null, so roots never have to repeat their id.
 - **No `result_delivery` column.** Under D9 there is exactly one delivery path (every caller result is materialized in Redis and read through the cursor), so the old `'inline' | 'claim_check'` discriminator describes a fork that no longer exists. `result_row_count` and `result_size_bytes` remain as history/observability facts — they describe a result that is very likely already expired, and they are **not** a claim that the result is still retrievable. Retrievability is a Redis TTL question ([§9](#9-what-is-not-in-this-database)).
 - Both result columns are NULL for pipelines with zero caller nodes (legal under D1 — pure write-back pipelines).
-- `updated_at` is absent by design: the row's lifecycle is INSERT-on-start then one terminal UPDATE, and `completed_at` already carries that timestamp.
+- `updated_at` is absent by design: the row is inserted on start and receives a terminal UPDATE whose timestamp is `completed_at`; `recordResult` separately fills the result-history columns before or after that UPDATE without changing the completion timestamp ([DAG Executor §10.1](dag-executor.md#101-how-an-emitted-event-becomes-durable-266)).
 
 **Partitioning candidate:** Partition by month on `started_at` for large deployments. Note that the composite FK constrains this — a partitioned `pipeline_executions` still references an unpartitioned `pipeline_versions`, which Postgres supports; partitioning `pipeline_versions` would not.
 
@@ -517,6 +518,10 @@ CREATE TABLE datasources (
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by              UUID        NOT NULL REFERENCES users(id),
+    incarnation_id          UUID        NOT NULL DEFAULT gen_random_uuid(),  -- which incarnation of the name; internal, never on the wire (V59)
+    generation              BIGINT      NOT NULL DEFAULT 1,                  -- identity-bearing writes since the insert; internal, never on the wire (V59)
+    CONSTRAINT uq_datasources_incarnation UNIQUE (incarnation_id),           -- V59
+    CONSTRAINT chk_datasources_generation CHECK (generation >= 1),           -- V59
     CONSTRAINT chk_datasource_name CHECK (
         char_length(name) BETWEEN 1 AND 63 AND name ~ '^[a-z0-9_-]+$'
     ),
@@ -553,14 +558,15 @@ CREATE INDEX idx_datasources_active ON datasources(name) WHERE is_deleted = FALS
 - `credential_encrypted` (V13; `password_encrypted` before it) is `BYTEA` ciphertext only ([Datasources §7.1](datasources.md#71-encryption-at-rest)) — never plaintext, never returned by any endpoint, and never logged. The master key is required and fail-fast (D8). The blob is **kind-agnostic**: a password, a bearer token, a PEM private key or a service-account JSON document are all sealed identically under the V10 versioned envelope with the datasource NAME as AAD, so a new credential kind needs no crypto change and rotation (§7.3) is unaffected.
 - The three V13 credential columns are one contract ([Datasources §3.4](datasources.md#34-credential-kinds)). `credential_kind` gains `DEFAULT 'password'`, which is what makes the backfill TRUE rather than a guess: every pre-087 row went through a save path that required a username and a password, so every one of them IS a password. `chk_datasource_credential_present` pins `kind = 'none'` ⟺ no ciphertext — that equivalence is why the §3.2 response can DERIVE `password_set` from the kind instead of carrying a read-side flag every constructor would have to get right. `chk_datasource_credential_username` restates §3.4's field rules at the column, as the backstop for a row written by restore or by hand; the application validator reports the same rules as field errors on a 400. `username` became nullable in the same migration: a private key, a service-account blob and "no credential" have no username, and the dummy value a NOT NULL column forced (`username: "sqlite"`, [Datasources §8A.1](datasources.md#8a1-file-shape)) is the lie V13 removes.
 - `created_by` is a real foreign key to `users(id)` (`ON DELETE RESTRICT`, the §2 default) — a user who owns datasources cannot be hard-deleted.
-- `workspace_id` (V4) binds the datasource to a workspace as **visibility/ownership only** — `name` stays the globally-unique PK and namespace (workspaces design D2/D3: it is the PK, the GCM AAD anchor, and the cross-env contract). **`NULL = global`**: existing rows backfilled NULL, preserving the pre-workspaces shared behavior (D9). `is_readonly` (V4) forbids the three write-shaped uses of the datasource in the pipeline contract — enforced since the readonly slice (save-time validation + executor backstop + the pool flag), and WRITABLE since the surfaces slice through the D8-gated registry save path (pool rebuilt on every flag write; `readonly` on a global datasource is admin-only). Since the surfaces slice both columns live on the entity and the repository's SQL: INSERT/UPDATE write `workspace_id`/`is_readonly` explicitly, and every read joins `workspaces` for the additive `workspace` name; visibility (`bound-to-active OR global`) is the repository's `findAllVisible`/`findVisibleByName` predicates — one authority for REST, MCP and the UI.
+- `owner_workspace_id` (V23; V4's `workspace_id` before it) records **ownership only** — the workspace that registered the datasource, NULL for an instance datasource — and never decides who can see it: visibility is the §4.16 grant table. `name` stays the globally-unique PK and namespace (workspaces design D2/D3: it is the PK, the GCM AAD anchor, and the cross-env contract), so a name taken in one workspace is taken for every workspace. History: V4's `workspace_id` meant both, with **`NULL = global`** (visible to every workspace, D9); V23 split it — the owner moved to `owner_workspace_id`, a former global row became an instance datasource with one grant per live workspace (§4.16), and the column was dropped. `is_readonly` (V4) forbids the three write-shaped uses of the datasource in the pipeline contract — enforced since the readonly slice (save-time validation + executor backstop + the pool flag), and WRITABLE since the surfaces slice through the D8-gated registry save path (pool rebuilt on every flag write; any mutation of an instance datasource, a `readonly` flip included, is super-admin-only — [Datasources §5.7](datasources.md#57-readonly-datasources-flag-semantics-and-enforcement-layers)). Both columns live on the entity and the repository's SQL: INSERT/UPDATE write `owner_workspace_id`/`is_readonly` explicitly, and every read left-joins `workspaces` on `owner_workspace_id` for the additive `workspace` name (NULL for an instance datasource); visibility is the repository's `GRANTED_PREDICATE` — `EXISTS` a `datasource_workspaces` row for the datasource and the reading workspace — inside `findAllVisible`/`findVisibleByName`, one authority for REST, MCP and the UI.
 - `idx_datasources_active` gives soft-delete parity with `pipelines` and `templates`: the registry's hot path is "list/lookup non-deleted datasources", and without it that scan had no supporting index. Note the PK index cannot serve it — `is_deleted` is not in the PK, so the filter would be a heap recheck on every row.
 - The three `last_test_*` columns (V9) record the outcome of the LAST connection test ([Datasources §8.1B](datasources.md#81b-the-last-tests-outcome-is-stored-and-listed)). All three NULL = **never tested**, which is the truthful state of every pre-V9 row — there is no outcome to backfill and no default that would not be an invention. They are written by the probe (`POST .../test`, the UI's Test button, and the §8A.3 rule-3 bootstrap check) and by nothing else; `last_test_message` is redaction-scrubbed at the probe, so no credential can reach the column. They exist because LISTING a datasource does not connect to it: on 2026-09-02 the screen showed a datasource as fine while every execution failed at CONNECT.
+- `incarnation_id` and `generation` (V59, #874; [Datasources §11.2](datasources.md#112-identity-across-delete-and-recreation)) are the datasource's **local** identity beside its name key — the name stays the PK and every foreign key's target. V59 adds both with their defaults, so PostgreSQL fills every existing row, soft-deleted ones included, with its own `gen_random_uuid()` value and generation 1 in the same statement: no SQL backfill, no NULL. The application never writes `incarnation_id` (an insert takes the default; no UPDATE names it), so an update or a soft delete keeps it and a row inserted again using the default gets a new one. A backup restore that supplies the stored incarnation preserves it; the default never replaces an explicit value. `generation` is advanced by `+ 1` inside the writer's own statement, in its guarded section, for the writers §11.2 lists; the `last_test_*` write and an unchanged managed re-sync do not advance it. `uq_datasources_incarnation` makes two rows sharing an incarnation impossible; `chk_datasources_generation` keeps the counter at 1 or above. Neither column is read by any DTO, export, promotion or release statement: the dependency graph's three batch reads (`findVisibleGraphFacts`, `findLiveGraphFacts`, `findIncarnation`) are their only readers, and the graph folds them into an internal fingerprint. V59 adds no explicit index — the UNIQUE constraint's implicit index is the only one (§5), and the graph reads go through the PK.
 - All timestamps are `TIMESTAMPTZ`; `updated_at` is set by the application in every UPDATE (§2), including credential rotation and pool-affecting property changes — **with one documented exception**: the `last_test_*` write does NOT move it. A test outcome is an observation about the datasource, not a change to it, and [Datasources §8A.3](datasources.md#8a3-semantics-create-if-absent-never-update) rule 1 promises an operator's row survives a boot byte-untouched, a promise that stays mechanically checkable only while a probe leaves the definition columns (`updated_at` among them) alone.
 
 ### 4.11 `workspaces`
 
-The unit of team isolation (workspaces design 2026-08-16, D1). Pipelines and templates belong to exactly one workspace; datasources bind by visibility only (§4.10); API keys pin one at issuance (§4.2).
+The unit of team isolation (workspaces design 2026-08-16, D1). Pipelines and templates belong to exactly one workspace; a datasource has at most one OWNING workspace (`owner_workspace_id`, §4.10) and is visible to the workspaces GRANTED it (§4.16); API keys pin one at issuance (§4.2).
 
 ```sql
 CREATE TABLE workspaces (
@@ -620,11 +626,12 @@ CREATE TABLE published_endpoints (
     id               UUID        PRIMARY KEY,
     workspace_id     UUID        NOT NULL REFERENCES workspaces(id),
     path_pattern     TEXT        NOT NULL,   -- '/lending/v1/{borough}/home'
-    pipeline_id      UUID        NOT NULL REFERENCES pipelines(id),
-    timeout_seconds  INTEGER     NOT NULL,   -- clamped by config at write time
-    description      TEXT        NOT NULL DEFAULT '',
+    pipeline_id      UUID        NOT NULL REFERENCES pipelines(id),   -- #786: legacy, the conversion's SOURCE only
+    timeout_seconds  INTEGER     NOT NULL,   -- #786: legacy creation snapshot; the version row's value serves
+    description      TEXT        NOT NULL DEFAULT '',                 -- #786: legacy, as timeout_seconds
     is_enabled       BOOLEAN     NOT NULL DEFAULT TRUE,
     retired_reason   TEXT        NULL,       -- NULL = a normal row; 'pre-R-EP5 path' = retired (#274)
+    current_version  INTEGER     NULL,       -- #786 (V58): the API's OWN runtime pointer, see §4.13a
     created_by       UUID        NOT NULL REFERENCES users(id),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -639,9 +646,60 @@ CREATE INDEX idx_published_endpoints_pipeline ON published_endpoints(pipeline_id
 - **`UNIQUE (path_pattern)` is deployment-wide, not per-workspace, on purpose.** A URL is global: `GET /api/lending/v1/home` has exactly one meaning on a deployment, so two workspaces cannot both own it. `workspace_id` says who may manage the row and whose datasources the pipeline runs against — it does not namespace the path. A per-workspace constraint would let two rows claim one URL and make request-time resolution ambiguous.
 - **`retired_reason` (V41, #274) — a stored row that fails a later grammar is retired, never fatal.** R-EP5 (2026-09-19) made three segments the floor, and rows written before that day under the then-legal two-segment grammar parse against nothing: the row mapper threw inside the demo seeder's conflict check and refused the whole boot. V41 disables every row whose path has fewer than three segments and records why (`retired_reason = 'pre-R-EP5 path'`; NULL is a normal row). Rows are never deleted — the listing shows them flagged with the reason, and unpublishing one is the operator's deliberate act. Independently of this column, the repository maps a row whose path no longer parses as a legacy value and keeps it out of the serve registry and the conflict check, so a database V41 has not reached yet still boots; the column is what makes the row read back as an ordinary disabled row everywhere else. The migration's down path (documented in the file's header) re-enables every row the reason names — V41 cannot distinguish "disabled by V41" from "disabled by an operator before V41" — and drops the column. The column is an audit marker, not the source of the listing's flag: `legacy` and `reason` come from parsing the stored path on every read (the mapper), and V41's predicate is the two-segment shape only — a row malformed another way (an illegal segment, an empty path) stays `is_enabled = TRUE` in the table, is mapped legacy on every read and is never served. **What sees a legacy row (#286).** Only the legacy read (`findLegacy`, workspace-scoped — there is no deployment-wide read) and the row-level read unpublish needs (`findRowByPath`); every valid-endpoint read skips it — the serve registry, the conflict check, the workspace listing, `EndpointKeyService.requireInsideWorkspace` (a node only a legacy path lies under is not inside the workspace's tree, so no key binds there) and the pipeline explorer's Usage tab (`findByPipeline`: a pipeline served only by a legacy row reads as unpublished, which it is). A promotion batch omits it and the sender logs the count. `path_pattern` is `TEXT` with no CHECK, so the surfaces that echo a legacy path (REST, `endpoints_list`, the console) cut it at the grammar's 200 characters (`EndpointPath.echoBounded`); the column keeps the stored value, because unpublish is by path. The once-per-JVM `event=endpoint.legacy_rows` WARN names the FIRST query's count as `at_least` — after V41 the registry warm-up reads enabled rows only, so it is a floor, not the deployment's total.
 - The constraint is not the whole uniqueness rule. `/a/{x}` and `/a/b` are different strings that match the same URL; that overlap is refused at publish time in the application (`endpoint.path_conflict`), under a transaction-scoped advisory lock so two concurrent publishes cannot both pass the check. The constraint is the second line, catching exact duplication.
-- The row pins a **pipeline, not a version**: the latest RELEASED version is resolved at request time, which is why the read-only rule is re-checked on every serve and not only at publish.
+- **Since #786 (V58) the entity pins nothing itself.** Its `current_version` names one of its API versions (§4.13a), and that version pins an EXACT pipeline version; serving reads this pointer and that pin, never the pipeline's CURRENT. The pointer is tied to a version row by the composite foreign key `fk_published_endpoints_current_version (id, current_version) → published_endpoint_versions (endpoint_id, version)`, `DEFERRABLE INITIALLY DEFERRED` (a constraint, not a trigger: a transaction that purges the current version and moves the pointer is checked once, at commit); NULL serves nothing. `pipeline_id`, `timeout_seconds` and `description` stay as the in-place conversion's SOURCE — read once for an entity with no version row — and as a new entity's creation snapshot; no serve statement reads them. (Before #786 the row pinned a pipeline, not a version, and the latest RELEASED version was resolved at request time; the read-only rule is still re-checked on every serve.)
 - `timeout_seconds` is clamped to the `datapipelines.endpoints.timeout-min-seconds` / `datapipelines.endpoints.timeout-max-seconds` bounds when written, deliberately **not** by a CHECK constraint — the bounds are configuration an operator may retune, and a row written under the old bounds must keep serving rather than make the table unreadable.
 - Matching reads the enabled rows whole and matches them in memory (the set is small and cached per instance, invalidated over the same Redis channel datasource pools use), so no query plan depends on the shape of `path_pattern`.
+
+### 4.13a `published_endpoint_versions`
+
+One row per API version (V58, #786; dependency-graph record §5.3, §24): DRAFT, RELEASED or DISCARDED, the exact pipeline pin by portable NAME and version NUMBER (never a pipeline UUID), the timeout and the description, and the house body hash. See [REST API §19](rest-api.md#19-published-endpoints).
+
+```sql
+CREATE TABLE published_endpoint_versions (
+    endpoint_id      UUID        NOT NULL REFERENCES published_endpoints(id) ON DELETE CASCADE,
+    version          INTEGER     NOT NULL,
+    status           TEXT        NOT NULL DEFAULT 'DRAFT',   -- chk_published_endpoint_versions_status: DRAFT | RELEASED | DISCARDED
+    pipeline_name    TEXT        NOT NULL,   -- the portable pipeline identity (pipeline-contract §11.1)
+    pipeline_version INTEGER     NOT NULL,   -- the EXACT pin: never 'current', never re-resolved
+    timeout_seconds  INTEGER     NOT NULL,   -- clamped by config at write time
+    description      TEXT        NOT NULL DEFAULT '',
+    body_hash        TEXT        NOT NULL,
+    released_at      TIMESTAMPTZ NULL,
+    released_by      UUID        REFERENCES users(id),
+    discarded_at     TIMESTAMPTZ NULL,
+    discarded_by     UUID        REFERENCES users(id),
+    updated_at       TIMESTAMPTZ NULL,
+    updated_by       UUID        REFERENCES users(id),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by       UUID        NOT NULL REFERENCES users(id),
+    PRIMARY KEY (endpoint_id, version),
+    CONSTRAINT chk_published_endpoint_versions_version CHECK (version >= 1),
+    CONSTRAINT chk_published_endpoint_versions_pin CHECK (pipeline_version >= 1),
+    CONSTRAINT chk_published_endpoint_versions_release_stamps CHECK (
+        (status = 'DRAFT' AND released_at IS NULL AND released_by IS NULL)
+        OR (status <> 'DRAFT' AND released_at IS NOT NULL)),
+    CONSTRAINT chk_published_endpoint_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL))
+);
+
+CREATE UNIQUE INDEX uq_published_endpoint_versions_one_draft
+    ON published_endpoint_versions (endpoint_id) WHERE status = 'DRAFT';
+CREATE INDEX idx_published_endpoint_versions_pin ON published_endpoint_versions (pipeline_name, pipeline_version);
+
+ALTER TABLE published_endpoints ADD COLUMN current_version INTEGER NULL
+    CONSTRAINT chk_published_endpoints_current_version CHECK (current_version IS NULL OR current_version >= 1);
+ALTER TABLE published_endpoints ADD CONSTRAINT fk_published_endpoints_current_version
+    FOREIGN KEY (id, current_version) REFERENCES published_endpoint_versions (endpoint_id, version)
+    DEFERRABLE INITIALLY DEFERRED;
+```
+
+**Notes:**
+- **At most one working DRAFT per API** — the V39 partial-unique pattern; a second insert surfaces as `endpoint.version.draft_exists`. A draft save is a CAS on the body hash (`endpoint.version.conflict`).
+- **The body hash is ONE SQL expression** (`PublishedEndpointVersionRepository.API_BODY_HASH_EXPR`, quoted byte-equal in V58's header and drift-tested): `sha256` over `jsonb_build_object('pipeline', 'pipeline_version', 'timeout_seconds', 'description')`. jsonb canonicalises key order, so equal bodies hash equally on every deployment; the path, the entity and pipeline UUIDs, `is_enabled` and the key bindings are not inputs (acceptance A44).
+- **Who pins a pipeline version** — `idx_published_endpoint_versions_pin` serves the pipeline discard/purge protection (#786 B.4): a DRAFT or RELEASED API version — noncurrent, or of a disabled entity, included — refuses `pipeline.version.pinned` with `referencing_api_versions`; a DISCARDED one protects nothing (its restore rechecks the pin).
+- **No data is backfilled in SQL.** Existing APIs are converted IN PLACE by a startup step in `modules/app` under the writer guard and the shared hash expression (owner ruling 2026-11-08): v1 pins the legacy pipeline's CURRENT version exactly, RELEASED when that version is RELEASED and DRAFT otherwise, and `current_version = 1`. Every path that creates an entity writes its v1 in the same transaction, so a version-less entity is legacy data only.
+- The release participant flips a version RELEASED inside the release coordinator's one transaction; `released_at` survives a discard and a restore.
 
 ### 4.14 `endpoint_key_bindings`
 
@@ -720,10 +778,10 @@ CREATE INDEX idx_datasource_workspaces_workspace ON datasource_workspaces(worksp
 
 **Notes:**
 - **Keyed by `datasource_name`, not by an id.** `datasources` is keyed by `name TEXT` (§4.10) and always has been; the RBAC design record's `datasource_id UUID` names a column that does not exist.
-- **V23's backfill preserves yesterday's visibility exactly.** A workspace-bound datasource is granted to its own workspace and `owner_workspace_id` is set to it; a former `global` datasource (`workspace_id IS NULL`) is granted to EVERY existing workspace and owns none. `granted_by` is the datasource's own `created_by` — the honest actor, and it keeps the migration from having to mint a users row.
+- **V23's backfill preserves yesterday's visibility exactly.** A workspace-bound datasource is granted to its own workspace and `owner_workspace_id` is set to it; a former `global` datasource (`workspace_id IS NULL`) is granted to every existing workspace that is not soft-deleted (`V23__rbac_core.sql` filters `w.is_deleted = FALSE`, so a soft-deleted workspace got no grant) and has no owner. `granted_by` is the datasource's own `created_by` — the honest actor, and it keeps the migration from having to mint a users row.
 - **`ON DELETE CASCADE` on the datasource, never on the workspace.** Removing a datasource removes its grants; a workspace is DEACTIVATED, never deleted (D-R10), so its grants must survive to be there when it is reactivated.
 - **Every grant is audited** (`datasource.granted` / `datasource.revoked`, auth.md §10.1). The row records who and when; the audit trail records the decision.
-- Revoking a grant does not touch the datasource. A workspace that loses one loses only its ability to SEE it — pipelines there that referenced it then fail with the ordinary not-found, which is the honest answer: it no longer exists for them.
+- Revoking a grant keeps the datasource's definition, credential and incarnation; when a grant row is actually removed, the same statement advances `datasources.generation` once (§4.10 — visibility is an identity fact for the dependency graph), and a revoke of a grant that did not exist advances nothing. A workspace that loses one loses only its ability to SEE it — pipelines there that referenced it then fail with the ordinary not-found, which is the honest answer: it no longer exists for them.
 
 ### 4.17 `workspace_invitations`
 
@@ -908,7 +966,7 @@ CREATE TABLE schedules (
     name                    TEXT        NOT NULL,       -- the pipeline path grammar (checked in code)
     revision                INT         NOT NULL DEFAULT 1,  -- the ETag / If-Match value; not a releasable version
     executor_id             TEXT        NOT NULL,       -- 'pipeline' in slice 1 — an allowlisted registry id
-    payload_schema_version  INT         NOT NULL,
+    payload_schema_version  INT         NOT NULL,       -- 'pipeline': 2 since #786 (the exact pin); 1 = pointer-following
     payload_json            JSONB       NOT NULL,       -- opaque; the executor validates it
     parameters_json         JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- literal inputs (R7), opaque here
     target_ref              TEXT        NOT NULL,       -- the executor's generic reference (B15): 'pipeline:<name>'
@@ -946,6 +1004,7 @@ CREATE INDEX idx_schedules_target ON schedules (workspace_id, target_ref) WHERE 
 
 **Notes:**
 - **Soft delete** (`deleted_at`, D-9.6/B17), not §2's `is_deleted` flag: the name is unique among LIVE schedules only (the partial index), so a deleted schedule keeps its runs and their trail and its name is free again. A deleted schedule is absent from every read.
+- **Payload schema 2 — the exact pin** (#786, no DDL change). The `pipeline` executor's payload is `{"pipeline": "<name>", "version": <int ≥ 1>}` at `payload_schema_version = 2`: every run executes exactly that pipeline version. Schema 1 (`"version": "current"`) followed the pointer; the executor READS the column and refuses a schema-1 payload (`schedule.validation.payload_schema_unsupported`; a run `payload_schema_unsupported`, blocking) rather than re-reading it. The upgrade's startup conversion rewrites every LIVE schema-1 row in place — only `payload_json.version` (`"current"` → the integer CURRENT names) and this column, under the row's revision CAS (so `revision` moves by one) — and the payload copy of each of its `queued` runs ([§4.23](#423-schedule_runs)) the same way; terminal runs keep the schema they ran under, as history. A deleted schedule is not converted. The pipeline discard's pin guard reads the schema-2 `version` as the version a schedule protects.
 - **`enabled` and `blocked_*` are independent operational controls** (record §1.1): pause flips `enabled`; an `unknown` run or a blocking refusal sets the block; resume never clears a block (unblock does).
 - **`next_due_at` is written only by the ONE occurrence function** (record §3.2) — at create, at the dispatcher's advance, and when resume, unblock or a cron/timezone edit recompute it from now.
 - **The dispatcher's scan** is `idx_schedules_due` joined to the workspace row (a deleted or DEACTIVATED workspace is not dispatched), locked `FOR UPDATE SKIP LOCKED`.
@@ -2068,6 +2127,7 @@ ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DE
 | `template_versions` | `idx_template_versions_dialect` | explicit | Filter template versions by dialect |
 | `datasources` | `datasources_pkey` | via PK | Lookup by name — the registry's hot path |
 | `datasources` | `idx_datasources_active` | explicit (partial) | List non-deleted datasources |
+| `datasources` | `uq_datasources_incarnation` | via UNIQUE | V59 (#874): one row per incarnation — no explicit index; the graph's batch reads use the PK |
 | `workspaces` | `workspaces_pkey` | via PK | Lookup by id |
 | `workspaces` | `workspaces_name_key` | via UNIQUE | Workspace lookup by name (config/UX references) |
 | `workspace_members` | `workspace_members_pkey` | via PK | Membership check `(workspace_id, user_id)` |
@@ -2081,6 +2141,9 @@ ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DE
 | `published_endpoints` | `published_endpoints_path_pattern_key` | via UNIQUE | One meaning per URL, deployment-wide ([§4.13](#413-published_endpoints)) |
 | `published_endpoints` | `idx_published_endpoints_workspace` | explicit | A workspace's endpoints — the management listing |
 | `published_endpoints` | `idx_published_endpoints_pipeline` | explicit | "Does any endpoint publish this pipeline?" — what a pipeline delete and the read-only re-check ask |
+| `published_endpoint_versions` | `published_endpoint_versions_pkey` | via PK | One row per `(endpoint_id, version)` ([§4.13a](#413a-published_endpoint_versions), #786) |
+| `published_endpoint_versions` | `uq_published_endpoint_versions_one_draft` | explicit (partial UNIQUE) | At most one working DRAFT per API |
+| `published_endpoint_versions` | `idx_published_endpoint_versions_pin` | explicit | "Which API versions pin this pipeline version?" — the pipeline discard/purge protection (#786 B.4) |
 | `endpoint_key_bindings` | `endpoint_key_bindings_pkey` | via PK | `(path_prefix, api_key_id)` — one key binds a node once |
 | `endpoint_key_bindings` | `idx_endpoint_key_bindings_key` | explicit | Which nodes a key binds — the key detail view and a revoke's blast radius |
 | `dashboard_key_bindings` | `dashboard_key_bindings_pkey` | via PK | `(name_prefix, api_key_id)` — one key binds a folder once (§4.36) |
@@ -2212,6 +2275,7 @@ table and the test's expected-table list in the same commit.
 | `pipeline_executions` | derived | Execution | — | `execution_id` | Produced by running; each environment's history is its own (versioning §9.3: "its own history references its own numbers") |
 | `execution_events` | derived | Event | — | `(execution_id, event_id)` | The durable SSE trail of local executions |
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
+| `published_endpoint_versions` | promotable | PublishedEndpoint | `version` (per API) | `(path_pattern, version)` | An API version is authored content (#786). Until follow-up #879 carries exact versions on the wire, promotion keeps today's by-path transfer: the receiver's import creates an absent API's v1 pinned to the TARGET pipeline's CURRENT, never a transmitted version or hash |
 | `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
 | `dashboard_key_bindings` | promotable | DashboardKeyBinding | — | — | The `endpoint_key_bindings` twin's OWN class, by the same reasoning (L5 #367's lane decision, recorded in the handback): a folder binding is authored topology. TODAY it has no promotion carrier (no batch row, no entity registered with the transfer) — the class states what it WOULD travel as; when a batch carries it, it travels by key NAME exactly like its twin |
@@ -2566,6 +2630,11 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.60 | #905 review F1 (no migration) — renumbered at final sync after dependency-graph | §4.6: correct the lifecycle note to include the separate result-history UPDATE, which does not change `completed_at`. |
+| 2026-11-11 | v1.59 | #896 docs: ownership and grants as they are since V23 | **No schema change.** Text that still described the V4 `workspace_id` model is corrected to the V23 model: the §3 relationship diagram shows `owner_workspace_id` (ownership; NULL = an instance datasource) and the `datasource_workspaces` grant rows (visibility); the §4.10 note on `workspace_id` becomes the `owner_workspace_id` note — ownership only, the global NAME namespace, visibility by `GRANTED_PREDICATE`, the V4 → V23 history kept as history; §4.11 no longer says datasources "bind by visibility only"; §4.16's backfill note names the `w.is_deleted = FALSE` filter (a soft-deleted workspace got no grant), and its revoke note says a removed grant advances `generation` once while the definition, credential and incarnation stay. |
+| 2026-11-11 | v1.58 | V59 (#874 G3) | **§4.10 `datasources` gains `incarnation_id`** (UUID, `DEFAULT gen_random_uuid()`, unique via `uq_datasources_incarnation`) **and `generation`** (BIGINT from 1, `chk_datasources_generation`) — the local identity beside the name key, both internal and never on the wire; the defaults fill every existing row in the migration's own statement. §5 gains the constraint's implicit index; V59 adds no explicit index. |
+| 2026-11-11 | v1.57 | #786 U2 (no migration) | **§4.22:** the `pipeline` payload is schema 2 — `{"pipeline", "version": <int>}`, the exact pin; schema 1 is refused at read, never re-read; the upgrade's startup conversion rewrites each live schema-1 row's `version` and `payload_schema_version` in place under its revision CAS, and each of its queued runs' payload copies. |
+| 2026-11-10 | v1.56 | V58 (#786 U1) | New **§4.13a `published_endpoint_versions`** — one row per API version (DRAFT/RELEASED/DISCARDED), the exact pipeline pin by name and number, the shared body-hash expression (A44), the one-draft partial index and the pin lookup; **§4.13 `published_endpoints` gains `current_version`**, the API's own pointer, tied to a version row by the deferrable composite FK `fk_published_endpoints_current_version`; the legacy `pipeline_id` / `timeout_seconds` / `description` stay as the in-place conversion's source and the creation snapshot, never served. The "pins a pipeline, not a version" note is corrected. §5 gains the three indexes; §5A classifies the table promotable (by-path transfer until #879). No SQL backfill: the conversion is code (owner ruling 2026-11-08). |
 | 2026-11-08 | v1.55 | 851 (#844) | V57 replaces `idx_lake_deliveries_unsettled (table_id, state)` with `idx_lake_deliveries_unsettled_page (table_id, id)` under the same partial predicate (§4.53, §5): the settlement page is an index range scan with no sort. |
 | 2026-11-06 | v1.54 | 818e (#818) | V56 widens the lease kind and adds reader metadata pins, their check and index; writer fencing is unchanged. |
 | 2026-11-04 | v1.53 | 799 (#799, dp-lake P4) | V55 adds permanent deliveries (§4.53), publication attempts (§4.54), and the derived pipeline version `writes_managed_lake` flag. |

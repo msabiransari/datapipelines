@@ -10,16 +10,20 @@ import java.util.UUID
 /**
  * The mechanical visualization test (the spec's §11.3, D56 (b)) — server-run, no browser, sub-second:
  *
- * 1. **Schema** — `config` against the renderer's schema (for Plotly the reduced 4.1.1 plot-schema:
- *    unknown attributes, wrong types and unsupported traces refused with the path);
- * 2. **Binding** — every path resolves in `config`, every bound column is in the output contract, and the
- *    column's type is one the renderer accepts at that path ([BindingTypes], the renderer-specific table);
+ * 1. **Schema** — `config` against the renderer's rules; a `chart` document against its v1 JSON Schema
+ *    ([ChartDocumentRules], the save's layer 1 re-run over the stored body);
+ * 2. **Binding** — every path resolves in `config` (a chart's bindings are field to field, never paths), every bound
+ *    column is in the output contract, and the column's type is one the renderer accepts at that path
+ *    ([BindingTypes], the renderer-specific table);
  * 3. **Fixture run** — through the pinned script ([TestFixtureEvaluator], the real bounded evaluator
  *    over `TemplateEvaluateService`), or, with no transform, the single input's fixture values through the
  *    same wire-form rules; every bound column must be present in every row's projection, and a present
  *    null passes only when the output column is nullable;
- * 4. **Assertion feasibility** — `trace_count` against `config.data.length`, `no_data` against zero
- *    produced rows, `text_visible`/`value_visible` strings present in the configuration or the bound values;
+ * 4. **Assertion feasibility** — for a `chart` over its [ChartModel] (design record 2026-11-06 §5.1): `mark_count`
+ *    against the model's drawn cells and `no_data` against an empty model, both DISPROVABLE; `text_visible` is
+ *    PROVEN by a configuration string or the model's texts and otherwise UNJUDGED — listed on the report, never a
+ *    failure (only the browser judges a formatted label). For table and KPI: `no_data` against zero produced rows,
+ *    `text_visible`/`value_visible` strings present in the configuration or the bound values;
  * 5. **Rendered state** — [RenderedStateCheck]; the default records `not_available` and never claims a
  *    browser saw anything (a headless render check is a later lane).
  *
@@ -34,6 +38,7 @@ class VisualizationMechanicalCheck(
     private val fixtures: TestFixtureEvaluator,
     private val templates: TemplateContractFacts,
     private val rendered: RenderedStateCheck = RenderedStateCheck.NOT_AVAILABLE,
+    private val charts: ChartDocumentRules = ChartDocumentRules.DEFAULT,
 ) {
     /** One mechanical failure: the step that found it, the catalogued code, the path, and the case when per-case. */
     data class Failure(
@@ -85,6 +90,23 @@ class VisualizationMechanicalCheck(
         }
     }
 
+    /**
+     * A chart assertion the server cannot judge (design record §5.1): `text_visible` whose text is in no configuration
+     * string and none of the model's texts — a formatted label. Not a failure: the browser judges it in the session.
+     */
+    data class Unjudged(
+        val case: String,
+        val path: String,
+        val kind: String,
+    ) {
+        fun toJson(): JsonNode =
+            ArtifactJson.mapper.createObjectNode().apply {
+                put("case", case)
+                put("path", path)
+                put("kind", kind)
+            }
+    }
+
     /** The §11.3 outcome — the run's `mechanical_json`, verbatim. */
     data class Report(
         val ranAt: Instant,
@@ -94,6 +116,8 @@ class VisualizationMechanicalCheck(
         val cases: Map<String, CaseReport>,
         /** Failures beyond [MAX_FAILURES], counted (`failures_dropped`); non-zero means the list is a prefix. */
         val dropped: Int = 0,
+        /** The chart assertions only the browser can judge; they never make [ok] false. */
+        val unjudged: List<Unjudged> = emptyList(),
     ) {
         data class CaseReport(
             val rows: Int,
@@ -109,6 +133,10 @@ class VisualizationMechanicalCheck(
                 set<JsonNode>(
                     "failures",
                     ArtifactJson.mapper.createArrayNode().addAll(failures.map { it.toJson() }),
+                )
+                set<JsonNode>(
+                    "unjudged",
+                    ArtifactJson.mapper.createArrayNode().addAll(unjudged.map { it.toJson() }),
                 )
                 set<JsonNode>(
                     "cases",
@@ -139,12 +167,13 @@ class VisualizationMechanicalCheck(
         val output = outputColumns(workspaceId, body)
         bindings(body, output, failures)
         val cases = fixtureRun(workspaceId, body, output, failures)
-        assertions(body, cases, failures)
+        val unjudged = mutableListOf<Unjudged>()
+        assertions(body, cases, failures, unjudged)
         val caseReports =
             cases.entries.associate { (name, outcome) ->
                 name to Report.CaseReport(outcome.rows, outcome.failures.isEmpty(), rendered.state(workspaceId, body, name))
             }
-        return Report(now, failures.isEmpty(), failures.toList(), caseReports, failures.dropped)
+        return Report(now, failures.isEmpty(), failures.toList(), caseReports, failures.dropped, unjudged)
     }
 
     // ---- step 1: schema -------------------------------------------------------------------------------
@@ -154,6 +183,19 @@ class VisualizationMechanicalCheck(
         failures: FailureSink,
     ) {
         if (!body.renderer.kind.renderable) return // reserved kinds are refused at save, never reach a session
+        if (body.renderer.kind == RendererKind.CHART) {
+            val tree: JsonNode = ArtifactJson.mapper.valueToTree(body)
+            charts.schema(tree).forEach {
+                failures +=
+                    Failure(
+                        "schema",
+                        VisualizationErrorCodes.CONFIG_SCHEMA_INVALID,
+                        ChartPaths.dotted(tree, it.pointer),
+                        "The chart document fails the v1 schema's '${it.keyword}' keyword here.",
+                    )
+            }
+            return
+        }
         renderers.validate(body.renderer.kind, body.config).forEach {
             failures += Failure("schema", VisualizationErrorCodes.CONFIG_SCHEMA_INVALID, JsonScan.join("config", it.path), it.message)
         }
@@ -188,18 +230,19 @@ class VisualizationMechanicalCheck(
         output: Map<String, ScriptContractView.Column>,
         failures: FailureSink,
     ) {
+        // A chart's bindings are derived field-to-field maps (design record §4.4), not config paths: only the contract check.
+        val paths = body.renderer.kind != RendererKind.CHART
         body.bindings.forEach { (path, column) ->
             val at = "bindings.$path"
             val steps = BindingPath.parse(path)
-            when {
-                steps == null -> {
-                    failures += Failure("bindings", VisualizationErrorCodes.BINDING_UNBOUND, at, "Not a binding path.")
+            val pathProblem =
+                when {
+                    !paths -> null
+                    steps == null -> "Not a binding path."
+                    !BindingPath.resolves(body.config, steps) -> "Does not resolve inside config."
+                    else -> null
                 }
-
-                !BindingPath.resolves(body.config, steps) -> {
-                    failures += Failure("bindings", VisualizationErrorCodes.BINDING_UNBOUND, at, "Does not resolve inside config.")
-                }
-            }
+            pathProblem?.let { failures += Failure("bindings", VisualizationErrorCodes.BINDING_UNBOUND, at, it) }
             val type = output[column]?.type
             when {
                 type == null -> {
@@ -226,6 +269,8 @@ class VisualizationMechanicalCheck(
         var rows: Int = 0,
         var boundValues: List<String> = emptyList(),
         val failures: FailureSink = FailureSink(MAX_FAILURES),
+        /** A chart case's model over its post-transform rows; null for other kinds and for a case without rows. */
+        var chart: ChartModel? = null,
     )
 
     private fun fixtureRun(
@@ -256,7 +301,9 @@ class VisualizationMechanicalCheck(
                     .orEmpty()
             FixtureValues.validate(body, case, index, rows, outcome.failures)
             outcome.rows = rows.size
-            outcome.boundValues = boundValues(body.bindings.values, rows.map(::toRowMap))
+            val rowMaps = rows.map(::toRowMap)
+            outcome.boundValues = boundValues(body.bindings.values, rowMaps)
+            chartModel(body, output, rowMaps, index, outcome)
         } else {
             when (val evaluation = fixtures.evaluate(workspaceId, transform.template, case.fixtures)) {
                 is FixtureEvaluation.Refused -> {
@@ -267,10 +314,38 @@ class VisualizationMechanicalCheck(
                     outcome.rows = evaluation.rows.size
                     outcome.boundValues = boundValues(body.bindings.values, evaluation.rows)
                     projectedRows(body, output, evaluation.rows, index, outcome)
+                    chartModel(body, output, evaluation.rows, index, outcome)
                 }
             }
         }
         return outcome
+    }
+
+    /**
+     * A chart case's [ChartModel] over the case's post-transform rows, typed by the contract the save rules read. A
+     * case whose rows already failed the fixture step gets no model: a count over rows outside their contract would
+     * be a second, misleading refusal of the same defect (its `mark_count`/`no_data` are judged on the next run).
+     */
+    private fun chartModel(
+        body: VisualizationBody,
+        output: Map<String, ScriptContractView.Column>,
+        rows: List<Map<String, Any?>>,
+        caseIndex: Int,
+        outcome: CaseOutcome,
+    ) {
+        if (body.renderer.kind != RendererKind.CHART || !outcome.failures.isEmpty()) return
+        try {
+            outcome.chart = ChartModel.of(body.config, output.mapValues { it.value.type }, rows)
+        } catch (refused: ChartModel.NotAMeasure) {
+            outcome.failures +=
+                Failure(
+                    "fixtures",
+                    VisualizationErrorCodes.TEST_CASE_INVALID,
+                    "tests.cases[$caseIndex]",
+                    refused.message ?: "A measure value is outside its wire form.",
+                    outcome.name,
+                )
+        }
     }
 
     private fun projectedRows(
@@ -335,24 +410,32 @@ class VisualizationMechanicalCheck(
         body: VisualizationBody,
         cases: Map<String, CaseOutcome>,
         failures: FailureSink,
+        unjudged: MutableList<Unjudged>,
     ) {
         val bodyCases = body.tests?.cases ?: return
         val configStrings = stringsOf(body.config)
+        val chart = body.renderer.kind == RendererKind.CHART
         bodyCases.forEachIndexed { index, case ->
             val outcome = cases[case.name] ?: return@forEachIndexed
             case.assertions.forEachIndexed { assertionIndex, assertion ->
                 val at = "tests.cases[$index].assertions[$assertionIndex]"
                 when (assertion.kind) {
-                    AssertionKind.TRACE_COUNT -> {
-                        traceCount(body, assertion, at, case.name, failures)
+                    AssertionKind.MARK_COUNT -> {
+                        markCount(chart, outcome, assertion, at, case.name, failures)
                     }
 
                     AssertionKind.NO_DATA -> {
-                        noData(outcome, at, case.name, failures)
+                        noData(chart, outcome, at, case.name, failures)
                     }
 
                     AssertionKind.TEXT_VISIBLE, AssertionKind.VALUE_VISIBLE -> {
-                        textPresent(configStrings, outcome, assertion, at, case.name, failures)
+                        if (chart) {
+                            val text = assertion.text
+                            val proven = text != null && (configStrings.any { text in it } || outcome.chart?.proves(text) == true)
+                            if (!proven) unjudged += Unjudged(case.name, at, assertion.kind.wire)
+                        } else {
+                            textPresent(configStrings, outcome, assertion, at, case.name, failures)
+                        }
                     }
 
                     // Step 5's assertions are a later lane's; the state is RECORDED, never judged here.
@@ -364,32 +447,31 @@ class VisualizationMechanicalCheck(
         }
     }
 
-    private fun traceCount(
-        body: VisualizationBody,
+    /**
+     * `mark_count` (design record §5.1): the chart model's drawn cells — distinct band × series pairs with a non-null
+     * aggregate. A case whose rows never reached a model (an evaluator refusal, a measure outside its wire form) already
+     * failed; it is not judged twice.
+     */
+    private fun markCount(
+        chart: Boolean,
+        outcome: CaseOutcome,
         assertion: Assertion,
         at: String,
         case: String,
         failures: FailureSink,
     ) {
-        if (body.renderer.kind != RendererKind.PLOTLY || !body.config.path("data").isArray) {
-            failures +=
-                Failure(
-                    "assertions",
-                    VisualizationErrorCodes.TEST_CASE_INVALID,
-                    at,
-                    "trace_count needs a Plotly config with a data array.",
-                    case,
-                )
+        if (!chart) {
+            failures += Failure("assertions", VisualizationErrorCodes.TEST_CASE_INVALID, at, "mark_count needs a chart document.", case)
             return
         }
-        val traces = body.config.path("data").size()
-        if (assertion.equals != null && assertion.equals != traces) {
+        val marks = outcome.chart?.markCount ?: return
+        if (assertion.equals != null && assertion.equals != marks) {
             failures +=
                 Failure(
                     "assertions",
                     VisualizationErrorCodes.TEST_CASE_INVALID,
                     at,
-                    "The configuration renders $traces traces; the case asserts ${assertion.equals}.",
+                    "The case's rows draw $marks marks; the case asserts ${assertion.equals}.",
                     case,
                 )
         }
@@ -400,13 +482,29 @@ class VisualizationMechanicalCheck(
         // deliberately empty: the no-op rendered-state check's answer is recorded, not judged
     }
 
+    /**
+     * `no_data`: zero produced rows — for a chart, an empty model (no rows, or every aggregate null; record §5.1); a
+     * chart case without a model already failed and is not judged twice.
+     */
     private fun noData(
+        chart: Boolean,
         outcome: CaseOutcome,
         at: String,
         case: String,
         failures: FailureSink,
     ) {
-        if (outcome.rows != 0) {
+        val model = outcome.chart
+        if (chart && model == null) return
+        if (model != null && !model.noData) {
+            failures +=
+                Failure(
+                    "assertions",
+                    VisualizationErrorCodes.TEST_CASE_INVALID,
+                    at,
+                    "The case expects the empty state; its rows draw ${model.markCount} marks.",
+                    case,
+                )
+        } else if (model == null && outcome.rows != 0) {
             failures +=
                 Failure(
                     "assertions",
@@ -520,34 +618,23 @@ private object FixtureValues {
 }
 
 /**
- * The renderer-specific type table (the spec's §11.3 step 2). Plotly's last leaf key selects its
- * numeric wire restrictions; table and KPI accept canonical scalars, preserving KPI's BIG wire strings.
- * Pinned by test — changing a row of this table is a spec amendment, not a refactor.
+ * The renderer-specific type table (the spec's §11.3 step 2). Table and KPI accept canonical scalars, preserving KPI's
+ * BIG wire strings; a chart's field types are its save rules' (`chart.measure.not_numeric`, `chart.field.binary`, … —
+ * [ChartSaveRules] over the same contract), so every type passes here. Pinned by test — changing a row of this table
+ * is a spec amendment, not a refactor.
  */
 object BindingTypes {
-    /**
-     * Leaf keys whose bound values feed a numeric Plotly array. The type system's wire decides what
-     * "numeric" means: INTEGER and DECIMAL travel as JSON numbers; BIGINTEGER/BIGDECIMAL travel as
-     * strings and would render as text, so they are refused here.
-     */
-    private val NUMERIC_LEAVES: Set<String> =
-        setOf("y", "z", "values", "size", "lat", "lon", "open", "high", "low", "close", "weight")
-
-    private val NUMERIC_TYPES: Set<LogicalType> = setOf(LogicalType.INTEGER, LogicalType.DECIMAL)
-
     /** True when [type] may bind a column at [path] for [renderer]. Reserved renderers refuse bindings. */
+    @Suppress("UNUSED_PARAMETER", "UnusedParameter") // path and type are the table's axes; no current row reads them
     fun accepts(
         renderer: RendererKind,
         path: String,
         type: LogicalType,
-    ): Boolean {
-        val leaf = path.substringAfterLast('.').substringBefore('[')
-        return when (renderer) {
-            RendererKind.PLOTLY -> if (leaf in NUMERIC_LEAVES) type in NUMERIC_TYPES else true
-            RendererKind.TABLE, RendererKind.KPI -> true
+    ): Boolean =
+        when (renderer) {
+            RendererKind.CHART, RendererKind.TABLE, RendererKind.KPI -> true
             RendererKind.HTML, RendererKind.SVG -> false
         }
-    }
 }
 
 /** The fixture-run port: the real bounded evaluator behind it lives in `web` (over `TemplateEvaluateService`). */

@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -102,6 +103,7 @@ import java.util.UUID
 @Suppress(
     "TooManyFunctions", // the aggregate's one-stop use-case surface (S5/R6); the 101 verbs grew it
     "ThrowsCount", // each refusal is a distinct catalogued code the caller distinguishes — the boundary's shape
+    "LongParameterList", // one collaborator per seam; #877 §E.3 made the release coordinator required (no default)
 )
 open class PipelineService(
     private val pipelines: PipelineRepository,
@@ -112,13 +114,18 @@ open class PipelineService(
     private val draftTemplates: ExclusiveDraftTemplates,
     /** #320 — the dashboards that pin a release: a source pins `pipeline {name, version}` exactly (graph rule 1). */
     private val dashboards: PipelineVersionConsumers,
+    /** #786 B.4 — the live API versions that pin a pipeline version exactly (record §14, A39). */
+    private val endpointVersions: EndpointVersionConsumers,
+    /** #786 B.4 — the live schedules that run a pipeline version, paused and blocked included (record §14, A39). */
+    private val schedules: ScheduleConsumers,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
     private val serializer: PipelineSerializer = PipelineSerializer(),
     /**
-     * The release-dependencies coordinator (#517): when the assembling layer wires one, every [release] runs
-     * through it and its one metadata transaction. Null in a directly constructed test, which releases natively.
+     * The release-dependencies coordinator (#517): every [release] runs through it and its one metadata transaction.
+     * Required since #877 §E.3 retired the native release — there is no release path without it, so a construction
+     * that never releases passes a coordinator that refuses (the test sources' `ReleaseCoordinationDoubles.REFUSING`).
      */
-    private val coordination: PipelineReleaseCoordination? = null,
+    private val coordination: PipelineReleaseCoordination,
     /** The workspace writer guard (#517, record §4.3); [ReleaseMutationGuard.NONE] in a directly constructed test. */
     private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
     /**
@@ -135,9 +142,11 @@ open class PipelineService(
     private val templateIds: TemplateIds = TemplateIds { _, _ -> false },
     /** Blockers one restore refusal lists (`datapipelines.release.dependencies.max-blockers`, record §14). */
     private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
+    /** #873 §D.3 — the transitive restore recheck; [RestoreDependencyGuard.DIRECT_ONLY] in a directly constructed test. */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
 ) {
-    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards)
-    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, templateIds, maxBlockers, deserializer)
+    private val pinGuard = PipelinePurgePinGuard(pipelines, dashboards, endpointVersions, schedules)
+    private val restorePins = PipelineRestorePins(pipelines, templateStatuses, templateIds, maxBlockers, deserializer, restoreGuard)
 
     /** The writer guard, acquired first inside every pin-affecting write's transaction. */
     private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.PIPELINE)
@@ -657,25 +666,24 @@ open class PipelineService(
     /**
      * §5.10 — release the draft.
      *
-     * The preconditions (a draft exists, it re-validates, every template version it pins is
-     * RELEASED) and the 140 release-check gate run in [PipelineReleaseService]; the
-     * template-pin guard and the one-statement flip run in a metadata transaction there.
-     * This method is deliberately NOT `@Transactional` as a whole since 140: the gate's
-     * check runs open customer-datasource connections, and `ConnectionLease` refuses exactly
-     * that (`datasource.lease_in_transaction`) while a metadata transaction is open on the
-     * thread (056 §E.2).
+     * Every release runs through the release coordinator ([coordination], #517): it prepares the
+     * draft (a draft exists, it re-validates, the 140 release-check gate) outside any metadata
+     * transaction, walks the dependency closure, refuses on the guard (every dependency
+     * RELEASED or consented), and flips every node in ONE metadata transaction. This method is
+     * deliberately NOT `@Transactional`: the gate's check runs open customer-datasource
+     * connections, and `ConnectionLease` refuses exactly that (`datasource.lease_in_transaction`)
+     * while a metadata transaction is open on the thread (056 §E.2).
      *
      * [overrideChecksReason] is the §13.17 escape hatch: non-blank, ≥ 10 characters, audited
      * with the release when any check did not pass. Ignored for a version with no checks.
      *
-     * [releasePinnedTemplates] is 142's consent: the DRAFT template versions the body pins
-     * are released in the flip's transaction, templates first, and the result's
-     * `templatesReleased` names them for the surfaces' audit events. False (the default)
-     * keeps the §6 refusal exactly as before.
+     * [releasePinnedTemplates] is 142's consent (the legacy alias, record §6): the root's direct
+     * DRAFT template pins are released in the flip's transaction, templates first, and the
+     * result's `templatesReleased` names them for the surfaces' audit events. False (the
+     * default) keeps the §6 refusal.
      *
-     * [plan] is the release-dependencies plan (#517, record §6). With the coordinator wired —
-     * production — every release runs through it, plan or not; a construction without one
-     * releases natively and refuses a plan it cannot honour.
+     * [plan] is the release-dependencies plan (#517, record §6); absent, the coordinator runs
+     * the compatible release.
      */
     open fun release(
         workspaceId: UUID,
@@ -685,15 +693,10 @@ open class PipelineService(
         overrideChecksReason: String? = null,
         releasePinnedTemplates: Boolean = false,
         plan: ReleasePlanRequest? = null,
-    ): PipelineReleaseService.Released {
-        coordination?.let { coordinator ->
-            return coordinator.release(
-                PipelineReleaseRequest(workspaceId, pipelineId, expectedHash, actor, overrideChecksReason, releasePinnedTemplates, plan),
-            )
-        }
-        check(plan?.present != true) { "A release plan needs the release coordinator; this construction wired none." }
-        return releases.release(workspaceId, pipelineId, expectedHash, actor, overrideChecksReason, releasePinnedTemplates)
-    }
+    ): PipelineReleaseService.Released =
+        coordination.release(
+            PipelineReleaseRequest(workspaceId, pipelineId, expectedHash, actor, overrideChecksReason, releasePinnedTemplates, plan),
+        )
 
     /**
      * §5.11 — purge the draft: the row and its executions are deleted (no tombstone since
@@ -961,13 +964,6 @@ open class PipelineService(
         entityPurge: Boolean = false,
     ) = pinGuard.refuseIfPinned(workspaceId, record, version, entityPurge)
 
-    private fun pinned(
-        record: PipelineRecord,
-        version: Int,
-        pinners: List<TemplatePin>,
-        dashboardPins: List<DashboardPin> = emptyList(),
-    ): DatapipelinesException = pinGuard.pinned(record, version, pinners, dashboardPins)
-
     /**
      * The discard statement returned zero rows after the service-side guard passed: a pin
      * landed in between, or a concurrent discard won.
@@ -977,9 +973,8 @@ open class PipelineService(
         record: PipelineRecord,
         version: Int,
     ): DatapipelinesException {
-        val pinners = pipelines.findLiveParentsPinningVersion(workspaceId, record.name, version)
-        val dashboardPins = dashboards.liveVersionPins(workspaceId, record.name, version)
-        if (pinners.isNotEmpty() || dashboardPins.isNotEmpty()) return pinned(record, version, pinners, dashboardPins)
+        val pinners = pinGuard.pinnersOf(workspaceId, record, version)
+        if (!pinners.isEmpty) return pinGuard.pinned(record, version, pinners)
         val current = pipelines.findVersionDetail(workspaceId, record.id, version) ?: throw versionNotFound(record.id, version)
         return when (current.status) {
             PipelineVersionStatus.RELEASED -> {

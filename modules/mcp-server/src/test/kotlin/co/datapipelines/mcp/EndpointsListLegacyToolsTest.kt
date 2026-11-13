@@ -1,10 +1,12 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.endpoints.CurrentVersion
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
+import co.datapipelines.application.endpoints.EndpointVersionBody
 import co.datapipelines.application.endpoints.PublishedEndpoint
-import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -22,26 +24,25 @@ import java.util.UUID
  */
 class EndpointsListLegacyToolsTest {
     private val publishing = mockk<EndpointPublishService>()
-    private val pipelines = mockk<PipelineRepository>()
-    private val tool = EndpointsTools.ListTool(publishing, pipelines)
+    private val tool = EndpointsTools.ListTool(publishing)
     private val ctx = McpFixtures.ctx()
 
     @Test
     fun `a legacy row is listed last, flagged with legacy true and its reason`() {
         every { publishing.list(any()) } returns listOf(validEndpoint())
         every { publishing.listLegacy(any()) } returns listOf(legacyRow())
-        every { pipelines.findById(any(), any()) } returns null
 
         @Suppress("UNCHECKED_CAST")
         val endpoints = tool.call(McpArguments(emptyMap()), ctx).asMap()["endpoints"] as List<Map<String, Any?>>
 
         endpoints.size shouldBe 2
 
-        // The valid row: exactly the pre-#274 shape — no `legacy` key at all.
+        // The valid row: exactly the pre-#274 shape — no `legacy` key at all. #786 changed assertion: `pipeline` is the
+        // current version's pinned name, read from the row itself (before: a pipeline lookup by the legacy id, null here).
         endpoints[0] shouldBe
             mapOf(
                 "path" to "/nyc/v1/revenue/{borough}",
-                "pipeline" to null,
+                "pipeline" to "test/pipeline",
                 "timeout_seconds" to 30,
                 "description" to "",
                 "enabled" to true,
@@ -53,7 +54,7 @@ class EndpointsListLegacyToolsTest {
         endpoints[1] shouldBe
             mapOf(
                 "path" to "/nyc/revenue-by-borough",
-                "pipeline" to null,
+                "pipeline" to "test/pipeline",
                 "enabled" to false,
                 "legacy" to true,
                 "reason" to REASON,
@@ -68,7 +69,6 @@ class EndpointsListLegacyToolsTest {
         val long = "/nyc/" + "x".repeat(LONG_TAIL)
         every { publishing.list(any()) } returns emptyList()
         every { publishing.listLegacy(any()) } returns listOf(legacyRow(path = long))
-        every { pipelines.findById(any(), any()) } returns null
 
         @Suppress("UNCHECKED_CAST")
         val row = (tool.call(McpArguments(emptyMap()), ctx).asMap()["endpoints"] as List<Map<String, Any?>>).single()
@@ -82,13 +82,11 @@ class EndpointsListLegacyToolsTest {
             id = UUID.nameUUIDFromBytes("/nyc/v1/revenue/{borough}".toByteArray()),
             workspaceId = WORKSPACE,
             pathPattern = "/nyc/v1/revenue/{borough}",
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 30,
-            description = "",
             isEnabled = true,
             createdBy = UUID.randomUUID(),
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
+            current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody("test/pipeline", 1, 30, "")),
         )
 
     private fun legacyRow(path: String = "/nyc/revenue-by-borough"): EndpointRow.Legacy =
@@ -96,7 +94,7 @@ class EndpointsListLegacyToolsTest {
             id = UUID.nameUUIDFromBytes(path.toByteArray()),
             workspaceId = WORKSPACE,
             pathPattern = path,
-            pipelineId = UUID.randomUUID(),
+            pipelineName = "test/pipeline",
             reason = REASON,
             enabled = false,
         )

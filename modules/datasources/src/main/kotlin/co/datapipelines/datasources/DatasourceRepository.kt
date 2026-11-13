@@ -9,6 +9,7 @@ import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.support.SqlArrayValue
 import java.sql.ResultSet
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -124,6 +125,13 @@ data class DatasourceRecentGrant(
 class DatasourceRepository(
     private val jdbc: NamedParameterJdbcTemplate,
     private val objectMapper: ObjectMapper = DEFAULT_MAPPER,
+    /**
+     * #841 (G0) — every definition write ([create], [update], [updateCredential], [softDelete]) runs under the
+     * datasource's prerequisite key and its affected workspaces, in one metadata transaction (joined when the caller
+     * has one: the registry's save holds it across its read, validation and write). [recordTestOutcome] stays
+     * outside — an observation, not a consent fact. [DatasourceWriteGuarding.UNGUARDED] is the unit-test default.
+     */
+    val writes: DatasourceWriteGuarding = DatasourceWriteGuarding.UNGUARDED,
 ) {
     /** The live (non-deleted) row for [name], or null. */
     fun findByName(name: String): DatasourceRow? =
@@ -281,8 +289,10 @@ class DatasourceRepository(
         credentialEncrypted: ByteArray?,
         createdBy: UUID,
     ): DatasourceRow =
-        mappingDuplicateName(datasource.name) {
-            jdbc.query(INSERT_SQL, insertParams(datasource, credentialEncrypted, createdBy), mapper()).single()
+        writes.definition(datasource.name, listOf(datasource.ownerWorkspaceId)) {
+            mappingDuplicateName(datasource.name) {
+                jdbc.query(INSERT_SQL, insertParams(datasource, credentialEncrypted, createdBy), mapper()).single()
+            }
         }
 
     /**
@@ -316,7 +326,9 @@ class DatasourceRepository(
         // NONE writes its NULL; every other kind keeps the stored blob when the caller sent none.
         val writesCredential = credentialEncrypted != null || datasource.credentialKind == CredentialKind.NONE
         val sql = if (writesCredential) UPDATE_WITH_CREDENTIAL_SQL else UPDATE_KEEP_CREDENTIAL_SQL
-        return jdbc.query(sql, params, mapper()).singleOrNull()
+        return writes.definition(datasource.name, listOf(datasource.ownerWorkspaceId)) {
+            jdbc.query(sql, params, mapper()).singleOrNull()
+        }
     }
 
     /**
@@ -328,7 +340,8 @@ class DatasourceRepository(
      * restart byte-untouched, a promise that stays mechanically checkable only while the
      * definition columns (`updated_at` among them) hold still when a probe runs. The three
      * `last_test_*` columns are the single, documented exception to "every UPDATE sets
-     * updated_at" (metadata-db §2), for exactly that reason.
+     * updated_at" (metadata-db §2), for exactly that reason. For the same reason the V59 `generation` does not
+     * advance here (#874, record §15.1: observations are excluded from the graph's fingerprint).
      *
      * Nothing here can leak a credential: [DatasourceTestOutcome.message] arrives already
      * scrubbed from the probe (`DefaultDatasourceRegistry.failedProbe`).
@@ -359,20 +372,23 @@ class DatasourceRepository(
      * column it may write. Display name, URL, username, properties, timeouts, the readonly
      * flag and the workspace binding are the operator's, and a resync does not get to have an
      * opinion about them. `updated_at` DOES move here — unlike [recordTestOutcome], this is a
-     * real change to the datasource.
+     * real change to the datasource, so the V59 `generation` advances by one too (record §15.1: a credential change is
+     * a protected local generation, never a credential-derived digest).
      */
     fun updateCredential(
         name: String,
         credentialEncrypted: ByteArray,
     ): Boolean =
-        jdbc.update(
-            """
-            UPDATE datasources
-               SET credential_encrypted = :credentialEncrypted, updated_at = NOW()
-             WHERE name = :name AND is_deleted = FALSE
-            """.trimIndent(),
-            MapSqlParameterSource().addValue("name", name).addValue("credentialEncrypted", credentialEncrypted),
-        ) > 0
+        writes.definition(name) {
+            jdbc.update(
+                """
+                UPDATE datasources
+                   SET credential_encrypted = :credentialEncrypted, updated_at = NOW(), generation = generation + 1
+                 WHERE name = :name AND is_deleted = FALSE
+                """.trimIndent(),
+                MapSqlParameterSource().addValue("name", name).addValue("credentialEncrypted", credentialEncrypted),
+            ) > 0
+        }
 
     /**
      * Every live datasource's name and `updated_at` — the §5.7 reconcile's whole input (094).
@@ -391,12 +407,87 @@ class DatasourceRepository(
                 rs.getString("name") to rs.getObject("updated_at", OffsetDateTime::class.java).toInstant()
             }.toMap()
 
-    /** Soft-deletes [name]; false when nothing live existed. The row (and its name) survive. */
+    /**
+     * Soft-deletes [name]; false when nothing live existed. The row (and its name) survive, and so does its V59
+     * incarnation; the generation advances by one (visibility ends — an identity fact, record §15.1).
+     */
     fun softDelete(name: String): Boolean =
-        jdbc.update(
-            "UPDATE datasources SET is_deleted = TRUE, updated_at = NOW() WHERE name = :name AND is_deleted = FALSE",
-            mapOf("name" to name),
-        ) > 0
+        writes.definition(name) {
+            jdbc.update(
+                "UPDATE datasources SET is_deleted = TRUE, updated_at = NOW(), generation = generation + 1 " +
+                    "WHERE name = :name AND is_deleted = FALSE",
+                mapOf("name" to name),
+            ) > 0
+        }
+
+    /**
+     * #874 (V59) — the identity facts of the row under [name], soft-deleted rows included, or null when no row holds
+     * the name. For tests and diagnostics; the graph reads [findVisibleGraphFacts] / [findLiveGraphFacts].
+     */
+    fun findIncarnation(name: String): Incarnation? =
+        jdbc
+            .query(
+                "SELECT incarnation_id, generation, is_deleted FROM datasources WHERE name = :name",
+                mapOf("name" to name),
+            ) { rs, _ ->
+                Incarnation(
+                    incarnationId = rs.getObject("incarnation_id", UUID::class.java),
+                    generation = rs.getLong("generation"),
+                    isDeleted = rs.getBoolean("is_deleted"),
+                )
+            }.singleOrNull()
+
+    /**
+     * #874 G3 (record §7.1, §12) — the graph facts of the live datasources among [names] GRANTED to [workspaceId]: ONE
+     * statement whatever the number of names, the list bound as one array parameter (`= ANY(:names)`), the same
+     * visibility predicate as [findAllVisible]. A name that is absent, soft-deleted or not granted is simply not
+     * returned — the caller cannot tell the three apart, by design (§12: hidden and missing are one outcome).
+     */
+    fun findVisibleGraphFacts(
+        names: Collection<String>,
+        workspaceId: UUID,
+    ): List<DatasourceGraphFacts> =
+        if (names.isEmpty()) {
+            emptyList()
+        } else {
+            jdbc.query(
+                "$GRAPH_FACTS_SELECT WHERE d.is_deleted = FALSE AND d.name = ANY(:names) AND $GRANTED_PREDICATE",
+                MapSqlParameterSource().addValue("names", textArray(names)).addValue("workspaceId", workspaceId),
+                graphFactsMapper(),
+            )
+        }
+
+    /**
+     * #874 G3 — [findVisibleGraphFacts] without the grant predicate: the live datasources among [names], for the
+     * super-admin inventory authority (§12 "Super admin: Native READ"), asked only for the requested names — never
+     * [findAll]'s whole inventory. ONE statement, the names bound as one array parameter.
+     */
+    fun findLiveGraphFacts(names: Collection<String>): List<DatasourceGraphFacts> =
+        if (names.isEmpty()) {
+            emptyList()
+        } else {
+            jdbc.query(
+                "$GRAPH_FACTS_SELECT WHERE d.is_deleted = FALSE AND d.name = ANY(:names)",
+                MapSqlParameterSource().addValue("names", textArray(names)),
+                graphFactsMapper(),
+            )
+        }
+
+    @Suppress("SpreadOperator") // SqlArrayValue takes a vararg; the copy is one bounded batch (ScheduleRepository precedent)
+    private fun textArray(values: Collection<String>): SqlArrayValue = SqlArrayValue("text", *values.toTypedArray())
+
+    /** The ONE construction site of [DatasourceGraphFacts]: its identity facts come from the stored row only. */
+    private fun graphFactsMapper(): RowMapper<DatasourceGraphFacts> =
+        RowMapper { rs: ResultSet, _: Int ->
+            DatasourceGraphFacts(
+                name = rs.getString("name"),
+                displayName = rs.getString("display_name"),
+                dialect = Dialect.fromWire(rs.getString("dialect")),
+                isReadonly = rs.getBoolean("is_readonly"),
+                incarnationId = rs.getObject("incarnation_id", UUID::class.java),
+                generation = rs.getLong("generation"),
+            )
+        }
 
     private fun insertParams(
         datasource: Datasource,
@@ -536,6 +627,10 @@ class DatasourceRepository(
         const val SELECT_COLUMNS =
             "SELECT $COLUMNS FROM datasources d LEFT JOIN workspaces w ON w.id = d.owner_workspace_id"
 
+        /** #874 — the graph facts' six columns: nothing of the connection, the owner or the grants. */
+        const val GRAPH_FACTS_SELECT =
+            "SELECT d.name, d.display_name, d.dialect, d.is_readonly, d.incarnation_id, d.generation FROM datasources d"
+
         /**
          * The visibility predicate (D-R7): a datasource is visible to a workspace exactly when
          * a GRANT row says so. "Global" is gone — the V23 backfill turned every former
@@ -598,6 +693,10 @@ class DatasourceRepository(
          * `RETURNING` cannot join, so the CTE's row is re-read through the workspace join and
          * the stored row carries `workspace_name` exactly like every other read. (Postgres
          * also rejects `UPDATE datasources d` aliases — the alias lives on the CTE.)
+         *
+         * #874 — every definition update advances the V59 `generation` by one, inside the caller's G0-guarded section
+         * (the `writes.definition` block [update] runs in); the RETURNING list does not carry it ([DatasourceRow] has
+         * no identity field — only [findVisibleGraphFacts]/[findLiveGraphFacts] read it).
          */
         private fun updateSql(includeCredential: Boolean): String {
             val credentialClause =
@@ -616,7 +715,8 @@ class DatasourceRepository(
                            introspection_include_schemas_json = CAST(:introspectionIncludeSchemas AS jsonb),
                            is_readonly = :isReadonly,
                            owner_workspace_id = :ownerWorkspaceId,
-                           updated_at = NOW()
+                           updated_at = NOW(),
+                           generation = generation + 1
                      WHERE name = :name AND is_deleted = FALSE
                     RETURNING name, display_name, description, dialect, jdbc_url, username, credential_kind, credential_encrypted,
                         properties_json, query_timeout_seconds, introspection_include_schemas_json,

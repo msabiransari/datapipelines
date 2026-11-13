@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.47 (living document — updated as enums evolve)
+**Status:** v1.49 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -422,8 +422,14 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `endpoint.key_unbound` | An API key's binding to a node was removed |
 | `dashboard.key_bound` (L5, #367) | A `dashboard` key was bound to a folder of the dashboard name space; `details.name_prefix` and `workspace_id` |
 | `dashboard.key_unbound` (L5, #367) | A `dashboard` key's folder binding was removed; `details.name_prefix` |
-| `endpoint.published` | An endpoint was published over a released pipeline |
+| `endpoint.published` | An endpoint was published over a released pipeline. **Retired from new writes by #786** (an API is created as its v1 DRAFT, `endpoint.draft_saved`); kept for the history rows written before it |
 | `endpoint.unpublished` | An endpoint was deleted |
+| `endpoint.draft_saved` (#786) | An API version DRAFT was saved — the create's v1 included; `details` carry the path, the version, the pinned `pipeline` and `pipeline_version` and the body hash |
+| `endpoint.released` (#786) | An API version was released, by its own release or as the root of a release cascade (strict audit: the release rolls back if this row cannot be written) |
+| `endpoint.version_discarded` (#786) | A RELEASED API version was discarded (reversible) |
+| `endpoint.version_restored` (#786) | A DISCARDED API version was restored after its pin was rechecked |
+| `endpoint.version_purged` (#786) | An API DRAFT version was purged |
+| `endpoint.current_switched` (#786) | The API's runtime current version was switched; `details.from` and `details.to` carry both numbers |
 
 > Password and lockout events exist only for the optional local accounts ([Auth §5A](auth.md#5a-local-password-accounts-optional)); an OIDC-only deployment never writes them. No event in this table ever carries credential material.
 
@@ -462,7 +468,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `pipeline.purged` | A pipeline ENTITY was purged (only-draft, no inbound edges) — the entity row went with its draft. `details` carries `exclusive_draft_templates` offered/purged and, since #320, `kept_draft_templates` — the ids of the draft-only templates the offer skipped because a parameter set or a visualization also pins them ([Versioning §3.2](versioning.md#32-entity-status-is-derived-names-are-unique-forever), [§3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)) |
 | `pipeline.current_switched` | The sticky pointer was moved by the manual switch verb (`POST /pipelines/{id}/current`) — including on a promotion receiver, where this is the rollout/rollback lever. `details` carries from/to versions ([Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) |
 | `pipeline.version.released` | A DRAFT pipeline version was RELEASED — the D4 human step, on every surface that offers it (REST `POST /pipelines/{id}/release`, the explorer dialog, the editor). `details` carries `pipeline_id`, `pipeline_name`, `version`, and `via` (`session` or `api_key`; `key_id` is on the row) — the record of WHO released and THROUGH WHAT ([Versioning D4](versioning.md#2-decision-log)). Added at T187 (2026-09-10): releases were the one lifecycle verb 101 left unaudited. Since 140, a release past failing checks also carries `checks_overridden: [check ids]` and `override_reason` — the escape hatch is on the record, never silent. Since 142 it always carries `templates_released: [{template_id, version}]` — the DRAFT template versions the release cascaded to with the promoter's consent (versioning §5.3), an empty list when none. **Since #517 one row per actual flip**: a release that flips dependencies writes one `*.version.released` row per flipped version — dependencies first in release order, the root last — strictly, in the release's own transaction (auth §10.1A). Three detail keys join every such row: `scope` (the word `version`: the row records one version's flip), `release_id` (one id shared by every row of the same release) and, on a cascaded dependency's row, `cascade_root: {family, id, version}` (the release's root); the root's row adds `dependencies_released: [{family, name, version}]` (an empty list when nothing cascaded). A child pipeline the release flipped writes its own `pipeline.version.released` with these keys |
-| `template.version.released` | The template twin of `pipeline.version.released`: `template_id`, `version`, `via`. Since 142 a release the PIPELINE cascade made (versioning §5.3) carries the same shape plus `cascade_from_pipeline_id` and `cascade_from_version` — "who released template X v2 and why" reads off this one event. Since #517 a cascaded row also carries `scope`, `release_id` and `cascade_root` (the `pipeline.version.released` row above). |
+| `template.version.released` | The template twin of `pipeline.version.released`: `template_id`, `version`, `via`. Since 142 a release the PIPELINE cascade made (versioning §5.3) carries the same shape plus `cascade_from_pipeline_id` and `cascade_from_version` — "who released template X v2 and why" reads off this one event. Since #517 a cascaded row also carries `scope`, `release_id` and `cascade_root` (the `pipeline.version.released` row above). Since #894 a release the API cascade made (`cascade_root.family` = `api_endpoint`) carries `cascade_from_api_endpoint_id` and `cascade_from_version` — the API's id and version — and no `cascade_from_pipeline_id` (release-dependencies record §11, amended 2026-11-11); a row written before #894 under an API root carries `cascade_from_pipeline_id` holding the API's id, and `cascade_root.family` tells the two apart. |
 | `visualization.exported` / `dashboard.exported` | A visualization or dashboard CURRENT release was exported (`GET /api/v1/visualizations|dashboards/{id}/export`, #10 L1c). `details` carry the artifact id and the exported version — ids and versions only, like every lifecycle event |
 | `visualization.imported` / `dashboard.imported` | A visualization or dashboard import LANDED (`POST /api/v1/visualizations|dashboards/import`, #10 L1c). `details` carry the artifact id, the landed version, the dashboard twin's bundled-visualization count, and `imported_with_evidence` — the envelope manifest's evidence summary recorded VERBATIM (`false` until the test sessions land, L4; the manifest says `evidence: null`) — the D56 question on the record |
 | `visualization.test.screenshot_uploaded` | The visualization test workflow's ONE screenshot was stored (`POST /api/v1/visualizations/{id}/tests/sessions/{sessionId}/screenshot`, #353; audited by #164, the one write an agent makes over REST). The route reads no principal — its only credential is the single-use upload capability — so `user_id` is the run's STARTER (`started_by`) and `key_id` is null; the source IP is on the row. `details` carry `workspace_id`, `visualization_id`, `run_id`, `media_type`, `size_bytes` and, when the upload named one, `case` — never the token, its hash or the image bytes. A refused upload (a wrong, consumed or expired capability, an invalid image) stores nothing and writes no row |
@@ -847,18 +853,18 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 
 ## 31. `RendererKind` — what a visualization's configuration targets (#10)
 
-**Source:** the [dashboard implementation spec §3.1](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (D4, D12, D13); the Kotlin enum is `RendererKind` (`visualization`, `VisualizationModel.kt`), `renderer.kind` of a visualization ([Dashboards §2.1](dashboards.md)).
+**Source:** the [dashboard implementation spec §3.1](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (D4, D13) and, for `chart`, the neutral chart grammar design record (2026-11-06, §4.2 and §5.1; issue #860); the Kotlin enum is `RendererKind` (`visualization`, `VisualizationModel.kt`), `renderer.kind` of a visualization ([Dashboards §2.1](dashboards.md)).
 **Used by:** the visualization module; the client runtime's adapters (L3).
 
 | Value | Meaning |
 |---|---|
-| `plotly` | A Plotly figure (`data` traces, `layout`, Plotly's own `config`) — the preferred chart renderer (D12) |
+| `chart` | A chart document v1 (`renderer.version` `"1"`): a library-neutral `mark` + `encoding`, judged by the JSON Schema served at `/schemas/chart/1/` and drawn by the runtime's converter; v1 has the bar family |
 | `table` | A table of labelled columns ([Dashboards §2.1.2](dashboards.md)) |
 | `kpi` | A single value with no label of its own, titled by its card heading; optional format and comparison (`comparison.label` names the comparison line) |
 | `html` | RESERVED — authored HTML (D13, D46); refused in round one |
 | `svg` | RESERVED — authored SVG (D13, D46); refused in round one |
 
-**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`.
+**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`. The `plotly` kind is **retired** (#860): a body naming it is refused the same way, with a message that names `chart`.
 
 ---
 
@@ -870,10 +876,10 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | Value | Argument | Meaning |
 |---|---|---|
 | `rendered` | — | The renderer reported completion |
-| `trace_count` | `equals` (≥ 0) | The rendered trace count |
+| `mark_count` | `equals` (≥ 0) | A chart's drawn marks — the distinct category × series cells with a non-null value; the mechanical check judges it over the case's rows |
 | `no_console_errors` | — | No console error while rendering |
-| `text_visible` | `text` | A title, legend or cell string is visible |
-| `no_data` | — | The case expects the empty state |
+| `text_visible` | `text` | A title, legend or cell string is visible; on a chart the mechanical check proves it from the document and the model or leaves it unjudged for the browser, never refusing it |
+| `no_data` | — | The case expects the empty state (a chart: no mark to draw) |
 | `value_visible` | `text` | A KPI value is visible |
 
 **Closed.** An unknown kind, a missing argument or an argument the kind does not take is `visualization.validation.test_case_invalid`.
@@ -1245,6 +1251,8 @@ Stored in `lake_delivery_attempts.outcome` ([Metadata DB §4.54](metadata-db.md#
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-11 | v1.49 | #894 endpoint-root audit provenance | **§15 `template.version.released`:** under an API root the cascaded row names the API — `cascade_from_api_endpoint_id` + the API's `cascade_from_version`, no `cascade_from_pipeline_id` (the owner's 2026-11-11 exception to the frozen release-dependencies record §11). Pipeline-root rows and every other event unchanged; rows written before #894 are not rewritten (`cascade_root.family` tells them apart). |
+| 2026-11-08 | v1.48 | 860 (#860) | **§31 `RendererKind`:** `chart` (the chart document v1, judged by the schema served at `/schemas/chart/1/`) replaces `plotly`, which is retired and refused as `visualization.validation.renderer_unsupported` with a message naming `chart`. **§32 `AssertionKind`:** `mark_count` replaces `trace_count`; `text_visible` on a chart is proven by the mechanical check or left unjudged, never refused. |
 | 2026-11-05 | v1.47 | 799 (#799) | New §49 delivery states, §50 failure phases and §51 attempt outcomes, matching V55's CHECKs and the Kotlin vocabularies; §15 gains the four strict delivery audit events. |
 | 2026-11-04 | v1.46 | 799 (#799) | §16 registers `lake.delivery.*` and `lake.append.*` domains for delivery and managed append structure/publication. |
 | 2026-11-04 | v1.45 | 798 (#798) | New **§46 `LakeTableStatus`**, **§47 `LakeApplyState`** and **§48 `LakeChangeClass`** (V54's two CHECKs and the supported-change policy's classes, held to their Kotlin enums by `LakeDefinitionEnumsSpecDriftTest`); **§15** gains the three lake definition audit events (`lake.definition.released` / `applied` / `apply_failed`, held by `LakeAuditEventsSpecDriftTest`); **§16** registers the `lake.definition.*` domain (pipeline-contract §13.25). Section numbers follow #778's §45; a lane merging after this one with its own §46 renumbers. |

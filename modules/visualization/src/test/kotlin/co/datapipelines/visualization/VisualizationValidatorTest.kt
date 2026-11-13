@@ -25,6 +25,7 @@ class VisualizationValidatorTest {
     @Test
     fun `the spec's worked document is valid unchanged - and a DRAFT transform pin is accepted at save`() {
         valid(DocumentFixtures.visualization())
+        valid(DocumentFixtures.table())
         fakes.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.Transform(PipelineVersionStatus.DRAFT, ValidatorFakes.CONTRACT)
         valid(DocumentFixtures.visualization())
     }
@@ -33,7 +34,7 @@ class VisualizationValidatorTest {
     fun `every validation code the validator owns is reached by exactly one case, and each case raises only its code`() {
         CASES.forEach { case ->
             withClue(case.code) {
-                val tree = DocumentFixtures.visualization().also(case.mutate)
+                val tree = case.document().also(case.mutate)
                 val failures = failures(tree)
                 failures.map { it.code }.toSet() shouldBe setOf(case.code)
                 failures.map { it.path to it.details["reason"] } shouldBe listOf(case.path to case.reason)
@@ -63,38 +64,70 @@ class VisualizationValidatorTest {
             listOf("transform.inputs.rows" to "value_input")
         reasons(mutate = { it.obj("inputs").set<ObjectNode>("target", it.obj("inputs.revenue").deepCopy()) }) shouldContainExactlyInAnyOrder
             listOf("inputs.target" to "input_unused", "tests.cases[0].fixtures.target" to "fixture_missing")
-        reasons(mutate = {
-            it.remove("transform")
-            it.obj("inputs").set<ObjectNode>("target", it.obj("inputs.revenue").deepCopy())
-            it.obj("tests.cases[0].fixtures").set<ArrayNode>("target", it.obj("tests.cases[0].fixtures").get("revenue"))
-        }) shouldBe listOf("transform" to "transform_required")
+        val twoInputsNoTransform: (ObjectNode) -> Unit = { tree ->
+            tree.remove("transform")
+            tree.obj("inputs").set<ObjectNode>("target", tree.obj("inputs.revenue").deepCopy())
+            tree.obj("tests.cases[0].fixtures").set<ArrayNode>("target", tree.obj("tests.cases[0].fixtures").get("revenue"))
+        }
+        // The chart's v1 schema reads ONE input without a transform: it refuses first (one defect, one layer) …
+        reasons(mutate = twoInputsNoTransform) shouldBe listOf("inputs" to "schema")
+        // … and the product's own rule says the same for the kinds without a schema.
+        reasons(mutate = twoInputsNoTransform, document = DocumentFixtures::table) shouldBe listOf("transform" to "transform_required")
     }
 
     @Test
-    fun `without a transform the renderer binds to the one input's columns`() {
+    fun `without a transform the chart reads the one input's columns - and its bindings are derived from them`() {
         val tree = DocumentFixtures.visualization()
         tree.remove("transform")
-        tree.obj("bindings").put("data[0].x", "month").put("data[0].y", "amount")
+        tree.remove("bindings")
+        tree.obj("config.encoding.x").put("field", "month")
+        tree.obj("config.encoding.y").put("field", "amount")
+        valid(tree).document.body.bindings shouldBe mapOf("amount" to "amount", "month" to "month")
+        tree.obj("config.encoding.y").put("field", "amounts")
+        reasons(tree) shouldBe listOf("config.encoding.y.field" to "chart.field.unknown")
+    }
+
+    @Test
+    fun `without a transform a table binds to the one input's columns`() {
+        val tree = DocumentFixtures.table()
+        tree.remove("transform")
+        tree.obj("bindings").put("columns[0].values", "month").put("columns[1].values", "amount")
         valid(tree)
-        tree.obj("bindings").put("data[0].y", "amounts")
-        reasons(tree) shouldBe listOf("bindings.data[0].y" to "column_unknown")
+        tree.obj("bindings").put("columns[1].values", "amounts")
+        reasons(tree) shouldBe listOf("bindings.columns[1].values" to "column_unknown")
     }
 
     @Test
     fun `a binding path must be the grammar and resolve inside config - a value output binds nothing`() {
-        reasons(mutate = { it.obj("bindings").put("data[0]..x", "amounts") }) shouldBe listOf("bindings.data[0]..x" to "path_invalid")
-        reasons(mutate = { it.obj("bindings").put("data[3].x", "amounts") }) shouldBe listOf("bindings.data[3].x" to "path_unresolved")
+        reasons(mutate = { it.obj("bindings").put("columns[0]..values", "amounts") }, document = DocumentFixtures::table) shouldBe
+            listOf("bindings.columns[0]..values" to "path_invalid")
+        reasons(mutate = { it.obj("bindings").put("columns[3].values", "amounts") }, document = DocumentFixtures::table) shouldBe
+            listOf("bindings.columns[3].values" to "path_unresolved")
         val valueOutput = ValidatorFakes.CONTRACT.copy(output = ScriptContractView.Output.Value(LogicalType.DECIMAL))
-        reasons(
-            { it.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.Transform(PipelineVersionStatus.RELEASED, valueOutput) },
-        ) shouldBe
-            listOf("bindings.data[0].x" to "column_unknown", "bindings.data[0].y" to "column_unknown")
+        val valuePin = { f: ValidatorFakes.Fakes ->
+            f.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.Transform(PipelineVersionStatus.RELEASED, valueOutput)
+        }
+        reasons(valuePin, document = DocumentFixtures::table) shouldBe
+            listOf("bindings.columns[0].values" to "column_unknown", "bindings.columns[1].values" to "column_unknown")
+        // A chart over a value output reads no columns: both encoded fields are unknown (the save rules, layer 2).
+        reasons(valuePin) shouldBe
+            listOf("config.encoding.x.field" to "chart.field.unknown", "config.encoding.y.field" to "chart.field.unknown")
+    }
+
+    @Test
+    fun `a chart is judged by its v1 schema first - a renderer version or a presentation never reaches the product rules`() {
+        reasons(mutate = { it.obj("renderer").put("version", "4.1") }) shouldBe listOf("renderer.version" to "schema")
+        reasons(mutate = { it.putObject("presentation").put("title", "x") }) shouldBe listOf("" to "schema")
+        failures(DocumentFixtures.visualization().also { it.obj("renderer").put("version", "4.1") }).single().details shouldBe
+            mapOf("reason" to "schema", "keyword" to "const", "pointer" to "/renderer/version", "renderer" to "chart")
     }
 
     @Test
     fun `the renderer, the inputs and the display text refuse each malformed part with its reason`() {
-        reasons(mutate = { it.obj("renderer").put("version", "4.1") }) shouldBe listOf("renderer.version" to "version_invalid")
-        reasons(mutate = { it.obj("inputs.revenue").putArray("columns") }) shouldContainExactlyInAnyOrder
+        val table = DocumentFixtures::table
+        reasons(mutate = { it.obj("renderer").put("version", "4.1") }, document = table) shouldBe
+            listOf("renderer.version" to "version_invalid")
+        reasons(mutate = { it.obj("inputs.revenue").putArray("columns") }, document = table) shouldContainExactlyInAnyOrder
             listOf(
                 "inputs.revenue.columns" to "no_columns",
                 "transform.inputs.rows" to "column_mismatch",
@@ -102,11 +135,12 @@ class VisualizationValidatorTest {
                 "tests.cases[0].fixtures.revenue[0].month" to "column_unknown",
                 "tests.cases[0].fixtures.revenue[0].amount" to "column_unknown",
             )
-        reasons(mutate = { it.obj("inputs.revenue.columns[0]").put("name", "a\u0007b") }).first() shouldBe
+        reasons(mutate = { it.obj("inputs.revenue.columns[0]").put("name", "a\u0007b") }, document = table).first() shouldBe
             ("inputs.revenue.columns[0].name" to "column_name_invalid")
-        reasons(mutate = { it.put("description", "x".repeat(2_001)) }) shouldBe listOf("description" to "too_long")
-        reasons(mutate = { it.obj("presentation").put("title", "x".repeat(121)) }) shouldBe listOf("presentation.title" to "too_long")
-        reasons(mutate = { it.obj("presentation.tokens").put("Series", "categorical") }) shouldBe
+        reasons(mutate = { it.put("description", "x".repeat(2_001)) }, document = table) shouldBe listOf("description" to "too_long")
+        reasons(mutate = { it.obj("presentation").put("title", "x".repeat(121)) }, document = table) shouldBe
+            listOf("presentation.title" to "too_long")
+        reasons(mutate = { it.obj("presentation.tokens").put("Series", "categorical") }, document = table) shouldBe
             listOf("presentation.tokens.Series" to "grammar")
     }
 
@@ -133,12 +167,11 @@ class VisualizationValidatorTest {
         reasons(mutate = { it.obj("tests.cases[0]").put("name", " ") }) shouldBe listOf("tests.cases[0].name" to "name_missing")
     }
 
-    private fun valid(tree: ObjectNode) {
+    private fun valid(tree: ObjectNode): ArtifactValidation.Valid<VisualizationDocument> =
         fakes
             .visualizationValidator()
             .validate(ValidatorFakes.WORKSPACE, ValidatorFakes.visualizationDocument(tree))
             .shouldBeInstanceOf<ArtifactValidation.Valid<VisualizationDocument>>()
-    }
 
     private fun failures(
         tree: ObjectNode,
@@ -158,16 +191,19 @@ class VisualizationValidatorTest {
     private fun reasons(
         setup: (ValidatorFakes.Fakes) -> Unit = {},
         mutate: (ObjectNode) -> Unit = {},
+        document: () -> ObjectNode = DocumentFixtures::visualization,
     ): List<Pair<String, Any?>> {
         // Fresh fakes per call: a setup never leaks into the next assertion of the same test.
         val fresh = ValidatorFakes.Fakes().also(setup)
-        return reasons(DocumentFixtures.visualization().also(mutate), fresh)
+        return reasons(document().also(mutate), fresh)
     }
 
+    /** One code's case over [document] — the chart by default; `table` for the rules a chart does not have. */
     private data class Case(
         val code: String,
         val path: String,
         val reason: String,
+        val document: () -> ObjectNode = DocumentFixtures::visualization,
         val mutate: (ObjectNode) -> Unit,
     )
 
@@ -181,21 +217,22 @@ class VisualizationValidatorTest {
             listOf(
                 Case(VisualizationErrorCodes.NAME_INVALID, "name", "folder_required") { it.put("name", "flat") },
                 Case(VisualizationErrorCodes.BODY_INVALID, "display_name", "blank") { it.put("display_name", "  ") },
-                Case(VisualizationErrorCodes.RENDERER_UNSUPPORTED, "renderer.kind", "reserved") { it.obj("renderer").put("kind", "svg") },
+                Case(VisualizationErrorCodes.RENDERER_UNSUPPORTED, "renderer.kind", "reserved", DocumentFixtures::table) {
+                    it.obj("renderer").put("kind", "svg")
+                },
                 Case(VisualizationErrorCodes.INPUT_CONTRACT_INVALID, "inputs.revenue.columns[2].name", "duplicate_column") {
                     (it.obj("inputs.revenue").get("columns") as ArrayNode).add(it.obj("inputs.revenue.columns[0]").deepCopy())
                 },
                 Case(VisualizationErrorCodes.TRANSFORM_BINDING_INVALID, "transform.inputs.rows", "column_mismatch") {
                     it.obj("inputs.revenue.columns[1]").put("type", "BIGDECIMAL")
                 },
-                Case(VisualizationErrorCodes.CONFIG_SCHEMA_INVALID, "config.data[0].type", "trace_type_unsupported") {
-                    it.obj("config.data[0]").put("type", "sankey")
+                Case(VisualizationErrorCodes.CONFIG_SCHEMA_INVALID, "config.encoding.y.field", "chart.measure.not_numeric") {
+                    it.obj("config.encoding.y").put("field", "month_labels")
+                    it.obj("bindings").remove("amounts")
                 },
-                Case(
-                    VisualizationErrorCodes.BINDING_UNBOUND,
-                    "bindings.data[0].y",
-                    "column_unknown",
-                ) { it.obj("bindings").put("data[0].y", "profit") },
+                Case(VisualizationErrorCodes.BINDING_UNBOUND, "bindings.columns[1].values", "column_unknown", DocumentFixtures::table) {
+                    it.obj("bindings").put("columns[1].values", "profit")
+                },
                 Case(VisualizationErrorCodes.TEST_CASE_INVALID, "tests.cases[0].fixtures.revenue", "fixture_missing") {
                     it.obj("tests.cases[0].fixtures").remove("revenue")
                 },

@@ -2,12 +2,12 @@
   "use strict";
 
   /*
-   * #349 — the workspace's six-tab state machine (spec §4.1, D2): Flow | Overview |
-   * Parameters | Runs | Usage | Versions, Flow the default. #420: the admission and
+   * #349 — the workspace's seven-tab state machine (spec §4.1, D2): Flow | Overview |
+   * Parameters | Runs | Usage | Dependencies (#876) | Versions, Flow the default. #420: the admission and
    * transition rules are the SHARED CORE's — static/js/workspace/tabs.js, the same machine
    * the dashboards and visualizations workspaces run (one admission and transition rule per
    * workspace shape, never a copy; the core's own tests own the rule). What remains here is
-   * this page's vocabulary: the closed six, the Runs admission question, and the 18 named
+   * this page's vocabulary: the closed seven, the Runs admission question, and the 21 named
    * getters the CSP template binds as property paths (the Alpine build evaluates names, not
    * calls).
    *
@@ -48,8 +48,10 @@
   var PARAMETERS = "parameters";
   var RUNS = "runs";
   var USAGE = "usage";
+  // #876 G6: what the viewed version depends on (record §13) — the opposite direction of Usage.
+  var DEPENDENCIES = "dependencies";
   var VERSIONS = "versions";
-  var TABS = [FLOW, OVERVIEW, PARAMETERS, RUNS, USAGE, VERSIONS];
+  var TABS = [FLOW, OVERVIEW, PARAMETERS, RUNS, USAGE, DEPENDENCIES, VERSIONS];
 
   /** This page's admission question: Runs needs the execution read; every other tab admits. */
   function admitted(tab, canReadExecutions) {
@@ -90,6 +92,9 @@
       get usageActive() {
         return this.active === USAGE;
       },
+      get dependenciesActive() {
+        return this.active === DEPENDENCIES;
+      },
       get versionsActive() {
         return this.active === VERSIONS;
       },
@@ -112,6 +117,9 @@
       get usageHidden() {
         return this.active !== USAGE;
       },
+      get dependenciesHidden() {
+        return this.active !== DEPENDENCIES;
+      },
       get versionsHidden() {
         return this.active !== VERSIONS;
       },
@@ -131,6 +139,9 @@
       },
       get usageAria() {
         return this.active === USAGE ? "true" : "false";
+      },
+      get dependenciesAria() {
+        return this.active === DEPENDENCIES ? "true" : "false";
       },
       get versionsAria() {
         return this.active === VERSIONS ? "true" : "false";
@@ -153,6 +164,7 @@
     PARAMETERS: PARAMETERS,
     RUNS: RUNS,
     USAGE: USAGE,
+    DEPENDENCIES: DEPENDENCIES,
     VERSIONS: VERSIONS,
     TABS: TABS,
   };

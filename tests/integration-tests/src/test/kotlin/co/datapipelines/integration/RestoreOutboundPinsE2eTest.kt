@@ -48,6 +48,14 @@ import java.util.concurrent.TimeUnit
  * - **Order B (discard first):** a connection holding the guard discards the dependency (status by SQL — the property
  *   under test is the lock and the status the recheck reads); the restore must wait on the guard, and after the commit
  *   the recheck sees the discard and refuses 400 with nothing written.
+ *
+ * #873 §D — the visualization and dashboard arms, and the TRANSITIVE recheck (record §25.2 row G2, §25.4 D15): the
+ * restore walks the stored body's whole closure, so a DRAFT beneath a RELEASED visualization blocks a dashboard restore
+ * (409 `dashboard.release.dependency_not_released`, `path` and `via`) and a DISCARDED one keeps the native 400 at the
+ * pin it hides under. A node below a RELEASED pin cannot leave RELEASED through the product (its own pin guard refuses),
+ * so those states are planted by SQL on an actually DISCARDED root and reverted after; each refusal is followed by the
+ * same restore succeeding once the plant is gone, so the refusal is the plant's doing. The four race molds run again
+ * for the new arms; order B for the dashboard discards a template TWO levels down, so the walk is what sees it.
  */
 @SpringBootTest(
     classes = [co.datapipelines.DatapipelinesApplication::class],
@@ -55,6 +63,7 @@ import java.util.concurrent.TimeUnit
 )
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@Suppress("LargeClass") // one ordered scenario per restore arm of every family, sharing one booted context
 class RestoreOutboundPinsE2eTest {
     @LocalServerPort
     private var port: Int = 0
@@ -101,6 +110,9 @@ class RestoreOutboundPinsE2eTest {
     }
 
     private fun rest(): RequestSpecification = given().port(port).asSession(SESSION)
+
+    /** #873 — the C fixture's REST authoring and SQL reads, over this class's workspace and datasource. */
+    private val fx by lazy { FamilyRootsFixture(port, SESSION, WORKSPACE_ID, DATASOURCE) }
 
     /** A template created over MCP and released over REST; version 1 RELEASED. */
     private fun releasedTemplate(name: String) {
@@ -565,6 +577,215 @@ class RestoreOutboundPinsE2eTest {
         }
     }
 
+    // ---- #873 §D: the visualization and dashboard arms, and the transitive walk ----------------------------------
+
+    private fun discardArtifact(node: FamilyRootsFixture.Node): Response =
+        rest().post("/api/v1/${ARTIFACT_ROUTES.getValue(node.family)}/${fx.row(node).uuid}/versions/1/discard")
+
+    private fun restoreArtifact(node: FamilyRootsFixture.Node): Response =
+        rest().post("/api/v1/${ARTIFACT_ROUTES.getValue(node.family)}/${fx.row(node).uuid}/versions/1/restore")
+
+    /** [family]'s closure under a fresh prefix, released through the plan path, its root then DISCARDED over REST. */
+    private fun discardedClosure(
+        family: String,
+        tag: String,
+    ): Pair<FamilyRootsFixture.Node, List<FamilyRootsFixture.Edge>> {
+        val prefix = "test/restore_873/$RUN/$tag"
+        val (root, edges) = if (family == "dashboard") fx.dashboardClosure(prefix) else fx.visualizationClosure(prefix)
+        val released = fx.releaseWithPlan(root, edges)
+        withClue("closure release: ${released.body.asString().take(EXCERPT)}") { released.statusCode shouldBe 200 }
+        discardArtifact(root).then().statusCode(200)
+        return root to edges
+    }
+
+    /** Plants [template] v1 at [status] by SQL (a discard carries its stamp; anything else clears it); exactly one row. */
+    private fun plantTemplate(
+        template: String,
+        status: String,
+    ) = sql { connection ->
+        connection
+            .prepareStatement(
+                "UPDATE template_versions tv SET status = ?, discarded_by = NULL," +
+                    " discarded_at = CASE WHEN ?::text = 'DISCARDED' THEN NOW() END FROM templates t" +
+                    " WHERE t.id = tv.template_id AND t.workspace_id = ?::uuid AND t.name = ? AND tv.version = 1",
+            ).use { ps ->
+                listOf(status, status, WORKSPACE_ID, template).forEachIndexed { index, arg -> ps.setString(index + 1, arg) }
+                withClue("the plant flips exactly one version") { ps.executeUpdate() shouldBe 1 }
+            }
+    }
+
+    private fun List<FamilyRootsFixture.Edge>.target(path: String) = single { it.path == path }.to
+
+    @Test
+    @Order(9)
+    fun `a dashboard over a released closure restores - a DRAFT beneath its RELEASED visualization refuses 409 with path and via`() {
+        val (board, edges) = discardedClosure("dashboard", "draft_below")
+        val boardId = fx.row(board).uuid
+        restoreArtifact(board).then().statusCode(200)
+        restoreAudits(boardId) shouldBe 1
+        discardArtifact(board).then().statusCode(200)
+        val chart = edges.target("visualizations[0].visualization")
+        val shape = edges.target("transform.template")
+        plantTemplate(shape.name, "DRAFT")
+
+        val refused = restoreArtifact(board)
+
+        withClue("restore ${refused.statusCode} ${refused.body.asString()}") {
+            refused.statusCode shouldBe 409
+            val json = refused.jsonPath()
+            json.getString("error.code") shouldBe "dashboard.release.dependency_not_released"
+            json.getString("error.details.root.name") shouldBe board.name
+            json.getString("error.details.blockers[0].family") shouldBe "template"
+            json.getString("error.details.blockers[0].name") shouldBe shape.name
+            json.getString("error.details.blockers[0].status") shouldBe "DRAFT"
+            json.getString("error.details.blockers[0].reason") shouldBe "not_released"
+            json.getList<String>("error.details.blockers[0].paths") shouldBe listOf("visualizations[0].visualization.transform.template")
+            json.getString("error.details.blockers[0].via[0].family") shouldBe "visualization"
+            json.getString("error.details.blockers[0].via[0].name") shouldBe chart.name
+            json.getList<Any>("error.details.blockers").size shouldBe 1
+            fx.row(board).status shouldBe "DISCARDED"
+            restoreAudits(boardId) shouldBe 1
+        }
+        plantTemplate(shape.name, "RELEASED")
+        restoreArtifact(board).then().statusCode(200)
+        restoreAudits(boardId) shouldBe 2
+    }
+
+    @Test
+    @Order(10)
+    fun `a DISCARDED template beneath the dashboard's RELEASED visualization keeps the native 400 at that pin, with path and via`() {
+        val (board, edges) = discardedClosure("dashboard", "discarded_below")
+        val chart = edges.target("visualizations[0].visualization")
+        val shape = edges.target("transform.template")
+        plantTemplate(shape.name, "DISCARDED")
+
+        val refused = restoreArtifact(board)
+
+        withClue("restore ${refused.statusCode} ${refused.body.asString()}") {
+            refused.statusCode shouldBe 400
+            val json = refused.jsonPath()
+            json.getString("error.code") shouldBe "dashboard.validation.dependency_not_found"
+            json.getString("error.details.failures[0].path") shouldBe "visualizations[0].visualization"
+            json.getString("error.details.failures[0].details.kind") shouldBe "template"
+            json.getString("error.details.failures[0].details.name") shouldBe shape.name
+            json.getString("error.details.failures[0].details.status") shouldBe "DISCARDED"
+            json.getString("error.details.failures[0].details.path") shouldBe "visualizations[0].visualization.transform.template"
+            json.getString("error.details.failures[0].details.via[0].name") shouldBe chart.name
+            fx.row(board).status shouldBe "DISCARDED"
+            restoreAudits(fx.row(board).uuid) shouldBe 0
+        }
+        plantTemplate(shape.name, "RELEASED")
+        restoreArtifact(board).then().statusCode(200)
+        fx.row(board).status shouldBe "RELEASED"
+    }
+
+    @Test
+    @Order(11)
+    fun `a visualization's DRAFT transform template refuses 409 with no via, a DISCARDED one the native 400 - then it restores`() {
+        val (chart, edges) = discardedClosure("visualization", "viz_pin")
+        val shape = edges.target("transform.template")
+        plantTemplate(shape.name, "DRAFT")
+
+        val draft = restoreArtifact(chart)
+
+        withClue("restore ${draft.statusCode} ${draft.body.asString()}") {
+            draft.statusCode shouldBe 409
+            draft.jsonPath().getString("error.code") shouldBe "visualization.release.dependency_not_released"
+            draft.jsonPath().getList<String>("error.details.blockers[0].paths") shouldBe listOf("transform.template")
+            draft.jsonPath().getString("error.details.blockers[0].via") shouldBe null
+        }
+        plantTemplate(shape.name, "DISCARDED")
+        val discarded = restoreArtifact(chart)
+        withClue("restore ${discarded.statusCode} ${discarded.body.asString()}") {
+            discarded.statusCode shouldBe 400
+            discarded.jsonPath().getString("error.code") shouldBe "visualization.validation.transform_binding_invalid"
+            discarded.jsonPath().getString("error.details.failures[0].details.reason") shouldBe "template_version_not_found"
+            fx.row(chart).status shouldBe "DISCARDED"
+            restoreAudits(fx.row(chart).uuid) shouldBe 0
+        }
+        plantTemplate(shape.name, "RELEASED")
+        restoreArtifact(chart).then().statusCode(200)
+        restoreAudits(fx.row(chart).uuid) shouldBe 1
+    }
+
+    @Test
+    @Order(12)
+    fun `race order A, visualization - a template discard fired during its restore waits on the guard, then is refused`() {
+        val (chart, edges) = discardedClosure("visualization", "race_a_viz")
+        val shape = edges.target("transform.template")
+
+        val (restored, discarded) =
+            restoreFirst(
+                "SELECT 1 FROM visualization_versions WHERE visualization_id = ?::uuid AND version = 1 FOR UPDATE" to fx.row(chart).uuid,
+                { restoreArtifact(chart) },
+                { discardTemplate(shape.name) },
+            )
+
+        withClue("restore ${restored.statusCode}; discard ${discarded.statusCode} ${discarded.body.asString()}") {
+            restored.statusCode shouldBe 200
+            discarded.statusCode shouldBe 409
+            discarded.jsonPath().getString("error.code") shouldBe "template.in_use"
+            fx.row(chart).status shouldBe "RELEASED"
+            templateStatus(shape.name) shouldBe "RELEASED"
+        }
+    }
+
+    @Test
+    @Order(13)
+    fun `race order A, dashboard - a visualization discard fired during its restore waits on the guard, then is refused pinned`() {
+        val (board, edges) = discardedClosure("dashboard", "race_a_board")
+        val chart = edges.target("visualizations[0].visualization")
+
+        val (restored, discarded) =
+            restoreFirst(
+                "SELECT 1 FROM dashboard_versions WHERE dashboard_id = ?::uuid AND version = 1 FOR UPDATE" to fx.row(board).uuid,
+                { restoreArtifact(board) },
+                { discardArtifact(chart) },
+            )
+
+        withClue("restore ${restored.statusCode}; discard ${discarded.statusCode} ${discarded.body.asString()}") {
+            restored.statusCode shouldBe 200
+            discarded.statusCode shouldBe 409
+            discarded.jsonPath().getString("error.code") shouldBe "visualization.version.pinned"
+            fx.row(board).status shouldBe "RELEASED"
+            fx.row(chart).status shouldBe "RELEASED"
+        }
+    }
+
+    @Test
+    @Order(14)
+    fun `race order B, visualization - a restore fired during a template discard waits on the guard, then refuses 400`() {
+        val (chart, edges) = discardedClosure("visualization", "race_b_viz")
+
+        val refused = discardFirst(templateDiscardSql(edges.target("transform.template").name)) { restoreArtifact(chart) }
+
+        withClue("restore ${refused.statusCode} ${refused.body.asString()}") {
+            refused.statusCode shouldBe 400
+            refused.jsonPath().getString("error.code") shouldBe "visualization.validation.transform_binding_invalid"
+            fx.row(chart).status shouldBe "DISCARDED"
+            restoreAudits(fx.row(chart).uuid) shouldBe 0
+        }
+    }
+
+    @Test
+    @Order(15)
+    fun `race order B, dashboard - a template discarded two levels down under the guard is what the walk then sees, 400`() {
+        val (board, edges) = discardedClosure("dashboard", "race_b_board")
+        val shape = edges.target("transform.template")
+
+        val refused = discardFirst(templateDiscardSql(shape.name)) { restoreArtifact(board) }
+
+        withClue("restore ${refused.statusCode} ${refused.body.asString()}") {
+            refused.statusCode shouldBe 400
+            refused.jsonPath().getString("error.code") shouldBe "dashboard.validation.dependency_not_found"
+            refused.jsonPath().getString("error.details.failures[0].details.name") shouldBe shape.name
+            refused.jsonPath().getString("error.details.failures[0].details.path") shouldBe
+                "visualizations[0].visualization.transform.template"
+            fx.row(board).status shouldBe "DISCARDED"
+            restoreAudits(fx.row(board).uuid) shouldBe 0
+        }
+    }
+
     /** The template's v1 flipped DISCARDED with its stamps — parameters: the actor, then the template name. */
     private fun templateDiscardSql(template: String): Pair<String, String> =
         "UPDATE template_versions tv SET status = 'DISCARDED', discarded_at = NOW(), discarded_by = ?::uuid FROM templates t" +
@@ -589,6 +810,8 @@ class RestoreOutboundPinsE2eTest {
         private const val WAIT_PROBE_SECONDS = 4L
         private const val PROBE_INTERVAL_MS = 20L
         private const val WRITER_TIMEOUT_SECONDS = 30L
+        private const val EXCERPT = 600
+        private val ARTIFACT_ROUTES = mapOf("visualization" to "visualizations", "dashboard" to "dashboards")
 
         /** Names are unique forever in a persisted metadata database: every run takes a fresh folder. */
         private val RUN: String = "r" + UUID.randomUUID().toString().substring(0, 8)

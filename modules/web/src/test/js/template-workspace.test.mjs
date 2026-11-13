@@ -20,9 +20,9 @@ const { createTabs, resolve, TABS, withTab } =
     ? globalThis.window.TplWorkspace
     : require(workspacePath);
 
-const ALL = ["source", "overview", "render", "runs", "used-by", "versions"];
+const ALL = ["source", "overview", "render", "runs", "used-by", "dependencies", "versions"];
 
-test("the closed tab set is the six the brief fixes, source the default", () => {
+test("the closed tab set is the brief's six plus #876's Dependencies, source the default", () => {
   assert.deepEqual(TABS, ALL);
   assert.equal(resolve(undefined, true), "source");
   assert.equal(resolve(null, true), "source");
@@ -40,7 +40,7 @@ test("render without the render tab resolves to source — twice over, like the 
 });
 
 test("every other tab is admitted whatever the render right is", () => {
-  for (const tab of ["source", "overview", "runs", "used-by", "versions"]) {
+  for (const tab of ["source", "overview", "runs", "used-by", "dependencies", "versions"]) {
     assert.equal(resolve(tab, false), tab);
   }
 });
@@ -205,4 +205,13 @@ test("without the helper a user switch keeps replaceState, and arrival writes no
   root.button("overview").click();
   assert.equal(entries.length, 1);
   assert.equal(entries[0].url, "http://app.test/templates/a.sql?tab=overview");
+});
+
+test("the client set IS the server enum: TemplateWorkspaceTab's wire values, in order (#876 sets move together)", () => {
+  const source = readFileSync(path.resolve(here, "../../main/kotlin/co/datapipelines/web/ui/TemplateWorkspaceController.kt"), "utf8");
+  const start = source.indexOf("enum class TemplateWorkspaceTab(");
+  const body = source.slice(start, source.indexOf("companion object", start));
+  const wires = Array.from(body.matchAll(/^\s+[A-Z_]+\("([a-z-]+)"\),?$/gm), (m) => m[1]);
+  assert.ok(wires.length >= 7, `non-vacuity: ${wires.length} enum entries read`);
+  assert.deepEqual(TABS, wires);
 });

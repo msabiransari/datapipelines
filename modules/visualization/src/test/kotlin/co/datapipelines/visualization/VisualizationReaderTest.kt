@@ -29,7 +29,7 @@ class VisualizationReaderTest {
         document.name shouldBe DocumentFixtures.VISUALIZATION_NAME
         val body = document.body
         body.displayName shouldBe "Monthly revenue"
-        body.renderer shouldBe RendererSpec(RendererKind.PLOTLY, "4")
+        body.renderer shouldBe RendererSpec(RendererKind.CHART, "1")
         body.inputs.keys shouldBe setOf("revenue")
         body.inputs
             .getValue("revenue")
@@ -37,15 +37,35 @@ class VisualizationReaderTest {
             .map { it.name to it.type } shouldBe
             listOf("month" to LogicalType.DATE, "amount" to LogicalType.DECIMAL)
         body.transform shouldBe TransformBinding(ArtifactRef("finance/scripts/revenue_bars", 2), mapOf("rows" to "revenue"))
-        body.bindings shouldBe mapOf("data[0].x" to "month_labels", "data[0].y" to "amounts")
-        body.presentation?.tokens shouldBe mapOf("series" to "categorical")
+        body.bindings shouldBe mapOf("amounts" to "amounts", "month_labels" to "month_labels")
+        document.bindings shouldBe BindingsPresence.PRESENT
+        body.presentation shouldBe null
         val case = body.tests!!.cases.single()
         case.fixtures
             .getValue("revenue")
             .single()
             .get("amount")
             .asText() shouldBe "10.5"
-        case.assertions shouldBe listOf(Assertion(AssertionKind.RENDERED), Assertion(AssertionKind.TRACE_COUNT, equals = 1))
+        case.assertions shouldBe listOf(Assertion(AssertionKind.RENDERED), Assertion(AssertionKind.MARK_COUNT, equals = 1))
+    }
+
+    @Test
+    fun `the bindings key's presence rides the document - absent, null and an object are three answers for a chart`() {
+        read(DocumentFixtures.visualization()).bindings shouldBe BindingsPresence.PRESENT
+        read(DocumentFixtures.visualization().also { it.remove("bindings") }).bindings shouldBe BindingsPresence.ABSENT
+        read(DocumentFixtures.visualization().also { it.putNull("bindings") }).bindings shouldBe BindingsPresence.NULL
+        read(DocumentFixtures.visualization().also { it.putObject("bindings") }).bindings shouldBe BindingsPresence.PRESENT
+    }
+
+    @Test
+    fun `the retired plotly kind is refused at read with a message that names the chart kind - never bound`() {
+        val tree = DocumentFixtures.visualization().also { it.obj("renderer").put("kind", "plotly").put("version", "4") }
+        val failure = refused(tree).single()
+        failure.code shouldBe VisualizationErrorCodes.RENDERER_UNSUPPORTED
+        failure.path shouldBe "renderer.kind"
+        failure.message shouldBe VisualizationReader.PLOTLY_RETIRED_MESSAGE
+        failure.details["reason"] shouldBe "unknown_kind"
+        failure.message.contains("chart") shouldBe true
     }
 
     @Test
@@ -83,7 +103,7 @@ class VisualizationReaderTest {
         tree.obj("inputs.revenue.columns[0]").put("width", 1)
         tree.obj("transform").put("mode", "row")
         tree.obj("transform.template").put("id", "x")
-        tree.obj("presentation").put("css", "x")
+        tree.putObject("presentation").put("css", "x")
         tree.obj("tests").put("skip", true)
         tree.obj("tests.cases[0]").put("tags", "x")
         tree.obj("tests.cases[0].assertions[0]").put("within", 1)
@@ -111,7 +131,7 @@ class VisualizationReaderTest {
         tree.obj("renderer").put("version", 4)
         tree.obj("inputs.revenue.columns[1]").put("nullable", "no")
         tree.putArray("config")
-        tree.obj("bindings").put("data[0].x", 1)
+        tree.obj("bindings").put("month_labels", 1)
         tree.obj("tests.cases[0].fixtures.revenue[0]").putObject("month")
         tree.obj("tests.cases[0].assertions[1]").put("equals", "1")
         val failures = refused(tree)
@@ -121,7 +141,7 @@ class VisualizationReaderTest {
                 "renderer.version",
                 "inputs.revenue.columns[1].nullable",
                 "config",
-                "bindings.data[0].x",
+                "bindings.month_labels",
                 "tests.cases[0].fixtures.revenue[0].month",
                 "tests.cases[0].assertions[1].equals",
             )
@@ -170,7 +190,7 @@ class VisualizationReaderTest {
             )
         val tree = DocumentFixtures.visualization()
         // Every member of the over-long collections is itself malformed: only the bound may be reported.
-        tree.obj("bindings").put("layout.title.text", 7)
+        tree.obj("bindings").put("extra", 7)
         (tree.obj("tests").get("cases") as ArrayNode).add(JsonNodeFactory.instance.textNode("not a case"))
         val failures =
             tight
@@ -191,7 +211,7 @@ class VisualizationReaderTest {
             listOf("tests.cases[0].fixtures" to JsonScan.REASON_TOO_MANY)
 
         val big = DocumentFixtures.visualization()
-        big.obj("config.layout.title").put("text", "x".repeat(VisualizationKey.MAX_CONFIG_BYTES.min.toInt()))
+        big.obj("config.title").put("text", "x".repeat(VisualizationKey.MAX_CONFIG_BYTES.min.toInt()))
         VisualizationReader(VisualizationConfig(maxConfigBytes = VisualizationKey.MAX_CONFIG_BYTES.min.toInt()))
             .read(big)
             .shouldBeInstanceOf<ReadOutcome.Refused>()
@@ -224,7 +244,7 @@ class VisualizationReaderTest {
         var deep: JsonNode = JsonNodeFactory.instance.textNode("x")
         repeat(100_000) { deep = JsonNodeFactory.instance.arrayNode().add(deep) }
         val tree = DocumentFixtures.visualization()
-        tree.obj("config.layout").set<JsonNode>("annotations", deep)
+        tree.obj("config").set<JsonNode>("annotations", deep)
         refused(tree).map { it.path to it.details["reason"] } shouldBe listOf("config" to JsonScan.REASON_TOO_DEEP)
     }
 

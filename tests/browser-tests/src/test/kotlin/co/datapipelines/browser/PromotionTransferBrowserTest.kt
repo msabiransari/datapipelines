@@ -177,7 +177,10 @@ class PromotionTransferBrowserTest : BrowserSuite() {
         return "tx-pipe-$suffix/revenue"
     }
 
-    /** A released visualization: created as a DRAFT over the session's REST, then stamped by SQL (the L2 precedent). */
+    /**
+     * A released visualization: created as a DRAFT over the session's REST, then stamped by SQL (the L2 precedent). A
+     * `table` (#860): the family rows are about the artifact, not its drawing.
+     */
     private fun createReleasedVisualization(suffix: String) {
         val created =
             postForBody(
@@ -185,11 +188,11 @@ class PromotionTransferBrowserTest : BrowserSuite() {
                 "/api/v1/visualizations",
                 """
                 {"name": "tx-viz/$suffix", "display_name": "Revenue", "description": "the promotion page's family rows (#10 L1c)",
-                 "renderer": {"kind": "plotly", "version": "4"},
+                 "renderer": {"kind": "table", "version": "1"},
                  "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                     {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-                 "config": {"data": [{"type": "bar", "x": [], "y": []}], "layout": {}},
-                 "bindings": {"data[0].x": "month", "data[0].y": "amount"},
+                 "config": {"columns": [{"label": "Month", "values": []}, {"label": "Amount", "values": []}]},
+                 "bindings": {"columns[0].values": "month", "columns[1].values": "amount"},
                  "presentation": {"title": "Revenue", "tokens": {"series": "categorical"}},
                  "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
                                       "assertions": [{"kind": "rendered"}]}]}}

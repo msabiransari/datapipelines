@@ -6,6 +6,7 @@ import co.datapipelines.application.endpoints.EndpointMatcher
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.PublishedEndpoint
+import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
@@ -45,9 +46,6 @@ class PublishedEndpointDeactivatedWorkspaceTest {
             id = UUID.randomUUID(),
             workspaceId = workspaceId,
             pathPattern = "/nyc/v1/revenue",
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 30,
-            description = "",
             isEnabled = true,
             createdBy = UUID.randomUUID(),
             createdAt = Instant.now(),
@@ -58,11 +56,14 @@ class PublishedEndpointDeactivatedWorkspaceTest {
             every { matcher() } returns EndpointMatcher(listOf(endpoint))
         }
     private val pipelines = mockk<PipelineService>()
+    private val versions = mockk<PublishedEndpointVersionRepository>()
     private val bindings = mockk<EndpointKeyBindingRepository>()
 
     private fun service(workspaceActive: Boolean) =
         PublishedEndpointServeService(
             registry = registry,
+            versions = versions,
+            pipelineRepository = mockk(),
             bindings = bindings,
             authorizer = EndpointAuthorizer(),
             readOnlyRule = mockk<ReadOnlyPipelineRule>(),
@@ -110,14 +111,15 @@ class PublishedEndpointDeactivatedWorkspaceTest {
         deactivated.status shouldBe 404
         deactivated.code shouldBe PipelineErrorCodes.Endpoint.NOT_FOUND
         deactivated shouldBe unknown
-        verify(exactly = 0) { pipelines.findRecord(any(), any(), any()) }
+        // #786: the API's current version is the first thing resolved after the gate; it is never read here.
+        verify(exactly = 0) { versions.findCurrent(any()) }
         verify(exactly = 0) { bindings.findByPrefixes(any(), any()) }
     }
 
     @Test
     fun `the same endpoint in an active workspace is resolved past the liveness gate`() {
         val service = service(workspaceActive = true)
-        every { pipelines.findRecord(workspaceId, any(), endpoint.pipelineId) } returns null
+        every { versions.findCurrent(endpoint.id) } returns null
 
         val outcome = service.serve("/nyc/v1/revenue", foreignUserKey, request)
 

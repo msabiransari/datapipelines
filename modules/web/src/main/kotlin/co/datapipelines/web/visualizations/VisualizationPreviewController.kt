@@ -1,13 +1,16 @@
 package co.datapipelines.web.visualizations
 
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.PreviewCase
+import co.datapipelines.visualization.RendererKind
 import co.datapipelines.visualization.TestPreview
 import co.datapipelines.visualization.TestSessionLinks
 import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationErrorCodes
+import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.visualization.VisualizationTestCapabilities
 import co.datapipelines.web.dashboards.runtime.RuntimeViews
 import co.datapipelines.web.ui.UiProperties
@@ -47,6 +50,8 @@ import java.util.UUID
 class VisualizationPreviewController(
     private val capabilities: VisualizationTestCapabilities,
     private val ui: UiProperties,
+    /** The chart's `columns` for the run's version — the one resolver the board's runtime configuration reads. */
+    private val visualizations: VisualizationService,
 ) {
     @GetMapping("/visualizations/{id}/preview")
     fun preview(
@@ -75,7 +80,11 @@ class VisualizationPreviewController(
         model.addAttribute("expiresAt", preview.expiresAt.toString())
         model.addAttribute("cases", preview.cases.map { PreviewCaseView(it.name, it.assertions.map(PreviewViews::assertionLabel)) })
         model.addAttribute("bundle", RuntimeViews.rendererBundle(listOf(visualization)))
-        model.addAttribute("previewJson", ScriptSafeJson.forScriptBlock(ArtifactJson.mapper.writeValueAsString(PreviewViews.page(preview))))
+        val columns = visualizations.chartColumns(visualization.record.workspaceId, visualization.body)
+        model.addAttribute(
+            "previewJson",
+            ScriptSafeJson.forScriptBlock(ArtifactJson.mapper.writeValueAsString(PreviewViews.page(preview, columns))),
+        )
         return VIEW
     }
 
@@ -117,20 +126,29 @@ internal object PreviewViews {
     fun assertionLabel(assertion: co.datapipelines.visualization.Assertion): String =
         listOfNotNull(assertion.kind.wire, assertion.equals?.let { "= $it" }, assertion.text?.let { "\"$it\"" }).joinToString(" ")
 
-    /** The capability page's block: the run's version and cases, keyed by the run, with the session's expiry. */
-    fun page(preview: TestPreview): ObjectNode = page(preview.visualization, preview.cases, "preview:${preview.runId}", preview.expiresAt)
+    /**
+     * The capability page's block: the run's version and cases, keyed by the run, with the session's expiry. [columns]
+     * is the chart's `{field: LogicalType}` ([co.datapipelines.visualization.VisualizationService.chartColumns]).
+     */
+    fun page(
+        preview: TestPreview,
+        columns: Map<String, LogicalType>,
+    ): ObjectNode = page(preview.visualization, preview.cases, "preview:${preview.runId}", preview.expiresAt, columns)
 
     /**
      * The block for ANY evaluated version (#399 factored it out of the run-bound form): the capability page passes its
      * run's version, cases, `preview:<runId>` key and expiry; the signed-in workspace's Preview tab passes the lensed
      * version, the same evaluation's cases, its own key and no expiry. Each case's `configuration_id` is
-     * `<configurationKey>:<index>`; `expires_at` is written only when given.
+     * `<configurationKey>:<index>`; `expires_at` is written only when given. A `chart` occurrence carries [columns]
+     * (#860, design record §4.1): the encoded fields' types the board's runtime configuration emits for the same
+     * version, so a case orders and aggregates exactly as the board does.
      */
     fun page(
         visualization: ArtifactVersion<VisualizationBody>,
         cases: List<PreviewCase>,
         configurationKey: String,
         expiresAt: Instant?,
+        columns: Map<String, LogicalType>,
     ): ObjectNode =
         nodes.objectNode().also { out ->
             out.putObject("visualization").also {
@@ -140,20 +158,21 @@ internal object PreviewViews {
             }
             if (expiresAt != null) out.put("expires_at", expiresAt.toString())
             val array = out.putArray("cases")
-            cases.forEachIndexed { index, case -> array.add(case(visualization, case, "$configurationKey:$index")) }
+            cases.forEachIndexed { index, case -> array.add(case(visualization, case, "$configurationKey:$index", columns)) }
         }
 
     private fun case(
         visualization: ArtifactVersion<VisualizationBody>,
         case: PreviewCase,
         configurationId: String,
+        columns: Map<String, LogicalType>,
     ): ObjectNode =
         nodes.objectNode().also { out ->
             val mapper = ArtifactJson.mapper
             out.put("name", case.name)
             out.set<JsonNode>("inputs", mapper.valueToTree(case.fixtures))
             out.set<JsonNode>("assertions", mapper.valueToTree(case.assertions))
-            out.set<JsonNode>("config", config(visualization, configurationId))
+            out.set<JsonNode>("config", config(visualization, configurationId, columns))
             out.putObject("results").set<JsonNode>(OCCURRENCE, result(visualization, case))
         }
 
@@ -186,14 +205,17 @@ internal object PreviewViews {
         }
     }
 
-    /** The §8.1 configuration of a one-occurrence board — the visualization exactly as the run pinned it. */
+    /**
+     * The §8.1 configuration of a one-occurrence board — the visualization exactly as the run pinned it, with the
+     * occurrence fields [RuntimeViews] writes for a board: `display_name`/`description` (the chart's accessible name),
+     * and `columns` on a `chart` occurrence through the same writer.
+     */
     private fun config(
         visualization: ArtifactVersion<VisualizationBody>,
         configurationId: String,
-    ): ObjectNode {
-        val body = visualization.body
-        val mapper = ArtifactJson.mapper
-        return nodes.objectNode().also { out ->
+        columns: Map<String, LogicalType>,
+    ): ObjectNode =
+        nodes.objectNode().also { out ->
             out.put("configuration_id", configurationId)
             out.putObject("renderer").put("bundle", RuntimeViews.rendererBundle(listOf(visualization)))
             out.putObject("dashboard").also {
@@ -214,19 +236,7 @@ internal object PreviewViews {
                     .put("h", GRID_HEIGHT)
             }
             out.set<JsonNode>("parameter_set", nodes.nullNode())
-            out.putArray("visualizations").addObject().also { v ->
-                v.put("name", OCCURRENCE)
-                v.putObject("artifact").also {
-                    it.put("id", visualization.record.id.toString())
-                    it.put("name", visualization.record.name)
-                    it.put("version", visualization.detail.version)
-                }
-                v.putObject("renderer").put("kind", body.renderer.kind.wire).put("version", body.renderer.version)
-                v.set<JsonNode>("config", body.config)
-                v.set<JsonNode>("bindings", mapper.valueToTree(body.bindings))
-                v.set<JsonNode>("presentation", body.presentation?.let { mapper.valueToTree(it) } ?: nodes.nullNode())
-                v.put("timeout_seconds", REFRESH_SECONDS)
-            }
+            occurrence(out.putArray("visualizations").addObject(), visualization, columns)
             out.putArray("groups")
             out
                 .putArray("actions")
@@ -246,6 +256,29 @@ internal object PreviewViews {
             }
             out.putObject("budgets").put("max_bytes_per_source", 0).put("max_bytes_per_refresh", 0)
         }
+
+    /** The board's one occurrence, written as [RuntimeViews] writes a pinned visualization. */
+    private fun occurrence(
+        v: ObjectNode,
+        visualization: ArtifactVersion<VisualizationBody>,
+        columns: Map<String, LogicalType>,
+    ) {
+        val body = visualization.body
+        val mapper = ArtifactJson.mapper
+        v.put("name", OCCURRENCE)
+        v.put("display_name", body.displayName)
+        v.put("description", body.description)
+        v.putObject("artifact").also {
+            it.put("id", visualization.record.id.toString())
+            it.put("name", visualization.record.name)
+            it.put("version", visualization.detail.version)
+        }
+        v.putObject("renderer").put("kind", body.renderer.kind.wire).put("version", body.renderer.version)
+        v.set<JsonNode>("config", body.config)
+        v.set<JsonNode>("bindings", mapper.valueToTree(body.bindings))
+        if (body.renderer.kind == RendererKind.CHART) v.set<JsonNode>("columns", RuntimeViews.chartColumns(columns))
+        v.set<JsonNode>("presentation", body.presentation?.let { mapper.valueToTree(it) } ?: nodes.nullNode())
+        v.put("timeout_seconds", REFRESH_SECONDS)
     }
 
     private const val GRID_COLUMNS = co.datapipelines.visualization.DashboardLayout.GRID_COLUMNS

@@ -1,0 +1,31 @@
+{
+  "case" : "self-cycle",
+  "bounds" : {
+    "max_depth" : 32,
+    "max_versions" : 1024,
+    "max_edges" : 4096,
+    "max_blockers" : 100,
+    "max_wire_bytes" : 1048576
+  },
+  "outcome" : "refused",
+  "refusal" : {
+    "code" : "pipeline.release.dependency_cycle",
+    "message" : "Release blocked: the dependencies form a cycle (acme/a v1 → acme/a v1).",
+    "details" : {
+      "path" : [
+        {
+          "node_id" : "n1",
+          "family" : "template",
+          "name" : "acme/a",
+          "version" : 1
+        },
+        {
+          "node_id" : "n1",
+          "family" : "template",
+          "name" : "acme/a",
+          "version" : 1
+        }
+      ]
+    }
+  }
+}

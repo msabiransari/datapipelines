@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "correlation_id": "00000000-0000-4000-8000-000000000000",
+  "data": {
+    "schema_version": 1,
+    "roots": [
+      "n0"
+    ],
+    "nodes": [
+      {
+        "node_id": "n0",
+        "entity_id": "00000000-0000-4000-8000-000000000001",
+        "family": "pipeline",
+        "name": "acme/root",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "artifact",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": "RELEASED",
+        "operational": null,
+        "current_version": null,
+        "body_hash": "hash-acme/root-1",
+        "capabilities": {
+          "release": "ARTIFACT_RELEASE",
+          "promotion": "VERSIONED_ARTIFACT"
+        }
+      },
+      {
+        "node_id": "n1",
+        "entity_id": "00000000-0000-4000-8000-000000000002",
+        "family": "pipeline",
+        "name": "acme/left",
+        "display_name": null,
+        "subtype": null,
+        "version": {
+          "kind": "artifact",
+          "number": 1
+        },
+        "resolution": "resolved",
+        "lifecycle": "RELEASED",
+        "operational": null,
+        "current_version": null,
+        "body_hash": "hash-acme/left-1",
+        "capabilities": {
+          "release": "ARTIFACT_RELEASE",
+          "promotion": "VERSIONED_ARTIFACT"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "e0",
+        "from": "n0",
+        "to": "n1",
+        "relationship": "CHILD_PIPELINE",
+        "source_path": "/refs/0",
+        "requested_selector": {
+          "kind": "exact_version",
+          "number": 1
+        },
+        "resolved_version": 1,
+        "constraints": [ ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": "LIMIT",
+        "node_id": null,
+        "edge_id": null,
+        "message": "The edges limit (1) was reached; the graph is incomplete."
+      }
+    ],
+    "complete": false,
+    "acyclic": null,
+    "observed_at": "2026-01-01T00:00:00Z"
+  }
+}

@@ -1,5 +1,6 @@
 package co.datapipelines.visualization
 
+import co.datapipelines.visualization.DocumentFixtures.obj
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.time.Duration
@@ -25,23 +26,26 @@ class MechanicalCheckTimingTest {
             }
         val check =
             VisualizationMechanicalCheck(
-                renderers = RendererConfigValidators.deep(),
+                renderers = RendererConfigValidators.default(),
                 fixtures = evaluator,
                 templates = facts,
             )
-        val body = ValidatorFakes.visualizationDocument(DocumentFixtures.visualization()).body
+        // 1,000 distinct categories: the chart model draws 1,000 marks, and the case asserts exactly that.
+        val tree = DocumentFixtures.visualization().also { it.obj("tests.cases[0].assertions[1]").put("equals", 1_000) }
+        val body = ValidatorFakes.visualizationDocument(tree).body
 
         val started = System.nanoTime()
         val report = check.run(UUID.randomUUID(), body)
         val elapsed = Duration.ofNanos(System.nanoTime() - started)
 
         report.ok shouldBe true
+        report.unjudged shouldBe emptyList()
         report.cases.values
             .single()
             .rows shouldBe 1_000
         // The ceiling is generous for CI noise; the MEASURED value is the record, printed below.
         val ceiling = Duration.ofSeconds(5)
-        val measured = "MECHANICAL-CHECK TIMING: single case, 1,000 fixture rows, deep schema: ${elapsed.toMillis()} ms"
+        val measured = "MECHANICAL-CHECK TIMING: single case, 1,000 fixture rows, chart schema + model: ${elapsed.toMillis()} ms"
         println("$measured (ceiling ${ceiling.toSeconds()}s)")
         check(elapsed < ceiling) { measured }
     }

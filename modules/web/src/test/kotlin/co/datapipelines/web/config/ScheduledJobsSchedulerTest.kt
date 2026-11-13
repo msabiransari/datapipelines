@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import co.datapipelines.auth.AuditProperties
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.DatasourceWriteGuarding
 import co.datapipelines.datasources.pooling.ReapOutcome
 import co.datapipelines.executor.CancellationFlags
 import co.datapipelines.executor.ExecutionCancellationService
@@ -12,10 +13,10 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.InMemoryCancellationRegistry
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.persistence.BatchSink
 import co.datapipelines.persistence.BatchingConfig
 import co.datapipelines.persistence.BatchingWriter
-import co.datapipelines.web.SnapshotListAppender
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -283,6 +284,8 @@ class ScheduledJobsSchedulerTest {
             registerBean(DatasourceRegistry::class.java, Supplier { datasources })
             // #818 — the freshness tick's regrant half; the lake is not under test here.
             registerBean(ManagedLakeDatasourceRegistrar::class.java, Supplier { mockk<ManagedLakeDatasourceRegistrar>(relaxed = true) })
+            // #841 — the regrant's writer guarding (DomainConfiguration's bean in production); no lock in this slice.
+            registerBean(DatasourceWriteGuarding::class.java, Supplier { DatasourceWriteGuarding.UNGUARDED })
             environment.propertySources.addFirst(MapPropertySource("freshness", mapOf(FRESHNESS_TICK_KEY to "1")))
             registerBean(MeterRegistry::class.java, Supplier { SimpleMeterRegistry() })
             registerBean(ExecutionEventRepository::class.java, Supplier { events })

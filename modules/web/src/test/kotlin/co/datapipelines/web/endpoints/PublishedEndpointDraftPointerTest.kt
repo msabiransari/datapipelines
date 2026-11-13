@@ -26,6 +26,8 @@ class PublishedEndpointDraftPointerTest {
     private fun service(development: Boolean) =
         PublishedEndpointServeService(
             registry = mockk<EndpointRegistry>(),
+            versions = mockk(),
+            pipelineRepository = mockk(),
             bindings = mockk<EndpointKeyBindingRepository>(),
             authorizer = EndpointAuthorizer(),
             readOnlyRule = mockk<ReadOnlyPipelineRule>(),

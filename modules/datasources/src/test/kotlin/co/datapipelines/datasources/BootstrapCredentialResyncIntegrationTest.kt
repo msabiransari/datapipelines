@@ -1,8 +1,6 @@
 package co.datapipelines.datasources
 
 import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.datasources.crypto.CredentialEncryptor
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -130,6 +128,7 @@ class BootstrapCredentialResyncIntegrationTest {
         rotateRolePasswordOutOfBand()
         val beforeBoot = definitionSnapshot()
         val staleCiphertext = passwordHex()
+        val generationBefore = repository.findIncarnation(NAME).shouldNotBeNull().generation
 
         val (summary, lines) = capturingLogs { registrar().register(bootstrapFile(), actor) }
 
@@ -146,6 +145,8 @@ class BootstrapCredentialResyncIntegrationTest {
         definitionSnapshot() shouldBe beforeBoot
         passwordHex() shouldNotBe staleCiphertext
         leaseSucceeds() shouldBe true
+        // #874: a credential change is a protected local generation (record §15.1) — exactly one advance.
+        repository.findIncarnation(NAME).shouldNotBeNull().generation shouldBe generationBefore + 1
 
         // §8.1B: the outcome is on the row, so the screen can say so without an execution.
         val lastTest =
@@ -275,10 +276,13 @@ class BootstrapCredentialResyncIntegrationTest {
     fun `a healthy restart probes nothing at all`() {
         register(ORIGINAL_PASSWORD)
         val beforeBoot = preV9Snapshot()
+        val generationBefore = repository.findIncarnation(NAME).shouldNotBeNull().generation
 
         registrar().register(bootstrapFile(ORIGINAL_PASSWORD), actor)
 
         preV9Snapshot() shouldBe beforeBoot
+        // #874: nothing was written, so nothing advanced.
+        repository.findIncarnation(NAME).shouldNotBeNull().generation shouldBe generationBefore
         repository
             .findByName(NAME)
             .shouldNotBeNull()
@@ -449,7 +453,7 @@ class BootstrapCredentialResyncIntegrationTest {
      * logging — so the raw `appender.list` iteration was a latent `ConcurrentModificationException`.
      */
     private fun <T> capturingLogs(block: () -> T): Pair<T, List<String>> {
-        val appender = co.datapipelines.datasources.SnapshotListAppender()
+        val appender = co.datapipelines.logcapture.SnapshotListAppender()
         val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         root.addAppender(appender)
         try {

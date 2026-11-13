@@ -744,6 +744,13 @@ object PipelineErrorCodes {
          * credential becomes a principal; a deactivated WORKSPACE keeps the 404 rule instead.
          */
         const val PRINCIPAL_DEACTIVATED = "auth.principal_deactivated"
+
+        /**
+         * §13.7 (#847) — 503: the native Argon2 verification of a password or key secret failed for a
+         * reason that is not a mismatch (allocation, a stored hash that does not decode). Fail closed,
+         * counted as no attempt, and answered identically on the unknown-email path.
+         */
+        const val SECRET_VERIFICATION_UNAVAILABLE = "auth.secret_verification.unavailable"
     }
 
     /** §13.8 — datasource. Defined in datasources.md §9–10; cataloged here (D5). */
@@ -771,6 +778,13 @@ object PipelineErrorCodes {
 
         /** #818 — an edit or delete of the managed lake datasource, which the server owns (§13.8). 409. */
         const val MANAGED = "datasource.managed"
+
+        /**
+         * #841 (G0) — a datasource definition, credential, delete or grant write waited past the writer guard's
+         * cumulative `lock-wait-seconds` for the datasource's prerequisite key or an affected workspace; nothing was
+         * written (§13.8). 409; `details` exactly `{lock_wait_seconds}`.
+         */
+        const val WRITE_BUSY = "datasource.write.busy"
         const val NOT_FOUND = "datasource.not_found"
         const val DRIVER_NOT_LOADED = "datasource.driver_not_loaded"
 
@@ -1049,6 +1063,9 @@ object PipelineErrorCodes {
 
         /** §13.9 — 409: the promotion peer lacks the full-closure envelope capability. */
         const val RELEASE_BUNDLE_UNSUPPORTED = "template.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "template.release.metadata_unavailable"
     }
 
     /** §13.10 — result retrieval. Defined in rest-api.md §7; cataloged here (D5/D9). */
@@ -1105,6 +1122,35 @@ object PipelineErrorCodes {
 
         /** §13.24 — 503: one node's metadata alone exceeds the tree's 1 MiB page budget. */
         const val METADATA_TOO_LARGE = "navigation.metadata.too_large"
+    }
+
+    /**
+     * The session-only dependency tree routes, `GET /api/v1/dependencies/<family>` (#875 G4; rest-api "Dependency trees",
+     * dependency-graph record §11.1). Three segments, like [Navigation]: the refused thing is the tree request or the
+     * metadata read behind it, never an artifact family — a hidden or absent ROOT answers its family's own not-found code.
+     * Raised by `web`'s dependency tree service; the static messages echo no caller input. Only codes live here: every
+     * string constant of this object is a catalogued code to `PipelineErrorCodesSpecDriftTest` and to the MCP
+     * `core-error-codes` generator, so the `details.reason` tokens stay G1's `RefusalReason` and the `details` keys
+     * stay with the service.
+     */
+    object Dependencies {
+        /**
+         * 400: the request does not name one root the family's route can read. `details.field` names the query field
+         * (`name`, `id`, `version`) and `details.reason` one of G1's `RefusalReason` tokens — never the refused value.
+         */
+        const val REQUEST_INVALID = "dependencies.request.invalid"
+
+        /**
+         * 503, retryable: the metadata walk ran out of its deadline, a statement hit its bound, or a provider's read
+         * failed. No partial tree is answered. `Retry-After` names the wait; logged at WARN without a stack.
+         */
+        const val METADATA_UNAVAILABLE = "dependencies.metadata.unavailable"
+
+        /**
+         * 503: the projected tree is larger than `max-wire-bytes` although the walk stayed inside its traversal limits — the
+         * configured limits and byte budget disagree. Never a truncated tree; logged at ERROR with a stack.
+         */
+        const val RESPONSE_TOO_LARGE = "dependencies.response.too_large"
     }
 
     /** §13.11 — rate limiting / idempotency. */
@@ -1265,6 +1311,9 @@ object PipelineErrorCodes {
         /** §13.13 — 409: the promotion peer lacks the full-closure envelope capability. */
         const val RELEASE_BUNDLE_UNSUPPORTED = "pipeline.release.bundle_unsupported"
 
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "pipeline.release.metadata_unavailable"
+
         /**
          * §13.13 (7e, transform-nodes design §8.2) — a WARNING, never an error: the released
          * pipeline pins a template version that reads `needs_review` (it cites a retired learned
@@ -1334,6 +1383,13 @@ object PipelineErrorCodes {
      * `PipelineErrorCodesSpecDriftTest.KNOWN_TWO_SEGMENT_CODES` lists each one deliberately.
      */
     object Endpoint {
+        /**
+         * #841 (G0) — a publish or unpublish waited past the writer guard's cumulative `lock-wait-seconds` for its
+         * workspace or the endpoint registry key; nothing was written (§13.14). 409; `details` exactly
+         * `{lock_wait_seconds}`.
+         */
+        const val WRITE_BUSY = "endpoint.write.busy"
+
         /**
          * §4.1 — a `path_pattern` that is not a legal path: wrong segment alphabet, fewer than
          * three or more than 10 segments, over 200 characters, a trailing slash, a `**`, a
@@ -1409,6 +1465,91 @@ object PipelineErrorCodes {
          * promotion pre-validation, so the target is left byte-unchanged.
          */
         const val PROMOTION_KEY_MISSING = "endpoint.promotion.key_missing"
+
+        /** #786 (record §24) — 404: the API has no version with that number (or the API is not visible). */
+        const val VERSION_NOT_FOUND = "endpoint.version.not_found"
+
+        /**
+         * #786 — 409: the draft save's `If-Match` is not the body hash of the version the edit is based on (the working
+         * draft, or the current version when no draft exists); `details.current_body_hash` names what is stored.
+         */
+        const val VERSION_CONFLICT = "endpoint.version.conflict"
+
+        /** #786 — 409: the verb needs a DRAFT (save, purge) and the addressed version is not one. */
+        const val VERSION_NOT_DRAFT = "endpoint.version.not_draft"
+
+        /** #786 — 409: a second working DRAFT was attempted; an API holds at most one (the V58 partial unique index). */
+        const val VERSION_DRAFT_EXISTS = "endpoint.version.draft_exists"
+
+        /** #786 (§14) — 409: something pins this API version; the hook APIs keep although nothing pins one today. */
+        const val VERSION_PINNED = "endpoint.version.pinned"
+
+        /** #786 — 409: a discard addresses a version that is not RELEASED (a draft is purged, never discarded). */
+        const val VERSION_NOT_RELEASED = "endpoint.version.not_released"
+
+        /** #786 — 409: a restore addresses a version that is not DISCARDED. */
+        const val VERSION_NOT_DISCARDED = "endpoint.version.not_discarded"
+
+        /**
+         * #786 (R1, versioning §3.2 — the `parameter.version.last_release` rule) — 409: an API entity deletion
+         * (`DELETE /api/v1/endpoints`, MCP `endpoints_delete`) found a version that is not a DRAFT. An API that was ever
+         * released keeps its history: discard is per version, the entity stays. Nothing is deleted.
+         */
+        const val VERSION_LAST_RELEASE = "endpoint.version.last_release"
+
+        /**
+         * #786 — 400: the purge dialog's typed confirm (ui-screens §5.1) did not name the version it asked for (`v2`);
+         * checked before the lifecycle service runs. The pipeline and template purge twins are `*.version.confirm_mismatch`.
+         */
+        const val VERSION_CONFIRM_MISMATCH = "endpoint.version.confirm_mismatch"
+
+        /**
+         * #786 (R3) — 409: the current switch names an API version this deployment's posture may not serve (a DRAFT
+         * where authoring is disabled, or a DISCARDED version anywhere).
+         */
+        const val VERSION_NOT_ELIGIBLE = "endpoint.version.not_eligible"
+
+        /**
+         * #786 (R3, A37) — 409: the exact pipeline version a save or a current switch pins exists but is not eligible
+         * under this deployment's posture (`eligibleForPointer`: RELEASED always, a DRAFT only where authoring is enabled).
+         */
+        const val PIPELINE_VERSION_NOT_ELIGIBLE = "endpoint.pipeline_version.not_eligible"
+
+        /** #786 — 400: the pinned pipeline, or its exact version, does not exist (or is DISCARDED). */
+        const val PIPELINE_VERSION_NOT_FOUND = "endpoint.pipeline_version.not_found"
+
+        /**
+         * #786 (§12) — 409: this deployment has authoring disabled; every API draft save, release, discard, restore,
+         * purge and current switch is refused regardless of role. Serving and reads are unaffected.
+         */
+        const val AUTHORING_DISABLED = "endpoint.authoring_disabled"
+
+        /** #786 (record §14) — 409: a visible missing/discarded pin or an unticked required draft; shared `blockers` details. */
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "endpoint.release.dependency_not_released"
+
+        /** #786 — 409: a consented snapshot fact changed between the preview and the submit. */
+        const val RELEASE_PLAN_CONFLICT = "endpoint.release.plan_conflict"
+
+        /** #786 — 428: cascade consent without a preview `tree_hash`. */
+        const val RELEASE_PLAN_REQUIRED = "endpoint.release.plan_required"
+
+        /** #786 — 400: a malformed digest or selection, or unknown or duplicate ids. */
+        const val RELEASE_PLAN_INVALID = "endpoint.release.plan_invalid"
+
+        /** #786 — 409: the closure repeats an exact node on its active path. */
+        const val RELEASE_DEPENDENCY_CYCLE = "endpoint.release.dependency_cycle"
+
+        /** #786 — 422: the complete closure exceeds a configured bound; `details.limit`, `details.maximum`. */
+        const val RELEASE_DEPENDENCY_LIMIT = "endpoint.release.dependency_limit"
+
+        /** #786 — 409: the workspace mutation guard's lock wait ran out; nothing was written. */
+        const val RELEASE_BUSY = "endpoint.release.busy"
+
+        /** #786 — 409: the promotion peer lacks the full-closure envelope capability (shared vocabulary; unused by APIs). */
+        const val RELEASE_BUNDLE_UNSUPPORTED = "endpoint.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "endpoint.release.metadata_unavailable"
     }
 
     /**
@@ -1593,6 +1734,13 @@ object PipelineErrorCodes {
         /** 409 — the workspace already holds `max-schedules-per-workspace` live schedules. */
         const val LIMIT_PER_WORKSPACE = "schedule.limit.per_workspace"
 
+        /**
+         * 409 — #841 (G0): a create, or an edit that changes the schedule's target reference, waited past the writer
+         * guard's cumulative `lock-wait-seconds` for its workspace; nothing was written. `details` exactly
+         * `{lock_wait_seconds}`.
+         */
+        const val WRITE_BUSY = "schedule.write.busy"
+
         /** 404 — no notification delivery with that id on that run (#442b). */
         const val NOTIFICATION_NOT_FOUND = "schedule.notification.not_found"
 
@@ -1626,8 +1774,11 @@ object PipelineErrorCodes {
         /** 400 — the payload names a target the workspace does not hold. */
         const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
 
-        /** 400 — the payload names a pipeline with no current version to follow (#280). */
+        /** 400 — the payload pins a pipeline version the deployment's posture does not run (#280; #786 D.1). */
         const val TARGET_NOT_RELEASED = "schedule.validation.target_not_released"
+
+        /** 400 — the stored payload's schema is one the executor no longer accepts (#786 D.2); `details.stored`, `details.supported`. */
+        const val PAYLOAD_SCHEMA_UNSUPPORTED = "schedule.validation.payload_schema_unsupported"
 
         /** 400 — a `parameter_bindings` entry cannot be resolved (#9 slice 3); `details` names why. */
         const val BINDING_INVALID = "schedule.validation.binding_invalid"
@@ -1827,6 +1978,9 @@ object PipelineErrorCodes {
         /** §13.20 — 409: the promotion peer lacks the full-closure envelope capability. */
         const val RELEASE_BUNDLE_UNSUPPORTED = "parameter.release.bundle_unsupported"
 
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "parameter.release.metadata_unavailable"
+
         const val IMPORT_MISSING_TEMPLATE = "parameter.import.missing_template"
 
         const val AUTHORING_DISABLED = "parameter.authoring.disabled"
@@ -1904,6 +2058,9 @@ object PipelineErrorCodes {
 
         /** §13.22 — 409: the promotion peer lacks the full-closure envelope capability. */
         const val RELEASE_BUNDLE_UNSUPPORTED = "visualization.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "visualization.release.metadata_unavailable"
 
         const val IMPORT_ID_TAKEN = "visualization.import.id_taken"
 
@@ -1998,6 +2155,9 @@ object PipelineErrorCodes {
 
         /** §13.23 — 409: the promotion peer lacks the full-closure envelope capability. */
         const val RELEASE_BUNDLE_UNSUPPORTED = "dashboard.release.bundle_unsupported"
+
+        /** Record §25.4 erratum (6): the planning walk's metadata deadline expired — 503, `Retry-After: 5`, no partial plan. */
+        const val RELEASE_METADATA_UNAVAILABLE = "dashboard.release.metadata_unavailable"
 
         const val IMPORT_ID_TAKEN = "dashboard.import.id_taken"
 

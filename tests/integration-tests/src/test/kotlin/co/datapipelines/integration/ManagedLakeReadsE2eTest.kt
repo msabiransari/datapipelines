@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
+import co.datapipelines.logcapture.SnapshotListAppender
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.zaxxer.hikari.HikariDataSource
@@ -96,8 +97,9 @@ import kotlin.io.path.relativeTo
  * - **C**, a boot whose `lake.name` is held by an ordinary datasource: refused with `lake.boot.datasource_name_taken`.
  * - **D**, a boot with the lake disabled: the managed row stays, and a read of a managed table is refused
  *   `lake.table.unavailable` with reason `lake.disabled`.
- * - **G** (#818b A): the freshness tick's two statements, each held behind a lock on the real scheduler, are
- *   cancelled at the tick's statement bound while the lock is still granted, and the reaper then runs.
+ * - **G** (#818b A; #841 R4): the freshness tick's steps, each held behind a lock on the real scheduler, end at the
+ *   tick's bound while the lock is still granted, and the reaper then runs — with the siblings' scheduler threads
+ *   parked, so G's INSERT-owning wait, its wait at the datasource key and the two in one budget are each forced.
  * - **E** (#818b B): a catalog outage leaves E's live generation serving until its age bound; past it the rebuild
  *   is refused `lake.unavailable` and nothing is installed.
  * - **F** (#818b B): lifecycle moves, each judged against the generation the lease came from (F's tick and age
@@ -458,60 +460,329 @@ class ManagedLakeReadsE2eTest {
         }
     }
 
+    /**
+     * G (#818b A; #841 R4): the freshness tick's steps on the real scheduler, each ended at its 5 s bound under a held
+     * lock while the lock stays granted, the reaper still running — with the instance that owns each wait FORCED.
+     *
+     * Since G0 the regrant takes the managed lake's datasource prerequisite key before its INSERT, so a held table lock
+     * can reach G two ways: G's own INSERT queued on the table, or G queued on the KEY behind a sibling whose INSERT is
+     * queued there (the gate-red failure: A and B tick the same database). So the siblings' one `dp-scheduled` thread is
+     * parked for the whole case ([ParkedSiblings]) and each way is forced on its own:
+     *
+     * 1. **INSERT owner** — G holds the key and its INSERT, queued on the held table, is cancelled at the bound
+     *    (`57014`); the catalog read before it likewise. Nothing is granted; the next tick repairs.
+     * 2. **Key waiter** — the test holds the key (the sibling's part, without its INSERT): G waits at the key and
+     *    refuses busy (`55P03`) at the bound, never issuing its INSERT; nothing is granted; the next tick repairs.
+     * 3. **One budget** — the test holds the key for [KEY_HOLD_MILLIS], then lets G through to an INSERT queued on the
+     *    held table: G's key wait and INSERT wait together end within ONE bound (before #841 R4: two, back to back).
+     *
+     * A busy refusal is not evidence that the INSERT's statement bound fired, so phase 1 alone carries that claim.
+     */
     @Test
     @Order(8)
     fun `A - each freshness-tick statement is cancelled at its bound under a held lock, and the reaper then runs`() {
         val held = boot(maxAgeSeconds = B_MAX_AGE_SECONDS, tickSeconds = HELD_TICK_SECONDS, application = APP_G, recordTicks = true)
+        val logger = LoggerFactory.getLogger(PRODUCT_LOGGERS) as Logger
+        val capture = SnapshotListAppender()
+        logger.addAppender(capture)
         try {
             countOn(portOf(held)) shouldBe ICEBERG_ROWS
             val recorder = held.getBean(ScheduledJobsSchedulerE2eTest.TickRecorder::class.java)
-            metadata { lock ->
-                lock.autoCommit = false
-                lock.createStatement().use {
-                    it.execute("LOCK TABLE lake_tables_managed IN ACCESS EXCLUSIVE MODE")
-                    it.execute("LOCK TABLE datasource_workspaces IN SHARE MODE")
-                }
-                try {
-                    metadata { watcher ->
-                        val read =
-                            cancelledWhileHeld(watcher, "the catalog read", CATALOG_READ_TEXT, "lake_tables_managed", "AccessExclusiveLock")
-                        val regrant = cancelledWhileHeld(watcher, "the regrant", REGRANT_TEXT, "datasource_workspaces", "ShareLock")
-                        val reaps = recorder.countOf(REAP_JOB)
-                        val ticks = recorder.countOf(FRESHNESS_JOB)
-                        val regrantGoneAt = System.nanoTime()
-                        // One scheduler thread: the reaper may wait its own cadence plus one more held tick (two bounded
-                        // statements) behind the lock. That wait is claim 3's delay, measured here.
-                        awaitTrue(Duration.ofSeconds(REAPER_CADENCE_SECONDS + 2 * FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS)) {
-                            recorder.countOf(REAP_JOB) > reaps
-                        }
-                        val reaperDelay = Duration.ofNanos(System.nanoTime() - regrantGoneAt).toMillis()
-                        awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS + 2 * FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS)) {
-                            recorder.countOf(FRESHNESS_JOB) > ticks
-                        }
-                        val stillHeld =
-                            lockGranted(watcher, "lake_tables_managed", "AccessExclusiveLock") &&
-                                lockGranted(watcher, "datasource_workspaces", "ShareLock")
-                        println(
-                            "HELD_LOCK_TICK read_queued_to_gone_ms=$read regrant_queued_to_gone_ms=$regrant " +
-                                "reaper_after_regrant_ms=$reaperDelay " +
-                                "reaps_after=${recorder.countOf(
-                                    REAP_JOB,
-                                ) - reaps} ticks_after=${recorder.countOf(FRESHNESS_JOB) - ticks} " +
-                                "locks_still_granted=$stillHeld",
-                        )
-                        assertAll(
-                            { read shouldBeInRange CANCEL_WINDOW_MS },
-                            { regrant shouldBeInRange CANCEL_WINDOW_MS },
-                            { stillHeld shouldBe true },
-                        )
-                    }
-                } finally {
-                    lock.rollback()
-                }
+            ParkedSiblings(listOfNotNull(contextA, instanceB, instanceF)).use {
+                insertOwnerPhase(recorder, capture)
+                keyWaiterPhase(recorder, capture)
+                oneBudgetPhase(capture)
             }
         } finally {
+            logger.detachAppender(capture)
+            capture.stop()
             held.close()
         }
+    }
+
+    /** Phase 1 of G: G owns the key and the INSERT; both of the tick's steps are cancelled at the bound. */
+    @Suppress("LongMethod") // one held-lock timeline on the real scheduler is the witness; its instants are asserted together
+    private fun insertOwnerPhase(
+        recorder: ScheduledJobsSchedulerE2eTest.TickRecorder,
+        capture: SnapshotListAppender,
+    ) {
+        val phase = "phase 1 (INSERT owner, instance G)"
+        lateinit var lacking: UUID
+        metadata { lock ->
+            lock.autoCommit = false
+            lock.createStatement().use {
+                it.execute("LOCK TABLE lake_tables_managed IN ACCESS EXCLUSIVE MODE")
+                it.execute("LOCK TABLE datasource_workspaces IN SHARE MODE")
+            }
+            try {
+                val mark = capture.events().size
+                lacking = sqlWorkspace("g841_owner")
+                metadata { watcher ->
+                    val read =
+                        cancelledWhileHeld(
+                            watcher,
+                            "$phase: the catalog read",
+                            CATALOG_READ_TEXT,
+                            "lake_tables_managed",
+                            "AccessExclusiveLock",
+                        )
+                    val regrant =
+                        cancelledWhileHeld(watcher, "$phase: the regrant INSERT", REGRANT_TEXT, "datasource_workspaces", "ShareLock") {
+                            withClue("$phase: G's queued INSERT runs under G's own hold of the datasource key") {
+                                lakeKeyLocks(watcher, granted = true, application = APP_G) shouldBe 1
+                            }
+                        }
+                    val reaps = recorder.countOf(REAP_JOB)
+                    val ticks = recorder.countOf(FRESHNESS_JOB)
+                    val regrantGoneAt = System.nanoTime()
+                    // The reaper owns its thread (#818d): it reaps on its own cadence while the tick is held.
+                    awaitTrue(
+                        Duration.ofSeconds(REAPER_CADENCE_SECONDS + 2 * FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS),
+                        "$phase: the reaper",
+                    ) {
+                        recorder.countOf(REAP_JOB) > reaps
+                    }
+                    val reaperDelay = Duration.ofNanos(System.nanoTime() - regrantGoneAt).toMillis()
+                    awaitTrue(
+                        Duration.ofSeconds(HELD_TICK_SECONDS + 2 * FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS),
+                        "$phase: G's next tick",
+                    ) {
+                        recorder.countOf(FRESHNESS_JOB) > ticks
+                    }
+                    val stillHeld =
+                        lockGranted(watcher, "lake_tables_managed", "AccessExclusiveLock") &&
+                            lockGranted(watcher, "datasource_workspaces", "ShareLock")
+                    val failures = regrantFailures(capture, mark)
+                    println(
+                        "HELD_LOCK_TICK phase=insert_owner read_queued_to_gone_ms=$read regrant_queued_to_gone_ms=$regrant " +
+                            "reaper_after_regrant_ms=$reaperDelay reaps_after=${recorder.countOf(REAP_JOB) - reaps} " +
+                            "ticks_after=${recorder.countOf(FRESHNESS_JOB) - ticks} locks_still_granted=$stillHeld " +
+                            "regrant_failures=$failures",
+                    )
+                    assertAll(
+                        { withClue("$phase: the catalog read's queued-to-gone") { read shouldBeInRange CANCEL_WINDOW_MS } },
+                        { withClue("$phase: the INSERT's queued-to-gone") { regrant shouldBeInRange CANCEL_WINDOW_MS } },
+                        { withClue("$phase: both held locks still granted") { stillHeld shouldBe true } },
+                        {
+                            withClue("$phase: G's INSERT was cancelled by its statement bound: $failures") {
+                                failures.any {
+                                    "sql_state=57014" in
+                                        it
+                                } shouldBe
+                                    true
+                            }
+                        },
+                        {
+                            withClue("$phase: G alone writes, so nothing refused it busy: $failures") {
+                                failures.none {
+                                    "sql_state=55P03" in
+                                        it
+                                } shouldBe
+                                    true
+                            }
+                        },
+                        { withClue("$phase: the cancelled repair granted nothing") { (lacking in grantedWorkspaces()) shouldBe false } },
+                    )
+                }
+            } finally {
+                lock.rollback()
+            }
+        }
+        awaitTrue(
+            Duration.ofSeconds(HELD_TICK_SECONDS * 2 + FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS),
+            "$phase: the next tick's repair",
+        ) {
+            lacking in grantedWorkspaces()
+        }
+    }
+
+    /** Phase 2 of G: the datasource key is held (a sibling's part); G waits there and refuses busy, its INSERT never sent. */
+    @Suppress("LongMethod") // one held-lock timeline on the real scheduler is the witness; its instants are asserted together
+    private fun keyWaiterPhase(
+        recorder: ScheduledJobsSchedulerE2eTest.TickRecorder,
+        capture: SnapshotListAppender,
+    ) {
+        val phase = "phase 2 (key waiter, instance G)"
+        lateinit var lacking: UUID
+        metadata { key ->
+            key.autoCommit = false
+            holdLakeKey(key)
+            try {
+                val mark = capture.events().size
+                lacking = sqlWorkspace("g841_waiter")
+                metadata { watcher ->
+                    awaitTrue(
+                        Duration.ofSeconds(HELD_TICK_SECONDS + FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS),
+                        "$phase: G queuing on the key",
+                    ) {
+                        lakeKeyLocks(watcher, granted = false, application = APP_G) > 0
+                    }
+                    val queuedAt = System.nanoTime()
+                    val reaps = recorder.countOf(REAP_JOB)
+                    var insertSent = false
+                    val deadline = queuedAt + Duration.ofSeconds(FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS).toNanos()
+                    while (System.nanoTime() < deadline && lakeKeyLocks(watcher, granted = false, application = APP_G) > 0) {
+                        insertSent = insertSent || statementActive(watcher, REGRANT_TEXT)
+                        Thread.sleep(WATCH_MILLIS)
+                    }
+                    val waited = Duration.ofNanos(System.nanoTime() - queuedAt).toMillis()
+                    withClue(
+                        "$phase: G still waited on the key ${FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS}s on: nothing refused it",
+                    ) {
+                        lakeKeyLocks(watcher, granted = false, application = APP_G) shouldBe 0
+                    }
+                    awaitTrue(Duration.ofSeconds(REAPER_CADENCE_SECONDS + BOUND_SLACK_SECONDS), "$phase: the reaper") {
+                        recorder.countOf(REAP_JOB) >
+                            reaps
+                    }
+                    awaitTrue(Duration.ofSeconds(BOUND_SLACK_SECONDS), "$phase: G's busy WARN") {
+                        regrantFailures(capture, mark).any { "sql_state=55P03" in it }
+                    }
+                    val failures = regrantFailures(capture, mark)
+                    println(
+                        "HELD_LOCK_TICK phase=key_waiter key_queued_to_refused_ms=$waited insert_sent=$insertSent " +
+                            "regrant_failures=$failures",
+                    )
+                    assertAll(
+                        { withClue("$phase: the key wait's queued-to-refused") { waited shouldBeInRange CANCEL_WINDOW_MS } },
+                        { withClue("$phase: refused before its INSERT") { insertSent shouldBe false } },
+                        {
+                            withClue("$phase: refused busy, the guard's native lock timeout: $failures") {
+                                failures.first() shouldContain
+                                    "error=DatapipelinesException sql_state=55P03"
+                            }
+                        },
+                        {
+                            withClue("$phase: the holder still holds the key") {
+                                lakeKeyLocks(watcher, granted = true, pid = backendPid(key)) shouldBe
+                                    1
+                            }
+                        },
+                        { withClue("$phase: the refused repair granted nothing") { (lacking in grantedWorkspaces()) shouldBe false } },
+                    )
+                }
+            } finally {
+                key.rollback()
+            }
+        }
+        awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS * 2 + BOUND_SLACK_SECONDS), "$phase: the next tick's repair") {
+            lacking in
+                grantedWorkspaces()
+        }
+    }
+
+    /**
+     * Phase 3 of G — #841 R4's property: a key wait and the INSERT wait after it share ONE bound. The key is held for
+     * [KEY_HOLD_MILLIS] after G queued on it, then released; G's INSERT then queues on the held table and is cancelled
+     * at what is left of the step's budget, so queued-on-key to INSERT-gone stays within one bound plus
+     * [STEP_ALLOWANCE_MILLIS] (two bounds back to back would be ~[KEY_HOLD_MILLIS] + 5 000 ms).
+     */
+    @Suppress("LongMethod") // one held-lock timeline on the real scheduler is the witness; its instants are asserted together
+    private fun oneBudgetPhase(capture: SnapshotListAppender) {
+        val phase = "phase 3 (one budget, instance G)"
+        lateinit var lacking: UUID
+        metadata { table ->
+            table.autoCommit = false
+            table.createStatement().use { it.execute("LOCK TABLE datasource_workspaces IN SHARE MODE") }
+            try {
+                val mark = capture.events().size
+                metadata { watcher ->
+                    val queuedAt =
+                        metadata { key ->
+                            key.autoCommit = false
+                            holdLakeKey(key)
+                            lacking = sqlWorkspace("g841_budget")
+                            awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS + BOUND_SLACK_SECONDS), "$phase: G queuing on the key") {
+                                lakeKeyLocks(watcher, granted = false, application = APP_G) > 0
+                            }
+                            System.nanoTime().also {
+                                Thread.sleep(KEY_HOLD_MILLIS)
+                                key.rollback()
+                            }
+                        }
+                    awaitTrue(
+                        Duration.ofSeconds(FRESHNESS_BOUND_SECONDS),
+                        "$phase: G's INSERT queuing on the table once the key was released",
+                    ) {
+                        waitingOnLock(watcher, REGRANT_TEXT)
+                    }
+                    val deadline = queuedAt + Duration.ofSeconds(FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS).toNanos()
+                    while (System.nanoTime() < deadline && waitingOnLock(watcher, REGRANT_TEXT)) Thread.sleep(WATCH_MILLIS)
+                    val step = Duration.ofNanos(System.nanoTime() - queuedAt).toMillis()
+                    awaitTrue(Duration.ofSeconds(BOUND_SLACK_SECONDS), "$phase: G's cancellation WARN") {
+                        regrantFailures(capture, mark).any { "sql_state=57014" in it }
+                    }
+                    val failures = regrantFailures(capture, mark)
+                    println(
+                        "HELD_LOCK_TICK phase=one_budget key_hold_ms=$KEY_HOLD_MILLIS key_queued_to_insert_gone_ms=$step " +
+                            "regrant_failures=$failures",
+                    )
+                    assertAll(
+                        { withClue("$phase: G's INSERT left the waiters") { waitingOnLock(watcher, REGRANT_TEXT) shouldBe false } },
+                        {
+                            withClue(
+                                "$phase: key wait + INSERT wait = $step ms; one bound is " +
+                                    "${FRESHNESS_BOUND_SECONDS * 1000} + $STEP_ALLOWANCE_MILLIS ms",
+                            ) {
+                                step shouldBeLessThanOrEqual FRESHNESS_BOUND_SECONDS * 1000 + STEP_ALLOWANCE_MILLIS
+                            }
+                        },
+                        {
+                            withClue("$phase: the table lock is still granted") {
+                                lockGranted(watcher, "datasource_workspaces", "ShareLock") shouldBe
+                                    true
+                            }
+                        },
+                        { withClue("$phase: the cancelled repair granted nothing") { (lacking in grantedWorkspaces()) shouldBe false } },
+                    )
+                }
+            } finally {
+                table.rollback()
+            }
+        }
+        awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS * 2 + BOUND_SLACK_SECONDS), "$phase: the next tick's repair") {
+            lacking in
+                grantedWorkspaces()
+        }
+    }
+
+    /**
+     * #841 R4 — parks each sibling instance's ONE `dp-scheduled` thread (the jobs' scheduler, `taskScheduler`) on a latch
+     * for the life of G's case, so no sibling's freshness tick can hold the datasource key while G is observed. The
+     * park is a task the scheduler itself runs: once it has started, any sibling tick in flight has finished and none
+     * can start until [close].
+     */
+    private class ParkedSiblings(
+        contexts: List<ApplicationContext>,
+    ) : AutoCloseable {
+        private val release = CountDownLatch(1)
+
+        init {
+            val parked = CountDownLatch(contexts.size)
+            val threads = java.util.concurrent.ConcurrentLinkedQueue<String>()
+            try {
+                contexts.forEach { context ->
+                    val jobs = context.getBean(JOBS_SCHEDULER_BEAN, ThreadPoolTaskScheduler::class.java)
+                    withClue("a sibling's jobs scheduler has one thread, so one park stops every tick") {
+                        jobs.scheduledThreadPoolExecutor.corePoolSize shouldBe 1
+                    }
+                    jobs.execute {
+                        threads += Thread.currentThread().name
+                        parked.countDown()
+                        release.await(PARK_MAX_SECONDS, TimeUnit.SECONDS)
+                    }
+                }
+                withClue("every sibling's dp-scheduled thread parks within ${PARK_WAIT_SECONDS}s") {
+                    parked.await(PARK_WAIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+                }
+                withClue("the parked threads are the jobs' thread") { threads.toSet() shouldBe setOf(JOBS_THREAD) }
+            } catch (e: Throwable) {
+                release.countDown()
+                throw e
+            }
+        }
+
+        override fun close() = release.countDown()
     }
 
     @Test
@@ -686,7 +957,13 @@ class ManagedLakeReadsE2eTest {
                 val cpu = awaitBurning(run)
                 // No poolFor on H from here on: only H's reaper can retire the generation.
                 val retireBy = builtAt.plusSeconds(H_MAX_AGE_SECONDS + REAPER_CADENCE_SECONDS + BOUND_SLACK_SECONDS)
-                awaitUntil(retireBy, "the reaper retires the generation with no lease") { generationBuiltAt(reader) == null }
+                // Removal precedes the retirement log; observe both before freezing the event snapshot.
+                awaitUntil(retireBy, "the reaper retires the generation with no lease") {
+                    generationBuiltAt(reader) == null &&
+                        linesOf(capture, "event=lake.generation_expired").any {
+                            "max_age_seconds=$H_MAX_AGE_SECONDS " in it.text && "trigger=reaper" in it.text && it.at >= builtAt
+                        }
+                }
                 val retiredSeenAt = Instant.now()
                 val runningAfterRetire = run.ended.count == 1L
                 val expired =
@@ -1491,7 +1768,13 @@ class ManagedLakeReadsE2eTest {
         label: String,
     ): ReapTimeline {
         val retireBy = builtAt.plusSeconds(H_MAX_AGE_SECONDS + REAPER_CADENCE_SECONDS + BOUND_SLACK_SECONDS)
-        awaitUntil(retireBy, "$label: the reaper retires the generation with no lease") { generationBuiltAt(reader) == null }
+        // The live-map removal and its log are separate observations on the reaper thread.
+        awaitUntil(retireBy, "$label: the reaper retires the generation with no lease") {
+            generationBuiltAt(reader) == null &&
+                linesOf(capture, "event=lake.generation_expired").any {
+                    "max_age_seconds=$H_MAX_AGE_SECONDS " in it.text && "trigger=reaper" in it.text && it.at >= builtAt
+                }
+        }
         val expired =
             linesOf(capture, "event=lake.generation_expired").filter {
                 "max_age_seconds=$H_MAX_AGE_SECONDS " in it.text && "trigger=reaper" in it.text && it.at >= builtAt
@@ -1773,11 +2056,13 @@ class ManagedLakeReadsE2eTest {
         instanceText: String,
         table: String,
         mode: String,
+        whileQueued: () -> Unit = {},
     ): Long {
-        awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS + FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS)) {
+        awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS + FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS), "$what queuing on $table") {
             waitingOnLock(watcher, instanceText)
         }
         val queuedAt = System.nanoTime()
+        whileQueued()
         val deadline = queuedAt + Duration.ofSeconds(FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS).toNanos()
         while (System.nanoTime() < deadline && waitingOnLock(watcher, instanceText)) Thread.sleep(WATCH_MILLIS)
         val goneAt = System.nanoTime()
@@ -1804,6 +2089,89 @@ class ManagedLakeReadsE2eTest {
                     rs.getInt(1) > 0
                 }
             }
+
+    /**
+     * #841 R4 — the backends holding ([granted]) or waiting on the managed lake's datasource prerequisite key, optionally
+     * only [application]'s or only backend [pid]'s: the two-int advisory lock `(841001, subkey)`, read on [watcher].
+     */
+    private fun lakeKeyLocks(
+        watcher: Connection,
+        granted: Boolean,
+        application: String? = null,
+        pid: Int? = null,
+    ): Int =
+        watcher
+            .prepareStatement(
+                """
+                SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+                 WHERE l.locktype = 'advisory' AND l.classid::bigint = ? AND l.objid::bigint = ? AND l.objsubid = 2
+                   AND l.granted = ? AND (CAST(? AS text) IS NULL OR a.application_name = ?) AND (CAST(? AS int) IS NULL OR l.pid = ?)
+                """.trimIndent(),
+            ).use { ps ->
+                ps.setLong(1, DATASOURCE_LOCK_SPACE)
+                ps.setLong(2, LAKE_KEY_SUBKEY.toLong() and UNSIGNED_INT_MASK)
+                ps.setBoolean(3, granted)
+                ps.setObject(4, application, java.sql.Types.VARCHAR)
+                ps.setObject(5, application, java.sql.Types.VARCHAR)
+                ps.setObject(6, pid, java.sql.Types.INTEGER)
+                ps.setObject(7, pid, java.sql.Types.INTEGER)
+                ps.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
+            }
+
+    /** Takes the managed lake's datasource prerequisite key on [connection]'s open transaction, as the guard does. */
+    private fun holdLakeKey(connection: Connection) {
+        connection.prepareStatement("SELECT pg_advisory_xact_lock(?, ?)").use { ps ->
+            ps.setInt(1, DATASOURCE_LOCK_SPACE.toInt())
+            ps.setInt(2, LAKE_KEY_SUBKEY)
+            ps.executeQuery().close()
+        }
+    }
+
+    private fun backendPid(connection: Connection): Int =
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT pg_backend_pid()").use { rs ->
+                rs.next()
+                rs.getInt(1)
+            }
+        }
+
+    /** Whether one of [application]'s backends is RUNNING [statementText] (waiting on a lock or not). */
+    private fun statementActive(
+        watcher: Connection,
+        statementText: String,
+        application: String = APP_G,
+    ): Boolean =
+        watcher
+            .prepareStatement(
+                "SELECT count(*) FROM pg_stat_activity WHERE application_name = ? AND state = 'active' AND query LIKE ?",
+            ).use { ps ->
+                ps.setString(1, application)
+                ps.setString(2, statementText)
+                ps.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getInt(1) > 0
+                }
+            }
+
+    /** The regrant step's failure WARNs logged since event [since] of [capture]. */
+    private fun regrantFailures(
+        capture: SnapshotListAppender,
+        since: Int,
+    ): List<String> =
+        capture
+            .events()
+            .drop(since)
+            .map { it.formattedMessage.substringBefore(" message=") }
+            .filter { it.startsWith("event=lake.freshness_tick_failed step=regrant ") }
+
+    /** A live workspace inserted by SQL — one lacking the managed grant, so the repair has a row to change. */
+    private fun sqlWorkspace(name: String): UUID =
+        UUID.randomUUID().also { id ->
+            metadata { it.createStatement().execute("INSERT INTO workspaces (id, name, display_name) VALUES ('$id', '$name', 'G841')") }
+        }
 
     private fun lockGranted(
         watcher: Connection,
@@ -2138,6 +2506,7 @@ class ManagedLakeReadsE2eTest {
 
     private fun awaitTrue(
         budget: Duration,
+        what: String? = null,
         condition: () -> Boolean,
     ) {
         val deadline = System.nanoTime() + budget.toNanos()
@@ -2145,7 +2514,11 @@ class ManagedLakeReadsE2eTest {
             if (condition()) return
             Thread.sleep(POLL_MILLIS)
         }
-        condition() shouldBe true
+        if (what == null) {
+            condition() shouldBe true
+        } else {
+            withClue("$what: not observed within ${budget.toMillis()} ms") { condition() shouldBe true }
+        }
     }
 
     companion object {
@@ -2185,6 +2558,31 @@ class ManagedLakeReadsE2eTest {
         private val CANCEL_WINDOW_MS = (FRESHNESS_BOUND_SECONDS * 1000 - 1000)..((FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS) * 1000)
         private const val CATALOG_READ_TEXT = "%SELECT t.namespace, t.name, t.format%FROM lake_tables t%"
         private const val REGRANT_TEXT = "%INSERT INTO datasource_workspaces%FROM workspaces w%"
+
+        /**
+         * #841 R4: the managed lake's datasource prerequisite key as the writer guard takes it — lock space 841001 and
+         * the first four bytes (big-endian) of SHA-256 of the canonical name — restated here, never read from the class
+         * under test.
+         */
+        private const val DATASOURCE_LOCK_SPACE = 841_001L
+        private val LAKE_KEY_SUBKEY: Int =
+            java.nio.ByteBuffer
+                .wrap(
+                    java.security.MessageDigest
+                        .getInstance("SHA-256")
+                        .digest(LAKE.toByteArray(Charsets.UTF_8)),
+                ).int
+        private const val UNSIGNED_INT_MASK = 0xFFFF_FFFFL
+
+        /** #841 R4 phase 3: how long the key is held after G queued on it — half the bound — and the step's allowance. */
+        private const val KEY_HOLD_MILLIS = 2_500L
+        private const val STEP_ALLOWANCE_MILLIS = 1_500L
+
+        /** #841 R4: the jobs' scheduler bean and its one thread, by the spec's names; how long a park may take and last. */
+        private const val JOBS_SCHEDULER_BEAN = "taskScheduler"
+        private const val JOBS_THREAD = "dp-scheduled"
+        private const val PARK_WAIT_SECONDS = 30L
+        private const val PARK_MAX_SECONDS = 300L
         private const val REAP_JOB = "co.datapipelines.web.config.DatasourcePoolReaperScheduler.reap"
         private const val FRESHNESS_JOB = "co.datapipelines.web.config.ManagedLakeFreshnessScheduler.tick"
 

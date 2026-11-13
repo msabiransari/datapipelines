@@ -191,7 +191,7 @@ class ScheduleBindingsE2eTest {
                 "payload" to
                     mapOf(
                         "pipeline" to PARENT_NAME,
-                        "version" to "current",
+                        "version" to 1,
                         "parameter_bindings" to
                             mapOf(
                                 "as_of_date" to mapOf("source" to "keyword", "name" to "TODAY"),

@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import ch.qos.logback.classic.Logger
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.logcapture.SnapshotListAppender
 import io.kotest.assertions.withClue
 import io.kotest.matchers.longs.shouldBeGreaterThan
 import io.kotest.matchers.longs.shouldBeLessThanOrEqual
@@ -20,9 +21,7 @@ import org.springframework.context.ApplicationContextInitializer
 import org.springframework.context.ConfigurableApplicationContext
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
-import org.testcontainers.images.builder.Transferable
 import org.testcontainers.utility.DockerImageName
-import org.yaml.snakeyaml.Yaml
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.core.sync.RequestBody
@@ -33,6 +32,7 @@ import software.amazon.awssdk.services.s3.S3Configuration
 import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.Socket
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
@@ -56,15 +56,17 @@ import kotlin.io.path.relativeTo
  * trickles above curl's low-speed limit (the #839 shape) cannot hold a reader — or the close waiting behind it —
  * forever.
  *
- * The proxy is the SHIPPED one: the image and the Envoy config are read from `deploy/compose.yml` (the config's
- * `${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}` replaced by [MAX_AGE_SECONDS], its listener moved to
- * a free loopback port), run on the host network so it reaches the [ReaderTrickleProxy] in this JVM, which passes
- * S3 through to this suite's own MinIO until armed. The app boots with `node-query-timeout-max-seconds` =
- * [CEILING_SECONDS], so [MAX_AGE_SECONDS] sits exactly on `LakeRules`' floor (ceiling + 30).
+ * The proxy is the SHIPPED one ([EgressProxyFixture]: compose's `egress-proxy` image, the config RENDERED by
+ * `EgressProxyConfigMain` from this suite's own store coordinates, only the listener moved to a free loopback port);
+ * it runs on the host network so it reaches the [ReaderTrickleProxy] in this JVM, which passes S3 through to this
+ * suite's own MinIO until armed. The allowlist's bypass matrix is `ManagedLakeEgressAllowlistE2eTest`'s. The app
+ * boots with `node-query-timeout-max-seconds` = [CEILING_SECONDS], so [MAX_AGE_SECONDS] sits exactly on
+ * `LakeRules`' floor (ceiling + 30).
  *
- * - **D.4** boot is refused `lake.boot.egress_proxy` with no proxy listening and with a proxy declaring another
- *   max-age; green with the right one (the `event=lake.egress_proxy_verified` line), and the managed lease carries
- *   `http_proxy` and cannot change it (the §15a lock).
+ * - **D.4** boot is refused `lake.boot.egress_proxy` with no proxy listening, with a proxy declaring another
+ *   max-age, and with a store the proxy does not allowlist (its own stamped 403, #862); green with the right one
+ *   (the `event=lake.egress_proxy_verified` line), and the managed lease carries `http_proxy` and cannot change it
+ *   (the §15a lock).
  * - **D.3** a multi-MB read goes through the proxy and is correct; nothing stays connected to the proxy past max-age +
  *   drain; the read then succeeds again.
  * - **D.1** the trickling read ENDS within the derived bound — httpfs retries a cut transfer, so the bound is
@@ -72,6 +74,8 @@ import kotlin.io.path.relativeTo
  *   the `Connection.close()` thread
  *   blocked behind it is gone with it.
  * - **D.2** the control: the same read with no proxy is NOT ended within 2 × max-age (bounded, then released).
+ * - **D.5** the allowlist: the declaration route answers with the cap, and a host outside the store's domains is
+ *   refused 403 in both request forms (CONNECT and absolute-form GET) on the real Envoy.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class ManagedLakeEgressProxyE2eTest {
@@ -89,6 +93,15 @@ class ManagedLakeEgressProxyE2eTest {
         println("EGRESS_E2E D4 refused=cap proxy=$envoyAddress declared=$MAX_AGE_SECONDS configured=$otherCap cause=\"$wrongCap\"")
         wrongCap shouldStartWith REFUSAL_ID
         wrongCap shouldContain "'max-age=$otherCap'"
+
+        // #862 (review R2): the proxy allowlists ONE store authority (this suite's trickle); an app configured with
+        // another one — here the same MinIO, addressed directly — gets the proxy's own stamped 403, never mistaken
+        // for the store's.
+        val direct = "http://${minio.host}:${minio.getMappedPort(MINIO_PORT)}"
+        val otherStore = refusal(proxied(egressProxy = envoyAddress, maxAge = MAX_AGE_SECONDS, endpoint = direct))
+        println("EGRESS_E2E D4 refused=allowlist proxy=$envoyAddress store=$direct cause=\"$otherStore\"")
+        otherStore shouldStartWith REFUSAL_ID
+        otherStore shouldContain "refused the store $direct/$BUCKET itself (403, x-dp-egress-refused)"
 
         // Twice: the first green boot writes the managed row the table's definition needs (its system actor); the
         // second registers that table at boot, so its generations attach the catalog D.1 reads.
@@ -201,6 +214,53 @@ class ManagedLakeEgressProxyE2eTest {
             }
         }
     }
+
+    /**
+     * D.5 — #862: the proxy's config is the renderer's allowlist, spoken to the REAL Envoy container the shipped
+     * image runs: the `/dp-egress` declaration on the proxy's own authority answers 200 with the cap (the boot
+     * check's route, reachable from the catch-all vhost), and an authority outside the store allowlist is refused
+     * 403 in both request forms — CONNECT and absolute-form GET — before any upstream is contacted.
+     */
+    @Test
+    @Order(5)
+    fun `D5 - the proxy answers the declaration and refuses a host outside the store allowlist`() {
+        val declaration =
+            proxyStatus("GET /dp-egress HTTP/1.1\r\nHost: $envoyAddress\r\nx-dp-egress-check: 1\r\nConnection: close\r\n\r\n")
+        println("EGRESS_E2E D5 declaration=\"$declaration\"")
+        withClue("the declaration route answers on the proxy's own authority") {
+            declaration shouldStartWith "HTTP/1.1 200"
+            declaration shouldContain "max-age=$MAX_AGE_SECONDS"
+        }
+
+        val connect =
+            proxyStatus("CONNECT $ATTACK_HOST:443 HTTP/1.1\r\nHost: $ATTACK_HOST:443\r\nConnection: close\r\n\r\n")
+        println("EGRESS_E2E D5 refused_connect=\"$connect\"")
+        connect shouldStartWith "HTTP/1.1 403"
+
+        val absolute =
+            proxyStatus("GET http://$ATTACK_HOST/ HTTP/1.1\r\nHost: $ATTACK_HOST\r\nConnection: close\r\n\r\n")
+        println("EGRESS_E2E D5 refused_absolute=\"$absolute\"")
+        absolute shouldStartWith "HTTP/1.1 403"
+    }
+
+    /**
+     * One raw HTTP request spoken to the shipped Envoy at [envoyAddress]; every caller sends `Connection: close`,
+     * so the full response — status line, headers, body — is read to the stream's end.
+     */
+    private fun proxyStatus(request: String): String =
+        Socket(InetAddress.getLoopbackAddress(), envoyPort).use { socket ->
+            socket.soTimeout = 10_000
+            socket.getOutputStream().apply {
+                write(request.toByteArray())
+                flush()
+            }
+            val reader = socket.getInputStream().bufferedReader(Charsets.US_ASCII)
+            buildList {
+                while (true) {
+                    add(reader.readLine() ?: break)
+                }
+            }.joinToString("\n")
+        }
 
     /** What one trickling read did within its observation: when it ended (null = still reading), and the closes left. */
     private data class TrickleOutcome(
@@ -454,9 +514,7 @@ class ManagedLakeEgressProxyE2eTest {
         private const val MESSAGE_CHARS = 200
         private const val NANOS_PER_MILLI = 1_000_000L
         private const val MILLIS_PER_SECOND = 1_000L
-        private const val COMPOSE_PATH = "deploy/compose.yml"
-        private const val MAX_AGE_VARIABLE = "\${DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-960}"
-        private const val SHIPPED_LISTENER = "socket_address: { address: 0.0.0.0, port_value: 3128 }"
+        private const val ATTACK_HOST = "leak.example.invalid"
 
         private var greenContext: ConfigurableApplicationContext? = null
         private val oidc = OidcDiscoveryStub()
@@ -472,6 +530,13 @@ class ManagedLakeEgressProxyE2eTest {
                 .forName("co.datapipelines.datasources.LakeHttpBounds")
                 .getMethod("egressReaderEndByMillis", Long::class.javaPrimitiveType)
                 .invoke(null, MAX_AGE_SECONDS) as Long
+
+        /**
+         * The renderer's output for THIS suite's store at [maxAge] — the exact derivation the shipped `egress-config`
+         * service runs in its container ([EgressProxyFixture.rendered]).
+         */
+        private fun renderedEgressConfig(maxAge: Long): String =
+            EgressProxyFixture.rendered(EgressProxyFixture.derive(greenTrickle.endpoint, "us-east-1", BUCKET, pathStyle = true), maxAge)
 
         private val minioStarted =
             lazy {
@@ -495,43 +560,20 @@ class ManagedLakeEgressProxyE2eTest {
         private val envoyPort by lazy { freePort() }
         private val envoyAddress get() = "127.0.0.1:$envoyPort"
 
-        /** The shipped proxy: compose's image and Envoy config, the cap and the listener substituted, nothing else. */
+        /**
+         * The shipped proxy: compose's image, and a config RENDERED by [renderedEgressConfig] — the same
+         * [co.datapipelines.web.config.EgressProxyConfigMain] derivation the shipped `egress-config` renderer
+         * service runs (compose ships no Envoy template to read since #862), from this suite's own store
+         * coordinates, with only the listener moved to a free loopback port.
+         */
         private val envoyStarted =
             lazy {
-                val compose = composeFile()
-
-                val parsed: Any? = Yaml().load(compose.readText())
-                val image = parsed.child("services").child("egress-proxy").child("image") as String
-                val shipped = parsed.child("configs").child("egress-proxy-envoy").child("content") as String
-                // Present, not counted: which options carry the cap is the subject (R2 removes one; D.1 must go red).
-                withClue("the shipped config still carries the substituted shapes") {
-                    shipped shouldContain "max-age=$MAX_AGE_VARIABLE"
-                    (shipped.split(SHIPPED_LISTENER).size - 1) shouldBe 1
-                }
-                val config =
-                    shipped
-                        .replace(MAX_AGE_VARIABLE, MAX_AGE_SECONDS.toString())
-                        .replace(SHIPPED_LISTENER, "socket_address: { address: 127.0.0.1, port_value: $envoyPort }")
-                println("EGRESS_E2E envoy image=$image listener=$envoyAddress max_age_s=$MAX_AGE_SECONDS")
-                GenericContainer(DockerImageName.parse(image))
-                    .withNetworkMode("host")
-                    .withCopyToContainer(Transferable.of(config), "/etc/envoy/envoy.yaml")
-                    .waitingFor(Wait.forLogMessage(".*all clusters initialized.*", 1).withStartupTimeout(Duration.ofSeconds(60)))
-                    .also { it.start() }
+                val rendered = renderedEgressConfig(MAX_AGE_SECONDS)
+                withClue("the rendered config carries the cap") { rendered shouldContain "max-age=$MAX_AGE_SECONDS" }
+                println("EGRESS_E2E envoy image=${EgressProxyFixture.shippedImage()} listener=$envoyAddress max_age_s=$MAX_AGE_SECONDS")
+                EgressProxyFixture.start(EgressProxyFixture.relistened(rendered, envoyPort))
             }
         private val envoy: GenericContainer<*> by envoyStarted
-
-        private fun Any?.child(key: String): Any? = (this as Map<*, *>)[key]
-
-        private fun composeFile(): File {
-            var dir: File? = File("").absoluteFile
-            while (dir != null) {
-                val candidate = File(dir, COMPOSE_PATH)
-                if (candidate.isFile) return candidate
-                dir = dir.parentFile
-            }
-            error("$COMPOSE_PATH not found walking up from ${File("").absolutePath}")
-        }
 
         private fun freePort(): Int = ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { it.localPort }
 
@@ -595,13 +637,14 @@ class ManagedLakeEgressProxyE2eTest {
         private fun <T> metadata(block: (Connection) -> T): T =
             DriverManager.getConnection(database.jdbcUrl, database.username, database.password).use(block)
 
-        /** A boot through the proxy at [egressProxy], the app configured with [maxAge]; the store is [greenTrickle]. */
+        /** A boot through the proxy at [egressProxy], the app configured with [maxAge]; the store is [endpoint]. */
         fun proxied(
             egressProxy: String,
             maxAge: Long,
+            endpoint: String = greenTrickle.endpoint,
         ): List<Pair<String, String>> {
             envoy.isRunning shouldBe true
-            return properties(greenTrickle.endpoint) +
+            return properties(endpoint) +
                 listOf(
                     "datapipelines.lake.reads.egress-proxy" to egressProxy,
                     "datapipelines.lake.reads.egress-max-age-seconds" to maxAge.toString(),

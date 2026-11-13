@@ -73,7 +73,7 @@ class VisualizationLifecycleE2eTest {
         read.statusCode shouldBe 200
         read.jsonPath().getString("data.name") shouldBe NAME
         read.jsonPath().getString("data.draft.body_hash") shouldBe hash
-        read.jsonPath().getString("data.renderer.kind") shouldBe "plotly"
+        read.jsonPath().getString("data.renderer.kind") shouldBe "chart"
     }
 
     @Test
@@ -87,7 +87,7 @@ class VisualizationLifecycleE2eTest {
         val written = put("/api/v1/visualizations/$id", document(NAME, title = "Revenue v2"), hash, ADMIN_SESSION)
         withClue(written.asString().take(EXCERPT)) { written.statusCode shouldBe 200 }
         written.jsonPath().getInt("data.version") shouldBe 1
-        written.jsonPath().getString("data.presentation.title") shouldBe "Revenue v2"
+        written.jsonPath().getString("data.config.title.text") shouldBe "Revenue v2"
         val moved = written.jsonPath().getString("data.body_hash")
         moved shouldNotBe hash
         hash = moved
@@ -259,7 +259,7 @@ class VisualizationLifecycleE2eTest {
     ): String {
         val node = mapper.readTree(DOCUMENT) as ObjectNode
         node.put("name", name)
-        (node.get("presentation") as ObjectNode).put("title", title)
+        (node.get("config").get("title") as ObjectNode).put("text", title)
         if (!cases) node.remove("tests")
         return mapper.writeValueAsString(node)
     }
@@ -297,12 +297,13 @@ class VisualizationLifecycleE2eTest {
         val DOCUMENT =
             """
             {"name": "$NAME", "display_name": "Revenue", "description": "",
-             "renderer": {"kind": "plotly", "version": "4"},
+             "renderer": {"kind": "chart", "version": "1"},
              "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                 {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-             "config": {"data": [{"type": "bar", "x": [], "y": []}]},
-             "bindings": {"data[0].x": "month", "data[0].y": "amount"},
-             "presentation": {"title": "Revenue"},
+             "config": {"title": {"text": "Revenue"}, "mark": {"type": "bar"},
+                        "encoding": {"x": {"field": "month", "type": "temporal", "sort": "ascending"},
+                                     "y": {"field": "amount", "type": "quantitative", "aggregate": "sum"}}},
+             "bindings": {"amount": "amount", "month": "month"},
              "tests": {"cases": [{"name": "one month", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
                                   "assertions": [{"kind": "rendered"}]}]}}
             """.trimIndent()

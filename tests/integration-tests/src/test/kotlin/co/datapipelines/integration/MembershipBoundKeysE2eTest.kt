@@ -660,7 +660,7 @@ class MembershipBoundKeysE2eTest {
             .cookie("dp_session", admin.session)
             .cookie("dp_csrf", admin.csrf)
             .header("DP-CSRF-Token", admin.csrf)
-            .body("""{"path": "/kbound/v1/report", "pipeline": "kbound/report", "timeout_seconds": 60}""")
+            .body("""{"path": "/kbound/v1/report", "pipeline": "kbound/report", "pipeline_version": 1, "timeout_seconds": 60}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()

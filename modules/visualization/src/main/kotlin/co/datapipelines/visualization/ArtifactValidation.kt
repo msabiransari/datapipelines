@@ -3,16 +3,30 @@ package co.datapipelines.visualization
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.ValidationResult
 
-/** A validator's answer: the canonical document, or every refusal together (§17.2). */
+/**
+ * A validator's answer: the canonical document — with the caveats a save carries (a chart's D-A warnings, design
+ * record 2026-11-06 §4.4; empty for every other document) — or every refusal together (§17.2).
+ */
 sealed interface ArtifactValidation<out D> {
     data class Valid<D>(
         val document: D,
+        val warnings: List<ArtifactWarning> = emptyList(),
     ) : ArtifactValidation<D>
 
     data class Invalid(
         val result: ValidationResult,
     ) : ArtifactValidation<Nothing>
 }
+
+/**
+ * A save accepted with a caveat (design record 2026-11-06 §4.4, D-A outcome 1): a stable [code], the dotted body
+ * [path] it concerns, and the [library] that cannot fully honour it. It never carries document text.
+ */
+data class ArtifactWarning(
+    val code: String,
+    val path: String,
+    val library: String,
+)
 
 /** The document's [ArtifactValidation.Valid] document, or [ArtifactValidationException] with every refusal. */
 fun <D> ArtifactValidation<D>.orThrow(fallbackCode: String): D =

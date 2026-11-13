@@ -275,6 +275,7 @@ class DashboardWorkspaceControllerTest {
 
         render(tab = "nonsense")["activeTab"] shouldBe "board"
         render(tab = "keys")["activeTab"] shouldBe "board"
+        render(tab = "dependencies")["activeTab"] shouldBe "dependencies"
     }
 
     @Test

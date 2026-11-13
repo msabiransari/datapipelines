@@ -125,6 +125,14 @@ internal class ParametersHarness(
                 return pinnedByDashboards.toList()
             }
         }
+
+    /**
+     * #873 §D.3 — what the transitive restore walk answers (empty: a fully released closure) and every root it was
+     * asked about; the walk itself is `WalkingRestoreDependencyGuardTest`'s.
+     */
+    val restoreReaches = mutableListOf<co.datapipelines.pipeline.release.RestoreReach>()
+    val restoreRechecked = mutableListOf<co.datapipelines.pipeline.release.ReleaseNodeIdentity>()
+
     val service =
         ParameterSetService(
             repository,
@@ -135,6 +143,16 @@ internal class ParametersHarness(
             releaser,
             transactions,
             guard = guard,
+            restoreGuard =
+                object : co.datapipelines.pipeline.release.RestoreDependencyGuard {
+                    override fun recheck(root: co.datapipelines.pipeline.release.ReleaseNodeIdentity) =
+                        restoreReaches.toList().also { restoreRechecked += root }
+
+                    override fun recheck(
+                        root: co.datapipelines.pipeline.release.ReleaseNodeIdentity,
+                        pins: List<co.datapipelines.pipeline.release.ReleasePin>,
+                    ): List<co.datapipelines.pipeline.release.RestoreReach> = error("a set restore walks its stored body")
+                },
         )
 
     /** Seeds an `sql` template (POSTGRES — the fake `warehouse`'s dialect) and answers its pin. */

@@ -420,8 +420,6 @@ class ArchitectureGuardTest {
                 "DatasourceOverviewController → DatasourceRepository",
                 "EndpointsController → ApiKeyRepository",
                 "EndpointsController → EndpointKeyBindingRepository",
-                "EndpointsController → PipelineRepository",
-                "EndpointsTools → PipelineRepository",
                 "EntryPointChecks → TemplateRepository",
                 "ExecutionDetailController → ExecutionEventRepository",
                 "ExecutionDetailController → ExecutionRepository",

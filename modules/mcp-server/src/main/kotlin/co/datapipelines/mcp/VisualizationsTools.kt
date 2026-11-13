@@ -10,6 +10,7 @@ import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationReader
+import co.datapipelines.visualization.VisualizationSaved
 import co.datapipelines.visualization.VisualizationService
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
@@ -47,6 +48,15 @@ internal object ArtifactTools {
             "status" to loaded.detail.status.name,
             "body_hash" to loaded.detail.bodyHash,
         )
+
+    /**
+     * What a visualization write answers (§6.2.52/§6.2.53, #860): [written]'s row plus `warnings` — ALWAYS present,
+     * `[]` on a clean save, one `{code, path, library}` per chart field the library honours only in part (design record
+     * 2026-11-06 §4.4). Never document text.
+     */
+    fun written(saved: VisualizationSaved): Map<String, Any?> =
+        written(saved.version) +
+            ("warnings" to saved.warnings.map { mapOf("code" to it.code, "path" to it.path, "library" to it.library) })
 
     /** A read's lifecycle state and document; the draft pointer only under the whole view (a promoter never sees one). */
     fun <B : Any> full(
@@ -213,7 +223,9 @@ class VisualizationsCreateTool(
                     "path (it must already exist in config) and column, the transform pin's contract against the " +
                     "inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused " +
                     "until you confirm it: reuse an existing root, or ask the person first and then pass " +
-                    "confirm_new_root: true. Returns the id the other tools take and the body_hash an update needs.",
+                    "confirm_new_root: true. Returns the id the other tools take, the body_hash an update needs, and " +
+                    "warnings: [] on a clean save, else one {code, path, library} per chart field the library draws " +
+                    "only in part (the save landed; the warning names what will look different).",
             schema = VISUALIZATION_DOCUMENT_SCHEMA_CREATE,
         )
 
@@ -250,7 +262,8 @@ class VisualizationsUpdateTool(
                     "updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from " +
                     "visualizations_get (or the previous update's result) for the version this edit is based on; a " +
                     "mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. " +
-                    "A visualization is never renamed: a document naming another is refused.",
+                    "A visualization is never renamed: a document naming another is refused. Returns the new body_hash " +
+                    "and warnings, as visualizations_create does.",
             schema = VISUALIZATION_DOCUMENT_SCHEMA_UPDATE,
         )
 
@@ -306,13 +319,13 @@ private const val VISUALIZATION_DOCUMENT_PROPERTIES =
     "name": {"type": "string", "description": "Folder-path name (2-10 segments, lower-case): acme/visualizations/monthly_revenue. Never renamed."},
     "display_name": {"type": "string", "description": "Human label, 1-120 characters."},
     "description": {"type": "string", "description": "Optional; 2000 characters max."},
-    "renderer": {"type": "object", "description": "{kind, version}: kind is plotly, table or kpi (html and svg are reserved and refused); version is the renderer major the host must provide, as a string (\"4\")."},
+    "renderer": {"type": "object", "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (plotly is retired; html and svg are reserved; all three are refused); version is the renderer major the host must provide, as a string."},
     "inputs": {"type": "object", "description": "Named input contracts: {<input>: {columns: [{name, type, nullable}]}}; type is a LogicalType (STRING, INTEGER, DECIMAL, DATE, TIMESTAMP, BOOLEAN, ...). At most 8 inputs, 256 columns each."},
     "transform": {"type": "object", "description": "Optional: {template: {name, version}, inputs: {<contract input>: <visualization input>}} — a pinned SCRIPT template whose declared input columns equal the named inputs' columns. Absent: the renderer binds one input directly."},
-    "config": {"type": "object", "description": "The renderer's native configuration, stored verbatim and validated against its schema (plotly: a non-empty data array of supported traces). At most 262,144 bytes."},
-    "bindings": {"type": "object", "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."},
-    "presentation": {"type": "object", "description": "Optional: {title, tokens} — tokens name theme tokens, never colours."},
-    "tests": {"type": "object", "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, trace_count (with equals), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."}
+    "config": {"type": "object", "description": "The renderer's configuration, stored verbatim. chart: the bar family's {mark, encoding, title}, validated against the v1 JSON Schema (https://datapipelines.co/schemas/chart/1/bar.schema.json, served at /schemas/chart/1/bar.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."},
+    "bindings": {"type": "object", "description": "Optional. chart: derived from the encoding, {<field>: <field>} for every encoded field; omit it, or send exactly that. table and kpi: {<path into config, e.g. columns[0].values>: <column of the transform's output, or of the single input>}; each path must already exist in config, and its value is replaced by the column's values at render."},
+    "presentation": {"type": "object", "description": "Optional, table and kpi only (a chart's title is config.title): {title, tokens} — tokens name theme tokens, never colours."},
+    "tests": {"type": "object", "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the bars drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."}
     """
 
 private val VISUALIZATION_DOCUMENT_SCHEMA_CREATE =

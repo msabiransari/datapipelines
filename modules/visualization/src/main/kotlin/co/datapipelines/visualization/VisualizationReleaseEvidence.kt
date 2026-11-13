@@ -50,60 +50,63 @@ class VisualizationReleaseEvidence(
                 mapOf("reason" to "draft_changed", "version" to candidate.version),
             )
         }
-        val latest =
-            runs.latestRun(candidate.visualizationId, candidate.version)
-                ?: return refused(
-                    VisualizationErrorCodes.RELEASE_TESTS_MISSING,
-                    "Visualization '${candidate.name.safeEcho()}' version ${candidate.version} has no test run; a release needs " +
-                        "the agent's GREEN run for this exact content.",
-                    mapOf("reason" to "no_runs", "version" to candidate.version),
-                )
+        val latest = runs.latestRun(candidate.visualizationId, candidate.version)
+        val facts = latest?.let { LatestRunFacts(it.status, it.bodyHash, it.expiresAt) }
+        val at = now()
+        // #873 R1: the read-side ladder is StoredEvidence's — the graph's evidence_ready fact reads the same classes.
         val refusal =
-            when (val status = latest.statusAt(now())) {
-                TestRunStatus.EXPIRED -> {
+            when (StoredEvidence.classify(facts, candidate.bodyHash, at)) {
+                StoredEvidence.NO_RUNS -> {
                     refused(
-                        VisualizationErrorCodes.RELEASE_TESTS_STALE,
-                        "The latest test run expired; start a fresh session for this exact content.",
-                        mapOf("reason" to "run_expired", "session_id" to latest.sessionId.toString()),
+                        VisualizationErrorCodes.RELEASE_TESTS_MISSING,
+                        "Visualization '${candidate.name.safeEcho()}' version ${candidate.version} has no test run; a release needs " +
+                            "the agent's GREEN run for this exact content.",
+                        mapOf("reason" to "no_runs", "version" to candidate.version),
                     )
                 }
 
-                TestRunStatus.RUNNING, TestRunStatus.GREEN, TestRunStatus.RED, TestRunStatus.INCOMPLETE -> {
-                    when {
-                        latest.bodyHash != candidate.bodyHash -> {
-                            refused(
-                                VisualizationErrorCodes.RELEASE_TESTS_STALE,
-                                "The latest test run is for other content; a release qualifies only for the exact body hash it tested.",
-                                mapOf("reason" to "run_hash_mismatch", "session_id" to latest.sessionId.toString()),
-                            )
-                        }
+                StoredEvidence.EXPIRED -> {
+                    refused(
+                        VisualizationErrorCodes.RELEASE_TESTS_STALE,
+                        "The latest test run expired; start a fresh session for this exact content.",
+                        mapOf("reason" to "run_expired", "session_id" to checkNotNull(latest).sessionId.toString()),
+                    )
+                }
 
-                        // An OPEN session is not evidence (the 352 merge's F1): without this arm a start that was
-                        // never submitted — or a second session opened after a GREEN run — fell through to PASS.
-                        status == TestRunStatus.RUNNING -> {
-                            refused(
-                                VisualizationErrorCodes.RELEASE_TESTS_MISSING,
-                                "The latest test run is still open — a session without a verdict is not evidence; submit it, " +
-                                    "or let it expire, then release.",
-                                mapOf("reason" to "run_open", "session_id" to latest.sessionId.toString()),
-                            )
-                        }
+                StoredEvidence.HASH_MISMATCH -> {
+                    refused(
+                        VisualizationErrorCodes.RELEASE_TESTS_STALE,
+                        "The latest test run is for other content; a release qualifies only for the exact body hash it tested.",
+                        mapOf("reason" to "run_hash_mismatch", "session_id" to checkNotNull(latest).sessionId.toString()),
+                    )
+                }
 
-                        status != TestRunStatus.GREEN -> {
-                            refused(
-                                VisualizationErrorCodes.RELEASE_TESTS_RED,
-                                "The latest test run is ${status.name}; a release needs its run GREEN.",
-                                mapOf("reason" to status.name.lowercase(), "session_id" to latest.sessionId.toString()),
-                            )
-                        }
+                // An OPEN session is not evidence (the 352 merge's F1): without this arm a start that was never
+                // submitted — or a second session opened after a GREEN run — fell through to PASS.
+                StoredEvidence.OPEN -> {
+                    refused(
+                        VisualizationErrorCodes.RELEASE_TESTS_MISSING,
+                        "The latest test run is still open — a session without a verdict is not evidence; submit it, " +
+                            "or let it expire, then release.",
+                        mapOf("reason" to "run_open", "session_id" to checkNotNull(latest).sessionId.toString()),
+                    )
+                }
 
-                        else -> {
-                            null
-                        }
-                    }
+                StoredEvidence.NOT_GREEN -> {
+                    val status = checkNotNull(latest).statusAt(at)
+                    refused(
+                        VisualizationErrorCodes.RELEASE_TESTS_RED,
+                        "The latest test run is ${status.name}; a release needs its run GREEN.",
+                        mapOf("reason" to status.name.lowercase(), "session_id" to latest.sessionId.toString()),
+                    )
+                }
+
+                StoredEvidence.READY -> {
+                    null
                 }
             }
         if (refusal != null) return refusal
+        val qualifying = checkNotNull(latest) { "a run-less candidate classifies NO_RUNS" }
         val report = mechanical.run(workspaceId, candidate.body, now())
         if (!report.ok) {
             return refused(
@@ -112,7 +115,7 @@ class VisualizationReleaseEvidence(
                     "current pins, whatever an earlier GREEN recorded.",
                 mapOf(
                     "reason" to "mechanical",
-                    "session_id" to latest.sessionId.toString(),
+                    "session_id" to qualifying.sessionId.toString(),
                     "failures" to report.failures.take(MAX_REPORTED_FAILURES).map { it.toJson().toString() },
                 ),
             )

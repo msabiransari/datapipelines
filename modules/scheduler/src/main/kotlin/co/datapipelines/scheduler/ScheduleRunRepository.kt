@@ -46,6 +46,39 @@ class ScheduleRunRepository(
     fun lock(id: UUID): ScheduleRun? =
         jdbc.query("SELECT * FROM schedule_runs WHERE id = :id FOR UPDATE", mapOf("id" to id), rowMapper).singleOrNull()
 
+    /**
+     * #786 D.5 — the QUEUED runs of [scheduleId] whose payload copy is still at [schema]: a run materialised before the
+     * upgrade and not yet admitted. The conversion pins its copy exactly as it pins the schedule, so the upgrade does
+     * not block a schedule over a run that was merely waiting when the server stopped.
+     */
+    fun listQueuedAtSchema(
+        scheduleId: UUID,
+        schema: Int,
+    ): List<ScheduleRun> =
+        jdbc.query(
+            "SELECT * FROM schedule_runs WHERE schedule_id = :sid AND state = 'queued' AND payload_schema_version = :schema ORDER BY id",
+            mapOf("sid" to scheduleId, "schema" to schema),
+            rowMapper,
+        )
+
+    /**
+     * #786 D.5 — one QUEUED run's payload copy and its schema number, nothing else. False when the run left `queued` or
+     * is already converted (the caller skips it; a run that was admitted meanwhile is the executor's to refuse).
+     */
+    fun convertQueuedPayload(
+        id: UUID,
+        fromSchema: Int,
+        payload: JsonNode,
+        toSchema: Int,
+    ): Boolean =
+        jdbc.update(
+            """
+            UPDATE schedule_runs SET payload_json = CAST(:payload AS jsonb), payload_schema_version = :toSchema
+            WHERE id = :id AND state = 'queued' AND payload_schema_version = :fromSchema
+            """.trimIndent(),
+            mapOf("id" to id, "fromSchema" to fromSchema, "toSchema" to toSchema, "payload" to mapper.writeValueAsString(payload)),
+        ) == 1
+
     /** A run of [scheduleId] in [workspaceId] — the REST read, workspace-scoped. */
     fun findInSchedule(
         workspaceId: UUID,

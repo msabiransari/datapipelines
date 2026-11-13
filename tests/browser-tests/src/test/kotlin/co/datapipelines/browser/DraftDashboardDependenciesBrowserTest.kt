@@ -137,12 +137,13 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
         request(
             "POST",
             "/api/v1/visualizations",
-            """
-            {"name":"$root/visualizations/chart","display_name":"Draft chart","renderer":{"kind":"plotly","version":"4"},
-             "inputs":{"main":{"columns":[{"name":"c","type":"STRING","nullable":false},
-                                               {"name":"n","type":"INTEGER","nullable":false}]}},
-             "config":{"data":[{"type":"bar","x":[],"y":[]}]},"bindings":{"data[0].x":"c","data[0].y":"n"}}
-            """.trimIndent(),
+            ChartBrowserFixtures.barDocument(
+                "$root/visualizations/chart",
+                "Draft chart",
+                "c" to "STRING",
+                "n" to "INTEGER",
+                input = "main",
+            ),
             201,
         )
         val board =

@@ -269,8 +269,16 @@ class TemplateImportService(
 
     /**
      * The §5.3 (046) existing-template resolution for imports: the payload inherits the
-     * template's established type or is refused. Reads the working version's type — identical
-     * across every version of the template by rule, so "latest" is as authoritative as any.
+     * template's established type or is refused. The type is identical across every version
+     * of the template by rule, so any version is as authoritative as another.
+     *
+     * Read first from the working version (a local template that exists only as a draft still
+     * has an established type, and §5.3 inherits it — D55); when there is none — every version
+     * DISCARDED (#883) — from the template's retained history. Such a template is registered
+     * ([TemplateRepository.existsId] counts any status), and an import onto it lands the next
+     * release and sets the NULL pointer (versioning §9.2, D60's first-import exception;
+     * lifecycle row `{X,X}` import), on both import modes: the working-version read alone
+     * answered `template.not_found` for a template that exists.
      */
     private fun resolvedAgainstExisting(
         workspaceId: UUID,
@@ -278,9 +286,8 @@ class TemplateImportService(
         draft: TemplateDraft,
     ): TemplateDraft {
         val established =
-            // The working version: a local template that exists only as a draft still has an
-            // established type, and §5.3 inherits it (D55).
             templates.findWorking(workspaceId, id)?.type
+                ?: templates.findEstablishedType(workspaceId, id)
                 ?: throw ApiErrors.templateNotFound(id)
         return TemplateTypeRule.forExisting(draft, established)
     }

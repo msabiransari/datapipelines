@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.scheduler.LastRunOutcome
 import co.datapipelines.scheduler.ScheduleCondition
 import co.datapipelines.scheduler.ScheduleService
@@ -48,6 +49,8 @@ class SchedulesUiController(
     private val themeResolver: ThemeResolver,
     /** #442 — read for the deployment's computed mail state only; every schedule read stays a REST fetch. */
     private val schedules: ScheduleService,
+    /** #786 D.4 — the posture the version picker marks eligibility by (the executor's own rule; the save stays the authority). */
+    private val authoring: AuthoringGuard,
 ) : ShellPage {
     @GetMapping("/schedules")
     @RequiredScope(Permission.SCHEDULE_READ)
@@ -67,6 +70,7 @@ class SchedulesUiController(
         model.addAttribute("outcomeOptions", ScheduleOutcomeFilter.OPTIONS)
         model.addAttribute("timezoneGroups", ScheduleTimezones.GROUPS)
         model.addAttribute("notificationDelivery", schedules.notificationDelivery().toWire())
+        model.addAttribute("draftsEligible", authoring.developmentPosture)
         return "schedules/index"
     }
 }

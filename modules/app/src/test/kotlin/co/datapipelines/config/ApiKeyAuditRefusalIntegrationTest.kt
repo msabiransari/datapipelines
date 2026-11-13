@@ -5,8 +5,8 @@ import ch.qos.logback.classic.spi.IThrowableProxy
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.OidcDiscoveryStub
 import co.datapipelines.SharedPostgres
-import co.datapipelines.SnapshotListAppender
 import co.datapipelines.config.ApiKeyAuditFixture.Fixture
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.web.api.ApiExceptionHandler
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.assertSoftly

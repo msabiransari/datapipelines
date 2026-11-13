@@ -5,6 +5,11 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.pipeline.release.ReleaseFamily
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleasePin
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreReach
 import co.datapipelines.visualization.VisualizationTestDb.WORKSPACE
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -14,11 +19,13 @@ import org.springframework.transaction.support.TransactionTemplate
  * cases need a rollback that means something) and the validators' ports faked as [ValidatorFakes] seeds them. The
  * template side of the visualization release is two recording fakes: [templateStatuses] answers the pin's status,
  * [templateReleaser] records what the cascade released. [evidence] defaults to PASS — the gate's own default
- * (`NOT_INSTALLED`, refusing) is proven by its own cases.
+ * (`NOT_INSTALLED`, refusing) is proven by its own cases. [charts] is the chart rules the validator runs (a planted D-A
+ * row makes a save warn, #860).
  */
 internal class LifecycleHarness(
     authoringEnabled: Boolean = true,
     evidence: ReleaseEvidence = ReleaseEvidence { _, _ -> EvidenceVerdict.Pass },
+    charts: ChartDocumentRules = ChartDocumentRules.DEFAULT,
 ) {
     val jdbc = VisualizationTestDb.jdbc
     val fakes = ValidatorFakes.Fakes()
@@ -30,10 +37,29 @@ internal class LifecycleHarness(
     val templateStatuses = mutableMapOf(ValidatorFakes.TRANSFORM_REF to PipelineVersionStatus.RELEASED)
     val templatesReleased = mutableListOf<TemplateRef>()
 
+    /**
+     * #873 §D — what the transitive restore walk answers per restored root family (empty: a fully released closure),
+     * and every root it was asked about, in order.
+     */
+    val restoreReaches = mutableMapOf<ReleaseFamily, List<RestoreReach>>()
+    val restoreRechecked = mutableListOf<ReleaseNodeIdentity>()
+    private val restoreGuard =
+        object : RestoreDependencyGuard {
+            override fun recheck(root: ReleaseNodeIdentity): List<RestoreReach> {
+                restoreRechecked += root
+                return restoreReaches[root.family].orEmpty()
+            }
+
+            override fun recheck(
+                root: ReleaseNodeIdentity,
+                pins: List<ReleasePin>,
+            ): List<RestoreReach> = error("a visualization or dashboard restore walks its stored body, never extracted pins")
+        }
+
     val visualizations =
         VisualizationService(
             repository = visualizationRepository,
-            validator = VisualizationValidator(fakes.templateFacts),
+            validator = VisualizationValidator(fakes.templateFacts, charts = charts),
             dashboards = dashboardRepository,
             authoring = AuthoringGuard(authoringEnabled),
             templateStatuses = TemplateVersionStatuses { _, name, version -> templateStatuses[ArtifactRef(name, version)] },
@@ -43,6 +69,7 @@ internal class LifecycleHarness(
                 },
             evidence = evidence,
             transactions = transactions,
+            restoreGuard = restoreGuard,
         )
 
     val dashboards =
@@ -53,6 +80,7 @@ internal class LifecycleHarness(
             sets = fakes.setFacts,
             authoring = AuthoringGuard(authoringEnabled),
             transactions = transactions,
+            restoreGuard = restoreGuard,
         )
 
     /** The production-shaped release judge (O2) over this harness's ports — statuses and facts as seeded. */
@@ -88,10 +116,11 @@ internal class LifecycleHarness(
 
     /** A visualization created as v1 DRAFT (MCP) in [WORKSPACE]. */
     fun createVisualization(name: String = DocumentFixtures.VISUALIZATION_NAME): ArtifactVersion<VisualizationBody> =
-        visualizations.create(
-            WORKSPACE,
-            visualizationDocument(name),
-            VisualizationTestDb.AUTHOR,
-            co.datapipelines.pipeline.WriteSurface.MCP,
-        )
+        visualizations
+            .create(
+                WORKSPACE,
+                visualizationDocument(name),
+                VisualizationTestDb.AUTHOR,
+                co.datapipelines.pipeline.WriteSurface.MCP,
+            ).version
 }

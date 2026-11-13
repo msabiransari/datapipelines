@@ -58,7 +58,7 @@ class ScheduleNotificationMailOffE2eTest {
                     mapper.writeValueAsString(
                         mapOf(
                             "name" to "test/notify_off",
-                            "payload" to mapOf("pipeline" to PIPELINE, "version" to "current"),
+                            "payload" to mapOf("pipeline" to PIPELINE, "version" to 1),
                             "parameters" to emptyMap<String, Any>(),
                             "cron" to YEARLY,
                             "timezone" to "UTC",

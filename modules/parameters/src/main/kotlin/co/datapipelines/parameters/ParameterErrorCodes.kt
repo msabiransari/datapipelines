@@ -299,6 +299,9 @@ object ParameterErrorCodes {
     /** §13.20 — 409: the promotion peer lacks the full-closure envelope capability. */
     const val RELEASE_BUNDLE_UNSUPPORTED = "parameter.release.bundle_unsupported"
 
+    /** §13.20 — 503: the release-planning metadata deadline expired (#786, record §25.4 erratum (6)); `Retry-After: 5`, no partial plan. */
+    const val RELEASE_METADATA_UNAVAILABLE = "parameter.release.metadata_unavailable"
+
     /** 400 — an import whose pinned template is absent on the target (promotion order: templates first). */
     const val IMPORT_MISSING_TEMPLATE = "parameter.import.missing_template"
 

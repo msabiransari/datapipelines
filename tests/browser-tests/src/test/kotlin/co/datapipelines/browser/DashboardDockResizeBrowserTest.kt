@@ -2,6 +2,7 @@ package co.datapipelines.browser
 
 import com.microsoft.playwright.Mouse
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.options.AriaRole
 import io.kotest.assertions.withClue
 import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
@@ -89,6 +90,7 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
             threshold: parseFloat(pageCss.getPropertyValue('--dp-board-auto-collapse-below')),
             drawer: getComputedStyle(toolbar).display !== 'none',
             expanded: dock.querySelector('[data-dp-dock-collapse]').getAttribute('aria-expanded'),
+            toggle: dock.querySelector('[data-dp-dock-collapse]').textContent.trim(),
             paneH: body.getBoundingClientRect().height,
             layoutH: layout.getBoundingClientRect().height,
             prop: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dp-dock-pane-h')),
@@ -114,6 +116,23 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
     private fun read(): Map<String, Any?> = page.evaluate(probe) as Map<String, Any?>
 
     private fun Map<String, Any?>.d(k: String) = (this[k] as Number).toDouble()
+
+    /**
+     * #842 — the dock toggle names the action it performs: Expand while the dock is collapsed,
+     * Collapse while it is open. Asserted three ways in one frame's read: the button's text, its
+     * ACCESSIBLE name (what a screen reader announces, not the markup), and `aria-expanded`.
+     */
+    private fun assertToggle(label: String) {
+        val r = read()
+        println("842-toggle|$label|${r["toggle"]}|${r["expanded"]}")
+        withClue("the dock toggle's text does not follow the state: $r") { r["toggle"] shouldBe label }
+        withClue("no single button is named '$label'") {
+            page.getByRole(AriaRole.BUTTON, Page.GetByRoleOptions().setName(label).setExact(true)).count() shouldBe 1
+        }
+        withClue("aria-expanded disagrees with the '$label' label: $r") {
+            r["expanded"] shouldBe if (label == EXPAND) "false" else "true"
+        }
+    }
 
     /** The handle's CENTRE, down, steps, up — the base handle answered only on its top row (A.0). */
     private fun dragHandle(byY: Double) {
@@ -152,7 +171,13 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
         r.d("layoutH") shouldBeGreaterThanOrEqual r.d("threshold")
         r.d("paneH") shouldBe 0.0
         r.d("handleH") shouldBe 0.0
+        assertToggle(EXPAND)
         shot("800-start-$filters")
+
+        page.click("[data-dp-dock-collapse]")
+        page.waitForSelector("#dp-board-dock:not([data-dp-dock-collapsed])")
+        assertToggle(COLLAPSE)
+        withClue("the toggle did not open the initially collapsed dock: ${read()}") { read().d("paneH") shouldBeGreaterThan 0.0 }
     }
 
     @Test
@@ -165,6 +190,7 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
         r["expanded"] shouldBe "true"
         r.d("boardIfOpen") shouldBeGreaterThanOrEqual r.d("threshold")
         near(r.d("paneH"), DEFAULT_PANE) shouldBe true
+        assertToggle(COLLAPSE)
     }
 
     @Test
@@ -177,6 +203,7 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
         r["expanded"] shouldBe "true"
         r["stored"] shouldBe REMEMBERED.toString()
         r.d("layoutH") shouldBeGreaterThanOrEqual BOARD_FLOOR
+        assertToggle(COLLAPSE)
     }
 
     @Test
@@ -187,13 +214,17 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
         page.setViewportSize(SHORT_W, SHORT_H)
         page.waitForSelector("#dp-board-dock[data-dp-dock-collapsed]")
         println("800-untouched-short|${read()}")
+        assertToggle(EXPAND)
         page.setViewportSize(REFERENCE_W, REFERENCE_H)
         page.waitForSelector("#dp-board-dock:not([data-dp-dock-collapsed])")
+        assertToggle(COLLAPSE)
         page.setViewportSize(SHORT_W, SHORT_H)
         page.waitForSelector("#dp-board-dock[data-dp-dock-collapsed]")
+        assertToggle(EXPAND)
         page.click("#dp-board-dock-tab-events")
         page.waitForSelector("#dp-board-dock:not([data-dp-dock-collapsed])")
         read()["expanded"] shouldBe "true"
+        assertToggle(COLLAPSE)
         page.setViewportSize(REFERENCE_W, REFERENCE_H)
         boardReady()
         page.setViewportSize(SHORT_W, SHORT_H)
@@ -462,6 +493,7 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
         val collapsed = read()
         withClue("a collapsed dock still shows its grip: $collapsed") { collapsed.d("handleH") shouldBe 0.0 }
         withClue("a collapsed dock kept its pane: $collapsed") { collapsed.d("paneH") shouldBe 0.0 }
+        assertToggle(EXPAND)
 
         page.click("[data-dp-dock-collapse]")
         page.waitForSelector("#dp-board-dock:not([data-dp-dock-collapsed])")
@@ -471,6 +503,7 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
             near(expanded.d("paneH"), dragged.d("paneH")) shouldBe true
         }
         withClue("the grip did not come back: $expanded") { expanded["centreHit"] shouldBe true }
+        assertToggle(COLLAPSE)
     }
 
     @Test
@@ -519,5 +552,9 @@ class DashboardDockResizeBrowserTest : DashboardBrowserSuite() {
         const val REFERENCE_H = 982
         const val SHORT_W = 1280
         const val SHORT_H = 720
+
+        /** #842: board.html's `data-dp-dock-label-collapsed` / `data-dp-dock-label-open`. */
+        const val EXPAND = "Expand"
+        const val COLLAPSE = "Collapse"
     }
 }

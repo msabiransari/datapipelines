@@ -95,7 +95,7 @@ class ManagedLakeDatasourceRegistrarTest {
     }
 
     @Test
-    fun `blank region and endpoint are left out, virtual-host style is spelled vhost, a non-MB size falls to KB`() {
+    fun `862 - a blank region and endpoint render the derived regional form, a non-MB size falls to KB`() {
         val dialect =
             desired(
                 storage(region = "", endpoint = "", pathStyle = false),
@@ -103,8 +103,10 @@ class ManagedLakeDatasourceRegistrarTest {
             ).properties.dialect
 
         assertAll(
-            { dialect.containsKey("region") shouldBe false },
-            { dialect.containsKey("endpoint") shouldBe false },
+            // #862: the secret declares the effective region and the derived endpoint ALWAYS — the engine
+            // would resolve the same form itself (probe A), and the proxy renderer derives the identical one.
+            { dialect["region"] shouldBe "us-east-1" },
+            { dialect["endpoint"] shouldBe "https://s3.us-east-1.amazonaws.com" },
             { dialect["url_style"] shouldBe "vhost" },
             { dialect["memory_limit"] shouldBe "1536KB" },
         )

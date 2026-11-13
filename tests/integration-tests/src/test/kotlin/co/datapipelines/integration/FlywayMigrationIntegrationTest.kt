@@ -184,6 +184,12 @@ class FlywayMigrationIntegrationTest {
                 "56|lake reader leases|true",
                 // #844 (V57) — the settlement page's (table_id, id) partial index replaces V55's (table_id, state) one.
                 "57|lake deliveries keyset index|true",
+                // #786 (V58) — API versions with exact pipeline pins and the entity's own current pointer
+                // (metadata-db §4.13a); no data backfill in SQL (the conversion is code).
+                "58|published endpoint versions|true",
+                // #874 (V59) — the datasource's local incarnation UUID and generation counter (metadata-db §4.10),
+                // backfilled by their DEFAULTs on every row, soft-deleted ones included.
+                "59|datasource incarnation|true",
             )
     }
 
@@ -1545,6 +1551,72 @@ class FlywayMigrationIntegrationTest {
             )
     }
 
+    /**
+     * #874 (V59, metadata-db §4.10) — the datasource's local identity beside its name key: `incarnation_id` minted by
+     * its DEFAULT and unique across every row, `generation` starting at 1 and never below it. Both constraints are
+     * proven by a refused INSERT/UPDATE (the V17 rule: a constraint that parses but does not bind is invisible to a
+     * text assertion); the row a plain INSERT leaves carries both values with nothing supplied.
+     */
+    @Test
+    fun `V59 mints a unique incarnation and a generation from 1 on every datasource row`() {
+        query(
+            """
+            SELECT column_name || '|' || data_type || '|' || is_nullable || '|' || COALESCE(column_default, 'NONE')
+              FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'datasources'
+               AND column_name IN ('incarnation_id', 'generation')
+             ORDER BY 1
+            """.trimIndent(),
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "generation|bigint|NO|1",
+                "incarnation_id|uuid|NO|gen_random_uuid()",
+            )
+        val userId = UUID.randomUUID()
+        val first = "v59-a-${userId.toString().take(8)}"
+        val second = "v59-b-${userId.toString().take(8)}"
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject) " +
+                        "VALUES ('$userId', 'v59-$userId@datapipelines.test', 'V59', 'local', 'v59-$userId')",
+                )
+                listOf(first, second).forEach { name ->
+                    statement.execute(
+                        "INSERT INTO datasources (name, display_name, dialect, jdbc_url, credential_kind, created_by) " +
+                            "VALUES ('$name', 'V59', 'H2', 'jdbc:h2:mem:$name', 'none', '$userId')",
+                    )
+                }
+                val duplicate =
+                    shouldThrow<SQLException> {
+                        statement.execute(
+                            "UPDATE datasources SET incarnation_id = (SELECT incarnation_id FROM datasources " +
+                                "WHERE name = '$first') WHERE name = '$second'",
+                        )
+                    }
+                duplicate.message.orEmpty() shouldContain "uq_datasources_incarnation"
+                val belowOne =
+                    shouldThrow<SQLException> {
+                        statement.execute("UPDATE datasources SET generation = 0 WHERE name = '$first'")
+                    }
+                belowOne.message.orEmpty() shouldContain "chk_datasources_generation"
+            }
+        }
+        query(
+            "SELECT (incarnation_id IS NOT NULL) || '|' || generation FROM datasources " +
+                "WHERE name IN ('$first', '$second') ORDER BY name",
+        ) { it.getString(1) } shouldContainExactly listOf("true|1", "true|1")
+        query("SELECT COUNT(DISTINCT incarnation_id) FROM datasources WHERE name IN ('$first', '$second')") {
+            it.getInt(1)
+        }.single() shouldBe 2
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("DELETE FROM datasources WHERE name IN ('$first', '$second')")
+                statement.execute("DELETE FROM users WHERE id = '$userId'")
+            }
+        }
+    }
+
     @Test
     fun `V5 adds the local password auth columns to users`() {
         // metadata-db §4.1 (auth.md §5A): password_hash NULL = OIDC-only account;
@@ -1600,8 +1672,8 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (53 after #799)
-    fun `creates exactly the fifty-three tables of metadata-db §4`() {
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (54 after #786)
+    fun `creates exactly the fifty-four tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1675,6 +1747,8 @@ class FlywayMigrationIntegrationTest {
                 "pipeline_executions",
                 "pipeline_versions",
                 "pipelines",
+                // #786 (V58) — one row per API version, the exact pipeline pin (metadata-db §4.13a).
+                "published_endpoint_versions",
                 "published_endpoints",
                 // 7e (V36) — a transform version's cited facts (metadata-db §4.21).
                 "template_implements",
@@ -1732,6 +1806,8 @@ class FlywayMigrationIntegrationTest {
                 "datasource_workspaces.idx_datasource_workspaces_workspace",
                 "datasources.datasources_pkey",
                 "datasources.idx_datasources_active",
+                // #874 (V59) — the incarnation UUID is unique across every row, live or soft-deleted.
+                "datasources.uq_datasources_incarnation",
                 "dashboard_key_bindings.dashboard_key_bindings_pkey",
                 "dashboard_key_bindings.idx_dashboard_key_bindings_key",
                 "endpoint_key_bindings.endpoint_key_bindings_pkey",
@@ -1828,6 +1904,10 @@ class FlywayMigrationIntegrationTest {
                 "pipelines.idx_pipelines_owner",
                 "pipelines.pipelines_pkey",
                 "pipelines.uq_pipelines_workspace_name",
+                // #786 (V58) — the PK, the one-draft partial index and the "who pins this pipeline version?" lookup.
+                "published_endpoint_versions.idx_published_endpoint_versions_pin",
+                "published_endpoint_versions.published_endpoint_versions_pkey",
+                "published_endpoint_versions.uq_published_endpoint_versions_one_draft",
                 "published_endpoints.idx_published_endpoints_pipeline",
                 "published_endpoints.idx_published_endpoints_workspace",
                 "published_endpoints.published_endpoints_path_pattern_key",
@@ -1948,6 +2028,8 @@ class FlywayMigrationIntegrationTest {
                 "chk_datasource_dialect",
                 "chk_datasource_name",
                 "chk_datasource_query_timeout",
+                // #874 (V59) — the generation counter starts at 1 and only ever advances.
+                "chk_datasources_generation",
                 "chk_dialect",
                 // V30 (177, D11): the credential kind behind an execution — 'user' | 'endpoint' | 'server' | NULL.
                 "chk_executions_executed_by_key_kind",
@@ -2050,6 +2132,14 @@ class FlywayMigrationIntegrationTest {
                 // 102 (V20): the write-surface stamps — 'session' | 'api_key' | 'mcp', both
                 // columns, the ruling's CHECK so a key id can never drift back in as a value.
                 "chk_pipeline_versions_via",
+                // #786 (V58) — the API version's stamps, exact pin floor, status and version floor, and the
+                // entity pointer's floor (its row link is the deferrable composite FK, not a CHECK).
+                "chk_published_endpoint_versions_discard_stamps",
+                "chk_published_endpoint_versions_pin",
+                "chk_published_endpoint_versions_release_stamps",
+                "chk_published_endpoint_versions_status",
+                "chk_published_endpoint_versions_version",
+                "chk_published_endpoints_current_version",
                 // #442b (V51) — the outbox's CHECKs (metadata-db §4.39–§4.40): a delivery's state list, its due/sending/
                 // accepted/failure pairings and counts; an event's checkbox list, its event/outcome pairing and sequence.
                 "chk_schedule_notification_deliveries_accepted",

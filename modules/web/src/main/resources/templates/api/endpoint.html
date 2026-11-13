@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <!-- #786 B.3 — one API's versions (ui-screens §4.18b, record §24 UX). The page keeps two things apart because the
+       record does: the VERSION card (the exact pipeline pin, timeout, description, status — the selected version's)
+       and the API card (enabled and the keys bound at the path — the entity's, the same whichever version is viewed).
+       Selecting a version is a link (?version=n): it changes what this page SHOWS, never what the API serves; only
+       the switch dialog moves the current version. Every verb opens a native lifecycle dialog in #ax-dialog whose GET
+       pre-reads the guard and whose POST re-runs it. -->
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">
+        <span class="app-method">GET</span>
+        <span class="ds-mono" th:text="${page.url}" data-api-url>/api/finance/v1/revenue</span>
+      </h1>
+      <p class="app-page-sub">Every version of this API, newest first. Each version pins one exact pipeline version;
+        the pin never moves when the pipeline's current version moves.</p>
+    </div>
+    <div class="app-page-actions">
+      <a class="ds-button ds-button-ghost" th:href="@{/api-console}">All APIs</a>
+      <button type="button" class="ds-button ds-button-primary" data-api-verb="new-draft"
+              th:if="${page.canPublish and page.authoringEnabled and !page.hasDraft and page.currentVersion != null}"
+              th:attr="hx-get=@{'/partials/endpoints/{id}/lifecycle/draft'(id=${page.id})}"
+              hx-target="#ax-dialog" hx-swap="innerHTML">New draft</button>
+    </div>
+  </div>
+
+  <div class="app-grid app-grid-wide-left">
+    <div class="ds-card app-card-table">
+      <div class="app-card-h">
+        <h2 class="ds-title">Versions</h2>
+        <span class="app-card-note" th:text="${page.currentVersion != null} ? ('serving v' + ${page.currentVersion}) : 'nothing to serve'"
+              data-api-current>serving v2</span>
+      </div>
+      <div class="dt-frame dt-flush" th:if="${not #lists.isEmpty(page.versions)}">
+        <div class="dt-viewport" tabindex="-1">
+          <table class="ds-table" data-api-versions>
+            <thead>
+            <tr>
+              <th>Version</th>
+              <th>Status</th>
+              <th>Pipeline version</th>
+              <th>Here</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="v : ${page.versions}" th:attr="data-api-version=${v.version},
+                aria-current=${page.selected != null and page.selected.version == v.version} ? 'true' : null">
+              <td>
+                <a th:href="@{'/api-console/endpoints/{id}'(id=${page.id},version=${v.version})}"
+                   th:text="'v' + ${v.version}">v2</a>
+                <span class="app-chip" th:if="${v.isCurrent}" data-api-is-current><i class="ds-status"></i>current</span>
+              </td>
+              <td><span class="ds-badge ds-badge-default" th:text="${v.status}" data-api-status>RELEASED</span></td>
+              <td class="ds-mono" th:text="${v.pinLabel}">finance/revenue@3</td>
+              <td>
+                <span class="app-chip" th:if="${v.eligible}">eligible</span>
+                <span class="app-chip app-chip-warn" th:unless="${v.eligible}"><i class="ds-status"></i>not eligible</span>
+              </td>
+            </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="app-card-b" th:if="${#lists.isEmpty(page.versions)}">
+        <div class="app-empty"><b>No versions you can see</b>This API has no version visible to you.</div>
+      </div>
+    </div>
+
+    <div class="app-grid-stack">
+      <div class="ds-card" th:if="${page.selected != null}" th:attr="data-api-selected=${page.selected.version}">
+        <div class="app-card-h">
+          <h2 class="ds-title" th:text="'Version ' + ${page.selected.version}">Version 2</h2>
+          <span class="ds-badge ds-badge-default" th:text="${page.selected.status}">RELEASED</span>
+        </div>
+        <div class="app-card-b">
+          <dl class="u-text-sm">
+            <dt>Pipeline</dt>
+            <dd class="ds-mono" th:text="${page.selected.pinLabel}" data-api-pin>finance/revenue@3</dd>
+            <dt>Timeout</dt>
+            <dd th:text="${page.selected.timeoutSeconds} + ' s'">30 s</dd>
+            <dt>Description</dt>
+            <dd th:text="${page.selected.description != '' ? page.selected.description : '—'}">Revenue by region.</dd>
+            <dt>Body hash</dt>
+            <dd class="ds-mono u-text-meta u-break" th:text="${page.selected.bodyHash}">9f2c…</dd>
+          </dl>
+          <div class="app-page-actions" data-api-verbs>
+            <th:block th:if="${page.selected.isDraft}">
+              <button type="button" class="ds-button ds-button-sm" data-api-verb="edit"
+                      th:if="${page.canPublish and page.authoringEnabled}"
+                      th:attr="hx-get=@{'/partials/endpoints/{id}/lifecycle/draft'(id=${page.id})}"
+                      hx-target="#ax-dialog" hx-swap="innerHTML">Edit draft</button>
+              <button type="button" class="ds-button ds-button-primary ds-button-sm" data-api-verb="release"
+                      th:if="${page.canRelease}"
+                      th:attr="hx-get=@{'/partials/endpoints/{id}/lifecycle/release'(id=${page.id})}"
+                      hx-target="#ax-dialog" hx-swap="innerHTML">Release</button>
+              <button type="button" class="ds-button ds-button-ghost ds-button-sm" data-api-verb="purge"
+                      th:if="${page.canManage}"
+                      th:attr="hx-get=@{'/partials/endpoints/{id}/lifecycle/purge'(id=${page.id},version=${page.selected.version})}"
+                      hx-target="#ax-dialog" hx-swap="innerHTML">Purge draft</button>
+            </th:block>
+            <th:block th:if="${page.selected.isReleased and page.canManage}">
+              <button type="button" class="ds-button ds-button-sm" data-api-verb="switch"
+                      th:if="${!page.selected.isCurrent and page.selected.eligible}"
+                      th:attr="hx-get=@{'/partials/endpoints/{id}/lifecycle/switch'(id=${page.id},version=${page.selected.version})}"
+                      hx-target="#ax-dialog" hx-swap="innerHTML">Make current</button>
+              <button type="button" class="ds-button ds-button-ghost ds-button-sm" data-api-verb="discard"
+                      th:attr="hx-get=@{'/partials/endpoints/{id}/lifecycle/discard'(id=${page.id},version=${page.selected.version})}"
+                      hx-target="#ax-dialog" hx-swap="innerHTML">Discard</button>
+            </th:block>
+            <button type="button" class="ds-button ds-button-sm" data-api-verb="restore"
+                    th:if="${page.selected.isDiscarded and page.canManage}"
+                    th:attr="hx-get=@{'/partials/endpoints/{id}/lifecycle/restore'(id=${page.id},version=${page.selected.version})}"
+                    hx-target="#ax-dialog" hx-swap="innerHTML">Restore</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- #876 G6 U3 (record §13: Dependencies belongs to the SELECTED API version, never implicitly to the current
+           pointer) — the selected version's pipeline pin and everything under it, in the shared Dependencies pane, in a
+           section closed by default and loaded the first time it is opened (dependencies/mount.js, `toggle`). The name
+           is the API's stored path: the published URL is the one /api prefix plus that path (EndpointVersionsPageModel),
+           so the prefix is taken off here. Another version is another page load (?version=n), so the pane never changes
+           version in place. -->
+      <div class="ds-card" th:if="${page.selected != null}">
+        <details class="dp-deps-section" data-api-deps>
+          <summary class="app-card-h dp-deps-summary">
+            <h2 class="ds-title"><svg class="ds-icon ds-icon-sm dp-deps-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>Dependencies</h2>
+            <span class="app-card-note" th:text="'what version ' + ${page.selected.version} + ' runs'">what version 2 runs</span>
+          </summary>
+          <div class="app-card-b">
+            <div class="dp-deps" data-dp-deps data-family="api_endpoint" data-dp-deps-state="idle"
+                 th:attr="data-name=${#strings.substringAfter(page.url, '/api')},data-version=${page.selected.version}">
+              <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this section is opened.</p>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <!-- The ENTITY card: these are the API's, not a version's — viewing another version never changes them. -->
+      <div class="ds-card" data-api-entity>
+        <div class="app-card-h">
+          <h2 class="ds-title">This API (every version)</h2>
+        </div>
+        <div class="app-card-b">
+          <p class="u-text-sm">
+            <span class="app-chip" th:if="${page.enabled}" data-api-enabled>enabled</span>
+            <span class="app-chip app-chip-warn" th:unless="${page.enabled}" data-api-enabled><i class="ds-status"></i>disabled</span>
+          </p>
+          <p class="u-text-sm u-mb-xs">API keys bound at this path:</p>
+          <span class="app-chips" th:if="${not #lists.isEmpty(page.boundKeyNames)}" data-api-keys>
+            <span class="app-chip app-chip-mono" th:each="k : ${page.boundKeyNames}" th:text="${k}">ci</span>
+          </span>
+          <span class="app-chip app-chip-warn" th:if="${#lists.isEmpty(page.boundKeyNames)}" data-api-keys><i class="ds-status"></i>none</span>
+          <p class="app-card-note app-flush">Enabling and key bindings belong to the API itself and apply to whichever
+            version is current.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- The lifecycle dialogs' one container on this page (lifecycle-dialog.js CONTAINERS). -->
+  <div id="ax-dialog"></div>
+  <script th:src="@{/js/lifecycle-dialog.js}"></script>
+  <!-- #876 G6 U3 — the Dependencies card's renderer and mount through the shell's page-script loader
+       (page-assets.mjs): the catalog runs once per document after the bare script above; its mount scans main. -->
+  <template data-page-assets>
+    <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+    <script th:src="@{/js/dependencies/renderer.js}"></script>
+    <script th:src="@{/js/dependencies/tree-view.js}"></script>
+    <script th:src="@{/js/dependencies/list.js}"></script>
+    <script th:src="@{/js/dependencies/source.js}"></script>
+    <script data-page-mount th:src="@{/js/dependencies/mount.js}"></script>
+  </template>
+</th:block>
+</html>

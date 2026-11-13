@@ -1,0 +1,73 @@
+{
+ "display_name": "Amount by region, largest first",
+ "description": "Regions ranked by total amount.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "bar",
+   "labels": "values"
+  },
+  "encoding": {
+   "y": {
+    "field": "region",
+    "type": "nominal",
+    "sort": "-x",
+    "title": null
+   },
+   "x": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "title": "Amount (USD)",
+    "format": "currency(USD)",
+    "axis": {
+     "grid": true
+    }
+   }
+  },
+  "title": {
+   "text": "Amount by region",
+   "subtitle": "Largest first"
+  }
+ }
+}

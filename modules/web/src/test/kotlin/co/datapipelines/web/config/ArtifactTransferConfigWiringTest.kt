@@ -237,12 +237,13 @@ class ArtifactTransferConfigWiringTest {
 
     /** A real visualization created through the context's service (the real save path), still DRAFT. */
     private fun createdVisualization(svc: VisualizationService) =
-        svc.create(
-            WS_A,
-            VisualizationReader().readOrThrow(ArtifactJson.mapper.readTree(DocumentFixturesJson.VISUALIZATION)),
-            AUTHOR,
-            WriteSurface.MCP,
-        )
+        svc
+            .create(
+                WS_A,
+                VisualizationReader().readOrThrow(ArtifactJson.mapper.readTree(DocumentFixturesJson.VISUALIZATION)),
+                AUTHOR,
+                WriteSurface.MCP,
+            ).version
 
     /** The SQL stamp the real release would write — the evidence gate is not this suite's subject. */
     private fun stampReleased(created: co.datapipelines.visualization.ArtifactVersion<*>) {
@@ -363,12 +364,12 @@ class ArtifactTransferConfigWiringTest {
         object DocumentFixturesJson {
             const val VISUALIZATION =
                 """{"name":"cfg/charts/plain","display_name":"Plain","description":"config wiring",
-                   "renderer":{"kind":"plotly","version":"4"},
+                   "renderer":{"kind":"chart","version":"1"},
                    "inputs":{"revenue":{"columns":[{"name":"month","type":"DATE","nullable":false},
                                                    {"name":"amount","type":"DECIMAL","nullable":false}]}},
-                   "config":{"data":[{"type":"bar","x":[],"y":[]}],"layout":{}},
-                   "bindings":{"data[0].x":"month","data[0].y":"amount"},
-                   "presentation":{"title":"Plain","tokens":{"series":"categorical"}},
+                   "config":{"mark":{"type":"bar"},"encoding":{"x":{"field":"month","type":"temporal","sort":"ascending"},
+                             "y":{"field":"amount","type":"quantitative","aggregate":"sum"}}},
+                   "bindings":{"amount":"amount","month":"month"},
                    "tests":{"cases":[{"name":"one","fixtures":{"revenue":[{"month":"2026-01-01","amount":10.5}]},
                                       "assertions":[{"kind":"rendered"}]}]}}"""
 
@@ -407,6 +408,16 @@ class ArtifactTransferConfigWiringTest {
             @Bean
             fun releaseMutationGuard(): co.datapipelines.pipeline.release.ReleaseMutationGuard =
                 co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE
+
+            /** #873 §D — the transitive restore recheck the restores now take; the graph, not the walk, is under test here. */
+            @Bean
+            fun restoreDependencyGuard(): co.datapipelines.pipeline.release.RestoreDependencyGuard =
+                co.datapipelines.pipeline.release.RestoreDependencyGuard.DIRECT_ONLY
+
+            @Bean
+            fun releaseBounds(): co.datapipelines.pipeline.release.ReleaseBounds =
+                co.datapipelines.pipeline.release
+                    .ReleaseBounds()
 
             @Bean
             fun dataSource(): javax.sql.DataSource = SharedPostgres.dataSource()

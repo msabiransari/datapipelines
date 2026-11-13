@@ -76,8 +76,10 @@ class ApiConsoleController(
         // ONE batch lookup for the whole page, never one per row — the same rule
         // [PipelineNames] was written for (T114). `EndpointsController` still does the
         // per-row read; this page has no excuse to copy it.
-        val names = pipelineNames.lookup(workspaceId, endpoints.map { it.pipelineId }.toSet())
-        val served = pipelineNames.servedVersions(workspaceId, endpoints.map { it.pipelineId }.toSet())
+        // #786 — keyed by ENDPOINT: each API's current version pins its own exact pipeline version.
+        val pins = pipelineNames.endpointPins(workspaceId, endpoints.map { it.id })
+        val names = pins.names
+        val served = pins.served
 
         // "Associated keys" is the EXACT-NODE set, which is what the REST surface reports and
         // what a reader can act on ("this path has bindings"). It is deliberately NOT the
@@ -96,15 +98,16 @@ class ApiConsoleController(
         model.addAttribute(
             "endpoints",
             endpoints.map { endpoint ->
-                val name = names[endpoint.pipelineId]
+                val name = names[endpoint.id]
                 EndpointRow(
+                    id = endpoint.id,
                     url = PUBLISHED_PREFIX + endpoint.pathPattern,
                     segments = endpoint.parsed.segments.map { segment -> segment is EndpointPath.Segment.Variable },
                     pipelineDisplayName = name?.displayName ?: name?.name ?: DELETED_PIPELINE,
                     pipelinePath = name?.name,
-                    servedVersion = served[endpoint.pipelineId]?.version,
-                    servedDraft = served[endpoint.pipelineId]?.draft ?: false,
-                    timeoutSeconds = endpoint.timeoutSeconds,
+                    servedVersion = served[endpoint.id]?.version,
+                    servedDraft = served[endpoint.id]?.draft ?: false,
+                    timeoutSeconds = endpoint.current?.body?.timeoutSeconds,
                     boundKeyNames = boundByPath[endpoint.pathPattern].orEmpty().mapNotNull { keyNames[it.apiKeyId] }.sorted(),
                     enabled = endpoint.isEnabled,
                 )
@@ -131,13 +134,15 @@ class ApiConsoleController(
      * count — the reader's question is "which", not "how many").
      */
     data class EndpointRow(
+        /** #786: the API's id — the row links to its versions page, `/api-console/endpoints/{id}`. */
+        val id: java.util.UUID,
         val url: String,
         val segments: List<Boolean>,
         val pipelineDisplayName: String,
         val pipelinePath: String?,
         val servedVersion: Int?,
         val servedDraft: Boolean,
-        val timeoutSeconds: Int,
+        val timeoutSeconds: Int?,
         val boundKeyNames: List<String>,
         val enabled: Boolean,
     )

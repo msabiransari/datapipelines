@@ -583,7 +583,9 @@ class PipelinesController(
      * stores it), so the body is read once here under §13.21's stated constraints first — not
      * JSON, or nested past the bound, is the pipeline family's malformed-body 400 before the
      * service parses anything with the domain mapper (measured before: a malformed body was a
-     * 500 on both routes).
+     * 500 on both routes). The service then parses the same text again with the domain
+     * deserializer, by design (#304: accepted; a tree would widen `PipelineService.create`
+     * and `update`).
      */
     private fun readableOrRefused(body: String) {
         RequestBodies.readTree(REQUEST_MAPPER, body, ApiErrors::malformedPipelineBody)

@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import co.datapipelines.application.dashboards.RefreshPlanner
 import co.datapipelines.executor.ExecutionSlots
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
@@ -20,7 +21,6 @@ import co.datapipelines.visualization.InputMapping
 import co.datapipelines.visualization.ListedDashboard
 import co.datapipelines.visualization.ParameterBinding
 import co.datapipelines.visualization.VisualizationOccurrence
-import co.datapipelines.web.capturingLogEvents
 import com.fasterxml.jackson.databind.node.IntNode
 import io.kotest.assertions.throwables.shouldNotThrow
 import io.kotest.assertions.throwables.shouldThrow

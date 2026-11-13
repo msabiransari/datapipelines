@@ -274,6 +274,7 @@
     var touched = false;
     var autoCollapsed = false;
     var collapseButton = dock.querySelector("[data-dp-dock-collapse]");
+    var collapseLabel = collapseButton ? collapseButton.querySelector("[data-dp-dock-collapse-label]") : null;
     var defaultObserver = null;
 
     function touchDock() {
@@ -286,6 +287,8 @@
       if (collapsed) dock.setAttribute("data-dp-dock-collapsed", "");
       else dock.removeAttribute("data-dp-dock-collapsed");
       if (collapseButton) collapseButton.setAttribute("aria-expanded", String(!collapsed));
+      // #842: the toggle names the action it performs; every caller passes through here.
+      if (collapseLabel) collapseLabel.textContent = collapseButton.getAttribute(collapsed ? "data-dp-dock-label-collapsed" : "data-dp-dock-label-open");
     }
 
     function applyDockDefault() {
@@ -545,6 +548,9 @@
         // the drawer's content at narrow widths.
         parametersContainer: filtersPanel,
       }),
+      // Record 2026-11-06 §5.2: the page declares the chart library it loaded. Without the vendored bundle the
+      // declaration is absent, so a board with a chart fails chart.library_undeclared and a board without one mounts.
+      charts: window.Plotly ? { library: "plotly", instance: window.Plotly } : undefined,
       options: {
         onNotification: function (n) {
           pageState.notifications.push(n);
