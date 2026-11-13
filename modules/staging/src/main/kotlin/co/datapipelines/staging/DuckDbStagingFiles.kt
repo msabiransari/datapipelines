@@ -136,14 +136,14 @@ internal class DuckDbStagingFiles(
 
         /**
          * The names directly inside [dir]. A failure while iterating, which the stream reports as an
-         * [UncheckedIOException], is rethrown as its [IOException] cause, so callers that map I/O
-         * failures to a fixed refusal see every one of them.
+         * [UncheckedIOException], is rethrown as an [IOException], so callers that map I/O failures
+         * to a fixed refusal see every one of them.
          */
         fun listNames(dir: Path): List<String> =
             try {
                 Files.list(dir).use { entries -> entries.map { it.fileName.toString() }.toList() }
             } catch (e: UncheckedIOException) {
-                throw e.cause ?: IOException("listing $dir failed")
+                throw IOException("could not list $dir", e)
             }
 
         private fun posix(dir: Path): Boolean = "posix" in dir.fileSystem.supportedFileAttributeViews()

@@ -78,7 +78,12 @@ class DuckDbScratchCrossProcessTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = ["after-admission", "owner-file-only", "before-driver-open", "after-driver-open", "in-trusted-initializer", "handed-out-with-table"])
+    @ValueSource(
+        strings = [
+            "after-admission", "owner-file-only", "before-driver-open",
+            "after-driver-open", "in-trusted-initializer", "handed-out-with-table",
+        ],
+    )
     fun `a crash at each point of the open sequence leaves nothing after the next sweep`(point: String) {
         val child = Child("crash", scratch.toString(), point)
         child.expect("AT $point ")

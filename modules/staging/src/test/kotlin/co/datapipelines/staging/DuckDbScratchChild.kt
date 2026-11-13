@@ -46,6 +46,7 @@ object DuckDbScratchChild {
                     staging.authorExec("INSERT INTO t VALUES (2)")
                     say("WROTE ${staging.scalarText("SELECT count(*) FROM t")}")
                 }
+
                 "quit" -> {
                     staging.close()
                     say("CLOSED")
@@ -76,15 +77,18 @@ object DuckDbScratchChild {
                 DuckDbStagingFactory(props).prepareDelivery(id, MIB)
                 halt(point, id)
             }
+
             "owner-file-only" -> {
                 val factory = DuckDbStagingFactory(props)
                 factory.create(UUID.randomUUID(), MIB).close()
                 halt(point, id)
             }
+
             "before-driver-open" -> {
                 val factory = DuckDbStagingFactory(props, ScratchBudget(props.scratchCapacityBytes)) { _, _ -> halt(point, id) }
                 factory.create(id, MIB)
             }
+
             "after-driver-open" -> {
                 val factory =
                     DuckDbStagingFactory(props, ScratchBudget(props.scratchCapacityBytes)) { url, p ->
@@ -92,13 +96,18 @@ object DuckDbScratchChild {
                     }
                 factory.create(id, MIB)
             }
-            "in-trusted-initializer" -> DuckDbStagingFactory(props).prepareDelivery(id, 256 * MIB).open { halt(point, id) }
+
+            "in-trusted-initializer" -> {
+                DuckDbStagingFactory(props).prepareDelivery(id, 256 * MIB).open { halt(point, id) }
+            }
+
             "handed-out-with-table" -> {
                 val staging = DuckDbStagingFactory(props).create(id, 256 * MIB) as DuckDbStaging
                 staging.authorExec("CREATE TABLE t AS SELECT range AS x FROM range(100000)")
                 say("AT $point $id")
                 Thread.sleep(Long.MAX_VALUE)
             }
+
             "mid-spill" -> {
                 val staging = DuckDbStagingFactory(props).create(id, 512 * MIB) as DuckDbStaging
                 staging.authorExec("CREATE TABLE big AS SELECT md5(range::VARCHAR) || repeat('x', 200) AS s FROM range(2000000)")
@@ -111,7 +120,10 @@ object DuckDbScratchChild {
                 say("SORT FINISHED")
                 Thread.sleep(Long.MAX_VALUE)
             }
-            else -> error("unknown crash point $point")
+
+            else -> {
+                error("unknown crash point $point")
+            }
         }
     }
 

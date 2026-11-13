@@ -103,7 +103,9 @@ class DuckDbSameIdLeftoverTest {
         val factory = sweptFactory()
         val live = factory.open()
 
-        shouldThrow<DatapipelinesException> { factory.create(live.executionId, StagingEngine.DUCKDB) }.code shouldBe StagingErrorCodes.CREATION_FAILED
+        val refused = shouldThrow<DatapipelinesException> { factory.create(live.executionId, StagingEngine.DUCKDB) }
+
+        refused.code shouldBe StagingErrorCodes.CREATION_FAILED
 
         live.scalarText("SELECT 1") shouldBe "1"
         live.close()
@@ -113,7 +115,10 @@ class DuckDbSameIdLeftoverTest {
     @Test
     fun `a failed open leaves every file that existed before it, a lookalike included`() {
         val props = duckProps(scratch)
-        val failing = DuckDbStagingFactory(props, ScratchBudget(props.scratchCapacityBytes)) { _, _ -> throw SQLException("simulated open failure") }
+        val failing =
+            DuckDbStagingFactory(props, ScratchBudget(props.scratchCapacityBytes)) { _, _ ->
+                throw SQLException("simulated open failure")
+            }
         val id = UUID.randomUUID()
         val lookalike = Files.writeString(scratch.resolve("exec_$id.duckdb.bak"), "operator's copy")
         val unrelated = Files.writeString(scratch.resolve("notes.txt"), "keep")

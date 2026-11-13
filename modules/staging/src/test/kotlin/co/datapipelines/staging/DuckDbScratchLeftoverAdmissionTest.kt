@@ -52,7 +52,13 @@ class DuckDbScratchLeftoverAdmissionTest {
         val refused = shouldThrow<StagingScratchBlockedException> { budgetWithLeftovers().reserve(id, 50) }
 
         refused.code shouldBe StagingErrorCodes.SCRATCH_BLOCKED
-        refused.details shouldBe mapOf("execution_id" to id.toString(), "requested_bytes" to 50L, "leftover_bytes" to 60L, "capacity_bytes" to 100L)
+        refused.details shouldBe
+            mapOf(
+                "execution_id" to id.toString(),
+                "requested_bytes" to 50L,
+                "leftover_bytes" to 60L,
+                "capacity_bytes" to 100L,
+            )
         refused.message shouldContain "leftover files"
         refused.message shouldContain "clear the scratch directory"
         requireNotNull(refused.message).lowercase() shouldNotContain "retry"
@@ -154,7 +160,10 @@ class DuckDbScratchLeftoverAdmissionTest {
             }) { _, _ -> error("nothing opens in this test") }
         val pool = Executors.newFixedThreadPool(4)
         try {
-            val calls = (1..4).map { pool.submit<Any> { runCatching { factory.prepareDelivery(UUID.randomUUID(), 50) }.exceptionOrNull() ?: "admitted" } }
+            val calls =
+                (1..4).map {
+                    pool.submit<Any> { runCatching { factory.prepareDelivery(UUID.randomUUID(), 50) }.exceptionOrNull() ?: "admitted" }
+                }
             inSweep.await(30, TimeUnit.SECONDS) shouldBe true
             Thread.sleep(200)
 

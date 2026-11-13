@@ -45,9 +45,10 @@ import java.util.concurrent.ConcurrentHashMap
  *    where any of them did not take is never handed out.
  *
  * Any failure after the reservation closes the root, deletes the files THAT attempt created (none
- * when it failed before its marker was written) and releases the reservation (`try`/`finally`). Setup failures surface as `creation_failed`; sanitized trusted
- * initialization refusals retain their domain code. Every lease afterwards is a
- * `duplicate()` of the locked root: it inherits the locked configuration and cannot change it
+ * when it failed before its marker was written) and releases the reservation (`try`/`finally`).
+ * Setup failures surface as `creation_failed`; sanitized trusted initialization refusals retain
+ * their domain code. Every lease afterwards is a `duplicate()` of the locked root: it inherits the
+ * locked configuration and cannot change it
  * (measured, lane #795 probe 12 — `SET`, `RESET` and `SET lock_configuration = false` are refused).
  *
  * `memory_limit` bounds DuckDB's buffer manager only, not the JVM heap and not every native
@@ -137,6 +138,11 @@ class DuckDbStagingFactory internal constructor(
         }
     }
 
+    /** Marks [executionId] open in this factory; a second open of the same id is refused. */
+    private fun holdId(executionId: UUID) {
+        if (!openHere.add(executionId)) throw IOException("execution $executionId is already open in this factory")
+    }
+
     /** Locks this factory's owner file once, after the directory was prepared. */
     private fun holdOwnerFile() {
         if (ownerChannel != null) return
@@ -160,7 +166,7 @@ class DuckDbStagingFactory internal constructor(
                 try {
                     DuckDbStagingFiles.prepareScratchDir(properties.scratchDir)
                     holdOwnerFile()
-                    if (!openHere.add(executionId)) throw IOException("execution $executionId is already open in this factory")
+                    holdId(executionId)
                     claimedId = true
                     housekeeper.claim(files)
                     markerWritten = true

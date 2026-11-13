@@ -30,7 +30,8 @@ class DuckDbScratchSweepTest {
     @TempDir
     lateinit var scratch: Path
 
-    private fun housekeeper(log: RecordingLogger = RecordingLogger()) = DuckDbScratchHousekeeper(scratch, DuckDbScratchOwnership.newOwner(), log)
+    private fun housekeeper(log: RecordingLogger = RecordingLogger()) =
+        DuckDbScratchHousekeeper(scratch, DuckDbScratchOwnership.newOwner(), log)
 
     @Test
     fun `a dead owner's databases are removed by a new factory's sweep and the reserved figure is unchanged`() {
@@ -159,8 +160,13 @@ class DuckDbScratchSweepTest {
     fun `a name that only resembles a database is left alone and counted`() {
         val id = UUID.randomUUID()
         val lookalikes =
-            listOf("exec_$id.duckdb.bak", "exec_$id", "exec_${id.toString().uppercase()}.duckdb", "dp-marker_$id.old", "dp-owner_$id.lock.1")
-                .map { Files.write(scratch.resolve(it), ByteArray(3)) }
+            listOf(
+                "exec_$id.duckdb.bak",
+                "exec_$id",
+                "exec_${id.toString().uppercase()}.duckdb",
+                "dp-marker_$id.old",
+                "dp-owner_$id.lock.1",
+            ).map { Files.write(scratch.resolve(it), ByteArray(3)) }
 
         val result = housekeeper().sweep()
 

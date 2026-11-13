@@ -49,54 +49,14 @@ internal class DuckDbScratchHousekeeper(
      * @throws IOException the directory cannot be listed.
      */
     fun sweep(): SweepResult {
-        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(dir)) return SweepResult(emptyList(), emptyMap())
+        if (!exists(dir)) return SweepResult(emptyList(), emptyMap())
         DuckDbStagingFiles.checkScratchDir(dir)
-        val names = DuckDbStagingFiles.listNames(dir)
-        val databaseIds = linkedSetOf<UUID>()
-        val ownerFiles = linkedSetOf<UUID>()
-        val counted = linkedMapOf<Path, Long>()
-        names.forEach { name ->
-            val databaseId = DuckDbScratchNames.idIn(DuckDbScratchNames.DATABASE_PATH, name) ?: DuckDbScratchNames.idIn(DuckDbScratchNames.MARKER, name)
-            val owner = DuckDbScratchNames.idIn(DuckDbScratchNames.OWNER, name)
-            when {
-                databaseId != null -> databaseIds += databaseId
-                owner != null -> ownerFiles += owner
-                else -> dir.resolve(name).let { counted[it] = bytesOf(it) }
-            }
-        }
-        val byOwner = linkedMapOf<UUID, MutableList<DuckDbStagingFiles>>()
-        databaseIds.map { DuckDbStagingFiles(dir, it) }.forEach { files ->
-            when (val marker = DuckDbScratchOwnership.readMarker(files.marker)) {
-                is Marker.Owned -> byOwner.getOrPut(marker.ownerId) { mutableListOf() } += files
-                Marker.Absent, Marker.Damaged -> counted += remainder(files)
-            }
-        }
-        val removed = mutableListOf<Path>()
-        byOwner.forEach { (owner, databases) ->
-            when (val state = DuckDbScratchOwnership.probe(dir, owner)) {
-                // Live in this JVM (never opened) or in another process (its lock is held).
-                OwnerState.Live -> Unit
-                OwnerState.Unprovable -> databases.forEach { counted += remainder(it) }
-                is OwnerState.Dead ->
-                    state.proof.use { dead ->
-                        var allGone = true
-                        databases.forEach { files ->
-                            val present = files.pathsWithMarker.filter(::exists)
-                            val remaining = removeDead(files)
-                            removed += present - remaining.keys
-                            counted += remaining
-                            if (remaining.isNotEmpty()) allGone = false
-                        }
-                        if (allGone) deleteOwnerFile(dead)
-                    }
-            }
-        }
-        (ownerFiles - byOwner.keys).forEach { owner ->
-            (DuckDbScratchOwnership.probe(dir, owner) as? OwnerState.Dead)?.proof?.use(::deleteOwnerFile)
-        }
-        val result = SweepResult(removed, counted)
-        report(result)
-        return result
+        val tally = Tally()
+        val inventory = inventory(DuckDbStagingFiles.listNames(dir), tally)
+        val byOwner = byOwner(inventory.databaseIds, tally)
+        byOwner.forEach { (owner, databases) -> sweepOwner(owner, databases, tally) }
+        (inventory.ownerFiles - byOwner.keys).forEach(::removeIfAbandoned)
+        return tally.result().also(::report)
     }
 
     /**
@@ -108,28 +68,121 @@ internal class DuckDbScratchHousekeeper(
      *   existing file is left as it was.
      */
     fun claim(files: DuckDbStagingFiles) {
-        if (!tryWriteMarker(files)) {
-            val removable =
-                when (val marker = DuckDbScratchOwnership.readMarker(files.marker)) {
-                    is Marker.Owned ->
-                        if (marker.ownerId == ownerId) {
-                            removeDead(files).isEmpty()
-                        } else {
-                            (DuckDbScratchOwnership.probe(dir, marker.ownerId) as? OwnerState.Dead)?.proof?.use { removeDead(files).isEmpty() } ?: false
-                        }
-                    // Removed between the two reads: the second write decides.
-                    Marker.Absent -> true
-                    Marker.Damaged -> false
-                }
-            if (!removable || !tryWriteMarker(files)) {
-                throw IOException("execution ${files.executionId} already has files in $dir that are live or nobody can vouch for; left untouched")
-            }
+        if (!tryWriteMarker(files) && !(clearSameId(files) && tryWriteMarker(files))) {
+            throw IOException(
+                "execution ${files.executionId} already has files in $dir that are live or nobody can vouch for; left untouched",
+            )
         }
         val predating = files.existing()
         if (predating.isNotEmpty()) {
             Files.deleteIfExists(files.marker)
             throw IOException("execution ${files.executionId} already has files nobody can vouch for, left untouched: $predating")
         }
+    }
+
+    /** What one sweep has removed and counted so far. */
+    private class Tally {
+        val removed = mutableListOf<Path>()
+        val counted = linkedMapOf<Path, Long>()
+
+        fun result(): SweepResult = SweepResult(removed.toList(), counted.toMap())
+    }
+
+    /** The directory's names sorted into database ids (a database path or a marker) and owner files. */
+    private class Inventory(
+        val databaseIds: Set<UUID>,
+        val ownerFiles: Set<UUID>,
+    )
+
+    /** Sorts [names]; a name that is neither a database's nor an owner file's is counted. */
+    private fun inventory(
+        names: List<String>,
+        tally: Tally,
+    ): Inventory {
+        val databaseIds = linkedSetOf<UUID>()
+        val ownerFiles = linkedSetOf<UUID>()
+        names.forEach { name ->
+            val databaseId =
+                DuckDbScratchNames.idIn(DuckDbScratchNames.DATABASE_PATH, name)
+                    ?: DuckDbScratchNames.idIn(DuckDbScratchNames.MARKER, name)
+            val owner = DuckDbScratchNames.idIn(DuckDbScratchNames.OWNER, name)
+            when {
+                databaseId != null -> databaseIds += databaseId
+                owner != null -> ownerFiles += owner
+                else -> dir.resolve(name).let { tally.counted[it] = bytesOf(it) }
+            }
+        }
+        return Inventory(databaseIds, ownerFiles)
+    }
+
+    /** Groups the databases by the owner their marker names; one without a readable marker is counted. */
+    private fun byOwner(
+        databaseIds: Set<UUID>,
+        tally: Tally,
+    ): Map<UUID, List<DuckDbStagingFiles>> {
+        val byOwner = linkedMapOf<UUID, MutableList<DuckDbStagingFiles>>()
+        databaseIds.map { DuckDbStagingFiles(dir, it) }.forEach { files ->
+            when (val marker = DuckDbScratchOwnership.readMarker(files.marker)) {
+                is Marker.Owned -> byOwner.getOrPut(marker.ownerId) { mutableListOf() } += files
+                Marker.Absent, Marker.Damaged -> tally.counted += remainder(files)
+            }
+        }
+        return byOwner
+    }
+
+    /** A live owner's databases are left alone, an unprovable one's counted, a dead one's removed. */
+    private fun sweepOwner(
+        owner: UUID,
+        databases: List<DuckDbStagingFiles>,
+        tally: Tally,
+    ) {
+        when (val state = DuckDbScratchOwnership.probe(dir, owner)) {
+            OwnerState.Live -> Unit
+            OwnerState.Unprovable -> databases.forEach { tally.counted += remainder(it) }
+            is OwnerState.Dead -> state.proof.use { dead -> removeAll(dead, databases, tally) }
+        }
+    }
+
+    /** Under [dead]'s proof: removes each database, counts what stays, and the owner file once all are gone. */
+    private fun removeAll(
+        dead: DuckDbScratchOwnership.DeadOwner,
+        databases: List<DuckDbStagingFiles>,
+        tally: Tally,
+    ) {
+        var allGone = true
+        databases.forEach { files ->
+            val present = files.pathsWithMarker.filter(::exists)
+            val remaining = removeDead(files)
+            tally.removed += present - remaining.keys
+            tally.counted += remaining
+            if (remaining.isNotEmpty()) allGone = false
+        }
+        if (allGone) deleteOwnerFile(dead)
+    }
+
+    /** An owner file no marker names: removed only when its owner is provably dead. */
+    private fun removeIfAbandoned(owner: UUID) {
+        (DuckDbScratchOwnership.probe(dir, owner) as? OwnerState.Dead)?.proof?.use(::deleteOwnerFile)
+    }
+
+    /** Whether the same-id leftover is gone: removed (its owner dead, or this housekeeper's own) or already absent. */
+    private fun clearSameId(files: DuckDbStagingFiles): Boolean =
+        when (val marker = DuckDbScratchOwnership.readMarker(files.marker)) {
+            is Marker.Owned -> removeIfOwnOrDead(marker.ownerId, files)
+
+            // Removed between the two reads: the second write decides.
+            Marker.Absent -> true
+
+            Marker.Damaged -> false
+        }
+
+    private fun removeIfOwnOrDead(
+        owner: UUID,
+        files: DuckDbStagingFiles,
+    ): Boolean {
+        if (owner == ownerId) return removeDead(files).isEmpty()
+        val dead = DuckDbScratchOwnership.probe(dir, owner) as? OwnerState.Dead ?: return false
+        return dead.proof.use { removeDead(files).isEmpty() }
     }
 
     /**
@@ -141,7 +194,13 @@ internal class DuckDbScratchHousekeeper(
         if (!wellFormed(files)) return remainder(files)
         val failures = files.delete()
         failures.forEach { (path, e) ->
-            log.warn("{}: DuckDB staging path {} of execution {} not deleted: {}", StagingErrorCodes.CLEANUP_FAILED, path, files.executionId, e.message)
+            log.warn(
+                "{}: DuckDB staging path {} of execution {} not deleted: {}",
+                StagingErrorCodes.CLEANUP_FAILED,
+                path,
+                files.executionId,
+                e.message,
+            )
         }
         if (failures.isEmpty()) {
             try {
@@ -177,7 +236,12 @@ internal class DuckDbScratchHousekeeper(
 
     private fun report(result: SweepResult) {
         if (result.removed.isNotEmpty()) {
-            log.info("DuckDB staging scratch sweep removed {} path(s) left by crashed processes in {}: {}", result.removed.size, dir, result.removed)
+            log.info(
+                "DuckDB staging scratch sweep removed {} path(s) left by crashed processes in {}: {}",
+                result.removed.size,
+                dir,
+                result.removed,
+            )
         }
         if (result.counted.isNotEmpty()) {
             log.warn(
