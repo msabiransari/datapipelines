@@ -18,9 +18,9 @@ import java.math.BigDecimal
 import java.sql.ResultSet
 
 /**
- * #967 V1: the edges of a numeric `truncate` partition. Every expected verdict is a literal read from the
- * orchestrator's probes on iceberg-api 1.12.0 (store `design-records/dp-lake-evidence/967-truncate-boundary/probes.out`),
- * never computed by the code under test.
+ * #967 V1: the edges of a numeric `truncate` partition. Expected verdicts are literals from the orchestrator's
+ * probes on iceberg-api 1.12.0 (store `design-records/dp-lake-evidence/967-truncate-boundary/probes.out`), plus
+ * adjacent integer values at the first multiple of the width inside the type; never computed by the code under test.
  */
 class TruncatePartitionRangeCheckTest {
     @ParameterizedTest(name = "{0} truncate[{1}] of {2} out of range = {3}")
@@ -159,7 +159,7 @@ class TruncatePartitionRangeCheckTest {
         private const val D38_NEXT = "-99999999999999999999999999999999.999998"
         private const val D38_HIGH = "99999999999999999999999999999999.999999"
 
-        /** Type, width, value, refused — each row is a line of probes.out; -1 and zero cannot leave a type. */
+        /** Type, width, value, refused — probe values and adjacent integer boundary pairs; -1 and zero always fit. */
         @JvmStatic
         fun edges(): List<Array<Any>> =
             buildList {
@@ -194,19 +194,23 @@ class TruncatePartitionRangeCheckTest {
                 row("int", 2, "-2147483646", false)
                 row("int", 10, "-2147483648", true)
                 row("int", 10, "-2147483647", true)
-                row("int", 10, "-2147483638", false)
+                row("int", 10, "-2147483641", true)
+                row("int", 10, "-2147483640", false)
                 row("int", 1000, "-2147483648", true)
                 row("int", 1000, "-2147483647", true)
-                row("int", 1000, "-2147482648", false)
+                row("int", 1000, "-2147483001", true)
+                row("int", 1000, "-2147483000", false)
                 row("long", 2, "-9223372036854775808", false)
                 row("long", 2, "-9223372036854775807", false)
                 row("long", 2, "-9223372036854775806", false)
                 row("long", 10, "-9223372036854775808", true)
                 row("long", 10, "-9223372036854775807", true)
-                row("long", 10, "-9223372036854775798", false)
+                row("long", 10, "-9223372036854775801", true)
+                row("long", 10, "-9223372036854775800", false)
                 row("long", 1000, "-9223372036854775808", true)
                 row("long", 1000, "-9223372036854775807", true)
-                row("long", 1000, "-9223372036854774808", false)
+                row("long", 1000, "-9223372036854775001", true)
+                row("long", 1000, "-9223372036854775000", false)
                 listOf("int" to "2147483647", "long" to "9223372036854775807").forEach { (type, high) ->
                     listOf(2, 10, 1000).forEach { width ->
                         row(type, width, high, false)
