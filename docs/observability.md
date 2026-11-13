@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.77 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.78 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-13
@@ -474,6 +474,7 @@ Delivery storage failures report the exception class and first SQLSTATE using §
 | WARN | `lake.append.settlement_deferred` | Immediate settlement failed and leaves recovery to a later sweep | `delivery_id`, `operation_id`, `cause`, `sql_state` |
 | WARN | `lake.delivery.cleanup_deferred` | Pre-publication cleanup could not stamp every receipt; resources were released and terminal executions are sweepable | `execution_id`, `cause`, `sql_state` |
 | INFO | `lake.settle.sweep` | A normal-mode tick finished its rotating table page, or stopped where its work budget ran out | `tables` (managed tables visited), `rows` (deliveries visited), `changed` (deliveries moved to a terminal state), `exhausted` (the tick's budget was spent), `deferred_budget`, `deferred_stuck`, `deferred_failed` (the tables whose recovery stopped short because the budget was spent, a metadata read could not be waited for, or an exception), `cause=none`, `sql_state=none` |
+| INFO | `lake.settle.protection_window_aligned` | A normal-mode tick found `lake_control.protection_interval` different from this instance's `datapipelines.lake.retention.protection-days` and set it to that value (#939, [Lake §8](lake.md#8-settlement-and-recovery)). Logged only when the row changed; a cluster whose instances carry different values logs it every tick and its mirror alternates, while each instance stamps with its own value | `days` (the configured window, whole days) |
 | WARN | `lake.settle.metadata_read_stuck` | A metadata read outlived the tick's budget and was abandoned on its own thread. It holds no lease and no connection and stops itself at its next chunk from the store ([Lake §8](lake.md#8-settlement-and-recovery)); every table's verification and repair are deferred until it ends | `table_id`, `elapsed_ms`, `stuck_total` (abandoned reads since boot), `cause=none`, `sql_state=none` |
 | INFO | `lake.settle.metadata_read_ended` | A later tick found the abandoned read finished: its result was discarded and reads resume | `table_id`, `elapsed_ms` (the read's whole life), `cause` (`abandoned` when it stopped itself after the tick abandoned it, the failure's class when it failed, `none` when it completed), `sql_state` |
 | WARN | `lake.settle.deferred` | One table's recovery failed; later eligible tables/pages remain recoverable | `table_id`, `cause`, `sql_state` |
@@ -790,6 +791,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.78 | 939 (#939) | **§3.4S**: new INFO `lake.settle.protection_window_aligned` (`days`) — the settle sweep set `lake_control.protection_interval` to this instance's `retention.protection-days`; logged only when the row changed. |
 | 2026-11-13 | v1.77 | 806 merge review (#806) | **§3.4**: catalogue the web module's `staging.scratch.health` transition WARN and recovery INFO already described in §6.1. Every non-`UP` transition retains the usable-byte reading, including an unwritable directory; a failed reading reports `unknown`. |
 | 2026-11-13 | v1.76 | 806 (#806) | **§4.1**: four untagged byte gauges, `datapipelines.staging.scratch.capacity`, `.reserved`, `.leftover` (`NaN` until the leftover sweep has counted) and `.usable` (`NaN` when the reading throws), read at every scrape. **§6.1**: the `diskSpace` bullet's "nothing writes to local disk" reasoning corrected (DuckDB staging, #795), and the DuckDB scratch signal described — the status-only `duckdb_scratch` indicator on the management port's `/actuator/health`, never a `/health` component, its rows, and what its `UP` does and does not establish (owner ruling 2026-11-12 for the surface). §6.4 unchanged: the indicator carries no detail. |
 | 2026-11-13 | v1.75 | 803 (#803) — renumbered at merge after #822's v1.73 and #814's v1.74 | **§3.4**: the `staging` row names the DuckDB scratch sweep's INFO (paths removed for a provably dead owner) and WARN (leftover paths nobody can vouch for, with their total bytes, counted against `scratch-bytes`). |

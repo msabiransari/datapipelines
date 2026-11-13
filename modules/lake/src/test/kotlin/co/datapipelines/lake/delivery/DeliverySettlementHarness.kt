@@ -1,6 +1,7 @@
 package co.datapipelines.lake.delivery
 
 import co.datapipelines.lake.LakeLeases
+import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTableProperties
 import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.LeaseHandle
@@ -91,12 +92,13 @@ internal class DeliverySettlementHarness(
     /**
      * The production sweep over this harness's tables. They carry no applied definition and no APPLYING attempt, so
      * the applier and the semantics repair return before reading any metadata; the store that refuses proves it.
-     * [budgets] mints each tick's budget (production's by default); pass it by name.
+     * [budgets] mints each tick's budget (production's by default); pass it and [protectionDays] by name.
      */
     fun sweep(
         leases: LakeLeases = leases(),
         budgets: () -> SettleBudget = { SettleBudget.startingNow(leases, LakeSettlementSweep.SWEEP_BUDGET) },
-    ): LakeSettlementSweep = graph(leases, budgets) { error("these tables never reach a metadata read") }
+        protectionDays: Int = LakeProperties.DEFAULT_PROTECTION_DAYS,
+    ): LakeSettlementSweep = graph(leases, budgets, protectionDays) { error("these tables never reach a metadata read") }
 
     /**
      * The production sweep over tables that DO reach verification and repair (B.0), with [io] as the object store the
@@ -107,11 +109,12 @@ internal class DeliverySettlementHarness(
         io: FileIO,
         leases: LakeLeases = leases(),
         budgets: () -> SettleBudget = { SettleBudget.startingNow(leases, LakeSettlementSweep.SWEEP_BUDGET) },
-    ): LakeSettlementSweep = graph(leases, budgets) { io }
+    ): LakeSettlementSweep = graph(leases, budgets, LakeProperties.DEFAULT_PROTECTION_DAYS) { io }
 
     private fun graph(
         leases: LakeLeases,
         budgets: () -> SettleBudget,
+        protectionDays: Int,
         store: () -> FileIO,
     ): LakeSettlementSweep {
         val definitions = LakeDefinitionRepository(named)
@@ -131,6 +134,7 @@ internal class DeliverySettlementHarness(
             ),
             LakeSemanticsRepair(named, transaction, observations, definitions, leases, reads),
             reads,
+            protectionDays,
             budgets = budgets,
         )
     }

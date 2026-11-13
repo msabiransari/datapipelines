@@ -81,6 +81,7 @@ class LakeAppendRuntime(
             ),
             LakeSemanticsRepair(named, transaction, DeliverySettlementRepository(named), definitions, leases, metadata),
             metadata,
+            properties.retention.protectionDays,
         )
     private val publisher =
         LakeWritebackRunner(
