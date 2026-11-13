@@ -86,7 +86,7 @@ class StagingAdmissionBootTest {
             "the boot failed, but its root cause is not the §7 report: $root"
         }
         check(root.stackTrace.first().let { it.className == ConfigValidator::class.java.name && it.methodName == "validateOnStartup" }) {
-            "an IllegalStateException with the report's prefix, thrown outside ConfigValidator.validateOnStartup: ${root.stackTrace.first()}"
+            "the report's prefix, thrown outside ConfigValidator.validateOnStartup: ${root.stackTrace.first()}"
         }
         chain.filterIsInstance<IllegalArgumentException>() shouldBe emptyList()
         chain.filter { it.javaClass.name.startsWith("org.springframework.boot.context.properties.bind.") } shouldBe emptyList()

@@ -63,7 +63,8 @@ internal class ConfigValidatorPrecedence : BeanFactoryPostProcessor {
             "#804: no '$STAGING_FACTORY' bean definition — the staging admission consumer was renamed or removed; " +
                 "update ConfigValidatorPrecedence so the §7 report still runs before it."
         }
-        val lakeProperties = beanFactory.beanDefinitionNames.filter { beanFactory.getBeanDefinition(it).beanClassName == LAKE_PROPERTIES_CLASS }
+        val lakeProperties =
+            beanFactory.beanDefinitionNames.filter { beanFactory.getBeanDefinition(it).beanClassName == LAKE_PROPERTIES_CLASS }
         (listOf(STAGING_FACTORY) + lakeProperties).forEach { name ->
             val definition = beanFactory.getBeanDefinition(name)
             val existing = definition.dependsOn.orEmpty()

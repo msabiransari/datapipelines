@@ -86,7 +86,9 @@ class StagingAdmissionStartupTest {
                     ConfigValidatorPrecedence.STAGING_FACTORY,
                     RootBeanDefinition(Any::class.java).apply { setDependsOn("somethingElse") },
                 )
-                registry.addBeanFactoryPostProcessor { factory -> factory.beanDefinitionNames.forEach { factory.getBeanDefinition(it).isLazyInit = true } }
+                registry.addBeanFactoryPostProcessor { factory ->
+                    factory.beanDefinitionNames.forEach { factory.getBeanDefinition(it).isLazyInit = true }
+                }
                 registry.addBeanFactoryPostProcessor(ConfigValidatorPrecedence())
             }.withUserConfiguration(Class.forName("co.datapipelines.lake.LakeAutoConfiguration"))
             .run { context ->
