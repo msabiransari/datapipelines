@@ -86,15 +86,18 @@ internal object DuckDbScratchOwnership {
      * must stay open for the life of the owner. A sweeper may have unlinked the file between the
      * open and the lock (it saw no lock and no database of this owner yet); the file's presence is
      * therefore checked after the lock, and a vanished one is created again.
+     * [beforeLock] is a scheduling-only test seam after an open, before its lock; production does nothing there.
      */
     fun lockOwnerFile(
         dir: Path,
         ownerId: UUID,
+        beforeLock: () -> Unit = {},
     ): FileChannel {
         val path = dir.resolve(DuckDbScratchNames.owner(ownerId))
         repeat(OWNER_ATTEMPTS) {
             val channel = openOwnerFile(path)
             try {
+                beforeLock()
                 channel.lock()
                 if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) return channel
             } catch (e: IOException) {
@@ -166,16 +169,18 @@ internal object DuckDbScratchOwnership {
      * (the proof keeps it, and this JVM's claim on the id, until closed — everything that owner left
      * may be removed meanwhile); [OwnerState.Unprovable] when its owner file is missing, not a
      * regular file, or unreadable — never a reason to delete.
+     * [beforeLock] is a scheduling-only test seam after opening the candidate, before trying its lock.
      */
     fun probe(
         dir: Path,
         ownerId: UUID,
+        beforeLock: () -> Unit = {},
     ): OwnerState {
         if (!held.add(ownerId)) return OwnerState.Live
         val path = dir.resolve(DuckDbScratchNames.owner(ownerId))
         val state =
             try {
-                lockIfAbandoned(path)
+                lockIfAbandoned(path, beforeLock)
             } catch (_: IOException) {
                 OwnerState.Unprovable
             }
@@ -183,21 +188,47 @@ internal object DuckDbScratchOwnership {
         return state
     }
 
-    private fun lockIfAbandoned(path: Path): OwnerState {
-        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) return OwnerState.Unprovable
+    private fun lockIfAbandoned(
+        path: Path,
+        beforeLock: () -> Unit,
+    ): OwnerState {
+        val fileKey = regularFileKey(path) ?: return OwnerState.Unprovable
         val ownerId = requireNotNull(DuckDbScratchNames.idIn(DuckDbScratchNames.OWNER, path.fileName.toString()))
         val channel = FileChannel.open(path, READ, WRITE, LinkOption.NOFOLLOW_LINKS)
         val lock =
             try {
+                beforeLock()
                 tryLock(channel)
             } catch (e: IOException) {
                 channel.close()
                 throw e
             }
-        // Closing is safe only because no part of this JVM holds a lock on this file (held, above).
-        if (lock == null) channel.close()
-        return if (lock == null) OwnerState.Live else OwnerState.Dead(DeadOwner(ownerId, path, channel))
+        val sameFile =
+            try {
+                regularFileKey(path) == fileKey
+            } catch (e: IOException) {
+                channel.close()
+                throw e
+            }
+        // A lock on an unlinked inode proves nothing about a replacement at the same pathname.
+        if (lock != null && sameFile) {
+            return OwnerState.Dead(DeadOwner(ownerId, path, channel, fileKey))
+        }
+        // No part of this JVM holds another lock on this owner (held, above).
+        channel.close()
+        return if (lock == null && sameFile) OwnerState.Live else OwnerState.Unprovable
     }
+
+    /** A provider's stable regular-file identity; absent, non-regular or identity-less is unprovable. */
+    private fun regularFileKey(path: Path): Any? =
+        try {
+            Files
+                .readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+                .takeIf { it.isRegularFile }
+                ?.fileKey()
+        } catch (_: NoSuchFileException) {
+            null
+        }
 
     private fun tryLock(channel: FileChannel): FileLock? =
         try {
@@ -239,10 +270,11 @@ internal object DuckDbScratchOwnership {
         val ownerId: UUID,
         private val ownerFile: Path,
         private val channel: FileChannel,
+        private val fileKey: Any,
     ) : AutoCloseable {
         /** Removes the owner file itself; only once none of its databases remains. */
         fun deleteOwnerFile() {
-            Files.deleteIfExists(ownerFile)
+            if (regularFileKey(ownerFile) == fileKey) Files.deleteIfExists(ownerFile)
         }
 
         override fun close() {
