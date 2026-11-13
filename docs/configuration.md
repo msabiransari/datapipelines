@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.90 (operator reference; source-traced configuration authority)
+**Status:** v1.91 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-13
 
 ---
 
