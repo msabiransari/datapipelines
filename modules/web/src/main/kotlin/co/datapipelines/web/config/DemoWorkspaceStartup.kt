@@ -8,10 +8,11 @@ import org.springframework.beans.factory.SmartInitializingSingleton
  * Ensures the `demo` workspace exists at first boot (D-R11) — the one workspace the product
  * ships, and the one every user with no membership joins as a VIEWER on first login.
  *
- * ## Why a boot hook when V23 already inserts the row
- * The migration covers a fresh database; this covers everything else, and — the part that
- * matters — it is where the example content is seeded, which SQL cannot do (it goes through
- * the pipeline and template import services).
+ * ## Why a boot hook, not a migration
+ * No migration inserts `demo` (`V23__rbac_core.sql` says so, and why): the seeder is the
+ * single authority for the row, on a fresh database too, because it is where the example
+ * content is seeded, which SQL cannot do (it goes through the pipeline and template import
+ * services), and a row inserted by SQL would leave every deployment with an empty `demo`.
  *
  * ## O-3: a deactivated `demo` is never recreated
  * The seeder's own check is "does a row named `demo` exist", not "is there an active one", so
