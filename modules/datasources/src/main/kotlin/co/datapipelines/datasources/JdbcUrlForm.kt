@@ -30,10 +30,12 @@ import co.datapipelines.typesystem.Dialect
  * DuckDB is embedded always and case-SENSITIVE (#941; duckdb_jdbc 1.5.5.1, probed in a forked
  * JVM by `DuckDbMemoryFormParityTest`): exactly `:memory:` (or the empty sub-name) is in-process
  * memory, while `jdbc:duckdb::MEMORY:` and `::Memory:` create literal files named `:MEMORY:` and
- * `:Memory:`, so a mixed-case variant is the file the driver opens — anything else a file,
- * including MotherDuck's `md:` form, which this product does not support and classifies
- * [Form.Unknown] (both cases, fail-closed) rather than wave through: `md:` reaches the network
- * on connect. SQLite is embedded always and case-SENSITIVE (xerial 3.49.1.0, probed:
+ * `:Memory:`, so a mixed-case variant is the file the driver opens. Named memory forms remain
+ * classified as files despite the driver's in-memory reading (#942); the parity test records
+ * that stricter classification separately. Other sub-names are classified as files except
+ * MotherDuck's `md:` form, which this product does not support and classifies [Form.Unknown]
+ * (both cases, fail-closed): `md:` reaches the network on connect.
+ * SQLite is embedded always and case-SENSITIVE (xerial 3.49.1.0, probed:
  * `jdbc:sqlite::MEMORY:` creates a literal file named `:MEMORY:`, `jdbc:sqlite:FILE:x` one named
  * `FILE:x`): exactly `:memory:` is memory, a `file:` URI or bare path is a file, the driver's
  * `:resource:` classpath form is [Form.Unknown]. Every other dialect (and `LAKE`, whose DuckDB
