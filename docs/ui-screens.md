@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.240
+**Status:** v1.241
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-13
 ---
 
 ## 1. Purpose
@@ -263,9 +263,9 @@ focused row's line and never around the subtree its item contains (#516) — one
 `:focus-visible` box-shadow is reset on tree items (#644). A mouse click leaves the selected-row tint.
 Labels use text sinks and fixed vendored lucide icons.
 
-**The row (#604, re-cut by #701 — owner ruling 2026-10-24).** The browser column sits on the record's browser surface: `--surface-overlay`, one step
-above the page. A row is a card there and ONE line — the activate (`.dp-tree-activate`) paints 12px vertical padding
-(`--space-3`) and 8px horizontal padding (`--space-2`), the 8px radius (`--radius-md`) and the tints: hover `--surface-hover`, selection
+**The row (#604, re-cut by #701 — owner ruling 2026-10-24; spacing and chevron re-cut by #943 — owner ruling 2026-11-13).** The browser column sits on the record's browser surface: `--surface-overlay`, one step
+above the page. A row is a card there and ONE line — the activate (`.dp-tree-activate`) paints the explorer tree's 8px vertical padding
+(`--gap-sm`) and 4px horizontal padding (`--gap-xs`), the 8px radius (`--radius-md`) and the tints: hover `--surface-hover`, selection
 `--surface-selected` with the title in primary ink (`--text-primary`) and the metadata in secondary
 (`--text-secondary`) — the record's primary-ink selection, not the link blue the other trees keep. The
 name is its own region, `span.dp-tree-title` at the **resource name** role (`--app-text-name`, 12px on
@@ -277,9 +277,9 @@ never the reverse, so every indicator stays inside the rail at any browser width
 scrolls sideways for a name (#541). The browser's rows are COMPACT at every width: the indent per
 level is 12px (`--space-3`) since #784, guide lines unchanged (#739's owner ruling 2026-10-26 set
 8px, `--space-2`). The same day's
-approved spacing reduction keeps that indent and reduces horizontal row insets to 8px (`--space-2`),
-row gaps to 4px (`--space-1`), and badge gaps and side padding to 2px (`--space-0-5`). Vertical row
-and badge padding, type sizes and the 4px row rhythm stay. Earlier spacing put a depth-ten
+approved spacing reduction keeps that indent and reduces badge gaps and side padding to 2px
+(`--space-0-5`); its 8px row insets, 4px in-row gaps and 4px row rhythm were replaced by #943 (4px
+insets, 8px in-row gaps, rows touching — the explorer tree's look, 085 §A). Earlier spacing put a depth-ten
 three-badge row 26px outside the 240px rail after its name had already shrunk to 0px; these
 horizontal savings preserve the badges and the hierarchy. #701's withdrawn width threshold hid a
 name on widening (131px at 381px compact, 0px at 382px full), so there is none — a wider browser
@@ -287,29 +287,35 @@ only gives a name more room. #739 measured a deep three-badge leaf with no name 
 then-240px minimum; at #784's 280px floor a sliver of the name remains — the tooltip still carries
 it — and a badge may use the trailing row/scroll inset, still inside
 the rail. When no badge is visible the region stays in the DOM and its box does not — no dead
-gap after the title. The glyph occupies the former chevron slot: a folder shows `folder` closed
-and `folder-open` expanded, following `aria-expanded`; leaves carry the family's menu glyph:
+gap after the title. Since #943 a folder leads with the sprite's `chevron-right`
+(`svg.dp-tree-chevron`, muted, a quarter turn while `aria-expanded="true"`), then its glyph
+(`svg.dp-tree-glyph`): `folder` closed and `folder-open` expanded; leaves carry the family's menu glyph:
 Pipelines `workflow`, Templates `code`, Dashboards `boxes`, Visualizations `chart-line`, Parameter
-Sets `sliders-horizontal`. Both are vertically centred and neither rotates. A nested row draws a
-1px `--border-subtle` vertical from its parent's glyph centre to the LAST child's own row centre,
-plus a horizontal tick into each child's glyph (6px since #784's 12px indent), continuous across the 4px
-row rhythm. An expanded last child's subtree never extends that parent's guide; a single child's
+Sets `sliders-horizontal`. A leaf leaves the chevron's 20px slot (the 12px icon plus the 8px gap) EMPTY,
+so its glyph sits in the folders' glyph column and its name under theirs. All are vertically centred
+and no glyph rotates. Below a 320px browser the chevron and the leaf's slot retract together
+(a container condition on the tree box, owner ruling 2026-11-13): with them a depth-ten three-badge
+leaf left the rail by 18px at the 280px floor; without them the row is the pre-#943 anatomy and the
+folder glyph alone carries the expansion. A nested row draws a
+1px `--border-subtle` vertical from its parent's first-icon centre to the LAST child's own row centre,
+plus a horizontal tick into each child's first icon (6px to a folder's chevron at #784's 12px indent,
+26px across the empty slot to a leaf's glyph), one unbroken stroke now that rows touch. An expanded last child's subtree never extends that parent's guide; a single child's
 guide spans parent centre to child centre. Root rows and all search results have no guides.
 Hover/selection tints paint over the guide inside the control, as in the 085 §A exemplar.
-The browser consumes its own `--dp-tree-indent`, `--dp-tree-inset`, `--dp-tree-row-h` and `--dp-tree-guide-x` geometry;
-the explorer's `--tpl-*` properties stay separate. The row's DOM contract
+The browser consumes its own `--dp-tree-indent`, `--dp-tree-inset`, `--dp-tree-gap`, `--dp-tree-slot`, `--dp-tree-row-h` and `--dp-tree-guide-x` geometry,
+derived the way the explorer's `--tpl-*` properties are; the two sets stay separate. The row's DOM contract
 is kept: the control stays the line's first child (folders' is a button, leaves' an anchor whose
-`title` is the full path), the icon region leads it, and every `aria` attribute is untouched. Rows sit
-4px (`--space-1`) apart, and the #516 keyboard ring stays on the row's line, which takes the card's
+`title` is the full path), the icon region leads it, and every `aria` attribute is untouched. Rows
+touch (#943), and the #516 keyboard ring stays on the row's line, which takes the card's
 radius while focused on the browser's rows.
 `BrowserResourceRowBrowserTest` measures the row — surface token, padding, radius, title role, the
 one-line height (a control is padding plus one 18.6px line, folder and leaf alike), the centred glyph,
 the same-line badge bounds, the ellipsis and the truncation of a long unbroken name, the folder/leaf
-glyph references, the 4px rhythm, and hover and selection colours — off the real page; at the 280px
+glyph references, the chevron's rotation, rows touching, and hover and selection colours — off the real page; at the 280px
 minimum and the 320px default it measures a depth-three and a depth-ten row on the pipelines tree
 (`v13` and `draft`) and on the templates tree (`v13`, `draft` and `needs review`) in both themes:
-every badge inside the rail, no sideways scroll, the full name in the tooltip, and the compact indent
-and badge padding; at the 480px maximum the rows are still compact and every name is wider than at
+every badge inside the rail, no sideways scroll, the full name in the tooltip, the compact indent
+and badge padding, and the chevron and leaf slot present from 320px and retracted below it; at the 480px maximum the rows are still compact and every name is wider than at
 320px. The #739 guide case measures parent/child centres, ticks, gap continuity, an expanded
 last child and a single child in both themes, with a trailing status row and guide-free search;
 `TreeIndentAndVersionMenuBrowserTest` pins the 12px label/icon step. The renderer accepts only the
@@ -416,10 +422,11 @@ foreign responses refuse admission, and a changed view clears cached levels befo
   rows (085 §A) draw from the same sprite: a rotating chevron-right, folder/folder-open on
   folders, the family's glyph on leaves (`table`, `calendar-clock`); the resource browser's REST tree
   draws `folder`/`folder-open` on folders and the family's menu glyph on leaves (`workflow`,
-  `code`, `boxes`, `chart-line`, `sliders-horizontal`; `tree/render.mjs`, #739). Its leaf and folder
-  glyphs share the former chevron slot; labels align among siblings and sit 8px right of their
+  `code`, `boxes`, `chart-line`, `sliders-horizontal`; `tree/render.mjs`, #739) and, since #943, the
+  same rotating chevron-right before a folder's glyph. Its leaf and folder
+  glyphs share one column (a leaf leaves the chevron slot empty); labels align among siblings and sit 12px right of their
   parent's, with parent-to-child guides only while browsing. Server-rendered explorers retain
-  their separate chevron slot and their own indent geometry; `TreeIndentAndVersionMenuBrowserTest`
+  their own indent geometry; `TreeIndentAndVersionMenuBrowserTest`
   measures the resource browser's two families. The `file-code` glyph left the sprite with the
   server-rendered sidebar levels (#466); `file` remains for pipeline-editor fact icons and the
   reusable renderer's default.
@@ -628,7 +635,7 @@ Spacing has no role tokens: the record's 4/8/12/16/20/24/32/40/48 scale is the d
 | Coarse pointer | every button, input and select ≥44px high; a small or icon button ≥44×44 — the HIT REGION grows, never the type or the glyph |
 | Primary navigation row (`.app-nav-link`) | 13px/400, 1.5 leading; ≥36px; 8px/12px padding; 12px icon gap; 8px radius; 12px menu gutters; primary selected label and accent icon (Minimal: inverted ink), tint plus 3px indicator |
 | Workspace switcher (`.app-ws`) | 12px padding/gap, 32px avatar, 8px radius; UI workspace name, 11px role badge, no redundant caption; transparent select remains operable |
-| Resource row (`.app-browser .dp-tree-activate`) | ONE line: a 12px/18.6px title truncating with an ellipsis (the full canonical name in the control's and label's tooltips), version/draft/needs-review badges on the same line after it, `flex: none` — the label yields width to them, a badge-less row leaves no metadata box; 12px vertical / 8px horizontal padding, 4px control gaps, 2px badge gaps and sides, 8px radius, 4px between rows; 8px indent per level with browse-only guides; folder/folder-open and family leaf glyphs centred on the line, never rotating (§3.4); selected: tint + primary-ink title, secondary metadata |
+| Resource row (`.app-browser .dp-tree-activate`) | ONE line: a 12px/18.6px title truncating with an ellipsis (the full canonical name in the control's and label's tooltips), version/draft/needs-review badges on the same line after it, `flex: none` — the label yields width to them, a badge-less row leaves no metadata box; 8px vertical / 4px horizontal padding, 8px control gaps, 2px badge gaps and sides, 8px radius, rows touching; 12px indent per level with browse-only guides; a rotating chevron before a folder's glyph from a 320px browser up, the leaf's slot empty; folder/folder-open and family leaf glyphs centred on the line, never rotating (§3.4, #943); selected: tint + primary-ink title, secondary metadata |
 
 **House exceptions (ruled).** Where the house departs from the application-shell record on purpose, the departure is listed here with its reason and its measurement; nothing else in this section departs from the record.
 
@@ -3198,6 +3205,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.241 | #943 the resource browser's rows take the explorer tree's look | **§3.4** the row paragraph, the icon bullet and the Resource row table row: 8px vertical / 4px horizontal row padding and 8px in-row gaps (the explorer's, replacing #701/#739's 12px / 8px / 4px), rows touching (replacing #604's 4px rhythm) so the guides read as one stroke, a rotating `chevron-right` before a folder's glyph, a leaf's empty 20px chevron slot keeping the glyph column, ticks of 6px to a chevron and 26px to a leaf glyph; #784's 12px indent and 280px floor stand; below a 320px browser the chevron and the slot retract together (owner ruling 2026-11-13: with them a depth-ten three-badge leaf left the rail by 18px at the floor). |
 | 2026-11-12 | v1.240 | #876 U4 the shared release dialog | **§4.3d** Release row: every family's dialog renders the one release plan (one row per closure node, each DRAFT dependency its own checked `include_dependencies` box, RELEASED badges, blocking MISSING/DISCARDED text, datasource prerequisites as text rows with one wording for absent and foreign, the plan's `tree_hash`, a collapsed graph of the same rows with no request) in place of the 142 consent group; the bare alias is 428 (versioning v1.40). The #416 paragraph names five families, and a draft changed under an open dialog is now refused `<family>.release.plan_conflict` (the plan's `tree_hash` covers the root's draft), not `<family>.version.conflict`. **§4.24** (visualizations) and **§4.21** (dashboards) lifecycle rows: the plan rows replace the one consent checkbox. **§4.23:** the parameter set's first release surface, "Release v`<n>`…" into `#ps-dialog`. **§4.4** draft lifecycle actions say so. Round 4: each DRAFT pipeline row offers its own check override (`check_override_node` / `check_override_reason` into `check_overrides`); the visualization dialog renders the plan beside its native refusals, so a MISSING or DISCARDED transform pin is a blocking plan row, not a pre-read refusal; the pipeline dialog's pending-checks placeholder is outside the consent evaluator. |
 | 2026-11-12 | v1.239 | #908 unmet parameter names in the Dependencies views | **§4.4, §4.21**: a dashboard's parameter-set edge whose `parameter_names` constraint carries `unmet_names` (#892, dependency-graph record erratum (11)) shows a second constraint text, `unmet parameters <names>`, after `requires parameters <names>` — in the List view's edge and node Constraints cells and the graph's selection panel; words, not colour; not a diagnostic, so the pane stays ready with no note. Also drops a stray comma in §4.21's Dependencies text. Tests: `dependencies-tree-view.test.mjs`, `DependenciesUnmetNamesBrowserTest`. |
 | 2026-11-12 | v1.238 | #876 G6 the API version's Dependencies card | **§4.18b**: a Dependencies card between the version card and the API card, only when a version is selected — the SELECTED version's tree (the API version with its lifecycle and enabled/disabled, its one **Pipeline** edge to the pinned pipeline version), a `<details>` closed by default, one tree read carrying the stored path and the viewed version on first open; no tab strip, another version is a page load. Tests: `EndpointVersionsPageRenderTest`, `DependenciesApiEndpointBrowserTest`. |

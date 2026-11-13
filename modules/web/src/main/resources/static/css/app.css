@@ -1475,8 +1475,8 @@ button.app-busy::after {
      template-tree.css) — a chevron on folders, tight rows with no gap between them,
      continuous guides and a tick that reaches the row's first icon. The geometry below
      mirrors the explorer's --tpl-* derivation with the browser's own lengths; it amends
-     the spacing of #604 (4px row rhythm), #701/#739 (12px/8px row padding) and #784
-     (12px indent). --dp-tree-slot is the chevron's slot: a leaf leaves it empty so its
+     the spacing of #604 (4px row rhythm) and #701/#739 (12px/8px row padding); #784's
+     12px indent and 280px floor stand. --dp-tree-slot is the chevron's slot: a leaf leaves it empty so its
      glyph sits in the folders' glyph column. --dp-tree-guide-x is the vertical guide's x
      relative to a row's item: the PARENT's chevron centre, negative by construction. */
   --dp-tree-indent: var(--space-3);
@@ -1485,6 +1485,10 @@ button.app-busy::after {
   --dp-tree-slot: calc(var(--icon-xs) + var(--dp-tree-gap));
   --dp-tree-row-h: calc(var(--gap-sm) * 2 + var(--app-text-name) * var(--app-leading-name));
   --dp-tree-guide-x: calc(var(--dp-tree-inset) + var(--icon-xs) / 2 - var(--dp-tree-indent));
+
+  /* #943: the tree box is a size container so the rows below can retract the chevron
+     when the browser is too narrow for it (the block after the guides). */
+  container: dp-browser-tree / inline-size;
 
   flex: 1;
   min-height: 0;
@@ -1622,8 +1626,8 @@ button.app-busy::after {
    at 240px. No width threshold: #701's threshold hid a name on widening (131px at
    381px compact, 0px at 382px full). Vertical padding and the 4px row rhythm stay.
    #784 amends the indent: 8px per level → --space-3 (12px), so the tick reads 6px.
-   #943 re-cuts the spacing to the explorer's: 16px per level, 4px row insets, no gap
-   between rows; the 2px badge gaps and sides stand. */
+   #943 re-cuts the spacing to the explorer's: 4px row insets, 8px in-row gaps, no gap
+   between rows; #784's 12px per level and the 2px badge gaps and sides stand. */
 .app-browser .dp-tree-group {
   padding-inline-start: var(--dp-tree-indent);
 }
@@ -1675,6 +1679,24 @@ button.app-busy::after {
 /* #943: a leaf's tick runs on across the empty chevron slot to its glyph. */
 .app-browser .dp-tree-rows[data-tree-searching="false"] .dp-tree-group > .dp-tree-item:not([aria-expanded])::after {
   width: calc(var(--dp-tree-inset) + var(--dp-tree-slot) - var(--dp-tree-guide-x));
+}
+
+/* #943 (owner ruling 2026-11-13, option 1): below a 320px browser the row has no room
+   for the chevron — a depth-ten three-badge leaf left the rail by 18px at the 280px
+   floor (#541/#739's containment rule) — so the chevron and the leaf's empty slot
+   retract TOGETHER: folder and leaf glyphs stay in one column, and the folder's
+   folder / folder-open glyph alone carries the expansion, as before #943. Nothing is
+   hidden but the ornament. The condition reads the tree box, which is the browser
+   less its 1px edge (319px at a 320px browser); a container condition cannot read a
+   custom property, hence the literal. */
+@container dp-browser-tree (width < 319px) {
+  .app-browser .dp-tree-scroll {
+    --dp-tree-slot: 0px;
+  }
+
+  .app-browser .dp-tree-chevron {
+    display: none;
+  }
 }
 
 .app-browser .dp-tree-meta .ds-badge {

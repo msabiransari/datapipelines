@@ -10,6 +10,7 @@ import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.doubles.shouldBeLessThanOrEqual
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -74,6 +75,8 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             titleHeight: tr.height,
             titleScrollWidth: title.scrollWidth, titleClientWidth: title.clientWidth,
             iconHref: use ? use.getAttribute('href') : null, iconTransform: getComputedStyle(icon).transform,
+            chevronTransform: control.querySelector('svg.dp-tree-chevron')
+              ? getComputedStyle(control.querySelector('svg.dp-tree-chevron')).transform : null,
             iconTop: icr.top, titleTop: tr.top, titleBottom: tr.bottom, titleLeft: tr.left,
             titleRight: tr.right, titleCenterY: tr.top + tr.height / 2, iconCenterY: icr.top + icr.height / 2,
             metaTop: mr.top, metaLeft: mr.left, metaBottom: mr.bottom, metaRight: mr.right,
@@ -288,6 +291,10 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             // glyphs: the expanded folder is folder-open, a pipeline leaf carries workflow
             withClue("row.folder.iconHref") { (readings["row.folder.iconHref"] as String).endsWith("#folder-open") shouldBe true }
             withClue("row.alpha.iconHref") { (readings["row.alpha.iconHref"] as String).endsWith("#workflow") shouldBe true }
+            // #943: a folder's chevron lies straight while collapsed and turns while expanded; a leaf has none
+            withClue("row.folder.collapsed.chevronTransform") { readings["row.folder.collapsed.chevronTransform"] shouldBe "none" }
+            withClue("row.folder.chevronTransform") { (readings["row.folder.chevronTransform"] as String) shouldNotBe "none" }
+            withClue("row.alpha.chevronTransform") { readings["row.alpha.chevronTransform"] shouldBe null }
             near("row.beta.itemTop", num("row.alpha.itemBottom"), 0.5)
             matchesToken("row.beta.hover.controlBg", "row.beta.surfaceHover")
         }
@@ -384,12 +391,12 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
                 withClue("root has no tick") { readings["guide.parent.afterContent"] shouldBe "none" }
                 for (path in listOf("guide/a", "guide/b", "guide/c", "guide/a/leaf", "guide/c/leaf")) {
                     withClue("$path guide exists") { readings["$path.beforeContent"] shouldBe "\"\"" }
-                    near("$path.indent", 16.0)
+                    near("$path.indent", 12.0)
                     near("$path.guideX", num("$path.parentIconCenterX"))
                     near("$path.tickY", num("$path.rowCenterY"))
                     near("$path.tickEndX", num("$path.iconLeft"))
-                    // #943: 10px to a folder's chevron; a leaf's runs on across the empty slot to its glyph
-                    near("$path.tickLength", if (path.endsWith("/leaf")) 30.0 else 10.0, 0.1)
+                    // #943: 6px to a folder's chevron; a leaf's runs on across the empty 20px slot to its glyph
+                    near("$path.tickLength", if (path.endsWith("/leaf")) 26.0 else 6.0, 0.1)
                     near("$path.rowHeight", 34.6, 0.1)
                     near("$path.guideWidth", 1.0, 0.1)
                     near("$path.tickHeight", 1.0, 0.1)
@@ -581,9 +588,16 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
         } else {
             withClue("$label — the ruling accepts a 0px name here") { n("titleClientWidth").shouldBeGreaterThanOrEqual(0.0) }
         }
-        // the rows (every width, #943): the indent is --space-4, the row inset --space-1,
+        // the rows (every width, #943): the indent is --space-3 (#784), the row inset --space-1,
         // the in-row gap --space-2, badge gaps/sides --space-0-5
-        withClue("$label — indent") { n("indent") shouldBe n("space4") }
+        withClue("$label — indent") { n("indent") shouldBe n("space3") }
+        // #943 (owner ruling 2026-11-13): from a 320px browser up a folder shows its chevron and a
+        // leaf clears the empty slot; below it both retract together, so the glyph column holds
+        val chevron = width >= CHEVRON_FROM
+        withClue("$label — folder chevron shown") { row["chevronShown"] shouldBe chevron }
+        withClue("$label — leaf start padding") {
+            n("leafPadStart") shouldBe n("space1") + if (chevron) n("iconXs") + n("space2") else 0.0
+        }
         withClue("$label — family leaf glyph") {
             (row["iconHref"] as String).endsWith(if (row["family"] == "templates") "#code" else "#workflow") shouldBe true
         }
@@ -646,6 +660,8 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
             indent: group ? parseFloat(getComputedStyle(group).paddingInlineStart) : null,
             iconHref: control.querySelector('svg.dp-tree-glyph use').getAttribute('href'),
             rowInset: parseFloat(cs.paddingRight), rowGap: parseFloat(cs.columnGap),
+            leafPadStart: parseFloat(cs.paddingLeft), iconXs: tok('--icon-xs'),
+            chevronShown: getComputedStyle(tree.querySelector('svg.dp-tree-chevron')).display !== 'none',
             badgeGap: parseFloat(getComputedStyle(meta).columnGap),
             spaceHalf: tok('--space-0-5'), space1: tok('--space-1'), space2: tok('--space-2'), space3: tok('--space-3'), space4: tok('--space-4') };
           probe.remove();
@@ -712,6 +728,9 @@ class BrowserResourceRowBrowserTest : RestTreeBrowserFixture() {
 
     private companion object {
         const val SHALLOW_DEPTH = 3.0
+
+        /** #943: the browser width from which a row has room for the chevron and the leaf's slot. */
+        const val CHEVRON_FROM = 320
 
         /** Twelve releases, then a draft: the row reads `v13` and `draft` — a two-digit version. */
         const val RELEASES = 12
