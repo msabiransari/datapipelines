@@ -4,11 +4,13 @@ import co.datapipelines.staging.DuckDbScratchOwnership.Marker
 import co.datapipelines.staging.DuckDbScratchOwnership.OwnerState
 import org.slf4j.Logger
 import java.io.IOException
-import java.io.UncheckedIOException
 import java.nio.file.FileAlreadyExistsException
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.UUID
 
@@ -24,13 +26,30 @@ import java.util.UUID
  * followed at any depth, and nothing outside [dir] is touched. Every other name is left alone and
  * counted.
  *
+ * A marker read before the owner was proven dead is only a hint: another sweeper or a same-id open
+ * may have removed that database under its own proof and a new owner claimed the id since. So every
+ * delete re-reads the marker WHILE holding the dead owner's proof and goes ahead only when it still
+ * names that owner. The proof makes the re-read final: a marker naming an owner is removed only by
+ * that owner's factory or by the holder of its proof, and a new database cannot be created while a
+ * marker for its id exists (create-new), so nobody can replace the marker between the re-read and
+ * the delete (#803 review R1).
+ *
+ * A leftover's size is read without following links; one that vanished counts as zero, and any
+ * other failure to read it is thrown — a leftover that cannot be measured never counts as free room
+ * (#803 review R2).
+ *
  * @param ownerId the id of the factory this housekeeper works for; its own databases are never swept.
  * @param log where the WARN and the cleanup failures go (server log; paths and sizes only).
+ * @param afterMarkerRead runs after a marker was read and before the owner it names is probed —
+ *   once per sweep after the markers are grouped, and at [claim] after the same-id marker read. A
+ *   test seam that holds that window open, as the factory's `beforeSweep` does; nothing in
+ *   production, and it decides nothing.
  */
 internal class DuckDbScratchHousekeeper(
     private val dir: Path,
     private val ownerId: UUID,
     private val log: Logger,
+    private val afterMarkerRead: () -> Unit = {},
 ) {
     /** What one sweep did: the paths it removed, and the paths it counted with their bytes. */
     data class SweepResult(
@@ -46,7 +65,7 @@ internal class DuckDbScratchHousekeeper(
      * must pass [DuckDbStagingFiles.checkScratchDir] before anything in it is read.
      *
      * @throws IllegalArgumentException the directory fails the checks (nothing was read).
-     * @throws IOException the directory cannot be listed.
+     * @throws IOException the directory cannot be listed, or a leftover's size cannot be read.
      */
     fun sweep(): SweepResult {
         if (!exists(dir)) return SweepResult(emptyList(), emptyMap())
@@ -54,6 +73,7 @@ internal class DuckDbScratchHousekeeper(
         val tally = Tally()
         val inventory = inventory(DuckDbStagingFiles.listNames(dir), tally)
         val byOwner = byOwner(inventory.databaseIds, tally)
+        afterMarkerRead()
         byOwner.forEach { (owner, databases) -> sweepOwner(owner, databases, tally) }
         (inventory.ownerFiles - byOwner.keys).forEach(::removeIfAbandoned)
         return tally.result().also(::report)
@@ -143,7 +163,13 @@ internal class DuckDbScratchHousekeeper(
         }
     }
 
-    /** Under [dead]'s proof: removes each database, counts what stays, and the owner file once all are gone. */
+    /**
+     * Under [dead]'s proof: re-reads each database's marker, removes the database only when the
+     * marker still names [dead], counts what stays, and removes the owner file once none remains.
+     * A marker that now names another owner belongs to a database claimed after the grouping read —
+     * like one created after the listing, it is not this sweep's; an absent or damaged one leaves
+     * its files to be counted, as at grouping.
+     */
     private fun removeAll(
         dead: DuckDbScratchOwnership.DeadOwner,
         databases: List<DuckDbStagingFiles>,
@@ -151,13 +177,26 @@ internal class DuckDbScratchHousekeeper(
     ) {
         var allGone = true
         databases.forEach { files ->
-            val present = files.pathsWithMarker.filter(::exists)
-            val remaining = removeDead(files)
-            tally.removed += present - remaining.keys
-            tally.counted += remaining
+            val remaining =
+                when (val now = DuckDbScratchOwnership.readMarker(files.marker)) {
+                    is Marker.Owned -> if (now.ownerId == dead.ownerId) removeCounted(files, tally) else emptyMap()
+                    Marker.Absent, Marker.Damaged -> remainder(files).also { tally.counted += it }
+                }
             if (remaining.isNotEmpty()) allGone = false
         }
         if (allGone) deleteOwnerFile(dead)
+    }
+
+    /** Removes a database whose marker was just re-read under its dead owner's proof; tallies both outcomes. */
+    private fun removeCounted(
+        files: DuckDbStagingFiles,
+        tally: Tally,
+    ): Map<Path, Long> {
+        val present = files.pathsWithMarker.filter(::exists)
+        val remaining = removeDead(files)
+        tally.removed += present - remaining.keys
+        tally.counted += remaining
+        return remaining
     }
 
     /** An owner file no marker names: removed only when its owner is provably dead. */
@@ -166,8 +205,10 @@ internal class DuckDbScratchHousekeeper(
     }
 
     /** Whether the same-id leftover is gone: removed (its owner dead, or this housekeeper's own) or already absent. */
-    private fun clearSameId(files: DuckDbStagingFiles): Boolean =
-        when (val marker = DuckDbScratchOwnership.readMarker(files.marker)) {
+    private fun clearSameId(files: DuckDbStagingFiles): Boolean {
+        val marker = DuckDbScratchOwnership.readMarker(files.marker)
+        afterMarkerRead()
+        return when (marker) {
             is Marker.Owned -> removeIfOwnOrDead(marker.ownerId, files)
 
             // Removed between the two reads: the second write decides.
@@ -175,14 +216,29 @@ internal class DuckDbScratchHousekeeper(
 
             Marker.Damaged -> false
         }
+    }
 
+    /**
+     * [ownerId]'s own marker cannot change under it: only this factory or a holder of its proof
+     * removes it, and no proof of a live owner exists. Another owner's is re-read under that owner's
+     * proof first — a marker that no longer names it was claimed meanwhile and is never removed.
+     */
     private fun removeIfOwnOrDead(
         owner: UUID,
         files: DuckDbStagingFiles,
     ): Boolean {
         if (owner == ownerId) return removeDead(files).isEmpty()
         val dead = DuckDbScratchOwnership.probe(dir, owner) as? OwnerState.Dead ?: return false
-        return dead.proof.use { removeDead(files).isEmpty() }
+        return dead.proof.use {
+            when (val now = DuckDbScratchOwnership.readMarker(files.marker)) {
+                is Marker.Owned -> now.ownerId == owner && removeDead(files).isEmpty()
+
+                // Removed meanwhile under the same proof: the second write decides.
+                Marker.Absent -> true
+
+                Marker.Damaged -> false
+            }
+        }
     }
 
     /**
@@ -259,33 +315,52 @@ internal class DuckDbScratchHousekeeper(
     private companion object {
         fun exists(path: Path): Boolean = Files.exists(path, LinkOption.NOFOLLOW_LINKS)
 
-        /** lstat size of [path]; for a directory the regular files under it (links not followed); 0 if gone. */
-        fun bytesOf(path: Path): Long =
-            try {
-                val attributes = Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
-                if (attributes.isDirectory) treeBytes(path) else attributes.size()
-            } catch (_: IOException) {
-                0L
-            } catch (_: UncheckedIOException) {
-                // Files.walk reports a directory that vanished mid-walk this way.
-                0L
-            }
+        /**
+         * lstat size of [path]; for a directory the regular files under it (links not followed). A
+         * path that vanished counts as 0; every other failure is thrown, never read as 0.
+         *
+         * @throws IOException a size or a directory listing could not be read (access denied, …).
+         */
+        fun bytesOf(path: Path): Long {
+            val attributes =
+                try {
+                    Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+                } catch (_: NoSuchFileException) {
+                    return 0L
+                }
+            return if (attributes.isDirectory) treeBytes(path) else attributes.size()
+        }
 
-        fun treeBytes(root: Path): Long =
-            Files.walk(root).use { paths ->
-                paths
-                    .filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }
-                    .map { sizeOrZero(it) }
-                    .toList()
-                    .fold(0L, ::saturatingAdd)
-            }
+        /** The regular files under [root], links not followed; an entry that vanished mid-walk counts as 0. */
+        fun treeBytes(root: Path): Long {
+            val total = TreeTotal()
+            Files.walkFileTree(root, total)
+            return total.bytes
+        }
+    }
 
-        fun sizeOrZero(path: Path): Long =
-            try {
-                Files.size(path)
-            } catch (_: IOException) {
-                0L
-            }
+    /** Sums regular-file sizes; rethrows every failure but a vanished entry. */
+    private class TreeTotal : SimpleFileVisitor<Path>() {
+        var bytes = 0L
+            private set
+
+        override fun visitFile(
+            file: Path,
+            attrs: BasicFileAttributes,
+        ): FileVisitResult {
+            if (attrs.isRegularFile) bytes = saturatingAdd(bytes, attrs.size())
+            return FileVisitResult.CONTINUE
+        }
+
+        override fun visitFileFailed(
+            file: Path,
+            exc: IOException,
+        ): FileVisitResult = if (exc is NoSuchFileException) FileVisitResult.CONTINUE else throw exc
+
+        override fun postVisitDirectory(
+            dir: Path,
+            exc: IOException?,
+        ): FileVisitResult = if (exc == null || exc is NoSuchFileException) FileVisitResult.CONTINUE else throw exc
     }
 }
 
