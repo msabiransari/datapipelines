@@ -11,7 +11,6 @@ import java.io.File
  * the CI-covered guard is `:tests:browser-tests:verifyBrowserShardPartition`.
  */
 class BrowserShardsTest {
-
     @TempDir
     lateinit var root: File
 
@@ -43,7 +42,10 @@ class BrowserShardsTest {
         for (bad in listOf("x/y", "1", "1/3/3", "", "1/")) assertRefused(bad, "is not <i>/<n>")
     }
 
-    private fun assertRefused(value: String, rule: String) {
+    private fun assertRefused(
+        value: String,
+        rule: String,
+    ) {
         val refusal = assertThrows<IllegalArgumentException> { BrowserShards.parseShard(value, 3) }
         val message = refusal.message.orEmpty()
         assertTrue(message.contains(rule), "'$value' → $message")
@@ -73,7 +75,10 @@ class BrowserShardsTest {
         )
     }
 
-    private fun write(path: String, text: String) {
+    private fun write(
+        path: String,
+        text: String,
+    ) {
         root.resolve(path).apply { parentFile.mkdirs() }.writeText(text)
     }
 }

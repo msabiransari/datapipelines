@@ -34,20 +34,27 @@ object BrowserShards {
     private val PACKAGE = Regex("""^package\s+([\w.]+)""", RegexOption.MULTILINE)
 
     // A top-level (unindented) class declaration whose name ends in `Test`, any modifiers.
-    private val TOP_LEVEL_TEST_CLASS = Regex(
-        """^(?:(?:public|internal|private|open|abstract|final|data|sealed|annotation|inner)\s+)*class\s+(\w+Test)\b""",
-        RegexOption.MULTILINE,
-    )
+    private val TOP_LEVEL_TEST_CLASS =
+        Regex(
+            """^(?:(?:public|internal|private|open|abstract|final|data|sealed|annotation|inner)\s+)*class\s+(\w+Test)\b""",
+            RegexOption.MULTILINE,
+        )
 
     /** One shard: 1-based [index] of [count]. */
-    data class Shard(val index: Int, val count: Int)
+    data class Shard(
+        val index: Int,
+        val count: Int,
+    )
 
     /**
      * Parses `<i>/<n>`, refusing anything but integers with n == [expectedCount] and
      * 1 ≤ i ≤ n — a CI matrix that drifts from [BROWSER_SHARDS] is red on its first leg,
      * never silently unbalanced.
      */
-    fun parseShard(value: String, expectedCount: Int = BROWSER_SHARDS): Shard {
+    fun parseShard(
+        value: String,
+        expectedCount: Int = BROWSER_SHARDS,
+    ): Shard {
         val parts = value.trim().split("/")
         val index = parts.getOrNull(0)?.toIntOrNull()
         val count = parts.getOrNull(1)?.toIntOrNull()
@@ -63,7 +70,11 @@ object BrowserShards {
     }
 
     /** Shard [index] (1-based) of [count] over [names]: sorted, then every count-th from index−1. */
-    fun partition(names: List<String>, index: Int, count: Int): List<String> {
+    fun partition(
+        names: List<String>,
+        index: Int,
+        count: Int,
+    ): List<String> {
         require(count >= 1) { "shard count must be ≥ 1, was $count" }
         require(index in 1..count) { "shard index $index is outside 1..$count" }
         return names.sorted().filterIndexed { i, _ -> i % count == index - 1 }
@@ -71,13 +82,13 @@ object BrowserShards {
 
     /** Every `*Test.kt` under [sourceRoot] as an FQN (package = the directory path), sorted. */
     fun testClassNames(sourceRoot: File): List<String> =
-        sourceRoot.walkTopDown()
+        sourceRoot
+            .walkTopDown()
             .filter { it.isFile && it.name.endsWith(TEST_FILE_SUFFIX) }
             .map { file ->
                 val relative = file.relativeTo(sourceRoot).invariantSeparatorsPath.removeSuffix(".kt")
                 relative.replace('/', '.')
-            }
-            .toList()
+            }.toList()
             .sorted()
 
     /**
@@ -86,24 +97,32 @@ object BrowserShards {
      * and a `*Test.kt` whose `package` is not its directory (its derived FQN would not exist).
      */
     fun unshardableSources(sourceRoot: File): List<String> =
-        sourceRoot.walkTopDown()
+        sourceRoot
+            .walkTopDown()
             .filter { it.isFile && it.extension == "kt" }
             .flatMap { file ->
                 val path = file.relativeTo(sourceRoot).invariantSeparatorsPath
                 val text = file.readText()
-                val misnamed = TOP_LEVEL_TEST_CLASS.findAll(text)
-                    .map { it.groupValues[1] }
-                    .filter { it != file.nameWithoutExtension }
-                    .map { "$path: class $it is not in a file of its own name" }
+                val misnamed =
+                    TOP_LEVEL_TEST_CLASS
+                        .findAll(text)
+                        .map { it.groupValues[1] }
+                        .filter { it != file.nameWithoutExtension }
+                        .map { "$path: class $it is not in a file of its own name" }
                 val directoryPackage = path.substringBeforeLast('/', "").replace('/', '.')
-                val declared = PACKAGE.find(text)?.groupValues?.get(1).orEmpty()
-                val misplaced = if (file.name.endsWith(TEST_FILE_SUFFIX) && declared != directoryPackage) {
-                    sequenceOf("$path: package '$declared' is not its directory '$directoryPackage'")
-                } else {
-                    emptySequence()
-                }
+                val declared =
+                    PACKAGE
+                        .find(text)
+                        ?.groupValues
+                        ?.get(1)
+                        .orEmpty()
+                val misplaced =
+                    if (file.name.endsWith(TEST_FILE_SUFFIX) && declared != directoryPackage) {
+                        sequenceOf("$path: package '$declared' is not its directory '$directoryPackage'")
+                    } else {
+                        emptySequence()
+                    }
                 misnamed + misplaced
-            }
-            .toList()
+            }.toList()
             .sorted()
 }
