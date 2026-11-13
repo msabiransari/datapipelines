@@ -4,6 +4,7 @@ import co.datapipelines.application.lake.LakeTableReferenceResolver.Resolution
 import co.datapipelines.datasources.DuckDbDefaultCatalog
 import co.datapipelines.datasources.SqlTableReferenceExtractor
 import co.datapipelines.datasources.WrittenTableReference
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -59,10 +60,12 @@ class LakeTableReferenceResolverTest {
         url: String,
         catalog: String,
     ) {
-        val defaultCatalog = DuckDbDefaultCatalog.of(url)
-        defaultCatalog shouldBe catalog
-        resolve(written(catalog, "lk", "events"), defaultCatalog = defaultCatalog) shouldBe resolved("lk", table = "events")
-        resolve(written(catalog.uppercase(), "lk", "events"), defaultCatalog = defaultCatalog) shouldBe resolved("lk", table = "events")
+        withClue(form) {
+            val defaultCatalog = DuckDbDefaultCatalog.of(url)
+            defaultCatalog shouldBe catalog
+            resolve(written(catalog, "lk", "events"), defaultCatalog = defaultCatalog) shouldBe resolved("lk", table = "events")
+            resolve(written(catalog.uppercase(), "lk", "events"), defaultCatalog = defaultCatalog) shouldBe resolved("lk", table = "events")
+        }
     }
 
     @Test
