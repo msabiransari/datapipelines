@@ -175,8 +175,7 @@ source "$ROOT/scripts/lib/gate-stages.sh"
 # from the #974 run — see gate-stages.sh) the gate runs the repository default and says
 # so in a header line: a short machine gives a slower gate, never a red one.
 mem_avail="$(awk '/^MemAvailable:/{print int($2/1024); exit}' /proc/meminfo 2>/dev/null)"
-fork_arg="$(gate_e2e_fork_args "$mem_avail" "$(gate_e2e_mem_floor_mb)" "${GATE_E2E_FORKS:-}" \
-  ${GATE_EXTRA_ARGS[@]+"${GATE_EXTRA_ARGS[@]}"}")"
+fork_arg="$(gate_e2e_fork_args "$mem_avail" "$(gate_e2e_mem_floor_mb)" "${GATE_E2E_FORKS:-}" "${GATE_EXTRA_ARGS[@]}")"
 [ -n "$fork_arg" ] && GATE_EXTRA_ARGS+=("$fork_arg")
 
 for i in $(seq 1 "$CYCLES"); do
