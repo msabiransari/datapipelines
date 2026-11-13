@@ -39,22 +39,24 @@ person releases the dashboard and holds the key.
 ## The page
 
 - The scripts, from the datapipelines origin (public `/js/**`, `/vendor/**`, `/css/**`): exactly one
-  Plotly bundle — `3d` only when a pinned visualization's Plotly `config.data[].type` is
-  `scatter3d`, `surface` or `mesh3d` (read each with `visualizations_get`), otherwise `2d` —
-  declared as `<script src="/vendor/plotly/plotly-2d.min.js" data-dp-plotly-bundle="2d"></script>`;
-  then the runtime `/js/datapipelines-dashboard.js` and the adapter files for the kinds your
-  dashboards use: `datapipelines-dashboard-plotly.js`, `datapipelines-dashboard-table.js`,
+  Plotly bundle, the `2d` — every chart family the `chart` kind ships is a 2D trace, so there is no
+  3D selection rule — declared as
+  `<script src="/vendor/plotly/plotly-2d.min.js" data-dp-plotly-bundle="2d"></script>`;
+  then the runtime `/js/datapipelines-dashboard.js`; then the `chart` kind's adapter
+  `/js/datapipelines-dashboard-chart.js` (registers the kind at script load, before init) and its
+  Plotly converter `/js/datapipelines-dashboard-plotly.js` (registers no kind of its own); then the
+  other kinds' adapters your dashboards use: `datapipelines-dashboard-table.js`,
   `datapipelines-dashboard-kpi.js` (each registers its renderer kind at script load, before init).
-  The runtime refuses a mismatched pair at bootstrap: `renderer.two_bundles` (both bundles
+  The runtime refuses a mismatched bundle pair at bootstrap: `renderer.two_bundles` (both bundles
   declared), `renderer.unsupported` (an unknown bundle), `renderer.version_mismatch` (a pinned
-  visualization needs a different major), `renderer.bundle_insufficient` (3D on the `2d` bundle).
+  visualization needs a different major).
 - The stylesheets, in this order: `/vendor/design-system/tokens.css`, the theme sheet
   (`/vendor/design-system/themes/light.css` for the default theme), `/vendor/design-system/base.css`,
   `/vendor/design-system/primitives.css`, `/css/app.css`, then `/css/dashboards.css`, plus
   `/vendor/plotly/plotly.css`. `dashboards.css` reads dozens of design tokens defined in the
   design-system sheets, not in itself — an `app.css` + `dashboards.css` pair alone renders
   half-styled. A host that brings its own stylesheet must define at least `--dashboard-row-unit`
-  (the composite's row unit) and the `--chart-*` set (the Plotly theme reads them).
+  (the composite's row unit) and the `--chart-*` set (the chart kind's converters read them).
 - Two elements: the board container and — when the dashboard has a parameter set — a parameters
   pane. Build the composite adapter and init:
 
@@ -65,12 +67,16 @@ person releases the dashboard and holds the key.
     dashboard: { id: DASHBOARD_ID, version: "released" },
     container: container,
     adapter: adapter,
+    charts: { library: "plotly", instance: window.Plotly },
   });
   await instance.ready;
   ```
 
   `credentials` is `"session"` or `{ proxyBaseUrl }`; in proxy mode the proxy base is the only base
-  used, and `baseUrl` may be omitted. `init` refuses `init.version_unsupported` (the version is
+  used, and `baseUrl` may be omitted. `charts` declares the library you loaded — with the `2d`
+  bundle it is `{ library: "plotly", instance: window.Plotly }`; when no bundle is loaded omit the
+  key, and a pinned chart visualization is refused `chart.library_undeclared` rather than drawn by
+  a guess. `init` refuses `init.version_unsupported` (the version is
   neither `"released"` nor a positive integer) and throws `DashboardAlreadyMounted` when the
   container already hosts an instance — never init twice on one container. `dispose()` on teardown;
   after disposal the same container may host a fresh init.
@@ -83,7 +89,7 @@ person releases the dashboard and holds the key.
   `renderParameters` (draw the parameter form), `readSelections` (current parameter values),
   `onEdit` (open edit), `onCommit` (apply parameters), `onAction` (run a board action),
   `renderData` (draw one visualization's rows), `renderStatus` (empty, error, stale),
-  `notify` (surface a notification), `resize` (respond to layout changes), `dispose` (unmount all
+  `notify` (deliver a notification), `resize` (respond to layout changes), `dispose` (unmount all
   of it). A custom renderer kind registers before init with
   `DatapipelinesDashboard.registerRenderer({ kind, version, create })`.
 - The runtime is DOM-only — one script, no dependencies, a container element. In React, Angular,
@@ -102,8 +108,16 @@ person releases the dashboard and holds the key.
 - `init.version_unsupported` — the version is neither `"released"` nor a positive integer.
 - `DashboardAlreadyMounted` — the container already hosts an instance; dispose first.
 - The bundle refusals above — fix the script declaration, not the code.
-- A rejected `ready` — the notification names the bootstrap step that failed; route
-  `onNotification` to your own UX.
+- `chart.library_undeclared` — a pinned chart visualization and no `charts` at init; load the
+  bundle and pass the declaration.
+- `chart.converter_missing` — the chart adapter is loaded but no converter is registered for the
+  declared library and the occurrence's family; load `-plotly.js` with `-chart.js`.
+- A rejected `ready` — the rejection is the runtime's one error type: `code` (the stable reason),
+  `message`, `retryable` and `details` (possibly empty); it carries no step field. A bootstrap
+  failure is ALSO published as a `bootstrap` notification — `{ scope: "bootstrap"`, `severity`,
+  `code`, `message`, `retryable`, `recover`, `configurationStale }` — to the `onNotification`
+  option, which the example does not install; a failed bootstrap disposes the instance, so a retry
+  is a fresh `init` on a clean container.
 - The proxy's own 404 — the request was outside the four routes; fix the caller, not the proxy.
 - A server 404 on a valid route — the key's folder binding does not cover this dashboard; an
   unbound dashboard is served to no key.

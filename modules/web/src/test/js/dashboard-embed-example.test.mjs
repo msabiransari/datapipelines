@@ -1,12 +1,18 @@
 /*
- * The embedded-dashboard example's conformance test (L5, #856) — the host glue in
- * examples/dashboard-embed/embed.js driven against the REAL runtime, the REAL
- * reference proxy (spawned, port 0) and a STUB upstream, on the house runner
- * (`node --test`, dependency-free).
+ * The embedded-dashboard example's conformance test (L5, #856; corrected by 856b) —
+ * the host glue in examples/dashboard-embed/embed.js driven against the REAL runtime,
+ * the REAL chart-kind adapter, the REAL reference proxy (spawned, port 0) and a STUB
+ * upstream, on the house runner (`node --test`, dependency-free).
  *
  * What it proves:
- * - embed.js boots a composite through `window.dpEmbed.ready` with `version: "released"`
- *   and proxy credentials only;
+ * - the REAL index.html loads every Datapipelines asset from ONE Datapipelines origin
+ *   placeholder, never from the host page's own origin (856b correction 1);
+ * - embed.js mounts every [data-dp-embed] container AUTOMATICALLY at load — there is no
+ *   window.dpEmbedBoot global (856b correction 2) — through `window.dpEmbed.ready` with
+ *   `version: "released"` and proxy credentials only;
+ * - the `chart` kind (the retired `plotly` kind's successor, #869) bootstraps with
+ *   `charts: { library: "plotly", instance: window.Plotly }` at init and the real chart
+ *   adapter + a Plotly converter registered;
  * - the runtime's requests reach the STUB only through the proxy: the proxy attached the
  *   dashboard key server-side (the client never carries it), and no cookie or CSRF header
  *   travels;
@@ -26,11 +32,15 @@ import http from "node:http";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const runtimePath = path.resolve(here, "../../main/resources/static/js/datapipelines-dashboard.js");
+const chartAdapterPath = path.resolve(here, "../../main/resources/static/js/datapipelines-dashboard-chart.js");
 const embedPath = path.resolve(here, "../../../../../examples/dashboard-embed/embed.js");
+const indexPath = path.resolve(here, "../../../../../examples/dashboard-embed/index.html");
+const readmePath = path.resolve(here, "../../../../../examples/dashboard-embed/README.md");
 const proxyPath = path.resolve(here, "../../../../../examples/dashboard-proxy/proxy.mjs");
 
 // A plainly fake, NON-secret key literal: the proxy reads it from its environment and
@@ -80,6 +90,8 @@ function installDom() {
   // The one bundle declaration the runtime reads (the index.html script tag, faked).
   const bundleScript = fakeElement("script");
   bundleScript.setAttribute("data-dp-plotly-bundle", "2d");
+  // The host containers embed.js's automatic mount scans for, in document order.
+  const embedHosts = [];
   const doc = {
     body: fakeElement("body"),
     head: fakeElement("head"),
@@ -88,13 +100,21 @@ function installDom() {
   doc.getElementById = () => null;
   doc.querySelectorAll = (selector) => {
     if (selector === "script[data-dp-plotly-bundle]") return [bundleScript];
+    if (selector === "[data-dp-embed]") return embedHosts.slice();
     return [];
   };
   doc.createElement = (tag) => fakeElement(tag);
   doc.createTextNode = (text) => ({ text: String(text), nodeType: 3 });
   globalThis.document = doc;
-  globalThis.window = { document: doc, getComputedStyle: () => ({ color: "rgb(10, 20, 30)" }) };
+  globalThis.window = {
+    document: doc,
+    // The library entry value embed.js declares at init (charts.instance).
+    Plotly: {},
+    addEventListener: () => {},
+    getComputedStyle: () => ({ color: "rgb(10, 20, 30)" }),
+  };
   globalThis.location = { reload: () => {} };
+  doc.__embedHosts = embedHosts;
   return doc;
 }
 
@@ -115,11 +135,13 @@ const CONFIG = () => ({
   renderer: { bundle: "2d" },
   dashboard: { id: "d1", name: "acme/finance/board", version: 1, status: "RELEASED" },
   layout: { columns: 12, grid: [] },
-  parameter_set: null,
-  visualizations: [
-    { name: "chart", renderer: { kind: "plotly", version: "4" }, config: {}, bindings: {}, presentation: null, timeout_seconds: 120 },
-    { name: "cells", renderer: { kind: "table", version: "1" }, config: {}, bindings: {}, presentation: null, timeout_seconds: 120 },
-  ],
+   parameter_set: null,
+   visualizations: [
+     // The chart kind (the plotly kind's successor, #869): a pinned bar chart whose
+     // family the judge reads from config.mark.type.
+     { name: "chart", renderer: { kind: "chart", version: "1" }, config: { mark: { type: "bar" } }, bindings: {}, presentation: null, timeout_seconds: 120 },
+     { name: "cells", renderer: { kind: "table", version: "1" }, config: {}, bindings: {}, presentation: null, timeout_seconds: 120 },
+   ],
   groups: [],
   actions: [],
   action_controls: [],
@@ -222,13 +244,26 @@ before(async (t) => {
   await waitReady(PROXY_BASE, "the proxy");
   installDom();
   const runtime = require(runtimePath);
-  // The browser gets its renderers from the adapter files' load-time registration; the
-  // tests register stand-ins for the same kinds and majors (dashboard-runtime.test.mjs).
+  // The chart kind's REAL adapter: loaded like index.html loads it (after the runtime),
+  // which auto-registers the kind through the fake window. Registered again explicitly
+  // for the Node path, idempotently (the adapter's own contract).
+  const chartApi = require(chartAdapterPath);
+  chartApi.register(runtime);
+  if (!runtime._internal.renderers().chart) throw new Error("the chart adapter did not register the chart kind");
+  // The Plotly converter the chart adapter draws through, as a stand-in with the REAL
+  // registration contract ({ library, families, draw }); the example's refresh declares
+  // no targets, so the converter's draw itself is never invoked here.
+  chartApi.registerConverter({
+    library: "plotly",
+    families: { bar: () => ({}) },
+    draw: () => {},
+  });
+  // The browser gets its table and KPI renderers from the adapter files' load-time
+  // registration; the tests register stand-ins for the same kinds and majors
+  // (dashboard-runtime.test.mjs).
   const registered = runtime._internal.renderers();
-  if (!registered.plotly) runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
   if (!registered.table) runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
   if (!registered.kpi) runtime.registerRenderer({ kind: "kpi", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
-  require(embedPath);
 });
 
 after(async () => {
@@ -259,83 +294,137 @@ async function waitFor(predicate, what, timeoutMs) {
   }
 }
 
-/** Builds the container the way index.html declares it: the two data attributes. */
+/**
+ * Builds the container the way index.html declares it: the data-dp-embed marker plus
+ * the two data attributes. Registered with the fake DOM's [data-dp-embed] scan so the
+ * AUTOMATIC mount (require-time mountAll) finds it — embed.js exposes no boot global
+ * (856b correction 2).
+ */
 function embedContainer() {
   const container = document.createElement("div");
+  container.setAttribute("data-dp-embed", "");
   container.setAttribute("data-dp-proxy-base", PROXY_BASE);
   container.setAttribute("data-dp-dashboard-id", DASHBOARD_ID);
+  document.body.appendChild(container);
+  document.__embedHosts.push(container);
   return container;
 }
 
-test("embed.js boots the example through the reference proxy: real fetch, key server-side only, clean dispose", async () => {
+/**
+ * The browser's load path: a fresh execution of embed.js mounts every registered
+ * [data-dp-embed] container at require time. The require-cache bust is the reload.
+ */
+function mountExample() {
+  delete require.cache[embedPath];
+  return require(embedPath);
+}
+
+test("every Datapipelines asset in index.html resolves to the one Datapipelines origin, not the host's", () => {
+  const HOST_ORIGIN = "https://host.example/page.html"; // where the host page itself lives
+  const DP_ORIGIN = "https://dp.example.co"; // the ONE placeholder the example writes
+  const html = fs.readFileSync(indexPath, "utf8");
+  const urls = [...html.matchAll(/(?:href|src)="([^"]+)"/g)].map((m) => m[1]);
+  // Resolve every href/src exactly as a browser on the HOST origin would: a root-relative
+  // Datapipelines asset resolves to the host and never loads.
+  const dpAssets = urls
+    .map((u) => new URL(u, HOST_ORIGIN))
+    .filter((u) => /^\/(vendor|css|js)\//.test(u.pathname));
+  // Non-vacuity: the example loads 13 Datapipelines assets (7 stylesheets + 6 scripts).
+  assert.equal(dpAssets.length, 13, `non-vacuity: expected 13 Datapipelines assets, found ${dpAssets.length}`);
+  for (const asset of dpAssets) {
+    assert.equal(
+      asset.origin,
+      DP_ORIGIN,
+      `Datapipelines asset ${asset.pathname} loads from ${asset.origin}, not the Datapipelines origin — a root-relative URL resolves to the HOST page's origin`,
+    );
+  }
+  // ONE origin placeholder value across the whole file.
+  const origins = [...new Set(dpAssets.map((a) => a.origin))];
+  assert.deepEqual(origins, [DP_ORIGIN], "the example writes exactly ONE Datapipelines origin value");
+  // The README tells the reader to replace it — stated once.
+  const readme = fs.readFileSync(readmePath, "utf8");
+  assert.equal(readme.split(DP_ORIGIN).length - 1, 1, "the README names the origin placeholder exactly once");
+});
+
+test("embed.js mounts the example automatically through the reference proxy: real fetch, key server-side only, clean dispose", async () => {
   reset();
   // RECORD, never fake: the runtime's fetches stay real (Node's global fetch); this
   // wrapper only writes down what the runtime asked for, then passes through.
   const clientRequests = [];
   const realFetch = globalThis.fetch;
-  globalThis.fetch = (url, init) => {
+  const recordingFetch = (url, init) => {
     clientRequests.push({ url: String(url), headers: (init && init.headers) || {} });
     return realFetch(url, init);
   };
+  globalThis.fetch = recordingFetch;
+  try {
+    // The automatic mount: the container is registered BEFORE embed.js loads, the way
+    // the script tag precedes the DOM content in no browser — here the fake DOM answers
+    // the [data-dp-embed] scan synchronously at require time.
+    const container = embedContainer();
+    mountExample();
+    assert.ok(window.dpEmbed && typeof window.dpEmbed.ready.then === "function", "the automatic mount published window.dpEmbed");
 
-  const container = embedContainer();
-  const handle = window.dpEmbedBoot(container);
-  assert.ok(handle && typeof handle.ready.then === "function", "boot returns the readiness promise");
+    await window.dpEmbed.ready;
+    assert.ok(true, "ready resolved");
 
-  await window.dpEmbed.ready;
-  assert.ok(true, "ready resolved");
+    // The refresh stream is driven explicitly: bootstrap mounts placeholders; the refresh
+    // proves the stream route through the proxy. The refresh promise resolves when the
+    // stream OPENS, so the POST's arrival is waited for explicitly.
+    await window.dpEmbed.instance.refresh({ scope: "all" });
+    await waitFor(() => seen.some((call) => call.url.endsWith("/runtime/visualizations")), "the refresh stream POST");
+    // The terminal frame is processed before the dispose below: the stub closes the stream
+    // right after writing it; give the runtime's read loop a beat to consume it.
+    await new Promise((r) => setTimeout(r, 100));
 
-  // The refresh stream is driven explicitly: bootstrap mounts placeholders; the refresh
-  // proves the stream route through the proxy. The refresh promise resolves when the
-  // stream OPENS, so the POST's arrival is waited for explicitly.
-  await handle.instance.refresh({ scope: "all" });
-  await waitFor(() => seen.some((call) => call.url.endsWith("/runtime/visualizations")), "the refresh stream POST");
-  // The terminal frame is processed before the dispose below: the stub closes the stream
-  // right after writing it; give the runtime's read loop a beat to consume it.
-  await new Promise((r) => setTimeout(r, 100));
+    // (2) The stub upstream saw the configuration read and the refresh, each carrying the
+    // key header the PROXY attached (server-side), and no cookie, no CSRF header.
+    assert.ok(seen.length >= 2, `non-vacuity: the upstream saw ${seen.length} requests`);
+    const configCall = seen.find((call) => call.url.endsWith("/runtime/config"));
+    const streamCall = seen.find((call) => call.url.endsWith("/runtime/visualizations"));
+    assert.ok(configCall, "the configuration read arrived at the stub");
+    assert.ok(streamCall, "the refresh stream arrived at the stub");
+    for (const call of seen) {
+      assert.equal(call.headers["dp-api-key"], KEY, `the proxy attached the key server-side to ${call.url}`);
+      assert.equal(call.headers["cookie"], undefined, `no cookie forwarded to ${call.url}`);
+      assert.equal(call.headers["dp-csrf-token"], undefined, `no CSRF header forwarded to ${call.url}`);
+    }
 
-  // (2) The stub upstream saw the configuration read and the refresh, each carrying the
-  // key header the PROXY attached (server-side), and no cookie, no CSRF header.
-  assert.ok(seen.length >= 2, `non-vacuity: the upstream saw ${seen.length} requests`);
-  const configCall = seen.find((call) => call.url.endsWith("/runtime/config"));
-  const streamCall = seen.find((call) => call.url.endsWith("/runtime/visualizations"));
-  assert.ok(configCall, "the configuration read arrived at the stub");
-  assert.ok(streamCall, "the refresh stream arrived at the stub");
-  for (const call of seen) {
-    assert.equal(call.headers["dp-api-key"], KEY, `the proxy attached the key server-side to ${call.url}`);
-    assert.equal(call.headers["cookie"], undefined, `no cookie forwarded to ${call.url}`);
-    assert.equal(call.headers["dp-csrf-token"], undefined, `no CSRF header forwarded to ${call.url}`);
+    // (3) Every request the RUNTIME sent went to the proxy's origin and carried no key.
+    assert.ok(clientRequests.length >= 2, `the runtime sent ${clientRequests.length} requests`);
+    for (const request of clientRequests) {
+      assert.ok(request.url.startsWith(PROXY_BASE), `the runtime sent ${request.url} straight past the proxy`);
+      const headerNames = Object.keys(request.headers);
+      const keyHeader = headerNames.find((name) => name.toLowerCase() === "dp-api-key");
+      assert.equal(keyHeader, undefined, `the client carried the key header on ${request.url}`);
+      const cookieHeader = headerNames.find((name) => name.toLowerCase() === "cookie");
+      assert.equal(cookieHeader, undefined, `the client sent a cookie to ${request.url}`);
+    }
+
+    // (4) dispose() unmounts; the same container hosts a fresh boot through the SAME
+    // automatic path (the require-cache bust is the reload).
+    window.dpEmbed.instance.dispose();
+    mountExample();
+    assert.ok(window.dpEmbed && typeof window.dpEmbed.ready.then === "function", "a disposed container boots again automatically");
+    await window.dpEmbed.ready;
+    const configReads = seen.filter((call) => call.url.endsWith("/runtime/config")).length;
+    assert.equal(configReads, 2, "the second boot fetched its own configuration");
+    window.dpEmbed.instance.dispose();
+  } finally {
+    globalThis.fetch = realFetch;
   }
-
-  // (3) Every request the RUNTIME sent went to the proxy's origin and carried no key.
-  assert.ok(clientRequests.length >= 2, `the runtime sent ${clientRequests.length} requests`);
-  for (const request of clientRequests) {
-    assert.ok(request.url.startsWith(PROXY_BASE), `the runtime sent ${request.url} straight past the proxy`);
-    const headerNames = Object.keys(request.headers);
-    const keyHeader = headerNames.find((name) => name.toLowerCase() === "dp-api-key");
-    assert.equal(keyHeader, undefined, `the client carried the key header on ${request.url}`);
-    const cookieHeader = headerNames.find((name) => name.toLowerCase() === "cookie");
-    assert.equal(cookieHeader, undefined, `the client sent a cookie to ${request.url}`);
-  }
-
-  // (4) dispose() unmounts; the same container hosts a fresh boot.
-  handle.instance.dispose();
-  const second = window.dpEmbedBoot(container);
-  assert.ok(second && typeof second.ready.then === "function", "a disposed container boots again");
-  await second.ready;
-  const configReads = seen.filter((call) => call.url.endsWith("/runtime/config")).length;
-  assert.equal(configReads, 2, "the second boot fetched its own configuration");
-
-  globalThis.fetch = realFetch;
 });
 
 test("a container missing either data attribute is refused with a message naming it", () => {
   reset();
+  // The boot seam (embed.js's module export) drives a single container directly; the
+  // automatic mount is what production uses, this seam is what a test may use.
+  const { boot } = require(embedPath);
   const missingProxyBase = document.createElement("div");
   missingProxyBase.setAttribute("data-dp-dashboard-id", DASHBOARD_ID);
-  assert.throws(() => window.dpEmbedBoot(missingProxyBase), /data-dp-proxy-base/);
+  assert.throws(() => boot(missingProxyBase), /data-dp-proxy-base/);
 
   const missingId = document.createElement("div");
   missingId.setAttribute("data-dp-proxy-base", PROXY_BASE);
-  assert.throws(() => window.dpEmbedBoot(missingId), /data-dp-dashboard-id/);
+  assert.throws(() => boot(missingId), /data-dp-dashboard-id/);
 });

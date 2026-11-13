@@ -9,12 +9,17 @@ What the page shows: a full-width board container (`#dashboard`) that
 `embed.js` boots into the first-party composite adapter, with a sibling
 `#parameters` div for the filters pane when the dashboard has a parameter set.
 
-## The three values a host changes
+## The four values a host changes
 
-1. `data-dp-proxy-base` — your relay's base URL (placeholder `https://app.example.co/dp`).
-2. `data-dp-dashboard-id` — the dashboard's UUID from `dashboards_get`, never its name
+1. the Datapipelines origin — every Datapipelines asset in `index.html` is
+   written against the placeholder `https://dp.example.co`; replace that origin
+   with your deployment's, everywhere it appears, or nothing loads (the page
+   sits on a separate host origin, so a root-relative asset URL would resolve
+   to the host);
+2. `data-dp-proxy-base` — your relay's base URL (placeholder `https://app.example.co/dp`).
+3. `data-dp-dashboard-id` — the dashboard's UUID from `dashboards_get`, never its name
    (placeholder is the all-zero UUID).
-3. the theme sheet — `themes/light.css` here; swap it if you serve another theme.
+4. the theme sheet — `themes/light.css` here; swap it if you serve another theme.
 
 ## The relay
 
@@ -31,14 +36,18 @@ visitor behind the relay.
 
 ## Script order, and why the bundle attribute matters
 
-1. exactly one Plotly bundle (`plotly-2d.min.js` or `plotly-3d.min.js`) with
-   `data-dp-plotly-bundle="2d"` (or `"3d"`) on the tag — `3d` only when a pinned
-   visualization is `scatter3d`, `surface` or `mesh3d`; the runtime reads these
-   declarations and refuses a mismatched pair at bootstrap;
+1. the Plotly `2d` bundle (`plotly-2d.min.js`) with
+   `data-dp-plotly-bundle="2d"` on the tag — every chart family the chart kind
+   ships is a 2D trace, so the example never needs the 3D bundle; the runtime
+   reads these declarations and refuses a mismatched pair at bootstrap;
 2. `/js/datapipelines-dashboard.js` — the runtime;
-3. the renderer adapters for the kinds your dashboards use (`-plotly.js`,
-   `-table.js`, `-kpi.js`) — each registers at script load, before init;
-4. `embed.js` — reads the container's data attributes and inits.
+3. `/js/datapipelines-dashboard-chart.js` — the `chart` kind's adapter; it
+   registers the kind at script load, before init;
+4. `/js/datapipelines-dashboard-plotly.js` — the Plotly converter the chart
+   adapter draws through (it registers no kind of its own);
+5. `/js/datapipelines-dashboard-table.js` and `/js/datapipelines-dashboard-kpi.js`
+   — the table and KPI kinds' adapters, each registering its kind at load;
+6. `embed.js` — mounts the container and inits.
 
 ## Stylesheets, in this order
 

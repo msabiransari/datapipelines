@@ -4,10 +4,12 @@
  *
  * Plain ES2019, one IIFE, no module syntax: it loads in any browser and under
  * `node --test`'s fake DOM via `require`. It expects, in this order:
- *   1. the Plotly bundle script with data-dp-plotly-bundle="2d" (or "3d"),
+ *   1. the Plotly "2d" bundle script with data-dp-plotly-bundle="2d" (every chart
+ *      family the chart kind ships is a 2D trace),
  *   2. /js/datapipelines-dashboard.js (publishes window.DatapipelinesDashboard),
- *   3. the renderer adapter files the dashboard's kinds need,
- *   4. this file.
+ *   3. the chart kind's adapter and its Plotly converter, then the table and KPI
+ *      renderers the dashboard's kinds need,
+ *   4. this file — it mounts every [data-dp-embed] container automatically.
  *
  * The host page declares ONE container (and optionally a parameters pane):
  *   <div data-dp-embed
@@ -19,9 +21,10 @@
  * The key NEVER appears here: every request goes to the proxy base, which
  * attaches the dashboard key server-side (examples/dashboard-proxy/).
  *
- * The one global: window.dpEmbed = { ready, instance } — the mounted
+ * The one browser global: window.dpEmbed = { ready, instance } — the mounted
  * dashboard's readiness promise and instance, so a test (or the page) can
- * await and drive it. dispose() runs on pagehide.
+ * await and drive it. `require`ing this file exports { boot } as the test
+ * seam. dispose() runs on pagehide.
  */
 (function () {
   "use strict";
@@ -47,6 +50,7 @@
       dashboard: { id: dashboardId, version: "released" },
       container: container,
       adapter: adapter,
+      charts: { library: "plotly", instance: window.Plotly },
     });
 
     var handle = {
@@ -58,14 +62,17 @@
     };
     window.dpEmbed = { ready: handle.ready, instance: instance };
 
-    // A rejected ready means a bootstrap step failed; the notification's step
-    // name is the one thing a host page should show (text only, no markup).
+    // A rejected ready means a bootstrap step failed. The rejection is the runtime's
+    // one error type (a DashboardError): `code` — the stable reason code, `message`,
+    // `retryable` and `details` (possibly empty); it carries no step field. The same
+    // failure is ALSO published as a bootstrap notification to the host's
+    // onNotification callback — this example installs none, so the code is what the
+    // page shows (text only, no markup).
     instance.ready.catch(function (error) {
       var note = document.createElement("p");
       note.setAttribute("role", "status");
       note.textContent = String(
-        (error && error.details && error.details.step) ||
-          (error && error.code) ||
+        (error && error.code) ||
           (error && error.message) ||
           error,
       );
@@ -89,5 +96,4 @@
   }
 
   if (typeof module !== "undefined" && module.exports) module.exports = { boot: boot };
-  if (typeof window !== "undefined") window.dpEmbedBoot = boot;
 })();
