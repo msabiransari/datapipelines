@@ -97,7 +97,8 @@ class StagingDuckDbWiringTest {
         duck.shouldBeInstanceOf<DuckDbStaging>()
         duck.reservationBytes shouldBe 3 * GIB
         duck.close()
-        Files.list(scratch).use { it.toList() }.shouldBeEmpty()
+        // Nothing of the database is left; the factory's owner lock file stays for the process's life (#803).
+        Files.list(scratch).use { s -> s.filter { !it.fileName.toString().startsWith("dp-owner_") }.toList() }.shouldBeEmpty()
         factory.duckDb.budget.reservedBytes shouldBe 0L
     }
 
