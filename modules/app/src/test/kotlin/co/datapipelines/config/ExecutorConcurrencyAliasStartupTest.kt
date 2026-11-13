@@ -60,10 +60,11 @@ class ExecutorConcurrencyAliasStartupTest {
 
     @Test
     fun `both keys set and differing refuses startup - both keys named in the failure`() {
-        // Spring wraps the validator's @PostConstruct refusal in a BeanCreationException; the
-        // §7 message rides its cause chain verbatim — the operator sees the full text.
+        // The validator's @PostConstruct refusal reaches the caller wrapped by whichever bean pulled it
+        // first — since #804 R2 the key consumers depend on it, so that is web-server creation pulling
+        // the staging factory. The §7 report is the ROOT of the chain, verbatim — the operator sees it.
         val failure =
-            shouldThrow<org.springframework.beans.factory.BeanCreationException> {
+            shouldThrow<Exception> {
                 SpringApplicationBuilder(DatapipelinesApplication::class.java)
                     .run(
                         *(
@@ -74,7 +75,9 @@ class ExecutorConcurrencyAliasStartupTest {
                     ).close()
             }
 
-        val text = failure.message.orEmpty() + " " + (failure.cause?.message.orEmpty())
+        val root = generateSequence<Throwable>(failure) { it.cause }.last()
+        check(root is IllegalStateException) { "the boot failed, but not on the §7 report: $root" }
+        val text = root.message.orEmpty()
         text.shouldContain("startup refused")
         text.shouldContain("max-concurrent-executions-global (150)")
         text.shouldContain("max-concurrent-executions-per-instance (200)")

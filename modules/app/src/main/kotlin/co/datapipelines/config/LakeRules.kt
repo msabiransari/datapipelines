@@ -11,10 +11,16 @@ import java.time.Duration
 /**
  * §7 / §3.36 (#785, dp-lake P2) — the managed lake's keys at boot (dp-lake design record §6 `LakeRules`). Judged
  * only when `datapipelines.lake.enabled=true`: a deployment without a lake is never refused for lake keys it does
- * not use. Values arrive as raw STRINGS (`ConfigSnapshot.lake`), so a malformed one is a NAMED violation here
- * rather than a binder crash; application.yml supplies every key, so an unset one is judged as its default.
+ * not use — the ONE exception being [checkStagingAdmission]'s three DuckDB staging inputs, which staging consumes
+ * whether or not the lake is enabled (#804). Values arrive as raw STRINGS (`ConfigSnapshot.lake`), so a malformed
+ * one is a NAMED violation here rather than a binder crash; application.yml supplies every key, so an unset one is
+ * judged as its default.
  *
  * The record's rules, and where each one lives:
+ * - the DuckDB staging admission, consumed with or without a lake (#804, staging §7.1): `staging-memory-limit` a
+ *   positive size at least DuckDB's 1 MiB floor, `staging-expansion-factor` and `scratch-bytes` positive, and
+ *   `scratch-bytes ≥ staging-memory-limit × staging-expansion-factor` — one default reservation, record §15
+ *   ([checkStagingAdmission]);
  * - storage: enabled → a bucket, and a region or an endpoint ([checkLakeStorage]);
  * - `protection-days ≥ 1`; `orphan-grace-hours × 3600 > job-timeout + statement-timeout-seconds + 3600` — a
  *   REFUSAL, the safety premise of §8a part (b) ([checkLakeRetention]);
@@ -111,6 +117,13 @@ internal object LakeRules {
     /** The credential keys: a rule needs only whether each is set, so the snapshot never holds their values. */
     val CREDENTIAL_KEYS: Set<String> = setOf(ACCESS_KEY, SECRET_KEY, READER_ACCESS_KEY, READER_SECRET_KEY)
 
+    /**
+     * #804 — the three admission inputs DuckDB staging consumes on every deployment, with or without a lake
+     * (staging.md §7.1): the keys [checkStagingAdmission] judges ALWAYS, the rest of the lake set being
+     * enabled-gated. `DomainConfiguration.stagingFactoryFor` binds exactly these for `DuckDbStagingFactory`.
+     */
+    val STAGING_ADMISSION_KEYS: Set<String> = setOf(STAGING_MEMORY_LIMIT, STAGING_EXPANSION_FACTOR, SCRATCH_BYTES)
+
     /** What `ConfigSnapshot.lake` carries for [key]: the raw value, or for a credential only [PRESENT] / empty. */
     fun carried(
         key: String,
@@ -135,6 +148,14 @@ internal object LakeRules {
     /** The share of the protection window the read bounds may use (record §10 RULING 4: one hour of a 24-hour day). */
     private const val PROTECTION_SHARE_DIVISOR = 24L
     private const val SECONDS_PER_DAY = 86_400L
+
+    /**
+     * DuckDB's floor for a staging database's memory limit, in bytes (1 MiB). The staging module's own
+     * `DuckDbStagingProperties.MIN_MEMORY_LIMIT_BYTES` refuses below this at bean construction — but that module is
+     * not on this one's compile classpath, so the value is pinned here for the always-on §3.36 report and, from the
+     * other side, by `StagingDuckDbWiringTest` (web) and `LakeRulesTest`'s boundary cases (#804).
+     */
+    private const val DUCKDB_MIN_STAGING_MEMORY_BYTES = 1_048_576L
 
     private fun enabled(snapshot: ConfigSnapshot): Boolean = snapshot.lake[ENABLED]?.trim()?.equals("true", ignoreCase = true) == true
 
@@ -185,7 +206,49 @@ internal object LakeRules {
         }
     }
 
-    /** The lease wait under the node query ceiling; a delivery's staging footprint within the scratch budget. */
+    /**
+     * #804 — the three admission inputs DuckDB staging consumes on EVERY deployment, lake or not
+     * (DomainConfiguration.stagingFactoryFor binds them for `DuckDbStagingFactory` whether or not the lake is
+     * enabled; staging.md §7.1): `staging-memory-limit` a positive size at least DuckDB's 1 MiB floor,
+     * `staging-expansion-factor` and `scratch-bytes` positive, and `scratch-bytes` at least one default
+     * reservation, `staging-memory-limit × staging-expansion-factor` (dp-lake record §15, owner ruling
+     * 2026-11-02). The factor's domain is its CONSUMER's: `LakeProperties.Admission.stagingExpansionFactor` binds
+     * an `Int`, so a value past [Int.MAX_VALUE] is named here rather than admitted to fail the binder (#804 R1).
+     * These were judged only under `lake.enabled=true`, so a lake-less deployment met a bad value as
+     * `DuckDbStagingProperties`' `IllegalArgumentException` at bean construction — never this catalogued §7
+     * report — and the cross-key reservation had no check at all. The comparison divides the scratch by the factor
+     * rather than multiplying the memory (the delivery bound's shape below): no term can overflow.
+     *
+     * Not enabled-gated — this is the exception the class KDoc names. The lake-specific rules stay in
+     * [checkLakeAdmission] and friends: a deployment without a lake is still never refused for lake keys it does
+     * not use.
+     */
+    fun checkStagingAdmission(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        val memory = dataSize(snapshot, STAGING_MEMORY_LIMIT, violations)
+        if (memory != null && memory.toBytes() < DUCKDB_MIN_STAGING_MEMORY_BYTES) {
+            violations +=
+                "$STAGING_MEMORY_LIMIT ($memory) must be at least 1 MiB, DuckDB's floor for a staging database " +
+                "(§3.36, staging.md)."
+        }
+        val factor = positiveInt(snapshot, STAGING_EXPANSION_FACTOR, violations)
+        val scratch = dataSize(snapshot, SCRATCH_BYTES, violations)
+        if (memory == null || factor == null || scratch == null) return
+        if (scratch.toBytes() / factor < memory.toBytes()) {
+            violations +=
+                "$SCRATCH_BYTES ($scratch) must be at least $STAGING_MEMORY_LIMIT × $STAGING_EXPANSION_FACTOR " +
+                "($memory × $factor — one DuckDB staging reservation; §3.36, staging.md)."
+        }
+    }
+
+    /**
+     * The lease wait under the node query ceiling; a delivery's staging footprint within the scratch budget.
+     * `staging-expansion-factor` and `scratch-bytes` enter this bound but are NOT named here — they are consumed
+     * and named by [checkStagingAdmission] whether or not the lake is enabled (#804), so this re-reads them
+     * silently rather than naming a malformed value twice in one §7 report.
+     */
     fun checkLakeAdmission(
         snapshot: ConfigSnapshot,
         violations: MutableList<String>,
@@ -194,7 +257,6 @@ internal object LakeRules {
         positiveLong(snapshot, MAX_CONCURRENT_INGESTIONS, violations)
         positiveLong(snapshot, MAX_CONCURRENT_MAINTENANCE, violations)
         positiveLong(snapshot, MAX_OPEN_PARTITIONS, violations)
-        dataSize(snapshot, STAGING_MEMORY_LIMIT, violations)
         val wait = positiveLong(snapshot, LEASE_WAIT_SECONDS, violations)
         val ceiling = snapshot.executorNodeQueryTimeoutMaxSeconds?.trim()?.toLongOrNull() ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
         if (wait != null && wait >= ceiling) {
@@ -202,8 +264,8 @@ internal object LakeRules {
                 "$LEASE_WAIT_SECONDS ($wait) must be below datapipelines.executor.node-query-timeout-max-seconds ($ceiling) (§3.36)."
         }
         val delivery = dataSize(snapshot, MAX_DELIVERY_BYTES, violations)
-        val factor = positiveLong(snapshot, STAGING_EXPANSION_FACTOR, violations)
-        val scratch = dataSize(snapshot, SCRATCH_BYTES, violations)
+        val factor = positiveIntOrNull(snapshot, STAGING_EXPANSION_FACTOR)
+        val scratch = runCatching { DataSize.parse(value(snapshot, SCRATCH_BYTES)) }.getOrNull()?.takeIf { it.toBytes() > 0 }
         if (delivery == null || factor == null || scratch == null) return
         if (delivery.toBytes() > scratch.toBytes() / factor) {
             violations += "$MAX_DELIVERY_BYTES × $STAGING_EXPANSION_FACTOR must not exceed $SCRATCH_BYTES (§3.36)."
@@ -303,6 +365,26 @@ internal object LakeRules {
         if (value(snapshot, first).isEmpty() != value(snapshot, second).isEmpty()) {
             violations += "$first and $second are set together or not at all (§3.36)."
         }
+    }
+
+    /**
+     * [key] as a positive `Int`, or null — the domain of a key whose consumer binds an `Int`
+     * (`LakeProperties.Admission.stagingExpansionFactor`). The silent reader a later rule re-reads a key with, so it
+     * can never compute with a value the naming rule refused (#804 R1).
+     */
+    private fun positiveIntOrNull(
+        snapshot: ConfigSnapshot,
+        key: String,
+    ): Int? = value(snapshot, key).toIntOrNull()?.takeIf { it > 0 }
+
+    private fun positiveInt(
+        snapshot: ConfigSnapshot,
+        key: String,
+        violations: MutableList<String>,
+    ): Int? {
+        val parsed = positiveIntOrNull(snapshot, key)
+        if (parsed == null) violations += "$key must be a positive whole number no greater than ${Int.MAX_VALUE} (§3.36)."
+        return parsed
     }
 
     private fun positiveLong(
