@@ -1158,8 +1158,15 @@ their build files set; any `-Pjunit.jupiter.testclass.order.default=…` you pas
 one-fork order with
 `./gradlew :tests:integration-tests:test :tests:browser-tests:test -Pdp.test.forks.e2e=1 -Pjunit.jupiter.testclass.order.default='org.junit.jupiter.api.ClassOrderer$ClassName'`.
 
-**CI's gate job: the budget and the report step (#290).** The job budgets 90 minutes (the
-integration job's figure) and its build step 70 of them. Before #290 the four green jobs took
+**CI's gate job: the budget and the report step (#290, #669).** The gate job budgets 170 minutes
+and its build step 150, preserving 20 minutes for reports after a build timeout. The integration
+job retains its own 90-minute budget. These serial-suite budgets remain a stopgap for #669's
+separate sharded browser job. Run 43354061464 reached the previous 100-minute build ceiling with
+11,796 unit tests passing and browser cases still passing, without completed browser XML; the
+dependency-graph tip's separate local serial browser run took 83 minutes for 735 cases. The larger
+budget changes neither the CI commands nor test assertions or per-action deadlines.
+
+Before #290 the four green jobs took
 48–57 min, and 19–23 of those were the coverage-report step RE-RUNNING tests: Kover 0.9.9's report
 tasks depend on every instrumented test task, a task that failed is never up to date, and neither
 was anything downstream of `modules/app`, whose build-info stamped a new `build.time` on every
@@ -1171,9 +1178,9 @@ needs nothing added there) and `-x :tests:integration-tests:koverXmlReport` (the
 compiled that module's tests, and `--offline` cannot resolve them); it fails as itself, never behind
 `|| true`. A following step names every failing test on the run's summary page, and the
 `gate-reports` artifact now carries every test task's XML (the browser suite's included) and the
-breach report. The browser suite stays in the gate job: it is the build step's long pole (20.4 of
-29.5 min on run 36334831413) but overlaps every other module's tests on the second worker, so a job
-of its own — which compiles the app first — would finish no sooner.
+breach report. The browser suite currently stays in the gate job. The older 20.4-of-29.5-minute
+measurement on run 36334831413 predates the suite growth recorded in #669; it does not size the
+current run or establish the benefit of the planned shards.
 
 **Measured on 2026-09-12** (2 × 24-core Xeon, 96 threads, 64 GB, NVMe, native Docker, Ubuntu
 26.04) — the numbers to size against:
