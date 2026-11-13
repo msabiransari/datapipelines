@@ -91,9 +91,10 @@ class FencedPoolPausedServerIntegrationTest {
         val refusedAfter = runCatching { session.loadTable(NAMESPACE, "paused_commit") }.exceptionOrNull()
         session.close()
         report("commit", ESTABLISHED_S, ended)
+        // First: a replaying pool reconnects into the paused server and outlasts the window, so this count names it.
+        withClue("no-replay: the pool opened no connection after the lost one") { counted.connectCalls.get() shouldBe connectsBefore }
         endsInWindow(ended, bound(ESTABLISHED_S), "08006")
         ended.failure.shouldBeInstanceOf<LakeCatalogException.OutcomeUnknown>()
-        withClue("no-replay: the pool opened no connection after the lost one") { counted.connectCalls.get() shouldBe connectsBefore }
         refusedAfter.shouldBeInstanceOf<IllegalStateException>()
         awaitNoCatalogBackend()
         val delta = revisions("paused_commit") - revisionsBefore

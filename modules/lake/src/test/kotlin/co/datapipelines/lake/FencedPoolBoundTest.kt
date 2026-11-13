@@ -10,7 +10,6 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
-import io.kotest.matchers.types.shouldBeInstanceOf
 import org.apache.iceberg.jdbc.UncheckedSQLException
 import org.junit.jupiter.api.Test
 import java.lang.reflect.InvocationHandler
@@ -86,10 +85,11 @@ class FencedPoolBoundTest {
                 val connector = RecordingConnector()
                 withClue("statement bound $seconds") {
                     val failure = runCatching { pool(connector, statementTimeoutSeconds = seconds).run { it } }.exceptionOrNull()
-                    failure.shouldBeInstanceOf<IllegalArgumentException>()
-                    failure.message.orEmpty() shouldContain "datapipelines.lake.catalog.statement-timeout-seconds"
-                    failure.message.orEmpty() shouldContain "1..2147478"
-                    failure.message.orEmpty() shouldContain "was $seconds"
+                    // A boolean, not shouldBeInstanceOf: a failed cast is a hard failure even inside assertSoftly.
+                    (failure is IllegalArgumentException) shouldBe true
+                    failure?.message.orEmpty() shouldContain "datapipelines.lake.catalog.statement-timeout-seconds"
+                    failure?.message.orEmpty() shouldContain "1..2147478"
+                    failure?.message.orEmpty() shouldContain "was $seconds"
                     connector.opened.size shouldBe 0
                 }
             }
