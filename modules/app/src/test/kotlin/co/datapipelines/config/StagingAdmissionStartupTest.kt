@@ -1,8 +1,16 @@
 package co.datapipelines.config
 
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.support.DefaultListableBeanFactory
+import org.springframework.beans.factory.support.RootBeanDefinition
+import org.springframework.boot.test.context.runner.ApplicationContextRunner
+import org.springframework.context.support.GenericApplicationContext
 import org.springframework.mock.env.MockEnvironment
 
 /**
@@ -59,5 +67,46 @@ class StagingAdmissionStartupTest {
         error.message!! shouldStartWith "Invalid configuration — startup refused"
         error.message!! shouldContain "datapipelines.lake.admission.scratch-bytes"
         error.message!! shouldContain "one DuckDB staging reservation"
+    }
+
+    /**
+     * #804 R2 — the order link's own wiring ([ConfigValidatorPrecedence]); `StagingAdmissionBootTest` proves its
+     * effect at a real boot. With the lake ENABLED, `LakeAutoConfiguration` registers `LakeProperties` through Boot's
+     * own `@EnableConfigurationProperties` path — the bean is found by its class name and linked too. Every
+     * definition is made lazy so nothing is instantiated: the case reads the definitions, not the beans.
+     */
+    @Test
+    fun `804 R2 - the staging factory and an enabled lake's properties both depend on the validator`() {
+        ApplicationContextRunner()
+            .withPropertyValues("datapipelines.lake.enabled=true")
+            .withInitializer { context ->
+                val registry = context as GenericApplicationContext
+                registry.registerBeanDefinition(ConfigValidatorPrecedence.VALIDATOR, RootBeanDefinition(Any::class.java))
+                registry.registerBeanDefinition(
+                    ConfigValidatorPrecedence.STAGING_FACTORY,
+                    RootBeanDefinition(Any::class.java).apply { setDependsOn("somethingElse") },
+                )
+                registry.addBeanFactoryPostProcessor { factory -> factory.beanDefinitionNames.forEach { factory.getBeanDefinition(it).isLazyInit = true } }
+                registry.addBeanFactoryPostProcessor(ConfigValidatorPrecedence())
+            }.withUserConfiguration(Class.forName("co.datapipelines.lake.LakeAutoConfiguration"))
+            .run { context ->
+                check(context.startupFailure == null) { "context failed: ${context.startupFailure}" }
+                val factory = context.beanFactory
+                val lake = context.getBeanNamesForType(Class.forName(ConfigValidatorPrecedence.LAKE_PROPERTIES_CLASS), true, false)
+                lake.toList() shouldHaveSize 1
+                factory.getBeanDefinition(lake.single()).dependsOn.orEmpty().toList() shouldContain ConfigValidatorPrecedence.VALIDATOR
+                // An existing dependsOn is kept, and the validator is added once.
+                factory.getBeanDefinition(ConfigValidatorPrecedence.STAGING_FACTORY).dependsOn.orEmpty().toList() shouldBe
+                    listOf("somethingElse", ConfigValidatorPrecedence.VALIDATOR)
+            }
+    }
+
+    /** #804 R2 — a renamed or removed staging bean refuses startup by name; the link never silently disappears. */
+    @Test
+    fun `804 R2 - without a stagingFactory definition the order link refuses, naming it`() {
+        val factory = DefaultListableBeanFactory()
+        factory.registerBeanDefinition(ConfigValidatorPrecedence.VALIDATOR, RootBeanDefinition(Any::class.java))
+        val failure = shouldThrow<IllegalStateException> { ConfigValidatorPrecedence().postProcessBeanFactory(factory) }
+        failure.message.orEmpty() shouldContain "no 'stagingFactory' bean definition"
     }
 }
