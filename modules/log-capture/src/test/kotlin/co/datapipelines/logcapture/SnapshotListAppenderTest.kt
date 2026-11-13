@@ -2,6 +2,7 @@ package co.datapipelines.logcapture
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.spi.LoggingEvent
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
@@ -13,7 +14,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -139,38 +139,51 @@ class SnapshotListAppenderTest {
      * #362 — the capture's reads are SNAPSHOTS: reader threads iterate a copy, so logger threads appending
      * in a tight loop cannot trip a `ConcurrentModificationException`, no event is torn and none is lost.
      * Iterating the live backing list while the writers run went red with exactly that exception.
+     * #938 bounds each producer's work: a slow snapshot reader must not allow unbounded event retention.
      */
     @Test
     fun `reads snapshot while writer threads append - no ConcurrentModificationException and nothing lost`() {
         val logger = logger()
         val appender = SnapshotListAppender()
-        val stop = AtomicBoolean(false)
         val written = AtomicInteger()
+        val started = CountDownLatch(WRITERS)
+        val release = CountDownLatch(1)
+        var prefix: List<ILoggingEvent> = emptyList()
         var reads = 0
         val captured =
             capturingLogEvents(logger, appender) {
                 val writers =
                     (1..WRITERS).map { thread ->
                         Thread {
-                            while (!stop.get()) {
+                            logger.info("event=stress.writer thread={}", thread)
+                            written.incrementAndGet()
+                            started.countDown()
+                            check(release.await(WAIT_SECONDS, TimeUnit.SECONDS)) { "snapshot reader did not release writers" }
+                            repeat(STRESS_EVENTS_PER_WRITER - 1) {
                                 logger.info("event=stress.writer thread={}", thread)
                                 written.incrementAndGet()
                             }
                         }.apply { start() }
                     }
                 try {
+                    started.await(WAIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+                    prefix = appender.events()
+                    prefix.size shouldBe WRITERS
+                    release.countDown()
                     val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(STRESS_MILLIS)
                     while (System.nanoTime() < deadline) {
                         appender.messages().forEach { line -> line.startsWith("event=stress.writer thread=") shouldBe true }
                         reads++
                     }
                 } finally {
-                    stop.set(true)
+                    release.countDown()
                     writers.forEach { it.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS)) }
                 }
                 writers.none { it.isAlive } shouldBe true
             }
         (reads > MIN_READS) shouldBe true
+        withClue("the snapshot taken before releasing producers remains the same prefix") { prefix.size shouldBe WRITERS }
+        written.get() shouldBe WRITERS * STRESS_EVENTS_PER_WRITER
         withClue("every event a writer logged is captured") { captured.size shouldBe written.get() }
     }
 
@@ -203,6 +216,7 @@ class SnapshotListAppenderTest {
         const val EVENTS = 32
         const val WAIT_SECONDS = 5L
         const val WRITERS = 4
+        const val STRESS_EVENTS_PER_WRITER = 2_048
         const val STRESS_MILLIS = 2_000L
         const val MIN_READS = 10
     }
