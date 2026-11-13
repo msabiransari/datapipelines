@@ -30,6 +30,8 @@ dependencies {
     // BOM-managed (the version `dag` already resolves).
     implementation(libs.kotlinx.coroutines.core)
 
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     // The container suite runs the repository and the lifecycle against a real Postgres with the SHIPPED
     // migrations applied through plain JDBC (module-structure §7.4; Flyway stays in `app`, §3.1 rule 2),
     // pins real `templates` rows (TemplateRepository) for the release cascade and the pin checks, and —

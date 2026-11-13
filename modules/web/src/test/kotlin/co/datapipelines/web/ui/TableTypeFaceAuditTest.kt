@@ -148,7 +148,11 @@ class TableTypeFaceAuditTest {
                 Triple("promotion/index.html", "candidate.name}\">daily_revenue", "§4.17 pipeline path"),
                 Triple("partials/executions.html", "p.name}\">nyc/mobility/x", "§4.8 pipeline machine path"),
                 Triple("partials/recent-executions.html", "p.name}\">nyc/mobility/x", "dashboard machine path"),
-                Triple("api/console.html", "e.url}\">/api/nyc", "§4.18 endpoint path"),
+                Triple(
+                    "api/console.html",
+                    "th:text=\"\${e.url}\"",
+                    "§4.18 endpoint path (#786: the cell is the link to the API versions page)",
+                ),
                 // 179: the keys table moved to the /api-keys page (D17), prefix with it.
                 Triple("api/keys.html", "k.prefix", "§4.19 key prefix"),
             )

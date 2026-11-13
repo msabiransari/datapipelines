@@ -17,7 +17,7 @@ import java.util.UUID
  *
  * Two template-specific facts. The pin evidence is `template.in_use` (graph rule 1: no
  * `template.version.pinned` exists — the in-use scan IS the refusal), read from [usage] — the SAME
- * evidence [TemplateReleaseService] refuses with, over pipelines, parameter sets and (#320) visualizations,
+ * evidence [TemplateReleaseService] refuses with, over pipelines, parameter sets, visualizations and importing templates,
  * so the list a dialog shows is the list the POST would name. And there is no Switch
  * dialog: templates are pinned by exact version, so there is no served pointer a human would
  * roll back.
@@ -96,6 +96,8 @@ class TemplateLifecycleDialogModel(
         /** #320 — the parameter sets and visualizations that pin it, beside the pipelines. */
         val inUseParameterSets: List<String> = emptyList(),
         val inUseVisualizations: List<String> = emptyList(),
+        /** #877 §D — the templates whose live versions import it (ANY version, for the sole draft). */
+        val inUseTemplates: List<String> = emptyList(),
     )
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -113,7 +115,7 @@ class TemplateLifecycleDialogModel(
                 details = mapOf("template_id" to id, "version" to version, "status" to detail.status.name),
             )
         }
-        // The purge's own guard, pre-read: a live version of a pipeline, a parameter set or a visualization pinning
+        // The purge's own guard, pre-read: a live pipeline, parameter set, visualization or importing template version pinning
         // THIS version is `template.in_use` and the purge would refuse — the dialog shows who, with no button. The
         // sole draft's purge takes the template with it, so it is the entity rule (any version ever), exactly as
         // the service asks.
@@ -131,6 +133,7 @@ class TemplateLifecycleDialogModel(
                 },
             inUseParameterSets = pins.parameterSets.map { it.setName }.distinct(),
             inUseVisualizations = pins.visualizations.map { it.name }.distinct(),
+            inUseTemplates = pins.templates.map { it.importerName }.distinct(),
         )
     }
 
@@ -145,6 +148,8 @@ class TemplateLifecycleDialogModel(
         /** #320 — the parameter sets and visualizations whose LIVE versions pin it. */
         val pinnerParameterSets: List<String> = emptyList(),
         val pinnerVisualizations: List<String> = emptyList(),
+        /** #877 §D — the templates whose LIVE versions import it. */
+        val pinnerTemplates: List<String> = emptyList(),
     )
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -188,6 +193,7 @@ class TemplateLifecycleDialogModel(
             pins.pipelines.map { it.pipelineName }.distinct(),
             pins.parameterSets.map { it.setName }.distinct(),
             pins.visualizations.map { it.name }.distinct(),
+            pins.templates.map { it.importerName }.distinct(),
         )
     }
 
@@ -236,6 +242,8 @@ class TemplateLifecycleDialogModel(
         /** #320 — the parameter sets and visualizations that pin ANY version of it. */
         val inUseParameterSets: List<String> = emptyList(),
         val inUseVisualizations: List<String> = emptyList(),
+        /** #877 §D — the templates any of whose stored versions import ANY version of it. */
+        val inUseTemplates: List<String> = emptyList(),
     )
 
     fun purgeEntity(
@@ -253,7 +261,7 @@ class TemplateLifecycleDialogModel(
             )
         }
         val soleDraft = versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT
-        // Graph rule 3's template arm: the ANY-version scan the delete guard itself runs, all three aggregates.
+        // Graph rule 3's template arm: the ANY-version scan the delete guard itself runs, all four families.
         val pins = usage.everPins(workspaceId, id)
         return PurgeEntityDialog(
             id = id,
@@ -262,6 +270,7 @@ class TemplateLifecycleDialogModel(
             expected = id,
             inUseParameterSets = pins.parameterSets.map { it.setName }.distinct(),
             inUseVisualizations = pins.visualizations.map { it.name }.distinct(),
+            inUseTemplates = pins.templates.map { it.importerName }.distinct(),
             refusal =
                 when {
                     !pins.isEmpty() -> {
@@ -283,7 +292,7 @@ class TemplateLifecycleDialogModel(
         )
     }
 
-    /** The pinners in one phrase: the pipelines first (as the refusal always said), then the sets, then the visualizations. */
+    /** The pinners in one phrase: pipelines, parameter sets, visualizations, then importing templates. */
     private fun pinSentence(pins: TemplateUsage.Pins): String =
         listOfNotNull(
             pins.pipelines
@@ -301,6 +310,11 @@ class TemplateLifecycleDialogModel(
                 .distinct()
                 .takeIf { it.isNotEmpty() }
                 ?.let { "${it.size} visualization(s): ${it.joinToString(", ")}" },
+            pins.templates
+                .map { it.importerName }
+                .distinct()
+                .takeIf { it.isNotEmpty() }
+                ?.let { "${it.size} importing template(s): ${it.joinToString(", ")}" },
         ).joinToString(" and ")
 
     /** §3.4: RELEASED always, DRAFT only under the development posture. */

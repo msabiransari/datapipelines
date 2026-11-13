@@ -34,6 +34,22 @@
 #   8. JVM code-loading environment names are refused, even if allowlisted.
 #   9. Every name outside DATAPIPELINES_* must have a FOREIGN_ALLOWLIST reason;
 #      entries no longer passed by compose are stale and fail too.
+#  10. ONE VALUE, TWO READERS (#845/#862). A DATAPIPELINES_* placeholder WITH a default anywhere
+#      else in compose.yml (the renderer service's anchored environment reads the app's
+#      values) is a variable the app binds, and its default is application.yml's — so the
+#      renderer's inputs and the app's configured values cannot diverge on a default install.
+#  11. THE RENDERER'S OWN ENV (#862). The x-lake-render-env anchor is the ONE place the
+#      renderer's environment is spelled: it must carry EXACTLY the six non-secret inputs —
+#      each the same-name pass-through with application.yml's default (check 10 covers the
+#      values) — and nothing else: no secret and no other app value crosses into the
+#      renderer (S3 signing stays in DuckDB). The egress-config service must use the anchor,
+#      the proxy must start only after the renderer completes, and the proxy must mount the
+#      renderer's volume read-only with nocopy (no image content copied into it first).
+#  12. THE RENDERER RUNS THE APP'S IMAGE AS THE APP'S USER (#862 review R4). The egress-config
+#      service's image is the datapipelines service's image, in compose.yml AND in
+#      compose.local-build.yml (the renderer is the app jar's EgressProxyConfigMain: another
+#      image renders with another renderer, or none), and it sets no `user:` — the image's own
+#      non-root user owns the volume's mountpoint (Dockerfile), so root is never needed.
 #
 # Values built by CONCATENATION (`${OTHER:+literal}${OTHER2:+,literal}`) are DERIVED,
 # not pass-throughs: the demo's bootstrap lists are assembled from the family ON
@@ -53,6 +69,7 @@ APP_YML="modules/app/src/main/resources/application.yml"
 COMPOSE="deploy/compose.yml"
 DEFAULTS_ENV="deploy/env/defaults.env"
 SECRETS_EXAMPLE="deploy/secrets.env.example"
+LOCAL_BUILD="deploy/compose.local-build.yml"
 if [[ "${1:-}" == "--self-test" ]]; then
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
@@ -62,17 +79,35 @@ if [[ "${1:-}" == "--self-test" ]]; then
   cp "$COMPOSE" "$tmp/$COMPOSE"
   cp "$DEFAULTS_ENV" "$tmp/$DEFAULTS_ENV"
   cp "$SECRETS_EXAMPLE" "$tmp/$SECRETS_EXAMPLE"
+  cp "$LOCAL_BUILD" "$tmp/$LOCAL_BUILD"
   # One defect per check class: a removed pass-through line (1), a diverged default (2),
   # a foreign literal without an allowlist entry (3), a line the app never binds (4), a
   # variable dropped from defaults.env (5), a drifted commented mirror (6), and a posture
   # key given a `${VAR:-}` default instead of the valueless form (7), a refused JVM
-  # loader variable (8), and an unlisted foreign environment name (9).
-  python3 - "$tmp/$COMPOSE" "$tmp/$DEFAULTS_ENV" "$tmp/$SECRETS_EXAMPLE" <<'PY'
+  # loader variable (8), an unlisted foreign environment name (9), a renderer-input
+  # default the app does not ship, outside the service block (10), and the renderer's
+  # anchor carrying an unknown name / missing one of the six (11), and the renderer run as
+  # root with a local-build image that is not the app's (12).
+  python3 - "$tmp/$COMPOSE" "$tmp/$DEFAULTS_ENV" "$tmp/$SECRETS_EXAMPLE" "$tmp/$LOCAL_BUILD" <<'PY'
 import sys, re
-p, defaults, secrets_example = sys.argv[1], sys.argv[2], sys.argv[3]
+p, defaults, secrets_example, local_build = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 t = open(p).read()
+# Class 12: the renderer given root, and its local-build image diverged from the app's.
+t = re.sub(r"(?m)^(  egress-config:\n)", r'\g<1>    user: "0"\n', t, count=1)
+lb = open(local_build).read()
+lb = re.sub(r"(?ms)^(  egress-config:\n.*?^    image: ).*?$", r"\g<1>ghcr.io/datapipelines/datapipelines:1.0.0", lb, count=1)
+open(local_build, "w").write(lb)
 t = t.replace("DATAPIPELINES_AUDIT_RETENTION_DAYS:-365", "DATAPIPELINES_AUDIT_RETENTION_DAYS:-7")
 t = t.replace("      DATAPIPELINES_ORG_WEEK_START: ${DATAPIPELINES_ORG_WEEK_START:-monday}\n", "")
+# Class 10: the RENDERER ANCHOR's max-age default (line-anchored to the 2-space
+# indent — the app service's own 6-space pass-through must stay untouched), since
+# #862 replaced the inline config with the anchored renderer environment.
+t = re.sub(r"(?m)^  (DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS: \$\{DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS:-)960\}$",
+           r"  \g<1>20}", t)
+# Class 11: the renderer's anchor carries a name it must not (and loses PATH_STYLE,
+# so the renderer and the app would diverge on it) — one replacement, two failures.
+t = re.sub(r"(?m)^  DATAPIPELINES_LAKE_S3_PATH_STYLE: \$\{DATAPIPELINES_LAKE_S3_PATH_STYLE:-false\}$",
+           "  DATAPIPELINES_LAKE_STORAGE_PATH_STYLE: ${DATAPIPELINES_LAKE_STORAGE_PATH_STYLE:-false}", t)
 t = t.replace("      DATAPIPELINES_AUTH_COOKIE_SECURE:\n",
               "      DATAPIPELINES_AUTH_COOKIE_SECURE: ${DATAPIPELINES_AUTH_COOKIE_SECURE:-}\n")
 # INSIDE the service's environment block. Appending it at EOF put it outside the block
@@ -97,16 +132,17 @@ PY
   if [[ "$status" -ne 1 ]]; then
     echo "SELF-TEST FAILED: doctored audit exited $status, expected 1" >&2; exit 1
   fi
-  if ! grep -q '^  8 ' <<< "$output" || ! grep -q '^  9 ' <<< "$output"; then
-    echo "SELF-TEST FAILED: missing class-8 or class-9 failure" >&2; exit 1
+  if ! grep -q '^  8 ' <<< "$output" || ! grep -q '^  9 ' <<< "$output" || ! grep -q '^  10 ' <<< "$output" \
+     || ! grep -q '^  11 ' <<< "$output" || [[ $(grep -c '^  12 ' <<< "$output") -ne 2 ]]; then
+    echo "SELF-TEST FAILED: missing a class-8, class-9, class-10 or class-11 failure, or the two class-12 ones" >&2; exit 1
   fi
   echo "self-test OK: doctored compose correctly fails the audit"; exit 0
 fi
 
-python3 - "$APP_YML" "$COMPOSE" "$DEFAULTS_ENV" "$SECRETS_EXAMPLE" <<'PY'
+python3 - "$APP_YML" "$COMPOSE" "$DEFAULTS_ENV" "$SECRETS_EXAMPLE" "$LOCAL_BUILD" <<'PY'
 import re, sys
 
-app_yml, compose, defaults_env, secrets_example = sys.argv[1:5]
+app_yml, compose, defaults_env, secrets_example, local_build = sys.argv[1:6]
 
 # The app's env contract: every DATAPIPELINES_* placeholder application.yml binds,
 # with its shipped default ('' when the placeholder carries none or an empty one).
@@ -185,6 +221,9 @@ DECLARED_OVERRIDES = {
     # resurrect the committed default and make the feature impossible to turn off under
     # compose. The default itself still mirrors application.yml's.
     "DATAPIPELINES_DEMO_API_KEY": "unset-fallback form (`-` not `:-`): an explicitly EMPTY value is the kill switch",
+    # #845 — the managed reads' egress proxy is the compose-internal SERVICE (egress-proxy:3128), the Redis host's
+    # precedent; application.yml ships it empty because a compose-less install has no proxy.
+    "DATAPIPELINES_LAKE_READS_EGRESS_PROXY": "compose-internal service name 'egress-proxy:3128'",
 }
 
 # Vars whose compose default deliberately mirrors the DOCKERFILE's ENV, not application.yml
@@ -411,6 +450,96 @@ for name in ("SAMPLE_BASE_URL", "SAMPLE_VERSION", "SAMPLE_TRADE_BASE_URL",
         failures.append(f"5 {defaults_env} is missing {name} — check-published.sh and the "
                         f"compose files read it from this file by name")
 
+# 10. ONE VALUE, TWO READERS (#845): every defaulted DATAPIPELINES_* placeholder OUTSIDE the
+# service's environment block (the egress proxy's rendered config) is a variable the app
+# binds, carrying application.yml's default. A placeholder with no default asserts none.
+outside_block = t[: svc.start(1)] + t[svc.end(1):]
+outside_defaults = re.findall(r"\$\{(DATAPIPELINES_[A-Z0-9_]+):?-([^}]*)\}", outside_block)
+for name, default in outside_defaults:
+    default = default.replace("$$", "$")
+    if name not in bound:
+        failures.append(f"10 compose reads {name} outside the datapipelines service, but application.yml never "
+                        f"binds it — a second reader of a value the app does not have")
+    elif default != bound[name]:
+        failures.append(f"10 compose renders {name} with default '{default}' outside the datapipelines service, but "
+                        f"application.yml ships '{bound[name]}' — the two readers of one value would diverge")
+
+# 11. THE RENDERER'S OWN ENV (#862). The x-lake-render-env anchor is the ONE place the
+# renderer's environment is spelled: exactly the six non-secret inputs, each the same-name
+# pass-through with application.yml's default, nothing else (S3 signing stays in DuckDB),
+# the egress-config service using the anchor, the proxy gated on its completion and
+# mounting its volume read-only.
+RENDERER_ENV = [
+    "DATAPIPELINES_LAKE_ENABLED",
+    "DATAPIPELINES_LAKE_S3_BUCKET",
+    "DATAPIPELINES_LAKE_S3_ENDPOINT",
+    "DATAPIPELINES_LAKE_S3_REGION",
+    "DATAPIPELINES_LAKE_S3_PATH_STYLE",
+    "DATAPIPELINES_LAKE_READS_EGRESS_MAX_AGE_SECONDS",
+]
+anchor = re.search(r"^x-lake-render-env: &lake-render-env\n(.*?)(?=^[a-z])", t, re.M | re.S)
+if not anchor:
+    failures.append("11 deploy/compose.yml lost the x-lake-render-env anchor — the renderer's "
+                    "environment is no longer spelled in one place")
+else:
+    anchor_env = dict(re.findall(r"^  ([A-Z0-9_]+): (.*)$", anchor.group(1), re.M))
+    for name in sorted(set(anchor_env) - set(RENDERER_ENV)):
+        failures.append(f"11 the renderer environment (x-lake-render-env) carries {name} — the renderer reads "
+                        f"exactly the six inputs and nothing else; no secret or other app value crosses into it")
+    for name in RENDERER_ENV:
+        if name not in anchor_env:
+            failures.append(f"11 the renderer environment (x-lake-render-env) is missing {name} — the renderer "
+                            f"and the app would diverge on it")
+            continue
+        if name not in bound:
+            failures.append(f"11 the renderer environment names {name}, which application.yml never binds — "
+                            f"a second reader of a value the app does not have")
+            continue
+        m = re.match(r"^\$\{" + name + r"(?::-?([^}]*))?\}$", anchor_env[name])
+        if not m:
+            failures.append(f"11 the renderer environment value for {name} is '{anchor_env[name]}' — not the "
+                            f"same-name pass-through form")
+        elif (m.group(1) or "") != bound[name]:
+            failures.append(f"11 the renderer environment default for {name} is '{m.group(1)}' but application.yml "
+                            f"ships '{bound[name]}' — the two readers of one value would diverge")
+    if "environment: *lake-render-env" not in t:
+        failures.append("11 the egress-config service does not use the x-lake-render-env anchor "
+                        "(`environment: *lake-render-env` missing)")
+if "condition: service_completed_successfully" not in t:
+    failures.append("11 the egress-proxy service does not gate on the renderer's completion "
+                    "(service_completed_successfully missing)")
+proxy_mount = re.search(r"^      - type: volume\n        source: egress-config\n        target: /etc/envoy\n"
+                        r"        read_only: true\n        volume:\n          nocopy: true$", t, re.M)
+if not proxy_mount:
+    failures.append("11 the egress-proxy does not mount the renderer's volume read-only at /etc/envoy with nocopy — "
+                    "without nocopy the Envoy image's root-owned default config is copied into the fresh volume "
+                    "first and the non-root renderer cannot write (#862 review R4)")
+
+# 12. THE RENDERER RUNS THE APP'S IMAGE AS THE APP'S USER (#862 review R4).
+def service_block(text, name):
+    m = re.search(r"^  " + re.escape(name) + r":\n(.*?)(?=^  \S|^\S|\Z)", text, re.M | re.S)
+    return m.group(1) if m else None
+
+def service_image(block):
+    m = re.search(r"^    image: *(\S+) *$", block or "", re.M)
+    return m.group(1) if m else None
+
+renderer_checked = 0
+for label, text in ((compose, t), (local_build, open(local_build).read())):
+    app_block, renderer_block = service_block(text, "datapipelines"), service_block(text, "egress-config")
+    if renderer_block is None:
+        failures.append(f"12 {label} has no egress-config service — the proxy's renderer would run another "
+                        f"image's renderer, or none")
+        continue
+    app_image, renderer_image = service_image(app_block), service_image(renderer_block)
+    if renderer_image is None or renderer_image != app_image:
+        failures.append(f"12 {label}: the egress-config image is '{renderer_image}' but the datapipelines image is "
+                        f"'{app_image}' — the renderer is the app jar's EgressProxyConfigMain and must be the same image")
+    if re.search(r"^    user:", renderer_block, re.M):
+        failures.append(f"12 {label}: the egress-config service sets `user:` — the renderer runs as the image's own "
+                        f"non-root user, which owns the volume's mountpoint (Dockerfile); root is never needed")
+    renderer_checked += 1
+
 if failures:
     print(f"compose-env-audit: {len(failures)} failure(s)")
     for f in failures:
@@ -419,6 +548,8 @@ if failures:
 print(f"compose-env-audit: OK ({len(bound)} app env vars; {len(passed)} compose pass-throughs "
       f"+ {len(unset_unless_set)} posture keys passed only when set; {len(DECLARED_OVERRIDES)} "
       f"declared compose overrides; {len(FOREIGN_ALLOWLIST)} allowlisted foreign names; "
+      f"{len(RENDERER_ENV)} renderer inputs anchored (check 11); renderer image = app image, non-root, "
+      f"in {renderer_checked} compose files (check 12); "
       f"one authority each — {len(defaults_active)} active in "
       f"{defaults_env} ({len(DEFAULTS_ENV_OVERRIDES)} declared to differ from application.yml), "
       f"{len(secrets_active)} in {secrets_example}, {len(POSTURE_VARS)} owned by the posture "

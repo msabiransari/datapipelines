@@ -1,0 +1,40 @@
+# .trivyignore.egress-proxy — baseline for the egress proxy image scan ONLY
+# (scripts/container-scan.sh scan 3, trivy 0.74.0). Kept apart from .trivyignore
+# because a suppression's reason is a claim about ONE image: these entries are
+# triaged against the proxy's exposure (no shell, no nscd, Envoy's own resolver),
+# which does not hold for the production image. Same rule as .trivyignore: every
+# entry carries a reason + date comment and an `exp:` date, so it EXPIRES LOUDLY;
+# anything NOT listed here fails the proxy scan.
+
+# --- Egress proxy image baseline (2026-11-07, #845) ---------------------------
+# envoyproxy/envoy:distroless-v1.40.2@sha256:09ca6f21… (the managed reads' egress proxy,
+# deploy/compose.yml + the Helm chart): 22 findings, all in the distroless Debian 13 base's
+# libc6 2.41-12+deb13u4 (8 LOW, 14 MEDIUM, 0 HIGH/CRITICAL), every one "affected" with NO fixed
+# Debian 13 version yet — there is nothing to upgrade to. Exposure: the proxy runs no shell, no
+# wordexp/strfmon/glob/iconv caller, no nscd, and resolves names through Envoy's own c-ares
+# resolver, not the glibc stub resolver (CVE-2026-8674, CVE-2026-5435); its only clients are the
+# app's DuckDB readers inside the deployment's network (no published port; the NetworkPolicy
+# admits only the app pods). The Ubuntu-based tag carries 2 HIGH and was not chosen. REVISIT on
+# the next Envoy release or when Debian ships a fixed libc6; the exp date forces the re-triage.
+CVE-2010-4756 exp:2027-02-07
+CVE-2018-20796 exp:2027-02-07
+CVE-2019-1010022 exp:2027-02-07
+CVE-2019-1010023 exp:2027-02-07
+CVE-2019-1010024 exp:2027-02-07
+CVE-2019-1010025 exp:2027-02-07
+CVE-2019-9192 exp:2027-02-07
+CVE-2026-18374 exp:2027-02-07
+CVE-2026-19499 exp:2027-02-07
+CVE-2026-19542 exp:2027-02-07
+CVE-2026-5435 exp:2027-02-07
+CVE-2026-6238 exp:2027-02-07
+CVE-2026-6368 exp:2027-02-07
+CVE-2026-6791 exp:2027-02-07
+CVE-2026-77117 exp:2027-02-07
+CVE-2026-80489 exp:2027-02-07
+CVE-2026-84243 exp:2027-02-07
+CVE-2026-8674 exp:2027-02-07
+CVE-2026-86805 exp:2027-02-07
+CVE-2026-89092 exp:2027-02-07
+CVE-2026-95818 exp:2027-02-07
+CVE-2026-97399 exp:2027-02-07

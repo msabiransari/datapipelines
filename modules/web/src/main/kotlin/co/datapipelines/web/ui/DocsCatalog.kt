@@ -4,6 +4,7 @@ import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TablesExtension
 import org.commonmark.node.AbstractVisitor
 import org.commonmark.node.Code
+import org.commonmark.node.CustomBlock
 import org.commonmark.node.HardLineBreak
 import org.commonmark.node.Heading
 import org.commonmark.node.Link
@@ -12,7 +13,9 @@ import org.commonmark.node.Paragraph
 import org.commonmark.node.SoftLineBreak
 import org.commonmark.node.Text
 import org.commonmark.parser.Parser
+import org.commonmark.renderer.NodeRenderer
 import org.commonmark.renderer.html.AttributeProvider
+import org.commonmark.renderer.html.HtmlNodeRendererContext
 import org.commonmark.renderer.html.HtmlRenderer
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import java.nio.file.Paths
@@ -118,6 +121,13 @@ class DocsCatalog(
         packagedPaths: Set<String>,
     ): RenderedDoc {
         val document = PARSER.parse(markdown)
+        // #713, before the §A rewrite (order is irrelevant to both: the rewrite descends into
+        // [DocPart] children like any parent). A flat 7,000–9,500-element body lays out in full
+        // on first paint — seconds of main-thread style-and-layout time for content the reader
+        // never has on screen (A.1's audit data). Wrapping each h2-run lets the browser skip
+        // the off-screen parts (`content-visibility: auto` in docs.css); scroll, find-in-page
+        // and fragment navigation force a part's render per the CSS containment spec.
+        wrapDocParts(document)
         // §A rewrite, before rendering: the parsed tree carries the original hrefs.
         document.accept(
             object : AbstractVisitor() {
@@ -142,6 +152,9 @@ class DocsCatalog(
                 // which the old renderer had emitted as raw TAGS; they now read as text.
                 .escapeHtml(true)
                 .attributeProviderFactory { HeadingIdProvider(seen, anchors) }
+                // #713: renders the [DocPart] wrappers; custom node types have no core
+                // rendering, so without this factory the wrapped runs would vanish.
+                .nodeRendererFactory { context -> DocPartRenderer(context) }
                 .build()
         val html = renderer.render(document)
 
@@ -216,6 +229,63 @@ class DocsCatalog(
     private fun groupOf(slug: String): String =
         GROUPING.entries.firstOrNull { slug in it.value }?.key
             ?: error("docs-in-app: $slug has no group (checked at init)")
+
+    /**
+     * #713: wraps each top-level run from an h2 up to (not including) the next h2 in a
+     * [DocPart], leaving the pre-heading preamble (title, status block, first paragraph —
+     * what a reader sees first, and where the meta description comes from) unwrapped.
+     * A pure tree restructure: every heading keeps its node, its position and the id
+     * [HeadingIdProvider] assigns at render, so the anchor contract (`docs-audit.sh`,
+     * `DocsLinkRewriteTest`, `llms.txt`, external deep links) is untouched by construction.
+     * The section boundaries follow the source's own h2 structure, so the rendered HTML
+     * nests exactly where the document already sections itself.
+     */
+    private fun wrapDocParts(document: Node) {
+        val h2s =
+            generateSequence(document.firstChild) { it.next }
+                .filterIsInstance<Heading>()
+                .filter { it.level == 2 }
+                .toList()
+        for (h2 in h2s) {
+            val part = DocPart()
+            h2.insertBefore(part)
+            var cursor: Node? = h2
+            while (cursor != null) {
+                val node = cursor
+                if (node !== h2 && node is Heading && node.level == 2) break
+                val next: Node? = node.next
+                node.unlink()
+                part.appendChild(node)
+                cursor = next
+            }
+        }
+    }
+
+    /** The #713 wrapper node: one h2-run of a doc body, rendered as `<section class="doc-part">`. */
+    private class DocPart : CustomBlock()
+
+    /**
+     * Renders [DocPart] as a bare `<section class="doc-part">` around the run it wraps. The
+     * class carries the skip-render rule (`content-visibility: auto` in `docs.css`); the tag
+     * carries no id, no style attribute and no script — the body stays data rendered through
+     * `th:utext`, exactly as #190 locked it.
+     */
+    private class DocPartRenderer(
+        private val context: HtmlNodeRendererContext,
+    ) : NodeRenderer {
+        override fun getNodeTypes(): Set<Class<out Node>> = setOf(DocPart::class.java)
+
+        override fun render(node: Node) {
+            context.writer.raw("""<section class="doc-part">""")
+            var child = node.firstChild
+            while (child != null) {
+                val next = child.next
+                context.render(child)
+                child = next
+            }
+            context.writer.raw("</section>")
+        }
+    }
 
     /**
      * Emits GitHub-compatible heading ids ([githubSlug] + per-document duplicate suffixing,

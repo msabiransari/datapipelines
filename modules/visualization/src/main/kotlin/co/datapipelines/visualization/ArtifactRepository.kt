@@ -4,6 +4,10 @@ import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.LifecycleBucket
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseRow
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import co.datapipelines.pipeline.release.RaceSavepoint
 import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.JsonNode
@@ -114,6 +118,43 @@ open class ArtifactRepository<B : Any>(
                 ids(workspaceId, id) + ("version" to version),
                 versionMapper,
             ).singleOrNull()
+
+    /**
+     * #873 (dependency-graph record §7.1, brief R1-8) — the exact versions [keys] name, `(artifact name, version)` pairs,
+     * any status, in ONE `IN`-list statement: the visualization and dashboard dependency providers' batch read. A key with
+     * no stored row is absent from the answer. Empty [keys] issues nothing (`IN ()` would not prepare).
+     */
+    fun findVersionsByName(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<ArtifactVersion<B>> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "${sql.selectVersion} WHERE s.workspace_id = :workspaceId AND (s.name, v.version) IN (:keys)",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
+            versionMapper,
+        )
+    }
+
+    /**
+     * [findVersionsByName]'s ONE statement with a per-row LATERAL join (#873 R1): the version rows are the subquery `x`,
+     * [lateral] joins one family fact to each (it may read `x.id` and `x.version`), [columns] selects it and [extra]
+     * maps it beside the version. Still one `IN`-list statement, never one per key.
+     */
+    protected fun <E> findVersionsByNameJoined(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+        columns: String,
+        lateral: String,
+        extra: (ResultSet) -> E,
+    ): List<Pair<ArtifactVersion<B>, E>> {
+        if (keys.isEmpty()) return emptyList()
+        return jdbc.query(
+            "SELECT x.*, $columns FROM (${sql.selectVersion} WHERE s.workspace_id = :workspaceId AND (s.name, v.version) IN (:keys)) x" +
+                " $lateral",
+            mapOf("workspaceId" to workspaceId, "keys" to keys.map { (name, version) -> arrayOf<Any>(name, version) }),
+        ) { rs, row -> checkNotNull(versionMapper.mapRow(rs, row)) to extra(rs) }
+    }
 
     /** The version the pointer names, or null (never released, or every release discarded). */
     fun findCurrent(
@@ -668,6 +709,16 @@ open class ArtifactRepository<B : Any>(
 class VisualizationRepository(
     jdbc: NamedParameterJdbcTemplate,
 ) : ArtifactRepository<VisualizationBody>(jdbc, ArtifactKind.VISUALIZATION, BodyCodec.Visualization) {
+    private val inverse = ArtifactInverseQueries(jdbc, ArtifactKind.VISUALIZATION)
+
+    /**
+     * #877 §B — the bounded inverse arm template ← visualization: one page of the stored `transform.template` pins naming
+     * template [InverseRequest.targetKey] (at [InverseRequest.targetVersion] when given), in the inverse total order,
+     * `limit + 1` rows. The ONE definition [ArtifactDependents.visualizationsPinningTemplate] and the provider arm share.
+     */
+    fun findTemplatePinOccurrences(request: InverseRequest): List<InverseRow> =
+        inverse.objectPin(request, ArtifactInverseQueries.TRANSFORM_TEMPLATE, ArtifactInverseQueries.TRANSFORM_TEMPLATE_PATH)
+
     /**
      * Recently updated over admitted versions. RecentSource's GREATEST covers draft-only writes,
      * restore's parent-only clock and imports with historic release stamps; a narrowed lens uses
@@ -679,6 +730,32 @@ class VisualizationRepository(
     ): List<co.datapipelines.pipeline.RecentRow> =
         co.datapipelines.pipeline.RecentSource
             .recent(jdbc, co.datapipelines.pipeline.NavigationFamily.VISUALIZATIONS, workspaceId, lens)
+
+    /**
+     * #873 R1 — the provider's batch read: the exact versions [keys] name (any status) each with its LATEST test run's
+     * stored facts ([LatestRunFacts], null when it has none; the order of `TestRunRepository.latestRun`), in ONE
+     * statement — the graph's `evidence_ready` is classified from stored evidence, never by running anything.
+     */
+    fun findVersionsWithLatestRun(
+        workspaceId: UUID,
+        keys: Collection<Pair<String, Int>>,
+    ): List<Pair<ArtifactVersion<VisualizationBody>, LatestRunFacts?>> =
+        findVersionsByNameJoined(
+            workspaceId,
+            keys,
+            columns = "lr.status AS latest_run_status, lr.body_hash AS latest_run_body_hash, lr.expires_at AS latest_run_expires_at",
+            lateral =
+                "LEFT JOIN LATERAL (SELECT r.status, r.body_hash, r.expires_at FROM visualization_test_runs r" +
+                    " WHERE r.visualization_id = x.id AND r.version = x.version ORDER BY r.started_at DESC, r.id DESC LIMIT 1) lr ON TRUE",
+        ) { rs ->
+            rs.getString("latest_run_status")?.let { status ->
+                LatestRunFacts(
+                    TestRunStatus.valueOf(status),
+                    rs.getString("latest_run_body_hash"),
+                    rs.getObject("latest_run_expires_at", OffsetDateTime::class.java).toInstant(),
+                )
+            }
+        }
 
     /** The pinned visualization version a dashboard names, by name within the workspace; null when absent. */
     val pins: VisualizationPins =
@@ -693,6 +770,30 @@ class VisualizationRepository(
 class DashboardRepository(
     jdbc: NamedParameterJdbcTemplate,
 ) : ArtifactRepository<DashboardBody>(jdbc, ArtifactKind.DASHBOARD, BodyCodec.Dashboard) {
+    private val inverse = ArtifactInverseQueries(jdbc, ArtifactKind.DASHBOARD)
+
+    /**
+     * #877 §B — the bounded inverse arm pipeline ← dashboard: one page of the stored `sources[i].pipeline` pins naming
+     * pipeline [InverseRequest.targetKey], `limit + 1` rows. [ArtifactDependents.dashboardsPinningPipeline] pages it.
+     */
+    fun findPipelinePinOccurrences(request: InverseRequest): List<InverseRow> =
+        inverse.arrayPin(request, ArtifactInverseQueries.SOURCES, ArtifactInverseQueries.SOURCE_PIPELINE)
+
+    /**
+     * #877 §B — the bounded inverse arm parameter set ← dashboard: one page of the stored `parameter_set` pins naming
+     * set [InverseRequest.targetKey], `limit + 1` rows. [ArtifactDependents.dashboardsPinningParameterSet] pages it.
+     */
+    fun findParameterSetPinOccurrences(request: InverseRequest): List<InverseRow> =
+        inverse.objectPin(request, ArtifactInverseQueries.PARAMETER_SET, ArtifactInverseQueries.PARAMETER_SET_PATH)
+
+    /**
+     * #877 §B — the bounded inverse arm visualization ← dashboard: one page of the stored
+     * `visualizations[i].visualization` pins naming visualization [InverseRequest.targetKey], `limit + 1` rows.
+     * [livePinsOf] pages it.
+     */
+    fun findVisualizationPinOccurrences(request: InverseRequest): List<InverseRow> =
+        inverse.arrayPin(request, ArtifactInverseQueries.VISUALIZATIONS, ArtifactInverseQueries.VISUALIZATION)
+
     /** #580 — the Dashboards overview's Recently updated list under the caller's workspace and version lens. */
     fun recent(
         workspaceId: UUID,
@@ -705,27 +806,22 @@ class DashboardRepository(
     /**
      * The LIVE (DRAFT or RELEASED) dashboard versions that pin visualization [name] — at [version], or at any
      * version when null — as `name@version` (the design record §4.2: purge and discard guards keep referenced
-     * releases). A JSONB containment probe over `body_json -> 'visualizations'`, built as a bound JSON value.
+     * releases). #877: paged to exhaustion over [findVisualizationPinOccurrences] — the arm's one definition — and
+     * collapsed per dashboard version (two placements of one pin answer once, as the containment probe did), sorted.
      */
     fun livePinsOf(
         workspaceId: UUID,
         name: String,
         version: Int?,
-    ): List<String> {
-        val pin = ArtifactJson.mapper.createObjectNode().put("name", name)
-        version?.let { pin.put("version", it) }
-        val probe = ArtifactJson.mapper.createArrayNode().add(ArtifactJson.mapper.createObjectNode().set<JsonNode>("visualization", pin))
-        return jdbc.query(
-            """
-            SELECT s.name || '@' || v.version AS pinned_by
-              FROM dashboard_versions v JOIN dashboards s ON s.id = v.dashboard_id
-             WHERE s.workspace_id = :workspaceId AND v.status IN ('DRAFT', 'RELEASED')
-               AND v.body_json -> 'visualizations' @> CAST(:probe AS jsonb)
-             ORDER BY 1
-            """.trimIndent(),
-            mapOf("workspaceId" to workspaceId, "probe" to ArtifactJson.mapper.writeValueAsString(probe)),
-        ) { rs, _ -> rs.getString("pinned_by") }
-    }
+    ): List<String> =
+        InverseSql
+            .exhaust(InverseSql.EXHAUST_PAGE) { after ->
+                findVisualizationPinOccurrences(
+                    InverseRequest(workspaceId, name, version, InverseScope.LIVE, after, InverseSql.EXHAUST_PAGE),
+                )
+            }.map { "${it.dependentName}@${it.dependentVersion}" }
+            .distinct()
+            .sorted()
 
     /**
      * [livePinsOf] for MANY visualization names in ONE statement (#331): every LIVE version's pin

@@ -114,7 +114,8 @@ object LifecycleVerbs {
      * The release a family verb's cascade rode on (#332): which family release ordered a cascaded
      * template or visualization release — the [CascadeSource] question with the source key spelled
      * per family (`cascade_from_parameter_set_id`, `cascade_from_visualization_id`,
-     * `cascade_from_dashboard_id`).
+     * `cascade_from_dashboard_id`; the release coordinator's other roots too — `cascade_from_api_endpoint_id` since
+     * #894, `cascade_from_template_id`).
      */
     data class FamilyCascade(
         val idKey: String,

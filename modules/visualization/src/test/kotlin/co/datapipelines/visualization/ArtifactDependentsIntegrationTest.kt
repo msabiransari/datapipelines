@@ -1,10 +1,15 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.inverse.InverseRequest
+import co.datapipelines.pipeline.inverse.InverseScope
+import co.datapipelines.pipeline.inverse.InverseSql
 import co.datapipelines.visualization.VisualizationTestDb.AUTHOR
 import co.datapipelines.visualization.VisualizationTestDb.OTHER_WORKSPACE
 import co.datapipelines.visualization.VisualizationTestDb.WORKSPACE
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -190,6 +195,29 @@ class ArtifactDependentsIntegrationTest {
         }
 
     /** One dependent artifact of [arrow]'s family with the given stored versions and index pointer. */
+    @Test
+    fun `the inverse dashboard pages walk a repeated reference by keyset - limit + 1 rows, every occurrence once`() {
+        // #877 §B: one dashboard version names the pipeline (sources) and the chart (visualizations) twice, another once.
+        val dashboard = arrows[1]
+        val twice =
+            """{"sources": [{"name": "a", "pipeline": {"name": "$TARGET", "version": 1}},""" +
+                """{"name": "b", "pipeline": {"name": "$TARGET", "version": 1}}],""" +
+                """"visualizations": [{"id": "v0", "visualization": {"name": "$TARGET", "version": 1}},""" +
+                """{"id": "v1", "visualization": {"name": "$TARGET", "version": 1}}]}"""
+        seed(dashboard, "dep/twice", pointer = 1, Row(1, "RELEASED", twice))
+        seed(dashboard, "dep/once", pointer = 1, Row(1, "RELEASED", dashboard.bodyPinning(TARGET, 1)))
+        val dashboards = DashboardRepository(VisualizationTestDb.jdbc)
+        val request = InverseRequest(WORKSPACE, TARGET, 1, InverseScope.LIVE, null, 1)
+
+        dashboards.findPipelinePinOccurrences(request) shouldHaveSize 2
+        val sources = InverseSql.exhaust(1) { after -> dashboards.findPipelinePinOccurrences(request.copy(after = after)) }
+        sources shouldBe dashboards.findPipelinePinOccurrences(request.copy(limit = InverseSql.EXHAUST_PAGE))
+        sources.map { it.dependentName to it.sourcePath } shouldContainExactlyInAnyOrder
+            listOf("dep/twice" to "sources[0].pipeline", "dep/twice" to "sources[1].pipeline", "dep/once" to "sources[1].pipeline")
+        val charts = InverseSql.exhaust(1) { after -> dashboards.findVisualizationPinOccurrences(request.copy(after = after)) }
+        charts.map { it.sourcePath } shouldBe listOf("visualizations[0].visualization", "visualizations[1].visualization")
+    }
+
     private fun seed(
         arrow: Arrow,
         name: String,

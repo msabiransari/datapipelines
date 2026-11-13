@@ -198,7 +198,9 @@ the repo Dockerfile as `datapipelines:local`, and runs the **production-shape
 stack** (`deploy/compose.yml` + the `compose.local-build.yml` image
 override — the same stack deployment.md Appendix A describes; secrets in
 git-ignored `deploy/secrets.env`, scaffolded with generated values on first
-run). `./app.sh --stop`
+run). A checkout also built by a host `./gradlew` has its `modules/*/build` removed by the
+next `--start`, once, because the container's build would otherwise package host outputs
+whose sources are gone (#281). `./app.sh --stop`
 stops it; `--status` / `--logs` inspect it. The rest of this section is the
 Gradle-on-host development flow the IDE path also uses:
 
@@ -579,7 +581,7 @@ planted failure (a held route, a planted page, a removed control) at a 5 s bound
 helper's real path with the plant gone. The derived fixtures (`DashboardBrowserSuite`,
 `ParameterSetBrowserSuite`, `SchedulesBrowserSuite`, `VisualizationBrowserSuite`,
 `RestTreeBrowserFixture`) and the support objects (`OverviewHomeBrowserSupport`,
-`EditorRunFixtures`, `PlotlyColorbarProbe`, through the top-level `namedWait`) name their waits
+`EditorRunFixtures`, through the top-level `namedWait`) name their waits
 the same way, second sessions sign in through `login(on, …)` and `landOnDashboard(on)`, and
 `FixtureSetupWaitsBrowserTest` pins each wrapper (#831); a change to `BrowserSuite` or to any of
 these runs the FULL browser suite locally before handback (the #456 rule).
@@ -1125,7 +1127,10 @@ failure-run snapshots are retained under the same policy.
 **A tooling crash is neither green nor red.** An OOM-killed daemon, `Could not write XML test
 results` (two builds sharing one `build/`), a corrupted result store — re-run before drawing any
 conclusion. `scripts/gate.sh` classifies these for you and is the scripted form of all of the
-above.
+above. A word such as `EOFException` that a test prints is a test failure when a fresh failed
+JUnit XML of that step carries it; with no such XML the log is still classified as a crash. The
+gate decides this right after each Gradle invocation, because the next one rewrites the result
+files.
 
 ### 9.5 Sizing the build for your machine
 
@@ -1153,8 +1158,15 @@ their build files set; any `-Pjunit.jupiter.testclass.order.default=…` you pas
 one-fork order with
 `./gradlew :tests:integration-tests:test :tests:browser-tests:test -Pdp.test.forks.e2e=1 -Pjunit.jupiter.testclass.order.default='org.junit.jupiter.api.ClassOrderer$ClassName'`.
 
-**CI's gate job: the budget and the report step (#290).** The job budgets 90 minutes (the
-integration job's figure) and its build step 70 of them. Before #290 the four green jobs took
+**CI's gate job: the budget and the report step (#290, #669).** The gate job budgets 170 minutes
+and its build step 150, preserving 20 minutes for reports after a build timeout. The integration
+job retains its own 90-minute budget. These serial-suite budgets remain a stopgap for #669's
+separate sharded browser job. Run 43354061464 reached the previous 100-minute build ceiling with
+11,796 unit tests passing and browser cases still passing, without completed browser XML; the
+dependency-graph tip's separate local serial browser run took 83 minutes for 735 cases. The larger
+budget changes neither the CI commands nor test assertions or per-action deadlines.
+
+Before #290 the four green jobs took
 48–57 min, and 19–23 of those were the coverage-report step RE-RUNNING tests: Kover 0.9.9's report
 tasks depend on every instrumented test task, a task that failed is never up to date, and neither
 was anything downstream of `modules/app`, whose build-info stamped a new `build.time` on every
@@ -1166,9 +1178,9 @@ needs nothing added there) and `-x :tests:integration-tests:koverXmlReport` (the
 compiled that module's tests, and `--offline` cannot resolve them); it fails as itself, never behind
 `|| true`. A following step names every failing test on the run's summary page, and the
 `gate-reports` artifact now carries every test task's XML (the browser suite's included) and the
-breach report. The browser suite stays in the gate job: it is the build step's long pole (20.4 of
-29.5 min on run 36334831413) but overlaps every other module's tests on the second worker, so a job
-of its own — which compiles the app first — would finish no sooner.
+breach report. The browser suite currently stays in the gate job. The older 20.4-of-29.5-minute
+measurement on run 36334831413 predates the suite growth recorded in #669; it does not size the
+current run or establish the benefit of the planned shards.
 
 **Measured on 2026-09-12** (2 × 24-core Xeon, 96 threads, 64 GB, NVMe, native Docker, Ubuntu
 26.04) — the numbers to size against:
@@ -1247,11 +1259,14 @@ in-checkout finding after a deletion (#703), use the forced affected-task check 
 
 ### 9.6 Capturing log lines in a test
 
-A test that asserts on log output captures it through its module's `SnapshotListAppender` (one
-test-source copy per module, beside its own `SnapshotListAppenderTest`; no shared test-fixtures
-module) and reads `events()` or `messages()`, detached copies taken under the list's own lock. Its
-block helper attaches, detaches and stops around a block: `capturingLogEvents(logger) { … }`, or
-`capturingLogs { … }` over the root logger in `modules/datasources`. Logback's raw
+A test that asserts on log output captures it through the shared `SnapshotListAppender` of the
+test-only module `modules/log-capture` (#756; module-structure §5.23): the module declares
+`testImplementation(project(":modules:log-capture"))` — never another configuration, which
+`verifyModuleDependencies` refuses — and the test imports `co.datapipelines.logcapture.SnapshotListAppender`,
+`capturingLogEvents` or `capturingLogs`. It reads `events()` or `messages()`, detached copies taken
+under the list's own lock. The block helpers start, attach, detach and stop around a block:
+`capturingLogEvents(logger) { … }` for one logger, or `capturingLogs { … }` over the root logger.
+No module keeps its own copy of the helper or its test; the guard below refuses one. Logback's raw
 `ListAppender.list` is a plain `ArrayList` that every logging thread appends to — a pool, a
 scheduler, a coroutine dispatcher, Hikari's housekeeper, a Spring context — so reading it while any
 of them can still log is a `ConcurrentModificationException` or a torn read on a slow runner
@@ -1260,7 +1275,8 @@ the sole writer between attach and the last read, and it then says so on its con
 alone on the line directly above it when the construction line would pass 120 columns:
 `// raw-list-appender: synchronous — <the fact that makes it safe>`. `RawListAppenderGuardTest`
 (buildSrc, run by the gate and CI's cold job) refuses any other raw construction, naming it
-`path:line` (#484).
+`path:line` (#484), and refuses a `SnapshotListAppender.kt` or `SnapshotListAppenderTest.kt`
+outside `modules/log-capture` (#756).
 
 ---
 
@@ -1738,7 +1754,10 @@ with a path + exact-value allowlist entry, never by reshaping the fixture's hist
 
 trivy (pinned in the script, same verified-download pattern) scans the
 Dockerfile for misconfigurations and the locally-built production image for
-package CVEs. Baseline exceptions live in `.trivyignore` with a reason + date
+package CVEs, then the egress proxy image deploy/compose.yml pins. Baseline
+exceptions live in `.trivyignore` (the production image and the config scans)
+and `.trivyignore.egress-proxy` (the proxy image only, so one image's triage
+never suppresses the other's findings), each with a reason + date
 comment AND an `exp:` expiry per entry — an expired entry fails the scan
 again, so baselines get re-triaged instead of rotting (same discipline as
 `osv-scanner.toml`'s `ignoreUntil`). Anything NOT ignored exits 1, so new

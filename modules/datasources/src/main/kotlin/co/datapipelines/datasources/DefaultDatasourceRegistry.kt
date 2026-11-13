@@ -91,6 +91,8 @@ class DefaultDatasourceRegistry(
     private val duckdbMemoryLimit: String? = null,
     private val poolMetrics: PoolLifecycleMetrics = PoolLifecycleMetrics.NONE,
     private val retireCeiling: Duration = ConnectionPoolManager.DEFAULT_RETIRE_CEILING,
+    /** #824 — a retired MANAGED generation's ceiling, forwarded to the pool manager; [retireCeiling] when unset. */
+    private val managedRetireCeiling: Duration = retireCeiling,
     /**
      * #204 L4 — the declared file roots, re-checked at EVERY pool build against every
      * `InProcessFile` row. The save-time validator holds the same instance for the same rule
@@ -190,6 +192,7 @@ class DefaultDatasourceRegistry(
                 )
             },
             retireCeiling = retireCeiling,
+            managedRetireCeiling = managedRetireCeiling,
             maxGenerationAge = maxGenerationAge,
             closer = poolCloser,
             pins = generationPins,
@@ -419,6 +422,16 @@ class DefaultDatasourceRegistry(
             datasource.copy(
                 introspectionIncludeSchemas = Datasource.normalizeIncludeSchemas(datasource.introspectionIncludeSchemas),
             )
+        // #841 (G0): the read, the validation against it and the write run under the datasource's prerequisite key
+        // and its affected workspaces, in one metadata transaction; the pool/cache/peer side effects run after commit.
+        return repository.writes.definition(toPersist.name, listOf(toPersist.ownerWorkspaceId)) { persist(toPersist, actor) }
+    }
+
+    /** [save]'s body, under the writer guard. */
+    private fun persist(
+        toPersist: Datasource,
+        actor: UUID,
+    ): Datasource {
         // ONE read of the live row, answering two questions: is this a create, and what kind does
         // the row currently hold. §3.4's rule that a kind CHANGE needs a secret can only be
         // checked against what is already there, and the previous `exists()` probe answered only
@@ -453,15 +466,17 @@ class DefaultDatasourceRegistry(
             // against the old row finishes on the connection it already holds (094). The audit
             // event is conditional on a pool having existed: §7.4 audits credential
             // *decryption*, and retiring nothing decrypted nothing (the subsequent lazy build
-            // emits its own `pool_build`).
-            if (retirePool(toPersist.name)) {
-                audit(DatasourceAuditEvents.POOL_REBUILD, toPersist.name, actor.toString())
+            // emits its own `pool_build`). #841: after the guarded transaction COMMITS.
+            repository.writes.afterCommit {
+                if (retirePool(toPersist.name)) {
+                    audit(DatasourceAuditEvents.POOL_REBUILD, toPersist.name, actor.toString())
+                }
+                cache.invalidate(toPersist.name)
+                // Cross-instance fan-out (§5.7, 050/R1): AFTER the row write committed
+                // and beside the synchronous local eviction above. The publisher's own instance
+                // does not act on its own message — local eviction stays THIS synchronous call.
+                invalidation.publish(toPersist.name)
             }
-            cache.invalidate(toPersist.name)
-            // Cross-instance fan-out (§5.7, 050/R1): AFTER the row write returned (committed)
-            // and beside the synchronous local eviction above. The publisher's own instance
-            // does not act on its own message — local eviction stays THIS synchronous call.
-            invalidation.publish(toPersist.name)
             row.toDatasource()
         }
     }
@@ -471,30 +486,39 @@ class DefaultDatasourceRegistry(
      * per referencing NODE — with the pipeline VERSION whose body holds it — because a
      * reference that lives only in a released v1 is exactly the one the old
      * `current_version`-only join could not see, and the operator's next move is to go and
-     * change that node in that version.
+     * change that node in that version. #873 §F.3 e adds the parameter-set selectors, by the
+     * same any-version rule.
      */
-    override fun delete(name: String): DeleteResult {
-        refuseManagedWrite(name, stored = repository.findByName(name)?.toDatasource(), incoming = null)
-        val referencing = references.referencesTo(name)
-        if (referencing.isNotEmpty()) {
-            return DeleteResult(
-                deleted = false,
-                name = name,
-                errorCode = DatasourceErrorCodes.IN_USE,
-                references = referencing,
-            )
+    override fun delete(name: String): DeleteResult =
+        // #841 (G0): the managed check, the in-use scan and the soft delete under the datasource's prerequisite key
+        // and its affected workspaces, in one metadata transaction; the side effects after commit.
+        repository.writes.definition(name) {
+            refuseManagedWrite(name, stored = repository.findByName(name)?.toDatasource(), incoming = null)
+            val referencing = references.referencesTo(name)
+            // #873 §F.3 e: a parameter-set selector locks the name too — the same refusal, both families listed.
+            val referencingSets = references.parameterSetReferencesTo(name)
+            if (referencing.isNotEmpty() || referencingSets.isNotEmpty()) {
+                return@definition DeleteResult(
+                    deleted = false,
+                    name = name,
+                    errorCode = DatasourceErrorCodes.IN_USE,
+                    references = referencing,
+                    parameterSetReferences = referencingSets,
+                )
+            }
+            val deleted = repository.softDelete(name)
+            if (deleted) {
+                repository.writes.afterCommit {
+                    retirePool(name)
+                    cache.invalidate(name)
+                    // Same §5.7 contract as update: peers learn the row is gone and drop their pools,
+                    // so a soft-deleted datasource stops serving queries on every instance (M3's
+                    // soft-delete tail), not just the one that happened to take the DELETE.
+                    invalidation.publish(name)
+                }
+            }
+            DeleteResult(deleted = deleted, name = name)
         }
-        val deleted = repository.softDelete(name)
-        if (deleted) {
-            retirePool(name)
-            cache.invalidate(name)
-            // Same §5.7 contract as update: peers learn the row is gone and drop their pools,
-            // so a soft-deleted datasource stops serving queries on every instance (M3's
-            // soft-delete tail), not just the one that happened to take the DELETE.
-            invalidation.publish(name)
-        }
-        return DeleteResult(deleted = deleted, name = name)
-    }
 
     /**
      * #818 (record §6) — the ONE chokepoint below every surface (UI form, REST PUT/POST/DELETE): the

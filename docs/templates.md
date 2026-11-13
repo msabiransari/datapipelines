@@ -1,9 +1,9 @@
 # Templates Specification
 
-**Status:** v1.24 (frozen contract — additive-only changes after this point)
+**Status:** v1.26 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
-**Last updated:** 2026-11-03
+**Last updated:** 2026-11-13
 
 ---
 
@@ -142,7 +142,7 @@ Example (the design record's own — a row-mode script over staged orders):
 }
 ```
 
-**Save and release run the suite (§8.1 of the record).** Every case runs through the real engine on the bounded evaluation pool under `datapipelines.script.evaluate-timeout-seconds`; its output passes the type gate against the contract (a `DECIMAL` output is rounded half-even to its declared scale, R1); the invariants run on it; the result is compared to `expect` after canonicalisation — exact equality or a refusal code, no tolerances. The suite checks `suite-timeout-seconds` before starting each case, after compilation; it does not interrupt a case already running or reject an overrun after the final case. See [Configuration §3.28](configuration.md#328-script-evaluation-7b-7). The first failure refuses the save with `template.test_failed` naming the case and the assertion (a diff bounded to 2 000 chars). **Release re-runs the suite** on the version being released — a suite that passed at save fails at release only if the engine changed, which is the case worth catching.
+**Save and release run the suite (§8.1 of the record).** Every case runs through the real engine on the bounded evaluation pool under `datapipelines.script.evaluate-timeout-seconds`; its output passes the type gate against the contract (a `DECIMAL` output is rounded half-even to its declared scale, R1); the invariants run on it; the result is compared to `expect` after canonicalisation — exact equality or a refusal code, no tolerances. `suite-timeout-seconds` is one budget for the whole suite: it starts before the runner compiles and covers every evaluation, each evaluation getting only what remains of it; a case that finishes after the budget fails with `template.test_failed`, `details.timeout = suite`, even with a matching output, and every later case fails the same way without running. The call can return later than the budget by a wait for a pool slot, one abandonment grace and work that is not interrupted (compilation, the type gate, the comparison); static validation before the suite and the editor's per-case detail pass are not under this budget. See [Configuration §3.28](configuration.md#328-script-evaluation-7b-7). The first failure refuses the save with `template.test_failed` naming the case and the assertion (a diff bounded to 2 000 chars). **Release re-runs the suite** on the version being released — a suite that passed at save fails at release only if the engine changed, which is the case worth catching.
 
 ### 3.4 Implements and drift
 
@@ -349,7 +349,7 @@ questions — never one query**:
 | Question | Scans | Drives |
 |---|---|---|
 | *Who is using `t@2` right now?* | each pipeline's **working version** — the draft when one exists, else the latest released (the §7 read rule, [Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)) — **and, since #194 lane D, each parameter set's working version** (the same rule over `parameter_set_versions`) **and, since #320, each visualization's working version** (its `transform.template` pin, over `visualization_versions`) | the `templates_used_by` MCP tool (pipeline rows, set rows **and `visualization_references`**), the template screen's per-version in-use count and "Used by" card (sets and visualizations included), the pipeline read's upgrade signal — and, since lane D, the set read's `upgrade_available` per pinned template |
-| *Is it safe to remove `t`?* | **any pipeline version, ever**, **any parameter-set version, ever** and **any visualization version, ever** — historical versions are immutable and executable, so their pins are real references (the discard and the draft purge of a template that keeps other versions ask the exact version, LIVE dependents only) | the `409 template.in_use` refusal on every removing verb (§5.1), whose `details` carry `referencing_parameter_sets` and `referencing_visualizations` beside `pinned_by` |
+| *Is it safe to remove `t`?* | **any pipeline version, ever**, **any parameter-set version, ever**, **any visualization version, ever** and — since #877 — **any version, ever, of a template whose `imports` pin it** (a library is protected by its importers; an importer whose every version is DISCARDED pins nothing, the rule every reverse arm shares, and restoring it is refused `template.validation.import_not_found`) — historical versions are immutable and executable, so their pins are real references (the discard and the draft purge of a template that keeps other versions ask the exact version, LIVE dependents only) | the `409 template.in_use` refusal on every removing verb (§5.1), whose `details` carry `referencing_parameter_sets`, `referencing_visualizations` and `referencing_templates` beside `pinned_by` — the names the caller's view admits, `pins_hidden: true` when others exist (#877) |
 
 The split is load-bearing in both directions: a working-version-only delete guard would let a
 still-pinned historical version be removed, and an any-version used-by listing would nag about
@@ -425,6 +425,14 @@ Because the loader only ever resolves `"{id}@{version}"` keys against the regist
 - Aliases must be unique within a template's `imports` array (`template.validation.duplicate_alias`). Two libraries may share macro names as long as their aliases differ — that is what namespacing is for.
 - Imports are transitive: library A can import library B. Transitive depth is capped at **10** (`template.validation.import_depth_exceeded`). The cap is a fixed constant, not a config key.
 - Cycles forbidden: A imports B, B imports A → `template.validation.import_cycle`.
+- **Lifecycle (#873).** Saving is permissive: a DRAFT may import a DRAFT library. RELEASING is not: a template is
+  released only when its whole declared import closure (transitively, beneath RELEASED libraries too) is RELEASED or
+  selected in the same release plan — the plan releases the selected libraries first and the importer last, in one
+  transaction; an unselected DRAFT, a DISCARDED or a missing library is a `template.release.dependency_not_released`
+  blocker, and nothing is restored for you ([Versioning §6](versioning.md#6-templates-same-lifecycle-plus-the-pin-rule)).
+  A RESTORE rechecks the same closure: a missing or DISCARDED import is `template.validation.import_not_found`
+  (`reason: discarded`), a DRAFT one `template.release.dependency_not_released`. In the dependency tree the import edges
+  are labelled **Imports** (the Dependencies tab, G6).
 
 ### 6.5 Library promotion across environments
 
@@ -788,6 +796,8 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v1.26 | #770 — renumbered at final sync after dependency-graph | §3.3: `suite-timeout-seconds` is a hard budget for the whole save/release suite — it starts before compilation, every evaluation is clipped to what remains, and a case finishing after it fails `template.test_failed` with `details.timeout = suite` even when it matched. The elapsed time may trail the budget by a pool-slot wait, one grace and uninterrupted work (owner ruling 2026-11-10, option A). |
+| 2026-11-11 | v1.25 | #877 G7 importer arm | §5.4: a template version whose `imports` pin `t` is a reference too — every removing verb refuses `template.in_use` with `referencing_templates` (record §23.3 item 5); the refusal's echo narrows by the caller's view (`pins_hidden`). `templates_used_by` and the Used-by card are unchanged. |
 | 2026-11-02 | v1.24 | #787 | `.get_optional_template` / `.getOptionalTemplate` joins the §4.2 forbidden list (a by-key render-time load; only the synthesized imports may load) — refused at save (§7 `dangerous_construct`), and the loader now enforces the §6.3 declared import closure: a render resolves its own key and the `imports` it declares, nothing else. |
 | 2026-10-22 | v1.23 | 8b (#8) | The JavaScript statements body, immutable frame, isolate availability and pooled save verdict ship. |
 | 2026-10-21 | v1.22 | #640 the script-node rename (script-node-rename lane, V50, owner ruling 2026-10-20) | **The script template types**: "script types", §"Script templates", the CHECK `chk_script_blocks`, the script face and its editor, the `script.*` codes. A rename only: no behaviour, route, permission or key change beyond the names, and no alias (the ruling). The visualization block's `transform` key, `transform.template` / `transform.inputs` and the CSS/SVG sense keep their word. |

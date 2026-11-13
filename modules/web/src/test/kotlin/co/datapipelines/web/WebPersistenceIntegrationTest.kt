@@ -18,6 +18,7 @@ import co.datapipelines.executor.NodeStatus
 import co.datapipelines.executor.RedisResultStore
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.persistence.BatchingConfig
 import co.datapipelines.persistence.BatchingHooks
 import co.datapipelines.persistence.BatchingWriter

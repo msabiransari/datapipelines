@@ -87,17 +87,31 @@ class PipelineServiceIntegrationTest {
         // Per-ID, not one answer for everything: a BLANK id is not a template at all
         // (a CALCULATOR or PIPELINE node's empty default ref), and the registry's honest
         // answer for it is "no such version". Without that distinction the
-        // no-template-pin test below could not go red — the empty ref would come back
-        // RELEASED along with the real one. The restore recheck (#517 round three) reads the same port.
+        // no-template-pin case (now `PipelineReleaseCoordinatorCasesTest` in `web`) could not go red — the empty ref
+        // would come back RELEASED along with the real one. The restore recheck (#517 round three) reads the same port.
         val statuses = TemplateVersionStatuses { _, id, _ -> if (id.isBlank()) null else templateStatus }
+        val releases =
+            PipelineReleaseService(
+                repository,
+                validator,
+                authoring,
+                dashboards = recordingDashboards(),
+                endpointVersions = NoApiVersionPins,
+                schedules = NoSchedulePins,
+            )
         return PipelineService(
             pipelines = repository,
             validator = validator,
             drafts = PipelineDraftService(repository, authoring),
-            releases = PipelineReleaseService(repository, statuses, validator, authoring, dashboards = recordingDashboards()),
+            releases = releases,
             authoring = authoring,
             draftTemplates = draftTemplates,
             dashboards = recordingDashboards(),
+            endpointVersions = NoApiVersionPins,
+            schedules = NoSchedulePins,
+            // #877 §E.3 — this suite's releases are SET-UP (a RELEASED version to update, discard, restore or read); the
+            // release cases themselves run through the real coordinator in `web`.
+            coordination = ReleaseCoordinationDoubles.setUp(releases, statuses),
             templateStatuses = statuses,
         )
     }
@@ -661,58 +675,6 @@ class PipelineServiceIntegrationTest {
         released.version.status shouldBe PipelineVersionStatus.RELEASED
         released.record.currentVersion shouldBe 2
         service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id).shouldBeNull()
-    }
-
-    @Test
-    fun `release refuses while a pinned template version is still a draft`() {
-        // versioning §6 — templates lock first. The gate reads the TemplateVersionStatuses port,
-        // which is how `pipeline-contract` asks `templates` a question without depending on it.
-        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
-        val draft =
-            service.update(
-                WORKSPACE_ID,
-                created.record.id,
-                body(renamed("Ready")),
-                checkNotNull(created.version).bodyHash,
-                owner,
-                WriteSurface.SESSION,
-            )
-        templateStatus = PipelineVersionStatus.DRAFT
-
-        val error =
-            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-                service.release(WORKSPACE_ID, created.record.id, checkNotNull(draft.version).bodyHash, owner)
-            }
-
-        error.code shouldBe PipelineErrorCodes.Versioning.RELEASE_DEPENDENCY_NOT_RELEASED
-        withClue("nothing was released: the draft is still there") {
-            service.findDraft(WORKSPACE_ID, ReadLens.Everything, created.record.id) shouldNotBe null
-        }
-    }
-
-    @Test
-    fun `a node with no template pin does not block the release`() {
-        // §6 checks TEMPLATE pins, and a CALCULATOR node has none (a PIPELINE node likewise pins a
-        // child pipeline instead). Asking the registry about the empty default `@0` answers
-        // MISSING, which refused the release of every pipeline containing one — naming
-        // `template_id: ""`, a template that cannot exist. Latent since composition shipped (such a
-        // pipeline was born RELEASED and only a re-release met the check); load-bearing since D55,
-        // because now EVERY pipeline has to be released once.
-        //
-        // The port answers per-ID (see `serviceWith`): RELEASED for the real pin, MISSING for the
-        // calculator's empty ref — so a release that still asked about that ref fails this test.
-        val calculator = Fixtures.calculatorNode()
-        val withCalculator =
-            Fixtures.pipeline(
-                nodes = listOf(calculator, Fixtures.node(id = "reads", dependsOn = listOf(calculator.id))),
-            )
-        val created = service.create(WORKSPACE_ID, body(withCalculator), owner, WriteSurface.SESSION)
-
-        val released =
-            service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
-
-        released.version.status shouldBe PipelineVersionStatus.RELEASED
-        released.record.currentVersion shouldBe 1
     }
 
     @Test

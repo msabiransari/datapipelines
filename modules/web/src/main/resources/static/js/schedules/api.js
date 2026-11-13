@@ -169,6 +169,7 @@
     // §5.7 — the picker's search, the caller's own view (the promoter lens applies server-side).
     findPipelines: function (text) { return request("GET", "/api/v1/pipelines" + q({ q: text, limit: 20 })); },
     pipeline: function (pipelineId) { return request("GET", "/api/v1/pipelines/" + id(pipelineId)); },
+    pipelineVersions: function (pipelineId) { return request("GET", "/api/v1/pipelines/" + id(pipelineId) + "/versions"); },
     pipelineVersion: function (pipelineId, version) { return request("GET", "/api/v1/pipelines/" + id(pipelineId) + "/versions/" + id(version)); },
     // §10.2 — one execution's metadata (its own duration_ms, status); execution.read, R3.
     execution: function (executionId) { return request("GET", "/api/v1/executions/" + id(executionId)); },

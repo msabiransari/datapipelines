@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import co.datapipelines.logcapture.capturingLogEvents
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeTrue

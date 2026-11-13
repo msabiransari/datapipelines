@@ -1,5 +1,6 @@
 package co.datapipelines.application.endpoints
 
+import co.datapipelines.pipeline.PipelineVersionStatus
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
@@ -139,13 +140,11 @@ class EndpointMatcherTest {
             id = UUID.randomUUID(),
             workspaceId = WORKSPACE,
             pathPattern = pattern,
-            pipelineId = UUID.randomUUID(),
-            timeoutSeconds = 30,
-            description = "",
             isEnabled = true,
             createdBy = ACTOR,
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
+            current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody("test/pipeline", 1, 30, "")),
         )
 
     /**

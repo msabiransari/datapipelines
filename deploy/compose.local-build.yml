@@ -15,3 +15,8 @@ services:
   datapipelines:
     image: ${IMAGE_TAG:-datapipelines:local}
     pull_policy: never
+  # #862: the egress proxy's renderer runs the APP's jar (EgressProxyConfigMain), so it must be the same
+  # locally built image — otherwise a local stack renders with the published image's renderer, or with none.
+  egress-config:
+    image: ${IMAGE_TAG:-datapipelines:local}
+    pull_policy: never

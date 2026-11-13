@@ -271,9 +271,9 @@ class DeactivationSweepTest {
         pinned.statusCode() shouldBe HTTP_NOT_FOUND
         pinned.code() shouldBe KEY_WORKSPACE_INACTIVE
 
-        // Non-vacuity: the live twin is served past the liveness gate (it has no release, so
-        // the NEXT stage answers — proof the registry holds the fixture and the gate is what
-        // hid the deactivated one).
+        // Non-vacuity: the live twin is served past the liveness gate (its only release was
+        // discarded, so no version is current and the NEXT stage answers — proof the registry
+        // holds the fixture and the gate is what hid the deactivated one).
         val live = serve(LIVE_ENDPOINT_PATH, CONTROL_ENDPOINT_KEY.plaintext)
         withClue("the live twin must be resolved: ${live.asString().take(LEAK_EXCERPT)}") {
             live.code() shouldBe ENDPOINT_PIPELINE_NOT_RELEASED
@@ -630,6 +630,9 @@ class DeactivationSweepTest {
         private const val DEAD_ENDPOINT_PATH = "/api/dsweep/v1/report"
         private const val LIVE_ENDPOINT_PATH = "/api/dsweep-live/v1/report"
 
+        /** Both report pipelines' v1: a body nothing here runs (neither API has a current version to serve). */
+        private const val PIPELINE_BODY = """{"schema_version":1,"name":"report","nodes":[]}"""
+
         /**
          * (key, who it acts as, who created it, workspace, kind) — every key the sweep presents,
          * seeded by SQL. Keys v2 (A13): every key — `mcp` included — acts as its own `service`
@@ -809,14 +812,34 @@ class DeactivationSweepTest {
                     )
                     statement.execute(
                         "INSERT INTO pipelines (id, name, display_name, description, owner_id, workspace_id, current_version) VALUES " +
-                            "('$DEAD_PIPELINE', 'dsweep/report', 'Dead report', '', '$LIVE_USER', '$WS_DEAD', 0), " +
-                            "('$LIVE_PIPELINE', 'dsweep/report', 'Live report', '', '$LIVE_USER', '$WS_LIVE', 0)",
+                            "('$DEAD_PIPELINE', 'dsweep/report', 'Dead report', '', '$LIVE_USER', '$WS_DEAD', 1), " +
+                            "('$LIVE_PIPELINE', 'dsweep/report', 'Live report', '', '$LIVE_USER', '$WS_LIVE', 1)",
+                    )
+                    statement.execute(
+                        "INSERT INTO pipeline_versions (pipeline_id, version, body_json, body_hash, status, created_by, " +
+                            "released_by, released_at) SELECT id, 1, '$PIPELINE_BODY'::jsonb, 'dsweep-hash', 'RELEASED', " +
+                            "'$LIVE_USER', '$LIVE_USER', NOW() FROM pipelines WHERE id IN ('$DEAD_PIPELINE', '$LIVE_PIPELINE')",
                     )
                     statement.execute(
                         "INSERT INTO published_endpoints " +
                             "(id, workspace_id, path_pattern, pipeline_id, timeout_seconds, created_by) VALUES " +
                             "('$DEAD_ENDPOINT', '$WS_DEAD', '/dsweep/v1/report', '$DEAD_PIPELINE', 30, '$LIVE_USER'), " +
                             "('$LIVE_ENDPOINT', '$WS_LIVE', '/dsweep-live/v1/report', '$LIVE_PIPELINE', 30, '$LIVE_USER')",
+                    )
+                    // #786: an API serves its OWN current version. Both APIs are in the state a native release and
+                    // discard of their only version leaves (record §24): v1 pinned pipeline v1 exactly, was RELEASED,
+                    // then DISCARDED, so no version is current and a call to either has nothing to serve. Seeded
+                    // after boot, a version-less row would also be refused by the NEXT context's startup conversion
+                    // (no pipeline version to pin) and take every later suite on this database down with it.
+                    statement.execute(
+                        "INSERT INTO published_endpoint_versions (endpoint_id, version, status, pipeline_name, pipeline_version, " +
+                            "timeout_seconds, description, body_hash, released_at, released_by, discarded_at, discarded_by, " +
+                            "created_by) SELECT e.id, 1, 'DISCARDED', p.name, 1, e.timeout_seconds, e.description, " +
+                            "encode(sha256(convert_to((jsonb_build_object('pipeline', p.name, 'pipeline_version', 1, " +
+                            "'timeout_seconds', e.timeout_seconds, 'description', e.description))::text, 'UTF8')), 'hex'), " +
+                            "NOW(), e.created_by, NOW(), e.created_by, e.created_by " +
+                            "FROM published_endpoints e JOIN pipelines p ON p.id = e.pipeline_id " +
+                            "WHERE e.id IN ('$DEAD_ENDPOINT', '$LIVE_ENDPOINT')",
                     )
                 }
                 connection

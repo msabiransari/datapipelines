@@ -1,9 +1,9 @@
 # Environments — naming them, and telling the product how careful to be
 
-**Status:** v1.0 (normative)
+**Status:** v1.5 (normative)
 **Owner:** datapipelines.co core
 **Depends on:** [Configuration](configuration.md) · [Deployment](deployment.md) · [Auth](auth.md)
-**Last updated:** 2026-09-06
+**Last updated:** 2026-11-10
 
 ---
 
@@ -50,7 +50,7 @@ This is normative. Everything the posture means is here.
 
 | Rule | `development` | `hardened` |
 |---|---|---|
-| Authoring (`DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED`) | `true` — this deployment builds pipelines | **`false`** — a promotion receiver; explicitly settable either way |
+| Authoring (`DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED`) | `true` — this deployment builds pipelines (settable to `false`) | **`false`** — a promotion receiver. Set to `true`, the deployment is **refused** at boot (#786) |
 | Demo (`DATAPIPELINES_DEMO`) | allowed | **refused** at boot |
 | Local bootstrap password (`DATAPIPELINES_AUTH_LOCAL_BOOTSTRAP_PASSWORD[_HASH]`) | allowed | **refused** at boot. Local password accounts themselves stay allowed — a *seeded* credential is what has no place here |
 | Loopback metadata database / Redis | allowed | **refused** at boot |
@@ -60,20 +60,13 @@ This is normative. Everything the posture means is here.
 | Outbound mail, when configured (`DATAPIPELINES_MAIL_*`, [Configuration §3.27](configuration.md#327-mail)) | STARTTLS may be off (a laptop's local mail sink) | **`DATAPIPELINES_MAIL_STARTTLS` must be `true`, and a `DATAPIPELINES_MAIL_USERNAME` needs a `DATAPIPELINES_MAIL_PASSWORD`** — refused at boot; inert while mail is unconfigured |
 | Boot line | `event=config.posture env=<env> posture=development authoring=on demo=nyc,trade` | same shape |
 
-Two rows are **defaults** you can override (authoring, cookie `Secure`); six are **refusals** you cannot. A refusal names the variable and the posture in its message, so the log line tells you which line of which file to change.
+Two rows are **defaults** (authoring, cookie `Secure`); six are **refusals** you cannot override. Authoring can be switched off under `development`, but switching it on under `hardened` is the seventh refusal (#786). A refusal names the variable and the posture in its message, so the log line tells you which line of which file to change.
 
 The refusals exist because a deployment that asked for the hardened stance and quietly got a relaxed one is worse than a deployment that did not start.
 
-### Turning a hardened deployment into an authoring one
+### A hardened deployment does not author (#786)
 
-A one-box organisation that wants the hardened posture *and* wants to build pipelines on that box sets the capability back on:
-
-```
-DATAPIPELINES_POSTURE=hardened
-DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=true
-```
-
-That is supported and expected. The default is `false` because the common hardened deployment is a **receiver** — content is built in a lower environment and promoted up (§7).
+Until #786 a one-box organisation could run `DATAPIPELINES_POSTURE=hardened` with `DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED=true`. That combination now **refuses to start**, naming the variable and the posture. The reason is the API version pins: where authoring is on, an API version may pin a DRAFT pipeline version (the authoring loop), and a hardened deployment must serve released versions only. A deployment is either a lower one that authors (`development`) or a higher one that receives promoted releases (`hardened`). A one-box organisation that builds its pipelines on the box runs `development`. The common hardened deployment is a **receiver**: content is built in a lower environment and promoted up (§7).
 
 **What authoring off means for versions.** Every draft-creating write — create, update, release,
 the draft purge, discard, restore and the entity purge, for pipelines and templates — is refused
@@ -352,6 +345,7 @@ To evaluate the product instead, on a laptop, the whole thing is one line — `.
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-11-10 | v1.5 | §2 (#786, record R3 — owner ruling 2026-11-05): `hardened` with authoring enabled is now a **refusal** at boot, not a supported override; the "Turning a hardened deployment into an authoring one" subsection is replaced by "A hardened deployment does not author". |
 | 2026-09-21 | v1.4 | §2: the posture table gains the passwordless-Redis row (188, #189) — under `hardened`, an empty `DATAPIPELINES_REDIS_PASSWORD` with a non-loopback Redis host is refused at boot, where `development` warns. Six refusals now. |
 | 2026-09-14 | v1.3 | §2: the posture table gains the outbound-mail row (137) — under `hardened`, with mail configured, STARTTLS must be on and a username needs a password; inert while mail is unconfigured. Five refusals now. |
 | 2026-09-08 | v1.2 | §2: what authoring OFF means for versions — every draft-creating write is refused, so a hardened receiver holds no drafts at all and the execute default (versioning §7.2, D56) is a RELEASED version by construction rather than by convention. |

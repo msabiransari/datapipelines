@@ -36,15 +36,15 @@
   --edge-done: var(--accent-success);
 }
 
-/* #10 L3a — CHART tokens (dashboards): what the Plotly adapter reads into `layout` at each render
- * (D25, the record's theme contract). Every one bridges the THEME's own tokens — no literal colour,
+/* #10 L3a — CHART tokens (dashboards): what the chart adapter resolves at each render (D25, the
+ * record's theme contract). Every one bridges the THEME's own tokens — no literal colour,
  * the same rule the 080 block above follows — so all nine themes and both modes carry a coherent
  * chart surface without the adapter knowing a hex. The four categorical series hues are the theme's
  * four accents in the design system's own order (info, success, warning, danger); the two blended
  * series are color-mix steps between accent pairs so a six-trace chart stays inside the theme's
  * range. The adapter resolves these through a probe element (a `color-mix()` token stream reads
- * back verbatim otherwise) and maps them onto Plotly's paper/plot/grid/font/colorway — see
- * datapipelines-dashboard-plotly.js and dashboards.md §4. */
+ * back verbatim otherwise) and the library's converter maps them onto its own surface (#860: Plotly's
+ * paper/plot/grid/font/colorway) — see datapipelines-dashboard-chart.js and dashboards.md §6.3. */
 :root {
   --chart-canvas: var(--surface-default);
   --chart-plot: var(--surface-page);

@@ -1,6 +1,7 @@
 package co.datapipelines.config
 
 import co.datapipelines.web.config.DatasourcesProperties
+import co.datapipelines.web.config.ManagedLakeEgressCheck
 import co.datapipelines.web.config.ReaperDelay
 import org.springframework.boot.convert.DurationStyle
 import org.springframework.util.unit.DataSize
@@ -21,11 +22,12 @@ import java.time.Duration
  *   scratch-bytes` ([checkLakeAdmission]);
  * - every other number positive, the maintenance window `HH:MM-HH:MM` ([checkLakeBounds]);
  * - `freshness-tick-seconds < max-generation-age-seconds`, `reads.memory-limit` a positive size, and
- *   `max-generation-age + 2 × reaper-delay + retire-ceiling + freshness-tick ≤
+ *   `max-generation-age + 2 × reaper-delay + managed-retire-ceiling + freshness-tick ≤
  *   protection-days × 86400 / 24` (record §10 RULING 4 as amended, #818 P5 / #818c / #818d) ([checkLakeReads]). The
- *   retire ceiling is the one `datasources` applies: `retire-ceiling-seconds` when set, else
- *   `node-query-timeout-seconds + 30` (datasources.md §5.2). The reaper delay is a code constant, not a key:
- *   [ReaperDelay.SECONDS] (the scheduling layer) derived and pinned where it is produced.
+ *   ceiling is the one `datasources` applies to a retired MANAGED generation (#824, owner ruling 2026-11-07):
+ *   `managed-retire-ceiling-seconds` when set, else `node-query-timeout-max-seconds + 30` (datasources.md §5.2). The
+ *   reaper delay is a code constant, not a key: [ReaperDelay.SECONDS] (the scheduling layer) derived and pinned where
+ *   it is produced.
  *
  * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` and the cgroup memory
  * sum to P1/P6 (the sum's amendment adds keys that do not exist yet, and E10b is its acceptance — owner
@@ -61,6 +63,8 @@ internal object LakeRules {
     const val MAX_GENERATION_AGE_SECONDS = "$PREFIX.reads.max-generation-age-seconds"
     const val FRESHNESS_TICK_SECONDS = "$PREFIX.reads.freshness-tick-seconds"
     const val READS_MEMORY_LIMIT = "$PREFIX.reads.memory-limit"
+    const val EGRESS_PROXY = "$PREFIX.reads.egress-proxy"
+    const val EGRESS_MAX_AGE_SECONDS = "$PREFIX.reads.egress-max-age-seconds"
     const val MAINTENANCE_WINDOW = "$PREFIX.maintenance.window"
     const val MAX_BYTES_REWRITTEN = "$PREFIX.maintenance.max-bytes-rewritten-per-run"
     const val PROTECTION_DAYS = "$PREFIX.retention.protection-days"
@@ -96,6 +100,8 @@ internal object LakeRules {
             MAX_GENERATION_AGE_SECONDS,
             FRESHNESS_TICK_SECONDS,
             READS_MEMORY_LIMIT,
+            EGRESS_PROXY,
+            EGRESS_MAX_AGE_SECONDS,
             MAINTENANCE_WINDOW,
             MAX_BYTES_REWRITTEN,
             PROTECTION_DAYS,
@@ -125,9 +131,6 @@ internal object LakeRules {
 
     /** §3.2's default for `node-query-timeout-max-seconds`, read when the key is unset (ConfigValidator's twin). */
     private const val DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS = 900L
-
-    /** §3.2's default for `node-query-timeout-seconds`, read when the key is unset (the executor's own default). */
-    private const val DEFAULT_NODE_QUERY_TIMEOUT_SECONDS = 60L
 
     /** The share of the protection window the read bounds may use (record §10 RULING 4: one hour of a 24-hour day). */
     private const val PROTECTION_SHARE_DIVISOR = 24L
@@ -238,42 +241,49 @@ internal object LakeRules {
     ) {
         if (!enabled(snapshot)) return
         dataSize(snapshot, READS_MEMORY_LIMIT, violations)
+        readsEgressTerm(snapshot, violations)
         val age = positiveLong(snapshot, MAX_GENERATION_AGE_SECONDS, violations)
         val tick = positiveLong(snapshot, FRESHNESS_TICK_SECONDS, violations)
         if (age != null && tick != null && tick >= age) {
             violations += "$FRESHNESS_TICK_SECONDS ($tick) must be below $MAX_GENERATION_AGE_SECONDS ($age) (§3.36)."
         }
         val days = value(snapshot, PROTECTION_DAYS).toLongOrNull()?.takeIf { it > 0 } ?: return // checkLakeRetention names it
-        val ceiling = retireCeilingSeconds(snapshot, violations) ?: return
+        val ceiling = managedRetireCeilingSeconds(snapshot, violations) ?: return
         if (age == null || tick == null) return
         val window = days * SECONDS_PER_DAY / PROTECTION_SHARE_DIVISOR
         val reaperDelay = ReaperDelay.SECONDS
         if (age + 2 * reaperDelay + ceiling + tick > window) {
             violations +=
-                "$MAX_GENERATION_AGE_SECONDS ($age) + 2 × the reaper delay ($reaperDelay) + the retire ceiling ($ceiling) + " +
+                "$MAX_GENERATION_AGE_SECONDS ($age) + 2 × the reaper delay ($reaperDelay) + the managed retire ceiling ($ceiling) + " +
                 "$FRESHNESS_TICK_SECONDS ($tick) must not exceed " +
                 "$PROTECTION_DAYS × 86400 / 24 ($window) (§3.36 — staleness bound; reader leases protect live readers)."
         }
     }
 
-    /** The ceiling `datasources` applies (datasources.md §5.2); a malformed explicit value is named here. */
-    private fun retireCeilingSeconds(
+    /**
+     * #824 — the ceiling `datasources` applies to a retired MANAGED generation (datasources.md §5.2,
+     * `DatasourcesProperties.managedCeiling`); a malformed explicit value is named here. The general
+     * `retire-ceiling-seconds` does not enter: it bounds every other retired pool, never a managed generation.
+     */
+    private fun managedRetireCeilingSeconds(
         snapshot: ConfigSnapshot,
         violations: MutableList<String>,
     ): Long? {
-        val explicit = snapshot.datasourcesRetireCeilingSeconds?.trim().orEmpty()
+        val explicit = snapshot.datasourcesManagedRetireCeilingSeconds?.trim().orEmpty()
         if (explicit.isNotEmpty()) {
             val parsed = explicit.toLongOrNull()?.takeIf { it > 0 }
-            if (parsed == null) violations += "datapipelines.datasources.retire-ceiling-seconds must be a positive whole number (§3.36)."
+            if (parsed == null) {
+                violations += "datapipelines.datasources.managed-retire-ceiling-seconds must be a positive whole number (§3.36)."
+            }
             return parsed
         }
-        // A malformed node timeout is named by the executor's own check; fall back to its default here.
-        val nodeTimeout =
-            snapshot.executorNodeQueryTimeoutSeconds
+        // A malformed maximum is named by the executor's own check; fall back to its default here.
+        val nodeTimeoutMax =
+            snapshot.executorNodeQueryTimeoutMaxSeconds
                 ?.trim()
                 ?.toLongOrNull()
-                ?.takeIf { it > 0 } ?: DEFAULT_NODE_QUERY_TIMEOUT_SECONDS
-        return nodeTimeout + DatasourcesProperties.CEILING_SLACK_SECONDS
+                ?.takeIf { it > 0 } ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
+        return nodeTimeoutMax + DatasourcesProperties.CEILING_SLACK_SECONDS
     }
 
     private fun usableEndpoint(endpoint: String): Boolean =
@@ -323,5 +333,51 @@ internal object LakeRules {
         val parsed = runCatching { DurationStyle.detectAndParse(value(snapshot, key)) }.getOrNull()?.takeIf { !it.isNegative && !it.isZero }
         if (parsed == null) violations += "$key must be a positive duration such as 2h or 90m (§3.36)."
         return parsed
+    }
+
+    /** #845 D1: the proxy may never cut a healthy query before the executor's own longest timeout, plus this slack. */
+    private const val EGRESS_MAX_AGE_SLACK_SECONDS = 30L
+
+    /**
+     * #845 (owner ruling 2026-11-06 option B, decision D1) — the managed reads' egress proxy term, its own violations:
+     * `reads.egress-max-age-seconds` is a positive whole number; when `reads.egress-proxy` is set, the proxy is
+     * `host:port` (the adapter's grammar, [ManagedLakeEgressCheck.isWellFormed]) and the max-age is at least
+     * `node-query-timeout-max-seconds` + [EGRESS_MAX_AGE_SLACK_SECONDS], so a healthy query is never cut by the proxy
+     * before its own timeout ends it. Whether the proxy answers and declares that max-age is the boot check's
+     * (`lake.boot.egress_proxy`), not configuration's.
+     *
+     * The floor compares the max-age itself, NOT the derived reader end-by
+     * (`LakeHttpBounds.egressReaderEndByMillis`, (http_retries + 1) × max-age + slack): it protects a HEALTHY query,
+     * whose connection is never cut and so never retried, and one connection's age is what the proxy cuts. Comparing
+     * end-by would admit a max-age below the query timeout. End-by bounds only a trickled reader (hygiene); no rule
+     * compares it, because the reader lease, not this bound, is the safety premise (#818e).
+     *
+     * Deliberately NOT named `check…`: it is a term of [checkLakeReads], not a new §7 rule, and
+     * `ConfigValidatorCheckCountTest` counts `check*` declarations against `CHECK_COUNT`.
+     */
+    private fun readsEgressTerm(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        val maxAge = positiveLong(snapshot, EGRESS_MAX_AGE_SECONDS, violations)
+        val proxy = value(snapshot, EGRESS_PROXY)
+        if (proxy.isEmpty()) return
+        if (!ManagedLakeEgressCheck.isWellFormed(proxy)) {
+            violations += "$EGRESS_PROXY must be host:port — letters, digits, '.' and '-', port 1-65535, no scheme (§3.36)."
+        }
+        if (maxAge == null) return
+        // A malformed node timeout maximum is named by the executor's own check; fall back to its default here.
+        val nodeMax =
+            snapshot.executorNodeQueryTimeoutMaxSeconds
+                ?.trim()
+                ?.toLongOrNull()
+                ?.takeIf { it > 0 } ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
+        val floor = nodeMax + EGRESS_MAX_AGE_SLACK_SECONDS
+        if (maxAge < floor) {
+            violations +=
+                "$EGRESS_MAX_AGE_SECONDS ($maxAge) must be at least datapipelines.executor.node-query-timeout-max-seconds " +
+                "($nodeMax) + $EGRESS_MAX_AGE_SLACK_SECONDS ($floor) while $EGRESS_PROXY is set (§3.36 — the proxy never " +
+                "cuts a healthy query before its own timeout)."
+        }
     }
 }

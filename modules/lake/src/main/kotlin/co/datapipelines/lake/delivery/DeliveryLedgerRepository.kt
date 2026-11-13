@@ -39,20 +39,42 @@ class DeliveryLedgerRepository(
      * Candidates only; the settling actor must separately establish lease ownership before a negative verdict.
      * One keyset page (record §8b, lane 799b): at most [limit] rows with an id after [afterId] (from the first row when
      * null) in id order, reading only the columns [ROW] maps — never `manifest_json`, which settlement does not read.
+     *
+     * Two statement texts, not one nullable-cursor text (#859): in a single
+     * `(CAST(:after AS uuid) IS NULL OR id > CAST(:after AS uuid))` disjunction, a generic prepared plan cannot fold
+     * away the null branch, so the cursor bound leaves the index condition and degrades to a `Filter` over the table's
+     * whole unsettled backlog. The first page issues the text without a cursor predicate or parameter; a cursor page
+     * issues `id > :after` directly, so each text's generic plan keeps its bound inside the page index's condition.
+     * Both texts keep every value bound — no cursor, table or limit is ever interpolated.
      */
     fun unsettled(
         tableId: UUID,
         afterId: UUID?,
         limit: Int,
     ): List<LakeDelivery> =
-        jdbc.query(
-            "SELECT id, table_id, feed, delivery_id, fingerprint, state, operation_id, execution_id, pipeline_id, received_at, " +
-                "metadata_location_after FROM lake_deliveries " +
-                "WHERE table_id = :table AND state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN') " +
-                "AND (CAST(:after AS uuid) IS NULL OR id > CAST(:after AS uuid)) ORDER BY id LIMIT :limit",
-            mapOf("table" to tableId, "after" to afterId, "limit" to limit),
-            ROW,
-        )
+        when (afterId) {
+            null -> {
+                jdbc.query(
+                    "SELECT id, table_id, feed, delivery_id, fingerprint, state, operation_id, execution_id, pipeline_id, received_at, " +
+                        "metadata_location_after FROM lake_deliveries " +
+                        "WHERE table_id = :table AND state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN') " +
+                        "ORDER BY id LIMIT :limit",
+                    mapOf("table" to tableId, "limit" to limit),
+                    ROW,
+                )
+            }
+
+            else -> {
+                jdbc.query(
+                    "SELECT id, table_id, feed, delivery_id, fingerprint, state, operation_id, execution_id, pipeline_id, received_at, " +
+                        "metadata_location_after FROM lake_deliveries " +
+                        "WHERE table_id = :table AND state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN') " +
+                        "AND id > :after ORDER BY id LIMIT :limit",
+                    mapOf("table" to tableId, "after" to afterId, "limit" to limit),
+                    ROW,
+                )
+            }
+        }
 
     internal fun insertIfAbsent(request: ReceiveDelivery) {
         requireTransaction()

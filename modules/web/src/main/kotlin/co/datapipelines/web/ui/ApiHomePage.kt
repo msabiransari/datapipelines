@@ -141,9 +141,9 @@ internal object ApiHomePage {
                         entries =
                             endpoints?.let { inventory ->
                                 inventory.valid.sortedByDescending { it.createdAt }.take(RECENT_LIMIT).map { endpoint ->
-                                    val pipeline = inventory.names[endpoint.pipelineId]
+                                    val pipeline = inventory.names[endpoint.id]
                                     val served =
-                                        inventory.served[endpoint.pipelineId]?.let { "v${it.version}${if (it.draft) " · draft" else ""}" }
+                                        inventory.served[endpoint.id]?.let { "v${it.version}${if (it.draft) " · draft" else ""}" }
                                             ?: "nothing to serve"
                                     item(
                                         name =

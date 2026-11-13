@@ -85,7 +85,8 @@ class SchedulesShotsBrowserTest : BrowserSuite() {
             page.locator("[data-verb='schedule-run']").click()
             awaitRunState("succeeded")
         }
-        send(page, "POST", "/api/v1/pipelines/$blockedPipeline/versions/1/discard").status shouldBe 200
+        // Legacy data since #786 B.4 (a release a live schedule runs cannot be discarded).
+        plantLegacyDiscardedRelease(blockedPipeline)
         open("?id=$blocked")
         page.locator("[data-verb='schedule-run']").click()
         page.locator("#schedule-detail [data-slot='blocked']:not([hidden])").waitFor()

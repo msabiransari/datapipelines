@@ -425,7 +425,7 @@ class LakeHandleProtocolTest {
     // ------------------------------------------------------------------ helpers
 
     // A snapshot (#484): the ROOT capture sees every thread in the JVM, so it is the module's helper.
-    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.datasources.capturingLogs(block = block)
+    private fun capturingLogs(block: () -> Unit): List<String> = co.datapipelines.logcapture.capturingLogs(block = block)
 
     private companion object {
         const val WAIT_S = 10L

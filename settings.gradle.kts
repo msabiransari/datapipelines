@@ -25,7 +25,9 @@ rootProject.name = "datapipelines"
 include(
     ":modules:typesystem",
     ":modules:graph",
+    ":modules:dependency-contract",
     ":modules:persistence",
+    ":modules:log-capture",
     ":modules:calculators",
     ":modules:scripting",
     ":modules:pipeline-contract",

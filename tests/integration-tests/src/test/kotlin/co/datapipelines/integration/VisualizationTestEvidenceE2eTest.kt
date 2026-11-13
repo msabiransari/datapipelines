@@ -94,7 +94,7 @@ class VisualizationTestEvidenceE2eTest {
     @Order(3)
     fun `a stale release after an edit is refused and nothing partial lands`() {
         val node = mapper.readTree(DOCUMENT) as com.fasterxml.jackson.databind.node.ObjectNode
-        (node.get("presentation") as com.fasterxml.jackson.databind.node.ObjectNode).put("title", "Evidence v2")
+        (node.get("config").get("title") as com.fasterxml.jackson.databind.node.ObjectNode).put("text", "Evidence v2")
         val written = put("/api/v1/visualizations/$id", mapper.writeValueAsString(node), hash, ADMIN_SESSION)
         withClue(written.asString().take(EXCERPT)) { written.statusCode shouldBe 200 }
         val newHash = written.jsonPath().getString("data.body_hash")
@@ -189,12 +189,13 @@ class VisualizationTestEvidenceE2eTest {
         val DOCUMENT =
             """
             {"name": "$NAME", "display_name": "Evidence", "description": "",
-             "renderer": {"kind": "plotly", "version": "4"},
+             "renderer": {"kind": "chart", "version": "1"},
              "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                 {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-             "config": {"data": [{"type": "bar", "x": [], "y": []}]},
-             "bindings": {"data[0].x": "month", "data[0].y": "amount"},
-             "presentation": {"title": "Evidence"},
+             "config": {"title": {"text": "Evidence"}, "mark": {"type": "bar"},
+                        "encoding": {"x": {"field": "month", "type": "temporal", "sort": "ascending"},
+                                     "y": {"field": "amount", "type": "quantitative", "aggregate": "sum"}}},
+             "bindings": {"amount": "amount", "month": "month"},
              "tests": {"cases": [{"name": "one month", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
                                   "assertions": [{"kind": "rendered"}]}]}}
             """.trimIndent()

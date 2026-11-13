@@ -23,6 +23,12 @@
 #      CVEs live in .trivyignore, each with a reason + date comment; anything
 #      NOT ignored exits 1. We do not chase base-image CVE zero: a baseline
 #      entry is added only with its triage reason.
+#   3. THIRD-PARTY IMAGE — the egress proxy the deployment ships (#845), read
+#      from its ONE pin in deploy/compose.yml (helm-check.sh pins the chart's
+#      default to the same reference). An unpinned reference is a finding (exit 1).
+#      Its baseline is .trivyignore.egress-proxy, read by this scan ONLY: a
+#      suppression's reason is triaged against one image's exposure, so the
+#      proxy's entries never hide the production image's findings (or back).
 #
 # Needs network on first run (trivy downloads its vulnerability DB to
 # ~/.cache/trivy) and a running Docker daemon for the image scan.
@@ -92,6 +98,8 @@ install_trivy() {
 
 IGNORE_ARGS=()
 [ -f "$ROOT/.trivyignore" ] && IGNORE_ARGS=(--ignorefile "$ROOT/.trivyignore")
+PROXY_IGNORE_ARGS=()
+[ -f "$ROOT/.trivyignore.egress-proxy" ] && PROXY_IGNORE_ARGS=(--ignorefile "$ROOT/.trivyignore.egress-proxy")
 
 # trivy_verdict <stage-label> <captured-rc> — map trivy's CAPTURED exit to
 # the published contract (014/F1): 0 = clean, 1 = findings not allowlisted
@@ -145,3 +153,20 @@ echo "== trivy $TRIVY_VERSION — image scan (datapipelines:trivy-scan) =="
 scan_rc=0
 "$BIN" image --exit-code 1 ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} datapipelines:trivy-scan || scan_rc=$?
 trivy_verdict "image scan" "$scan_rc"
+
+# #845 — the egress proxy image, exactly as compose pins it (the `egress-proxy` service's `image:`).
+EGRESS_PROXY_IMAGE=$(awk '/^  egress-proxy:$/ {in_service = 1; next}
+  in_service && /^    image: / {print $2; exit}
+  in_service && /^  [^ #]/ {exit}' "$ROOT/deploy/compose.yml")
+if [ -z "$EGRESS_PROXY_IMAGE" ]; then
+  echo "container-scan: deploy/compose.yml has no egress-proxy image — no verdict" >&2
+  exit 2
+fi
+case "$EGRESS_PROXY_IMAGE" in
+  *@sha256:*) ;;
+  *) echo "container-scan: the egress proxy image '$EGRESS_PROXY_IMAGE' is not pinned by digest." >&2; exit 1 ;;
+esac
+echo "== trivy $TRIVY_VERSION — image scan ($EGRESS_PROXY_IMAGE) =="
+scan_rc=0
+"$BIN" image --exit-code 1 ${PROXY_IGNORE_ARGS[@]+"${PROXY_IGNORE_ARGS[@]}"} "$EGRESS_PROXY_IMAGE" || scan_rc=$?
+trivy_verdict "image scan (egress proxy)" "$scan_rc"

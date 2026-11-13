@@ -14,9 +14,11 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
+import java.time.Duration
 import java.util.concurrent.TimeUnit
 
 /**
@@ -76,12 +78,23 @@ class PoolReaperSchedulingConfiguration {
 
     /**
      * #818d (record §10 RULING 4 amended, item 6) — the closer every pool the reaper hands off is closed by: the
-     * `dp-pool-close` threads, each close under [co.datapipelines.datasources.pooling.PoolCloser.DEADLINE_SECONDS].
+     * `dp-pool-close` threads, each close under its pool's own deadline (#840,
+     * [co.datapipelines.datasources.pooling.PoolCloser.deadlineFor]); a managed generation's adds the release of its
+     * reader pins on the metadata pool [jdbc] runs on ([DeadlinePoolCloser.managedReleaseBound]). A context with no
+     * `JdbcTemplate` (a slice that wires the reaper alone) has no keeper either, so the term falls back to HikariCP's
+     * default checkout, as the keeper's own derivation does for a pool it cannot read.
      * The registry takes it (`DomainConfiguration.datasourceRegistry`), which is what orders its destruction after
      * the registry's own synchronous shutdown close.
      */
     @Bean
-    fun poolCloser(metrics: PoolLifecycleMetrics): DeadlinePoolCloser = DeadlinePoolCloser(metrics)
+    fun poolCloser(
+        metrics: PoolLifecycleMetrics,
+        jdbc: ObjectProvider<JdbcTemplate>,
+    ): DeadlinePoolCloser =
+        DeadlinePoolCloser(
+            metrics,
+            managedReleaseBound = DeadlinePoolCloser.managedReleaseBound(jdbc.ifAvailable?.dataSource),
+        )
 
     /**
      * #818 (dp-lake record §10 RULING 4 item 2) — the managed lake's freshness tick, on the jobs' `dp-scheduled`
@@ -90,11 +103,21 @@ class PoolReaperSchedulingConfiguration {
      * the registry's pass iterates live managed generations only, and the regrant returns at once when the lake
      * is disabled.
      *
-     * #818b A — every statement the tick issues runs over [statements], a dedicated template bounded at
+     * #818b A — the tick's own statements run over [statements], a dedicated template bounded at
      * [ManagedLakeFreshnessScheduler.FRESHNESS_STATEMENT_TIMEOUT_SECONDS] (the sweep's and the retention job's
-     * `BoundedJdbc` pattern, never the shared template's timeout). The tick issues two kinds, and only these:
-     * the managed catalog read (one per live managed generation, over the same SQL and disabled-lake rule as
-     * the build's read: [LakeConfiguration.managedLakeCatalogOver]) and the regrant's one INSERT.
+     * `BoundedJdbc` pattern, never the shared template's timeout). The tick has two steps, each inside ONE budget of
+     * that bound (#841 R4 re-derived the inventory after G0 put the regrant under the writer guard):
+     *
+     * 1. **refresh** — the managed catalog read, one per live managed generation, over the same SQL and disabled-lake
+     *    rule as the build's read ([LakeConfiguration.managedLakeCatalogOver]): one statement, its bound its budget.
+     * 2. **regrant** — the repair, one metadata transaction of five phases sharing ONE deadline of the same bound
+     *    ([DatasourceGrantRepository.grantToEveryWorkspace]): the budget's `statement_timeout` (on [statements], so the
+     *    connection carries its socket bound before the guard's statements run on it), the datasource's prerequisite
+     *    key and the workspace rows on the shared writer guard [writes] (their `lock_timeout` capped at the deadline
+     *    whatever `lock-wait-seconds` is), the discovery read and the INSERT (each `statement_timeout` = the time
+     *    left). Before #841 R4 the key wait and the INSERT wait were consecutive full bounds: a peer that waited on the
+     *    key behind a sibling's held INSERT then waited a full bound again on its own INSERT (the gate-red probe's
+     *    ten-second call).
      */
     @Bean
     fun managedLakeFreshnessScheduler(
@@ -102,6 +125,7 @@ class PoolReaperSchedulingConfiguration {
         registrar: ManagedLakeDatasourceRegistrar,
         jdbc: NamedParameterJdbcTemplate,
         lakeProperties: ObjectProvider<LakeProperties>,
+        writes: co.datapipelines.datasources.DatasourceWriteGuarding,
     ): ManagedLakeFreshnessScheduler {
         val statements =
             BoundedJdbc.bounded(
@@ -117,7 +141,14 @@ class PoolReaperSchedulingConfiguration {
                     ManagedLakeTableRepository(statements),
                     enabled = lakeProperties.ifAvailable?.enabled == true,
                 ),
-            grants = DatasourceGrantRepository(statements),
+            // #841 (G0): the tick's repair grants take the datasource's prerequisite key and the workspaces they
+            // change, on the shared writer guard; #841 R4: the whole repair shares one freshness bound.
+            grants =
+                DatasourceGrantRepository(
+                    statements,
+                    writes,
+                    repairBudget = Duration.ofSeconds(ManagedLakeFreshnessScheduler.FRESHNESS_STATEMENT_TIMEOUT_SECONDS.toLong()),
+                ),
         )
     }
 
@@ -140,11 +171,12 @@ class PoolReaperSchedulingConfiguration {
  * reaper, since #818d, does not, so a catalog read held at its bound delays the next tick, never a reap.
  *
  * #818b A — both steps read and write through [catalog] and [grants], the bean's statement-bounded pair, so a
- * statement queued behind a lock is cancelled at [FRESHNESS_STATEMENT_TIMEOUT_SECONDS] and the shared
- * `dp-scheduled` thread returns to its sibling jobs. Each step is isolated as the retention tick's are: a step that
- * throws is one WARN (`event=lake.freshness_tick_failed step=<name>`, class and SQLState only), the next step
- * runs, and nothing reaches the scheduler, so the next tick runs on schedule. The registry's pass already turns
- * a failed catalog read into its own WARN (`lake.freshness_read_failed`); the catch here holds what escapes.
+ * step queued behind a lock ends within [FRESHNESS_STATEMENT_TIMEOUT_SECONDS] and the shared `dp-scheduled` thread
+ * returns to its sibling jobs (#841 R4: the regrant's guarded phases share that one budget). Each step is isolated
+ * as the retention tick's are: a step that throws is one WARN (`event=lake.freshness_tick_failed step=<name>`,
+ * class and SQLState only), the next step runs, and nothing reaches the scheduler, so the next tick runs on
+ * schedule. The registry's pass already turns a failed catalog read into its own WARN
+ * (`lake.freshness_read_failed`); the catch here holds what escapes.
  * Failed ticks are not added to `ScheduledJob`'s failed-tick counter: that enum lives outside this lane.
  */
 class ManagedLakeFreshnessScheduler(
@@ -191,13 +223,14 @@ class ManagedLakeFreshnessScheduler(
         private val log = LoggerFactory.getLogger(ManagedLakeFreshnessScheduler::class.java)
 
         /**
-         * #818b A — the bound on each statement of the tick, a JDBC `queryTimeout` (Postgres cancels with SQLState
-         * `57014`). Not a configuration key, for the reaper's reason: it bounds how long the tick can hold the
-         * `dp-scheduled` thread its sibling jobs share (the reaper no longer does, #818d), so a tick blocked on both
-         * of its statements delays a sibling by at most 2 × 5 s. A healthy catalog read and the grant INSERT take
-         * milliseconds, so the bound fires only on a statement queued behind a lock. A cancelled read retires nothing
-         * (the generation serves until its age bound); a cancelled INSERT grants nothing and the next tick retries the
-         * same idempotent INSERT.
+         * #818b A — the bound on each step of the tick: the catalog read's JDBC `queryTimeout`, and (#841 R4) the ONE
+         * budget the regrant's guarded phases share — key and workspace-row waits (`lock_timeout`, refused `55P03`),
+         * the discovery read and the INSERT (`statement_timeout` = the time left, cancelled `57014`). Not a
+         * configuration key, for the reaper's reason: it bounds how long the tick can hold the `dp-scheduled` thread
+         * its sibling jobs share (the reaper no longer does, #818d), so a tick blocked in both of its steps delays a
+         * sibling by at most 2 × 5 s. A healthy catalog read and repair take milliseconds, so the bound fires only on
+         * a step queued behind a lock. A cancelled read retires nothing (the generation serves until its age bound);
+         * a cancelled or refused repair grants nothing and the next tick retries the same idempotent repair.
          */
         const val FRESHNESS_STATEMENT_TIMEOUT_SECONDS = 5
 

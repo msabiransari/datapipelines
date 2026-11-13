@@ -31,10 +31,18 @@ import java.time.Duration
  * the project (module-structure.md §5.6 records the surface). Decisions, once:
  *
  * - **The jobs have a scheduler of their own (#316):** [taskScheduler], ONE daemon thread named
- *   `dp-scheduled`. Four `@Scheduled` jobs tick on it — this sweep, the managed lake's freshness tick
- *   (`PoolReaperSchedulingConfiguration`, #818), the retention sweep (`RetentionSchedulingConfiguration`) and the
- *   dashboard refresh sweep (`DashboardRuntimeConfiguration`) — and nothing else does: no bean is wired to it;
- *   Spring's registrar looks it up. The pool reaper is the one exception, by name: since #818d it ticks alone on
+ *   `dp-scheduled`. Five `@Scheduled` jobs tick on it — this sweep, the managed lake's freshness tick
+ *   (`PoolReaperSchedulingConfiguration`, #818), the retention sweep (`RetentionSchedulingConfiguration`), the
+ *   dashboard refresh sweep (`DashboardRuntimeConfiguration`) and, only with `datapipelines.lake.enabled=true`, the lake
+ *   settlement tick (`LakeSettlementSchedulingConfiguration`) — and nothing else does: no bean is wired to it;
+ *   Spring's registrar looks it up. All five carry two bounds on every metadata statement — the four built on
+ *   `BoundedJdbc` (#837), and the settlement tick through its runtime's template in `modules/lake`, which keeps the same
+ *   contract (#858): the statement's `queryTimeout` (a cancel) and a socket read bound of that plus 5 s, which lets a statement end
+ *   against a server that accepts and never answers, where the cancel cannot (it ends at the statement bound plus the
+ *   driver's 10 s cancel wait, measured). The connection acquire is bounded pool-wide by
+ *   `spring.datasource.hikari.connection-timeout` (10 s). A tick's worst wait on the metadata database is therefore the
+ *   acquire plus the statement bound plus 10 s for its longest statement (the settlement tick's: 10 + 5 + 10 = 25 s).
+ *   The pool reaper is the one exception, by name: since #818d it ticks alone on
  *   `dp-reaper` (`PoolReaperTaskScheduler`, its `@Scheduled`'s `scheduler` attribute), because the reads lifetime
  *   rule counts its delay and a shared thread made that delay the sum of every sibling's statement bounds. Until #316
  *   none was declared, and the registrar fell back to the context's unique
@@ -44,7 +52,7 @@ import java.time.Duration
  *   unique `TaskScheduler`, and that name when there are several, so a second `TaskScheduler`
  *   bean cannot send the jobs back to the SSE executor (`ScheduledJobsSchedulerTest`, and the
  *   assembled application's `ScheduledJobsSchedulerE2eTest`, observe every job's tick there).
- * - **One thread is enough:** four jobs, each tick a few bounded statements (the retention tick has
+ * - **One thread is enough:** five jobs, each tick a few bounded statements (the retention tick has
  *   a two-second budget). One thread serialises them — a job can wait for one run of each of the
  *   others — and no other rule counts on how soon any of them starts (the reaper, whose delay one
  *   does, left for its own thread in #818d). A second thread would fix nothing that matters:

@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.65 — the activity dock starts collapsed on short windows until a first gesture, and both docks use one handle class (§7, #800/#801) beside a never-admissible refresh refusal is published with no Retry offer and a fixed sentence naming the configuration key to raise, while a busy refusal keeps its Retry offer (§5.5, #771) beside a board taller than its region scrolls inside it with the activity dock kept in main, and the dock's height is the shared splitter's, remembered across tab switches, Back and reload (§7, #783) beside a refresh needing more distinct executions than the instance can ever admit is refused at once with `details.reason = never_admissible`, and startup refuses or warns on the ceilings that would cause it (§5.5, #762) beside a refresh sent for an older selection may render its result but never clears a later commit's stale mark (§6.6, #550) beside the Board tab flexes its panes into a full-height column so the activity dock stays visible without scrolling main (§7, #612) beside a 1280 px window with the resource browser shown already puts the board region under the filters' 820 px drawer threshold, and a resize of the browser at a fixed viewport crosses it (§7, #573) beside small Plotly cards keep a drawable body and renderer rejections leave a bounded browser diagnostic (§6.6, #536); committed parameter changes mark their affected cards stale after parent re-evaluation or immediately for leaves, and retain the mark through success settling (§6.6, #542) beside a stale card's border is the warning accent, not #536's gray (§6.6, #544) beside the card's border carries every state and the status chip is never shown: one class vocabulary shared by the runtime and the sheet, an animated loading edge, green success for three seconds, a stale border, red error and abort in both phases (§6.2, §6.6, #536) beside explicit action-control buttons in the filters pane (§6.2/§7, #543) beside a draft-only workspace opens its admitted draft directly, labelled (§7, #537) beside the default heatmap’s pixelated rendering hint is a CSSOM write under the enforced policy (§6.6, #531) beside Plotly’s colorbar fills are reset by removing the style attribute, so a colorbar draws under the enforced policy and the collector has no exception left (§6.4, §6.6, #525) beside the missing-marker fallback creates a CSP-compliant template marker (§6.6, #526) beside Plotly’s host marker precedes bundle load and CSP refusals are collected by provenance (§6.6, #456) beside the parameters pane's error row wraps its sentence as prose and its code chip stays inside the panel (§6.2, §7, #507) beside the drawer's Close heads the form and a rejected typed value stays in its field beside its error while the last valid value travels (§6.2, §7, #496/#497) beside the parameters pane's error row speaks the design system's field error and every checkbox or radio option is one row (§6.2, §7, #498/#499) beside the KPI has no label of its own and its card heading titles it (§2.1.2, §6.3, #475, owner ruling) beside the filters drawer follows the board region at 820 px (§7, #492) beside the compact chart card: the chip on the heading line, the message over the body's lower edge (§6.2, §6.6, #501) beside the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.73 — the Release dialogs render the shared release plan and a bare `release_pinned_*` is refused 428 (§3.1, §3.2, §7, #876) beside the dashboards and visualizations workspaces gain a Dependencies tab (§7, #876) beside the explicit action buttons are unavailable while the action gate is closed, `aria-disabled` and described by one sentence per refusal (visible for invalid parameters only), through the optional `renderActionAvailability` hook, and an in-flight refresh does not close the gate (§6.2, #548) beside a 2-row chart with both axis titles is held to a 40% plot-area floor, #386's half kept for untitled axes (§6.3, #870) beside `renderData` has one signature, the mounted handle's `(occurrenceRef, rows, bindings)`, and the composite's adapter-level function forwards exactly those three (§6.2, #852) beside the activity dock's toggle reads Expand while the dock is collapsed and Collapse while it is open (§7, #842) beside a refresh and a draft preview send a read-only request, so each source's DQL runs in the per-lease read-only mode where the database enforces it (§5.1, #463) beside the `chart` kind (the chart document v1, its served schema and three save layers) replaces the retired `plotly` kind, a chart occurrence's configuration carries its encoded fields' `columns`, `init` takes `charts`, and the runtime's mount refusals are tabled (§2.1, §3.4, §5.2, §5.3, §6.1–§6.4, §7, #860) beside the activity dock starts collapsed on short windows until a first gesture, and both docks use one handle class (§7, #800/#801) beside a never-admissible refresh refusal is published with no Retry offer and a fixed sentence naming the configuration key to raise, while a busy refusal keeps its Retry offer (§5.5, #771) beside a board taller than its region scrolls inside it with the activity dock kept in main, and the dock's height is the shared splitter's, remembered across tab switches, Back and reload (§7, #783) beside a refresh needing more distinct executions than the instance can ever admit is refused at once with `details.reason = never_admissible`, and startup refuses or warns on the ceilings that would cause it (§5.5, #762) beside a refresh sent for an older selection may render its result but never clears a later commit's stale mark (§6.6, #550) beside the Board tab flexes its panes into a full-height column so the activity dock stays visible without scrolling main (§7, #612) beside a 1280 px window with the resource browser shown already puts the board region under the filters' 820 px drawer threshold, and a resize of the browser at a fixed viewport crosses it (§7, #573) beside small Plotly cards keep a drawable body and renderer rejections leave a bounded browser diagnostic (§6.6, #536); committed parameter changes mark their affected cards stale after parent re-evaluation or immediately for leaves, and retain the mark through success settling (§6.6, #542) beside a stale card's border is the warning accent, not #536's gray (§6.6, #544) beside the card's border carries every state and the status chip is never shown: one class vocabulary shared by the runtime and the sheet, an animated loading edge, green success for three seconds, a stale border, red error and abort in both phases (§6.2, §6.6, #536) beside explicit action-control buttons in the filters pane (§6.2/§7, #543) beside a draft-only workspace opens its admitted draft directly, labelled (§7, #537) beside the default heatmap’s pixelated rendering hint is a CSSOM write under the enforced policy (§6.6, #531) beside Plotly’s colorbar fills are reset by removing the style attribute, so a colorbar draws under the enforced policy and the collector has no exception left (§6.4, §6.6, #525) beside the missing-marker fallback creates a CSP-compliant template marker (§6.6, #526) beside Plotly’s host marker precedes bundle load and CSP refusals are collected by provenance (§6.6, #456) beside the parameters pane's error row wraps its sentence as prose and its code chip stays inside the panel (§6.2, §7, #507) beside the drawer's Close heads the form and a rejected typed value stays in its field beside its error while the last valid value travels (§6.2, §7, #496/#497) beside the parameters pane's error row speaks the design system's field error and every checkbox or radio option is one row (§6.2, §7, #498/#499) beside the KPI has no label of its own and its card heading titles it (§2.1.2, §6.3, #475, owner ruling) beside the filters drawer follows the board region at 820 px (§7, #492) beside the compact chart card: the chip on the heading line, the message over the body's lower edge (§6.2, §6.6, #501) beside the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -15,7 +15,7 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-11-06
+**Last updated:** 2026-11-13
 
 A dashboard presents pipeline results. Draft development admits draft dependencies; published boards require released dependencies. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin exact pipeline versions as sources, map their results onto visualization inputs, and arrange visualizations, groups, actions and
@@ -54,35 +54,40 @@ outside the body: the stored body never carries it.
 {
   "display_name": "Monthly revenue",
   "description": "",
-  "renderer": { "kind": "plotly", "version": "4" },
+  "renderer": { "kind": "chart", "version": "1" },
   "inputs": {
     "revenue": { "columns": [ { "name": "month", "type": "DATE", "nullable": false },
                               { "name": "amount", "type": "DECIMAL", "nullable": false } ] }
   },
-  "transform": { "template": { "name": "finance/transforms/revenue_bars", "version": 2 },
-                 "inputs": { "rows": "revenue" } },
-  "config": { "data": [ { "type": "bar", "x": "$.x", "y": "$.y" } ], "layout": { "title": { "text": "Revenue" } } },
-  "bindings": { "data[0].x": "month_labels", "data[0].y": "amounts" },
-  "presentation": { "title": "Monthly revenue", "tokens": { "series": "categorical" } },
-  "tests": { "cases": [ { "name": "twelve months", "fixtures": { "revenue": [ { "month": "2026-01-01", "amount": 10.5 } ] },
-                          "assertions": [ { "kind": "rendered" }, { "kind": "trace_count", "equals": 1 } ] } ] }
+  "config": {
+    "title": { "text": "Revenue" },
+    "mark": { "type": "bar" },
+    "encoding": {
+      "x": { "field": "month", "type": "temporal", "sort": "ascending", "format": "month", "title": "Month" },
+      "y": { "field": "amount", "type": "quantitative", "aggregate": "sum", "format": "currency(USD)" }
+    }
+  },
+  "tests": { "cases": [ { "name": "one month", "fixtures": { "revenue": [ { "month": "2026-01-01", "amount": 10.5 } ] },
+                          "assertions": [ { "kind": "rendered" }, { "kind": "mark_count", "equals": 1 } ] } ] }
 }
 ```
 
-(The document as submitted also carries its `name`, e.g. `"finance/visualizations/monthly_revenue"`. The
-implementation spec's copy writes the fixture's `amount` as the string `"10.5"`; a `DECIMAL` is a JSON number on the
-wire, so it is `10.5` here.)
+(The document as submitted also carries its `name`, e.g. `"finance/visualizations/monthly_revenue"`. A `DECIMAL` is a
+JSON number on the wire, so the fixture writes `10.5`, not `"10.5"`. The save stores the chart's derived `bindings`,
+`{"amount": "amount", "month": "month"}`, and the read returns them. With a `transform`, the encoded fields name columns
+of the transform's OUTPUT contract instead of the input's. Until #860 the example was a `plotly` figure; that kind is
+retired, §2.1.2.)
 
 | Field | Rule |
 |---|---|
 | `display_name` | Required, 1–120 characters, not blank. `description` at most 2000. Both are content: they ride the release, and the index row shows the current version's |
-| `renderer.kind` | `plotly`, `table` or `kpi` ([Enumerations §31](enums.md)). `html` and `svg` are reserved and refused in round one (`visualization.validation.renderer_unsupported`) |
-| `renderer.version` | The MAJOR version the host must provide (`"4"`), matched at bootstrap — a positive integer of at most four digits |
+| `renderer.kind` | `chart`, `table` or `kpi` ([Enumerations §31](enums.md)). `html` and `svg` are reserved and refused in round one (`visualization.validation.renderer_unsupported`); the retired `plotly` kind is refused the same way, with a message naming `chart` |
+| `renderer.version` | The MAJOR version the host must provide (`"1"` for `chart`), matched at bootstrap — a positive integer of at most four digits |
 | `inputs` | At least one named input (`[a-z][a-z0-9_]{0,63}`), each a non-empty list of columns in the transform contract's vocabulary: a `name` (1–128 characters, no control character, unique in the input), a `type` — any logical type ([Type System](type-system.md)) — and `nullable` (default `false`). A bad contract is `visualization.validation.input_contract_invalid` |
 | `transform` | Optional. `template` pins a transform template version; `inputs` maps each of the contract's input names to one of the visualization's inputs. The pin must exist (a DRAFT is accepted here; the release requires it RELEASED — §3.2), be a transform, name exactly the contract's inputs, and each declared input's columns must EQUAL the mapped input's by name, type and nullability; every visualization input must be read. Without a transform the visualization has exactly one input and the renderer binds to it directly. Refusals are `visualization.validation.transform_binding_invalid`, naming the column |
-| `config` | The renderer's native configuration, stored VERBATIM (D4) and judged against the renderer's schema (§2.1.2) — `visualization.validation.config_schema_invalid`, naming the path inside it |
-| `bindings` | A map from a path inside `config` to a column of the transform's OUTPUT contract — or, without a transform, the input's columns. The path must follow §2.1.1's grammar and exist in the stored `config`; the column must exist (`visualization.validation.binding_unbound`). At render, the runtime replaces each bound path with that column's values as an array; nothing else in the configuration changes |
-| `presentation` | Optional: a `title` (≤ 120 characters) and `tokens` — theme-token names for the renderer's semantic slots (`series: categorical`), never CSS (D11, D25) |
+| `config` | The renderer's configuration, stored as written and judged against the renderer's schema (§2.1.2) — `visualization.validation.config_schema_invalid`, naming the path. A `chart`'s is the library-neutral `mark` + `encoding` (+ `title`); a `table`'s and a `kpi`'s are their own native shapes (D4) |
+| `bindings` | **`table`, `kpi`:** a map from a path inside `config` to a column of the transform's OUTPUT contract — or, without a transform, the input's columns. The path must follow §2.1.1's grammar and exist in the stored `config`; the column must exist (`visualization.validation.binding_unbound`). At render, the runtime replaces each bound path with that column's values as an array; nothing else in the configuration changes. **`chart`:** derived, never authored — each encoded field maps to itself; absent is accepted and the save stores the derived map; any other map is refused (`chart.bindings.mismatch`, §2.1.2) |
+| `presentation` | **`table`, `kpi`:** optional, a `title` (≤ 120 characters) and `tokens` — theme-token names for the renderer's semantic slots (`series: categorical`), never CSS (D11, D25). **`chart`:** refused by the closed schema; a chart's title is `config.title.text` and its look is the host's tokens |
 | `tests.cases[]` | The saved static-data tests (D34), versioned with the visualization — §2.1.3 |
 
 #### 2.1.1 Binding paths
@@ -90,18 +95,58 @@ wire, so it is `10.5` here.)
 A key, then any run of `.key` and `[index]` steps: `data[0].x`, `layout.title.text`, `columns[2].values`. A key is
 `[A-Za-z_][A-Za-z0-9_]*`, an index `0`–`9999` without leading zeros, 256 characters at most. There is no wildcard, no
 filter and no root marker: a path names exactly one place, and that place must exist in the stored configuration —
-the author puts a placeholder there (`"x": "$.x"` above) — so the runtime's substitution can never create structure.
+the author puts a placeholder there (a `table` column's `"values": "$.amounts"`) — so the runtime's substitution can
+never create structure. A `chart` has no binding paths: its encoded fields are its bindings, and the runtime delivers
+each as `{field: [values]}` (§2.1.2).
 
 #### 2.1.2 Renderer schemas
 
-- **`plotly`** — an object whose `data` is a non-empty array (at most 64) of trace objects, each with a `type` from
-  the two vendored bundles: `scatter`, `bar`, `pie`, `histogram`, `box`, `heatmap` (the 2D bundle, the default) and
-  `scatter3d`, `surface`, `mesh3d` (the 3D bundle, loaded only for a dashboard that uses one — D63); `layout` and
-  Plotly's own `config` are objects. Nothing else at the top level. Deeper attributes are judged against the
-  vendored 4.1.1 plot-schema (reduced to the nine supported traces' attribute trees, plus layout and config —
-  §3.4): an unknown attribute, a wrong-typed value and an unsupported trace are refused
-  `visualization.validation.config_schema_invalid` naming the path. A binding placeholder (`$.x`, §2.1.1) is the
-  substitution grammar, not a value; the save-time walk accepts it where a leaf is expected.
+- **`chart`** — the chart document v1 (`renderer.version` `"1"`; #860, design record 2026-11-06 §4). Its contract is
+  the JSON Schema the product serves, public and unauthenticated:
+  `GET /schemas/chart/1/bar.schema.json`, which `allOf`s
+  `/schemas/chart/1/skeleton.schema.json` ([Auth §8.3](auth.md)). The served
+  bytes ARE the save path's schema; where this text and the schema disagree, the schema wins. `config` is one family's
+  configuration; v1 has the bar family:
+  `{title?: {text, subtitle?}, mark: {type: "bar", labels?: "none" | "values"}, encoding: {x, y, color?}}`. One of
+  `x`/`y` is the band — `type` `nominal`, `ordinal` or `temporal`, `sort` required (`ascending`, `descending`, by the
+  category's total `y`/`-y`/`x`/`-x`, `null` for input order, or an explicit list) — and the other the value —
+  `type: "quantitative"`, `aggregate` required (`sum`, `mean`, `min`, `max`, or `count`, which takes no field).
+  `y` quantitative draws vertical bars, `x` quantitative horizontal ones. `color` names the series column, and then
+  the value's `stack` is required: `"zero"` stacked, `"normalize"` (shares; `percent` format) or `null` grouped.
+  An axis or legend `title` absent is the field name (the value axis: `Sum of amount`, `Count`), `null` is no title.
+  Numbers take named formats only — `integer`, `decimal(n)` (n 0–6), `percent`, `compact`, `currency(XXX)` — and a
+  temporal band's `format` is `date`, `month`, `year` or `datetime`, labelled in UTC. Every person-facing string is
+  plain text: no control characters, at most 200 characters, `<` and `>` drawn as text. The objects are closed: no
+  theme, colour, font, size, URL or library option — the host's tokens style the chart (§6.3).
+
+  The save judges a chart in three layers, in order; a document that fails one is not judged by the next. Each
+  refusal is `visualization.validation.config_schema_invalid` with `details.renderer` `chart`, and its message never
+  echoes document text — the failure's `path` says where.
+  1. **The schema** — `details.reason` `schema`, with the failing `keyword` and its JSON `pointer`.
+  2. **The save rules** over the document and the contract the chart reads (the pinned transform's output, else the
+     one input's columns) — `details.reason` is the code in the table below.
+  3. **The declared library's support table** — Plotly's, for the product's pages: a meaning field the library cannot
+     draw is refused `chart.unsupported.<field>`; a presentation field it draws only approximately is accepted with a
+     warning `{code: "chart.degraded.<field>", path, library}`. The write response — REST and the MCP tools, create
+     and update — always carries `warnings`, `[]` when clean; warnings are recomputed on every save and never stored.
+     Plotly draws every v1 field directly, so today this layer refuses and warns on nothing.
+
+  | `details.reason` | Layer | When |
+  |---|---|---|
+  | `schema` | schema | the document fails the served schema (`keyword`, `pointer`) |
+  | `chart.inputs.cardinality` | save rules (also the schema) | no transform and not exactly one input |
+  | `chart.transform.output_unknown` | save rules | a transform whose output contract is not known |
+  | `chart.field.unknown` / `chart.field.binary` / `chart.field.null_type` | save rules | an encoded field that is not a column / is BINARY / is NULL-typed |
+  | `chart.measure.not_numeric` | save rules | a value field on a non-numeric column |
+  | `chart.category.type_mismatch` | save rules | a `temporal` band on a column that is not DATE or TIMESTAMP |
+  | `chart.category.nullable` / `chart.color.nullable` | save rules | a nullable band / series column |
+  | `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | save rules | a `scale.domain` on a normalized stack / not increasing or without zero |
+  | `chart.format.normalize_percent` / `chart.format.currency_unknown` | save rules | a normalized stack whose format is not `percent` / an unknown currency code |
+  | `chart.bindings.mismatch` | save rules | `bindings` present and not the derived map |
+  | `chart.unsupported.<field>` | library support | a meaning field the declared library cannot draw |
+
+  The retired `plotly` kind (a native Plotly figure, D12) is refused `visualization.validation.renderer_unsupported`
+  with a message naming `chart`; Plotly stays as the library the product's pages draw charts with (§6.4).
 - **`table`** — `columns`: a non-empty array (at most 64) of `{label, values, format?, align?}` — `label` a
   non-blank string of at most 120 characters, `values` the placeholder a binding fills, `format` one of `text`,
   `number`, `integer`, `percent`, `date`, `datetime`, `align` one of `left`, `center`, `right`; `page_size` an
@@ -118,8 +163,9 @@ the author puts a placeholder there (`"x": "$.x"` above) — so the runtime's su
 
 Each case has a unique non-blank `name`, `fixtures` with rows for EVERY input — each row an object of the input's
 columns, every value a scalar, no null in a non-nullable column — and at least one assertion from a closed
-vocabulary ([Enumerations §32](enums.md)): `rendered`, `trace_count` (`equals`), `no_console_errors`,
-`text_visible` (`text`), `no_data`, `value_visible` (`text`). An unrunnable case is
+vocabulary ([Enumerations §32](enums.md)): `rendered`, `mark_count` (`equals` — a chart's drawn marks, the distinct
+category × series cells with a non-null value), `no_console_errors`, `text_visible` (`text`), `no_data`,
+`value_visible` (`text`). An unrunnable case is
 `visualization.validation.test_case_invalid`. Fixture VALUES are judged by the transform engine's type gate when
 the case runs; a `DECIMAL` is a JSON number on the wire (type-system §3), so write `10.5`, not `"10.5"`.
 
@@ -204,8 +250,8 @@ versions and counts.
 
 In this order, in ONE transaction for the last three steps: the DRAFT declares at least one test case
 (`visualization.release.tests_missing`); the §2.1 rules pass against the pin as it is now; the transform pin is
-RELEASED — or a DRAFT released with the visualization when the caller consents (`release_pinned_templates`, the
-cascade pipelines use for templates), otherwise `visualization.release.dependency_not_released` naming the pin; the
+RELEASED — or a DRAFT released with the visualization when the caller's release plan selects it ([Versioning §5.3](versioning.md#53-release-lock);
+since #876 a bare `release_pinned_templates` is refused 428 `visualization.release.plan_required`), otherwise `visualization.release.dependency_not_released` naming the pin; the
 release evidence passes — the agent's GREEN run for this exact content and the server's mechanical check (D56;
 `visualization.release.tests_stale`, `visualization.release.tests_red`, `visualization.release.mechanical_failed`).
 The gate is installed (#352, §3.4): in the release's one transaction it re-reads the exact DRAFT under a row
@@ -229,11 +275,12 @@ parameter set a dashboard pins `parameter.in_use`, a transform template a visual
 ### 3.2 Releasing a dashboard
 
 The §2.2 rules pass against the dependencies' current state; the pinned set version is RELEASED; every pinned
-visualization version is RELEASED — or, when the caller consents (`release_pinned_visualizations`, D61), a DRAFT pin
-is released through the visualization's own release (§3.1, its gate included) in the dashboard's transaction, the
+visualization version is RELEASED — or, when the caller's release plan selects it (D61; since #876 a bare
+`release_pinned_visualizations` is refused 428 `dashboard.release.plan_required`), a DRAFT pin is released through the
+visualization's own release (§3.1, its gate included) in the dashboard's transaction, the
 dashboard's flip last, so a stale hash rolls every cascaded release back. Anything not released is
-`dashboard.release.dependency_not_released`, `details.dependencies_not_released` listing each. The consent does not
-reach a visualization's own draft transform pin, which needs that visualization's consent.
+`dashboard.release.dependency_not_released`, `details.dependencies_not_released` listing each. Each DRAFT the plan
+selects, anywhere in the closure, is released through its own family's release, gate included.
 
 ### 3.3 Export and import
 
@@ -304,26 +351,27 @@ the preview page, the upload and the two tools — is §3.4.1 (#353).
   each ≤ 120 characters) and is the agent's REPORT, never a server measurement. Unknown or duplicate case names
   refuse; an omitted case lands the run `INCOMPLETE`; any `red` verdict — or a mechanical failure — lands `RED`;
   GREEN requires every case green AND the mechanical check passing at submit.
-- **The mechanical check** (§11.3, D56 (b)) is server-run, no browser, sub-second (measured: one case, 1,000
-  fixture rows through the deep schema, ~60 ms): the renderer's schema (for Plotly the reduced vendored
-  4.1.1 plot-schema — unknown attributes, wrong types and unsupported traces refused with the path), every
-  binding's resolution and renderer-specific type rules, every case's fixtures through the REAL bounded evaluator (a DRAFT
+- **The mechanical check** (§11.3, D56 (b)) is server-run, no browser, sub-second: the renderer's schema (for a
+  `chart` the served v1 JSON Schema, the save's first layer re-run over the stored body — §2.1.2), every binding's
+  resolution and renderer-specific type rules (a chart's bindings are field to field, so only the contract check
+  runs; its field types are the save rules'), every case's fixtures through the REAL bounded evaluator (a DRAFT
   transform pin is valid here and in an explicitly selected draft dashboard; published runtime requires RELEASED pins), every projected bound
   column present in every row, with explicit null accepted only when its output contract column is nullable,
-  and static assertion feasibility (`trace_count` against `config.data.length`,
-  `no_data` against zero produced rows, `text_visible`/`value_visible` strings present in the configuration or
-  the bound values). Bound strings and INTEGER/DECIMAL values participate by their existing scalar text
-  (for example, `42` and `10.5`), using substring matching without numeric normalization. Locale, currency,
-  percent and rounded display text still need the agent's visual check in the preview. The rendered-state
-  check records `not_available` today — a headless render check is a later
-  lane, and nothing here claims a browser saw anything. The report is stored on the run and RE-RUN at release.
-  Plotly numeric leaves (`y`, `z`, `values`, `size`, `lat`, `lon`, `open`, `high`, `low`, `close`,
-  `weight`, including indexed leaves) accept INTEGER/DECIMAL; BIGINTEGER/BIGDECIMAL string wire values
-  remain refused there. Other Plotly leaves accept any scalar type. Table `columns[n].values` accepts
-  every canonical scalar type, including STRING, BOOLEAN, dates and BIG wire strings. KPI `value` and
-  `comparison.value` retain their scalar compatibility, including BIG wire strings; formatting feasibility
-  still requires visual evidence. For nullable Plotly y/z columns, present nulls remain gaps rather than
-  zeros. An absent bound key is `binding_unbound` even when nullable; a present nonnullable null is
+  and static assertion feasibility. **For a `chart`** it builds the chart's model over the case's post-transform
+  rows (the runtime's aggregation, design record 2026-11-06 §5.1): `mark_count` is judged against the model's drawn
+  cells — the distinct band × series pairs with a non-null aggregate — and `no_data` against an empty model (no
+  rows, or every aggregate null), both disprovable; `text_visible` is PROVEN by a configuration string or one of the
+  model's texts (a category, a series, a title) and otherwise listed as `unjudged` on the report — never a failure,
+  because only the browser sees a formatted label. **For `table` and `kpi`:** `no_data` against zero produced
+  rows, `text_visible`/`value_visible` strings present in the configuration or the bound values; bound strings
+  and INTEGER/DECIMAL values participate by their existing scalar text (for example, `42` and `10.5`), using
+  substring matching without numeric normalization. Locale, currency, percent and rounded display text still need
+  the agent's visual check in the preview. The rendered-state check records `not_available` today — a headless
+  render check is a later lane, and nothing here claims a browser saw anything. The report is stored on the run
+  and RE-RUN at release. Table `columns[n].values` accepts every canonical scalar type, including STRING, BOOLEAN,
+  dates and BIG wire strings. KPI `value` and `comparison.value` retain their scalar compatibility, including BIG
+  wire strings; formatting feasibility still requires visual evidence. A chart's null value is a gap, never a
+  zero. An absent bound key is `binding_unbound` even when nullable; a present nonnullable null is
   `test_case_invalid`. Null supplies no assertion text (including the literal `"null"`). Evaluator refusals
   retain their own code and case path, and the report keeps its existing failure bound.
 - **At a successful submission the server mints a SECOND, separate capability** for the screenshot upload —
@@ -478,10 +526,14 @@ caller's `pipeline.execute`, the set is evaluated without `parameter_set.evaluat
 - **Sources are read-only.** Every source pins a live pipeline that passes the read-only rule (D38),
   transitively through its child pipelines. It is checked at save, at release, at every configuration read AND at
   every refresh and against every exact loaded child body immediately before execution; a pin that stops holding is `dashboard.runtime.dependency_missing` (409), never a run.
-  The rule is declarative: it admits a pipeline by its nodes' declared types, output targets and sources. It does
-  not run the source's statements on a read-only connection or transaction. Database-enforced read-only is
-  [#463](https://github.com/msabiransari/datapipelines/issues/463); this matters most for a draft preview, whose
-  source bodies are unreviewed.
+  The rule is declarative: it admits a pipeline by its nodes' declared types, output targets and sources. At run
+  time a refresh and a draft preview alike also send a read-only request (#463): every `DQL` node of the source and
+  of its child pipelines runs its datasource statements in the per-lease read-only mode, where the database itself
+  refuses a write on the dialects marked `DATABASE` (Postgres, MySQL, SQLite), so write-shaped authored SQL — a
+  data-modifying CTE, a writing function — fails there with `pipeline.node.query_execution_failed`. On the dialects
+  marked `DECLARATIVE_ONLY` (H2, DuckDB, Oracle, MSSQL, LAKE) nothing at the connection refuses it, and the rule plus
+  a SELECT-only database user remain the guard; this matters most for a draft preview, whose source bodies are
+  unreviewed. The measured per-dialect table is [DAG Executor §8.2](dag-executor.md#82-error-code-mapping)'s.
 - **Lifecycle follows the dashboard.** A released dashboard requires RELEASED dependencies. An explicitly selected
   draft dashboard admits live DRAFT or RELEASED visualizations, parameter sets, source and nested pipelines, and
   node, selector, transform and imported templates. Missing or DISCARDED references refuse in both modes. A missing or changed pin is
@@ -499,7 +551,7 @@ it for everyone — and it writes NO stored result (§5.5).
 
 | Route | Answers |
 |---|---|
-| `GET /{id}/runtime/config` | The runtime configuration and its `configuration_id`. |
+| `GET /{id}/runtime/config` | The runtime configuration and its `configuration_id`; each `chart` occurrence carries `columns`, its encoded fields' types ([REST §23.3](rest-api.md#233-the-runtime-and-the-refresh-routes)). |
 | `POST /{id}/runtime/parameters` | The pinned set evaluated against the submitted selections. |
 | `POST /{id}/runtime/visualizations` | One refresh, as a server-sent stream. |
 | `POST /{id}/runtime/refreshes/{refresh_id}/abort` | 202; aborts a RUNNING refresh the caller owns. |
@@ -524,7 +576,9 @@ nested pipeline bodies, node/selector/transform templates and their transitive i
 changes the identity. Every later call sends it; a mismatch
 is `dashboard.runtime.configuration_stale` (409) and the client reloads. The answer carries the layout, each
 occurrence's renderer, configuration and `bindings` (a configuration path to a column, filled later from
-`visualization_data`), the groups, actions, controls, scopes and parameter-state overrides, the resolved refresh
+`visualization_data`), a `chart` occurrence's `columns` (`{field: LogicalType}` for every encoded field, read from the
+contract the save rules read: the pinned transform's output table, else the one input's columns; `{}` when that cannot
+be known — the runtime then orders categories as the reference did), the groups, actions, controls, scopes and parameter-state overrides, the resolved refresh
 deadline, and the budgets the client is held to.
 
 The client enforces `timeouts.render_seconds` independently of the source refresh: a renderer
@@ -647,6 +701,7 @@ const instance = DatapipelinesDashboard.init({
   dashboard: { id, version: "released" | 2 },  // the preview's named version (§5.2, #369)
   container: HTMLElement,
   adapter: DatapipelinesDashboard.adapters(container, { parametersContainer }),  // or the host's own §6.2 object
+  charts: { library, instance },  // the chart library the page loaded, below — beside options, not inside it
   options: { renderTimeoutMs, onNotification },
 });
 instance.ready   // Promise — resolves after the bootstrap barrier, rejects with the failing step
@@ -662,6 +717,24 @@ version attribute unless the URL named one) — or, since #369, a positive INTEG
 view is looking at (§5.2; the server refuses a version the caller may not see, and a `dashboard` key never names one). Anything else is refused with `init.version_unsupported`. Re-initialising
 a container that already mounts an instance throws `DashboardAlreadyMounted`; after `dispose()` the
 container is unmarked and a fresh `init` is legitimate.
+
+**`charts`** — a key of `init`'s argument beside `options` — declares the chart library the page draws `chart` occurrences with (#860, design record
+2026-11-06 §5.2): `{ library, instance }`. `library` is one of the eight chart library identities — `plotly`,
+`echarts`, `chartjs`, `apexcharts`, `vegalite`, `highcharts`, `amcharts5`, `recharts` — and `instance` is that
+library's entry value as the library documents it, an object or a constructor function. The product's pages pass
+`{ library: "plotly", instance: window.Plotly }`; the runtime never looks a library up on `window` itself, and it only
+calls the instance to draw, resize and purge (Plotly: `react`, `Plots.resize`, `purge`) — never serializes or evaluates
+it. A board without a `chart` occurrence needs no `charts`. `init` refuses a malformed `charts` synchronously with
+`init.invalid`: not an object, the chart kind (`datapipelines-dashboard-chart.js`) not loaded before `init`, a
+`library` outside the eight (`details.libraries` lists them), or an `instance` that is neither an object nor a
+function; the message never echoes the host's value. A declared library still needs its converter loaded (the product
+ships Plotly's, `datapipelines-dashboard-plotly.js`, for the bar family); §6.2's refusals name what is missing.
+
+While drawing, a chart publishes render warnings — `{ scope: "render", severity: "warning", code, name, refreshId }`,
+each code once per occurrence per refresh, superseded by the next refresh's frame: `chart.rule.no-data` (no rows to
+draw; the card shows its empty state), `chart.rule.null-category` (rows with a null category or series were left out)
+and `chart.degraded.<field>` (the declared library draws that field only approximately — the same table the save's
+`warnings` read, §2.1.2). A warning carries its code and a fixed sentence, never document text or a bound value.
 
 Bootstrap is the four-step barrier, each step awaited: validate the adapter and the renderer/bundle
 pair → fetch the configuration → mount the layout → fetch and render the parameter state (an explicit
@@ -681,11 +754,12 @@ of them, and a no-op is not conformant (the conformance suite drives real behavi
 | `renderParameters(state[, { restore }]) → Promise` | render the FULL server state, hidden and disabled included | awaited INSIDE the parameter gate — the lock releases only after the render resolves; `reset()` passes `{ restore: true }` (#497 — the applied state again, not a new answer; an adapter may ignore it); the composite mounts the pane into `parametersContainer` when the factory's second argument names one (#473 — the first-party page's filters panel BESIDE the chart container, so no adapter's mount scope claims it), APPENDED after the host's own head controls there (#496 — the board drawer's Close stays first), else into the layout container as before (its first child, before the grid); a failing parameter's row is the design system's field-error voice — the sentence first, the catalogued code after it as a muted mono chip (`data-dp-code` carries the codes; composed with createElement/textNode, never a server string as markup) and the row's design-system control wearing the vendored error border while in error (#498) — and a checkbox or radio group is a two-column grid whose every option's box and label share one centred row, the caption and the note/error rows full-width (#499) |
 | `readSelections() → {name: value}` | return every current committed value, in the wire's type | merged over the server state at each evaluation; hidden and disabled values included (D23) |
 | `onEdit/onCommit/onAction(callback)` | register the interaction callbacks | every callback carries `{instanceId, name, type, refreshId}` |
-| `renderData(occurrence, refreshId, rows, bindings) → Promise<'rendered'\|'no-data'>` | render native data | deadline-bounded; a late acknowledgment is discarded |
+| `renderData(occurrenceRef, rows, bindings) → Promise<'rendered'\|'no-data'>` | render native data | the runtime calls the MOUNTED HANDLE's `renderData` (the one `mountVisualization` returned) with exactly these three arguments: `occurrenceRef` = `{name, type: "visualization", occurrence}`, `rows` the data frame's row count, `bindings` its columnar `{path: [values]}` (`{}` when absent) (#852); deadline-bounded; a late acknowledgment is discarded; the adapter-level function has the same three arguments |
 | `renderStatus(occurrence, {state, stale, reason})` | show the state accessibly, colour never alone | a throwing hook is isolated and reported |
 | `notify(notification)` | show the structured notification | deduplicated per outcome; never a raw server message |
 | `resize()`, `dispose()` | the lifecycle | disposal invalidates every pending callback |
 | `renderActionControls(controls)` **optional** | render explicit action buttons; emit their action through `onAction` | called after layout, before parameter state, with resolved `{ name, label, action, scope, targets }`; absent hooks keep the twelve required functions |
+| `renderActionAvailability(availability)` **optional** | show whether an action control may be pressed | called right after `renderActionControls` and on every change of the action gate, with `{ available, reason }` — `reason` is `null`, `actions.locked`, `actions.not_ready` or `parameters.invalid`, the code the gate would refuse a press with at that moment; called only when the reason changed; a throwing hook is isolated and reported once as `actions.availability_failed`; absent hooks keep the twelve required functions (#548) |
 
 The optional `renderActionControls(controls)` hook (#543) receives explicit `action_controls`
 WITHOUT `parameter`, after `mountLayout` and before the parameter-state step. Each entry is
@@ -697,17 +771,54 @@ with `data-dp-action-control` naming the control and `data-dp-action` naming its
 is the authored label (falling back to the control name), assigned as text only. A press emits
 `onAction({ action, name, type: "action_control" })`, routed through the existing refresh gate
 with the action's scope and targets. The pane mounts even without a parameter set, and every
-parameter re-render restores the buttons after the rows. Buttons remain pressable while the
-gate is closed: refusals speak through `actions.locked`, `parameters.invalid` or
-`actions.not_ready` notifications in the dock; disabled-state presentation is tracked in #548.
+parameter re-render restores the buttons after the rows.
+
+The buttons follow the action gate (#548) through the optional `renderActionAvailability`
+hook: the runtime computes the gate's refusal in ONE place, so what a button shows and what a
+press is told cannot diverge. While the gate is closed every button carries
+`aria-disabled="true"` (the attribute, never the `disabled` property, so a person who has just
+Tabbed onto Apply keeps focus) and `aria-describedby` names a `p.dp-dashboard-actions-note` in
+the actions row holding one fixed sentence: "Applying is paused while the parameters are
+checked." (`actions.locked`), "The dashboard is still loading." (`actions.not_ready`), or "Fix
+the parameter errors to apply." (`parameters.invalid`). Only the last, the state the person can
+fix, is visible, muted under the buttons; the transient two are described for assistive
+technology and visually hidden (the status chip's clip pattern, never `display: none`). An
+available button carries neither attribute and the note is empty. A press while unavailable —
+the design system already stops a mouse; a keyboard Enter/Space still dispatches `click` — calls
+nothing and stops the click there, so the board's filters-panel listener neither unfolds the
+activity dock nor counts a gesture. The runtime gate stays authoritative: a programmatic
+`refresh` or `reset`, and any race between a press and a gate change, still refuse with
+`actions.locked`, `actions.not_ready` or `parameters.invalid`. An in-flight refresh does NOT close
+the gate: Apply stays available while one runs, and a second refresh claims its occurrences
+newest-wins (the server, not the gate, refuses an overloaded workspace with
+`dashboard.refresh.saturated`, §5.5).
 
 The first-party composite (`DatapipelinesDashboard.adapters(container)`) implements all twelve over a
 CSS grid, text-only parameter controls and the three shipped renderers, which register themselves at
-load: `plotly` major `4` (`datapipelines-dashboard-plotly.js`), `table` major `1` and `kpi` major `1`
-(the table and kpi versions are the seeded fixtures' wire value). A host registers its own kind the
-same way (`DatapipelinesDashboard.registerRenderer({kind, version, create})`) before `init`; the
-renderer `kind` and `version` on each occurrence's `renderer` are matched against the registrations at
-bootstrap, before any execution.
+load: `chart` major `1` (`datapipelines-dashboard-chart.js`, the neutral chart document), `table` major `1` and
+`kpi` major `1` (the table and kpi versions are the seeded fixtures' wire value). The composite's own
+`renderData(occurrenceRef, rows, bindings)` forwards the same three arguments to the occurrence's mounted handle; the
+runtime itself calls the handle directly (#852). The chart kind draws through a
+library CONVERTER, registered with it the same way at load —
+`DatapipelinesDashboardChart.registerConverter({library, families, draw, resize, dispose})`; the product ships one,
+Plotly's bar family (`datapipelines-dashboard-plotly.js`, loaded after the chart kind). A host registers its own kind
+(`DatapipelinesDashboard.registerRenderer({kind, version, create})`) or converter before `init`; the renderer `kind`
+and `version` on each occurrence's `renderer` are matched against the registrations at bootstrap, before any execution.
+
+**Mount refusals.** Each fails the WHOLE board before anything executes: `init.invalid` throws from `init` itself; the
+others reject `ready` at the renderer judgement, after the configuration is fetched and before the layout mounts — no
+card is drawn and no refresh is sent. The six bootstrap refusals are also published as a `bootstrap` notification
+carrying the code (§6.1); `init.invalid` is the thrown error alone. None echoes document text.
+
+| Code | When | `details` |
+|---|---|---|
+| `init.invalid` | `init` was called without its required options (`server`, `dashboard`, a container element), with malformed credentials or fixtures, or with a malformed `charts` (§6.1) | `{libraries}` for an unknown chart library, else none |
+| `renderer.unsupported` | an occurrence names no renderer, or a `kind` no loaded script registered | `{kind, name}` (`{name}` without a renderer) |
+| `renderer.version_mismatch` | the occurrence's renderer major is not the one its kind registered | `{kind, name}` |
+| `renderer.two_bundles` | the page declares more than one Plotly bundle (`script[data-dp-plotly-bundle]`, §6.4) | none |
+| `renderer.bundle_insufficient` | the board needs the 3D bundle and the page declared the 2D one (no v1 kind needs 3D) | `{name}` |
+| `chart.library_undeclared` | a `chart` occurrence, and `init` was given no `charts` | `{name}` |
+| `chart.converter_missing` | no converter is loaded for the declared library and the occurrence's chart family | `{library, family, name}` |
 
 **The parameter state the adapter receives is the writer's** (`EvaluateResponseJson` — rest-api
 §21.3): every parameter is a FLAT object — the stored definition's fields (`name`, `label`, `type`,
@@ -734,23 +845,35 @@ renderer shows the resolved value" for this case only).
 
 ### 6.3 The renderers
 
-- **Plotly.** `renderData` substitutes the resolved bindings into a CLONE of the stored configuration
-  (the stored bytes are never mutated and no structure is ever invented — a path that resolves nowhere
-  is skipped whole; bindings were validated to resolve at save) and calls `Plotly.react`. Bound
-  STRINGS are escaped (`&`, `<`, `>`) before Plotly sees them: Plotly renders a subset of HTML in
-  text, hover and titles, and a data cell is DATA, never markup — an `<img onerror>` in a column
-  renders as text. The theme reaches the chart at EACH render (D25): the adapter resolves the app's
-  `--chart-*` tokens (app.css, bridged off the theme) through a probe element and maps them onto
-  `paper_bgcolor`, `plot_bgcolor`, the grid, the font and the categorical `colorway`.
-  `presentation.tokens` is an OPEN map: `series: "categorical"` is the one name the adapter knows;
-  names it does not know are ignored. **The size defaults (#386):** Plotly's own margins (about 100 px
-  top, 80 px elsewhere) would consume a 2-row slot (176 px), so the adapter starts every figure from a
-  compact frame — `margin` `{l: 8, r: 8, t: 8, b: 8, pad: 0}`, `t: 36` when the figure has a title —
-  and sets `automargin: true` on `xaxis`, `yaxis` and every numbered axis the layout declares, so
-  each axis's tick labels and title take what they need and no more. **Two precedences, opposite:**
-  the size defaults sit UNDER the author — a stored `layout.margin` key or a stored `automargin`
-  (`false` included) wins, key by key; the theme's colours sit OVER the author — a stored
-  `paper_bgcolor` or grid colour loses to the token at render. Neither touches the other's keys.
+- **Chart** (`datapipelines-dashboard-chart.js`, #860, design record 2026-11-06 §5.2). ONE adapter for the chart
+  document: `renderData` receives the runtime's columnar delivery `{field: [values]}`, builds the chart's model in the
+  library-neutral core — the band order by the column's type (`columns`, §5.3: exact decimal order for
+  BIGINTEGER/BIGDECIMAL, the UTC digit key for `temporal`), the aggregation (BIG* exact; `mean` rounded half-even at the
+  inputs' scale + 6), the stack, the ticks, the named number formats, the UTC labels and the 32-code-point label cut —
+  and hands it to the declared library's CONVERTER. The server's mechanical check builds the same model in Kotlin, and
+  a parity test runs both over one fixture set. Rows with a null category or series are left out with the
+  `chart.rule.null-category` warning; no rows draw no marks with `chart.rule.no-data` and the card's empty state (§6.1).
+  The occurrence's `description`, when set, is the chart's accessible description (`role="img"` and `aria-label`,
+  set with `setAttribute`). The card heading names the chart (its `display_name`; a chart has no `presentation`),
+  so a `config.title` whose text repeats it exactly (trimmed) and carries no subtitle is not drawn (#473) — a card
+  never prints the same words twice; a title that says more, or carries a subtitle, is drawn whole. The theme reaches the chart at EACH render (D25): the adapter resolves the app's
+  `--chart-*` tokens (canvas, plot, grid, ink, muted, six series colours; app.css, bridged off the theme) and
+  `--font-sans` through a fresh probe element per declared property, and the document's `lang` as the locale; a chart
+  document carries no theme of its own, so nothing in it competes with the tokens.
+- **The Plotly converter** (`datapipelines-dashboard-plotly.js`, the bar family). A pure conversion of the model to
+  Plotly's `{data, layout, config}` — every string that reaches a Plotly text sink (trace names, tick text, hover
+  text, titles, bar text) is escaped (`&`, `<`, `>`) first, because Plotly renders a subset of HTML there and a data
+  cell is DATA, never markup: an `<img onerror>` in a column renders as text. Its host side calls the declared
+  instance ONLY through `react`, `Plots.resize` and `purge`. **The size frame (#386):** the conversion's margins are
+  the reference port's, sized for a 900 × 600 figure, so a 2-row slot (176 px) would keep a sliver of plot; `draw`
+  therefore lays every figure over a compact frame — `margin` `{l: 8, r: 8, t: 8, b: 8, pad: 0}`, `t: 36` with a
+  title and one more line (18 px) with a subtitle — with `automargin: true` on both axes, so each axis's tick labels
+  and title take what they need and no more. A value label drawn past the plotting rectangle takes no automargin, so
+  horizontal outside labels keep the conversion's right margin (sized to the widest label) and vertical ones add one
+  label line on top. An axis whose title is `null` is drawn with no title at all: Plotly reserves a title line for an
+  empty string. #386's half floor holds for a chart whose axes carry `title: null`, the shape a 2-row slot is for; a
+  default chart with both axis titles keeps at least 40% of a 2-row slot for its plot, each title being a second line
+  beside its ticks (#870; both floors measured by `DashboardGridRowUnitBrowserTest.kt`).
 - **Table.** `columns[]` (`label`, `values` — the path the binding fills, `format`, `align`),
   `page_size` capping the rows. Every cell is `textContent`.
 - **KPI.** `value` (the bound path), `format` (`number|integer|percent|currency`), `unit`,
@@ -760,9 +883,11 @@ renderer shows the resolved value" for this case only).
 
 ### 6.4 The two bundles
 
-Plotly is vendored as two self-contained custom bundles (D63): `plotly-2d.min.js` (scatter, bar, pie,
-histogram, box, heatmap — the default) and `plotly-3d.min.js` (those plus scatter3d, surface, mesh3d —
-WebGL). The SERVER's `runtime/config` carries `renderer.bundle: "2d" | "3d"` derived from pinned trace types.
+Plotly — the library the product's pages draw `chart` occurrences with (§6.3), no longer a visualization kind — is
+vendored as two self-contained custom bundles (D63): `plotly-2d.min.js` (scatter, bar, pie, histogram, box,
+heatmap — the default) and `plotly-3d.min.js` (those plus scatter3d, surface, mesh3d — WebGL). The SERVER's
+`runtime/config` carries `renderer.bundle: "2d" | "3d"`; since the `plotly` kind is retired (#860) it is always
+`"2d"` — the bar family needs nothing more — and the 3D bundle stays vendored for the family that will need it.
 Standalone previews/embeds load exactly one matching bundle and declare it with `data-dp-plotly-bundle`.
 The runtime refuses two declarations, unsupported renderers, incompatible versions and a 3D config on a 2D bundle.
 Both bundles are built from the 4.1.1 tag plus the numbered source patch series `static/vendor/plotly/patches/*.patch`
@@ -910,10 +1035,12 @@ and the linked rules in both themes. The CSP collector exempts an empty-style ha
 harness provenance; a refusal from an application URL, including vendor and page-loader scripts,
 fails the browser test and retains its source location.
 A colorbar draws without an inline style: the vendored bundles carry a colorbar source patch (§6.4) under which the fill
-reset removes the `style` attribute instead of writing an empty one, and the visualization workspace (3D surface) and
-a 2D heatmap with a colorbar are CSP-clean under the strict collector, which has no exception for a vendor file.
-Since #531, a default heatmap’s `image-rendering` hint is set through the CSSOM in the original fallback order, ending
-in `pixelated`, so crisp cells render under the same CSP without a `zsmooth` fixture pin.
+reset removes the `style` attribute instead of writing an empty one. Since #531, a default heatmap’s
+`image-rendering` hint is set through the CSSOM in the original fallback order, ending in `pixelated`, so crisp cells
+render under the same CSP without a `zsmooth` fixture pin. Both patches stay in the bundles' pinned bytes; since the
+`plotly` kind is retired (#860) no v1 chart family draws a colorbar or a heatmap, so the browser suite no longer seeds
+the 3D surface and heatmap figures that proved them CSP-clean under the strict collector — the chart family that
+draws one again carries that proof.
 
 ## 7. The first-party pages (L3b)
 
@@ -957,13 +1084,16 @@ none named and no admitted draft is NOT an error (#409): the choose-a-version st
 heading shows the dashboard's name and offers the admitted history, with the sentence saying
 there is no release yet. This remains for a caller whose lens hides the draft, or a dashboard
 whose versions are all discarded; #537 supersedes #409's choice only for an admitted draft.
-The five tabs:
+The six tabs:
 
 - **Board** — the Board tab is a full-height column: `.dp-ws-root` flexes and its panes shrink into it,
   so `<main>` does not scroll and the activity dock stays visible (#612). The board page, reorganised
   by #473: the ONE bundle the server chose for the VIEWED
-  version declared on its script tag (§6.4; the same read the client's bootstrap performs),
-  the glue (`static/js/dashboards-page.js`) booting the runtime with the FILTERS panel as the
+  version declared on its script tag (§6.4; the same read the client's bootstrap performs), then the runtime, the
+  chart kind, its Plotly converter and the table and KPI renderers, in that order (#860),
+  the glue (`static/js/dashboards-page.js`) booting the runtime with `charts: {library: "plotly", instance:
+  window.Plotly}` (§6.1; omitted when no bundle loaded, so a chart occurrence is refused `chart.library_undeclared`
+  rather than drawn by a guess) and the FILTERS panel as the
   adapter's `parametersContainer` (§6.2 — the parameters pane lives BESIDE the chart container,
   never inside it, so no adapter's mount scope claims it and §2.2's breakpoint measures the
   board beside it; when the board region is 820 px or narrower the panel is a drawer announced by the toolbar's Filters
@@ -994,7 +1124,7 @@ The five tabs:
   Shift ±64px, Home/End, double-click back to the 200px default), floor 120px, ceiling the
   board's 160px, `--dp-dock-pane-h` on `<html>` remembered under `dp.pane.board-dock` and
   restored before first paint, so it survives a tab switch, Back and reload; collapse hides the
-  grip and expand restores the height. The dock starts collapsed when its 200px default would leave the board row below `--dp-board-auto-collapse-below` (320px: the 160px floor plus a 160px drag margin, the editor’s threshold), unless a remembered `dp.pane.board-dock` height says the person chose one. Until the first dock gesture the default follows the board page as it resizes; a tab click expands the dock, and a tab click, the collapse button or a splitter resize/reset makes the state the person’s. An explicit board action also ends the default and opens an automatically collapsed dock to show its outcome; a dock the person collapsed stays collapsed. Both docks use app.css’s shared handle class and cursor locks (#800/#801). Arrivals use prepared main-content navigation (§6.4,
+  grip and expand restores the height. The toggle names its action: it reads Expand while the dock is collapsed and Collapse while it is open, with `aria-expanded` matching, both set in `setCollapsed` (`dashboards-page.js`), so the automatic default, a tab click, a board action and the button itself always agree (#842). The dock starts collapsed when its 200px default would leave the board row below `--dp-board-auto-collapse-below` (320px: the 160px floor plus a 160px drag margin, the editor’s threshold), unless a remembered `dp.pane.board-dock` height says the person chose one. Until the first dock gesture the default follows the board page as it resizes; a tab click expands the dock, and a tab click, the collapse button or a splitter resize/reset makes the state the person’s. An explicit board action also ends the default and opens an automatically collapsed dock to show its outcome; a dock the person collapsed stays collapsed. Both docks use app.css’s shared handle class and cursor locks (#800/#801). Arrivals use prepared main-content navigation (§6.4,
   #460): the board mounts per arrival without a document load. Disposal stays the
   `htmx:beforeHistorySave` hook, which also runs the mount's teardown — the drawer's Escape and
   resize-close listeners, the tab-leave and filters observers — so a board revisited in-shell
@@ -1007,6 +1137,9 @@ The five tabs:
   Versions tab.
 - **Refreshes** — the refreshes listing full width (the same partial route; since #473 the board
   pane's beside-board copy lives in the Board tab's activity dock's History tab instead).
+- **Dependencies** (#876) — what the viewed version pins, transitively (its parameter set, source pipelines and
+  visualizations, then their templates, imports and datasources), as a graph and a list drawn by the shared
+  Dependencies pane ([ui-screens §4.21](ui-screens.md)); the Overview tab lists the direct pins only.
 - **Versions** — the admitted history (newest first, served/draft/discarded markers; created and
   released relative in the cell, absolute UTC on hover — the keys page's shape, #422) and the
   lifecycle verbs' dialogs in the pipeline dialogs' shape: Release (the ONE D61 consent —
@@ -1035,7 +1168,7 @@ URL's `?tab=` moves with a pushed history entry of the workspace's own (#402,
 Back/Forward re-select the tab in page (a cached restore re-wires the strip once and shows the
 tab it left), and lazy tabs (Overview,
 Refreshes, Versions, Keys) load their fragment once, on the tab's first activation — a
-hidden tab causes no fetch. The Board pane's reveal runs the runtime instance's OWN
+hidden tab causes no fetch; the Dependencies pane reads its tree once on first activation the same way (#876). The Board pane's reveal runs the runtime instance's OWN
 `resize()`, and the composite host observer places the grid when a `?tab=versions` deep link
 reveals its 0-wide board, so a chart that booted while hidden re-fits its slot.
 Every version switch preserves the rail through prepared main-content navigation (#460, the compatible superset bundle), and
@@ -1049,7 +1182,7 @@ prints (the truth about what is on screen, "v2 · draft", never "latest release"
 display name and description) and the rail's Visualizations branch is the same lazy tree with the
 same search box. `/visualizations/{id}?version=&tab=` is the version-explicit workspace on
 `visualization.read` alone — a DISCARDED or lens-hidden version is the family's 404, a malformed
-version a 400 that never echoes it. Its five tabs ([ui-screens §4.24](ui-screens.md)):
+version a 400 that never echoes it. Its six tabs ([ui-screens §4.24](ui-screens.md)):
 
 - **Preview (test fixtures)** — the default: the viewed version's saved test cases in the
   runtime's FIXTURE mode (§3.4.1's capability page's mount and builder — `PreviewViews.page` writes
@@ -1061,12 +1194,18 @@ version a 400 that never echoes it. Its five tabs ([ui-screens §4.24](ui-screen
   run's screenshot through the existing screenshot route, else "no screenshot".
 - **Used by** — the dashboard versions pinning this visualization, read through the caller's
   dashboard lens, each linking its dashboard's workspace.
+- **Dependencies** (#876) — the opposite direction: what the viewed version pins (its transform block's template
+  and that template's imports), drawn by the shared Dependencies pane; a chart with no transform says
+  "No dependencies".
 - **Versions** — the history (created and released relative in the cell, absolute UTC on hover,
   #422) and the lifecycle verbs' dialogs: Release (the refusals before the
   button, in the service's order — §3.1's test case and transform pin, then §3.4's evidence gate —
-  and the ONE `release_pinned_templates` consent for a DRAFT transform pin, D61; the form posts
+  and, since #876, the shared release plan — one checked row per DRAFT dependency, posted with its
+  `tree_hash` ([UI Screens §4.3d](ui-screens.md)), D61; the form posts
   `body_hash`, the hash of the draft the dialog read, and the release is made AT it — a draft
-  changed after the dialog opened is refused `visualization.version.conflict`, except that §3.4's
+  changed after the dialog opened is refused 409 with nothing released: since #876 the plan's
+  `tree_hash` covers the root's draft, so the code is `visualization.release.plan_conflict`
+  (`visualization.version.conflict` before #876), except that §3.4's
   evidence gate judges the CURRENT body and answers first when the new draft has no green run,
   #416), Purge draft,
   Discard (naming the D60 fallback), Restore, Purge version, Switch, Purge visualization (typed
@@ -1090,6 +1229,14 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-12 | v0.73 | #876 shared release dialog, alias flip — renumbered at final sync after #548's v0.71 | **§3.1, §3.2:** a DRAFT transform pin or visualization pin is released with its root when the caller's release plan selects it; a bare `release_pinned_templates` / `release_pinned_visualizations` is refused 428 `<family>.release.plan_required` ([Versioning §5.3](versioning.md#53-release-lock)), and the sentence that the dashboard's consent never reaches a visualization's transform pin leaves (the plan covers the closure). **§7:** the visualization Release dialog's ONE consent checkbox becomes the shared release plan, and a draft changed under an open dialog is refused `visualization.release.plan_conflict`, not `visualization.version.conflict`. |
+| 2026-11-12 | v0.72 | #876 the Dependencies tabs — renumbered at final sync after #548's v0.71 | **§7:** the dashboards workspace gains a sixth tab and the visualizations workspace a sixth, **Dependencies** — the viewed version's exact pins, transitively, drawn by the shared Dependencies pane (UI Screens §4.21/§4.24 v1.234); the board itself is unchanged. |
+| 2026-11-12 | v0.71 | 548 (#548) | **§6.2:** a table row for the optional `renderActionAvailability(availability)` hook — called right after `renderActionControls` and on every change of the action gate with `{ available, reason }`, the reason the gate's own refusal code; and the action-controls paragraph rewritten: the composite's buttons carry `aria-disabled="true"` and an `aria-describedby` note while the gate is closed ("Applying is paused while the parameters are checked.", "The dashboard is still loading.", "Fix the parameter errors to apply." — only the last shown, the others described), an unavailable press calls nothing and stops its click, the runtime gate stays authoritative for programmatic `refresh`/`reset` and races, and an in-flight refresh does not close the gate. "Tracked in #548" is dropped. |
+| 2026-11-12 | v0.70 | 870 (#870) | **§6.3:** the chart bullet states the plot-area rule for a 2-row slot: #386's half floor holds for a chart whose axes carry `title: null`; a default chart with both axis titles keeps at least 40% (measured 79 px of 176, both themes), guarded by a new `DashboardGridRowUnitBrowserTest` case. The "about 45%" observation is replaced by the rule; no runtime, CSS or skill change. |
+| 2026-11-12 | v0.69 | 852 (#852) one `renderData` signature | **§6.2:** the `renderData` row reads `renderData(occurrenceRef, rows, bindings)` — the runtime calls the mounted handle with exactly these three (`rows` the data frame's row count, `bindings` the columnar `{path: [values]}`, `{}` when absent), and the adapter-level function has the same three arguments; the composite's forwards them to the handle (it carried a fourth, a `refreshId` no caller passed). |
+| 2026-11-12 | v0.68 | 842 (#842) | **§7:** the activity dock's toggle names its action — Expand while the dock is collapsed, Collapse while it is open — with `aria-expanded` matching; the label is set in `setCollapsed`, the one writer of the collapsed state, so the automatic short-window default, a tab click and a board action update it as the button does. Behaviour and the remembered pane height are unchanged. |
+| 2026-11-12 | v0.67 | #463 read-only execution at the connection | **§5.1** "Sources are read-only": the declarative disclaimer and the #463 pointer are replaced by what is enforced — a refresh and a draft preview send a read-only request, every DQL node of the source and its children runs in the per-lease read-only mode, the database refuses a write on the `DATABASE` dialects — and where it is not (the `DECLARATIVE_ONLY` dialects keep the rule and a SELECT-only user), pointing at the DAG Executor §8.2 table. |
+| 2026-11-08 | v0.66 | 860 (#860) the chart kind | **§2.1:** the example is a `chart` document; `renderer.kind` is `chart`, `table` or `kpi` (the retired `plotly` kind refused `renderer_unsupported`, its message naming `chart`); a chart's `bindings` are derived (`chart.bindings.mismatch` otherwise) and its `presentation` is refused. **§2.1.2:** the `chart` bullet replaces `plotly`'s: the bar family, the served schema at `/schemas/chart/1/`, the three save layers (schema, save rules, the declared library's support table with `warnings` on every write response) and the `details.reason` table. **§2.1.3:** `mark_count` replaces `trace_count`. **§3.4:** the mechanical check re-runs the chart's schema, judges `mark_count`/`no_data` over the chart model, and lists an unproven `text_visible` as `unjudged`. **§5.2/§5.3:** each `chart` occurrence of the runtime configuration carries `columns`, `{field: LogicalType}` of its encoded fields from the contract the save rules read (`{}` when unknowable). **§6.1:** `init`'s `charts = {library, instance}`, a key beside `options` — one of the eight library identities and the library's entry value; a malformed one is `init.invalid`; render warnings `chart.rule.*` / `chart.degraded.<field>`. **§6.2:** the shipped kinds are `chart` 1 (drawing through a registered converter; Plotly's bar family ships), `table` 1, `kpi` 1; the seven mount refusals, tabled. **§6.3:** the chart adapter and the Plotly converter replace the Plotly adapter — escaping in every Plotly text sink, the tokens per render, #473's duplicate-title rule, #386's size frame applied by the converter's `draw` (an axis titled `null` reserves no title line). **§6.4:** Plotly is the library, not a kind; `renderer.bundle` is always `"2d"`. **§6.6:** the colorbar and heatmap patches stay pinned; no v1 family exercises them. **§7:** the board's script order and its `charts` declaration. |
 | 2026-11-06 | v0.65 | #800/#801 board dock defaults and shared handle | **§7:** the board starts collapsed below a 320px board-if-open threshold unless a height is remembered, follows resizes until the first gesture, and expands on a tab click. Both dock grips share app.css geometry, states and cursor locks. |
 | 2026-11-05 | v0.64 | #771 a never-admissible refusal offers no Retry | **§5.5:** the board publishes the never-admissible saturated refusal with `retryable: false` and `recover: null`, its message the client runtime's own fixed sentence naming the configuration key to raise (never the error body's); a `busy` refusal keeps `retryable: true` with `recover: "retry"`. The server's code, status, `Retry-After` and `details` are unchanged. |
 | 2026-11-03 | v0.63 | #783 board dock on the shared splitter | **§7:** a tall board scrolls inside its region and the activity dock stays inside `<main>` (the page grid pins its rows; the board keeps `--dp-board-floor`, 160px); the dock's height moves from the page-local drag (96–480 clamp, stripped at every teardown) to `splitter.js`'s `board-dock` pane — floor 120, ceiling board row + pane − 160, default 200px, remembered under `dp.pane.board-dock` across tab switches, Back and reload; the teardown no longer strips it. |

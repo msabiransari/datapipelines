@@ -73,8 +73,10 @@ class ConfigValidator(
          * 44 since #785 added `LakeRules.checkLakeStorage`, `checkLakeRetention`, `checkLakeAdmission` and
          * `checkLakeBounds` (§3.36 — the managed lake, judged only when it is enabled).
          * 45 since #818 added `LakeRules.checkLakeReads` (§3.36 — the managed reads' bounds, record §10 RULING 4).
+         * 46 since #786 added `PostureRules.checkHardenedAuthoring` (§3.23 — a hardened deployment does not author).
+         * 47 since #325 added `ExecutorRules.checkLifecycleWriteCeiling` (§3.2 — the lifecycle bound under the start wait).
          */
-        internal const val CHECK_COUNT = 45
+        internal const val CHECK_COUNT = 47
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -103,9 +105,6 @@ class ConfigValidator(
 
         /** configuration.md §3.3's default. */
         private const val DEFAULT_STAGING_MAX_MEMORY_MB = 1024L
-
-        /** configuration.md §3.2's default (156, #2), read when the operator key is unset. */
-        private const val DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS = 900
 
         /** Above this share of the max heap, the per-execution budget is a promise the JVM cannot keep. */
         private const val STAGING_PRESSURE_RATIO = 0.8
@@ -137,6 +136,7 @@ class ConfigValidator(
             PostureRules.checkPostureProfileAlignment(snapshot, violations)
             PostureRules.checkHardenedPosture(snapshot, violations, warnings)
             PostureRules.checkHardenedRedisPassword(snapshot, violations)
+            PostureRules.checkHardenedAuthoring(snapshot, violations)
             checkRemovedWorkspaceKeys(snapshot, violations)
             ScriptRules.checkRemovedTransformKeys(snapshot, violations)
             checkBootstrapActorConfigured(snapshot, violations)
@@ -146,10 +146,12 @@ class ConfigValidator(
             checkLocalAuth(snapshot, violations)
             checkExecutorConcurrencyAlias(snapshot, violations, warnings)
             checkStagingBudgetPressure(snapshot, warnings)
-            checkExecutorQueryTimeoutByDialect(snapshot, violations)
+            ExecutorRules.checkExecutorQueryTimeoutByDialect(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
             // §3.1 (#488) — the Redis client bounds, their own file like the request limits.
             RedisRules.checkRedisTimeoutBounds(snapshot, violations)
+            // §3.2 (#325) — the lifecycle-write bound under the scheduler's start wait, its own file too.
+            ExecutorRules.checkLifecycleWriteCeiling(snapshot, violations)
             checkOrgSettings(snapshot, violations)
             ScriptRules.checkScriptBounds(snapshot, violations)
             // §3.30 (#194) — the parameter engine's limits, in their own file like the script bounds.
@@ -675,43 +677,6 @@ class ConfigValidator(
         }
 
         /**
-         * §7 / §3.2 (156, #2) — `node-query-timeout-max-seconds` and every entry of
-         * `node-query-timeout-seconds-by-dialect` are validated at boot, fail fast: a value an
-         * author's `settings.query_timeout_seconds` could never legally reach (because the
-         * ceiling itself is malformed or a dialect default already exceeds it) is worse
-         * discovered at the first save than at startup, in the one report every other §7
-         * violation reaches.
-         *
-         * `ExecutorProperties`'s own `init` refuses the same shapes for a DIRECTLY constructed
-         * instance (the defensive per-field pattern every key in that class already follows);
-         * this is the §7 twin that names the KEYS in the aggregated report, same relationship as
-         * [checkEndpointsTimeoutOrdering] to `EndpointsProperties.init`.
-         */
-        private fun checkExecutorQueryTimeoutByDialect(
-            snapshot: ConfigSnapshot,
-            violations: MutableList<String>,
-        ) {
-            val ceilingRaw = snapshot.executorNodeQueryTimeoutMaxSeconds?.trim()
-            val ceiling = ceilingRaw?.toIntOrNull()
-            if (ceilingRaw != null && (ceiling == null || ceiling <= 0)) {
-                violations +=
-                    "datapipelines.executor.node-query-timeout-max-seconds is '$ceilingRaw'; §3.2 requires a " +
-                    "positive integer."
-                return
-            }
-            val effectiveCeiling = ceiling ?: DEFAULT_NODE_QUERY_TIMEOUT_MAX_SECONDS
-            snapshot.executorNodeQueryTimeoutSecondsByDialect.forEach { (dialect, rawValue) ->
-                val where = "datapipelines.executor.node-query-timeout-seconds-by-dialect.$dialect"
-                val value = rawValue.trim().toIntOrNull()
-                if (value == null || value !in 1..effectiveCeiling) {
-                    violations +=
-                        "$where is '$rawValue'; §3.2 requires a positive integer no greater than " +
-                        "node-query-timeout-max-seconds ($effectiveCeiling)."
-                }
-            }
-        }
-
-        /**
          * §7 / §3.2 — the executor concurrency key rename's one-release alias (050/R2).
          *
          * `max-concurrent-executions-global` is deprecated in favour of
@@ -898,8 +863,9 @@ class ConfigValidator(
                 executorMaxConcurrentGlobal = environment.getProperty("datapipelines.executor.max-concurrent-executions-global"),
                 executorMaxConcurrentPerInstance = environment.getProperty("datapipelines.executor.max-concurrent-executions-per-instance"),
                 executorNodeQueryTimeoutMaxSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-max-seconds"),
-                executorNodeQueryTimeoutSeconds = environment.getProperty("datapipelines.executor.node-query-timeout-seconds"),
-                datasourcesRetireCeilingSeconds = environment.getProperty("datapipelines.datasources.retire-ceiling-seconds"),
+                executorLifecycleWriteTimeoutSeconds = environment.getProperty("datapipelines.executor.lifecycle-write-timeout-seconds"),
+                datasourcesManagedRetireCeilingSeconds =
+                    environment.getProperty("datapipelines.datasources.managed-retire-ceiling-seconds"),
                 executorNodeQueryTimeoutSecondsByDialect = executorNodeQueryTimeoutSecondsByDialect(environment),
                 stagingMaxMemoryMb = environment.getProperty("datapipelines.staging.h2.max-memory-mb"),
                 maxHeapMb = Runtime.getRuntime().maxMemory() / BYTES_PER_MB,
@@ -976,6 +942,7 @@ class ConfigValidator(
                 deploymentName = environment.getProperty(DeploymentEnv.LEGACY_ENV_KEY),
                 authAllowLocalOnly =
                     environment.getProperty("datapipelines.auth.allow-local-only", Boolean::class.java) ?: false,
+                authoringEnabled = PostureRules.authoringEnabledOf(environment), // §3.19 (#786 §E.4)
                 mail = MailRules.snapshot(environment),
             )
 
@@ -1149,10 +1116,13 @@ internal data class ConfigSnapshot(
     val executorMaxConcurrentPerInstance: String? = null,
     /** §3.2 (156, #2) — raw string so a non-numeric value is a NAMED violation, not a binder crash. */
     val executorNodeQueryTimeoutMaxSeconds: String? = null,
-    /** §3.2 / §3.36 (#818) — raw; the retire ceiling's derivation input when `retire-ceiling-seconds` is unset. */
-    val executorNodeQueryTimeoutSeconds: String? = null,
-    /** §3.36 (#818) — `datapipelines.datasources.retire-ceiling-seconds`, raw; empty = derived (datasources.md §5.2). */
-    val datasourcesRetireCeilingSeconds: String? = null,
+    /** §3.2 (#325) — raw, so a value past the start-wait ceiling or not a number is a NAMED violation. */
+    val executorLifecycleWriteTimeoutSeconds: String? = null,
+    /**
+     * §3.36 (#824) — `datapipelines.datasources.managed-retire-ceiling-seconds`, raw; empty = derived from
+     * [executorNodeQueryTimeoutMaxSeconds] (datasources.md §5.2). The reads rule's ceiling term.
+     */
+    val datasourcesManagedRetireCeilingSeconds: String? = null,
     /** §3.2 (156, #2) — the per-dialect map, raw values (`dialect wire -> seconds string`). */
     val executorNodeQueryTimeoutSecondsByDialect: Map<String, String> = emptyMap(),
     /** §3.3 — the PER-EXECUTION tempdb budget, read here only for the §C pressure warning. */
@@ -1212,6 +1182,8 @@ internal data class ConfigSnapshot(
     val deploymentName: String? = null,
     /** §3.4 (075) — the explicit acknowledgement that a hardened deployment has no OIDC. */
     val authAllowLocalOnly: Boolean = false,
+    /** §3.19 (#786 §E.4) — `datapipelines.deployment.authoring-enabled` as resolved; null = unset or unreadable. */
+    val authoringEnabled: Boolean? = null,
     /** §3.27 (137) — the mail block, its own value so the snapshot builder stays readable. */
     val mail: MailSnapshot = MailSnapshot(),
 ) {
@@ -1251,8 +1223,8 @@ internal data class ConfigSnapshot(
             "executorMaxConcurrentGlobal=$executorMaxConcurrentGlobal, " +
             "executorMaxConcurrentPerInstance=$executorMaxConcurrentPerInstance, " +
             "executorNodeQueryTimeoutMaxSeconds=$executorNodeQueryTimeoutMaxSeconds, " +
-            "executorNodeQueryTimeoutSeconds=$executorNodeQueryTimeoutSeconds, " +
-            "datasourcesRetireCeilingSeconds=$datasourcesRetireCeilingSeconds, " +
+            "executorLifecycleWriteTimeoutSeconds=$executorLifecycleWriteTimeoutSeconds, " +
+            "datasourcesManagedRetireCeilingSeconds=$datasourcesManagedRetireCeilingSeconds, " +
             "executorNodeQueryTimeoutSecondsByDialect=$executorNodeQueryTimeoutSecondsByDialect, " +
             "stagingMaxMemoryMb=$stagingMaxMemoryMb, " +
             "maxHeapMb=$maxHeapMb, " +
@@ -1281,6 +1253,7 @@ internal data class ConfigSnapshot(
             "demo=$demo, " +
             "deploymentName=$deploymentName, " +
             "authAllowLocalOnly=$authAllowLocalOnly, " +
+            "authoringEnabled=$authoringEnabled, " +
             "mail=$mail)"
 }
 

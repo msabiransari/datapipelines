@@ -37,7 +37,7 @@
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/deployment.md §3.5 -->
-      <p>For your own databases, register a datasource per engine. Postgres, SQL Server, SQLite, DuckDB, H2 and dp-lake ship in the published image; you supply the MySQL and Oracle drivers, because of their licenses. <a th:href="@{/mcp-server-for-sql-databases}">Engine-by-engine details</a>.</p>
+      <p class="section-note">For your own databases, register a datasource per engine. Postgres, SQL Server, SQLite, DuckDB, H2 and dp-lake ship in the published image; you supply the MySQL and Oracle drivers, because of their licenses. <a th:href="@{/mcp-server-for-sql-databases}">Engine-by-engine details</a>.</p>
     </div>
   </section>
 
@@ -53,7 +53,7 @@
         afterwards, so copy it straight into the client config in step 3. Rotation later is the same page: revoke
         the key, create another.
       </p>
-      <p>The key holds the role you gave it, as an identity of its own. What the agent may do, by the role the key carries:</p>
+      <p class="section-note">The key holds the role you gave it, as an identity of its own. What the agent may do, by the role the key carries:</p>
       <table class="facts-table">
         <caption>What the key may do, by the role it carries.</caption>
         <thead>
@@ -66,9 +66,9 @@
         </tbody>
       </table>
       <!-- claim: docs/auth.md §7.5 — the key's role is chosen at creation and held by its own identity; member role changes do not flow to the key; no key is ever a super admin (B1) -->
-      <p>Administration of the instance stays with signed-in people; no key can hold it. The key's role is fixed at
+      <p class="section-note">Administration of the instance stays with signed-in people; no key can hold it. The key's role is fixed at
         creation: your later role changes do not flow into it.</p>
-      <p>Rotating means revoking the key on the Keys page and creating another under a fresh name; revocation takes
+      <p class="section-note">Rotating means revoking the key on the Keys page and creating another under a fresh name; revocation takes
         effect within about a minute. There is no shared password to rotate.</p>
     </div>
   </section>
@@ -116,7 +116,7 @@
         <li><strong><code>auth.role_required</code></strong>, as the tool's result: the key is real and the role it carries does not reach what the agent tried. The key acts at its own role: to widen its reach, create another key with a wider role, which the dialog offers only when your own role reaches that far.</li>
         <li><strong>Silent rejection of a browser session</strong>: expected. <code>/mcp</code> takes API keys only; a cookie will never work there.</li>
       </ul>
-      <p><a th:href="@{/docs/mcp-server}">The MCP server specification &rarr;</a> &middot;
+      <p class="section-note"><a th:href="@{/docs/mcp-server}">The MCP server specification &rarr;</a> &middot;
          <a th:href="@{/docs/auth}">Authentication and roles &rarr;</a></p>
     </div>
   </section>

@@ -1,6 +1,7 @@
 package co.datapipelines.scheduler
 
 import co.datapipelines.pipeline.PipelineNameGrammar
+import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.dao.DuplicateKeyException
@@ -42,6 +43,14 @@ class ScheduleService(
     /** #442b — the outbox: a run's deliveries for its detail, and the explicit resend. */
     private val notifications: NotificationRepository,
     /**
+     * #841 (G0, dependency-graph record §15.1) — the metadata writer guard. A create, and an edit that changes the
+     * target reference, acquire the schedule's workspace FIRST in one metadata transaction, validate the reference
+     * through the executor UNDER it, then write (insert / revision CAS): revision CAS alone sees other schedule edits,
+     * never a pipeline discard or purge. Production wires the JDBC guard; [MetadataWriterGuard.NONE] is the directly
+     * constructed test default.
+     */
+    private val writeGuard: MetadataWriterGuard = MetadataWriterGuard.NONE,
+    /**
      * The system identity's user id (R2) — every run's `actor_user_id`. LAST on purpose: a
      * call site may pass it as a trailing lambda, which binds to the final parameter (#250
      * lane note — placing [targetReads] after it silently stole every trailing lambda).
@@ -71,9 +80,13 @@ class ScheduleService(
                 ?.takeIf { notifications.recipients.isEmpty() && notifications.events == NotificationEvent.DEFAULT }
                 ?.let { hashOf(request, null) }
         key?.let { replayCreate(workspaceId, actor, it, hash!!, legacyHash) }?.let { return it }
-        val validated = validate(workspaceId, request)
         return try {
             transactions.execute {
+                // #841: the writer guard first, then the reference's validation under it, then the insert — one
+                // transaction, so a pipeline writer (which takes the same workspace guard) can neither interleave
+                // between the target's validation and the insert nor be overtaken by it.
+                writeGuard.workspaces(listOf(workspaceId), ScheduleErrorCodes.WRITE_BUSY)
+                val validated = validate(workspaceId, request)
                 // The workspace row's lock serialises the cap's count with every concurrent insert
                 // (#253): count-then-insert under read committed alone lets N creates at the cap
                 // all pass the count and overshoot. One row, one workspace, held to the commit.
@@ -92,7 +105,7 @@ class ScheduleService(
                             workspaceId = workspaceId,
                             name = validated.name,
                             executorId = validated.executor.id,
-                            payloadSchemaVersion = validated.executor.payloadSchemaVersion,
+                            payloadSchemaVersion = validated.payloadSchemaVersion,
                             payload = request.payload,
                             parameters = validated.parameters,
                             targetRef = validated.targetRef,
@@ -127,7 +140,40 @@ class ScheduleService(
     ): Schedule {
         val current = schedules.findLive(workspaceId, id) ?: throw notFound(id)
         if (current.revision != expectedRevision) throw revisionConflict(current)
-        val validated = validate(workspaceId, request)
+        // #841 (record §15.1): an edit that leaves the executor and its payload — the reference — unchanged keeps
+        // revision CAS alone; one that sets or changes the reference joins the writer protocol: guard, validate the
+        // reference under it, revision-CAS write, all in one metadata transaction.
+        //
+        // #786 D.2: a payload stored in a schema its executor no longer writes is NOT unchanged even when its JSON is:
+        // saving it again writes it in the executor's schema, so it is that schema's save — guarded and validated in
+        // full as the executor's own payload (a resent schema-1 `"current"` is refused by the exact-pin grammar). Only
+        // a payload already in the executor's schema keeps the revision-CAS-only path.
+        val storedInExecutorSchema = executors.find(current.executorId)?.payloadSchemaVersion == current.payloadSchemaVersion
+        if (request.executor == current.executorId && request.payload == current.payload && storedInExecutorSchema) {
+            return edit(workspaceId, id, actor, expectedRevision, request, current, current.payloadSchemaVersion)
+        }
+        return checkNotNull(
+            transactions.execute {
+                writeGuard.workspaces(listOf(workspaceId), ScheduleErrorCodes.WRITE_BUSY)
+                edit(workspaceId, id, actor, expectedRevision, request, current, storedSchema = null)
+            },
+        )
+    }
+
+    /**
+     * [update]'s validate-then-write: the caller decides whether it runs under the writer guard. [storedSchema] is the
+     * schema of a payload the edit keeps (null: the request's payload is new, so it is in the executor's own schema).
+     */
+    private fun edit(
+        workspaceId: UUID,
+        id: UUID,
+        actor: UUID,
+        expectedRevision: Int,
+        request: ScheduleRequest,
+        current: Schedule,
+        storedSchema: Int?,
+    ): Schedule {
+        val validated = validate(workspaceId, request, storedSchema)
         val notifications =
             NotificationSettings.resolve(request.notifications, current, properties.notifications.maxRecipients, notificationPolicy)
         val timingChanged = validated.pattern.pattern != current.cron || validated.zone.id != current.timezone
@@ -135,7 +181,7 @@ class ScheduleService(
             ScheduleEdit(
                 name = validated.name,
                 executorId = validated.executor.id,
-                payloadSchemaVersion = validated.executor.payloadSchemaVersion,
+                payloadSchemaVersion = validated.payloadSchemaVersion,
                 payload = request.payload,
                 parameters = validated.parameters,
                 targetRef = validated.targetRef,
@@ -220,7 +266,7 @@ class ScheduleService(
                 mapOf("schedule_id" to id.toString()),
             )
         }
-        executors.require(current.executorId).validate(workspaceId, current.payload, current.parameters)
+        executors.require(current.executorId).validate(workspaceId, current.payload, current.parameters, current.payloadSchemaVersion)
         val next =
             OccurrenceFunction.next(
                 OccurrenceFunction.parse(current.cron),
@@ -286,6 +332,13 @@ class ScheduleService(
                 mapOf("schedule_id" to id.toString()),
             )
         }
+        // #786 D.2: a payload stored under a schema its executor no longer writes is read-checked BEFORE a run is
+        // recorded — the executor refuses it (its catalogued code), so Run now queues nothing it would only refuse.
+        // A payload in the executor's own schema queues as before; the run's preparation decides the rest.
+        executors
+            .find(schedule.executorId)
+            ?.takeIf { it.payloadSchemaVersion != schedule.payloadSchemaVersion }
+            ?.validate(workspaceId, schedule.payload, schedule.parameters, schedule.payloadSchemaVersion)
         val now = clock.instant()
         val run =
             NewRun(
@@ -555,10 +608,14 @@ class ScheduleService(
         return schedule
     }
 
-    /** Everything a create or an edit must satisfy before a row is written (record §3, §5, §6). */
+    /**
+     * Everything a create or an edit must satisfy before a row is written (record §3, §5, §6). [storedSchema] is the
+     * schema of a stored payload the write keeps; null means the request's payload is new, in the executor's schema.
+     */
     private fun validate(
         workspaceId: UUID,
         request: ScheduleRequest,
+        storedSchema: Int? = null,
     ): Validated {
         val name = request.name.trim()
         if (!PipelineNameGrammar.matches(name)) {
@@ -588,8 +645,9 @@ class ScheduleService(
         val policy =
             MissedRunPolicy.fromWire(request.missedRunPolicy)
                 ?: throw requestInvalid("missed_run_policy", "one of ${MissedRunPolicy.entries.map { it.wire }}")
-        val targetRef = executor.validate(workspaceId, request.payload, request.parameters)
-        return Validated(name, executor, request.parameters, targetRef, pattern, zone, policy)
+        val schema = storedSchema ?: executor.payloadSchemaVersion
+        val targetRef = executor.validate(workspaceId, request.payload, request.parameters, schema)
+        return Validated(name, executor, schema, request.parameters, targetRef, pattern, zone, policy)
     }
 
     /** The generic limits a payload honours whatever its executor (record §5): an object, 16 KiB, depth 8. */
@@ -805,6 +863,8 @@ data class RunDetail(
 private data class Validated(
     val name: String,
     val executor: JobExecutor,
+    /** The schema the validated payload is in — the one the write stores (#786 D.2). */
+    val payloadSchemaVersion: Int,
     val parameters: JsonNode,
     val targetRef: String,
     val pattern: CronPattern,

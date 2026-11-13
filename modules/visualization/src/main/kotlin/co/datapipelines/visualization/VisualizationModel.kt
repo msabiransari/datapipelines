@@ -12,11 +12,14 @@ import com.fasterxml.jackson.databind.node.ObjectNode
  * [name] — the folder-path grammar pipelines, templates and parameter sets use — and its versioned [body].
  * The name is NOT part of the body (`visualization_versions.body_json` stores the document with `name`
  * omitted, `chk_visualization_versions_body`), and a visualization is never renamed.
- * [VisualizationReader] is the only way in from JSON.
+ * [VisualizationReader] is the only way in from JSON; it records whether the authored tree carried [bindings]
+ * (a chart's bindings are derived when absent — design record 2026-11-06 §4.4). A stored or code-built document is
+ * [BindingsPresence.PRESENT].
  */
 data class VisualizationDocument(
     val name: String,
     val body: VisualizationBody,
+    val bindings: BindingsPresence = BindingsPresence.PRESENT,
 )
 
 /**
@@ -25,8 +28,9 @@ data class VisualizationDocument(
  * are content: they ride the release and the index row indexes the current values (versioning §3.7).
  *
  * Every key is spelled on all three use sites — the Kotlin-Jackson naming trap. [config] is the renderer's
- * native configuration, stored VERBATIM and never interpreted server-side beyond the renderer validator's
- * shape checks (D4: no common chart language).
+ * configuration: for `chart` the neutral chart document v1 (design record 2026-11-06-neutral-chart-grammar, which
+ * supersedes D4's "no common chart language" for charts) judged by [ChartDocumentRules]; for `table` and `kpi` the
+ * house schemas of [RendererConfigValidators]. Stored verbatim either way.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class VisualizationBody(
@@ -43,7 +47,10 @@ data class VisualizationBody(
     val transform: TransformBinding? = null,
     @field:JsonProperty("config") @get:JsonProperty("config") @param:JsonProperty("config")
     val config: ObjectNode,
-    /** A JSON path into [config] → a column of the transform's OUTPUT (or of the single input). */
+    /**
+     * `table`/`kpi`: a JSON path into [config] → a column of the transform's OUTPUT (or of the single input).
+     * `chart`: DERIVED — each encoded field to itself (record §4.4); stored derived, refused when authored otherwise.
+     */
     @field:JsonProperty("bindings") @get:JsonProperty("bindings") @param:JsonProperty("bindings")
     val bindings: Map<String, String> = emptyMap(),
     @field:JsonProperty("presentation") @get:JsonProperty("presentation") @param:JsonProperty("presentation")
@@ -61,15 +68,17 @@ data class RendererSpec(
 )
 
 /**
- * The renderer kinds (enums.md §31). `html` and `svg` are RESERVED (D13, D46): a body naming them binds, and
- * the validator refuses it `visualization.validation.renderer_unsupported` in round one.
+ * The renderer kinds (enums.md §31). `chart` is the neutral chart document v1 (design record 2026-11-06); the
+ * `plotly` kind is RETIRED with it — a body naming `plotly` is an unknown kind (the reader's `renderer_unsupported`).
+ * `html` and `svg` are RESERVED (D13, D46): a body naming them binds, and the validator refuses it
+ * `visualization.validation.renderer_unsupported` in round one.
  */
 enum class RendererKind(
     @JsonValue val wire: String,
     /** False for the reserved kinds round one does not render. */
     val renderable: Boolean,
 ) {
-    PLOTLY("plotly", renderable = true),
+    CHART("chart", renderable = true),
     TABLE("table", renderable = true),
     KPI("kpi", renderable = true),
     HTML("html", renderable = false),
@@ -155,8 +164,8 @@ enum class AssertionKind(
     /** The renderer reported completion. */
     RENDERED("rendered", Argument.NONE),
 
-    /** The rendered trace count equals `equals`. */
-    TRACE_COUNT("trace_count", Argument.EQUALS),
+    /** A chart's drawn mark count (bars) equals `equals` — judged against the chart model (design record §4.4). */
+    MARK_COUNT("mark_count", Argument.EQUALS),
 
     /** The page logged no console error while rendering. */
     NO_CONSOLE_ERRORS("no_console_errors", Argument.NONE),

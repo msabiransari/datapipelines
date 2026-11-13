@@ -27,6 +27,19 @@
   <script th:src="@{/js/schedules/run.js}" defer></script>
   <script th:src="@{/js/schedules/form.js}" defer></script>
   <script th:src="@{/js/schedules/page.js}" defer></script>
+  <!-- #876 G6 U2 — the Dependencies section's renderer and mount through the shell's page-script loader
+       (page-assets.mjs): a catalog runs once per document after the bare scripts above, and its mount scans main;
+       detail.js scans each detail it clones. -->
+  <template data-page-assets>
+    <script th:src="@{/vendor/dagre/dagre.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape.min.js}"></script>
+    <script th:src="@{/vendor/cytoscape/cytoscape-dagre.js}"></script>
+    <script th:src="@{/js/dependencies/renderer.js}"></script>
+    <script th:src="@{/js/dependencies/tree-view.js}"></script>
+    <script th:src="@{/js/dependencies/list.js}"></script>
+    <script th:src="@{/js/dependencies/source.js}"></script>
+    <script data-page-mount th:src="@{/js/dependencies/mount.js}"></script>
+  </template>
 
   <!-- #641: the condition stamp below is the PARSED deep-link word (the controller refused any
        other value with a 400), absent when the list is unfiltered; the script reads it first.
@@ -34,7 +47,8 @@
   <div class="tplx-page sch-page app-canvas" data-schedules-root
        th:attr="data-can-author=${canAuthor == true},
                 data-can-read-executions=${canReadExecutions == true},
-                data-can-execute=${canExecute == true}"
+                data-can-execute=${canExecute == true},
+                data-drafts-eligible=${draftsEligible == true}"
        th:data-schedule-condition="${#strings.isEmpty(condition) ? null : condition}"
        th:data-schedule-outcome="${#strings.isEmpty(outcome) ? null : outcome}">
 
@@ -44,7 +58,7 @@
         <h1 class="ds-headline">Schedules</h1>
         <p class="app-page-sub">
           Run a pipeline on a timetable. A schedule fires as the system identity, never as the
-          person who created it, and follows the pipeline's current version.
+          person who created it, and runs the exact pipeline version it names.
         </p>
       </div>
       <div class="app-page-actions">

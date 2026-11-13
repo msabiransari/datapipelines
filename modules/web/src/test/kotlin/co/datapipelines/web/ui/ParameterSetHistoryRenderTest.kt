@@ -135,6 +135,40 @@ class ParameterSetHistoryRenderTest {
         html shouldContain "id=\"ps-workspace\""
     }
 
+    /**
+     * #876 G6 (record §13 last paragraph): the object-level section is the ONLY thing named Dependencies — one strip
+     * link — and the workspace arm's internal graph card is "Parameter graph", so the two never read as one.
+     */
+    @Test
+    fun `exactly one Dependencies in the strip and no card titled Dependencies - the internal graph is the Parameter graph`() {
+        val html = workspace("workspace").markup()
+        val strip = html.substringAfter("<nav class=\"ps-tabs\"").substringBefore("</nav>")
+
+        Regex(">Dependencies<").findAll(strip).count() shouldBe 1
+        Regex("<h2[^>]*>Dependencies</h2>").containsMatchIn(html) shouldBe false
+        html shouldContain "<h2 class=\"ps-card-title\" id=\"ps-graph-title\">Parameter graph</h2>"
+        html shouldContain "href=\"/parameter-sets/$setId?version=2&amp;tab=dependencies\""
+        html shouldNotContain "data-dp-deps"
+    }
+
+    @Test
+    fun `the Dependencies arm renders the mount pane over the viewed version and no form, graph or history`() {
+        val html = workspace("dependencies").markup()
+
+        val pane = Regex("<div class=\"dp-deps\" data-dp-deps data-family=\"parameter_set\"[^>]*>").find(html)?.value.orEmpty()
+        pane shouldContain "data-name=\"acme/geo_filters\""
+        pane shouldContain "data-version=\"2\""
+        Regex("""data-ps-tab="dependencies"[^>]*aria-current="page"""").containsMatchIn(html) shouldBe true
+        html shouldNotContain "id=\"ps-form-host\""
+        html shouldNotContain "id=\"ps-graph\""
+        html shouldNotContain "data-ps-history"
+        // No version viewed: the pane carries no version and the mount makes no request (§A.6).
+        val none = workspace("dependencies", viewedVersion = null).markup()
+        val bare = Regex("<div class=\"dp-deps\" data-dp-deps[^>]*>").find(none)?.value.orEmpty()
+        bare shouldContain "data-name=\"acme/geo_filters\""
+        bare shouldNotContain "data-version"
+    }
+
     @Test
     fun `the Workspace arm renders the form and the graph and no history`() {
         val html = workspace("workspace").markup()

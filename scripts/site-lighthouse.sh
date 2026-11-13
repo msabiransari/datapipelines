@@ -35,8 +35,30 @@ FLOOR=95
 EXPORT_DIR="modules/web/build/website-export"
 # Trailing slashes: the export is a directory tree, and python's http.server answers a
 # slash-less directory path with a redirect — one wasted round trip on the critical chain.
+#
+# 713 added the six long docs pages that measured under the 95 floor BEFORE the
+# content-visibility ladder landed (docs/auth, rest-api, pipeline-contract, mcp-server,
+# datasources, metadata-db) — the pages most likely to regress silently. The heaviest
+# packaged doc, docs/ui-screens (~758 KB rendered, ~9.5k DOM nodes), measured 92–94 at
+# the end of 713 and is deliberately NOT watched here: a below-floor page would hold
+# this guard permanently red. It joins this list when its editorial split lands
+# (follow-up issue filed from 713).
+#
+# 713 owner ruling, 2026-10-25: docs pages are measured in TWO passes. The content-
+# visibility ladder in css/docs.css (`.doc-body table`, `.doc-body pre`, `.doc-part`)
+# delivers the performance floor, but Lighthouse 12.8.2's accessibility category
+# mis-measures it — axe's contrast/target-size audits read stale coordinates out of
+# cv-skipped subtrees and pair dark ink with an unpainted band color (proven artifact:
+# axe reports 7 contrast violations with cv, 0 with cv toggled off on the same DOM;
+# real rendered contrast ≈ 13:1; evidence/713 …/a11y-contrast-artifact.md). So:
+# pass 1 runs performance/best-practices/seo on the page AS SHIPPED (cv active, what a
+# user's browser does); pass 2 runs accessibility on a cv-SUSPENDED render served under
+# /__cv-off/ (the fully-rendered state the audits assume). The suspension selectors are
+# mirrored by DocsContentVisibilitySuspensionDriftTest, which fails if css/docs.css
+# gains a content-visibility rule the guard does not suspend.
 PAGES=("/" "/how-it-works/" "/demo-data/" "/faq/" "/tableau/" "/published-api/" "/for/saas-teams/" "/pricing/" "/semantic-layer/" "/use-cases/" "/explore/"
-  "/pipeline-scheduling/" "/sql-dashboards/" "/reusable-parameter-sets/")
+  "/pipeline-scheduling/" "/sql-dashboards/" "/reusable-parameter-sets/"
+  "/docs/auth/" "/docs/rest-api/" "/docs/pipeline-contract/" "/docs/mcp-server/" "/docs/datasources/" "/docs/metadata-db/")
 CATEGORIES=("performance" "accessibility" "best-practices" "seo")
 
 command -v python3 >/dev/null || { echo "site-lighthouse: python3 is required to serve the export" >&2; exit 1; }
@@ -81,12 +103,29 @@ COMPRESSIBLE = (
     ".html", ".css", ".js", ".json", ".svg", ".xml", ".txt", ".webmanifest",
 )
 
+# 713 owner ruling, 2026-10-25 (see the header block): the accessibility pass for
+# /docs/* pages is served under /__cv-off/ with the content-visibility ladder suspended,
+# because axe mis-measures contrast and target-size on cv-skipped subtrees. The selector
+# list MUST mirror every content-visibility SKIP (auto/hidden) rule in css/docs.css —
+# DocsContentVisibilitySuspensionDriftTest fails when the two drift apart. A
+# content-visibility: visible rule (the sheet's :has(:target) fragment-landing rule)
+# cannot hide anything from the audit and deliberately has no entry here.
+CV_SUSPEND_SELECTORS = ".doc-part,.doc-body table,.doc-body pre"
+CV_SUSPEND_STYLE = (
+    '<style id="cv-audit-suspend">/* content-visibility suspended for this accessibility '
+    'pass (713 owner ruling 2026-10-25); selectors mirror css/docs.css */'
+    + CV_SUSPEND_SELECTORS
+    + "{content-visibility:visible !important}</style>"
+).encode()
+
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def send_head(self):
-        path = self.translate_path(self.path)
+        suspend_prefix = "/__cv-off/"
+        suspended = self.path.startswith(suspend_prefix)
+        path = self.translate_path(self.path[len(suspend_prefix):] if suspended else self.path)
         if path.endswith("/") or "." not in path.rsplit("/", 1)[-1]:
             path = path.rstrip("/") + "/index.html"
         try:
@@ -95,20 +134,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, "File not found")
             return None
         ctype = self.guess_type(path)
+        body = f.read()
+        f.close()
+        if suspended and path.endswith(".html"):
+            body = body.replace(b"</head>", CV_SUSPEND_STYLE + b"</head>", 1)
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         wants_gzip = "gzip" in (self.headers.get("Accept-Encoding") or "")
         if path.endswith(COMPRESSIBLE) and wants_gzip:
-            body = gzip.compress(f.read(), 6)
-            f.close()
+            body = gzip.compress(body, 6)
             self.send_header("Content-Encoding", "gzip")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            return io.BytesIO(body)
-        self.send_header("Content-Length", str(f.seek(0, 2)))
-        f.seek(0)
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        return f
+        return io.BytesIO(body)
 
     def log_message(self, *args):
         pass
@@ -136,6 +174,22 @@ printf "%-22s %-14s %-14s %-16s %-6s\n" "----" "-----------" "-------------" "--
 
 for page in "${PAGES[@]}"; do
   OUT="$WORK_DIR/$(echo "$page" | tr '/ ' '__').json"
+  # 713 owner ruling, 2026-10-25: docs pages measure performance/best-practices/seo on
+  # the page as shipped, and accessibility on the cv-suspended render under /__cv-off/
+  # (see the header block). "-" tells the verdict reader to take accessibility from the
+  # main pass (the marketing pages, which carry no content-visibility rules).
+  A11Y_OUT="-"
+  if [[ "$page" == /docs/* ]]; then
+    A11Y_OUT="$WORK_DIR/$(echo "$page" | tr '/ ' '__').a11y.json"
+    npx --yes "lighthouse@$LIGHTHOUSE_VERSION" \
+      "http://127.0.0.1:$PORT/__cv-off$page" \
+      --quiet \
+      --chrome-flags="--headless=new --no-sandbox --disable-gpu" \
+      --only-categories="accessibility" \
+      --output=json \
+      --output-path="$A11Y_OUT" \
+      >/dev/null 2>&1
+  fi
   npx --yes "lighthouse@$LIGHTHOUSE_VERSION" \
     "http://127.0.0.1:$PORT$page" \
     --quiet \
@@ -145,11 +199,13 @@ for page in "${PAGES[@]}"; do
     --output-path="$OUT" \
     >/dev/null 2>&1
 
-  if ! python3 - "$page" "$OUT" "$FLOOR" <<PY
+  if ! python3 - "$page" "$OUT" "$FLOOR" "$A11Y_OUT" <<PY
 import json, sys
 
-page, path, floor = sys.argv[1], sys.argv[2], int(sys.argv[3])
-scores = json.load(open(path))["categories"]
+page, path, floor, a11y_path = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+scores = dict(json.load(open(path))["categories"])
+if a11y_path != "-":
+    scores["accessibility"] = json.load(open(a11y_path))["categories"]["accessibility"]
 cells, bad = [], []
 for key in ("performance", "accessibility", "best-practices", "seo"):
     score = scores[key]

@@ -1,15 +1,18 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.dependencies.DatasourceReferencesAdapter
+import co.datapipelines.application.dependencies.IncomingRows
+import co.datapipelines.application.dependencies.InverseArm
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceReference
-import co.datapipelines.pipeline.DatasourceRef
+import co.datapipelines.datasources.ParameterSetDatasourceReference
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.web.pipelines.PipelineBodies
+import co.datapipelines.pipeline.inverse.InverseRow
+import co.datapipelines.pipeline.inverse.InverseScope
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.verify
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -28,23 +31,48 @@ import java.util.UUID
  * workspaces exist and must still block the delete.
  *
  * **061/T79 added the second axis.** The aggregate is across workspaces AND across pipeline
- * VERSIONS: the bean reads [PipelineBodies.anyVersionReferences], never the working-version
- * scan the pipelines listing uses. Both axes are the same failure — a scan narrower than the
- * promise — reached from different directions.
+ * VERSIONS: the guard reads every stored version, never the working-version scan the pipelines
+ * listing uses. Both axes are the same failure — a scan narrower than the promise — reached
+ * from different directions.
+ *
+ * **#877 §C:** the bean is a [DatasourceReferencesAdapter] over the datasource family's two
+ * inverse arms; both axes are now the QUESTION it asks — every workspace, entity-wide, the ANY
+ * scope — which a recording inverse read pins here (the arms' SQL is the conformance suite's).
  */
 class DatasourceReferencesWiringTest {
-    private val bodies = mockk<PipelineBodies>()
     private val workspaces = mockk<WorkspaceRepository>()
-    private val references = DomainConfiguration().datasourceReferences(bodies, workspaces)
+    private val answers = mutableMapOf<Triple<UUID, InverseArm, String>, List<InverseRow>>()
+    private val asked = mutableListOf<Asked>()
+    private val incoming =
+        IncomingRows { ws, arm, key, version, scope ->
+            asked += Asked(ws, arm, key, version, scope)
+            answers[Triple(ws, arm, key)].orEmpty()
+        }
+    private val references = DatasourceReferencesAdapter(incoming) { workspaces.findAll().map { it.id } }
 
     private val wsA = workspace("acme")
     private val wsB = workspace("globex")
 
+    private data class Asked(
+        val workspaceId: UUID,
+        val arm: InverseArm,
+        val key: String,
+        val version: Int?,
+        val scope: InverseScope,
+    )
+
+    private fun pipelines(
+        ws: Workspace,
+        name: String,
+        vararg rows: InverseRow,
+    ) {
+        answers[Triple(ws.id, InverseArm.DATASOURCE_FROM_PIPELINE, name)] = rows.toList()
+    }
+
     @Test
     fun `a global datasource counts references across ALL workspaces`() {
         every { workspaces.findAll() } returns listOf(wsA, wsB)
-        every { bodies.anyVersionReferences(wsA.id, "shared") } returns emptyList()
-        every { bodies.anyVersionReferences(wsB.id, "shared") } returns listOf(ref("globex-report"))
+        pipelines(wsB, "shared", ref("globex-report"))
 
         references.referencesTo("shared").map { it.pipelineName } shouldBe listOf("globex-report")
     }
@@ -56,60 +84,94 @@ class DatasourceReferencesWiringTest {
     @Test
     fun `a bound datasource counts references across ALL workspaces - the re-bind cannot orphan them`() {
         every { workspaces.findAll() } returns listOf(wsA, wsB)
-        every { bodies.anyVersionReferences(wsA.id, "bound") } returns listOf(ref("acme-report"))
-        every { bodies.anyVersionReferences(wsB.id, "bound") } returns listOf(ref("globex-report"))
+        pipelines(wsA, "bound", ref("acme-report"))
+        pipelines(wsB, "bound", ref("globex-report"))
 
         val referencing = references.referencesTo("bound")
 
         referencing.map { it.pipelineName } shouldBe listOf("acme-report", "globex-report")
+        // #873 §F.3 e: each reference carries the workspace it was found in — the evidence a refusal is scoped by.
+        referencing.map { it.workspaceId } shouldBe listOf(wsA.id, wsB.id)
     }
 
     /**
-     * 061/T79: the whole point of the second scan. A reference living only in a RELEASED v1
+     * 061/T79: the whole point of the second axis. A reference living only in a RELEASED v1
      * that v2 dropped is a real reference — v1 is immutable and still executable by explicit
-     * version — and the projection carries the version so the refusal can name it.
+     * version — and the projection carries the version so the refusal can name it. A node naming
+     * the datasource as both source and output is ONE reference.
      */
     @Test
     fun `a reference in a HISTORICAL version blocks the delete and its version reaches the refusal`() {
         every { workspaces.findAll() } returns listOf(wsA)
-        every { bodies.anyVersionReferences(wsA.id, "retired") } returns
-            listOf(DatasourceRef(UUID.randomUUID(), "monthly_revenue", 1, PipelineVersionStatus.RELEASED, "extract"))
+        val pipeline = UUID.randomUUID().toString()
+        pipelines(
+            wsA,
+            "retired",
+            InverseRow(pipeline, "monthly_revenue", 1, PipelineVersionStatus.RELEASED, "nodes[0].source", null, "extract"),
+            InverseRow(pipeline, "monthly_revenue", 1, PipelineVersionStatus.RELEASED, "nodes[0].output.datasource", null, "extract"),
+        )
 
         references.referencesTo("retired") shouldBe
-            listOf(DatasourceReference("monthly_revenue", 1, "RELEASED", "extract"))
+            listOf(DatasourceReference("monthly_revenue", 1, "RELEASED", "extract", wsA.id))
     }
 
     @Test
     fun `an unknown name scans globally and finds nothing - the registry's not-found path is unaffected`() {
         every { workspaces.findAll() } returns listOf(wsA, wsB)
-        every { bodies.anyVersionReferences(any(), "ghost") } returns emptyList()
 
         references.referencesTo("ghost") shouldBe emptyList()
+        asked.map { it.workspaceId } shouldBe listOf(wsA.id, wsB.id)
     }
 
     /**
      * The guard must never fall back to the working-version scan: that join sees
-     * `current_version` only, which is the defect this wiring exists to close.
-     *
-     * **Assertion changed by 056, and this is the round's ONE such change.** It used to read
-     * `verify(exactly = 0) { bodies.scan(...) }`. `PipelineBodies.scan` no longer exists — the
-     * listing it served is `PipelineService.list` now — so the old line names a method that is
-     * gone. The intent is preserved and made stronger: `confirmVerified` asserts that
-     * `anyVersionReferences` is the ONLY call the guard makes on `PipelineBodies`, which would
-     * also catch a future working-version scan added under a different name.
+     * `current_version` only, which is the defect this wiring exists to close. #877 §C: the
+     * question is the inverse arm's — entity-wide (no version), at the ANY scope — and it is the
+     * ONLY question the pipeline half asks, once per workspace.
      */
     @Test
     fun `the guard never reads the working-version listing scan`() {
         every { workspaces.findAll() } returns listOf(wsA)
-        every { bodies.anyVersionReferences(wsA.id, "any") } returns emptyList()
 
         references.referencesTo("any")
 
-        verify(exactly = 1) { bodies.anyVersionReferences(wsA.id, "any") }
-        io.mockk.confirmVerified(bodies)
+        asked shouldBe listOf(Asked(wsA.id, InverseArm.DATASOURCE_FROM_PIPELINE, "any", null, InverseScope.ANY))
     }
 
-    private fun ref(pipeline: String) = DatasourceRef(UUID.randomUUID(), pipeline, 1, PipelineVersionStatus.RELEASED, "n1")
+    /**
+     * #873 §F.3 e: the parameter-set arm reads the same two axes — every workspace, every version (a DISCARDED one
+     * included) — and projects each selector occurrence with its version, status and path.
+     */
+    @Test
+    fun `the parameter-set arm counts selector references across ALL workspaces and every version`() {
+        every { workspaces.findAll() } returns listOf(wsA, wsB)
+        val arm = InverseArm.DATASOURCE_FROM_PARAMETER_SET
+        answers[Triple(wsA.id, arm, "warehouse")] =
+            listOf(setRow("acme/filters", 2, PipelineVersionStatus.DISCARDED, "parameters[1].source.datasource"))
+        answers[Triple(wsB.id, arm, "warehouse")] =
+            listOf(setRow("globex/filters", 1, PipelineVersionStatus.RELEASED, "parameters[0].source.datasource"))
+
+        references.parameterSetReferencesTo("warehouse") shouldBe
+            listOf(
+                ParameterSetDatasourceReference("acme/filters", 2, "DISCARDED", "parameters[1].source.datasource", wsA.id),
+                ParameterSetDatasourceReference("globex/filters", 1, "RELEASED", "parameters[0].source.datasource", wsB.id),
+            )
+        asked shouldBe
+            listOf(
+                Asked(wsA.id, arm, "warehouse", null, InverseScope.ANY),
+                Asked(wsB.id, arm, "warehouse", null, InverseScope.ANY),
+            )
+    }
+
+    private fun ref(pipeline: String) =
+        InverseRow(UUID.randomUUID().toString(), pipeline, 1, PipelineVersionStatus.RELEASED, "nodes[0].source", null, "n1")
+
+    private fun setRow(
+        name: String,
+        version: Int,
+        status: PipelineVersionStatus,
+        path: String,
+    ) = InverseRow(UUID.randomUUID().toString(), name, version, status, path, null, null)
 
     private fun workspace(name: String) =
         Workspace(

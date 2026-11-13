@@ -28,6 +28,9 @@
         dashboard: { id: data.visualization.id, version: data.visualization.version },
         container: board,
         adapter: runtime.adapters(board),
+        // Record 2026-11-06 §5.2: the page declares the chart library it loaded. Without the vendored bundle the
+        // declaration is absent, so a chart case fails chart.library_undeclared and a table or KPI case still mounts.
+        charts: window.Plotly ? { library: "plotly", instance: window.Plotly } : undefined,
         options: {
           onNotification: function (notification) {
             notifications.push({ case: testCase.name, code: notification.code });

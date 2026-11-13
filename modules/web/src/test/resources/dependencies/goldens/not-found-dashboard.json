@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "correlation_id": "00000000-0000-4000-8000-000000000000",
+  "error": {
+    "code": "dashboard.not_found",
+    "message": "The requested object does not exist or is not visible.",
+    "user_message": "We couldn't find that dashboard.",
+    "details": { },
+    "doc_url": "https://datapipelines.co/docs/pipeline-contract#1323-dashboards"
+  }
+}

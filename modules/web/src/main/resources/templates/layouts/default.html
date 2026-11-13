@@ -122,6 +122,9 @@
        frame paints. This closes the exposure the line above names for `template-editor.css`. -->
   <link th:href="@{/css/template-editor.css}" rel="stylesheet">
   <link th:href="@{/css/template-workspace.css}" rel="stylesheet">
+  <!-- #876 G6 — the Dependencies pane every artifact workspace carries (design tokens only). Head-loaded
+       for 090's reason, §3.0 normative: all five workspaces are boosted arrivals. -->
+  <link th:href="@{/css/dependencies.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
        Until 188 this was the ONE inline script in the layout — the round's only
@@ -774,6 +777,15 @@
              visualization's — so the family carries its own switch, draft-purge and purge words. -->
         <th:block th:if="${code == 'visualization_switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'Dashboards that pin this visualization keep their pinned versions; the Versions tab shows which version is current.')}"></div></th:block>
         <th:block th:if="${code == 'visualization_draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft is gone. This cannot be undone.')}"></div></th:block>
+        <!-- #786 — the API versions page's verbs (ui-screens §4.18b): an API version is not a pipeline's, so the
+             family carries its own words; `switched` names what the API serves, never the pipeline's pointer. -->
+        <th:block th:if="${code == 'api_draft_saved'}"><div th:replace="~{partials/toast :: toast('success', 'Draft saved', 'The API draft pins the pipeline version you chose. Release it to lock it.')}"></div></th:block>
+        <th:block th:if="${code == 'api_released'}"><div th:replace="~{partials/toast :: toast('success', 'Released', 'The draft is now the API current version and is locked.')}"></div></th:block>
+        <th:block th:if="${code == 'api_discarded'}"><div th:replace="~{partials/toast :: toast('success', 'Version discarded', 'It no longer serves. The list shows which version is current now.')}"></div></th:block>
+        <th:block th:if="${code == 'api_restored'}"><div th:replace="~{partials/toast :: toast('success', 'Version restored', 'It is released again. The list shows which version is current.')}"></div></th:block>
+        <th:block th:if="${code == 'api_switched'}"><div th:replace="~{partials/toast :: toast('success', 'Current version switched', 'The API now serves the version you chose, at its own pinned pipeline version.')}"></div></th:block>
+        <th:block th:if="${code == 'api_draft_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Draft purged', 'The draft is gone. This cannot be undone.')}"></div></th:block>
+        <th:block th:if="${code == 'api_purged'}"><div th:replace="~{partials/toast :: toast('success', 'API removed', 'Its only version was a draft, so the API is gone with it.')}"></div></th:block>
         <th:block th:if="${code == 'visualization_purged'}"><div th:replace="~{partials/toast :: toast('success', 'Visualization purged', 'The visualization and its draft are gone.')}"></div></th:block></th:block>
     </div>
     <th:block th:replace="${content}"/>

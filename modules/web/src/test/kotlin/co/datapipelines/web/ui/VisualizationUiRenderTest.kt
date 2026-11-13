@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.web.ui.site.REPORT_PROBLEM_URL
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -42,6 +43,7 @@ class VisualizationUiRenderTest {
         }
 
     private val vizId = UUID.randomUUID()
+    private val vizRoot = ReleaseDialogFixtures.root("visualization", "acme/charts/revenue", 2)
     private val leaf =
         VisualizationBrowseModel.LeafView(vizId, "acme/charts/revenue", "revenue", "Revenue", 3, released = true)
     private val draftLeaf =
@@ -127,13 +129,26 @@ class VisualizationUiRenderTest {
         body shouldContain "/js/visualization-preview.js"
         body shouldContain ">acme/charts/revenue<"
         body shouldContain "v3 · released · current"
-        Regex("data-dp-tab=\"").findAll(body).toList().size shouldBe 5
+        Regex("data-dp-tab=\"").findAll(body).toList().size shouldBe 6
         body shouldContain "Preview (test fixtures)"
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/preview?version=3\""
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/overview?version=3\""
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/versions?version=3\""
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/evidence\""
         body shouldContain "data-lazy-url=\"/partials/visualizations/$vizId/used-by\""
+        // #876 G6: the Dependencies pane is a mount over the SELECTED version, not a lazy partial.
+        body shouldContain ">Dependencies</button>"
+        Regex(
+            "<div class=\"dp-deps\" data-dp-deps data-family=\"visualization\"" +
+                "[^>]*data-name=\"acme/charts/revenue\"[^>]*data-version=\"3\"",
+        ).containsMatchIn(body) shouldBe true
+        Regex("id=\"viz-pane-dependencies\"[^>]*data-lazy-url").containsMatchIn(body) shouldBe false
+        val catalog = body.substringAfter("<template data-page-assets>").substringBefore("</template>")
+        Regex("src=\"(/[^\"]+)\"")
+            .findAll(catalog)
+            .map { it.groupValues[1] }
+            .toList()
+            .takeLast(RELEASE_DEPENDENCY_CATALOG.size) shouldBe RELEASE_DEPENDENCY_CATALOG
         body shouldContain "data-nav-current=\"visualizations\""
         body shouldContain "id=\"dp-dialog\""
         // Every version switch is a boosted, rail-preserving navigation that keeps the tab (#714).
@@ -156,7 +171,7 @@ class VisualizationUiRenderTest {
         val html = workspace(bundle = "2d", activeTab = "evidence")
 
         Regex("id=\"viz-pane-evidence\"[^>]*hidden").containsMatchIn(html) shouldBe false
-        for (other in listOf("preview", "overview", "used-by", "versions")) {
+        for (other in listOf("preview", "overview", "used-by", "dependencies", "versions")) {
             Regex("id=\"viz-pane-$other\"[^>]*hidden=\"hidden\"").containsMatchIn(html) shouldBe true
         }
         html shouldContain "data-active-tab=\"evidence\""
@@ -387,62 +402,82 @@ class VisualizationUiRenderTest {
     // ------------------------------------------------------------------ the dialogs
 
     @Test
-    fun `a refused release lists every refusal with its code and draws no form`() {
+    fun `a refused release lists every native refusal with its code and draws no submit - the plan still renders`() {
         val dlg =
             release(
-                pin = VisualizationLifecycleDialogModel.PinView("acme/templates/t", 2, PipelineVersionStatus.DISCARDED),
                 refusals =
                     listOf(
                         VisualizationLifecycleDialogModel.Refusal("visualization.release.tests_missing", "No test cases."),
-                        VisualizationLifecycleDialogModel.Refusal("visualization.release.dependency_not_released", "Pin."),
+                        VisualizationLifecycleDialogModel.Refusal("visualization.release.tests_red", "Red."),
                     ),
             )
-        val html = dialog("visualization-lifecycle-release", dlg)
+        val html = dialog("visualization-lifecycle-release", dlg).replace(Regex("<!--[\\s\\S]*?-->"), "")
 
         html shouldContain "data-refusal-code=\"visualization.release.tests_missing\""
-        html shouldContain "data-refusal-code=\"visualization.release.dependency_not_released\""
-        html shouldNotContain "<form"
+        html shouldContain "data-refusal-code=\"visualization.release.tests_red\""
+        html shouldNotContain "type=\"submit\""
         html shouldNotContain "data-verb=\"visualization-release-confirm\""
+        html shouldNotContain "Releasing makes"
+        // #876 R1: the plan owns the dependency rows, so it renders beside the native refusals.
+        html shouldContain "data-release-plan"
     }
 
     @Test
-    fun `a releasable draft with a DRAFT script carries the ONE consent, checked, and from`() {
-        val dlg =
-            release(
-                pin = VisualizationLifecycleDialogModel.PinView("acme/templates/t", 2, PipelineVersionStatus.DRAFT),
-                refusals = emptyList(),
-            )
-        val html = dialog("visualization-lifecycle-release", dlg)
+    fun `876 R1 - a MISSING or DISCARDED transform pin is the plan's blocking row, never a native refusal - submit disabled`() {
+        for (status in listOf("MISSING", "DISCARDED")) {
+            val dlg = release(refusals = emptyList())
+            val rd = ReleaseDialogFixtures.plan(vizRoot, ReleaseDialogFixtures.blocking("template", "acme/templates/t", 2, status))
+            val html = dialog("visualization-lifecycle-release", dlg, rd).replace(Regex("<!--[\\s\\S]*?-->"), "")
+
+            withClue(status) { html shouldNotContain "data-release-refusals" }
+            withClue(status) { html shouldContain "data-release-row=\"blocking\"" }
+            withClue(status) { html shouldContain "data-status=\"$status\"" }
+            withClue(status) { html shouldContain "data-release-submittable=\"false\"" }
+            withClue(status) { html shouldContain "data-release-blocked" }
+            withClue(status) {
+                Regex("<button[^>]*data-verb=\"visualization-release-confirm\"[^>]*disabled=\"disabled\"").containsMatchIn(html) shouldBe
+                    true
+            }
+        }
+    }
+
+    @Test
+    fun `876 - a releasable draft with a DRAFT script is a plan row, checked, posting its node id, and from`() {
+        val dlg = release(refusals = emptyList())
+        val rd = ReleaseDialogFixtures.plan(vizRoot, ReleaseDialogFixtures.draft("template", "acme/templates/t", 2))
+        val html = dialog("visualization-lifecycle-release", dlg, rd)
 
         html shouldContain "hx-post=\"/partials/visualizations/$vizId/lifecycle/release\""
-        html shouldContain "name=\"release_pinned_templates\""
-        html shouldContain "data-consent-input"
-        Regex("name=\"release_pinned_templates\"[^>]*checked").containsMatchIn(html) shouldBe true
+        html shouldNotContain "release_pinned_templates"
+        Regex("name=\"include_dependencies\" value=\"n-template-acme-templates-t-2\" checked[^>]*data-consent-input")
+            .containsMatchIn(html) shouldBe true
+        html shouldContain "name=\"tree_hash\" value=\"${ReleaseDialogFixtures.TREE_HASH}\""
         html shouldContain "name=\"from\" value=\"versions\""
         html shouldContain "data-verb=\"visualization-release-confirm\""
+        // No pipeline row in a visualization plan, so no per-row check override.
+        html.replace(Regex("<!--[\\s\\S]*?-->"), "") shouldNotContain "check_override_node"
     }
 
     @Test
     fun `a released transform pin needs no consent`() {
-        val dlg =
-            release(
-                pin = VisualizationLifecycleDialogModel.PinView("acme/templates/t", 2, PipelineVersionStatus.RELEASED),
-                refusals = emptyList(),
-            )
-        val html = dialog("visualization-lifecycle-release", dlg).replace(Regex("<!--[\\s\\S]*?-->"), "")
+        val dlg = release(refusals = emptyList())
+        val rd = ReleaseDialogFixtures.plan(vizRoot, ReleaseDialogFixtures.released("template", "acme/templates/t", 2))
+        val html = dialog("visualization-lifecycle-release", dlg, rd).replace(Regex("<!--[\\s\\S]*?-->"), "")
 
         html shouldNotContain "release_pinned_templates"
-        html shouldContain "data-release-pins"
+        html shouldNotContain "name=\"include_dependencies\""
+        html shouldContain "data-release-row=\"released\""
     }
 
     @Test
     fun `the confirm buttons render only for a role that may author`() {
-        val dlg = release(pin = null, refusals = emptyList())
+        val dlg = release(refusals = emptyList())
         val promoter =
             engine.process(
                 "partials/visualization-lifecycle-release",
                 webContext("/partials").withRoles(canAuthor = false).apply {
                     setVariable("dlg", dlg)
+                    setVariable("rd", ReleaseDialogFixtures.plan(vizRoot))
                     setVariable("from", "versions")
                 },
             )
@@ -648,29 +683,28 @@ class VisualizationUiRenderTest {
         isViewed = isCurrent,
     )
 
-    private fun release(
-        pin: VisualizationLifecycleDialogModel.PinView?,
-        refusals: List<VisualizationLifecycleDialogModel.Refusal>,
-    ) = VisualizationLifecycleDialogModel.ReleaseDialog(
-        id = vizId,
-        name = "acme/charts/revenue",
-        version = 4,
-        bodyHash = "h",
-        updatedBy = "Ada",
-        updatedAgo = "2 hours ago",
-        caseCount = 1,
-        pin = pin,
-        refusals = refusals,
-    )
+    private fun release(refusals: List<VisualizationLifecycleDialogModel.Refusal>) =
+        VisualizationLifecycleDialogModel.ReleaseDialog(
+            id = vizId,
+            name = "acme/charts/revenue",
+            version = 4,
+            bodyHash = "h",
+            updatedBy = "Ada",
+            updatedAgo = "2 hours ago",
+            caseCount = 1,
+            refusals = refusals,
+        )
 
     private fun dialog(
         template: String,
         dlg: Any,
+        rd: ReleaseDialogModel = ReleaseDialogFixtures.plan(vizRoot),
     ): String =
         engine.process(
             "partials/$template",
             webContext("/partials").apply {
                 setVariable("dlg", dlg)
+                setVariable("rd", rd)
                 setVariable("from", "versions")
             },
         )

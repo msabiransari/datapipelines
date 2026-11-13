@@ -37,7 +37,9 @@ import java.util.UUID
  * Pipeline P pins two DRAFT templates; the release ticks both, so the coordinator flips them first and P last, then
  * writes one strict audit row per flip.
  * - **T1** — `BEFORE UPDATE ON pipeline_versions WHEN (DRAFT → RELEASED of P)`: the ROOT flip throws after both
- *   template flips ran. Proved on the plan path and on the legacy alias path (both route through the coordinator).
+ *   template flips ran, proved on the plan path. The legacy alias had its own T1 case; since #876 round 3 the alias
+ *   without a plan is refused `428 pipeline.release.plan_required` before anything is read, so its case asserts that
+ *   refusal and the unchanged committed state instead of a rollback (no flip ever starts, so none can roll back).
  * - **T2** — `BEFORE INSERT ON audit_log WHEN (the root's release row of this workspace)`: the LAST audit insert is
  *   refused after every flip and the dependencies' rows ran — unavailable audit storage refuses the release.
  *
@@ -223,6 +225,7 @@ class PipelineDependencyReleaseRollbackE2eTest {
             .body(mapper.writeValueAsString(mapOf("tree_hash" to previewOfP(), "include_dependencies" to listOf("n1", "n2"))))
             .post("/api/v1/pipelines/$pipelineId/release")
 
+    /** The retired alias: `release_pinned_templates=true`, no plan — refused `plan_required` since #876 round 3. */
     private fun releaseWithAlias(): Response =
         given()
             .port(port)
@@ -358,13 +361,18 @@ class PipelineDependencyReleaseRollbackE2eTest {
 
     @Test
     @Order(3)
-    fun `T1 legacy alias - the same root failure rolls the alias's template flips back too`() {
+    fun `T1 legacy alias - refused plan_required on purpose, no flip starts and the committed state is unchanged`() {
         val before = committed()
-        plantTrigger(rootFlipTrigger())
-        try {
-            refusedWithNothingCommitted(before) { releaseWithAlias() }
-        } finally {
-            dropPlant()
+
+        val response = releaseWithAlias()
+
+        withClue(response.asString()) { response.statusCode shouldBe PRECONDITION_REQUIRED }
+        response.jsonPath().getString("error.code") shouldBe "pipeline.release.plan_required"
+        withClue("no template, pipeline, pointer or audit row moved") { committed() shouldBe before }
+        withClue("both templates and the pipeline are still DRAFT") {
+            val state = committed()
+            state.getValue("templates").map { it.split(" | ")[STATUS_COLUMN] } shouldBe listOf("DRAFT", "DRAFT")
+            state.getValue("pipelines").map { it.split(" | ")[STATUS_COLUMN] } shouldBe listOf("DRAFT")
         }
     }
 
@@ -430,6 +438,7 @@ class PipelineDependencyReleaseRollbackE2eTest {
 
         /** The unhandled store failure's answer: refused, with a correlation id; no release code exists for it. */
         private const val INTERNAL_ERROR = 500
+        private const val PRECONDITION_REQUIRED = 428
         private const val STATUS_COLUMN = 3
 
         private val WORKSPACE_ID: String = UUID.randomUUID().toString()

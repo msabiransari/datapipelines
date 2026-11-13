@@ -183,7 +183,7 @@ class SchedulePromoterPagingE2eTest {
                         mapper.writeValueAsString(
                             mapOf(
                                 "name" to name,
-                                "payload" to mapOf("pipeline" to name, "version" to "current"),
+                                "payload" to mapOf("pipeline" to name, "version" to 1),
                                 "cron" to "0 3 1 1 *",
                                 "timezone" to "UTC",
                             ),

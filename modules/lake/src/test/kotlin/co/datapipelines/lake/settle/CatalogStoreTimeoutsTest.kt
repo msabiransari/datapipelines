@@ -3,7 +3,9 @@ package co.datapipelines.lake.settle
 import co.datapipelines.lake.CatalogDatabase
 import co.datapipelines.lake.LakeCatalogs
 import co.datapipelines.lake.LakeProperties
+import co.datapipelines.lake.LakeTestDb
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
@@ -26,5 +28,28 @@ class CatalogStoreTimeoutsTest {
     @Test
     fun `the socket bound is the sweep's ten-second budget, not the SDK's thirty`() {
         properties["http-client.urlconnection.socket-timeout-ms"] shouldBe LakeSettlementSweep.SWEEP_BUDGET.toMillis().toString()
+    }
+
+    @Test
+    fun `the abandoned read's documented end names this derivation, computed from these bounds`() {
+        val lake = LakeTestDb.repoFile("docs/lake.md").readText().replace(Regex("\\s+"), " ")
+        val end = SettlementObjectReadEnd.stalledReadEndByMillis(properties)
+
+        val function = Regex("`(SettlementObjectReadEnd[.][A-Za-z]+)`").find(lake)?.groupValues?.get(1)
+        val displayed = Regex("[*][*]at most ([0-9 ]+) ms").find(lake)?.groupValues?.get(1)
+        function shouldBe "SettlementObjectReadEnd.stalledReadEndByMillis"
+        requireNotNull(displayed).replace(" ", "").toLong() shouldBe end
+    }
+
+    @Test
+    fun `the metadata read's cap is the documented 64 MiB`() {
+        LakeMetadataReads.METADATA_MAX_BYTES shouldBe MIB * CAP_MIB
+        LakeTestDb.repoFile("docs/lake.md").readText().replace(Regex("\\s+"), " ") shouldContain
+            "capped at $CAP_MIB MiB of JSON after decompression"
+    }
+
+    private companion object {
+        const val MIB = 1_024L * 1_024L
+        const val CAP_MIB = 64L
     }
 }

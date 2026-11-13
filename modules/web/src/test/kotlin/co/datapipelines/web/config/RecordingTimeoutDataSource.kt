@@ -18,6 +18,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
+import java.sql.Statement
 import java.time.OffsetDateTime
 import java.util.UUID
 import javax.sql.DataSource
@@ -26,28 +27,87 @@ import javax.sql.DataSource
  * The `@Scheduled` jobs' statement fixtures, shared by `ScheduledJobsStatementBoundsTest` (#326, #636, #818b A: each
  * statement carries its bound) and `ReaperDelayDerivationTest` (#818c: the bounds sum to the published reaper delay).
  *
- * Hands out relaxed JDBC doubles and records, per prepared statement, its SQL and the `queryTimeout` set on it
- * ([UNBOUNDED] when none was). A query answers one row: one column, the database clock for the audit cutoff, a
- * `(table, column)` pair for the keys purge's FK list, an `id` for the housekeeping sweeps' `RETURNING id`, and the
- * managed lake's namespace for its catalog read. An update answers 0 rows, so a batched loop ends after one batch.
+ * Hands out relaxed JDBC doubles and records, per prepared statement, its SQL, the `queryTimeout` set on it
+ * ([UNBOUNDED] when none was) and — #837 — the network (socket read) timeout in force on the connection it was prepared
+ * on when it was executed ([NO_SOCKET_BOUND] when none was set). A query answers one row: one column, the database
+ * clock for the audit cutoff, a `(table, column)` pair for the keys purge's FK list, an `id` for the housekeeping sweeps'
+ * `RETURNING id`, and the managed lake's namespace for its catalog read. An update answers 0 rows, so a batched loop ends after one batch.
  */
 internal class RecordingTimeoutDataSource(
     private val lakeName: String = SCHEDULED_JOBS_TEST_LAKE,
+    /** #867 — when set, a query's row answers `name` with it, so the managed read's row maps to a named table. */
+    private val tableName: String? = null,
+    /**
+     * #841 R4 — also answer and record plain (unprepared) statements, as `JdbcTemplate` sends a query without
+     * arguments (the writer guard's `SHOW`). Off by default, so the other cases' counts are unchanged.
+     */
+    private val recordPlainStatements: Boolean = false,
 ) : DataSource by mockk(relaxed = true) {
     private val statements = mutableListOf<Pair<String, IntArray>>()
 
-    override fun getConnection(): Connection =
-        mockk(relaxed = true) {
-            every { prepareStatement(any<String>()) } answers { statement(firstArg()) }
-        }
+    /** Per statement, parallel to [statements]: the String parameters bound to it (#841 R4: the budget's settings). */
+    private val parameters = mutableListOf<MutableList<String>>()
 
-    private fun statement(sql: String): PreparedStatement {
+    /** Per statement, parallel to [statements]: the connection's network timeout when the statement ran. */
+    private val sockets = mutableListOf<IntArray>()
+
+    /** Every `setNetworkTimeout` call on any connection handed out, in order, in milliseconds. */
+    private val networkCalls = mutableListOf<Int>()
+
+    override fun getConnection(): Connection {
+        val network = intArrayOf(NO_SOCKET_BOUND)
+        val connection = mockk<Connection>(relaxed = true)
+        every { connection.prepareStatement(any<String>()) } answers { statement(firstArg(), connection, network) }
+        every { connection.setNetworkTimeout(any(), any()) } answers {
+            network[0] = secondArg()
+            networkCalls += secondArg<Int>()
+        }
+        every { connection.networkTimeout } answers { network[0] }
+        if (recordPlainStatements) every { connection.createStatement() } answers { plainStatement(connection, network) }
+        return connection
+    }
+
+    /** A plain statement: recorded when it executes its SQL, answering one row as a prepared one does. */
+    private fun plainStatement(
+        owner: Connection,
+        network: IntArray,
+    ): Statement {
         val timeout = intArrayOf(UNBOUNDED)
-        statements += sql to timeout
         return mockk(relaxed = true) {
             every { setQueryTimeout(any()) } answers { timeout[0] = firstArg() }
-            every { executeUpdate() } returns 0
-            every { executeQuery() } answers { oneRow() }
+            every { connection } returns owner
+            every { executeQuery(any()) } answers {
+                statements += firstArg<String>() to timeout
+                sockets += intArrayOf(network[0])
+                parameters += mutableListOf<String>()
+                oneRow()
+            }
+        }
+    }
+
+    private fun statement(
+        sql: String,
+        owner: Connection,
+        network: IntArray,
+    ): PreparedStatement {
+        val timeout = intArrayOf(UNBOUNDED)
+        val socket = intArrayOf(NO_SOCKET_BOUND)
+        val bound = mutableListOf<String>()
+        statements += sql to timeout
+        sockets += socket
+        parameters += bound
+        return mockk(relaxed = true) {
+            every { setQueryTimeout(any()) } answers { timeout[0] = firstArg() }
+            every { setString(any(), any()) } answers { bound += secondArg<String>() }
+            every { connection } returns owner
+            every { executeUpdate() } answers {
+                socket[0] = network[0]
+                0
+            }
+            every { executeQuery() } answers {
+                socket[0] = network[0]
+                oneRow()
+            }
         }
     }
 
@@ -60,7 +120,10 @@ internal class RecordingTimeoutDataSource(
             every { getString("referencing_table") } returns "executions"
             every { getString("referencing_column") } returns "executed_by"
             every { getObject("id", UUID::class.java) } returns UUID.randomUUID()
+            // #841 R4: the guarded repair's discovery read finds one workspace lacking the grant, so every phase runs.
+            every { getObject(1, UUID::class.java) } returns LACKING_WORKSPACE
             every { getArray("namespace").array } returns arrayOf(lakeName, "sales")
+            tableName?.let { every { getString("name") } returns it }
         }
     }
 
@@ -76,6 +139,28 @@ internal class RecordingTimeoutDataSource(
 
     fun everyTimeout(): Set<Int> = statements.map { it.second[0] }.toSet()
 
+    /**
+     * #837 — the network timeout, in milliseconds, in force on the connection of the one statement whose SQL starts with
+     * [prefix] when it ran ([NO_SOCKET_BOUND] when none was set).
+     */
+    fun socketTimeoutOf(prefix: String): Int {
+        val matching = statements.indices.filter { statements[it].first.trim().startsWith(prefix) }
+        withClue("statements sent: ${firstLines()}") {
+            matching.shouldNotBeEmpty()
+            matching.map { sockets[it][0] }.toSet().size shouldBe 1
+        }
+        return sockets[matching.first()][0]
+    }
+
+    /** #837 — every statement's network timeout when it ran, as a set (milliseconds). */
+    fun everySocketTimeout(): Set<Int> = sockets.map { it[0] }.toSet()
+
+    /** #867 — every statement's network timeout when it ran, in the order the statements were prepared (milliseconds). */
+    fun socketTimeouts(): List<Int> = sockets.map { it[0] }
+
+    /** #837 — every `setNetworkTimeout` call on a connection handed out, in order (milliseconds). */
+    fun networkTimeoutCalls(): List<Int> = networkCalls.toList()
+
     /** Every statement's recorded timeout, in the order the statements were prepared. */
     fun timeouts(): List<Int> = statements.map { it.second[0] }
 
@@ -90,11 +175,26 @@ internal class RecordingTimeoutDataSource(
 
     fun statementCount(): Int = statements.size
 
-    fun clear() = statements.clear()
+    /** #841 R4 — every statement in order: its first SQL line, its String parameters and its socket bound when it ran. */
+    fun trace(): List<Triple<String, List<String>, Int>> =
+        statements.indices.map { Triple(firstLines()[it], parameters[it].toList(), sockets[it][0]) }
+
+    fun clear() {
+        statements.clear()
+        sockets.clear()
+        parameters.clear()
+        networkCalls.clear()
+    }
 
     companion object {
         /** No `setQueryTimeout` call. */
         const val UNBOUNDED = 0
+
+        /** No `setNetworkTimeout` call: the driver's own 0, an unbounded socket read. */
+        const val NO_SOCKET_BOUND = 0
+
+        /** The one workspace a recorded discovery read answers. */
+        val LACKING_WORKSPACE: UUID = UUID.fromString("00000000-0000-0000-0000-000000000841")
     }
 }
 

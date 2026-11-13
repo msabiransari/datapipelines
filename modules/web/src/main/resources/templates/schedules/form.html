@@ -11,8 +11,9 @@
      Notification settings are saved in slice 4 part a; the note below states, with its reason, when
      this deployment sends no scheduler mail (#442 part b) — never described as delivery.
      Key and role assignment remain outside this form (R2 — a schedule fires as the system
-     identity). The version is `current`, fixed: slice 1 refuses a numeric version
-     (scheduler.md §2.1). -->
+     identity). The version is an EXACT pipeline version (payload schema 2, #786; scheduler.md
+     §2.1), picked from the pipeline's own version list with each one's status; a version this
+     deployment does not run is offered disabled with its reason, and the save stays the authority. -->
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="skeletons">
   <th:block th:if="${canAuthor == true}">
   <template id="sch-tpl-form">
@@ -48,8 +49,16 @@
                    autocomplete="off" spellcheck="false" required placeholder="Start typing a pipeline path"
                    aria-describedby="sch-f-pipeline-help sch-f-pipeline-error">
             <datalist id="sch-f-pipelines"></datalist>
-            <p class="ds-field-help" id="sch-f-pipeline-help" data-slot="pipeline-help">Runs the pipeline's <b>current</b> version at each occurrence — whichever version its current pointer names then.</p>
+            <p class="ds-field-help" id="sch-f-pipeline-help" data-slot="pipeline-help">The pipeline to run. Then pick the exact version below.</p>
             <p class="ds-field-error" id="sch-f-pipeline-error" data-field-error="pipeline" hidden></p>
+          </div>
+
+          <div class="ds-field">
+            <label class="ds-field-label" for="sch-f-version">Version</label>
+            <select id="sch-f-version" name="version" class="ds-input" required data-slot="version"
+                    aria-describedby="sch-f-version-help sch-f-version-error"></select>
+            <p class="ds-field-help" id="sch-f-version-help" data-slot="version-help">Every run executes exactly this version. Releasing a newer one does not move the schedule — edit it to pick the new version.</p>
+            <p class="ds-field-error" id="sch-f-version-error" data-field-error="version" hidden></p>
           </div>
 
           <fieldset class="sch-fieldset">
@@ -123,7 +132,7 @@
 
           <fieldset class="sch-fieldset">
             <legend class="ds-field-label">Parameters</legend>
-            <p class="ds-field-help u-mt-xs" data-slot="params-status">Choose a pipeline to see the parameters its current version declares.</p>
+            <p class="ds-field-help u-mt-xs" data-slot="params-status">Choose a pipeline and a version to see the parameters it declares.</p>
             <div class="sch-params" data-slot="params"></div>
             <p class="ds-field-error" data-field-error="parameters" hidden></p>
           </fieldset>
@@ -156,7 +165,7 @@
     </div>
   </template>
 
-  <!-- One declared parameter of the chosen pipeline's current version (pipeline-contract §6).
+  <!-- One declared parameter of the picked pipeline version (pipeline-contract §6).
        Blank means "not given": the declared default applies, and a required one is refused by
        the binder beside this field.
 

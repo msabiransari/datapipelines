@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -15,9 +16,20 @@ const logicPath = path.resolve(here, "../../main/resources/static/js/dashboards/
 const logic = require(logicPath);
 
 test("the admitted set is the rendered strip's, in the closed set's order", () => {
-  assert.deepEqual(logic.admittedTabs(["board", "overview", "refreshes", "versions", "keys"]), ["board", "overview", "refreshes", "versions", "keys"]);
+  assert.deepEqual(logic.admittedTabs(["board", "overview", "refreshes", "dependencies", "versions", "keys"]), ["board", "overview", "refreshes", "dependencies", "versions", "keys"]);
   // No Keys button rendered (an author): the tab does not exist for them at all.
-  assert.deepEqual(logic.admittedTabs(["board", "overview", "refreshes", "versions"]), ["board", "overview", "refreshes", "versions"]);
+  assert.deepEqual(logic.admittedTabs(["board", "overview", "refreshes", "dependencies", "versions"]), ["board", "overview", "refreshes", "dependencies", "versions"]);
+});
+
+test("the client set IS the server enum: DashboardWorkspaceTab's wire values, in order (#876 sets move together)", () => {
+  const source = fs.readFileSync(path.resolve(here, "../../main/kotlin/co/datapipelines/web/ui/DashboardWorkspaceController.kt"), "utf8");
+  const start = source.indexOf("enum class DashboardWorkspaceTab(");
+  const body = source.slice(start, source.indexOf("companion object", start));
+  const wires = Array.from(body.matchAll(/^\s+[A-Z_]+\("([a-z-]+)"\),?$/gm), (m) => m[1]);
+  assert.ok(wires.length >= 6, `non-vacuity: ${wires.length} enum entries read`);
+  const all = ["board", "overview", "refreshes", "dependencies", "versions", "keys", "bogus"];
+  assert.deepEqual(logic.admittedTabs(all), wires, "every enum tab admitted, nothing else, same order");
+  assert.equal(logic.tabFromUrl("/dashboards/x?version=2&tab=dependencies", wires), "dependencies");
 });
 
 test("the URL's tab reads only when the strip admits it; anything else is Board", () => {

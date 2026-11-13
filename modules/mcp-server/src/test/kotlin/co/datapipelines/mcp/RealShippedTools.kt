@@ -88,5 +88,7 @@ fun realShippedTools(): List<McpTool> {
         // #353 — the two test-session tools' collaborators; never reached by these callers.
         visualizationTestSessions = mockk<co.datapipelines.visualization.VisualizationTestSessionService>(),
         visualizationTestLinks = co.datapipelines.visualization.TestSessionLinks(null),
+        // #877 §C — the ONE TemplateUsage bean the tools take; the tools under these tests never reach it.
+        usage = mockk<co.datapipelines.application.templates.TemplateUsage>(),
     )
 }

@@ -55,6 +55,14 @@ class ReadFloorTest {
         wrong.joinToString("\n").also { withClue(it) { wrong.shouldBeEmpty() } }
     }
 
+    /** #875: a dependency tree route is its own family, never the family whose word is its segment. */
+    @Test
+    fun `the dependency tree routes classify as their own family`() {
+        familyOf("/api/v1/dependencies/parameter_set") shouldBeFamily Family.DEPENDENCY_TREES
+        familyOf("/api/v1/dependencies/dashboard") shouldBeFamily Family.DEPENDENCY_TREES
+        familyOf("/api/v1/dependencies/pipeline") shouldBeFamily Family.DEPENDENCY_TREES
+    }
+
     /** Non-vacuity: every family classifies the handlers it exists for. */
     @Test
     fun `every family actually classifies handlers`() {
@@ -110,6 +118,8 @@ class ReadFloorTest {
         // record's rule, the dashboard family's rows now named here).
         familyOf("/partials/dashboards/{id}/lifecycle/release") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/partials/dashboards/{id}/lifecycle/purge-entity") shouldBeFamily Family.LIFECYCLE_DIALOGS
+        // #876 §F.3 — the parameter set's release dialog is a lifecycle dialog, never the family's read.
+        familyOf("/partials/parameter-sets/{id}/lifecycle/release") shouldBeFamily Family.LIFECYCLE_DIALOGS
         familyOf("/partials/dashboards/{id}/refreshes") shouldBeFamily Family.DASHBOARD_RUNTIME
         // #556 — each family overview is its family's read, never the catch-all.
         familyOf("/overview/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
@@ -149,6 +159,27 @@ class ReadFloorTest {
         val permissions: Set<Permission>,
         val matches: (String) -> Boolean,
     ) {
+        /**
+         * #875 (G4) — the eight dependency tree routes, `GET /api/v1/dependencies/<family>`: each declares its OWN
+         * family's READ (design record erratum (8)(a)), so the family admits exactly those eight and its floor is the
+         * eight routes. FIRST, so no family below can claim a tree route by a substring of its family segment.
+         */
+        DEPENDENCY_TREES(
+            floor = 8,
+            permissions =
+                setOf(
+                    Permission.PIPELINE_READ,
+                    Permission.TEMPLATE_READ,
+                    Permission.PARAMETER_SET_READ,
+                    Permission.VISUALIZATION_READ,
+                    Permission.DASHBOARD_READ,
+                    Permission.ENDPOINT_READ,
+                    Permission.SCHEDULE_READ,
+                    Permission.DATASOURCE_READ,
+                ),
+            matches = { path -> path.startsWith("/api/v1/dependencies/") },
+        ),
+
         /** D11: own unless workspace admin, promoter none — never READ_RESOURCES. */
         EXECUTIONS(
             floor = 6,
@@ -209,7 +240,11 @@ class ReadFloorTest {
             // #400 — the dashboard family's dialogs join the pipeline and template ones: each
             // GET floors at the verb's own permission, the same rule one more family over.
             // #399 — the visualization family's seven join on the same rule.
-            floor = 24,
+            // #786 — the API family's six join too: the draft dialog is the form of the draft save (`endpoint.publish`),
+            // the release dialog `endpoint.release`, and discard / restore / purge / switch `endpoint.version.manage`.
+            // #876 §F.3 — the parameter set's release dialog joins on the same rule: its GET is the form of the
+            // release, so it floors at `parameter_set.release`. The floor is the family's measured count with it (32).
+            floor = 32,
             permissions =
                 setOf(
                     Permission.PIPELINE_VERSION_MANAGE,
@@ -227,6 +262,10 @@ class ReadFloorTest {
                     Permission.VISUALIZATION_DELETE,
                     Permission.VISUALIZATION_RELEASE,
                     Permission.VISUALIZATION_SWITCH_VERSION,
+                    Permission.ENDPOINT_PUBLISH,
+                    Permission.ENDPOINT_RELEASE,
+                    Permission.ENDPOINT_VERSION_MANAGE,
+                    Permission.PARAMETER_SET_RELEASE,
                 ),
             matches = { path -> path.contains("/lifecycle/") },
         ),

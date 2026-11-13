@@ -3,12 +3,13 @@ package co.datapipelines.visualization
 import com.fasterxml.jackson.databind.JsonNode
 
 /**
- * The binding grammar — the path a `bindings` key names inside `config` (the spec's §3.1: "a map from a JSON
- * path into `config`"): a key, then any run of `.key` and `[index]` steps — `data[0].x`, `layout.title.text`,
- * `columns[2].values`. A key is `[A-Za-z_][A-Za-z0-9_]*` (Plotly's attribute names), an index `0..9999`
+ * The binding grammar of the table and KPI kinds — the path a `bindings` key names inside `config` (the spec's §3.1:
+ * "a map from a JSON path into `config`"): a key, then any run of `.key` and `[index]` steps — `columns[2].values`,
+ * `value`. A key is `[A-Za-z_][A-Za-z0-9_]*` (a JSON attribute name), an index `0..9999`
  * without leading zeros; at most [MAX_PATH_CHARS] characters. No wildcard, no filter, no root marker: a path
  * names exactly one place, and that place must EXIST in the stored `config` (the renderer's placeholder), so
- * the runtime's substitution (§8.3 `visualization_data.bindings`) can never create structure.
+ * the runtime's substitution (§8.3 `visualization_data.bindings`) can never create structure. A chart's bindings
+ * are not paths: they are derived field-to-field (design record 2026-11-06 §4.4), and nothing here parses them.
  */
 object BindingPath {
     /** One step of a parsed path. */

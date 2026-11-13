@@ -6,8 +6,9 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
 /**
- * The module's renderer schemas, pinned (Dashboards §2.1.2): Plotly's shape and the two bundles' trace lists
- * (the spec's §10.4), and the `table` and `kpi` schemas this module defines.
+ * The module's renderer schemas, pinned (Dashboards §2.1.2): the two vendored Plotly bundles' trace lists (the spec's
+ * §10.4 — library facts the chart converter loads, no document vocabulary since the 860 retirement), and the `table`
+ * and `kpi` schemas this module defines; a `chart` is judged as a whole document elsewhere.
  */
 class RendererConfigValidatorsTest {
     private val validator = RendererConfigValidators.default()
@@ -19,21 +20,10 @@ class RendererConfigValidatorsTest {
     }
 
     @Test
-    fun `plotly - data a non-empty array of typed traces from the bundles, layout and config objects, nothing else`() {
-        problems(
-            RendererKind.PLOTLY,
-            """{"data":[{"type":"bar"},{"type":"surface"}],"layout":{},"config":{"displayModeBar":false}}""",
-        ) shouldBe
-            emptyList()
-        problems(RendererKind.PLOTLY, """{"layout":{}}""") shouldBe listOf("data" to "traces_missing")
-        problems(RendererKind.PLOTLY, """{"data":[{"x":[1]},{"type":"sankey"},3],"layout":[],"frames":[]}""") shouldContainExactlyInAnyOrder
-            listOf(
-                "frames" to "unknown_key",
-                "data[0].type" to "trace_type_missing",
-                "data[1].type" to "trace_type_unsupported",
-                "data[2]" to "wrong_type",
-                "layout" to "wrong_type",
-            )
+    fun `a chart config is no concern of this port - the whole document is judged by its v1 schema`() {
+        // Even an empty object: the chart's schema step (ChartDocumentRules) refuses it, never this validator.
+        problems(RendererKind.CHART, """{}""") shouldBe emptyList()
+        problems(RendererKind.CHART, """{"data":[{"type":"sankey"}]}""") shouldBe emptyList()
     }
 
     @Test

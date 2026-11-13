@@ -185,7 +185,7 @@ class SchedulerShutdownOrderE2eTest {
                 mapper.writeValueAsString(
                     mapOf(
                         "name" to name,
-                        "payload" to mapOf("pipeline" to pipeline, "version" to "current"),
+                        "payload" to mapOf("pipeline" to pipeline, "version" to 1),
                         "cron" to "0 3 1 1 *",
                         "timezone" to "UTC",
                     ),

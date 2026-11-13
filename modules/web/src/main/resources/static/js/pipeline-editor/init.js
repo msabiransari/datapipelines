@@ -126,7 +126,7 @@
          is gone; Details is the dock's landing tab. */
       dock: window.PEDock.createDock(),
       eventsLog: window.PEEvents.createEventsLog(),
-      /* #349 — the workspace's six-tab state (tabs.js, pure; admission re-read from the
+      /* #349 — the workspace's seven-tab state (tabs.js, pure; admission re-read from the
          root's server-stamped attributes in init()). Created with the flow default so
          the template's bindings resolve even before init() runs. */
       tabs: window.PETabs ? window.PETabs.createTabs(false, "flow") : null,
@@ -512,7 +512,7 @@
       },
 
       /* ==================================================== #349 — the workspace
-       * composition: six tabs, in-page version switching, run identity, and the
+       * composition: seven tabs, in-page version switching, run identity, and the
        * generation/sink guards every in-page read is stamped with. The spec's state
        * model (§4.3): page/view state key = workspace + pipeline + viewed version +
        * generation; execution state key = workspace + execution id, kept alive while
@@ -986,6 +986,9 @@
       },
       selectUsageTab: function () {
         this.switchTab("usage");
+      },
+      selectDependenciesTab: function () {
+        this.switchTab("dependencies");
       },
       selectVersionsTab: function () {
         this.switchTab("versions");

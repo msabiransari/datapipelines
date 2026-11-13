@@ -119,6 +119,9 @@ object DashboardErrorCodes {
     /** §13.23 — 409: the promotion peer lacks the full-closure envelope capability. */
     const val RELEASE_BUNDLE_UNSUPPORTED = "dashboard.release.bundle_unsupported"
 
+    /** §13.23 — 503: the release-planning metadata deadline expired (#786, record §25.4 erratum (6)); `Retry-After: 5`, no partial plan. */
+    const val RELEASE_METADATA_UNAVAILABLE = "dashboard.release.metadata_unavailable"
+
     /** 409 — the exported id belongs to another dashboard on this server (C29: never re-issued). */
     const val IMPORT_ID_TAKEN = "dashboard.import.id_taken"
 

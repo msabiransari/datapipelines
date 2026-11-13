@@ -1,19 +1,48 @@
 package co.datapipelines.web.templates
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
+import co.datapipelines.pipeline.release.ReleaseNodeIdentity
+import co.datapipelines.pipeline.release.ReleaseNodeStatus
+import co.datapipelines.pipeline.release.ReleasePlanRequest
+import co.datapipelines.pipeline.release.RestoreDependencyGuard
+import co.datapipelines.pipeline.release.RestoreRechecks
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateValidationException
+import co.datapipelines.templates.TemplateValidationFailure
+import co.datapipelines.templates.TemplateValidationResult
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
+
+/**
+ * The port [TemplateReleaseService.release] delegates to when the assembling layer wires one (#873 §C.1; the
+ * `PipelineReleaseCoordination` mold): every surface template release — the REST route's and the dialog's — then runs
+ * through the shared release planner, its import closure walked and its ONE metadata transaction.
+ */
+fun interface TemplateReleaseCoordination {
+    fun release(request: TemplateReleaseRequest): TemplateReleaseService.Released
+}
+
+/** A template release as the surfaces ask for it: the template's entity, its `If-Match`, and a plan (record §6). */
+data class TemplateReleaseRequest(
+    val workspaceId: UUID,
+    /** The template's surrogate id — the coordinator names every root by its entity. */
+    val entityId: UUID,
+    val expectedHash: String,
+    val actor: UUID,
+    val plan: ReleasePlanRequest? = null,
+)
 
 /**
  * Template release, purge, discard and restore (versioning §5.3/§5.4/§3.1, mirrored by §6;
@@ -33,7 +62,9 @@ import java.util.UUID
  * aggregates that pin templates: pipelines, parameter sets and visualizations. Discard and the draft purge of a
  * template that keeps other versions ask the LIVE-exact question (rule 1); an entity purge, and a draft purge that
  * takes the entity with it (the only version), ask the ANY-version question (rule 3, R12: a discarded dependent
- * version can be restored and must keep what it pins).
+ * version can be restored and must keep what it pins). #877 §D adds the fourth aggregate, importing TEMPLATES: a
+ * library pinned by a live importer's `imports` is refused the same way. Each removing verb takes the caller's
+ * [LensedView]: the guard decides on the whole workspace, and [TemplateInUseRefusal] narrows only the refusal's echo.
  *
  * ## The writer guard (#517, release-dependencies record §4.3)
  * Every verb here changes what a release resolves — a status, a pointer, a version's existence — so each runs in a
@@ -53,6 +84,18 @@ open class TemplateReleaseService(
     private val usage: TemplateUsage,
     /** The workspace writer guard (#517); [ReleaseMutationGuard.NONE] in a directly constructed test. */
     private val guard: ReleaseMutationGuard = ReleaseMutationGuard.NONE,
+    /**
+     * #873 §C.1 — the shared release planner; when set, [release] hands every surface release to it (the template's
+     * import closure is the planner's walk), and the planner's participant flips through [releaseExact]. Null in a
+     * directly constructed test, which releases natively.
+     */
+    private val coordination: TemplateReleaseCoordination? = null,
+    /**
+     * #873 §D.2 — the transitive restore recheck over the import closure ([RestoreDependencyGuard.DIRECT_ONLY] in a
+     * directly constructed test) and the blockers one restore refusal lists (record §14).
+     */
+    private val restoreGuard: RestoreDependencyGuard = RestoreDependencyGuard.DIRECT_ONLY,
+    private val maxBlockers: Int = ReleaseBounds.DEFAULT_MAX_BLOCKERS,
 ) {
     private fun lockWorkspace(workspaceId: UUID) = guard.acquire(workspaceId, ReleaseFamily.TEMPLATE)
 
@@ -71,16 +114,60 @@ open class TemplateReleaseService(
      *
      * Transactional and guarded since #517: until then the flip was a bare statement outside any transaction. Inside
      * the pipeline coordinator's transaction it joins that one (the guard is already held; re-acquiring it is a no-op).
+     *
+     * Since #873 a wired [coordination] owns the surface release after the authoring check (record §4.1, §23.3): the
+     * template's DRAFT, missing or DISCARDED imports, at any depth, are the planner's blockers, and a [plan] may select the
+     * DRAFT ones. Without one the native flip below runs, the import closure unchecked (the directly constructed service).
      */
-    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the caller distinguishes
-    @Transactional("metadataTransactionManager")
     open fun release(
         workspaceId: UUID,
         id: String,
         expectedHash: String,
         actor: UUID,
+        plan: ReleasePlanRequest? = null,
     ): Released {
         // §5.5: release is an authoring action — a promotion receiver refuses it.
+        authoring.requireTemplateAuthoring()
+        coordination?.let {
+            val (entity, _) = releaseTarget(workspaceId, id)
+            return it.release(TemplateReleaseRequest(workspaceId, entity, expectedHash, actor, plan))
+        }
+        check(plan?.present != true) { "a release plan needs the release coordinator, and none is wired" }
+        return flip(workspaceId, id, expectedHash, actor)
+    }
+
+    /**
+     * The template's DRAFT as a release root names it (#873 §C.1): its entity id and the draft's detail, or the native
+     * `template.version.not_draft` (a template that does not exist has no draft either, as [release] always answered).
+     */
+    open fun releaseTarget(
+        workspaceId: UUID,
+        id: String,
+    ): Pair<UUID, TemplateVersionDetail> {
+        val draft = templates.findDraftDetail(workspaceId, id) ?: throw notDraft(id)
+        val entity = templates.findEntityUuid(workspaceId, id) ?: throw notDraft(id)
+        return entity to draft
+    }
+
+    /** The template name behind entity [entityUuid], or the native `template.version.not_draft` (#873 §C.1). */
+    open fun releaseTargetName(
+        workspaceId: UUID,
+        entityUuid: UUID,
+    ): String = templates.findNameByEntityUuid(workspaceId, entityUuid) ?: throw notDraft(entityUuid.toString())
+
+    /**
+     * The native release's flip (versioning §5.3): the guard, the DRAFT re-validated exactly as a save would, the
+     * one-statement flip at [expectedHash]. [release]'s unwired body and every cascade leg ([releasePinned],
+     * [releaseExact]) run it; inside the coordinator's transaction it joins that one.
+     */
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the caller distinguishes
+    @Transactional("metadataTransactionManager")
+    open fun flip(
+        workspaceId: UUID,
+        id: String,
+        expectedHash: String,
+        actor: UUID,
+    ): Released {
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
 
@@ -156,7 +243,7 @@ open class TemplateReleaseService(
                     ),
             )
         }
-        return release(workspaceId, id, draft.bodyHash, actor)
+        return flip(workspaceId, id, draft.bodyHash, actor)
     }
 
     /**
@@ -176,7 +263,7 @@ open class TemplateReleaseService(
     ): Released {
         val draft = templates.findDraftDetail(workspaceId, id) ?: throw conflict()
         if (draft.version != version || draft.bodyHash != consentedHash) throw conflict()
-        return release(workspaceId, id, consentedHash, actor)
+        return flip(workspaceId, id, consentedHash, actor)
     }
 
     /**
@@ -191,13 +278,14 @@ open class TemplateReleaseService(
         workspaceId: UUID,
         id: String,
         expectedHash: String,
+        view: LensedView,
     ) {
         // §5.5: purging authored content is authoring — a promotion receiver refuses it.
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
 
         val draft = templates.findDraftDetail(workspaceId, id) ?: throw notDraft(id)
-        refuseIfDraftPinned(workspaceId, id, draft.version)
+        refuseIfDraftPinned(workspaceId, id, draft.version, view)
         if (!templates.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture)) {
             throw conflictAfterGuardFailure(workspaceId, id)
         }
@@ -217,19 +305,27 @@ open class TemplateReleaseService(
         id: String,
         version: Int,
         actor: UUID,
+        view: LensedView,
     ): TemplateVersionDetail {
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.RELEASED) throw notReleased(id, version, detail.status)
-        refuseIfPinned(workspaceId, id, version)
+        refuseIfPinned(workspaceId, id, version, view)
 
         return templates.discardVersion(workspaceId, id, version, actor, authoring.developmentPosture)
-            ?: throw pinnedOrConcurrent(workspaceId, id, version)
+            ?: throw pinnedOrConcurrent(workspaceId, id, version, view)
     }
 
-    /** §3.1 (101) — restore DISCARDED version [version]; the pointer moves only above-current-or-NULL. */
+    /**
+     * §3.1 (101) — restore DISCARDED version [version]; the pointer moves only above-current-or-NULL. A restore lands
+     * RELEASED without a release's consent, so under the guard the stored body's import closure is rechecked first
+     * through the shared restore walk (#873 §D.2, record §25.2 row G2): a missing or DISCARDED import anywhere in it is
+     * the save rules' 400 `template.validation.import_not_found` (`reason: discarded` for a DISCARDED version; the full
+     * `path` and the intermediate libraries as `via` below the first level); a DRAFT one — imported directly or beneath a
+     * RELEASED library — is `template.release.dependency_not_released` (409). Metadata only; a refusal writes nothing.
+     */
     @Transactional("metadataTransactionManager")
     open fun restoreVersion(
         workspaceId: UUID,
@@ -241,8 +337,27 @@ open class TemplateReleaseService(
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.DISCARDED) throw notDiscarded(id, version, detail.status)
+        refuseUnreleasedImports(ReleaseNodeIdentity(workspaceId, ReleaseFamily.TEMPLATE, id, version))
         return templates.restoreVersion(workspaceId, id, version)
             ?: throw templateNotFound(id, version)
+    }
+
+    private fun refuseUnreleasedImports(root: ReleaseNodeIdentity) {
+        val reaches = restoreGuard.recheck(root)
+        val dangling =
+            reaches.filter { it.dangling }.map { reach ->
+                val key = "${reach.identity.entityId}@${reach.identity.version}"
+                TemplateValidationFailure(
+                    PipelineErrorCodes.Template.IMPORT_NOT_FOUND,
+                    "Imported template '$key' is ${reach.status.name.lowercase()}; a restore lands RELEASED and its whole " +
+                        "import closure must be live.",
+                    mapOf("import" to key) +
+                        (if (reach.status == ReleaseNodeStatus.DISCARDED) mapOf("reason" to "discarded") else emptyMap()) +
+                        if (reach.transitive) mapOf("path" to reach.path, "via" to reach.viaDetails()) else emptyMap(),
+                )
+            }
+        if (dangling.isNotEmpty()) throw TemplateValidationException(TemplateValidationResult(dangling))
+        RestoreRechecks.notReleased(root, root.entityId, reaches, maxBlockers)?.let { throw it }
     }
 
     /**
@@ -254,13 +369,14 @@ open class TemplateReleaseService(
         workspaceId: UUID,
         id: String,
         version: Int,
+        view: LensedView,
     ) {
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
         requireTemplate(workspaceId, id)
         val detail = findVersionOr404(workspaceId, id, version)
         if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(id, version, detail.status)
-        refuseIfDraftPinned(workspaceId, id, version)
+        refuseIfDraftPinned(workspaceId, id, version, view)
         if (!templates.purgeDraft(workspaceId, id, null, authoring.developmentPosture)) {
             throw templateNotFound(id, version)
         }
@@ -275,6 +391,7 @@ open class TemplateReleaseService(
     open fun purgeEntity(
         workspaceId: UUID,
         id: String,
+        view: LensedView,
     ) {
         authoring.requireTemplateAuthoring()
         lockWorkspace(workspaceId)
@@ -284,9 +401,10 @@ open class TemplateReleaseService(
             throw lastReleaseEntity(id, versions.size)
         }
         // Graph rule 3: no inbound edges — any pin of ANY version, from any stored pipeline version, since 194d
-        // from any parameter set version (the record's §8.4), and since #320 from any visualization version.
+        // from any parameter set version (the record's §8.4), since #320 from any visualization version, and since #877
+        // §D from any template version that imports it.
         val pins = usage.everPins(workspaceId, id)
-        if (!pins.isEmpty()) throw inUse(id, pins)
+        if (!pins.isEmpty()) throw TemplateInUseRefusal.of(id, pins, view)
         templates.deleteTemplateRow(workspaceId, id)
     }
 
@@ -324,9 +442,10 @@ open class TemplateReleaseService(
         workspaceId: UUID,
         id: String,
         version: Int,
+        view: LensedView,
     ) {
         val pins = usage.liveVersionPins(workspaceId, id, version)
-        if (!pins.isEmpty()) throw inUse(id, pins)
+        if (!pins.isEmpty()) throw TemplateInUseRefusal.of(id, pins, view)
     }
 
     /**
@@ -338,19 +457,21 @@ open class TemplateReleaseService(
         workspaceId: UUID,
         id: String,
         version: Int,
+        view: LensedView,
     ) {
         val takesTheEntity = templates.listVersions(workspaceId, id).size == 1
         val pins = if (takesTheEntity) usage.everPins(workspaceId, id) else usage.liveVersionPins(workspaceId, id, version)
-        if (!pins.isEmpty()) throw inUse(id, pins)
+        if (!pins.isEmpty()) throw TemplateInUseRefusal.of(id, pins, view)
     }
 
     private fun pinnedOrConcurrent(
         workspaceId: UUID,
         id: String,
         version: Int,
+        view: LensedView,
     ): DatapipelinesException {
         val pins = usage.liveVersionPins(workspaceId, id, version)
-        if (!pins.isEmpty()) return inUse(id, pins)
+        if (!pins.isEmpty()) return TemplateInUseRefusal.of(id, pins, view)
         val current = findVersionOr404(workspaceId, id, version)
         return if (current.status == PipelineVersionStatus.RELEASED) {
             DatapipelinesException(
@@ -361,36 +482,6 @@ open class TemplateReleaseService(
         } else {
             notReleased(id, version, current.status)
         }
-    }
-
-    private fun inUse(
-        id: String,
-        pins: TemplateUsage.Pins,
-    ): DatapipelinesException {
-        val pipelineNames = pins.pipelines.map { it.pipelineName }.distinct()
-        val setNames = pins.parameterSets.map { it.setName }.distinct()
-        val visualizationNames = pins.visualizations.map { it.name }.distinct()
-        val sentences =
-            listOfNotNull(
-                pipelineNames.takeIf { it.isNotEmpty() }?.let {
-                    "${pins.pipelines.size} live pipeline version(s): ${it.joinToString(
-                        ", ",
-                    )}"
-                },
-                setNames.takeIf { it.isNotEmpty() }?.let { "${it.size} parameter set version(s): ${it.joinToString(", ")}" },
-                visualizationNames.takeIf { it.isNotEmpty() }?.let { "${it.size} visualization version(s): ${it.joinToString(", ")}" },
-            )
-        return DatapipelinesException(
-            code = PipelineErrorCodes.Template.IN_USE,
-            message = "Version of template '$id' is pinned by ${sentences.joinToString(" and ")}; discard or repoint them first.",
-            details =
-                buildMap {
-                    put("template_id", id)
-                    put("pinned_by", pipelineNames)
-                    if (setNames.isNotEmpty()) put("referencing_parameter_sets", setNames)
-                    if (visualizationNames.isNotEmpty()) put("referencing_visualizations", visualizationNames)
-                },
-        )
     }
 
     private fun lastRelease(

@@ -497,7 +497,7 @@ class KeyIdentitiesE2eTest {
             .port(port)
             .asSession(ADMIN_SESSION)
             .contentType(ContentType.JSON)
-            .body("""{"path": "$path", "pipeline": "$pipeline", "timeout_seconds": $timeoutSeconds}""")
+            .body("""{"path": "$path", "pipeline": "$pipeline", "pipeline_version": 1, "timeout_seconds": $timeoutSeconds}""")
             .`when`()
             .post("/api/v1/endpoints")
             .then()

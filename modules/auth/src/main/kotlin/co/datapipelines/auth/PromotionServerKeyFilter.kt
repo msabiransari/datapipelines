@@ -65,6 +65,13 @@ import org.springframework.web.filter.OncePerRequestFilter
  * id rides on the principal ([AuthenticatedPrincipal.keyId]) so the audit trail can say WHICH key
  * opened the route across a rotation.
  *
+ * ## A native verification fault is a 503, not a refusal (#847)
+ * When the stored-key check could not RUN ([SecretVerificationUnavailableException]), the
+ * request is not answered `auth.promotion.key_invalid`: a peer would read that as "my key is
+ * wrong" and an operator would rotate a good key. [accept] lets that one type escape its
+ * refusal swallow; the filter answers the 503 envelope, logs one ERROR line, writes no audit
+ * row (nothing was judged) and stops the chain, for the same reason [reject] does.
+ *
  * ## What never appears
  * The key does not reach a log line, an error message, an audit `details` map, or the
  * exception. `PromotionServerKeyFilterTest` asserts that on the filter's own log output —
@@ -94,7 +101,13 @@ class PromotionServerKeyFilter(
         }
 
         val presented = request.getHeader(HEADER)
-        val accepted = accept(presented)
+        val accepted =
+            try {
+                accept(presented)
+            } catch (e: SecretVerificationUnavailableException) {
+                unavailable(request, response, e)
+                return
+            }
         if (accepted == null) {
             reject(request, response)
             return
@@ -122,7 +135,8 @@ class PromotionServerKeyFilter(
         return runCatching { apiKeyService.validateServerKey(presented) }
             .map { Accepted(key = it) }
             .getOrElse { cause ->
-                if (cause !is AuthException) throw cause
+                // #847 — a native fault is not a refusal: it escapes to doFilterInternal's 503.
+                if (cause !is AuthException || cause is SecretVerificationUnavailableException) throw cause
                 null
             }
     }
@@ -179,6 +193,26 @@ class PromotionServerKeyFilter(
             promotionProperties.receives,
         )
         authErrorWriter.write(request, response, PromotionKeyInvalidException())
+    }
+
+    /**
+     * #847 — the stored-key verification could not run. The 503 envelope, one ERROR line naming the
+     * client and the path (never the presented key), no audit row, and the chain stops.
+     */
+    private fun unavailable(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        e: SecretVerificationUnavailableException,
+    ) {
+        log.error(
+            "event={} path={} client={} native_code={}",
+            AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE,
+            request.requestURI,
+            clientAddressResolver.clientAddressOf(request),
+            e.nativeCode,
+            e,
+        )
+        authErrorWriter.write(request, response, e)
     }
 
     /**

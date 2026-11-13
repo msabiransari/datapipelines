@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ManagedLakeGeneration
+import co.datapipelines.logcapture.capturingLogs
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
@@ -108,6 +109,8 @@ class ManagedLakeRegistryIntegrationTest {
             val stored = registry.get(LAKE).shouldNotBeNull()
             assertAll(
                 { updatedAt() shouldBe firstVersion },
+                // #874: CREATED minted generation 1; an UNCHANGED sync writes nothing, so it stays there.
+                { generation() shouldBe 1L },
                 { stored.isManagedLake() shouldBe true },
                 { stored.isReadonly shouldBe true },
                 // The credential took the encrypted path: never in properties, never returned.
@@ -134,16 +137,55 @@ class ManagedLakeRegistryIntegrationTest {
             val firstVersion = updatedAt()
 
             // Credential rotation: the reader pair changed in configuration, then a restart.
+            val firstGeneration = generation()
             registry.syncManagedLake(managed(secret = "$READER_SECRET-rotated"), owner) shouldBe ManagedLakeSync.RESYNCED
 
             assertAll(
                 { (updatedAt().after(firstVersion)) shouldBe true },
+                // #874: a RESYNC is a definition update — exactly one advance.
+                { generation() shouldBe firstGeneration + 1 },
                 { audit.countOf(DatasourceAuditEvents.POOL_REBUILD) shouldBe 1 },
                 { published shouldContainExactly listOf(LAKE) },
                 { registry.poolFor(registry.get(LAKE).shouldNotBeNull()) shouldNotBe firstPool },
             )
             // And the rotated secret is what the row now decrypts to: the next sync is UNCHANGED.
             registry.syncManagedLake(managed(secret = "$READER_SECRET-rotated"), owner) shouldBe ManagedLakeSync.UNCHANGED
+            generation() shouldBe firstGeneration + 1
+        } finally {
+            registry.shutdown()
+        }
+    }
+
+    /**
+     * #845 (B.3, the upgrade note): a release that adds `egress_proxy` to the configured row RESYNCs the stored row on
+     * its first boot (sameManagedShape compares the dialect map whole), retiring the pool built without the proxy;
+     * the next boot is UNCHANGED, and dropping the proxy from configuration RESYNCs again.
+     */
+    @Test
+    fun `845 - an egress proxy added by an upgrade re-syncs the row on the first boot, then is unchanged`() {
+        val registry = registry()
+        try {
+            registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.CREATED
+            val withoutProxy = registry.poolFor(registry.get(LAKE).shouldNotBeNull())
+
+            registry.syncManagedLake(managed(egressProxy = "egress-proxy:3128"), owner) shouldBe ManagedLakeSync.RESYNCED
+
+            assertAll(
+                {
+                    registry
+                        .get(LAKE)
+                        .shouldNotBeNull()
+                        .properties.dialect[LakeHttpBounds.EGRESS_PROXY_KEY] shouldBe "egress-proxy:3128"
+                },
+                { registry.poolFor(registry.get(LAKE).shouldNotBeNull()) shouldNotBe withoutProxy },
+            )
+            registry.syncManagedLake(managed(egressProxy = "egress-proxy:3128"), owner) shouldBe ManagedLakeSync.UNCHANGED
+            registry.syncManagedLake(managed(), owner) shouldBe ManagedLakeSync.RESYNCED
+            registry
+                .get(LAKE)
+                .shouldNotBeNull()
+                .properties.dialect
+                .containsKey(LakeHttpBounds.EGRESS_PROXY_KEY) shouldBe false
         } finally {
             registry.shutdown()
         }
@@ -504,30 +546,32 @@ class ManagedLakeRegistryIntegrationTest {
 
     // ------------------ fixtures
 
-    private fun managed(secret: String = READER_SECRET) =
-        Datasource(
-            name = LAKE,
-            displayName = "Managed lake",
-            description = "The server's managed lake.",
-            dialect = Dialect.LAKE,
-            jdbcUrl = "jdbc:duckdb::memory:",
-            username = "reader",
-            credentialKind = CredentialKind.PASSWORD,
-            secret = secret,
-            properties =
-                DatasourceProperties(
-                    dialect =
-                        mapOf(
-                            "catalog.kind" to "s3",
-                            MANAGED_DIALECT_KEY to "true",
-                            "region" to "us-east-1",
-                            "endpoint" to "localhost:9",
-                            "url_style" to "path",
-                            "memory_limit" to "512MB",
-                        ),
-                ),
-            isReadonly = true,
-        )
+    private fun managed(
+        secret: String = READER_SECRET,
+        egressProxy: String? = null,
+    ) = Datasource(
+        name = LAKE,
+        displayName = "Managed lake",
+        description = "The server's managed lake.",
+        dialect = Dialect.LAKE,
+        jdbcUrl = "jdbc:duckdb::memory:",
+        username = "reader",
+        credentialKind = CredentialKind.PASSWORD,
+        secret = secret,
+        properties =
+            DatasourceProperties(
+                dialect =
+                    mapOf(
+                        "catalog.kind" to "s3",
+                        MANAGED_DIALECT_KEY to "true",
+                        "region" to "us-east-1",
+                        "endpoint" to "localhost:9",
+                        "url_style" to "path",
+                        "memory_limit" to "512MB",
+                    ) + listOfNotNull(egressProxy?.let { LakeHttpBounds.EGRESS_PROXY_KEY to it }),
+            ),
+        isReadonly = true,
+    )
 
     private fun table(
         name: String,
@@ -546,6 +590,12 @@ class ManagedLakeRegistryIntegrationTest {
     ) = LakeRegisteredTable(listOf(LAKE, "sales"), name, "iceberg", location, managed = true)
 
     private fun external() = LakeRegisteredTable(listOf(LAKE, "ref"), "zones", "parquet", "s3://dp-ref/zones.parquet")
+
+    /** #874 — the managed row's V59 generation. */
+    private fun generation(): Long =
+        checkNotNull(
+            jdbc.queryForObject("SELECT generation FROM datasources WHERE name = :name", mapOf("name" to LAKE), Long::class.java),
+        )
 
     private fun updatedAt(): Timestamp =
         checkNotNull(

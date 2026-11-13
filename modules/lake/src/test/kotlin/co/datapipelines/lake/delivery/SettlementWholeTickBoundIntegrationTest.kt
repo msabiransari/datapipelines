@@ -7,12 +7,12 @@ import co.datapipelines.lake.definitions.LakeApplyState
 import co.datapipelines.lake.definitions.LakeAuditEvents
 import co.datapipelines.lake.settle.LakeSettlementSweep
 import co.datapipelines.lake.settle.SettleBudget
+import co.datapipelines.logcapture.SnapshotListAppender
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.fail
 import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.ints.shouldBeGreaterThan
-import io.kotest.matchers.longs.shouldBeGreaterThan
 import io.kotest.matchers.longs.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -33,7 +33,8 @@ import java.util.concurrent.TimeoutException
  * Record §8b, owner ruling D3 (i), lane 799c: the settlement tick is bounded THROUGH verification and repair. The budget
  * is checked before every statement group inside them; the Iceberg metadata read leaves the scheduler thread, so a stalled
  * or trickling object store costs the tick nothing past its deadline, leaves one thread behind and is refused a successor
- * until it ends. Real PostgreSQL, real fence, real sweep; only the object store is scripted. On the sweep path the catalog
+ * until it ends. An abandoned read stops itself at its next byte (#851): a trickle ends there, a stall when the store
+ * answers. Real PostgreSQL, real fence, real sweep; only the object store is scripted. On the sweep path the catalog
  * is a strict double: a `catalogs.open` there fails the case.
  */
 class SettlementWholeTickBoundIntegrationTest {
@@ -143,38 +144,41 @@ class SettlementWholeTickBoundIntegrationTest {
     }
 
     @Test
-    fun `B6 a trickling store ends the tick within the bound and its residual is one thread and one read`() {
+    fun `B6 a trickling store ends the tick within the bound and its abandoned read ends at its next byte`() {
         val attempt = h.applyingWithEvidence()
         val io = ScriptedFileIo(h.metadataJson(), ScriptedFileIo.Mode.TRICKLE)
         val sweep = h.stallableSweep(io, budgets = shortBudget())
 
         val first = tick(sweep, io, SHORT_BUDGET)
         val atTickEnd = io.bytesServed.get()
-        Thread.sleep(RESIDUAL_MILLIS)
+        val ended = awaitStreamClosed(io, RESIDUAL_MILLIS)
         val after = io.bytesServed.get()
         val total = h.metadataJson().size
         println(
             "case=B6-trickle tick=1 elapsed_ms=${first.toMillis()} bytes_at_tick_end=$atTickEnd " +
-                "bytes_${RESIDUAL_MILLIS}ms_later=$after of=$total reader_alive=${io.readerThread?.isAlive} " +
+                "bytes_at_stream_close=$after of=$total stream_closed_ms_after_tick=${ended?.toMillis()} " +
                 "reader_name=${io.readerThread?.name} ended=${io.readsEnded.get()} leases=${leases()} " +
                 "active_connections=${activeConnections()} whole_file_at_100ms_per_byte_ms=${total * TRICKLE_MILLIS_PER_BYTE}",
         )
-        withClue("the abandoned read is still running after the tick ended") {
-            after shouldBeGreaterThan atTickEnd
-            io.readsEnded.get() shouldBe 0
+        withClue("the abandoned read stopped itself at its next byte, within $RESIDUAL_MILLIS ms of the tick's end") {
+            io.readsEnded.get() shouldBe 1
+            after shouldBeLessThanOrEqual atTickEnd + 1
         }
         readerLeftTheSchedulerThread(io)
         nothingHeldAndNothingStamped(attempt, LakeApplyState.APPLYING)
-
-        tick(sweep, io, SHORT_BUDGET)
-        io.streamsEntered.get() shouldBe 1
+        withClue("the read is over: no successor is refused") { h.noStuckReadWithin(WAIT_MILLIS).shouldBeTrue() }
+        lines.messages().single { it.startsWith("event=lake.settle.metadata_read_ended ") } shouldContain
+            "table_id=${h.tableId} elapsed_ms="
+        lines.messages().single { it.startsWith("event=lake.settle.metadata_read_ended ") } shouldContain "cause=abandoned"
 
         io.mode = ScriptedFileIo.Mode.HEALTHY
-        io.release()
-        h.noStuckReadWithin(WAIT_MILLIS).shouldBeTrue()
-        nothingHeldAndNothingStamped(attempt, LakeApplyState.APPLYING)
         tick(sweep, io, SHORT_BUDGET)
+        withClue("the next tick's verification and repair each sent a new read, with no release of the store") {
+            io.streamsEntered.get() shouldBe 3
+        }
         h.applyState() shouldBe LakeApplyState.APPLIED
+        h.audit.events.map { it.event } shouldBe listOf(LakeAuditEvents.APPLIED)
+        leases() shouldBe 0
     }
 
     @Test
@@ -421,6 +425,19 @@ class SettlementWholeTickBoundIntegrationTest {
             else -> statement
         }
 
+    /** Waits up to [millis] for the scripted store's stream to be closed; the time it took after the call, or null. */
+    private fun awaitStreamClosed(
+        io: ScriptedFileIo,
+        millis: Long,
+    ): Duration? {
+        val started = System.nanoTime()
+        val end = started + Duration.ofMillis(millis).toNanos()
+        while (io.readsEnded.get() == 0 && System.nanoTime() < end) {
+            Thread.sleep(POLL_MILLIS)
+        }
+        return if (io.readsEnded.get() == 0) null else Duration.ofNanos(System.nanoTime() - started)
+    }
+
     private fun stuckLines(): List<String> = lines.messages().filter { it.startsWith("event=lake.settle.metadata_read_stuck ") }
 
     private fun sweepLines(): List<String> = lines.messages().filter { it.startsWith("event=lake.settle.sweep ") }
@@ -440,6 +457,7 @@ class SettlementWholeTickBoundIntegrationTest {
         const val WAIT_MILLIS = 5_000L
         const val RESIDUAL_MILLIS = 1_000L
         const val TRICKLE_MILLIS_PER_BYTE = 100
+        const val POLL_MILLIS = 10L
 
         /** The number docs/lake.md §8 states, as a literal: `SettlementOverrunDerivationTest` derives it from the source. */
         val PERMITTED_OVERRUN: Duration = Duration.ofSeconds(16)

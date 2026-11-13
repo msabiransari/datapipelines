@@ -4,8 +4,8 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.web.capturingLogEvents
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.kotest.assertions.withClue
@@ -85,6 +85,30 @@ class ApiExceptionHandlerTest {
         tree["error"]["message"].asText() shouldContain "nesting depth"
         mapper.writeValueAsString(response.body).contains("987654321") shouldBe false
         mapper.readTree("[[\"sentinel987654321\"]]").isArray shouldBe true
+    }
+
+    /**
+     * #847 — the native verification fault answers its own 503 envelope through the auth advice:
+     * the fixed message and user message, empty details, and never the library's text or code.
+     */
+    @Test
+    fun `a native verification fault is a 503 envelope free of the native cause`() {
+        val error =
+            co.datapipelines.auth.SecretVerificationUnavailableException(
+                -22,
+                IllegalStateException("argon2id_verify failed: Memory allocation error (-22)"),
+            )
+
+        val response = ApiExceptionHandler().onAuth(error, MockHttpServletRequest("POST", "/api/v1/auth/password"))
+
+        response.statusCode.value() shouldBe 503
+        val tree = jacksonObjectMapper().valueToTree<JsonNode>(response.body)
+        tree["error"]["code"].asText() shouldBe co.datapipelines.auth.AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
+        tree["error"]["message"].asText() shouldBe "Secret verification is temporarily unavailable"
+        tree["error"]["details"].size() shouldBe 0
+        val json = jacksonObjectMapper().writeValueAsString(response.body)
+        json.contains("emory") shouldBe false
+        json.contains("-22") shouldBe false
     }
 
     @Test

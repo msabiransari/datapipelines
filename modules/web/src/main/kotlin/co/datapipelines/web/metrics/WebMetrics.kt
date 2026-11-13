@@ -5,6 +5,7 @@ import co.datapipelines.persistence.BatchingWriter
 import co.datapipelines.persistence.FallbackReason
 import co.datapipelines.web.sse.ExecutionStream
 import co.datapipelines.web.sse.ExecutionStreamRegistry
+import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.DistributionSummary
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -83,15 +84,30 @@ class WebMetrics(
                 .description("Items per committed batch")
                 .tag(TAG_STORE, store)
                 .register(registry)
-        val batchDuration = Timer.builder(PERSISTENCE_BATCH_DURATION).tag(TAG_STORE, store).register(registry)
+        val batchDuration =
+            Timer
+                .builder(PERSISTENCE_BATCH_DURATION)
+                .description("The store's time to commit one batch")
+                .tag(TAG_STORE, store)
+                .register(registry)
         val lag =
             Timer
                 .builder(PERSISTENCE_LAG)
                 .description("Enqueue to durable, per item")
                 .tag(TAG_STORE, store)
                 .register(registry)
-        val retried = registry.counter(PERSISTENCE_BATCHES_RETRIED, TAG_STORE, store)
-        val dropped = registry.counter(PERSISTENCE_DROPPED, TAG_STORE, store)
+        val retried =
+            Counter
+                .builder(PERSISTENCE_BATCHES_RETRIED)
+                .description("Batches that threw and were retried one item at a time")
+                .tag(TAG_STORE, store)
+                .register(registry)
+        val dropped =
+            Counter
+                .builder(PERSISTENCE_DROPPED)
+                .description("submit calls refused (queue full or stopped)")
+                .tag(TAG_STORE, store)
+                .register(registry)
         writer.hooks =
             object : BatchingHooks {
                 override fun onBatch(

@@ -3,7 +3,10 @@ package co.datapipelines.web.config
 import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.pooling.PoolCloser
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
+import co.datapipelines.lake.LakeLeases
 import co.datapipelines.persistence.FailureShape
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.DisposableBean
 import java.time.Duration
@@ -15,18 +18,25 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
+import javax.sql.DataSource
 
 /**
  * #818d (dp-lake record §10 RULING 4 amended, item 6) — the production [PoolCloser]: every close the reaper's pass
  * hands off runs on a `dp-pool-close-<n>` thread, never on the pass's own `dp-reaper` thread, under a per-close
- * deadline of [PoolCloser.DEADLINE_SECONDS] counted from the hand-off.
+ * deadline counted from the hand-off.
+ *
+ * - **The deadline is the pool's own (#840).** [deadlineOf]: [PoolCloser.deadlineFor] at the pool's own
+ *   [ConnectionPool.connectionTimeout], plus [managedReleaseBound] for a managed lake generation, whose close also
+ *   releases its reader pins on the metadata database (the fourth term; see [PoolCloser.deadlineFor]). 65 s for a pool
+ *   at Hikari's default 30 s ([PoolCloser.DEADLINE_SECONDS]); a datasource configured with a longer
+ *   `connectionTimeout` gets a longer deadline instead of a stuck report while Hikari is inside a wait it admits.
  *
  * - **The pass never waits.** [close] submits and returns; a Hikari shutdown that runs its full waits, or a driver
  *   close that never returns, costs one `dp-pool-close` thread, never the next pass.
  * - **A stuck close is reported once, never retried.** Past the deadline the close is still running (the thread is
  *   left to finish; nothing can safely cut a native close): one WARN `datasource.pool_close_stuck` with the datasource,
- *   the instance generation, the seconds elapsed since the hand-off and the active count the pass read at hand-off,
- *   and one increment of `datapipelines.datasource.pool.close_stuck`. [ConnectionPool.close] starts independent
+ *   the instance generation, the seconds elapsed since the hand-off, the active count the pass read at hand-off and the
+ *   deadline it was held to, and one increment of `datapipelines.datasource.pool.close_stuck`. [ConnectionPool.close] starts independent
  *   physical-handle close attempts first. A native reader can remain blocked; reader pins follow its physical lifetime.
  * - **Threads: daemon, named, one per close, never queued.** A cached executor: a thread is made for a hand-off
  *   when none is idle, and an idle one ends after [IDLE_SECONDS]. No cap and no queue, on purpose: a close waiting
@@ -45,7 +55,13 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class DeadlinePoolCloser(
     private val metrics: PoolLifecycleMetrics,
-    private val deadline: Duration = Duration.ofSeconds(PoolCloser.DEADLINE_SECONDS),
+    /**
+     * #840 — the fourth deadline term, for a managed lake generation only: the bound of its reader-pin release
+     * ([managedReleaseBound] derives it from the metadata pool). Zero where no pins are wired.
+     */
+    private val managedReleaseBound: Duration = Duration.ZERO,
+    /** The pool-independent terms, [PoolCloser.FIXED_CLOSE_TERMS]; a test scales them down to seconds. */
+    private val fixedTerms: Duration = PoolCloser.FIXED_CLOSE_TERMS,
 ) : PoolCloser,
     DisposableBean {
     private val threadCount = AtomicInteger()
@@ -55,9 +71,18 @@ class DeadlinePoolCloser(
             Thread(runnable, "$THREAD_PREFIX${threadCount.incrementAndGet()}").apply { isDaemon = true }
         }
 
+    /** #840 — [pool]'s own close deadline (class KDoc). */
+    fun deadlineOf(pool: ConnectionPool): Duration =
+        PoolCloser.deadlineFor(
+            pool.connectionTimeout,
+            releaseBound = if (pool.managedGeneration != null) managedReleaseBound else Duration.ZERO,
+            fixedTerms = fixedTerms,
+        )
+
     override fun close(pool: ConnectionPool) {
         val handedOffAt = System.nanoTime()
         val activeAtHandOff = pool.activeConnections
+        val deadline = deadlineOf(pool)
         val running =
             try {
                 CompletableFuture.runAsync(pool::close, executor)
@@ -73,7 +98,7 @@ class DeadlinePoolCloser(
             .whenComplete { _, error ->
                 when (val cause = unwrapped(error)) {
                     null -> Unit
-                    is TimeoutException -> stuck(pool, handedOffAt, activeAtHandOff)
+                    is TimeoutException -> stuck(pool, handedOffAt, activeAtHandOff, deadline)
                     else -> failed(pool, cause)
                 }
             }
@@ -101,14 +126,17 @@ class DeadlinePoolCloser(
         pool: ConnectionPool,
         handedOffAt: Long,
         activeAtHandOff: Int,
+        deadline: Duration,
     ) {
         LOG.warn(
             "event=datasource.pool_close_stuck datasource={} generation={} elapsed_seconds={} active_connections={} " +
+                "deadline_seconds={} " +
                 "message=\"a retired pool's close is still running past its deadline; the close thread is left to finish\"",
             pool.name,
             pool.generation ?: NO_GENERATION,
             TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - handedOffAt),
             activeAtHandOff,
+            deadline.seconds,
         )
         metrics.poolCloseStuck(pool.name)
     }
@@ -134,5 +162,30 @@ class DeadlinePoolCloser(
 
         /** What the stuck line's `generation=` carries for a pool that owns no instance (every non-LAKE pool). */
         const val NO_GENERATION = "none"
+
+        /**
+         * #840 — the fourth term for a managed generation, derived from the metadata pool its pins are released on
+         * (`PoolReaderLeaseConfiguration.managedGenerationPins` builds the keeper over the same [metadata]): the
+         * checkout, bounded by that pool's own `connectionTimeout` (HikariCP's default when it is not a Hikari pool,
+         * as the keeper reads it), plus the DELETE, whose statement and socket timeouts are both
+         * `LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS`, plus [DRIVER_CANCEL_WAIT_SECONDS]: against a server that accepts
+         * and never answers, the statement ends only when the driver's cancel attempt gives up, at its bound plus that
+         * wait (measured under #837, `co.datapipelines.executor.BoundedJdbc`). 10 + 5 + 10 = 25 s on the shipped metadata
+         * pool (`spring.datasource.hikari.connection-timeout` = 10 000 ms since #837); 30 + 5 + 10 = 45 s on HikariCP's
+         * default.
+         */
+        fun managedReleaseBound(metadata: DataSource?): Duration =
+            Duration
+                .ofMillis((metadata as? HikariDataSource)?.connectionTimeout ?: HikariConfig().connectionTimeout)
+                .plusSeconds(LakeLeases.READER_STATEMENT_TIMEOUT_SECONDS.toLong())
+                .plusSeconds(DRIVER_CANCEL_WAIT_SECONDS)
+
+        /**
+         * pgjdbc's `cancelSignalTimeout` default, in seconds (`PGProperty.CANCEL_SIGNAL_TIMEOUT`, "10" in the pinned
+         * 42.7.13): a statement whose query timeout has fired waits for its cancel to finish
+         * (`PgStatement.killTimerTask`), and a cancel sent to a server that never answers gives up only at this timeout.
+         * The metadata URL does not set it. A typed value because the driver is not on this module's compile classpath.
+         */
+        const val DRIVER_CANCEL_WAIT_SECONDS = 10L
     }
 }

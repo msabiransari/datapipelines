@@ -68,6 +68,16 @@ class VisualizationTestConfigurationWiringTest {
         fun releaseMutationGuard(): co.datapipelines.pipeline.release.ReleaseMutationGuard =
             co.datapipelines.pipeline.release.ReleaseMutationGuard.NONE
 
+        /** #873 §D — the transitive restore recheck the restores now take; the graph, not the walk, is under test here. */
+        @Bean
+        fun restoreDependencyGuard(): co.datapipelines.pipeline.release.RestoreDependencyGuard =
+            co.datapipelines.pipeline.release.RestoreDependencyGuard.DIRECT_ONLY
+
+        @Bean
+        fun releaseBounds(): co.datapipelines.pipeline.release.ReleaseBounds =
+            co.datapipelines.pipeline.release
+                .ReleaseBounds()
+
         private fun dataSource(): javax.sql.DataSource = io.mockk.mockk(relaxed = true)
 
         @Bean

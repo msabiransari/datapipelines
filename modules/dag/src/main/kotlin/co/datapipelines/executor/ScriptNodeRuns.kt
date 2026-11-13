@@ -1290,7 +1290,15 @@ internal class ScriptInvariants(
         )
     }
 
-    /** The §5.4 bound's count: rows + rejects + table inputs, before anything is read back. */
+    /**
+     * The §5.4 bound's count: rows + rejects + table inputs, before anything is read back.
+     *
+     * Every written table counts its rows. Row mode adds the buffered caller rows and rejects
+     * and the streamed input. Table/value mode adds each loaded table input and, when nothing
+     * was written (a `table` caller output), the gated rows the invariants will see as `rows`
+     * — a tempdb output's gated rows are already its written table, so they are not counted
+     * twice. A value or object output is a single gated value, never a list, and adds nothing.
+     */
     private suspend fun readBackSize(
         inputs: Map<String, Any?>,
         source: InvariantSource,
@@ -1308,6 +1316,10 @@ internal class ScriptInvariants(
 
             is InvariantSource.Single -> {
                 inputs.values.filterIsInstance<List<*>>().forEach { total += it.size.toLong() }
+                val gated = source.gated
+                if (writtenTables.isEmpty() && gated is List<*>) {
+                    total += gated.size.toLong()
+                }
             }
         }
         return total

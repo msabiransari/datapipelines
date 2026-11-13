@@ -1,0 +1,97 @@
+{
+ "variant": "nul-keys",
+ "note": "The original two colliding pairs, with two independently expected gaps.",
+ "spec": {
+  "display_name": "NUL category keys",
+  "description": "Amount by region, stacked by channel, categories and series carrying NUL characters.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "stack": "zero",
+     "format": "compact",
+     "axis": {
+      "grid": true
+     }
+    },
+    "color": {
+     "field": "channel",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Channel"
+    }
+   },
+   "title": {
+    "text": "Amount by region"
+   }
+  }
+ },
+ "bindings": {
+  "region": [
+   "a\u0000string:b",
+   "a"
+  ],
+  "channel": [
+   "c",
+   "b\u0000string:c"
+  ],
+  "amount": [
+   10,
+   20
+  ]
+ },
+ "expect": {
+  "categories_full": [
+   "a",
+   "a\u0000string:b"
+  ],
+  "series_full": [
+   "b\u0000string:c",
+   "c"
+  ],
+  "num": [
+   [
+    20,
+    null
+   ],
+   [
+    null,
+    10
+   ]
+  ]
+ }
+}

@@ -151,7 +151,18 @@ class ApiConsoleRenderTest {
         timeout: Int = 30,
         boundKeyNames: List<String> = listOf("ci", "nightly"),
         enabled: Boolean = true,
-    ) = ApiConsoleController.EndpointRow(url, listOf(false), displayName, path, served, draft, timeout, boundKeyNames, enabled)
+    ) = ApiConsoleController.EndpointRow(
+        java.util.UUID.nameUUIDFromBytes(url.toByteArray()),
+        url,
+        listOf(false),
+        displayName,
+        path,
+        served,
+        draft,
+        timeout,
+        boundKeyNames,
+        enabled,
+    )
 
     @Test
     fun `the two cards render, and the tool count is the catalog's size`() {
@@ -279,7 +290,7 @@ class ApiConsoleRenderTest {
                     id = java.util.UUID.randomUUID(),
                     workspaceId = java.util.UUID.randomUUID(),
                     pathPattern = long,
-                    pipelineId = java.util.UUID.randomUUID(),
+                    pipelineName = "test/pipeline",
                     reason = "Path is ${long.length} characters; the limit is 200 (§4.1).",
                     enabled = true,
                 ),

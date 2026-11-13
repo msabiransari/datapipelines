@@ -27,6 +27,11 @@ import org.springframework.security.web.AuthenticationEntryPoint
  * servlet container builds `sendRedirect`'s absolute URL from the `Host` header, and a
  * poisoned `Host` would then aim the redirect at an attacker origin. RFC 7231 relative
  * `Location` resolves against the request's own origin.
+ *
+ * ## A server fault is never a login redirect (#847)
+ * A recorded [SecretVerificationUnavailableException] answers its 503 envelope for EVERY
+ * `Accept`: sending a browser to `/login` would tell the person to sign in again with a
+ * credential the server could not check, and hide the outage behind an ordinary logout.
  */
 class AuthEntryPoint(
     private val errorWriter: AuthErrorWriter,
@@ -37,7 +42,7 @@ class AuthEntryPoint(
         authException: AuthenticationException,
     ) {
         val recorded = request.getAttribute(AuthAttributes.AUTH_ERROR) as? AuthException
-        if (redirectsToLogin(request)) {
+        if (recorded !is SecretVerificationUnavailableException && redirectsToLogin(request)) {
             response.status = HttpServletResponse.SC_FOUND
             // 180 (D15): a session refused because its user was DEACTIVATED lands where the
             // login rejection for the same state lands (`?error=inactive`), so the person is

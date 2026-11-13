@@ -32,6 +32,9 @@ dependencies {
     implementation(project(":modules:visualization"))
     // #785 — the managed lake: LakeCatalogStartupCheck calls its after-Flyway boot check (web/config).
     implementation(project(":modules:lake"))
+    // #868 G1 — the release wiring: the production FamilyRegistry, GraphLimits and the ReleasePlanningDeadline seam
+    // (web/release/ReleaseConfiguration) are dependency-contract types.
+    implementation(project(":modules:dependency-contract"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.actuator)
@@ -68,6 +71,8 @@ dependencies {
     implementation(libs.slf4j.api)
 
     // --- Tests -------------------------------------------------------------------
+    // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
+    testImplementation(project(":modules:log-capture"))
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.kotlinx.coroutines.test)
     // Module-local integration tests: a Postgres container running app's real V1

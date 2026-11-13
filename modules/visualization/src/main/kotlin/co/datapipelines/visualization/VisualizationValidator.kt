@@ -1,6 +1,7 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.ScriptContractView
+import com.fasterxml.jackson.databind.JsonNode
 import java.util.UUID
 
 /**
@@ -24,12 +25,28 @@ import java.util.UUID
  *   assertion, an assertion missing its argument or carrying one its kind does not take.
  *
  * Fixture VALUES are not judged here: the type gate judges them at the fixture run (§11.3 step 3, L4).
+ *
+ * A `chart` document (design record 2026-11-06 §4.4) runs in three layers and stops at the first that refuses:
+ * (1) the v1 JSON Schema over the body as stored — `config_schema_invalid`, `details.reason` = `schema` with the
+ * `keyword` and the instance `pointer`; (2) the product rules above (display text, inputs, transform, tests) together
+ * with the chart save rules — `config_schema_invalid`, `details.reason` = the `chart.*` code; (3) the D-A authority —
+ * a `chart.unsupported.*` refusal, or a warning on the [ArtifactValidation.Valid] answer. A valid chart's `bindings`
+ * are the derived map.
  */
 class VisualizationValidator(
     private val templates: TemplateContractFacts,
     private val renderers: RendererConfigValidator = RendererConfigValidators.default(),
+    private val charts: ChartDocumentRules = ChartDocumentRules.DEFAULT,
 ) {
-    /** Every rule over [document]; the document itself when it passes. */
+    private val columns = ChartColumns(templates)
+
+    /** A chart body's `columns` for the runtime ([ChartColumns]), from the contract this validator's save rules read. */
+    fun chartColumns(
+        workspaceId: UUID,
+        body: VisualizationBody,
+    ): Map<String, co.datapipelines.typesystem.LogicalType> = columns.of(workspaceId, body)
+
+    /** Every rule over [document]; the document itself (a chart's with its derived bindings) when it passes. */
     fun validate(
         workspaceId: UUID,
         document: VisualizationDocument,
@@ -37,17 +54,65 @@ class VisualizationValidator(
         val failures = ArtifactFailures(VisualizationErrorCodes.BODY_INVALID)
         val body = document.body
         DocumentRules.name(document.name, VisualizationErrorCodes.NAME_INVALID, failures)
+        if (body.renderer.kind == RendererKind.CHART) return chart(workspaceId, document, failures)
         DocumentRules.texts(body.displayName, body.description, VisualizationErrorCodes.BODY_INVALID, failures)
         presentation(body, failures)
         renderer(body, failures)
         inputs(body, failures)
         val output = transform(workspaceId, body, failures)
         if (body.renderer.kind.renderable) config(body, failures)
-        bindings(body, output, failures)
+        bindings(body, output.names, failures)
         tests(body, failures)
         val result = failures.toResult()
         return if (result.isValid) ArtifactValidation.Valid(document) else ArtifactValidation.Invalid(result)
     }
+
+    private fun chart(
+        workspaceId: UUID,
+        document: VisualizationDocument,
+        failures: ArtifactFailures,
+    ): ArtifactValidation<VisualizationDocument> {
+        val body = document.body
+        val tree = charts.storedForm(document)
+        charts.schema(tree).forEach { problem ->
+            failures.add(
+                VisualizationErrorCodes.CONFIG_SCHEMA_INVALID,
+                ChartPaths.dotted(tree, problem.pointer),
+                "The chart document fails the v1 schema's '${problem.keyword}' keyword here (served at /schemas/chart/1/).",
+                mapOf(
+                    "reason" to "schema",
+                    "keyword" to problem.keyword,
+                    "pointer" to problem.pointer,
+                    "renderer" to RendererKind.CHART.wire,
+                ),
+            )
+        }
+        if (!failures.isEmpty) return ArtifactValidation.Invalid(failures.toResult())
+        DocumentRules.texts(body.displayName, body.description, VisualizationErrorCodes.BODY_INVALID, failures)
+        inputs(body, failures)
+        val output = transform(workspaceId, body, failures)
+        tests(body, failures)
+        val verdict = if (output.refused) null else charts.saveRules(tree, output.columns)
+        verdict?.refusals?.forEach { chartRefusal(tree, it, failures) }
+        if (verdict == null || !failures.isEmpty) return ArtifactValidation.Invalid(failures.toResult())
+        val library = charts.libraryRules(tree, output.columns.orEmpty())
+        library.refusals.forEach { chartRefusal(tree, it, failures) }
+        if (!failures.isEmpty) return ArtifactValidation.Invalid(failures.toResult())
+        val warnings = library.warnings.map { ArtifactWarning(it.code, ChartPaths.dotted(tree, it.pointer), charts.support.library) }
+        val derived = document.copy(body = body.copy(bindings = verdict.derivedBindings), bindings = BindingsPresence.PRESENT)
+        return ArtifactValidation.Valid(derived, warnings)
+    }
+
+    private fun chartRefusal(
+        tree: JsonNode,
+        refusal: ChartRefusal,
+        failures: ArtifactFailures,
+    ) = failures.add(
+        VisualizationErrorCodes.CONFIG_SCHEMA_INVALID,
+        ChartPaths.dotted(tree, refusal.pointer),
+        refusal.message,
+        mapOf("reason" to refusal.code, "renderer" to RendererKind.CHART.wire),
+    )
 
     private fun presentation(
         body: VisualizationBody,
@@ -133,22 +198,30 @@ class VisualizationValidator(
         }
     }
 
-    /** The transform's rules; answers the columns a binding may name (null when they cannot be known). */
+    /**
+     * The contract a renderer reads: [columns] null when it cannot be known (no transform and several inputs); a
+     * transform whose output is not a table reads no columns. [refused] = the pin itself was refused (reported).
+     */
+    private class Output(
+        val columns: List<InputColumn>?,
+        val refused: Boolean = false,
+    ) {
+        /** The `table`/`kpi` binding check's column names; null when they cannot be known. */
+        val names: Set<String>? get() = if (refused) null else columns?.map { it.name }?.toSet()
+    }
+
+    /** The transform's rules; answers the contract the renderer reads ([Output]). */
     private fun transform(
         workspaceId: UUID,
         body: VisualizationBody,
         failures: ArtifactFailures,
-    ): Set<String>? {
+    ): Output {
         val transform = body.transform
         if (transform == null) {
             if (body.inputs.size > 1) {
                 bindingInvalid("transform", "transform_required", "With more than one input a transform must combine them.", failures)
             }
-            return body.inputs.values
-                .singleOrNull()
-                ?.columns
-                ?.map { it.name }
-                ?.toSet()
+            return Output(ChartColumns.inputs(body))
         }
         return when (val pin = templates.pinOf(workspaceId, transform.template)) {
             TemplatePin.NotFound -> {
@@ -158,7 +231,7 @@ class VisualizationValidator(
                     "No template '${transform.template.name.safeEcho()}' here.",
                     failures,
                 )
-                null
+                Output(null, refused = true)
             }
 
             TemplatePin.VersionNotFound -> {
@@ -168,7 +241,7 @@ class VisualizationValidator(
                     "The template has no live version ${transform.template.version}.",
                     failures,
                 )
-                null
+                Output(null, refused = true)
             }
 
             is TemplatePin.NotScript -> {
@@ -178,12 +251,12 @@ class VisualizationValidator(
                     "The pinned template is '${pin.type.wire}', not a script.",
                     failures,
                 )
-                null
+                Output(null, refused = true)
             }
 
             is TemplatePin.Transform -> {
                 contractBinding(body, transform, pin.contract, failures)
-                (pin.contract.output as? ScriptContractView.Output.Table)?.columns?.map { it.name }?.toSet() ?: emptySet()
+                Output(ChartColumns.output(pin))
             }
         }
     }

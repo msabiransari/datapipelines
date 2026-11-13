@@ -229,14 +229,14 @@ class ComponentBoundariesBrowserTest : VisualizationBrowserSuite() {
             api(
                 "POST",
                 "/api/v1/visualizations/$id/tests/sessions/$sessionId/results",
-                """{"cases":[{"name":"two series","verdict":"green"},{"name":"empty","verdict":"green"}],
+                """{"cases":[{"name":"three months","verdict":"green"},{"name":"empty","verdict":"green"}],
                    "environment":{"browser":"chromium (playwright)","theme":"light","viewport":"1440x900"}}""",
             )
         val runId = submitted.at("data", "run_id") as String
         val upload = submitted.at("data", "upload") as Map<*, *>
         val stored =
             page.request().post(
-                "$baseUrl${upload["url"]}?case=two%20series",
+                "$baseUrl${upload["url"]}?case=${ChartBrowserFixtures.WORKSPACE_DATA_CASE.replace(" ", "%20")}",
                 RequestOptions
                     .create()
                     .setHeader(upload["header"] as String, upload["token"] as String)

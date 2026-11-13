@@ -6,6 +6,7 @@ import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.LakeHttpBounds
 import co.datapipelines.datasources.MANAGED_DIALECT_KEY
 import co.datapipelines.datasources.ManagedLakeSync
 import co.datapipelines.lake.LakeBootCheck
@@ -25,6 +26,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.springframework.beans.factory.support.StaticListableBeanFactory
 import org.springframework.util.unit.DataSize
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.util.UUID
 
 /**
@@ -92,7 +95,7 @@ class ManagedLakeDatasourceRegistrarTest {
     }
 
     @Test
-    fun `blank region and endpoint are left out, virtual-host style is spelled vhost, a non-MB size falls to KB`() {
+    fun `862 - a blank region and endpoint render the derived regional form, a non-MB size falls to KB`() {
         val dialect =
             desired(
                 storage(region = "", endpoint = "", pathStyle = false),
@@ -100,10 +103,39 @@ class ManagedLakeDatasourceRegistrarTest {
             ).properties.dialect
 
         assertAll(
-            { dialect.containsKey("region") shouldBe false },
-            { dialect.containsKey("endpoint") shouldBe false },
+            // #862: the secret declares the effective region and the derived endpoint ALWAYS — the engine
+            // would resolve the same form itself (probe A), and the proxy renderer derives the identical one.
+            { dialect["region"] shouldBe "us-east-1" },
+            { dialect["endpoint"] shouldBe "https://s3.us-east-1.amazonaws.com" },
             { dialect["url_style"] shouldBe "vhost" },
             { dialect["memory_limit"] shouldBe "1536KB" },
+        )
+    }
+
+    @Test
+    fun `845 - the dialect map carries the egress proxy trimmed when configured, and no key when it is empty`() {
+        val withProxy = desired(storage(), reads = LakeProperties.Reads(egressProxy = " egress-proxy:3128 ")).properties.dialect
+        val withoutProxy = desired(storage(), reads = LakeProperties.Reads(egressProxy = "")).properties.dialect
+
+        assertAll(
+            { withProxy[LakeHttpBounds.EGRESS_PROXY_KEY] shouldBe "egress-proxy:3128" },
+            { withoutProxy.containsKey(LakeHttpBounds.EGRESS_PROXY_KEY) shouldBe false },
+        )
+    }
+
+    @Test
+    fun `845 - an unreachable egress proxy refuses the boot with the catalogued id, before anything is written`() {
+        val closedPort = ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { it.localPort }
+        val fixture =
+            Fixture(enabled = true, sync = ManagedLakeSync.CREATED, reads = LakeProperties.Reads(egressProxy = "127.0.0.1:$closedPort"))
+
+        val refused = shouldThrow<IllegalStateException> { fixture.registrar.register() }
+
+        assertAll(
+            { refused.message.orEmpty() shouldStartWith "${LakeBootCheck.Refusal.EGRESS_PROXY.id}: " },
+            { verify(exactly = 0) { fixture.users.provisionSystemActor() } },
+            { verify(exactly = 0) { fixture.registry.syncManagedLake(any(), any()) } },
+            { verify(exactly = 0) { fixture.grants.grantToEveryWorkspace(any(), any()) } },
         )
     }
 
@@ -177,11 +209,50 @@ class ManagedLakeDatasourceRegistrarTest {
         )
     }
 
+    @Test
+    fun `823 - grantTo writes ONE grant for the named workspace as the boot actor, through the registrar's own repository`() {
+        val fixture = Fixture(enabled = true, sync = ManagedLakeSync.UNCHANGED)
+        val workspace = UUID.randomUUID()
+        every { fixture.grants.grant("lake", workspace, actor) } returns true
+        fixture.registrar.register()
+
+        val created = fixture.registrar.grantTo(workspace)
+
+        assertAll(
+            { created shouldBe true },
+            { verify(exactly = 1) { fixture.grants.grant("lake", workspace, actor) } },
+            // Never the tick's bounded repository, never a grant to every workspace: one row, on the caller's transaction.
+            { verify(exactly = 0) { fixture.tickGrants.grantToEveryWorkspace(any(), any()) } },
+            { verify(exactly = 1) { fixture.users.provisionSystemActor() } },
+        )
+    }
+
+    @Test
+    fun `823 - grantTo reports an existing grant as false, and grants nothing with the lake disabled or before boot`() {
+        val workspace = UUID.randomUUID()
+
+        val existing = Fixture(enabled = true, sync = ManagedLakeSync.UNCHANGED)
+        every { existing.grants.grant("lake", workspace, actor) } returns false
+        existing.registrar.register()
+        val disabled = Fixture(enabled = false, sync = ManagedLakeSync.UNCHANGED)
+        disabled.registrar.register()
+        val beforeBoot = Fixture(enabled = true, sync = ManagedLakeSync.UNCHANGED)
+
+        assertAll(
+            { existing.registrar.grantTo(workspace) shouldBe false },
+            { disabled.registrar.grantTo(workspace) shouldBe false },
+            { beforeBoot.registrar.grantTo(workspace) shouldBe false },
+            { verify(exactly = 0) { disabled.grants.grant(any(), any(), any()) } },
+            { verify(exactly = 0) { beforeBoot.grants.grant(any(), any(), any()) } },
+        )
+    }
+
     // ------------------ fixtures
 
     private inner class Fixture(
         enabled: Boolean,
         sync: ManagedLakeSync,
+        reads: LakeProperties.Reads = LakeProperties.Reads(),
     ) {
         val synced = slot<Datasource>()
         val registry = mockk<DatasourceRegistry> { every { syncManagedLake(capture(synced), actor) } returns sync }
@@ -192,7 +263,7 @@ class ManagedLakeDatasourceRegistrarTest {
             mockk<UserService> {
                 every { provisionSystemActor() } returns mockk<User> { every { id } returns actor }
             }
-        private val properties = LakeProperties(enabled = enabled, storage = storage())
+        private val properties = LakeProperties(enabled = enabled, storage = storage(), reads = reads)
         val registrar =
             ManagedLakeDatasourceRegistrar(
                 lakeProperties = providerOf(properties),

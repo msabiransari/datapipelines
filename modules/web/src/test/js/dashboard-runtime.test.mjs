@@ -291,7 +291,7 @@ function configPayload(overrides) {
       layout: { columns: 12, grid: [] },
       parameter_set: null,
       visualizations: [
-        { name: "chart", renderer: { kind: "plotly", version: "4" }, config: {}, bindings: {}, presentation: null, timeout_seconds: 120 },
+        { name: "chart", renderer: { kind: "stub", version: "1" }, config: {}, bindings: {}, presentation: null, timeout_seconds: 120 },
         { name: "cells", renderer: { kind: "table", version: "1" }, config: {}, bindings: {}, presentation: null, timeout_seconds: 120 },
       ],
       groups: [],
@@ -379,7 +379,7 @@ async function boot(options) {
   // The browser gets its renderers from the adapter files' load-time registration; the tests
   // register stand-ins for the same kinds and majors when the real files are not loaded.
   const registered = runtime._internal.renderers();
-  if (!registered.plotly) runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+  if (!registered.stub) runtime.registerRenderer({ kind: "stub", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
   if (!registered.table) runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
   const container = doc.createElement("div");
   // `composite: true` boots with the FIRST-PARTY adapter (its controls, its readSelections) bound
@@ -393,6 +393,8 @@ async function boot(options) {
     dashboard: { id: "d1", version: "released" },
     container,
     adapter: instanceAdapter,
+    // Record 2026-11-06 §5.2: the host's chart library, at the init's top level (absent unless a case declares it).
+    charts: options && options.charts,
     options: Object.assign({ renderTimeoutMs: 200 }, options && options.initOptions),
   });
   await instance.ready;
@@ -464,7 +466,7 @@ test("bootstrap runs in the barrier's order, and a parameter-free board skips th
   const order = (marker) => adapter.log.indexOf(marker);
   assert.ok(order("mountLayout") !== -1 && order("renderParameters:1") !== -1, adapter.log.join("|"));
   assert.ok(
-    order("mountLayout") < order("renderParameters:1") && order("renderParameters:1") < order("mountVisualization:chart:plotly"),
+    order("mountLayout") < order("renderParameters:1") && order("renderParameters:1") < order("mountVisualization:chart:stub"),
     "layout → parameters → placeholders, in that order: " + adapter.log.join("|"),
   );
   assert.deepEqual(
@@ -598,6 +600,40 @@ test("a data frame renders, shows success, then settles to ready without a new s
   assert.ok(!adapter.log.includes("status:chart:ready"), "still success one tick early: " + adapter.log.join("|"));
   clock.tick(1);
   assert.ok(adapter.log.includes("status:chart:ready"), "success settles to ready: " + adapter.log.join("|"));
+});
+
+// #852 — the runtime's only data call: the mounted handle gets (occurrenceRef, rows, bindings),
+// `rows` the frame's row COUNT and `bindings` its columnar {path: [values]}; nothing else.
+test("#852: a data frame calls the mounted handle's renderData with exactly (occurrenceRef, rows, bindings)", async () => {
+  let args = null;
+  let mountedOccurrence = null;
+  const adapter = scriptedAdapter({
+    mountVisualization: (occurrence) => {
+      if (occurrence.name === "chart") mountedOccurrence = occurrence;
+      return Promise.resolve({
+        renderData: function () {
+          if (occurrence.name === "chart") args = Array.from(arguments);
+          return Promise.resolve("rendered");
+        },
+      });
+    },
+  });
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    return fetchImpl.stream([
+      fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { x: [1, 2, 3] }, rows: 3, bytes: 24 }),
+    ]);
+  });
+  const { instance } = await boot({ fetch: fetchImpl, adapter });
+  try {
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(mountedOccurrence, "the chart occurrence mounted");
+    assert.deepEqual(args, [{ name: "chart", type: "visualization", occurrence: mountedOccurrence }, 3, { x: [1, 2, 3] }]);
+  } finally {
+    instance.dispose();
+  }
 });
 
 /** A hand-driven setTimeout for the instance's `_env`: `tick(ms)` fires every timer due by then, in order. */
@@ -1764,7 +1800,7 @@ test("#550 an old run's in-progress and no-data status frames keep the mark", as
 test("the renderer judgement fails before execution: unknown kind, version mismatch, two bundles, 2d-declared for a 3d board", async () => {
   const cases = [
     { config: configPayload({ visualizations: [{ name: "x", renderer: { kind: "svg", version: "1" }, config: {} }] }), code: "renderer.unsupported" },
-    { config: configPayload({ visualizations: [{ name: "x", renderer: { kind: "plotly", version: "5" }, config: {} }] }), code: "renderer.version_mismatch" },
+    { config: configPayload({ visualizations: [{ name: "x", renderer: { kind: "stub", version: "5" }, config: {} }] }), code: "renderer.version_mismatch" },
     { config: configPayload({ renderer: { bundle: "3d" } }), dom: { plotlyScripts: [{ getAttribute: () => "2d" }] }, code: "renderer.bundle_insufficient" },
     { config: configPayload(), dom: { plotlyScripts: [{ getAttribute: () => "2d" }, { getAttribute: () => "3d" }] }, code: "renderer.two_bundles" },
   ];
@@ -1780,7 +1816,7 @@ test("the renderer judgement fails before execution: unknown kind, version misma
     globalThis.fetch = fetchImpl;
     const runtime = require(runtimePath);
     runtime._internal.resetRenderers();
-    runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+    runtime.registerRenderer({ kind: "stub", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
     runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
     const adapter = scriptedAdapter();
     const instance = runtime.init({ server: { baseUrl: "", credentials: "session" }, dashboard: { id: "d1", version: "released" }, container: doc.createElement("div"), adapter, options: { renderTimeoutMs: 200 } });
@@ -1999,7 +2035,7 @@ test("fixture mode renders each target from the page's results through the real 
   try {
     const runtime = require(runtimePath);
     const registered = runtime._internal.renderers();
-    if (!registered.plotly) runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+    if (!registered.stub) runtime.registerRenderer({ kind: "stub", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
     if (!registered.table) runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
     const adapter = scriptedAdapter();
     const instance = fixtureInit(runtime, doc.createElement("div"), adapter, {
@@ -2148,4 +2184,470 @@ test("#497: reset's restore render drops a rejected INPUT text on the composite"
   assert.equal(input().value, "10", "reset restores the applied value, never the rejected text");
   assert.equal(alertText(), null);
   assert.equal(adapter.readSelections().limit, 10);
+});
+
+// ------------------------------------------------------------------------------------- the chart kind
+
+// Design record 2026-11-06 §5.2: the runtime's side of the chart kind — the `options.charts` declaration and its
+// refusals, the kind's own mount judgement and bundle need, render warnings, and the zero-row empty state — driven
+// through the REAL chart adapter and Plotly converter against a recording Plotly instance.
+const chartPath = path.resolve(here, "../../main/resources/static/js/datapipelines-dashboard-chart.js");
+const plotlyPath = path.resolve(here, "../../main/resources/static/js/datapipelines-dashboard-plotly.js");
+
+const BAR = {
+  name: "chart",
+  display_name: "Sales",
+  description: "Sales by region",
+  renderer: { kind: "chart", version: "1" },
+  config: {
+    mark: { type: "bar" },
+    encoding: { x: { field: "region", type: "nominal", sort: null }, y: { field: "amount", type: "quantitative", aggregate: "sum" } },
+  },
+  bindings: { region: "region", amount: "amount" },
+  columns: { region: "STRING", amount: "DECIMAL" },
+  presentation: null,
+  timeout_seconds: 120,
+};
+
+function recordingPlotly() {
+  const calls = [];
+  return {
+    calls,
+    react: (host, data, layout, config) => {
+      calls.push({ host, data, layout, config });
+      return Promise.resolve();
+    },
+    Plots: { resize: () => {} },
+    purge: () => {},
+  };
+}
+
+/** The chart kind and the Plotly converter registered on the runtime the boot requires (one module cache). */
+function chartKind() {
+  const runtime = require(runtimePath);
+  const chart = require(chartPath);
+  chart.register(runtime);
+  require(plotlyPath).register(chart);
+  return { runtime, chart };
+}
+
+/** A scripted adapter that mounts every occurrence through its kind's REAL create, as the composite does. */
+function chartAdapter(runtime) {
+  return scriptedAdapter({
+    mountVisualization: (occurrence, renderer, mount) => {
+      const host = globalThis.document.createElement("div");
+      return Promise.resolve(
+        runtime._internal.renderers()[renderer.kind].create({ host, occurrence, charts: mount && mount.charts, notify: () => {}, signal: () => {} }),
+      );
+    },
+  });
+}
+
+const chartConfig = (visualizations) => configPayload({ visualizations: visualizations || [BAR] });
+const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 30));
+
+test("options.charts at mount: absent without a chart mounts; absent with a chart fails chart.library_undeclared; an uninstalled library or family fails chart.converter_missing", async () => {
+  // Absent, and no chart occurrence: the board mounts as it always did.
+  chartKind();
+  const plain = await boot({});
+  assert.ok(plain.instance, "a board without a chart needs no declaration");
+  plain.instance.dispose();
+  uninstallDom();
+  const cases = [
+    { charts: undefined, visualizations: [BAR], code: "chart.library_undeclared", details: { name: "chart" } },
+    { charts: { library: "echarts", instance: {} }, visualizations: [BAR], code: "chart.converter_missing", details: { library: "echarts", family: "bar", name: "chart" } },
+    {
+      charts: { library: "plotly", instance: recordingPlotly() },
+      visualizations: [Object.assign({}, BAR, { config: Object.assign({}, BAR.config, { mark: { type: "line" } }) })],
+      code: "chart.converter_missing",
+      details: { library: "plotly", family: "line", name: "chart" },
+    },
+  ];
+  for (const testCase of cases) {
+    const fetchImpl = fakeFetch();
+    let executed = false;
+    fetchImpl.on("/runtime/visualizations", () => {
+      executed = true;
+      return fetchImpl.stream([]);
+    });
+    const { runtime } = chartKind();
+    await assert.rejects(
+      () => boot({ fetch: fetchImpl, config: chartConfig(testCase.visualizations), charts: testCase.charts, adapter: chartAdapter(runtime) }),
+      (error) => error.code === testCase.code && JSON.stringify(error.details) === JSON.stringify(testCase.details),
+      "expected " + testCase.code,
+    );
+    assert.ok(!executed, testCase.code + ": nothing executed");
+    uninstallDom();
+  }
+});
+
+test("options.charts is refused synchronously as init.invalid: not an object, an unknown library, a null or primitive instance, the chart kind not loaded", () => {
+  installDom();
+  try {
+    const { runtime } = chartKind();
+    const init = (charts) =>
+      runtime.init({
+        server: { baseUrl: "", credentials: "session" },
+        dashboard: { id: "d1", version: "released" },
+        container: fakeElement("div"),
+        adapter: scriptedAdapter(),
+        charts,
+      });
+    for (const charts of ["plotly", [], null, { library: "d3", instance: {} }, { library: "plotly" }, { library: "plotly", instance: null }, { library: "plotly", instance: "Plotly" }, { library: "plotly", instance: 1 }]) {
+      assert.throws(() => init(charts), (error) => error.code === "init.invalid", JSON.stringify(charts));
+    }
+    // The message never echoes the host's value.
+    assert.throws(() => init({ library: "<img src=x>", instance: {} }), (error) => error.code === "init.invalid" && !error.message.includes("<img"));
+    // Every library identity is admitted; a constructor function is an instance.
+    for (const library of require(chartPath).LIBRARIES) {
+      assert.doesNotThrow(() => init({ library, instance: function Chart() {} }).dispose(), library);
+    }
+    // Without the chart kind loaded the declaration cannot be judged: refused, naming the file.
+    runtime._internal.resetRenderers();
+    assert.throws(() => init({ library: "plotly", instance: {} }), (error) => error.code === "init.invalid" && /datapipelines-dashboard-chart\.js/.test(error.message));
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("a kind's needsBundle 3d against a page that loaded the 2D bundle fails renderer.bundle_insufficient before execution", async () => {
+  const fetchImpl = fakeFetch();
+  let executed = false;
+  fetchImpl.on("/runtime/visualizations", () => {
+    executed = true;
+    return fetchImpl.stream([]);
+  });
+  const runtime = require(runtimePath);
+  runtime._internal.resetRenderers();
+  runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+  runtime.registerRenderer({ kind: "stub", version: "1", needsBundle: () => "3d", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+  await assert.rejects(
+    () => boot({ fetch: fetchImpl, dom: { plotlyScripts: [{ getAttribute: () => "2d" }] } }),
+    (error) => error.code === "renderer.bundle_insufficient" && error.details.name === "chart",
+  );
+  assert.ok(!executed, "nothing executed");
+  uninstallDom();
+  // The same kind needing only 2D mounts on the same page.
+  runtime._internal.resetRenderers();
+  runtime.registerRenderer({ kind: "stub", version: "1", needsBundle: () => "2d", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+  const mounted = await boot({ dom: { plotlyScripts: [{ getAttribute: () => "2d" }] } });
+  mounted.instance.dispose();
+  uninstallDom();
+});
+
+/** Two refreshes of the chart, each answering the frames [script] builds for its refresh id. */
+async function chartRefreshes(script) {
+  const fetchImpl = fakeFetch();
+  const ids = [];
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    ids.push(refreshId);
+    return fetchImpl.stream(script(ids.length, refreshId, fetchImpl));
+  });
+  const { runtime } = chartKind();
+  const plotly = recordingPlotly();
+  const booted = await boot({ fetch: fetchImpl, config: chartConfig(), charts: { library: "plotly", instance: plotly }, adapter: chartAdapter(runtime) });
+  return Object.assign(booted, { plotly, ids, fetchImpl });
+}
+
+const renderNotices = (instance) => Object.keys(instance._notifications).filter((key) => key.startsWith("render:"));
+
+test("a chart's render warnings publish once per occurrence per refresh - scope render, the occurrence's name, its refresh - and the next refresh's data frame supersedes them", async () => {
+  const published = [];
+  const board = await chartRefreshes((n, refreshId, f) => [
+    f.frame("visualization_data", {
+      refresh_id: refreshId,
+      name: "chart",
+      type: "visualization",
+      // Refresh 1 carries two null categories (ONE warning code); refresh 2 none.
+      bindings: n === 1 ? { region: ["North", null, null], amount: [1, 2, 3] } : { region: ["North"], amount: [4] },
+      rows: n === 1 ? 3 : 1,
+      bytes: 8,
+    }),
+    f.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "ok" } } }),
+  ]);
+  try {
+    board.instance._options.onNotification = (notification) => published.push(notification);
+    await board.instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    const first = published.filter((notification) => notification.scope === "render");
+    assert.equal(first.length, 1, "one code, published once: " + JSON.stringify(first));
+    assert.deepEqual(
+      { code: first[0].code, severity: first[0].severity, name: first[0].name, refreshId: first[0].refreshId },
+      { code: "chart.rule.null-category", severity: "warning", name: "chart", refreshId: board.ids[0] },
+    );
+    assert.ok(!first[0].message.includes("North") && !/\d/.test(first[0].message), "a fixed sentence, no data and no count: " + first[0].message);
+    assert.deepEqual(renderNotices(board.instance), ["render:chart:" + board.ids[0] + ":chart.rule.null-category"]);
+    await board.instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.deepEqual(renderNotices(board.instance), [], "the second refresh's data frame retired the first refresh's warning");
+    assert.equal(published.filter((notification) => notification.scope === "render").length, 1, "and published nothing of its own");
+    assert.equal(board.plotly.calls.length, 2, "both refreshes drew");
+    assert.ok(board.adapter.log.includes("status:chart:success"), board.adapter.log.join("|"));
+  } finally {
+    board.instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("no-data (a): refresh 1's data then refresh 2's no-data draws the no-marks option, publishes chart.rule.no-data exactly once, and shows no error", async () => {
+  const published = [];
+  const board = await chartRefreshes((n, refreshId, f) =>
+    n === 1
+      ? [
+          f.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { region: ["North"], amount: [4] }, rows: 1, bytes: 4 }),
+          f.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "ok" } } }),
+        ]
+      : [
+          // The server's zero-row answer: a no-data status, then the completion naming the same outcome.
+          f.frame("visualization_status", { refresh_id: refreshId, name: "chart", type: "visualization", state: "no-data" }),
+          f.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "no-data" } } }),
+        ],
+  );
+  try {
+    board.instance._options.onNotification = (notification) => published.push(notification);
+    await board.instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.equal(board.plotly.calls.length, 1);
+    assert.ok(board.plotly.calls[0].data.some((trace) => trace.y.some((v) => v !== null)), "refresh 1 drew marks");
+    await board.instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.equal(board.plotly.calls.length, 2, "the status frame and the completion drew the empty state ONCE");
+    const empty = board.plotly.calls[1];
+    assert.ok(empty.data.every((trace) => trace.y.every((v) => v === null)), "no marks: " + JSON.stringify(empty.data));
+    const noData = published.filter((notification) => notification.code === "chart.rule.no-data");
+    assert.equal(noData.length, 1, "published exactly once: " + JSON.stringify(published));
+    assert.deepEqual({ name: noData[0].name, refreshId: noData[0].refreshId, scope: noData[0].scope }, { name: "chart", refreshId: board.ids[1], scope: "render" });
+    assert.ok(board.adapter.log.includes("status:chart:no-data"), board.adapter.log.join("|"));
+    assert.ok(!board.adapter.log.includes("status:chart:error"), "no error card: " + board.adapter.log.join("|"));
+    assert.ok(!published.some((notification) => notification.severity === "error"), JSON.stringify(published));
+  } finally {
+    board.instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("no-data (b): a no-data carrying refresh 1's id after refresh 2's data leaves the marks untouched and publishes nothing", async () => {
+  const published = [];
+  const board = await chartRefreshes((n, refreshId, f) => [
+    f.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { region: ["North"], amount: [n] }, rows: 1, bytes: 4 }),
+    f.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "ok" } } }),
+  ]);
+  try {
+    board.instance._options.onNotification = (notification) => published.push(notification);
+    await board.instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    await board.instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.equal(board.plotly.calls.length, 2);
+    const before = published.length;
+    // A late frame of refresh 1 (re-registered so the runtime knows the id): the ownership check runs FIRST.
+    board.instance._refreshes[board.ids[0]] = board.instance._refreshes[board.ids[0]] || { id: board.ids[0], targets: ["chart"], ended: false };
+    board.instance._onFrame("visualization_status", { refresh_id: board.ids[0], name: "chart", type: "visualization", state: "no-data" });
+    await settle();
+    assert.equal(board.plotly.calls.length, 2, "the marks are untouched");
+    assert.equal(published.length, before, "nothing published: " + JSON.stringify(published.slice(before)));
+    assert.ok(!board.adapter.log.slice(-3).includes("status:chart:no-data"), board.adapter.log.join("|"));
+  } finally {
+    board.instance.dispose();
+    uninstallDom();
+  }
+});
+
+test("a renderer that THROWS from renderData instead of rejecting is render.failed, and the frame loop keeps going", async () => {
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    return fetchImpl.stream([
+      fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: {}, rows: 1, bytes: 4 }),
+      fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "cells", type: "visualization", bindings: {}, rows: 1, bytes: 4 }),
+    ]);
+  });
+  const adapter = scriptedAdapter({
+    mountVisualization: (occurrence) =>
+      Promise.resolve({
+        renderData: (ref) => {
+          adapter.log.push("renderData:" + ref.name);
+          if (occurrence.name === "chart") throw new Error("a synchronous renderer failure");
+          return Promise.resolve("rendered");
+        },
+      }),
+  });
+  const { instance } = await boot({ fetch: fetchImpl, adapter });
+  try {
+    await instance.refresh({ scope: "targets", targets: ["chart", "cells"] });
+    await settle();
+    assert.ok(adapter.log.includes("status:chart:error"), adapter.log.join("|"));
+    assert.ok(adapter.log.includes("notify:render.failed"), adapter.log.join("|"));
+    assert.ok(adapter.log.includes("status:cells:success"), "the next frame still rendered: " + adapter.log.join("|"));
+  } finally {
+    instance.dispose();
+    uninstallDom();
+  }
+});
+
+// #860 R3 — the empty draw is bounded by the same render deadline as a data draw: a renderEmpty that
+// never acknowledges drives the SAME error status + notification, and a deadline that fires after the
+// empty draw's refresh was superseded publishes nothing (the ownership guard).
+
+test("a hung renderEmpty hits the render deadline and reports error with the render code, drawn once per refresh", async () => {
+  const calls = [];
+  const hungAdapter = scriptedAdapter({
+    mountVisualization: () =>
+      Promise.resolve({
+        renderData: () => {
+          calls.push("renderData");
+          return Promise.resolve("rendered");
+        },
+        renderEmpty: () => {
+          calls.push("renderEmpty");
+          return new Promise(() => {}); // never settles — the deadline must
+        },
+      }),
+  });
+  hungAdapter.renderStatus = (occurrence, status) =>
+    hungAdapter.log.push("status:" + occurrence.name + ":" + status.state + (status.reason ? ":" + status.reason.code : ""));
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    return fetchImpl.stream(
+      calls.includes("renderData")
+        ? [
+            fetchImpl.frame("visualization_status", { refresh_id: refreshId, name: "chart", type: "visualization", state: "no-data" }),
+            fetchImpl.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "no-data" } } }),
+          ]
+        : [
+            fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { x: [1] }, rows: 1, bytes: 4 }),
+          ],
+    );
+  });
+  const { instance } = await boot({ fetch: fetchImpl, adapter: hungAdapter, initOptions: { renderTimeoutMs: 30 } });
+  try {
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.deepEqual(calls, ["renderData"], "refresh 1 drew data");
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.deepEqual(calls.filter((c) => c === "renderEmpty"), ["renderEmpty"], "the status frame drew the empty state once; the completion did not repeat it");
+    assert.ok(hungAdapter.log.includes("status:chart:no-data"), hungAdapter.log.join("|"));
+    assert.ok(hungAdapter.log.includes("status:chart:error:render.timeout"), "the deadline drove the render error: " + hungAdapter.log.join("|"));
+    assert.ok(hungAdapter.log.includes("notify:render.failed"), hungAdapter.log.join("|"));
+  } finally {
+    instance.dispose();
+  }
+});
+
+test("an empty draw whose deadline fires after its refresh was superseded publishes nothing", async () => {
+  const calls = [];
+  const hungAdapter = scriptedAdapter({
+    mountVisualization: () =>
+      Promise.resolve({
+        renderData: (ref, rows) => {
+          calls.push("renderData:" + rows);
+          return Promise.resolve("rendered");
+        },
+        renderEmpty: () => {
+          calls.push("renderEmpty");
+          return new Promise(() => {}); // refresh 1's empty draw never settles
+        },
+      }),
+  });
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    const refreshId = JSON.parse(init.body).refresh_id;
+    return fetchImpl.stream(
+      calls.length === 0
+        ? [
+            fetchImpl.frame("visualization_status", { refresh_id: refreshId, name: "chart", type: "visualization", state: "no-data" }),
+            fetchImpl.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "no-data" } } }),
+          ]
+        : [
+            fetchImpl.frame("visualization_data", { refresh_id: refreshId, name: "chart", type: "visualization", bindings: { x: [2] }, rows: 1, bytes: 4 }),
+          ],
+    );
+  });
+  const { instance, adapter } = await boot({ fetch: fetchImpl, adapter: hungAdapter, initOptions: { renderTimeoutMs: 30 } });
+  try {
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.ok(adapter.log.includes("status:chart:success"), "refresh 2 drew: " + adapter.log.join("|"));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.ok(!adapter.log.includes("status:chart:error"), "the late deadline published nothing: " + adapter.log.join("|"));
+    assert.ok(!adapter.log.includes("notify:render.failed"), adapter.log.join("|"));
+    assert.ok(!adapter.log.includes("status:chart:no-data") || adapter.log.indexOf("status:chart:success") > adapter.log.indexOf("status:chart:no-data"), "success stands: " + adapter.log.join("|"));
+  } finally {
+    instance.dispose();
+  }
+});
+
+test("a failed empty draw stays failed through later no-data frames of the same refresh, and a new refresh can recover", async () => {
+  let releaseCompletion;
+  const completionGate = new Promise((resolve) => { releaseCompletion = resolve; });
+  let emptyStarted;
+  const clearStarted = new Promise((resolve) => { emptyStarted = resolve; });
+  let refreshId;
+  let clears = 0;
+  const adapter = scriptedAdapter({
+    mountVisualization: () => Promise.resolve({
+      renderData: () => Promise.resolve("rendered"),
+      renderEmpty: () => {
+        clears++;
+        emptyStarted();
+        return new Promise(() => {});
+      },
+    }),
+  });
+  adapter.renderStatus = (occurrence, status) =>
+    adapter.log.push("status:" + occurrence.name + ":" + status.state + (status.reason ? ":" + status.reason.code : ""));
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", (url, init) => {
+    refreshId = JSON.parse(init.body).refresh_id;
+    const response = fetchImpl.stream([
+      fetchImpl.frame("visualization_status", { refresh_id: refreshId, name: "chart", state: "no-data" }),
+      fetchImpl.frame("refresh_completed", { refresh_id: refreshId, status: "COMPLETED", targets: { chart: { outcome: "no-data" } } }),
+    ]);
+    const originalReader = response.body.getReader;
+    response.body.getReader = () => {
+      const reader = originalReader();
+      let reads = 0;
+      return {
+        read: async () => {
+          if (reads++ === 1) await completionGate;
+          return reader.read();
+        },
+        cancel: reader.cancel,
+      };
+    };
+    return response;
+  });
+  const { instance } = await boot({ fetch: fetchImpl, adapter, initOptions: { renderTimeoutMs: 30 } });
+  const lastStatus = () => adapter.log.filter((line) => line.startsWith("status:chart:")).at(-1);
+  try {
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await clearStarted;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(lastStatus(), "status:chart:error:render.timeout", "positive control: the clear actually timed out");
+    instance._onFrame("visualization_status", { refresh_id: refreshId, name: "chart", state: "no-data" });
+    assert.equal(lastStatus(), "status:chart:error:render.timeout", "a repeated no-data status cannot hide the failed clear");
+    releaseCompletion();
+    await settle();
+    assert.equal(lastStatus(), "status:chart:error:render.timeout", "the later terminal frame cannot hide the failed clear");
+    assert.equal(clears, 1);
+    assert.equal(adapter.log.filter((line) => line === "notify:render.failed").length, 1);
+    fetchImpl.on("/runtime/visualizations", (url, init) => {
+      const newerId = JSON.parse(init.body).refresh_id;
+      return fetchImpl.stream([
+        fetchImpl.frame("visualization_data", { refresh_id: newerId, name: "chart", bindings: { x: [2] }, rows: 1, bytes: 4 }),
+        fetchImpl.frame("refresh_completed", { refresh_id: newerId, status: "COMPLETED", targets: { chart: { outcome: "ok" } } }),
+      ]);
+    });
+    await instance.refresh({ scope: "targets", targets: ["chart"] });
+    await settle();
+    assert.equal(lastStatus(), "status:chart:success", "the failure belongs only to the old refresh");
+  } finally {
+    releaseCompletion();
+    instance.dispose();
+  }
 });

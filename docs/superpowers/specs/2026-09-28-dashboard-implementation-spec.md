@@ -11,6 +11,9 @@ Where this document chooses a number or a name the record did not, the choice is
 prerequisite is [#266](https://github.com/msabiransari/datapipelines/issues/266) (D62).
 **Distribution:** contributor design material under `docs/superpowers/specs/`, outside the product
 documentation packaging allowlist. The product documents this creates are listed in §15.
+**Superseded in part (2026-11-08, #860):** the stored `plotly` kind is retired for the renderer-neutral `chart` kind
+v1; §3.1, §10.3, §10.4, §11.3 and L6 carry dated notes, the original text kept. Current contract:
+[Dashboards §2.1, §3.4 and §6](../../dashboards.md).
 
 ## 0. What ships in round one, and what does not
 
@@ -86,6 +89,14 @@ Both documents are read by a strict reader (the `ParameterSetReader` shape: unkn
 back exactly as stored plus the server-assigned `id`, `version`, `status`, `body_hash`.
 
 ### 3.1 Visualization body
+
+> **Superseded in part 2026-11-08 (#860):** the example's `"kind": "plotly"` (a Plotly figure as `config`), the
+> kind list's `plotly`, "stored verbatim … the vendored plot-schema", the `bindings` paths into `config` and the
+> `trace_count` assertion. A chart is now `{"kind": "chart", "version": "1"}` with the neutral
+> `config: {title?, mark, encoding}`, judged at save by its served JSON Schema, its save rules and the library
+> support table; a chart's `bindings` are derived from its encodings (`{field: field}`), its `presentation` is
+> refused, and the count assertion is `mark_count`. `table` and `kpi` are unchanged. Current text:
+> [Dashboards §2.1 and §2.1.2](../../dashboards.md); the chart-configuration design record (orchestration store, `design-records/2026-11-06-neutral-chart-grammar.md`) §4.
 
 ```json
 {
@@ -424,10 +435,17 @@ Bootstrap is the record's four-step barrier; `init` on an owned container throws
 
 ### 10.3 The adapter contract (D22, R21)
 
+> **Superseded in part 2026-11-08 (#860):** "The Plotly adapter … `Plotly.react` with the bound arrays substituted
+> into the stored configuration". The chart kind (`datapipelines-dashboard-chart.js`) parses the neutral document
+> into a library-neutral model — order, aggregation, formats, labels — and its Plotly converter
+> (`datapipelines-dashboard-plotly.js`) converts that model into a figure, so no stored path is substituted. The
+> data call that runs is the mounted handle's `handle.renderData(occurrenceRef, rows, bindings)` (three arguments;
+> the list below carries them since #852). Current text: [Dashboards §6.2 and §6.3](../../dashboards.md).
+
 Required functions (initialisation rejects a missing one; a no-op is not conformant — §10.5):
 `mountLayout(layout) → Promise`, `mountVisualization(occurrence, renderer) → Promise`,
 `renderParameters(state) → Promise`, `readSelections() → {name: value}`,
-`onEdit/onCommit/onAction(callback)` registration, `renderData(occurrence, refreshId, bindings) →
+`onEdit/onCommit/onAction(callback)` registration, `renderData(occurrenceRef, rows, bindings) →
 Promise<'rendered' | 'no-data'>`, `renderStatus(occurrence, {state, stale, reason})`,
 `notify(notification) → void` (with `recover(intent)` reporting), `resize()`, `dispose()`.
 Every callback carries `{instanceId, name, type, refreshId}`. The Plotly adapter
@@ -437,6 +455,11 @@ reads the resolved theme tokens from CSS custom properties into `layout` at each
 `table` and `kpi` adapters ship beside it.
 
 ### 10.4 The Plotly bundles (D63, revised 2026-09-28)
+
+> **Superseded in part 2026-11-08 (#860):** the bundles stay — they are the LIBRARY the product's pages draw with —
+> but no document names a trace type any more: a chart declares a `mark`, so `renderer.bundle` is always `"2d"`
+> for the v1 kinds, and "the configuration validator refuses any trace type outside the loaded bundle's list" no
+> longer applies. Current text: [Dashboards §6.4](../../dashboards.md); the chart-configuration design record (orchestration store, `design-records/2026-11-06-neutral-chart-grammar.md`) §5.3.
 
 Plotly's 3D traces are WebGL — there is no lighter 3D in Plotly — so the size question is
 answered by never shipping WebGL to a dashboard that has no 3D visualization. Two self-contained
@@ -505,6 +528,11 @@ mechanical test (§11.3) passed at that moment; `RED` otherwise; `INCOMPLETE` wh
 verdict. Notes and environment are bounded; nothing else in the request is stored.
 
 ### 11.3 The mechanical visualization test (D56 (b))
+
+> **Superseded in part 2026-11-08 (#860):** step 1's Plotly schema (the vendored `plot-schema.json` and its reducer)
+> and the Plotly leaf rows of step 2. A chart's step 1 is its served v1 JSON Schema, its save rules and the library
+> support table; step 4's count assertion is `mark_count`, judged against the chart model's drawn marks. Current
+> text: [Dashboards §3.4](../../dashboards.md); the chart-configuration design record (orchestration store, `design-records/2026-11-06-neutral-chart-grammar.md`) §4.4.
 
 Server-run, no browser, sub-second, at submit and again at release:
 
@@ -609,6 +637,9 @@ conformance suite; `RenderedStateCheck`'s no-op pinned by a test that expects `n
 | **L4 tests + gate** | sessions, preview token page, evidence tables, screenshot route + cap, the mechanical test with the reduced plot-schema, release atomicity, `RenderedStateCheck` interface — **split 2026-09-30: L4a (#352) the backend (sessions, capabilities, mechanical validation, screenshot storage, the production gate) LANDED 2026-10-01; L4b (#353) the preview page, the REST/MCP surfaces, the §7.6 rows and the wire/browser acceptance** | on L1 (parallel with L2) | red/green on each refusal; a stale run cannot release; a screenshot over the cap refused; the token's confinement (no other route, expiry) proven on the wire |
 | **L5 `dashboard` key kind** | `ApiKeyKind.DASHBOARD`, `KeyRole.DASHBOARD_VIEWER`, bindings table + routes, `ScopeInterceptor`/`McpAuthFilter` confinement, the reference proxy example with its streaming conformance test | on L2 | the key reaches only the runtime routes; unbound = unservable; deeper binding replaces; two users of one key with independent refreshes; the proxy streams (not buffers) |
 | **L6 (later)** | headless render check + screenshot capture by the server (D56 step 5); the derived timeout defaults; HTML/SVG renderers | after L4 | — |
+
+> **Amended 2026-11-08 (#860):** L6's step 5 asserts `mark_count`, not a trace count; its SVG half now has a
+> direction — the runtime's own themed SVG drawer, and an agent-authored SVG kind (the chart-configuration design record (orchestration store, `design-records/2026-11-06-neutral-chart-grammar.md`), R6 and §5.4).
 
 Every lane brief carries the store template's Roles and Security sections, runs each touched
 module's `koverVerify` in its pregate, and names its dispatch base. L2 and L4 share L1's base and

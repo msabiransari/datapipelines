@@ -8,7 +8,7 @@ import co.datapipelines.datasources.DatasourceErrorCodes
 import co.datapipelines.datasources.DatasourceFileRoots
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.Fixtures
-import co.datapipelines.datasources.SnapshotListAppender
+import co.datapipelines.logcapture.SnapshotListAppender
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow

@@ -2,8 +2,8 @@
   "use strict";
 
   /*
-   * #398 — the template workspace's six-tab state machine: Source (the default) |
-   * Overview | Render | Runs | Used by | Versions. PURE at the core (no DOM, no fetch), so
+   * #398 — the template workspace's seven-tab state machine: Source (the default) |
+   * Overview | Render | Runs | Used by | Dependencies (#876) | Versions. PURE at the core (no DOM, no fetch), so
    * `node --test` owns the admission and transition tables — the same harness decision
    * pipeline-editor/tabs.js got — with a thin DOM glue (a delegated click listener and the
    * URL rewrite) in the browser half.
@@ -39,8 +39,9 @@
   var RENDER = "render";
   var RUNS = "runs";
   var USED_BY = "used-by";
+  var DEPENDENCIES = "dependencies";
   var VERSIONS = "versions";
-  var TABS = [SOURCE, OVERVIEW, RENDER, RUNS, USED_BY, VERSIONS];
+  var TABS = [SOURCE, OVERVIEW, RENDER, RUNS, USED_BY, DEPENDENCIES, VERSIONS];
 
   /** The admission rule, shared by the server enum and this mirror: unknown → source. */
   function resolve(raw, canRender) {

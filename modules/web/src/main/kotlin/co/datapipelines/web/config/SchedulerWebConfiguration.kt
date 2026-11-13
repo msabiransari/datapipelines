@@ -10,16 +10,24 @@ import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.scheduler.CapacityGate
 import co.datapipelines.scheduler.JobExecutor
 import co.datapipelines.scheduler.NotificationDeployment
 import co.datapipelines.scheduler.NotificationMailer
+import co.datapipelines.scheduler.ScheduleRepository
+import co.datapipelines.scheduler.ScheduleRunRepository
 import co.datapipelines.scheduler.SchedulerProperties
 import co.datapipelines.scheduler.SystemActorSource
+import co.datapipelines.web.endpoints.CommitEffects
+import co.datapipelines.web.endpoints.ConversionAttempt
+import co.datapipelines.web.endpoints.EndpointConversionConfiguration
+import co.datapipelines.web.endpoints.StartupConversion
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import co.datapipelines.web.schedules.PipelineJobExecutor
+import co.datapipelines.web.schedules.ScheduleVersionConversion
 import co.datapipelines.web.schedules.SlotCapacityGate
 import co.datapipelines.web.schedules.SmtpNotificationMailer
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -27,7 +35,9 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.annotation.Order
 import org.springframework.core.env.Environment
+import java.util.UUID
 
 /**
  * The scheduler's composition root (#9; scheduler design revision §6.2, A3 — `web/config`, since
@@ -52,6 +62,35 @@ class SchedulerWebConfiguration {
         co.datapipelines.web.schedules
             .ScheduleLakeAppendAuthorization(pipelines, pipelineService)
 
+    /** #786 §D.5 — the in-place schedule conversion (schema 1 → the exact pin); `modules/app`'s startup runner runs it. */
+    @Bean
+    fun scheduleVersionConversion(
+        schedules: ScheduleRepository,
+        runs: ScheduleRunRepository,
+        pipelines: PipelineRepository,
+    ): ScheduleVersionConversion = ScheduleVersionConversion(schedules, runs, pipelines)
+
+    /**
+     * The schedule family (D.5), SECOND in the runner's order after the API family (E.1): one runner, E.0 read for both
+     * before either writes, both converted in the runner's one transaction (#895).
+     */
+    @Bean
+    @Order(EndpointConversionConfiguration.SCHEDULE_FAMILY_ORDER)
+    fun scheduleStartupConversion(conversion: ScheduleVersionConversion): StartupConversion =
+        object : StartupConversion {
+            override fun logPrecondition(): Int = conversion.logPrecondition()
+
+            override fun plan(): ConversionAttempt {
+                val attempt = conversion.plan()
+                return object : ConversionAttempt {
+                    override val workspaces: Set<UUID> = attempt.workspaces
+
+                    override fun convert(guarded: Set<UUID>): CommitEffects =
+                        attempt.convert(guarded).let { outcome -> CommitEffects { outcome.publish() } }
+                }
+            }
+        }
+
     /** The system identity's id — read once: the row never changes (auth.md §4.5). */
     @Bean
     fun schedulerSystemActor(users: UserService): SystemActorSource {
@@ -64,6 +103,7 @@ class SchedulerWebConfiguration {
     fun pipelineJobExecutor(
         pipelines: PipelineRepository,
         pipelineService: PipelineService,
+        authoring: AuthoringGuard,
         workspaces: WorkspaceRepository,
         users: UserService,
         runner: RecordingExecutionRunner,
@@ -77,6 +117,7 @@ class SchedulerWebConfiguration {
         PipelineJobExecutor(
             pipelines = pipelines,
             pipelineService = pipelineService,
+            authoring = authoring,
             workspaces = workspaces,
             users = users,
             runner = runner,

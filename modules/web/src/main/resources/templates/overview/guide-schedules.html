@@ -22,8 +22,8 @@
   <p class="app-overview-panel-sub">A person creates schedules on the Schedules list, in three steps.</p>
   <div class="app-overview-prose" data-overview-create>
     <ol class="app-overview-steps">
-      <li><b>Pick the pipeline.</b> It needs a current version to follow; each run uses whatever
-        version is current then, with the parameter values you give.</li>
+      <li><b>Pick the pipeline and its version.</b> Every run executes exactly the version you pick,
+        with the parameter values you give; releasing a newer version does not move the schedule.</li>
       <li><b>Set when it runs.</b> The cron pattern and its timezone — the form previews the next
         occurrences — and the missed-run policy: skip records missed occurrences, latest catches up the
         newest one.</li>
@@ -41,7 +41,7 @@
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="howitworks" class="app-overview-dialog-section app-overview-prose"
      data-dialog-section="howitworks" data-title="What schedules are for" data-overview-intro hidden>
   <p>
-    A schedule runs a pipeline's current version at the times a cron pattern names, in the timezone
+    A schedule runs one exact version of a pipeline at the times a cron pattern names, in the timezone
     you choose, as the system identity rather than as the person who saved it. Every firing is
     recorded as a run, so you can see what ran, what was skipped and why. A person can pause a
     schedule, and it blocks itself when a run's outcome is unknown or something must be fixed,

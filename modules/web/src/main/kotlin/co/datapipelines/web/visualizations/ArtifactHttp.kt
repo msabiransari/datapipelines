@@ -7,6 +7,7 @@ import co.datapipelines.visualization.ArtifactFolder
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.ArtifactVersionDetail
+import co.datapipelines.visualization.VisualizationSaved
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.RequestBodies
@@ -149,6 +150,25 @@ internal object ArtifactResponses {
             pointer.put("body_hash", it.bodyHash)
             pointer.put("updated_by", it.updatedBy?.toString() ?: "")
             pointer.put("updated_at", it.updatedAt?.toString() ?: "")
+        }
+        return node
+    }
+
+    /**
+     * A visualization save's answer (rest-api §22 POST/PUT, #860): the [full] projection of the saved version plus
+     * `warnings` — ALWAYS present, `[]` on a clean save, one `{code, path, library}` per field the chart library
+     * honours only in part (design record 2026-11-06 §4.4; the release response's `warnings` shape, pipelines §5.10).
+     * Never document text: a code, a dotted body path and a library name.
+     */
+    fun saved(saved: VisualizationSaved): JsonNode {
+        val node = full(saved.version, draftOf(saved.version)) as ObjectNode
+        val warnings = node.putArray("warnings")
+        saved.warnings.forEach {
+            warnings
+                .addObject()
+                .put("code", it.code)
+                .put("path", it.path)
+                .put("library", it.library)
         }
         return node
     }

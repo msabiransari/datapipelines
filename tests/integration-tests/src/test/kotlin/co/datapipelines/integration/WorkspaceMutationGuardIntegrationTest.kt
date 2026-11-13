@@ -63,6 +63,7 @@ class WorkspaceMutationGuardIntegrationTest {
     private val http: HttpClient = HttpClient.newHttpClient()
     private val pool = Executors.newFixedThreadPool(2)
     private var rpcId = 0
+    private lateinit var templateHash: String
 
     // ---- the lock holder and the waiter probe -------------------------------------------------------------------
 
@@ -217,15 +218,19 @@ class WorkspaceMutationGuardIntegrationTest {
         hash: String,
     ): Response = rest().header("If-Match", hash).post("/api/v1/pipelines/$id/draft/discard")
 
+    /** A release with no flag and no plan: only the pipeline flips (its pinned template must already be RELEASED). */
     private fun release(
         id: String,
         hash: String,
-        alias: Boolean,
-    ): Response =
+    ): Response = rest().header("If-Match", hash).post("/api/v1/pipelines/$id/release")
+
+    /** The shared DRAFT template released through its own route, at the hash its create answered. */
+    private fun releaseTemplate(): Response =
         rest()
-            .header("If-Match", hash)
-            .queryParam("release_pinned_templates", alias.toString())
-            .post("/api/v1/pipelines/$id/release")
+            .contentType(ContentType.JSON)
+            .header("If-Match", templateHash)
+            .body(mapper.writeValueAsString(mapOf("name" to TEMPLATE)))
+            .post("/api/v1/templates/release")
 
     private fun rest(): RequestSpecification = given().port(port).asSession(SESSION)
 
@@ -265,6 +270,7 @@ class WorkspaceMutationGuardIntegrationTest {
                 ),
             )
         withClue("templates_create must succeed: $template") { isError shouldBe false }
+        templateHash = template["body_hash"].asText()
         // Non-vacuity of the probe: nobody waits on the guard row before any race starts.
         hold(WORKSPACE_ID).use { holder -> guardWaiters(holder.pid) shouldBe 0 }
     }
@@ -304,14 +310,16 @@ class WorkspaceMutationGuardIntegrationTest {
     @Test
     @Order(5)
     fun `race 4 - a second release waits for the first to commit, then releases`() {
-        // Unheld: release the shared template through the alias, so the release under test flips nothing but its
-        // root — the template service's own guard (taken when a cascade flips a template) cannot stand in for the
-        // coordinator's, and removing the coordinator's call is what turns this case red.
+        // Unheld: release the shared template through its own route (the legacy alias is refused since #876 round 3),
+        // so the release under test flips nothing but its root — the template service's own guard (taken when a
+        // cascade flips a template) cannot stand in for the coordinator's, and removing the coordinator's call is
+        // what turns this case red.
         val (warmUp, warmUpHash) = createPipeline("test/guard_517_release_first")
-        release(warmUp, warmUpHash, alias = true).statusCode shouldBe 200
+        withClue("the shared template releases on its own route") { releaseTemplate().statusCode shouldBe 200 }
+        release(warmUp, warmUpHash).statusCode shouldBe 200
         val (id, hash) = createPipeline("test/guard_517_release")
 
-        val response: Response = waitsForTheGuard { release(id, hash, alias = false) }
+        val response: Response = waitsForTheGuard { release(id, hash) }
 
         withClue(response.asString()) { response.statusCode shouldBe 200 }
         response.jsonPath().getString("data.status") shouldBe "RELEASED"
@@ -398,12 +406,13 @@ class WorkspaceMutationGuardIntegrationTest {
         private val VISUALIZATION =
             """
             {"name": "test/charts/guard_517", "display_name": "Guard evidence", "description": "",
-             "renderer": {"kind": "plotly", "version": "4"},
+             "renderer": {"kind": "chart", "version": "1"},
              "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
                                                 {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
-             "config": {"data": [{"type": "bar", "x": [], "y": []}]},
-             "bindings": {"data[0].x": "month", "data[0].y": "amount"},
-             "presentation": {"title": "Guard evidence"},
+             "config": {"title": {"text": "Guard evidence"}, "mark": {"type": "bar"},
+                        "encoding": {"x": {"field": "month", "type": "temporal", "sort": "ascending"},
+                                     "y": {"field": "amount", "type": "quantitative", "aggregate": "sum"}}},
+             "bindings": {"amount": "amount", "month": "month"},
              "tests": {"cases": [{"name": "one month", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
                                   "assertions": [{"kind": "rendered"}]}]}}
             """.trimIndent()

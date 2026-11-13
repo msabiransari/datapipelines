@@ -43,10 +43,11 @@ class DashboardErrorCodesSpecDriftTest {
             .filterValues { it != "409" }
             .keys
             .shouldBeEmpty()
-        // The release-dependency plan's three non-409 codes (release-dependencies record §14, #517).
+        // The release-dependency plan's non-409 codes (release-dependencies record §14, #517; the 503 is #786's).
         documented[DashboardErrorCodes.RELEASE_PLAN_REQUIRED] shouldBe "428"
         documented[DashboardErrorCodes.RELEASE_PLAN_INVALID] shouldBe "400"
         documented[DashboardErrorCodes.RELEASE_DEPENDENCY_LIMIT] shouldBe "422"
+        documented[DashboardErrorCodes.RELEASE_METADATA_UNAVAILABLE] shouldBe "503"
         documented[DashboardErrorCodes.NAME_TAKEN] shouldBe "409"
         documented[DashboardErrorCodes.NOT_FOUND] shouldBe "404"
         documented[DashboardErrorCodes.IMPORT_ID_TAKEN] shouldBe "409"
@@ -67,6 +68,7 @@ class DashboardErrorCodesSpecDriftTest {
                 DashboardErrorCodes.RELEASE_PLAN_REQUIRED,
                 DashboardErrorCodes.RELEASE_PLAN_INVALID,
                 DashboardErrorCodes.RELEASE_DEPENDENCY_LIMIT,
+                DashboardErrorCodes.RELEASE_METADATA_UNAVAILABLE,
             )
 
         val SUB_FAMILIES =

@@ -6,6 +6,7 @@ import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceProperties
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.LakeHttpBounds
 import co.datapipelines.datasources.MANAGED_DIALECT_KEY
 import co.datapipelines.datasources.ManagedLakeSync
 import co.datapipelines.lake.LakeBootCheck
@@ -33,16 +34,23 @@ import java.util.UUID
  *
  * ## What it writes
  * One row named `lake.name`: dialect LAKE, `dialect.catalog.kind = s3`, `dialect.managed = true`, read-only,
- * the store's region, endpoint and URL style, and `memory_limit = reads.memory-limit`. The URL is the anonymous
+ * the store's region and endpoint as [EgressStoreTarget] derives them (#862: declared always, so the engine dials
+ * exactly the authority the boot probe checks and the proxy allowlists), the store's URL style,
+ * `memory_limit = reads.memory-limit`, and — when
+ * `reads.egress-proxy` is set — `egress_proxy` (#845), which the adapter turns into `SET http_proxy` ahead of the
+ * §15a lockdown. Adding or changing that key RESYNCs the row on the next boot. The URL is the anonymous
  * in-memory engine, so the §15a lock on each generation reaches no other pool. The credential is the reader
  * pair, else the writer pair, through the registry's encrypted credential path, never `properties.dialect`.
  * Neither pair set means the instance's credential chain (`CredentialKind.NONE`).
  *
  * Then, every boot: the backfill of registry rows for tables defined while no datasource row existed, and the
- * grant to every workspace (record D3: the lake is server-level). [regrant] repeats the grant on the freshness
- * tick, so a workspace created after boot sees the lake within one tick. The tick's grant runs over the
- * repository the tick passes in (its statement-bounded one, #818b A) and as the system actor this registrar
- * provisioned at boot, so the tick issues exactly one statement and provisions nothing.
+ * grant to every workspace (record D3: the lake is server-level). A workspace created through the product is
+ * granted in its own creation transaction ([grantTo], #823), so it never exists without the lake; [regrant]
+ * repeats the grant on the freshness tick as the REPAIR path (a workspace inserted by SQL, a grant an operator
+ * deleted by hand, a grant that predates this registrar). The tick's grant runs over the repository the tick
+ * passes in (its statement-bounded one, #818b A) and as the system actor this registrar provisioned at boot, so
+ * the tick issues exactly one statement and provisions nothing. Neither path writes an audit row: the server
+ * granting its own datasource is not a person's act, and a creation is covered by `auth.workspace.created`.
  *
  * `enabled=false`: nothing is written, and an existing managed row stays where it is (record §6). The managed
  * catalog bean then reports every managed table unavailable (`lake.disabled`).
@@ -64,6 +72,9 @@ class ManagedLakeDatasourceRegistrar(
     @PostConstruct
     fun register() {
         val properties = lakeProperties.ifAvailable?.takeIf { it.enabled } ?: return
+        // #845 D4: the egress proxy answers, declares the configured max-age and reaches the store, or the boot stops
+        // here (lake.boot.egress_proxy) before anything is written.
+        ManagedLakeEgressCheck.verify(properties)
         val actor = userService.provisionSystemActor().id
         systemActor = actor
         val desired = desiredDatasource(properties)
@@ -107,6 +118,20 @@ class ManagedLakeDatasourceRegistrar(
             )
         }
         grantEveryWorkspace(desired.name, actor)
+    }
+
+    /**
+     * #823 (owner ruling 2026-11-07) — the managed lake granted to ONE workspace, as the boot-provisioned system actor,
+     * through this registrar's own repository so the INSERT joins the transaction the caller is in (workspace creation's).
+     * Idempotent: returns true when a row was created, false when the grant existed, the lake is disabled, or [register]
+     * has not provisioned the actor. It takes no datasource name and no actor — the one thing it can grant is the managed
+     * lake, and the grantor is the server, never the principal creating the workspace. Not logged: a creation that
+     * grants is the norm (`WorkspaceService.create` logs `managed_lake_granted`); the event below reports repairs.
+     */
+    fun grantTo(workspaceId: UUID): Boolean {
+        val properties = lakeProperties.ifAvailable?.takeIf { it.enabled } ?: return false
+        val actor = systemActor ?: return false
+        return grants.grant(properties.name, workspaceId, actor)
     }
 
     /**
@@ -155,14 +180,30 @@ class ManagedLakeDatasourceRegistrar(
                     storage.hasStaticCredentials -> storage.accessKey to storage.secretKey
                     else -> null to null
                 }
+            // #862: the secret carries the DERIVED endpoint and the EFFECTIVE region, always — one form covers
+            // engine, boot probe and proxy renderer ([EgressStoreTarget], probe A: the engine would resolve a
+            // blank endpoint itself to s3.<region>.amazonaws.com; declaring it keeps every consumer on the same
+            // authority the proxy allowlists). Blank endpoint ⇒ the regional AWS https form.
+            val target =
+                EgressStoreTarget.derive(
+                    endpoint = storage.endpoint,
+                    region = storage.region,
+                    bucket = storage.bucket,
+                    pathStyle = storage.pathStyle,
+                )
             val dialect =
                 buildMap<String, Any?> {
                     put("catalog.kind", LakeProperties.KIND_S3)
                     put(MANAGED_DIALECT_KEY, "true")
-                    storage.region.takeIf { it.isNotBlank() }?.let { put("region", it) }
-                    storage.endpoint.takeIf { it.isNotBlank() }?.let { put("endpoint", it) }
+                    put("region", target.region)
+                    put("endpoint", target.duckdbEndpoint)
                     put("url_style", if (storage.pathStyle) "path" else "vhost")
                     put("memory_limit", duckdbSize(properties.reads.memoryLimit))
+                    // #845: the egress proxy the adapter points `http_proxy` at; absent when configuration sets none.
+                    properties.reads.egressProxy
+                        .trim()
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { put(LakeHttpBounds.EGRESS_PROXY_KEY, it) }
                 }
             return Datasource(
                 name = properties.name,

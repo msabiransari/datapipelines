@@ -232,6 +232,9 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun mcpCallAudit(): co.datapipelines.application.mcp.McpCallAudit = mockk()
 
+        // #877 §C — the ONE combined reverse arrow `web` declares; the tools take the bean, never build their own.
+        @Bean fun templateUsage(): co.datapipelines.application.templates.TemplateUsage = mockk()
+
         // 139 — the entry-point checks read the audit log through this jdbc; `mcpTools`
         // now takes it directly (the same collaborator the mcpCallAudit bean wraps, which
         // this stub context keeps out the same way).
