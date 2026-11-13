@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit
  * The fenced pool under the owner's record-form ruling (2026-11-02: session-scoped settings, one pool per lease
  * holder, closed at release) and §8a's no-replay rule:
  *
- * 1. every catalog connection carries the lease, the operation id and both timeouts;
+ * 1. every catalog connection carries the lease, the operation id, both timeouts and the socket bound (#878);
  * 2. DP's own Hikari pool never carries them;
  * 3. no catalog connection outlives its session;
  * 4. a second holder — or a fabricated handle — cannot write under the first's lease;
@@ -59,6 +59,8 @@ class FencedPoolIntegrationTest {
                 }
             settings shouldBe
                 listOf(lease.token.toString(), lease.operationId.toString(), "5s", "30s", CatalogDatabase.APPLICATION_NAME)
+            // #878: the real driver honoured the socket bound, (30 + 5) s, on the connection the pool returned.
+            pool.run { it.networkTimeout } shouldBe 35_000
         }
     }
 
