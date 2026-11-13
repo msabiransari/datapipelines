@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.96 (revised — see Change Log)
+**Status:** v1.98 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-13
@@ -1756,6 +1756,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.append.null_in_required` | 400 | The staged result has null values in required columns; details contain every count. |
 | `lake.append.type_mismatch` | 400 | A staged native type cannot be stored without narrowing or coercion. |
 | `lake.append.too_many_partitions` | 400 | The append would open more distinct output partitions than admitted. It stops before opening the excess partition, commits nothing, and retains already written files for maintenance. |
+| `lake.append.partition_value_out_of_range` | 400 | The staged result has values a `truncate[N]` partition over an `INTEGER`, `BIGINTEGER`, `DECIMAL(p,s)` or `BIGDECIMAL` column cannot hold: Iceberg's own truncate, which rounds toward negative infinity, would give a partition value outside the column's type (a decimal one digit wider than the column, an integer that wraps above the row). Only the lowest values of a column's range can do this, depending on N. Raised by the append's first scan, after `lake.append.null_in_required` and before a data file is written or a catalog commit starts. `details.out_of_range_counts` maps each partition field, written `truncate[N](<column>)` (for example `truncate[2](amount)`), to its number of rows; never a value. Temporary, until Iceberg keeps the value inside its type ([Lake §7](lake.md#7-append-publication); apache/iceberg 17027, 13105). |
 | `lake.append.recipe_exists` | 500 | An attempt's immutable recipe key already exists. Bug signal: the PUT is not retried or overwritten; catalog publication has not started. |
 | `lake.append.forbidden` | 403 | The effective principal lacks `lake.append`; key authority comes from the key's own role, never its creator's identity or current role. |
 | `lake.append.recipe_write_failed` | 503 | The immutable recipe could not be written before the admission-fixed deadline. No catalog publication; storage messages and causes are stripped. |
@@ -1781,7 +1782,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.definition.not_draft` | — | The version named is not a DRAFT (release), or the table has no draft (purge-draft). |
 | `lake.definition.not_released` | — | Discard names a version that is not RELEASED. |
 | `lake.definition.version_conflict` | — | The caller's `expected_body_hash` is not the hash of the version it builds on (the DRAFT it overwrites or releases, or the RELEASED version a new draft copies), or a draft already exists: someone else wrote first. |
-| `lake.definition.invalid_body` | — | The body breaks a rule of lake.md §1; `details.path` names the offending element. |
+| `lake.definition.invalid_body` | — | The body breaks a rule of lake.md §1; `details.path` names the offending element. Also returned by a release whose stored draft breaks the sort-column rule against the table's first version ever released (`details.path` `sort_field_ids`, reason `missing` or `locked`, among others); nothing is released. |
 | `lake.definition.name_taken` | — | A managed table of that name already exists in the namespace. |
 | `lake.definition.applied_version` | — | Discard names the version this environment has applied. |
 | `lake.definition.reviewed_change` | — | The change from the applied definition is in the policy's reviewed class (lake.md §4); recorded on the table as `failed`. |
@@ -2042,6 +2043,8 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.98 | 967 (#967) — renumbered at the spec sync after #935's v1.97 | §13.25 gains `lake.append.partition_value_out_of_range` (400): the append's first scan refuses a delivery with a value a numeric `truncate` partition cannot hold, before anything is written (owner ruling 2026-11-13, temporary until apache/iceberg 17027 and 13105). Landed with the constant in `PipelineErrorCodes.Lake` and the explicit `ApiErrorCatalog` row (§13 row count 513 → 514, recounted with the drift test's own regex). |
+| 2026-11-13 | v1.97 | 935 (#935) | §13.25 `lake.definition.invalid_body`: a release returns it too, when its stored draft breaks the sort-column rule of lake.md §1 (sort columns fixed by the table's first release); nothing is released and no audit row is written. No code added or removed. |
 | 2026-11-13 | v1.96 | 803 (#803) — renumbered at merge after #822's v1.95 | §13.5 gains `pipeline.staging.scratch_blocked` (500, the `pipeline.staging.` family default — no explicit `ApiErrorCatalog` row): a DuckDB scratch reservation that can never fit beside the leftover files a factory's sweep counted, a type distinct from the retryable `scratch_exhausted` (details `execution_id`, `requested_bytes`, `leftover_bytes`, `capacity_bytes`). Landed with the constants in `StagingErrorCodes` and `PipelineErrorCodes.Staging`. §13 row count 512 → 513. |
 | 2026-11-13 | v1.95 | 822 (#822) | §13.25 `lake.definition.apply_unclassified`: any step of the apply, not only the commit step, returns it — `pending` before the commit, left for `verifyApplying` after it; a release throws nothing after its landing but `lake.definition.not_found`. No code added or removed. |
 | 2026-11-12 | v1.94 | 847 (#847) — renumbered at merge after #821's v1.89 — renumbered at final sync after dependency-graph | §13.7 gains `auth.secret_verification.unavailable` (503): a native Argon2 verification failure that is not a mismatch is no longer a silent wrong password. Landed with the constants in `AuthErrorCodes` and `PipelineErrorCodes.Auth` and the explicit `ApiErrorCatalog` row (§13 row count 508 → 509, recounted with the drift test's own regex). |

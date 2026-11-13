@@ -8,6 +8,7 @@ import io.kotest.matchers.shouldBe
 import org.apache.iceberg.DataFile
 import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
+import org.apache.iceberg.SortOrder
 import org.apache.iceberg.Table
 import org.apache.iceberg.TableProperties
 import org.apache.iceberg.data.GenericRecord
@@ -94,6 +95,7 @@ class LibraryDeleteRefusalIntegrationTest {
                         UUID.randomUUID(),
                         Schema(Types.NestedField.required(1, "id", Types.LongType.get())),
                         PartitionSpec.unpartitioned(),
+                        SortOrder.unsorted(),
                         1,
                     )
                 block(table)

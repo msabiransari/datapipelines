@@ -14,15 +14,18 @@ import java.util.UUID
  * Bounded normal-mode recovery; durable revisions remain protected until an observation sees their supersession.
  *
  * Whole-tick bound (record §8b; owner ruling D3 (i), lane 799c): one [SettleBudget] of [SWEEP_BUDGET] per tick, minted
- * after the tick's first mode read and consulted before the protection page, the table page, every table (before and
- * after its mode read) and every statement group of the delivery settlement, the projection repair, the applying
- * verification and the semantics repair. A tick visits a rotating page of at most [PAGE_SIZE] managed tables and, per
+ * after the tick's first mode read and consulted before each of the protection step's two statements, the table page,
+ * every table (before and after its mode read) and every statement group of the delivery settlement, the projection
+ * repair, the applying verification and the semantics repair. A tick visits a rotating page of at most [PAGE_SIZE] managed tables and, per
  * table, one keyset page of at most [rowPage] unsettled deliveries after that table's row cursor (D1), which advances
  * past visited rows — live, busy and failing ones included — and wraps when a page comes back short. Once the budget is
  * spent no new statement group starts; what still runs is the unit under way, the release of a lease it took over or the
  * deadline comparison of a refused takeover, and the `last_sweep_at` heartbeat: at most [PERMITTED_OVERRUN] past the
  * budget (docs/lake.md §8). The Iceberg metadata read leaves the tick's thread ([LakeMetadataReads]), so an object store
  * that stops answering adds nothing to that number. [rowPage] and [budgets] are test seams; pass [budgets] by name.
+ *
+ * [protectionDays] is the deployment's `datapipelines.lake.retention.protection-days` (record §11a call 35, one value
+ * per deployment). It is required: a construction site that forgets it does not compile (#939 D2).
  */
 class LakeSettlementSweep(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -31,6 +34,8 @@ class LakeSettlementSweep(
     private val applier: LakeDefinitionApplier,
     private val semantics: LakeSemanticsRepair,
     private val metadata: LakeMetadataReads,
+    /** Whole days a finalised supersession stays protected; the stamp reads this, never `lake_control` (#939 D1). */
+    val protectionDays: Int,
     private val rowPage: Int = SETTLE_PAGE_SIZE,
     private val budgets: () -> SettleBudget = { SettleBudget.startingNow(leases, SWEEP_BUDGET) },
 ) {
@@ -45,13 +50,14 @@ class LakeSettlementSweep(
     init {
         require(jdbc.jdbcTemplate.queryTimeout > 0) { "settlement sweep JDBC must be bounded" }
         require(rowPage > 0) { "settlement row page must be positive: $rowPage" }
+        require(protectionDays > 0) { "protection window must be at least one day: $protectionDays" }
     }
 
     /** One finite page per tick, rotating through managed tables without starving the shared scheduled thread. */
     fun runOnce() {
         if (!normal()) return
         val budget = budgets()
-        if (!budget.expired()) finalizeProtection()
+        if (!budget.expired()) finalizeProtection { !budget.expired() }
         // Null when the budget was spent before the table page: nothing was visited, so the pass neither wraps nor forgets.
         val tables = if (budget.expired()) null else tablePage()
         var visited = 0
@@ -99,16 +105,46 @@ class LakeSettlementSweep(
         ) { rows, _ -> rows.getObject("id", UUID::class.java) }
 
     /**
-     * Autocommit visibility, rather than a trigger timestamp, starts the full retention window. At most [PAGE_SIZE]
-     * revisions per statement; an unobserved supersession stays protected (NULL) until a later tick observes it.
+     * The protection step of a tick: [alignProtectionWindow], then [stampProtection], two autocommit statements with no
+     * transaction around them (record §8a: `now()` is the stamp statement's own start). Returns the revisions stamped.
+     * [proceed] is asked between the two: a tick passes its budget, because the alignment may be the statement that spent
+     * it, and then the stamp does not start (an unstamped supersession stays protected, NULL, for a later tick).
      */
-    fun finalizeProtection(): Int =
+    fun finalizeProtection(proceed: () -> Boolean = { true }): Int {
+        alignProtectionWindow()
+        return if (proceed()) stampProtection() else 0
+    }
+
+    /**
+     * Makes `lake_control.protection_interval` equal to [protectionDays], in normal mode only and only when it differs, so a
+     * steady-state tick writes nothing and a restoring or replaying catalog is left as the restore put it. The column is a
+     * mirror for whoever reads the catalog; no deadline is computed from it (#939 D1). Instances configured differently
+     * each align to their own value and log it (D4). The comparison is on the rendered value, so `1 mon` is not taken
+     * for `30 days`. Returns the rows changed: 0 or 1.
+     */
+    fun alignProtectionWindow(): Int {
+        val changed =
+            jdbc.update(
+                "UPDATE lake_control SET protection_interval = make_interval(days => :days) WHERE id = 1 AND mode = :mode " +
+                    "AND CAST(protection_interval AS text) <> CAST(make_interval(days => :days) AS text)",
+                mapOf("days" to protectionDays, "mode" to LakeProperties.MODE_NORMAL),
+            )
+        if (changed > 0) log.info("event=lake.settle.protection_window_aligned days={}", protectionDays)
+        return changed
+    }
+
+    /**
+     * Autocommit visibility, rather than a trigger timestamp, starts the full retention window: `now()` plus the configured
+     * [protectionDays], never the control row's interval. At most [PAGE_SIZE] revisions per statement; an unobserved
+     * supersession stays protected (NULL) until a later tick observes it, and a deadline already stamped is never touched.
+     */
+    fun stampProtection(): Int =
         jdbc.update(
-            "UPDATE lake_table_revisions r SET protected_until = now() + c.protection_interval FROM lake_control c " +
+            "UPDATE lake_table_revisions r SET protected_until = now() + make_interval(days => :days) FROM lake_control c " +
                 "WHERE c.id = 1 AND c.mode = :mode AND r.superseded_at IS NOT NULL AND r.protected_until IS NULL " +
                 "AND r.seq IN (SELECT seq FROM lake_table_revisions WHERE superseded_at IS NOT NULL AND protected_until IS NULL " +
                 "ORDER BY seq LIMIT :limit)",
-            mapOf("mode" to LakeProperties.MODE_NORMAL, "limit" to PAGE_SIZE),
+            mapOf("days" to protectionDays, "mode" to LakeProperties.MODE_NORMAL, "limit" to PAGE_SIZE),
         )
 
     @Suppress("TooGenericExceptionCaught") // One busy/broken table cannot prevent recovery of the next page.

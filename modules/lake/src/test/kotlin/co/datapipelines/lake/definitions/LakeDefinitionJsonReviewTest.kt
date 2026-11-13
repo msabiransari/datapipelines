@@ -14,7 +14,7 @@ class LakeDefinitionJsonReviewTest {
     fun `a complete definition followed by another JSON value is refused`(suffix: String) {
         val failure =
             shouldThrow<DatapipelinesException> {
-                LakeDefinitionBodies.parse(LakeDefinitionFixtures.ORDERS_V1 + suffix, null)
+                LakeDefinitionBodies.parse(LakeDefinitionFixtures.ORDERS_V1 + suffix, null, null)
             }
         failure.code shouldBe PipelineErrorCodes.Lake.DEFINITION_INVALID_BODY
     }

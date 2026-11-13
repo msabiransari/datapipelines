@@ -16,6 +16,7 @@ object LakeDefinitionRules {
     const val MAX_TAGS = 16
     const val MAX_PARTITION_FIELDS = 8
     const val MAX_TRANSFORM_PARAMETER = 10_000
+    const val MAX_SORT_FIELDS = 4
 
     private val NAME = Regex("^[a-z0-9_]{1,63}$")
     private val TRANSFORM = Regex("^(identity|year|month|day|hour|bucket\\[([0-9]{1,5})]|truncate\\[([0-9]{1,5})])$")
@@ -25,14 +26,21 @@ object LakeDefinitionRules {
 
     private val TIME_TRANSFORMS = setOf("year", "month", "day", "hour")
 
+    private const val SORT = LakeDefinitionBodies.SORT_FIELD_IDS
+
     /**
      * Validates [body]. With no [base] (a table's first definition) the field ids must be exactly 1..n in listed order,
      * which is how Iceberg numbers a table it creates. With a [base], an id the base lacks is a new column, and new
      * columns take consecutive ids after the base's highest, in listed order (Iceberg's `lastColumnId + 1`).
+     *
+     * The sort columns are judged last, by [sortRules] against [lockBasis] alone, never against [base]: the lock's
+     * basis is the table's first version ever released, which a discard does not undo, while [base] is the current
+     * release, which a discard can remove.
      */
     fun validate(
         body: LakeDefinitionBody,
         base: LakeDefinitionBody?,
+        lockBasis: LakeDefinitionBody?,
     ) {
         if (body.fields.isEmpty()) throw invalidBody("fields", "empty", "a table has at least one field")
         if (body.fields.size > MAX_FIELDS) throw invalidBody("fields", "too_many", "at most $MAX_FIELDS fields")
@@ -51,6 +59,50 @@ object LakeDefinitionRules {
         idRules(body, base)
         partitionRules(body)
         identifierRules(body)
+        sortRules(body, lockBasis)
+    }
+
+    /**
+     * The sort-column rule (lake.md §1, dp-lake design record §11a call 36 items 1 and 3), also run on its own by a
+     * release (D3 of brief 935). [lockBasis] is the body of the table's first version ever released, RELEASED or
+     * DISCARDED; null when the table has never been released.
+     * - No lock basis: the key is required, 1 to [MAX_SORT_FIELDS] distinct ids of the body's fields, none `BINARY`
+     *   and, for now, none an approximate `DECIMAL` (a floating-point column; #971 lifts that refusal).
+     * - A lock basis: the list must be exactly the basis's, the same ids in the same order. A basis without the key
+     *   (a legacy table) admits only a body without it.
+     */
+    fun sortRules(
+        body: LakeDefinitionBody,
+        lockBasis: LakeDefinitionBody?,
+    ) {
+        val ids = body.sortFieldIds
+        if (lockBasis == null && ids.isEmpty()) {
+            throw invalidBody(SORT, "missing", "a table has 1 to $MAX_SORT_FIELDS sort columns, fixed by its first release")
+        }
+        if (ids.size > MAX_SORT_FIELDS) throw invalidBody(SORT, "too_many", "at most $MAX_SORT_FIELDS sort columns")
+        val seen = HashSet<Int>()
+        ids.forEachIndexed { i, id ->
+            val path = "$SORT[$i]"
+            val field = body.field(id) ?: throw invalidBody(path, "unknown_field", "no field has id $id")
+            if (!seen.add(id)) throw invalidBody(path, "duplicate", "sort column $id listed twice")
+            if (field.icebergType is Types.BinaryType) {
+                throw invalidBody(path, "unsupported_type", "a BINARY column cannot be a sort column")
+            }
+            if (field.icebergType is Types.DoubleType) {
+                // Temporary (owner ruling 2026-11-13T18:23:58Z, lifted by #971): the engine that will order the rows
+                // returns every -0.0 of a floating ORDER BY key as 0.0 (duckdb/duckdb#25417).
+                throw invalidBody(path, "unsupported_type", "a floating-point column (an approximate DECIMAL) cannot be a sort column")
+            }
+        }
+        if (lockBasis != null && ids != lockBasis.sortFieldIds) {
+            val remedy =
+                if (lockBasis.sortFieldIds.isEmpty()) {
+                    "this table was released without sort columns and stays unsorted"
+                } else {
+                    "they are ${lockBasis.sortFieldIds}; another order needs a replacement table"
+                }
+            throw invalidBody(SORT, "locked", "sort columns are fixed by the table's first release: $remedy")
+        }
     }
 
     private fun typeRules(

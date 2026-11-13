@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.60 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.61 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-13
@@ -1767,6 +1767,7 @@ INSERT INTO lake_control (id, mode) VALUES (1, 'normal');
 **Notes:**
 - **`restoring` refuses every catalog write** at the fence (`DP002`). No code path in P2 changes the mode; the restore and replay flows that set it, and the sweep that stamps `last_sweep_at`, are later phases' (record §9, P6).
 - The boot check refuses a table that does not hold exactly its one row.
+- **`protection_interval` mirrors `datapipelines.lake.retention.protection-days`; no deadline is computed from it** (#939, record §5.2 errata of 2026-11-13). Its `DEFAULT INTERVAL '7 days'` is only what a database holds before its first normal-mode settle tick: in normal mode the sweep sets the column to the configured days whenever the two differ, and stamps `lake_table_revisions.protected_until` from the setting, not from the column ([Lake §8](lake.md#8-settlement-and-recovery)). A restoring or replaying catalog keeps the value the restore put there. No migration changed the column.
 
 ### 4.46 `lake_leases`
 
@@ -2630,6 +2631,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.61 | 939 (#939, no migration) | **§4.45** Notes: `lake_control.protection_interval` mirrors `datapipelines.lake.retention.protection-days` — the normal-mode settle sweep keeps it equal and stamps `protected_until` from the setting, not the column; the column's `DEFAULT` is only what a database holds before its first normal-mode tick. No schema change. |
 | 2026-11-12 | v1.60 | #905 review F1 (no migration) — renumbered at final sync after dependency-graph | §4.6: correct the lifecycle note to include the separate result-history UPDATE, which does not change `completed_at`. |
 | 2026-11-11 | v1.59 | #896 docs: ownership and grants as they are since V23 | **No schema change.** Text that still described the V4 `workspace_id` model is corrected to the V23 model: the §3 relationship diagram shows `owner_workspace_id` (ownership; NULL = an instance datasource) and the `datasource_workspaces` grant rows (visibility); the §4.10 note on `workspace_id` becomes the `owner_workspace_id` note — ownership only, the global NAME namespace, visibility by `GRANTED_PREDICATE`, the V4 → V23 history kept as history; §4.11 no longer says datasources "bind by visibility only"; §4.16's backfill note names the `w.is_deleted = FALSE` filter (a soft-deleted workspace got no grant), and its revoke note says a removed grant advances `generation` once while the definition, credential and incarnation stay. |
 | 2026-11-11 | v1.58 | V59 (#874 G3) | **§4.10 `datasources` gains `incarnation_id`** (UUID, `DEFAULT gen_random_uuid()`, unique via `uq_datasources_incarnation`) **and `generation`** (BIGINT from 1, `chk_datasources_generation`) — the local identity beside the name key, both internal and never on the wire; the defaults fill every existing row in the migration's own statement. §5 gains the constraint's implicit index; V59 adds no explicit index. |

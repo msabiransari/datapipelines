@@ -9,6 +9,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
+import org.apache.iceberg.SortOrder
 import org.apache.iceberg.inmemory.InMemoryFileIO
 import org.apache.iceberg.io.FileIO
 import org.apache.iceberg.types.Types
@@ -231,7 +232,7 @@ class FencedPoolPausedServerIntegrationTest {
     private fun table(name: String): LeaseHandle {
         val lease = server.lease(LeaseKind.TABLE, LakeNames.tableLeaseName(NAMESPACE, name))
         LakeCatalogs(properties(DEFAULT_S), server.database(), ::inMemory).open(lease).use {
-            it.createTable(NAMESPACE, name, UUID.randomUUID(), SCHEMA, PartitionSpec.unpartitioned(), 1L)
+            it.createTable(NAMESPACE, name, UUID.randomUUID(), SCHEMA, PartitionSpec.unpartitioned(), SortOrder.unsorted(), 1L)
         }
         return lease
     }

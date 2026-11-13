@@ -60,6 +60,18 @@ class SettlementOverrunDerivationTest {
     }
 
     @Test
+    fun `a protection stamp in flight at the deadline is one statement inside the unit in flight (#939)`() {
+        // The mint and the alignment are one statement each and can spend the budget, so the budget is checked again
+        // before the stamp; what can run past the deadline is that one stamp, then the heartbeat.
+        (LakeAppendRuntime.STATEMENT_TIMEOUT_SECONDS <= inFlightSeconds()) shouldBe true
+        val heartbeat = LakeAppendRuntime.STATEMENT_TIMEOUT_SECONDS.toLong()
+        (LakeAppendRuntime.STATEMENT_TIMEOUT_SECONDS + heartbeat <= LakeSettlementSweep.PERMITTED_OVERRUN.toSeconds()) shouldBe true
+
+        val lake = LakeTestDb.repoFile("docs/lake.md").readText().replace(Regex("\\s+"), " ")
+        lake shouldContain "a stamp in flight at the deadline is one five-second statement, inside the first row of the table"
+    }
+
+    @Test
     fun `the lake document states the numbers this class derives`() {
         val lake = LakeTestDb.repoFile("docs/lake.md").readText().replace(Regex("\\s+"), " ")
 

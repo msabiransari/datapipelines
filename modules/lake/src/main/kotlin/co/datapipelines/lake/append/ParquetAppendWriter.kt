@@ -40,7 +40,7 @@ class ParquetAppendWriter {
         checkActive: () -> Unit,
     ): WrittenAppend {
         require(maxOpenPartitions > 0)
-        val plan = AppendColumnCheck().check(input, table.schema(), checkActive)
+        val plan = AppendColumnCheck().check(input, table.schema(), table.spec(), checkActive)
         if (plan.rowCount == 0L) return WrittenAppend(0, emptyList())
         val factory =
             GenericFileWriterFactory
