@@ -202,7 +202,7 @@ class TruncatePartitionRunnerIntegrationTest {
                 arrayOf("INTEGER truncate[10]", INTEGER_10, rows("7::INTEGER", "(-2147483648)::INTEGER"), "truncate[10](v)"),
             )
 
-        /** The nearest value that fits (probes.out), -1, zero, the highest value, a null in the optional column. */
+        /** The nearest value that fits, -1, zero, the highest value, a null in the optional column. */
         @JvmStatic
         fun neighbourDeliveries(): List<Array<Any>> =
             listOf(
@@ -220,7 +220,7 @@ class TruncatePartitionRunnerIntegrationTest {
                 arrayOf(
                     "INTEGER truncate[10]",
                     INTEGER_10,
-                    rows("(-2147483638)::INTEGER", "(-1)::INTEGER", "0::INTEGER", "2147483647::INTEGER", "NULL::INTEGER"),
+                    rows("(-2147483640)::INTEGER", "(-1)::INTEGER", "0::INTEGER", "2147483647::INTEGER", "NULL::INTEGER"),
                 ),
             )
 
