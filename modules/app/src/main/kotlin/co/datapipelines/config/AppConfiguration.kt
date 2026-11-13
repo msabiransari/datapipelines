@@ -57,6 +57,9 @@ class AppConfiguration {
  *   linked when defined. Named as a string because `modules/lake` is not on this module's compile classpath.
  */
 internal class ConfigValidatorPrecedence : BeanFactoryPostProcessor {
+    // SpreadOperator: `setDependsOn` is a Java varargs setter with no array overload; the copy is of a handful of
+    // bean names, once, at startup (the same reasoning as `DatapipelinesApplication.main`).
+    @Suppress("SpreadOperator")
     override fun postProcessBeanFactory(beanFactory: ConfigurableListableBeanFactory) {
         check(beanFactory.containsBeanDefinition(VALIDATOR)) { "#804: no '$VALIDATOR' bean definition to order the key consumers after." }
         check(beanFactory.containsBeanDefinition(STAGING_FACTORY)) {

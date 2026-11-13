@@ -96,10 +96,11 @@ class StagingAdmissionStartupTest {
                 val factory = context.beanFactory
                 val lake = context.getBeanNamesForType(Class.forName(ConfigValidatorPrecedence.LAKE_PROPERTIES_CLASS), true, false)
                 lake.toList() shouldHaveSize 1
-                factory.getBeanDefinition(lake.single()).dependsOn.orEmpty().toList() shouldContain ConfigValidatorPrecedence.VALIDATOR
+                val lakeDependsOn = factory.getBeanDefinition(lake.single()).dependsOn.orEmpty()
+                lakeDependsOn.toList() shouldContain ConfigValidatorPrecedence.VALIDATOR
                 // An existing dependsOn is kept, and the validator is added once.
-                factory.getBeanDefinition(ConfigValidatorPrecedence.STAGING_FACTORY).dependsOn.orEmpty().toList() shouldBe
-                    listOf("somethingElse", ConfigValidatorPrecedence.VALIDATOR)
+                val stagingDependsOn = factory.getBeanDefinition(ConfigValidatorPrecedence.STAGING_FACTORY).dependsOn.orEmpty()
+                stagingDependsOn.toList() shouldBe listOf("somethingElse", ConfigValidatorPrecedence.VALIDATOR)
             }
     }
 
