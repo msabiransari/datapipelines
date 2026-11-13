@@ -80,7 +80,7 @@ internal object SharedE2e {
             .withUsername(USER)
             .withPassword(PASSWORD)
             // The context cache keeps each cached context and its Hikari pool open until
-            // eviction (at most eight cached entries after #934). Fifteen-odd cached pools
+            // eviction (one cached entry after #934's cold-CI recurrence). Fifteen-odd pools
             // exhausted Postgres's default 100
             // connections mid-gate (observed as Flyway's "too many clients already"). A
             // shared server needs a shared-sized connection budget.

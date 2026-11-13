@@ -65,10 +65,11 @@ dependencyLocking {
 }
 
 // #934: bound retained full application contexts in every test task, including security
-// assurance. The default 32-context cache exceeded the unchanged 4096 MiB staging budget
-// in CI's single fork; H2 measures the whole JVM, including these otherwise idle apps.
+// assurance. Both 32 and eight cached contexts exceeded the unchanged 4096 MiB staging
+// budget in cold CI. Retain only the current cached application: H2 measures the whole
+// JVM, including otherwise idle apps. Explicit multi-instance fixtures still own theirs.
 tasks.withType<Test>().configureEach {
-    systemProperty("spring.test.context.cache.maxSize", "8")
+    systemProperty("spring.test.context.cache.maxSize", "1")
 }
 
 // 025 B4: the jar smoke (JarSmokeE2eTest) boots the REAL bootJar — the packaged
@@ -78,7 +79,7 @@ tasks.withType<Test>().configureEach {
 tasks.named<Test>("test") {
     dependsOn(":modules:app:bootJar")
     // CI runs the whole module in one forked JVM. After #934, Spring's TestContext cache
-    // retains at most eight entries per test JVM; eviction closes cached contexts and
+    // retains at most one entry per test JVM; eviction closes cached contexts and
     // their resources. Manually booted contexts remain their callers' responsibility.
     // The default heap (a quarter of the host's RAM — 4 GB on a 16 GB box) ran OUT in
     // the full-module run: java.lang.OutOfMemoryError booting the alphabetically-late
