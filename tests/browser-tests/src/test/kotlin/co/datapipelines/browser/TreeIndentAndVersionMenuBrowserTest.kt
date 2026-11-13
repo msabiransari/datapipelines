@@ -145,15 +145,15 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
                       level.appendChild(probe);
                       const space3 = parseFloat(getComputedStyle(probe).width);
                       probe.remove();
-                      return {
-                        space3,
-                        indent: parseFloat(getComputedStyle(level).paddingLeft),
-                        parentLabel: left(parent, 'span[title]'),
-                        leafLabel: left(leaf, 'span[title]'),
-                        siblingLabel: left(sibling, 'span[title]'),
-                        leafIcon: left(leaf, 'svg'),
-                        siblingIcon: left(sibling, 'svg'),
-                      };
+                       return {
+                         space3,
+                         indent: parseFloat(getComputedStyle(level).paddingLeft),
+                         parentLabel: left(parent, 'span[title]'),
+                         leafLabel: left(leaf, 'span[title]'),
+                         siblingLabel: left(sibling, 'span[title]'),
+                         leafIcon: left(leaf, 'svg'),
+                         siblingGlyph: left(sibling, 'svg.dp-tree-glyph'),
+                       };
                     }""",
                 )
 
@@ -165,7 +165,11 @@ class TreeIndentAndVersionMenuBrowserTest : BrowserSuite() {
             (m.px("leafLabel") - m.px("parentLabel"))
                 .shouldBeWithinOnePxOf(m.px("indent"), "$screen: leaf label sits one indent right of its PARENT's label")
             m.px("leafLabel").shouldBeWithinOnePxOf(m.px("siblingLabel"), "$screen: leaf label level with a SIBLING folder's label")
-            m.px("leafIcon").shouldBeWithinOnePxOf(m.px("siblingIcon"), "$screen: leaf glyph level with a sibling folder's glyph")
+            // #943: a folder row leads with the disclosure chevron, so the row's FIRST svg is
+            // the chevron, not the glyph. The #398 invariant survives it unchanged: the leaf's
+            // empty slot puts its GLYPH in the folders' glyph column (the same comparison the
+            // explorer's .tpl-leaf slot padding makes).
+            m.px("leafIcon").shouldBeWithinOnePxOf(m.px("siblingGlyph"), "$screen: leaf glyph in the sibling folder's glyph column")
         }
     }
 
