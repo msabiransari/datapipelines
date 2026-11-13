@@ -1479,7 +1479,7 @@ button.app-busy::after {
      (12px indent). --dp-tree-slot is the chevron's slot: a leaf leaves it empty so its
      glyph sits in the folders' glyph column. --dp-tree-guide-x is the vertical guide's x
      relative to a row's item: the PARENT's chevron centre, negative by construction. */
-  --dp-tree-indent: var(--space-4);
+  --dp-tree-indent: var(--space-3);
   --dp-tree-inset: var(--gap-xs);
   --dp-tree-gap: var(--gap-sm);
   --dp-tree-slot: calc(var(--icon-xs) + var(--dp-tree-gap));

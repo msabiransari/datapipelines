@@ -394,7 +394,11 @@ test("a row is an icon, a title span and a trailing metadata region; a folder's 
   assert.equal(meta.children.find(child => child.className.includes("dp-tree-version")).textContent, "v4");
 
   const folderRow = controlOf("folder:region");
-  assert.equal(folderRow.children[1].className, "dp-tree-title", "a folder carries the same title region");
+  // #943: a folder row is the chevron, then the glyph, then the regions; a leaf has no chevron.
+  assert.equal(folderRow.children[0].className, "ds-icon ds-icon-xs dp-tree-chevron", "a folder opens with the chevron");
+  assert.equal(folderRow.children[1].className.includes("dp-tree-glyph"), true, "the folder's glyph follows the chevron");
+  assert.equal(folderRow.children[2].className, "dp-tree-title", "a folder carries the same title region");
+  assert.equal(folderRow.children[0].children[0].getAttribute("href").endsWith("#chevron-right"), true, "the chevron is the sprite's");
   const folderMeta = folderRow.children.at(-1);
   assert.equal(folderMeta.className, "dp-tree-meta");
   assert.equal(folderMeta.children.filter(child => !child.hidden).length, 0, "a folder's region shows no badge");
@@ -414,14 +418,15 @@ test("a folder's glyph follows its expansion between folder and folder-open; a l
   const renderer = createTreeRenderer(host, state, { label: "Templates", getHref: node => `/templates/${node.path}` });
   await state.initialize(); renderer.render();
   const controlOf = key => host.querySelectorAll(`[data-tree-key="${key}"]`)[0].children[0].children[0];
-  const glyphHref = control => control.children[0].children[0].getAttribute("href");
+  // #943: the folder's chevron precedes the glyph, so the glyph is read by class, not position.
+  const glyphHref = control => control.querySelectorAll(".dp-tree-glyph")[0].children[0].getAttribute("href");
 
   assert.equal(glyphHref(controlOf("folder:glyph")).endsWith("#folder"), true, "a collapsed folder shows the closed folder glyph");
   await state.expand("folder:glyph"); renderer.render();
   assert.equal(glyphHref(controlOf("folder:glyph")).endsWith("#folder-open"), true, "an expanded folder shows the open folder glyph");
   assert.equal(glyphHref(controlOf("artifact:glyph/row.jsonata")).endsWith("#file"), true, "a leaf keeps the file glyph");
   assert.equal(controlOf("folder:glyph").title, "glyph", "the control's title carries the full path");
-  assert.equal(controlOf("folder:glyph").children[1].title, "glyph", "the label's title carries the full path");
+  assert.equal(controlOf("folder:glyph").querySelectorAll(".dp-tree-title")[0].title, "glyph", "the label's title carries the full path");
   await state.collapse("folder:glyph"); renderer.render();
   assert.equal(glyphHref(controlOf("folder:glyph")).endsWith("#folder"), true, "collapsing returns the closed folder glyph");
   renderer.dispose();
@@ -437,7 +442,9 @@ for (const [option, expected] of [[undefined, "file"], ["file", "file"],
       [{ ...leaf("glyph/row", "folder:glyph"), leafGlyph: "unknown", icon: "unknown" }]); } };
     const state = createTreeState({ source });
     const renderer = createTreeRenderer(host, state, { leafGlyph: option });
-    const href = key => host.querySelectorAll(`[data-tree-key="${key}"]`)[0].children[0].children[0].children[0].children[0].getAttribute("href");
+    // #943: the folder's chevron is the control's first svg, so the family glyph is read by class.
+    const href = key => host.querySelectorAll(`[data-tree-key="${key}"]`)[0].children[0].children[0]
+      .querySelectorAll(".dp-tree-glyph")[0].children[0].getAttribute("href");
     await state.initialize(); renderer.render();
     assert.equal(href("folder:glyph"), "/vendor/icons/lucide-sprite.svg#folder");
     await state.expand("folder:glyph"); renderer.render();
