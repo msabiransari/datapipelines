@@ -50,6 +50,13 @@ class ApiErrorCatalogSpecDriftTest {
         }
     }
 
+    @Test
+    fun `the truncate partition refusal is a 400 with its own message, not the lake family line (#967)`() {
+        val code = PipelineErrorCodes.Lake.APPEND_PARTITION_VALUE_OUT_OF_RANGE
+        ApiErrorCatalog.statusFor(code) shouldBe HttpStatus.BAD_REQUEST
+        ApiErrorCatalog.userMessageFor(code) shouldBe "The staged result has values a truncate partition cannot hold."
+    }
+
     /** §13.2–§13.12 rows: `| \`code\` | HTTP | … |` with a numeric or em-dash HTTP cell. */
     private fun parseStatusRows(spec: String): List<Pair<String, Int?>> =
         spec

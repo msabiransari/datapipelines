@@ -132,7 +132,7 @@ class TruncatePartitionRunnerIntegrationTest {
 
     @Test
     fun `the applied column decides - a promoted value whose partition fits the wider table column publishes`() {
-        h.reset(body(listOf(ID, field(2, "v", "BIGDECIMAL", "precision" to 16, "scale" to 3)), partition = listOf(partition(2, "truncate[2]"))))
+        h.reset(table("BIGDECIMAL", "truncate[2]", "precision" to 16, "scale" to 3))
         LakeMinio.client().use { client ->
             h.withRequest(sql = "SELECT '$D15_LOW'::DECIMAL(15,3) AS v, 1::BIGINT AS id") { request, _ ->
                 h.runner(client).publish(request) {} shouldBe 1
@@ -145,7 +145,7 @@ class TruncatePartitionRunnerIntegrationTest {
 
     @Test
     fun `a delivery without the optional partition source column publishes a null partition value`() {
-        h.reset(body(listOf(ID, field(2, "v", "INTEGER")), partition = listOf(partition(2, "truncate[10]"))))
+        h.reset(INTEGER_10)
         LakeMinio.client().use { client ->
             h.withRequest(sql = "SELECT 1::BIGINT AS id") { request, _ -> h.runner(client).publish(request) {} shouldBe 1 }
         }
@@ -175,16 +175,30 @@ class TruncatePartitionRunnerIntegrationTest {
     companion object {
         private const val D15_LOW = "-999999999999.999"
         private val ID = field(1, "id", "BIGINTEGER", "required" to true)
-        private val DECIMAL_15 = body(listOf(ID, field(2, "v", "DECIMAL", "precision" to 15, "scale" to 3)), partition = listOf(partition(2, "truncate[2]")))
-        private val INTEGER_10 = body(listOf(ID, field(2, "v", "INTEGER")), partition = listOf(partition(2, "truncate[10]")))
+        private val DECIMAL_15 = table("DECIMAL", "truncate[2]", "precision" to 15, "scale" to 3)
+        private val INTEGER_10 = table("INTEGER", "truncate[10]")
+
+        /** A released `id` plus one optional column `v` of [type], partitioned by [transform]. */
+        private fun table(
+            type: String,
+            transform: String,
+            vararg extra: Pair<String, Any?>,
+        ): String = body(listOf(ID, field(2, "v", type, *extra)), partition = listOf(partition(2, transform)))
 
         private fun rows(vararg values: String): String =
-            "SELECT * FROM (VALUES " + values.mapIndexed { index, value -> "(${index + 1}::BIGINT, $value)" }.joinToString() + ") t(id, v)"
+            values
+                .mapIndexed { index, value -> "(${index + 1}::BIGINT, $value)" }
+                .joinToString(prefix = "SELECT * FROM (VALUES ", postfix = ") t(id, v)")
 
         @JvmStatic
         fun edgeDeliveries(): List<Array<Any>> =
             listOf(
-                arrayOf("decimal(15,3) truncate[2]", DECIMAL_15, rows("1.5::DECIMAL(15,3)", "'$D15_LOW'::DECIMAL(15,3)"), "truncate[2](v)"),
+                arrayOf(
+                    "decimal(15,3) truncate[2]",
+                    DECIMAL_15,
+                    rows("1.5::DECIMAL(15,3)", "'$D15_LOW'::DECIMAL(15,3)"),
+                    "truncate[2](v)",
+                ),
                 arrayOf("INTEGER truncate[10]", INTEGER_10, rows("7::INTEGER", "(-2147483648)::INTEGER"), "truncate[10](v)"),
             )
 
@@ -216,17 +230,17 @@ class TruncatePartitionRunnerIntegrationTest {
             listOf(
                 arrayOf(
                     "identity on INTEGER",
-                    body(listOf(ID, field(2, "v", "INTEGER")), partition = listOf(partition(2, "identity"))),
+                    table("INTEGER", "identity"),
                     rows("(-2147483648)::INTEGER", "5::INTEGER"),
                 ),
                 arrayOf(
                     "bucket[16] on INTEGER",
-                    body(listOf(ID, field(2, "v", "INTEGER")), partition = listOf(partition(2, "bucket[16]"))),
+                    table("INTEGER", "bucket[16]"),
                     rows("(-2147483648)::INTEGER", "5::INTEGER"),
                 ),
                 arrayOf(
                     "truncate[4] on STRING",
-                    body(listOf(ID, field(2, "v", "STRING")), partition = listOf(partition(2, "truncate[4]"))),
+                    table("STRING", "truncate[4]"),
                     rows("'abcdef'", "''"),
                 ),
             )

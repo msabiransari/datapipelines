@@ -102,8 +102,15 @@ class TruncatePartitionRangeCheckTest {
                 Types.NestedField.optional(2, "m", Types.LongType.get()),
                 Types.NestedField.optional(3, "amount", Types.DecimalType.of(15, 3)),
             )
-        val spec = PartitionSpec.builderFor(schema).truncate("n", 10).truncate("m", 1000).truncate("amount", 2).build()
-        val bindings = schema.columns().mapIndexed { index, field -> AppendColumnBinding(field, index + 1, field.type().asPrimitiveType()) }
+        val spec =
+            PartitionSpec
+                .builderFor(schema)
+                .truncate("n", 10)
+                .truncate("m", 1000)
+                .truncate("amount", 2)
+                .build()
+        val bindings =
+            schema.columns().mapIndexed { index, field -> AppendColumnBinding(field, index + 1, field.type().asPrimitiveType()) }
         TruncatePartitionRangeCheck.of(spec, bindings).guards.map { it.key } shouldBe
             listOf("truncate[10](n)", "truncate[1000](m)", "truncate[2](amount)")
     }
@@ -128,8 +135,12 @@ class TruncatePartitionRangeCheckTest {
     ): Any =
         when (type) {
             is Types.IntegerType -> value.toInt()
+
             is Types.LongType -> value.toLong()
-            is Types.DecimalType -> BigDecimal(value).setScale(type.scale()) // the value as AppendValues writes it
+
+            is Types.DecimalType -> BigDecimal(value).setScale(type.scale())
+
+            // the value as AppendValues writes it
             else -> error("no fixture parser for $type")
         }
 
