@@ -321,6 +321,7 @@ class LakeDefinitionApplier(
                             row.id,
                             schema,
                             LakeTableShape.specOf(attempt.intent, schema),
+                            LakeTableShape.sortOrderOf(attempt.intent, schema),
                             attempt.version.toLong(),
                         )
                     }

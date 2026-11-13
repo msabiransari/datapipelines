@@ -9,6 +9,7 @@ import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.settle.LakeMetadataReads
 import co.datapipelines.lake.settle.SettleBudget
 import co.datapipelines.pipeline.AuthoringGuard
+import co.datapipelines.pipeline.WriteSurface
 import org.apache.iceberg.io.FileIO
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
@@ -82,13 +83,14 @@ internal class LakeDefinitionsHarness(
     val applyLeases = LakeApplyLeases(leases, leaseWait, Duration.ofMillis(POLL_MILLIS))
     val applier = LakeDefinitionApplier(definitions, applies, applyLeases, catalogs, properties.name, tx, audit, hooks)
     private val metadataReads = LakeMetadataReads(named, properties.name, catalogs::metadataFileIo)
+    private val policyJson = LakeTablePolicy.defaultsJson(properties)
     val service =
         LakeDefinitionService(
             definitions = definitions,
             applier = applier,
             leases = leases,
             jobTimeout = properties.admission.jobTimeout,
-            policyJson = LakeTablePolicy.defaultsJson(properties),
+            policyJson = policyJson,
             tx = tx,
             audit = audit,
             authoring = AuthoringGuard(authoringEnabled),
@@ -149,6 +151,36 @@ internal class LakeDefinitionsHarness(
             check(definitions.releaseDraft(tableId, version, null, actor) == 1)
             check(definitions.pointAtRelease(tableId, version) == 1)
         }
+    }
+
+    /**
+     * Stores table `<namespace>.<table>` with draft version 1 holding [bodyJson] as it is, through the repository and
+     * without the service's rules: a row written before a rule it would now break, such as a legacy body without
+     * sort columns (lake.md §1). Its canonical text is what [LakeDefinitionBodies.toJson] writes.
+     */
+    fun insertUnvalidatedDraft(
+        namespace: String,
+        table: String,
+        bodyJson: String,
+    ): UUID =
+        requireNotNull(
+            tx.execute {
+                val tableId = UUID.randomUUID()
+                check(definitions.insertTable(tableId, definitions.namespaceId(namespace, actor), table, policyJson, actor))
+                val canonical = LakeDefinitionBodies.toJson(LakeDefinitionBodies.read(bodyJson))
+                checkNotNull(definitions.insertDraft(tableId, 1, canonical, actor, WriteSurface.SESSION))
+                tableId
+            },
+        )
+
+    /** Overwrites [tableId]'s draft with [bodyJson] as it is, through the repository and without the service's rules. */
+    fun overwriteUnvalidatedDraft(
+        tableId: UUID,
+        bodyJson: String,
+    ) {
+        val draft = requireNotNull(definitions.findDraft(tableId)) { "table $tableId has no draft" }
+        val canonical = LakeDefinitionBodies.toJson(LakeDefinitionBodies.read(bodyJson))
+        checkNotNull(definitions.overwriteDraft(tableId, canonical, draft.bodyHash, actor, WriteSurface.SESSION))
     }
 
     companion object {

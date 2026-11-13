@@ -11,19 +11,20 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
+import org.apache.iceberg.SortOrder
 
 /**
  * The definition body's wire form (lake.md §1): a strict parse (unknown keys, duplicate keys, wrong JSON types and
  * an over-cap body are refused, each as `lake.definition.invalid_body` with `details.path`), the canonical JSON the
- * repository stores, and the reverse mapping from an Iceberg schema. Every parsed body passes [LakeDefinitionRules]
- * before it is returned, so an invalid body never reaches `body_hash`.
+ * repository stores, and the reverse mapping from an Iceberg schema, spec and sort order. Every parsed body passes
+ * [LakeDefinitionRules] before it is returned, so an invalid body never reaches `body_hash`.
  */
 @Suppress("ThrowsCount") // each wrong shape is its own named refusal (lake.md §1)
 object LakeDefinitionBodies {
     /** The body cap, in UTF-8 bytes of the text the caller sent. */
     const val MAX_BODY_BYTES = 262_144
 
-    private val ROOT_KEYS = setOf("fields", "partition", "identifier_field_ids")
+    private val ROOT_KEYS = setOf("fields", "partition", "identifier_field_ids", SORT_FIELD_IDS)
     private val FIELD_KEYS = setOf("id", "name", "type", "precision", "scale", "required", "doc", "tags")
     private val PARTITION_KEYS = setOf("field_id", "transform")
 
@@ -34,10 +35,18 @@ object LakeDefinitionBodies {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .build()
 
-    /** Parses and validates [json]; [base] is the body the new version builds on (null for a table's first). */
+    /** The sort columns' key, written last in the canonical text (lake.md §1). */
+    const val SORT_FIELD_IDS = "sort_field_ids"
+
+    /**
+     * Parses and validates [json]. [base] is the body the new version builds on (the current release; null for a
+     * table's first); [lockBasis] is the body of the table's first version EVER released, discarded or not (null when
+     * it has never been released), which fixes the sort columns ([LakeDefinitionRules.validate]).
+     */
     fun parse(
         json: String,
         base: LakeDefinitionBody?,
+        lockBasis: LakeDefinitionBody?,
     ): LakeDefinitionBody {
         if (json.toByteArray(Charsets.UTF_8).size > MAX_BODY_BYTES) {
             throw invalidBody("$", "too_large", "the body is over $MAX_BODY_BYTES bytes")
@@ -49,7 +58,7 @@ object LakeDefinitionBodies {
                 throw invalidBody("$", "malformed_json", e.originalMessage ?: "not JSON", e)
             } ?: throw invalidBody("$", "malformed_json", "empty body")
         val body = fromTree(root)
-        LakeDefinitionRules.validate(body, base)
+        LakeDefinitionRules.validate(body, base, lockBasis)
         return body
     }
 
@@ -59,7 +68,10 @@ object LakeDefinitionBodies {
      */
     fun read(json: String): LakeDefinitionBody = fromTree(mapper.readTree(json))
 
-    /** The canonical JSON of [body]: fixed key order, optional keys omitted when absent. */
+    /**
+     * The canonical JSON of [body]: fixed key order, optional keys omitted when absent. `sort_field_ids` comes last
+     * and is omitted when empty, so a body stored before the key existed keeps its text and its hash.
+     */
     fun toJson(body: LakeDefinitionBody): String {
         val f = JsonNodeFactory.instance
         val root = f.objectNode()
@@ -71,6 +83,9 @@ object LakeDefinitionBodies {
         }
         if (body.identifierFieldIds.isNotEmpty()) {
             root.putArray("identifier_field_ids").apply { body.identifierFieldIds.forEach { add(it) } }
+        }
+        if (body.sortFieldIds.isNotEmpty()) {
+            root.putArray(SORT_FIELD_IDS).apply { body.sortFieldIds.forEach { add(it) } }
         }
         return mapper.writeValueAsString(root)
     }
@@ -93,13 +108,16 @@ object LakeDefinitionBodies {
     }
 
     /**
-     * The body an Iceberg [schema] and [spec] spell (the round trip of lake.md §1): field ids, names, types, required,
-     * docs, the partition fields and the identifier fields. Tags are DP's own and absent from Iceberg, so they come
-     * back empty. A type outside the closed list is refused with `unsupported_type`.
+     * The body an Iceberg [schema], [spec] and [sortOrder] spell (the round trip of lake.md §1): field ids, names,
+     * types, required, docs, the partition fields, the identifier fields and the sort columns. Tags are DP's own and
+     * absent from Iceberg, so they come back empty. A type outside the closed list is refused with `unsupported_type`;
+     * a sort order the body cannot spell (descending, nulls last, a transform other than identity) with
+     * `unsupported_sort_order`. An unsorted table comes back without sort columns.
      */
     fun fromIceberg(
         schema: Schema,
         spec: PartitionSpec,
+        sortOrder: SortOrder,
     ): LakeDefinitionBody {
         val fields =
             schema.columns().mapIndexed { index, column ->
@@ -109,7 +127,14 @@ object LakeDefinitionBodies {
                 LakeFieldDefinition(column.fieldId(), column.name(), type, precision, scale, column.isRequired, column.doc())
             }
         val partition = spec.fields().map { LakePartitionField(it.sourceId(), it.transform().toString()) }
-        return LakeDefinitionBody(fields, partition, schema.identifierFieldIds().sorted())
+        val sortFieldIds =
+            sortOrder.fields().map { sortField ->
+                if (LakeSortFieldShape.of(sortField) != LakeSortFieldShape.ascending(sortField.sourceId())) {
+                    throw invalidBody(SORT_FIELD_IDS, "unsupported_sort_order", "Iceberg sort order $sortOrder has no DP spelling")
+                }
+                sortField.sourceId()
+            }
+        return LakeDefinitionBody(fields, partition, schema.identifierFieldIds().sorted(), sortFieldIds)
     }
 
     private fun fromTree(root: JsonNode): LakeDefinitionBody {
@@ -132,7 +157,19 @@ object LakeDefinitionBodies {
                 }
                 node.intValue()
             }
-        return LakeDefinitionBody(fields, partition, identifiers)
+        val sortNode = obj.get(SORT_FIELD_IDS)
+        val sortFieldIds =
+            array(obj, SORT_FIELD_IDS).mapIndexed { i, node ->
+                if (!node.isIntegralNumber || !node.canConvertToInt()) {
+                    throw invalidBody("$SORT_FIELD_IDS[$i]", "wrong_type", "a sort field id is an integer")
+                }
+                node.intValue()
+            }
+        // An empty list is refused here, whatever the table's history: a body without sort columns is the key's absence.
+        if (sortNode != null && sortNode.isArray && sortNode.isEmpty) {
+            throw invalidBody(SORT_FIELD_IDS, "empty", "sort_field_ids lists 1 to ${LakeDefinitionRules.MAX_SORT_FIELDS} field ids")
+        }
+        return LakeDefinitionBody(fields, partition, identifiers, sortFieldIds)
     }
 
     private fun field(

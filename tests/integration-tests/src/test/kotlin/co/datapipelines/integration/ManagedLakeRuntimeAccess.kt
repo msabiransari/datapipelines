@@ -103,7 +103,7 @@ internal class ManagedLakeRuntimeAccess(
                 "createDraft",
                 "p4delivery",
                 "orders",
-                """{"fields":[{"id":1,"name":"id","type":"BIGINTEGER","required":true}]}""",
+                """{"fields":[{"id":1,"name":"id","type":"BIGINTEGER","required":true}],"sort_field_ids":[1]}""",
                 actor,
                 surface,
             )
