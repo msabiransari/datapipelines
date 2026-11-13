@@ -5,6 +5,7 @@ import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.LeaseKind
 import co.datapipelines.lake.settle.LakeSettlementSweep
 import co.datapipelines.logcapture.capturingLogEvents
+import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.doubles.shouldBeBetween
 import io.kotest.matchers.shouldBe
@@ -68,13 +69,16 @@ class ProtectionWindowIntegrationTest {
     @Test
     fun `T3 restoring and replaying leave the window and every deadline as the restore put them`() {
         supersede()
-        for (mode in listOf("restoring", "replaying")) {
-            h.jdbc.update("UPDATE lake_control SET mode = ?, protection_interval = INTERVAL '2 days' WHERE id = 1", mode)
-            val events = capturingLogEvents(sweepLog) { h.sweep(protectionDays = 30).finalizeProtection() shouldBe 0 }
+        // Soft: a defect is reported once per mode, not only for the first.
+        assertSoftly {
+            for (mode in listOf("restoring", "replaying")) {
+                h.jdbc.update("UPDATE lake_control SET mode = ?, protection_interval = INTERVAL '2 days' WHERE id = 1", mode)
+                val events = capturingLogEvents(sweepLog) { h.sweep(protectionDays = 30).finalizeProtection() shouldBe 0 }
 
-            withClue("mode $mode: protection_interval") { window() shouldBe "2 days" }
-            withClue("mode $mode: every deadline") { deadlines() shouldBe mapOf(1L to null) }
-            withClue("mode $mode: no alignment logged") { aligned(events) shouldBe emptyList() }
+                withClue("mode $mode: protection_interval") { window() shouldBe "2 days" }
+                withClue("mode $mode: every deadline") { deadlines() shouldBe mapOf(1L to null) }
+                withClue("mode $mode: no alignment logged") { aligned(events) shouldBe emptyList() }
+            }
         }
     }
 
