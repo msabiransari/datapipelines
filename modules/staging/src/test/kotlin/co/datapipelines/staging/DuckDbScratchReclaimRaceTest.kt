@@ -1,6 +1,5 @@
 package co.datapipelines.staging
 
-import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -12,7 +11,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -100,12 +98,13 @@ class DuckDbScratchReclaimRaceTest {
             Files.exists(files.database) shouldBe true
 
             resume.countDown()
-            val refused = shouldThrow<ExecutionException> { claim.get(WAIT_SECONDS, TimeUnit.SECONDS) }
+            val outcome = runCatching { claim.get(WAIT_SECONDS, TimeUnit.SECONDS) }
 
             // Rules out: the same-id cleanup deleting a reclaimed database under the old owner's proof.
             Files.exists(files.database) shouldBe true
             Files.readString(files.marker) shouldBe newMarker
-            (refused.cause is IOException) shouldBe true
+            // The id is live in another owner: the claim is refused, nothing of it written.
+            (outcome.exceptionOrNull()?.cause is IOException) shouldBe true
             live.authorExec("INSERT INTO t VALUES (43)")
             live.scalarText("SELECT count(*) FROM t") shouldBe "2"
         }
