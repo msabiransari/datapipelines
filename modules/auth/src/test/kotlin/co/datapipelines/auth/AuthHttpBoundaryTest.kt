@@ -457,11 +457,12 @@ class AuthHttpBoundaryTest {
     @Test
     fun `a native verification fault answers 503 through the real chain and is not cached`() {
         val freshKey = seedUserKey("dpk_FAULTKEYAAAA", user.id, "fault-key", expiresAt = null)
+        val correlationId = "00000000-2200-4000-8000-000000000001"
         val callsBefore = faultable.verifyCalls.get()
         val response =
             try {
                 faultable.failing.set(true)
-                call(HttpMethod.POST, "/mcp", headers(apiKey = freshKey))
+                call(HttpMethod.POST, "/mcp", headers(apiKey = freshKey, correlationId = correlationId))
             } finally {
                 faultable.failing.set(false)
             }
@@ -470,9 +471,9 @@ class AuthHttpBoundaryTest {
         val error = error(response)
         error["code"] shouldBe AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
         error["message"] shouldBe "Secret verification is temporarily unavailable"
-        (mapper.readValue(response.body, Map::class.java)["correlation_id"] as String).shouldNotBeBlank()
+        mapper.readValue(response.body, Map::class.java)["correlation_id"] shouldBe correlationId
         response.body.orEmpty() shouldNotContain "emory"
-        response.body.orEmpty() shouldNotContain "-22"
+        mapper.writeValueAsString(error) shouldNotContain "-22"
         withClue("the throwing verify must have been REACHED, not bypassed by the outcome cache") {
             faultable.verifyCalls.get() shouldBe callsBefore + 1
         }
