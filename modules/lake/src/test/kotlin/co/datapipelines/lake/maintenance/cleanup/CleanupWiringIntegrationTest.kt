@@ -40,12 +40,16 @@ class CleanupWiringIntegrationTest {
     fun close() = h.close()
 
     @Test
-    fun `C14 the planner's task for a table cleaned longer ago than its interval runs the cleanup through the scheduler, and a paused one changes nothing`() {
+    fun `C14 a cleanup due by its interval runs through the planner and the scheduler, and a paused one changes nothing`() {
         val t = h.table("c14")
         val snapshots = h.keptAndExpirable(t, "c14_k")
         val orphan = h.orphan(t)
         h.store.age = CleanupHarness.OLD
-        val interval = h.profiles.forTable(t.id).cleanupIntervalHours.toLong()
+        val interval =
+            h.profiles
+                .forTable(t.id)
+                .cleanupIntervalHours
+                .toLong()
         h.cleaned(t, hoursAgo = interval + 1)
         val worker = h.worker(gate = ProfileMaintenanceGate(h.m.named))
         val pauses = LakeTablePauses(LakeProfileRepository(h.m.defs.named), h.m.defs.tx, h.m.audit) { h.m.dbNow() }
@@ -80,7 +84,7 @@ class CleanupWiringIntegrationTest {
     }
 
     @Test
-    fun `C14a (i) tags and an expiry committed, then the removal stops - failed cleanup_incomplete, both stay, one stopped event, due again`() {
+    fun `C14a (i) tags and an expiry committed, then the removal stops - failed, both stay, one stopped event, due again`() {
         val t = h.table("c14a_i")
         val snapshots = h.keptAndExpirable(t, "c14a_i_k")
         h.orphan(t)
@@ -92,7 +96,11 @@ class CleanupWiringIntegrationTest {
         val dueAgain = h.planned(t)
         val row = h.m.rows(t).single()
         val stopped = events.map { it.formattedMessage }.filter { "event=lake.cleanup.stopped" in it }
-        println("(962 C14a i) row=${row.state} ${row.errorCode} tags=${h.tags(t).size} later ran=${later.ran.get()} due again=$dueAgain event: $stopped")
+        println(
+            "(962 C14a i) row=${row.state} ${row.errorCode} tags=${h.tags(
+                t,
+            ).size} later ran=${later.ran.get()} due again=$dueAgain event: $stopped",
+        )
 
         dueAgain shouldBe true // the next plan finds the cleanup due: not postponed by an interval
         row.state shouldBe "failed"
@@ -187,7 +195,11 @@ class CleanupWiringIntegrationTest {
         rewrite["attempted"] shouldBe false
         later.ran.get() shouldBe 0
         h.planned(t) shouldBe true
-        println("(962 C14a v) part=${cleanupPart(row)["outcome"]} deleted=${cleanupPart(row)["files"]} expected=1000 later=$rewrite due again=true")
+        println(
+            "(962 C14a v) part=${cleanupPart(
+                row,
+            )["outcome"]} deleted=${cleanupPart(row)["files"]} expected=1000 later=$rewrite due again=true",
+        )
     }
 
     @Test
@@ -241,7 +253,15 @@ class CleanupWiringIntegrationTest {
                             .build(),
                     ).deleted()
             }
-        val errors = requested.filter { it == refused }.map { S3Error.builder().key(it).code("AccessDenied").message("injected").build() }
+        val errors =
+            requested.filter { it == refused }.map {
+                S3Error
+                    .builder()
+                    .key(it)
+                    .code("AccessDenied")
+                    .message("injected")
+                    .build()
+            }
         return DeleteObjectsResponse
             .builder()
             .deleted(confirmed)

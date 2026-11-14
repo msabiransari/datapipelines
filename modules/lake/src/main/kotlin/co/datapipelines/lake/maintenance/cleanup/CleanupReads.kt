@@ -162,8 +162,11 @@ class MaintenanceRunStates(
             jdbc.queryForList("SELECT state FROM lake_maintenance_runs WHERE id = ?", String::class.java, runId).singleOrNull()
         ) {
             null -> null
+
             RUNNING -> false
+
             in TERMINAL -> true
+
             // A state V60's check does not admit: unclear, so the marker stays (the silence rule).
             else -> null
         }

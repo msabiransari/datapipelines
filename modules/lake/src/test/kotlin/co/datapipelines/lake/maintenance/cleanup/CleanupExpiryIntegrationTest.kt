@@ -137,7 +137,11 @@ class CleanupExpiryIntegrationTest {
         result.details["tags_created"] shouldBe 0
         result.details["snapshots_expired"] shouldBe 0
         result.details["not_kept"] shouldBe mapOf("history_not_available" to 2, "name_taken_by_branch" to 1)
-        println("(962 C3r) not_kept=${result.details["not_kept"]} revisions=$revisions→${h.revisionCount(t)} deleted=${result.figures.files} expected=0")
+        println(
+            "(962 C3r) not_kept=${result.details["not_kept"]} revisions=$revisions→${h.revisionCount(
+                t,
+            )} deleted=${result.figures.files} expected=0",
+        )
     }
 
     @Test
@@ -175,7 +179,9 @@ class CleanupExpiryIntegrationTest {
         println("(962 C4) pass1 deleted=${first.figures.files} $gone1")
         println("(962 C4) pass2 deleted=${second.figures.files} $gone2")
         println("(962 C4) pass3 deleted=${third.figures.files} $gone3")
-        listOf(first to gone1, second to gone2, third to gone3).forEach { (result, gone) -> result.figures.files shouldBe gone.size.toLong() }
+        listOf(first to gone1, second to gone2, third to gone3).forEach { (result, gone) ->
+            result.figures.files shouldBe gone.size.toLong()
+        }
         // Expected: nothing in passes 1–2; in pass 3 exactly f1, the manifest that added it and s1's manifest list.
         gone1.size shouldBe 0
         gone2.size shouldBe 0
@@ -205,7 +211,13 @@ class CleanupExpiryIntegrationTest {
         result.details["tags_created"] shouldBe 2
         result.details["snapshots_expired"] shouldBe 0
         h.snapshotIds(t) shouldContainAll listOf(s1, s2)
-        h.metadata(t).refs().filterValues { it.isTag }.values.map { it.snapshotId() }.toSet() shouldBe setOf(s1)
+        h
+            .metadata(t)
+            .refs()
+            .filterValues { it.isTag }
+            .values
+            .map { it.snapshotId() }
+            .toSet() shouldBe setOf(s1)
         println("(962 C5) tags=${h.metadata(t).refs().keys} snapshots=${h.snapshotIds(t)} deleted=${result.figures.files} expected=0")
     }
 
@@ -241,7 +253,12 @@ class CleanupExpiryIntegrationTest {
         return Triple(s1, s2, s3)
     }
 
-    private fun dataKeys(t: MaintenanceTable): Set<String> = h.listing(t).map { it.key }.filterNot { "/dp/" in it }.toSet()
+    private fun dataKeys(t: MaintenanceTable): Set<String> =
+        h
+            .listing(t)
+            .map { it.key }
+            .filterNot { "/dp/" in it }
+            .toSet()
 
     private companion object {
         const val WINDOW_DAYS = 3

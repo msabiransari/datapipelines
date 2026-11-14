@@ -9,10 +9,8 @@ import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
 
-/**
- * #962 C11–C13a: the purge sequence up to the purge deletion, as P8's actions will leave it (brief "What is verified":
- * no code writes `purged` yet, so the status is set by SQL and the pointer dropped through the catalog).
- */
+// #962 C11–C13a: the purge sequence up to the purge deletion, as P8's actions will leave it (brief "What is verified":
+// no code writes `purged` yet, so the status is set by SQL and the pointer dropped through the catalog).
 
 /** Drops [table] from the catalog under its writer lease, without purging (the revision trigger stamps it dropped). */
 internal fun CleanupHarness.drop(table: MaintenanceTable) {

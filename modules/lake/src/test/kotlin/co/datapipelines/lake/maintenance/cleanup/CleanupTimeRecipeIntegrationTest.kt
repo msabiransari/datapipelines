@@ -91,7 +91,7 @@ class CleanupTimeRecipeIntegrationTest {
         )
         deleted shouldBe true
         cleanup["files"] shouldBe 1
-        producer.committed shouldBe Guarded.Refused(MaintenanceOutcome.DEADLINE, PipelineErrorCodes.Lake.MAINTENANCE_DEADLINE)
+        producer.committed shouldBe DEADLINE_REFUSED
     }
 
     @Test
@@ -143,20 +143,22 @@ class CleanupTimeRecipeIntegrationTest {
         pb.resume()
         pa.resume()
         val margin = Duration.between(pb.deadline, deletedAt)
+        val outputs = setOf(pb.outputKey, pa.outputKey)
+        val outputDeletions = deletes.count { it.first in outputs }
         println(
             "(962 C9) store behind 3500 s: kept at t=2+S and t=110, deleted at delete_call−deadline=${margin.toMillis()} ms " +
                 "(> S = ${STATEMENT_TIMEOUT_S}s); store ahead 3500 s: kept=${h.exists(pa.outputKey)}; resumed acquires " +
-                "behind=${pb.committed} ahead=${pa.committed}; output deletions=${deletes.count { it.first in setOf(pb.outputKey, pa.outputKey) }} expected=1",
+                "behind=${pb.committed} ahead=${pa.committed}; output deletions=$outputDeletions expected=1",
         )
         h.exists(pb.outputKey) shouldBe false
         (margin > Duration.ofSeconds(STATEMENT_TIMEOUT_S)) shouldBe true
-        pb.committed shouldBe Guarded.Refused(MaintenanceOutcome.DEADLINE, PipelineErrorCodes.Lake.MAINTENANCE_DEADLINE)
+        pb.committed shouldBe DEADLINE_REFUSED
         h.exists(pa.outputKey) shouldBe true
         deletes.none { it.first == pa.outputKey } shouldBe true
     }
 
     @Test
-    fun `C9a past the bound - the probe refuses with clock skew and no candidate is deleted, and the producer commits before its deadline`() {
+    fun `C9a past the bound - the probe refuses with clock skew, no candidate is deleted, the producer commits before its deadline`() {
         val t = h.table("c9x")
         h.removerClock.shift(Duration.ofSeconds(PAST_BOUND_SKEW_S)) // store behind by 3600 + S + 60
         h.store.age = Duration.ofSeconds(JOB_TIMEOUT_S - INSIDE_LIFETIME_S) // A = J − 25
@@ -171,13 +173,20 @@ class CleanupTimeRecipeIntegrationTest {
         producer.resume()
 
         val deletedAt = deletes.firstOrNull { it.first == producer.outputKey }?.second
-        val named = h.metadata(t).currentSnapshot()?.let { s -> h.snapshotFiles(t, s.snapshotId()) }.orEmpty()
+        val named =
+            h
+                .metadata(t)
+                .currentSnapshot()
+                ?.let { s -> h.snapshotFiles(t, s.snapshotId()) }
+                .orEmpty()
+        val cleanupEnd =
+            outcome.exceptionOrNull()?.let { (it as? DatapipelinesException)?.code ?: it::class.simpleName }
+                ?: outcome.getOrNull()?.outcome
+        val deleteMargin = deletedAt?.let { Duration.between(producer.deadline, it).toMillis() }
         println(
-            "(962 C9a) skew=${PAST_BOUND_SKEW_S}s A=${h.store.age.seconds}s cleanup=${outcome.exceptionOrNull()?.let {
-                (it as? DatapipelinesException)?.code ?: it::class.simpleName
-            } ?: outcome.getOrNull()?.outcome} output present=${h.exists(producer.outputKey)} " +
-                "delete_call−deadline=${deletedAt?.let { Duration.between(producer.deadline, it).toMillis() }} ms " +
-                "commit=${producer.committed} commit_at−deadline=${producer.commitMargin()} snapshot names output=${producer.outputKey in named}",
+            "(962 C9a) skew=${PAST_BOUND_SKEW_S}s A=${h.store.age.seconds}s cleanup=$cleanupEnd " +
+                "output present=${h.exists(producer.outputKey)} delete_call−deadline=$deleteMargin ms commit=${producer.committed} " +
+                "commit_at−deadline=${producer.commitMargin()} snapshot names output=${producer.outputKey in named}",
         )
         h.exists(producer.outputKey) shouldBe true
         deletedAt shouldBe null
@@ -249,7 +258,10 @@ class CleanupTimeRecipeIntegrationTest {
             done = CompletableFuture.supplyAsync { worker.run(table.id.toString()) }
             check(written.await(MaintenanceHarness.WAIT_SECONDS, TimeUnit.SECONDS)) { "the producer did not write its output" }
             // The ONE admission statement gives both: the row's deadline_at is the run's deadline (957 D5).
-            h.m.rows(table).single { it.id == run.runId }.deadline shouldBe run.deadline
+            h.m
+                .rows(table)
+                .single { it.id == run.runId }
+                .deadline shouldBe run.deadline
             return this
         }
 
@@ -278,5 +290,8 @@ class CleanupTimeRecipeIntegrationTest {
         /** A producer pauses at most this long: longer than C9's real two minutes plus its passes. */
         const val PAUSE_BOUND_S = 300L
         const val POLL_MILLIS = 200L
+
+        /** The resumed part's acquire past its run's deadline (957 D5). */
+        val DEADLINE_REFUSED = Guarded.Refused(MaintenanceOutcome.DEADLINE, PipelineErrorCodes.Lake.MAINTENANCE_DEADLINE)
     }
 }

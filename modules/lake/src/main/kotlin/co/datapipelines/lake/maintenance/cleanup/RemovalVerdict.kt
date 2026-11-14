@@ -33,8 +33,11 @@ internal sealed interface RemovalVerdict {
         private fun refused(result: RemovalResult.Refused): RemovalVerdict =
             when (result.reason) {
                 RefusalReason.LEASE_LOST -> Deadline
+
                 RefusalReason.MODE_NOT_NORMAL -> Fail(CleanupIncomplete(IncompleteReason.MODE))
+
                 RefusalReason.CLOCK_SKEW -> Fail(CleanupClockSkew(result.skew))
+
                 // The part checked the status itself before the lease (D4); a refusal here means the row changed under it.
                 RefusalReason.NOT_PURGED -> Fail(IllegalStateException("the table is no longer purged"))
             }
@@ -61,10 +64,17 @@ internal sealed interface RemovalVerdict {
 
                 is MarkerFate.Left -> {
                     when (fate.reason) {
-                        MarkerLeftReason.LEASE_LOST -> Deadline
-                        MarkerLeftReason.MODE_CHANGED -> Fail(CleanupIncomplete(IncompleteReason.MODE))
-                        MarkerLeftReason.CHECK_FAILED, MarkerLeftReason.DELETE_UNCONFIRMED ->
+                        MarkerLeftReason.LEASE_LOST -> {
+                            Deadline
+                        }
+
+                        MarkerLeftReason.MODE_CHANGED -> {
+                            Fail(CleanupIncomplete(IncompleteReason.MODE))
+                        }
+
+                        MarkerLeftReason.CHECK_FAILED, MarkerLeftReason.DELETE_UNCONFIRMED -> {
                             Fail(CleanupIncomplete(IncompleteReason.DELETE_FAILED))
+                        }
                     }
                 }
             }

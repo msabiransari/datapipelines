@@ -27,8 +27,17 @@ class RemovalVerdictTest {
                 RemovalVerdict.of(RemovalResult.Refused(reason, MarkerFate.NotWritten))
             }
         rows.getValue(RefusalReason.LEASE_LOST) shouldBe RemovalVerdict.Deadline
-        rows.getValue(RefusalReason.MODE_NOT_NORMAL).failure().shouldBeInstanceOf<CleanupIncomplete>().reason shouldBe IncompleteReason.MODE
-        rows.getValue(RefusalReason.CLOCK_SKEW).failure().shouldBeInstanceOf<CleanupClockSkew>().code shouldBe PipelineErrorCodes.Lake.MAINTENANCE_CLOCK_SKEW
+        rows
+            .getValue(RefusalReason.MODE_NOT_NORMAL)
+            .failure()
+            .shouldBeInstanceOf<CleanupIncomplete>()
+            .reason shouldBe IncompleteReason.MODE
+        rows
+            .getValue(RefusalReason.CLOCK_SKEW)
+            .failure()
+            .shouldBeInstanceOf<CleanupClockSkew>()
+            .code shouldBe
+            PipelineErrorCodes.Lake.MAINTENANCE_CLOCK_SKEW
         rows.getValue(RefusalReason.NOT_PURGED).failure().shouldBeInstanceOf<IllegalStateException>()
         rows.keys shouldBe RefusalReason.entries.toSet()
     }
@@ -62,10 +71,17 @@ class RemovalVerdictTest {
             val verdict = RemovalVerdict.of(completed(marker = MarkerFate.Left(reason)))
             withClue(reason) {
                 when (reason) {
-                    MarkerLeftReason.LEASE_LOST -> verdict shouldBe RemovalVerdict.Deadline
-                    MarkerLeftReason.MODE_CHANGED -> verdict.incomplete() shouldBe IncompleteReason.MODE
-                    MarkerLeftReason.CHECK_FAILED, MarkerLeftReason.DELETE_UNCONFIRMED ->
+                    MarkerLeftReason.LEASE_LOST -> {
+                        verdict shouldBe RemovalVerdict.Deadline
+                    }
+
+                    MarkerLeftReason.MODE_CHANGED -> {
+                        verdict.incomplete() shouldBe IncompleteReason.MODE
+                    }
+
+                    MarkerLeftReason.CHECK_FAILED, MarkerLeftReason.DELETE_UNCONFIRMED -> {
                         verdict.incomplete() shouldBe IncompleteReason.DELETE_FAILED
+                    }
                 }
             }
         }

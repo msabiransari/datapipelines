@@ -57,8 +57,9 @@ class CleanupObserverIntegrationTest {
         o.refs.toSet() shouldBe
             metadata
                 .refs()
-                .map { (name, ref) -> ObservedRef(name, if (ref.isBranch) ObservedRefType.BRANCH else ObservedRefType.TAG, ref.snapshotId()) }
-                .toSet()
+                .map { (name, ref) ->
+                    ObservedRef(name, if (ref.isBranch) ObservedRefType.BRANCH else ObservedRefType.TAG, ref.snapshotId())
+                }.toSet()
         o.refs.count { it.type == ObservedRefType.TAG } shouldBe 2
         o.floor.shouldBeInstanceOf<ExpiryFloor.Applied>().wire shouldBe result.details["floor"]
         o.inventory.map { it.key } shouldContainAll h.listing(t).map { it.key }.filterNot { "/dp/" in it }
@@ -67,7 +68,8 @@ class CleanupObserverIntegrationTest {
         o.pass shouldBe ObservedPass.Complete
         result.details["observer"] shouldBe ObserverOutcome.OK.wire
         println(
-            "(962 C14b complete) calls=1 snapshots=${o.snapshots.map { it.snapshotId }} refs=${o.refs.map { "${it.name}:${it.type.wire}" }} " +
+            "(962 C14b complete) calls=1 snapshots=${o.snapshots.map { it.snapshotId }} " +
+                "refs=${o.refs.map { "${it.name}:${it.type.wire}" }} " +
                 "floor=${o.floor.wire} inventory=${o.inventory.size} visits=${o.visits.size} deleted=${result.figures.files} expected=1",
         )
     }
@@ -140,7 +142,10 @@ class CleanupObserverIntegrationTest {
         failed.size shouldBe 1
         failed.single() shouldContain "IllegalStateException"
         failed.single() shouldNotContain "observer secret text"
-        println("(962 C14b throws) row=${row.state} outcome=${part["outcome"]} observer=${part["observer"]} deleted=1 expected=1 event: ${failed.single()}")
+        println(
+            "(962 C14b throws) row=${row.state} outcome=${part["outcome"]} observer=${part["observer"]} deleted=1 expected=1 " +
+                "event: ${failed.single()}",
+        )
     }
 
     private companion object {

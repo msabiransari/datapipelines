@@ -25,7 +25,11 @@ class DueParityIntegrationTest {
 
     @Test
     fun `cleanup - never cleaned, cleaned longer ago than the interval, within it, and a failed run in between`() {
-        val interval = h.profiles.forTable(h.table("probe").id).cleanupIntervalHours.toLong()
+        val interval =
+            h.profiles
+                .forTable(h.table("probe").id)
+                .cleanupIntervalHours
+                .toLong()
         val cases =
             mapOf<String, (MaintenanceTable) -> Unit>(
                 "never cleaned" to {},

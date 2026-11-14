@@ -210,7 +210,13 @@ class CleanupPart(
                 location = target.location,
                 listingTime = listingTime,
                 currentSnapshotId = metadata?.currentSnapshot()?.snapshotId(),
-                snapshots = metadata?.snapshots().orEmpty().map { ObservedSnapshot(it.snapshotId(), Instant.ofEpochMilli(it.timestampMillis())) },
+                snapshots =
+                    metadata?.snapshots().orEmpty().map {
+                        ObservedSnapshot(
+                            it.snapshotId(),
+                            Instant.ofEpochMilli(it.timestampMillis()),
+                        )
+                    },
                 refs =
                     metadata?.refs().orEmpty().map { (name, ref) ->
                         ObservedRef(name, if (ref.isBranch) ObservedRefType.BRANCH else ObservedRefType.TAG, ref.snapshotId())

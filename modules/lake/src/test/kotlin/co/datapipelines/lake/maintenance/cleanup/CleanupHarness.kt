@@ -6,7 +6,6 @@ import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.LeaseHandle
 import co.datapipelines.lake.LeaseOutcome
-import co.datapipelines.lake.maintenance.plan.MaintenanceDue
 import co.datapipelines.lake.maintenance.MaintenanceGate
 import co.datapipelines.lake.maintenance.MaintenanceHarness
 import co.datapipelines.lake.maintenance.MaintenancePart
@@ -15,6 +14,7 @@ import co.datapipelines.lake.maintenance.MaintenanceRunContext
 import co.datapipelines.lake.maintenance.MaintenanceRunHooks
 import co.datapipelines.lake.maintenance.MaintenanceTable
 import co.datapipelines.lake.maintenance.MaintenanceWorker
+import co.datapipelines.lake.maintenance.plan.MaintenanceDue
 import co.datapipelines.lake.maintenance.plan.MaintenancePartNames
 import co.datapipelines.lake.maintenance.plan.PlanHarness
 import co.datapipelines.lake.maintenance.plan.TableDue
@@ -38,10 +38,14 @@ import org.apache.iceberg.TableMetadata
 import org.apache.iceberg.TableMetadataParser
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest
+import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.model.PutObjectResponse
 import java.sql.Timestamp
 import java.time.Clock
 import java.time.Duration
@@ -141,7 +145,8 @@ internal class CleanupHarness(
         runId: UUID = UUID.randomUUID(),
         hooks: MaintenanceRunHooks = MaintenanceRunHooks.NONE,
         leases: LakeLeases = m.leases,
-    ): MaintenanceRun = MaintenanceRunContext(leases, m.defs.catalogs, m.heartbeats, hooks).open(runId, table, m.dbNow() + lifetime, emptyMap())
+    ): MaintenanceRun =
+        MaintenanceRunContext(leases, m.defs.catalogs, m.heartbeats, hooks).open(runId, table, m.dbNow() + lifetime, emptyMap())
 
     /** The production lease protocol with a lock wait long enough that an acquire WAITS behind a held commit (C7). */
     fun patientLeases(): LakeLeases = LakeLeases(jdbc, holderInstance = "lake-test-962", lockTimeout = Duration.ofSeconds(PATIENT_SECONDS))
@@ -200,7 +205,9 @@ internal class CleanupHarness(
     ): List<String> {
         val prefix = "${target(table).keyPrefix}data/orphan-"
         val keys = (0 until count).map { "$prefix${UUID.randomUUID()}.parquet" }
-        val pool = java.util.concurrent.Executors.newFixedThreadPool(threads)
+        val pool =
+            java.util.concurrent.Executors
+                .newFixedThreadPool(threads)
         try {
             keys.map { key -> pool.submit { put(key) } }.forEach { it.get() }
         } finally {
@@ -290,7 +297,11 @@ internal class CleanupHarness(
             added = requireNotNull(target(table).keyOf(file.location()))
             put(added)
             files[added] = file
-            t.newOverwrite().deleteFile(removed).addFile(file).commit()
+            t
+                .newOverwrite()
+                .deleteFile(removed)
+                .addFile(file)
+                .commit()
         }
         return metadata(table).currentSnapshot().snapshotId() to added
     }
@@ -486,10 +497,14 @@ internal class AgingS3Client(
     @Volatile
     var age: Duration = Duration.ZERO
 
-    val young: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    val young: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap
+            .newKeySet()
 
     /** Keys aged by [age] even under `dp/clock/`: ANOTHER run's marker (C15), never the probing pass's own. */
-    val agedMarkers: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    val agedMarkers: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap
+            .newKeySet()
 
     override fun listObjectsV2(request: ListObjectsV2Request): software.amazon.awssdk.services.s3.model.ListObjectsV2Response {
         val response = real.listObjectsV2(request)
@@ -508,11 +523,11 @@ internal class AgingS3Client(
     override fun putObject(
         request: PutObjectRequest,
         body: RequestBody,
-    ) = real.putObject(request, body)
+    ): PutObjectResponse = real.putObject(request, body)
 
-    override fun headObject(request: HeadObjectRequest) = real.headObject(request)
+    override fun headObject(request: HeadObjectRequest): HeadObjectResponse = real.headObject(request)
 
-    override fun deleteObjects(request: software.amazon.awssdk.services.s3.model.DeleteObjectsRequest) = real.deleteObjects(request)
+    override fun deleteObjects(request: DeleteObjectsRequest): DeleteObjectsResponse = real.deleteObjects(request)
 
     override fun serviceName(): String = real.serviceName()
 

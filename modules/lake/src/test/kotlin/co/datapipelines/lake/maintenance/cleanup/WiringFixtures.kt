@@ -20,11 +20,9 @@ import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * #962 D (C14, C14a, C14b): the fixtures the wiring cases share — a table whose cleanup commits keep tags and an expiry
- * (C6's shape), a part ordered after the cleanup that records whether it ran, and the scheduler seam (957's db-scheduler
- * queue over the module's Postgres, with the library's manual scheduler, as 959's `PlanQueueIntegrationTest` builds it).
- */
+// #962 D (C14, C14a, C14b): the fixtures the wiring cases share — a table whose cleanup commits keep tags and an expiry
+// (C6's shape), a part ordered after the cleanup that records whether it ran, and the scheduler seam (957's db-scheduler
+// queue over the module's Postgres, with the library's manual scheduler, as 959's `PlanQueueIntegrationTest` builds it).
 
 /** The keep rule of C5 and C6: the end of each of the last two days kept for two days. */
 internal const val TWO_DAY_KEEP = """[{"period":"day","keep_for":{"n":2,"unit":"days"}}]"""

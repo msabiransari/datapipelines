@@ -128,7 +128,14 @@ class LakeMaintenanceAutoConfiguration {
         lakeS3Client: S3Client,
         lakeMaintenanceRunStates: RunStates,
     ): CleanupRemoval =
-        CleanupRemoval.of(properties, LakeAppendRuntime.statements(dataSource), catalogs, lakeLeases, lakeS3Client, lakeMaintenanceRunStates)
+        CleanupRemoval.of(
+            properties,
+            LakeAppendRuntime.statements(dataSource),
+            catalogs,
+            lakeLeases,
+            lakeS3Client,
+            lakeMaintenanceRunStates,
+        )
 
     @Bean
     fun lakeCleanupReads(

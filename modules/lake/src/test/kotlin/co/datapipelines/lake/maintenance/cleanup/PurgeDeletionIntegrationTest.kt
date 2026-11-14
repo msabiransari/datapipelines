@@ -62,7 +62,7 @@ class PurgeDeletionIntegrationTest {
     }
 
     @Test
-    fun `C12 a purged table holding a recipe ends finished - the recipe stays, purge_deleted_at is stamped, the next plan enqueues nothing`() {
+    fun `C12 a purged table holding a recipe ends finished - the recipe stays, stamped, the next plan enqueues nothing`() {
         val t = h.table("c12")
         h.append(t)
         val keep = h.recipe(t)
@@ -89,7 +89,7 @@ class PurgeDeletionIntegrationTest {
     }
 
     @Test
-    fun `C13 a pass that leaves a young key does not stamp and records the count, the next plan enqueues it again, and later it finishes`() {
+    fun `C13 a pass leaving a young key does not stamp and records it, the next plan enqueues it again, later it finishes`() {
         val t = h.table("c13")
         h.append(t)
         val p = h.purged(t, until = h.m.dbNow() - LONG_AGO)
@@ -104,7 +104,10 @@ class PurgeDeletionIntegrationTest {
         first["purge_stamped"] shouldBe false
         first["deferred_deletions"] shouldBe 1
         (first["left"] as Map<*, *>)["young"] shouldBe 1
-        h.m.rows(p).single().figures.deferredDeletions shouldBe 1
+        h.m
+            .rows(p)
+            .single()
+            .figures.deferredDeletions shouldBe 1
         h.exists(young) shouldBe true
         h.purgeDeletedAt(p) shouldBe null
         h.planned(p) shouldBe true
@@ -127,7 +130,7 @@ class PurgeDeletionIntegrationTest {
     }
 
     @Test
-    fun `C13a a purge whose delete call fails for one batch ends the run failed cleanup_incomplete, no stamp, enqueued again, then a clean pass stamps`() {
+    fun `C13a a failed delete batch ends the run failed cleanup_incomplete, no stamp, enqueued again, then a clean pass stamps`() {
         val t = h.table("c13a")
         h.append(t)
         val p = h.purged(t, until = h.m.dbNow() - LONG_AGO)

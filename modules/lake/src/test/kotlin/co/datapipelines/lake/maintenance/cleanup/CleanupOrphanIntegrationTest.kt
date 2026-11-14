@@ -37,7 +37,7 @@ class CleanupOrphanIntegrationTest {
     }
 
     @Test
-    fun `C7a a late commit held past its deadline - the cleanup's acquire is refused 55P03, busy, nothing deleted - then its files survive`() {
+    fun `C7a a late commit held past its deadline - the acquire is refused, busy, nothing deleted, then its files survive`() {
         val t = h.table("c7a")
         h.append(t)
         val orphan = h.orphan(t)
@@ -86,7 +86,9 @@ class CleanupOrphanIntegrationTest {
         h.exists(orphan) shouldBe false
         result.figures.files shouldBe 1
         h.snapshotIds(t).size shouldBe 2 // the first append and the late one: the cleanup's read saw it land
-        println("(962 C7b) waited behind the late commit: outcome=${result.outcome} deleted=${result.figures.files} expected=1 (the orphan)")
+        println(
+            "(962 C7b) waited behind the late commit: outcome=${result.outcome} deleted=${result.figures.files} expected=1 (the orphan)",
+        )
     }
 
     @Test
@@ -168,7 +170,12 @@ class CleanupOrphanIntegrationTest {
     }
 
     /** The test's own listing of [t] (keys only, `dp/` keys apart: the passes' own markers come and go). */
-    private fun keys(t: MaintenanceTable): Set<String> = h.listing(t).map { it.key }.filterNot { "/dp/" in it }.toSet()
+    private fun keys(t: MaintenanceTable): Set<String> =
+        h
+            .listing(t)
+            .map { it.key }
+            .filterNot { "/dp/" in it }
+            .toSet()
 
     /** A commit of [table] that passed the fence, held inside its transaction until [release], past its lease's deadline. */
     private inner class HeldCommit(
@@ -208,16 +215,17 @@ class CleanupOrphanIntegrationTest {
         val end = System.nanoTime() + Duration.ofSeconds(MaintenanceHarness.WAIT_SECONDS).toNanos()
         LakeTestDb.connect().use { probe ->
             while (System.nanoTime() < end) {
-                val waiting =
-                    probe.prepareStatement("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid()").use {
-                        it.executeQuery().use { rs -> rs.next().let { rs.getInt(1) } }
-                    }
-                if (waiting >= count) return true
+                if (lockWaiters(probe) >= count) return true
                 Thread.sleep(POLL_MILLIS)
             }
         }
         return false
     }
+
+    private fun lockWaiters(probe: java.sql.Connection): Int =
+        probe
+            .prepareStatement("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid()")
+            .use { it.executeQuery().use { rs -> rs.next().let { rs.getInt(1) } } }
 
     private companion object {
         const val ADVISORY_KEY = 962
