@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.79 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.80 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-14
@@ -437,7 +437,7 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 | INFO | `lake.boot.ok` | Every check passed: the catalog shape, the four V53 triggers, the control row, the store reachable and honouring `If-None-Match: *` | `bucket`, `prefix` |
 | INFO | `lake.egress_proxy_verified` | #845: before the managed datasource is registered, the configured egress proxy declared the configured max-age at `/dp-egress` and a `HEAD` of the bucket through it reached the store (any store answer counts; only a proxy-generated 502/503/504 does not) | `proxy` (`host:port`), `max_age_seconds`, `reader_end_by_ms` (the bound a reader against a store that trickles on every attempt ends within: `LakeHttpBounds.egressReaderEndByMillis`, (`http_retries` + 1) × max-age + slack, [Lake §9](lake.md#9-reads)), `store` (the bucket URI, no credential), `store_status`, `duration_ms` |
 | WARN | `lake.egress_proxy_absent` | #845: `datapipelines.lake.reads.egress-proxy` is empty, so managed reads reach the store directly with no connection max-age ([Lake §9](lake.md#9-reads)) | — |
-| INFO | `lake.profile.seeded` | #956: the first start with the lake enabled copied `datapipelines.lake.maintenance.window` and `.max-bytes-rewritten-per-run` into the `production` profile and cleared its `seed_pending` mark ([Lake §10](lake.md#10-profiles)); logged once per database, by the instance whose statement changed the row — a later start, a second instance or an edited profile logs nothing | `profile` (`production`), `window`, `max_bytes_rewritten_per_run` |
+| INFO | `lake.profile.seeded` | #956: the first start with the lake enabled copied `datapipelines.lake.maintenance.window` and `.max-bytes-rewritten-per-run` into the `production` profile and cleared its `seed_pending` mark ([Lake §11](lake.md#11-profiles)); logged once per database, by the instance whose statement changed the row — a later start, a second instance or an edited profile logs nothing | `profile` (`production`), `window`, `max_bytes_rewritten_per_run` |
 
 **The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put`, `lake.boot.egress_proxy` (#845: the configured egress proxy is malformed, does not answer within its 2 s connect / 5 s read bound, declares another max-age, or answers a 502/503/504 of its own for the store), and `lake.boot.datasource_name_taken` (#818, raised when the managed datasource is registered: another datasource holds `datapipelines.lake.name`) (what each means: Configuration §7). No credential, key, or object body appears in any of them.
 
@@ -489,6 +489,22 @@ as their conditional state/attempt changes. Their details contain only `table_id
 and `outcome`. A lost acknowledgement can record UNKNOWN followed by PUBLISHED and SETTLED without a second CAS.
 Ingestion storage setup failures use the staging boundary's fixed message and log only execution id and class;
 generated secret SQL, credentials and driver messages never reach an execution event or recipe.
+
+#### 3.4T The lake remover's events (#958)
+
+The one place a managed-lake object is deleted ([Lake §10](lake.md#10-removal-and-cleanup)). Every event carries the
+table id; all except `lake.removal.unexpected_dp_key` also carry the pass's run id. The unexpected-key event carries
+one relative key, as specified below; no event carries a key list, a presigned URL or a credential. A failure reports
+the exception class and first SQLSTATE in §3.4G's safe shape. Nothing in production calls the remover before 962.
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| WARN | `lake.removal.refused` | A pass did nothing: the catalog is not in `normal` mode, the caller's lease did not answer, the table is not `purged` (a purge), or the clock-skew probe's interval left ±3600 s (`lake.maintenance.clock_skew`, [Pipeline Contract §13.25](pipeline-contract.md#1325-managed-lake)) | `table_id`, `run_id`, `reason` (`mode_not_normal` \| `lease_lost` \| `not_purged` \| `clock_skew`), `code` (the catalogued code or `none`), `marker` (`not_written` \| `removed` \| `left:<reason>`), `skew_lower_s`, `skew_upper_s` (`none` unless the probe ran) |
+| INFO | `lake.removal.ended` | A pass listed the table's location and ended, complete or stopped | `table_id`, `run_id`, `pass` (`orphans` \| `purge`), `listed`, `reached`, `deleted` (confirmed by the store), `bytes`, `left` (`<reason>=<count>` pairs), `stopped` (`lease_lost` \| `mode_changed` \| `delete_failed` \| `none`), `marker`, `purge` (`finished` \| `more_to_do` \| `none`) |
+| WARN | `lake.removal.failed` | The probe, the protected-graph walk, a catalog read or the listing failed: nothing was deleted, the pass's marker (if written) is left, and the caller sees the failure | `table_id`, `run_id`, `cause`, `sql_state` |
+| WARN | `lake.removal.batch_failed` | A delete batch's response named keys it did not delete (`outcome=failed`, later batches still run), or the call threw or its answer was lost (`outcome=unknown`, no further batch) | `table_id`, `run_id`, `keys` (the count), `outcome`, `cause`, `sql_state` |
+| WARN | `lake.removal.marker_left` | The pass's own `dp/clock/<run-id>` marker was not deleted: a lease or mode check said no or could not be made, or its delete was not confirmed. A later pass removes it once this run is terminal | `table_id`, `run_id`, `reason` (`lease_lost` \| `mode_changed` \| `check_failed` \| `delete_unconfirmed`) |
+| WARN | `lake.removal.unexpected_dp_key` | The listing holds keys under `dp/` that are neither a recipe nor a clock marker; they are never deleted and keep a purge at *more to do*. Once per pass | `table_id`, `count`, `first` (the first such key, relative to the table location) |
 
 ### 3.5 Log destination
 
@@ -792,7 +808,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-14 | v1.79 | 956 (#956, dp-lake P6) | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |
+| 2026-11-14 | v1.79 | 958 (#958) | New **§3.4T**, the lake remover's six events: WARN `lake.removal.refused`, INFO `lake.removal.ended`, WARN `lake.removal.failed`, `lake.removal.batch_failed`, `lake.removal.marker_left` and `lake.removal.unexpected_dp_key`. Counts, identifiers and one relative unexpected key; never a key list or a credential. |
+| 2026-11-14 | v1.80 | 956 (#956, dp-lake P6) | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |
 | 2026-11-13 | v1.78 | 939 (#939) | **§3.4S**: new INFO `lake.settle.protection_window_aligned` (`days`) — the settle sweep set `lake_control.protection_interval` to this instance's `retention.protection-days`; logged only when the row changed. |
 | 2026-11-13 | v1.77 | 806 merge review (#806) | **§3.4**: catalogue the web module's `staging.scratch.health` transition WARN and recovery INFO already described in §6.1. Every non-`UP` transition retains the usable-byte reading, including an unwritable directory; a failed reading reports `unknown`. |
 | 2026-11-13 | v1.76 | 806 (#806) | **§4.1**: four untagged byte gauges, `datapipelines.staging.scratch.capacity`, `.reserved`, `.leftover` (`NaN` until the leftover sweep has counted) and `.usable` (`NaN` when the reading throws), read at every scrape. **§6.1**: the `diskSpace` bullet's "nothing writes to local disk" reasoning corrected (DuckDB staging, #795), and the DuckDB scratch signal described — the status-only `duckdb_scratch` indicator on the management port's `/actuator/health`, never a `/health` component, its rows, and what its `UP` does and does not establish (owner ruling 2026-11-12 for the surface). §6.4 unchanged: the indicator carries no detail. |
