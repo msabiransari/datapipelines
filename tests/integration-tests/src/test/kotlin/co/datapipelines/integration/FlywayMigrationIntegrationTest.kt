@@ -202,6 +202,8 @@ class FlywayMigrationIntegrationTest {
                 // #959 (V63) — the lake maintenance planner: measurements, daily usage, the one plan row, the purge
                 // deletion stamp and the run-history index (metadata-db §4.57–§4.59).
                 "63|lake maintenance plan|true",
+                // #964 (V64) — the lake storage breakdown: the latest six-row inventory per table (metadata-db §4.60).
+                "64|lake storage inventory|true",
             )
     }
 
@@ -1050,6 +1052,28 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #964 (V64) — the latest storage breakdown: the six row names (the `StorageRow` wire values) and non-negative
+     * figures as CHECKs, one row per table and row name, and every column. Behaviour is the lake module's
+     * `StorageInventoryIntegrationTest`; this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V64 creates the lake storage inventory with its six row names`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'lake_storage_inventory'::regclass " +
+                "ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_lake_storage_inventory_figures|CHECK (((object_count >= 0) AND (bytes >= 0)))",
+                "chk_lake_storage_inventory_row|CHECK ((row_name = ANY (ARRAY['dp_records'::text, 'table_metadata'::text, " +
+                    "'current'::text, 'history'::text, 'keep_held'::text, 'not_referenced'::text])))",
+                "lake_storage_inventory_pkey|PRIMARY KEY (table_id, row_name)",
+                "lake_storage_inventory_table_id_fkey|FOREIGN KEY (table_id) REFERENCES lake_tables_managed(id) ON DELETE CASCADE",
+            )
+        columnsOf("lake_storage_inventory") shouldContainExactlyInAnyOrder
+            listOf("bytes", "measured_at", "object_count", "row_name", "run_id", "table_id")
+    }
+
+    /**
      * #798 (V54) — managed lake table definitions, read from the SHIPPED database: the closed lists the
      * `lake.definitions` enums mirror (table status, apply state, version status, origin), the pointer/state pairing,
      * the one-DRAFT index and every column. Behaviour is `LakeDefinitionRepositoryIntegrationTest`'s; this pins
@@ -1783,6 +1807,8 @@ class FlywayMigrationIntegrationTest {
                 "lake_table_measurements",
                 "lake_storage_usage",
                 "lake_maintenance_plan",
+                // #964 (V64) — the latest storage breakdown per table (metadata-db §4.60).
+                "lake_storage_inventory",
                 // 118 (V25) — the learned semantic layer.
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
@@ -1921,6 +1947,8 @@ class FlywayMigrationIntegrationTest {
                 "lake_storage_usage.lake_storage_usage_pkey",
                 "lake_storage_usage.idx_lake_storage_usage_measured",
                 "lake_maintenance_plan.lake_maintenance_plan_pkey",
+                // #964 (V64) — one row per table and storage row.
+                "lake_storage_inventory.lake_storage_inventory_pkey",
                 "lake_column_semantics.lake_column_semantics_pkey",
                 "lake_namespaces.lake_namespaces_pkey",
                 "lake_namespaces.uq_lake_namespaces_name",
@@ -2157,6 +2185,10 @@ class FlywayMigrationIntegrationTest {
                 "chk_lake_reference_scans_scanner_version",
                 "chk_lake_reference_scans_status",
                 "chk_lake_reference_scans_version",
+                // #964 (V64) — an inventory row's non-negative figures and its six row names (§4.60); `inventory` sorts
+                // before `usage`.
+                "chk_lake_storage_inventory_figures",
+                "chk_lake_storage_inventory_row",
                 // #959 (V63) — a usage row's non-negative figures (§4.58); `s` sorts between `reference` and `table`.
                 "chk_lake_storage_usage_figures",
                 // #798 (V54) — the definition version's body shape, stamps, status, floor and surface (§4.50), before

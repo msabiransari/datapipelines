@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.68 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.69 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-14
@@ -86,6 +86,7 @@ lake_profiles ──1:N── lake_tables_managed (profile_id, NOT NULL, no casc
 users ──0:N── lake_profiles (created_by / updated_by; NULL = written by the system — §4.56)
 lake_tables_managed ──1:0..1── lake_table_measurements (the planner's figures, ON DELETE CASCADE — §4.57)
 lake_tables_managed ──1:N── lake_storage_usage (one row per UTC day, ON DELETE CASCADE — §4.58)
+lake_tables_managed ──1:0..6── lake_storage_inventory (the latest storage breakdown, six rows, ON DELETE CASCADE — §4.60)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -2270,6 +2271,31 @@ CREATE INDEX idx_lake_maintenance_runs_finished
 ```
 
 
+### 4.60 `lake_storage_inventory`
+
+**The latest storage breakdown per managed table, not a history** (V64; #964, record §11b call 46 "The storage breakdown", cut L12): six rows per table, one per [`StorageRow`](enums.md#62-storagerow--a-row-of-a-tables-storage-breakdown-964), written by the cleanup's observer from the cleanup's own listing and walk, after its expiry and removals. A table with no row has not been measured.
+
+```sql
+CREATE TABLE lake_storage_inventory (
+    table_id     UUID        NOT NULL REFERENCES lake_tables_managed(id) ON DELETE CASCADE,
+    row_name     TEXT        NOT NULL,
+    object_count BIGINT      NOT NULL,
+    bytes        BIGINT      NOT NULL,
+    measured_at  TIMESTAMPTZ NOT NULL,
+    run_id       UUID        NOT NULL,
+    PRIMARY KEY (table_id, row_name),
+    CONSTRAINT chk_lake_storage_inventory_row CHECK (
+        row_name IN ('dp_records', 'table_metadata', 'current', 'history', 'keep_held', 'not_referenced')),
+    CONSTRAINT chk_lake_storage_inventory_figures CHECK (object_count >= 0 AND bytes >= 0)
+);
+```
+
+**Notes:**
+- **One inventory, one time.** `measured_at` is the catalog's clock at the cleanup's listing, the same on all six rows ("in the bucket at"), and `run_id` the maintenance run whose cleanup measured it (no foreign key: the figures outlive the run row). Every listed object falls in exactly one row, the first that fits, so the six `object_count`s and `bytes` add up to the listing; if they ever do not, nothing is written and the previous six rows stay.
+- **Replaced, never appended.** A cleanup deletes the table's rows and inserts its six in one transaction. A refused cleanup (no listing) writes nothing; a purge deletion writes nothing, so a purged table keeps its last inventory.
+- **Read** in one statement by table id (the primary key): the six rows with their time, or "not measured yet" when there is none — never zero. It is not summed with the planner's figures ([§4.57](#457-lake_table_measurements), [§4.58](#458-lake_storage_usage)): two sources, two times.
+
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -2435,6 +2461,7 @@ CREATE INDEX idx_lake_maintenance_runs_finished
 | `lake_table_measurements` | `lake_table_measurements_pkey` | via PK | V63: one row per table — the attempt stamp and the conditional figures write ([§4.57](#457-lake_table_measurements)) |
 | `lake_storage_usage` | `lake_storage_usage_pkey` | via PK | V63: one row per table per UTC day — the measurement's upsert and the growth baseline read ([§4.58](#458-lake_storage_usage)) |
 | `lake_storage_usage` | `idx_lake_storage_usage_measured` | explicit | V63: the pass's prune of rows measured more than 35 days ago |
+| `lake_storage_inventory` | `lake_storage_inventory_pkey` | via PK | V64 (#964): one row per table and storage row — the cleanup's replace and the read for P8 ([§4.60](#460-lake_storage_inventory)) |
 | `lake_maintenance_plan` | `lake_maintenance_plan_pkey` | via PK | V63: the one plan row (`id = 1`) |
 | `lake_table_definition_versions` | `lake_table_definition_versions_pkey` | via PK | `(table_id, version)` fetch ([§4.50](#450-lake_table_definition_versions)) |
 | `lake_table_definition_versions` | `uq_lake_table_definition_versions_one_draft` | explicit (partial, unique) | V54: one DRAFT per table — the physical guard behind copy-on-write |
@@ -2525,6 +2552,7 @@ table and the test's expected-table list in the same commit.
 | `lake_profiles` | environment-local | LakeProfile | — | — | This deployment's maintenance and write tuning (record call 35); per environment, never promoted — a receiver keeps its own profiles and its tables keep theirs |
 | `lake_table_measurements` | derived | LakeMaintenancePlan | — | — | Measured from THIS environment's Iceberg metadata by its planner; rebuilt by the next passes, never promoted |
 | `lake_storage_usage` | derived | LakeMaintenancePlan | — | — | Daily figures of this environment's tables, from its own measurements; kept 35 days, never promoted |
+| `lake_storage_inventory` | derived | LakeStorageInventory | — | — | The latest breakdown of this environment's own bucket, from its own cleanups; replaced by the next cleanup, never promoted |
 | `lake_maintenance_plan` | environment-local | LakeMaintenancePlan | — | — | The latest plan of this deployment's maintenance queue: runtime state, meaningless beside another environment's |
 
 ---
@@ -2841,7 +2869,8 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-14 | v1.68 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.67 | **§4.55 `lake_maintenance_runs`**: compaction's own keys in its `parts_json` entry (`committed`, `left_for_fresh_run`, `blocked`, `largest_need_bytes`, `limit_bytes`, `limit_source`, and `groups`, one flat object per committed group). No DDL change, no migration. |
+| 2026-11-14 | v1.69 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.67 and #964's v1.68 | **§4.55 `lake_maintenance_runs`**: compaction's own keys in its `parts_json` entry (`committed`, `left_for_fresh_run`, `blocked`, `largest_need_bytes`, `limit_bytes`, `limit_source`, and `groups`, one flat object per committed group). No DDL change, no migration. |
+| 2026-11-14 | v1.68 | V64 (#964, dp-lake P6) | **V64 — the lake storage breakdown.** New **§4.60 `lake_storage_inventory`**: the latest inventory per table, six rows (one per `StorageRow`, V64's CHECK) with their object count, bytes, one time and the run id, replaced by each cleanup in one transaction. §3 ERD, §5 (its primary key) and §5A (derived) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-14 | v1.67 | 962 (#962, dp-lake P6) | **§4.55 `lake_maintenance_runs`**: the cleanup and purge deletion parts add their counts to their `parts_json` entries (scalars; a count by reason as one `<field>_<reason>` key per reason that occurred). No DDL change, no migration. |
 | 2026-11-14 | v1.66 | 963 (#963, dp-lake P6) | **§4.55 `lake_maintenance_runs`**: a part may add its own figures as top-level keys of its `parts_json` entry (the manifest rewrite's `folded`, `manifests_before`, `manifests_after`, `lease_held_millis`, reason `nothing to fold`). No DDL change, no migration. |
 | 2026-11-14 | v1.65 | V63 (#959, dp-lake P6) — renumbered at the spec merge after #961's V62 and v1.64 | **V63 — the lake maintenance planner.** New **§4.57 `lake_table_measurements`** (one row per table: the attempt stamp and its profile pair, the error, the profile-independent and profile-dependent figures with the pair they were computed under, NULL never zero), **§4.58 `lake_storage_usage`** (one row per table per UTC day, kept 35 days) and **§4.59 `lake_maintenance_plan`** (one row, the latest plan's counts); **§4.49 `lake_tables_managed` gains `purge_deleted_at`** (#962 stamps it, the planner reads it); `idx_lake_maintenance_runs_finished` serves the plan's one run-history statement. §3 ERD, §5 (five indexes) and §5A (two derived, one environment-local) updated. Down path documented in the migration header, not shipped. |
