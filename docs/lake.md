@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.25 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #957, maintenance runs)
+**Status:** v1.26 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -628,7 +628,105 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 ---
 
-## 10. Maintenance runs
+## 10. Removal and cleanup
+
+The remover (#958, dp-lake P6; `modules/lake`'s `maintenance/remove` package) is the only code that deletes an object
+of the managed lake (design record §8b "One remover, one policy"). Iceberg never deletes: the catalog's FileIO refuses
+every request (§7) and hands the key on as a hint. All S3 deletes are in one file, `LakeObjectDeleter.kt`, and
+`LakeDeletionArchitectureTest` fails when `deleteObject`, `deleteObjects`, `DeleteObjectRequest` or
+`DeleteObjectsRequest` appears in any other main source. **No production code calls the remover yet**: the maintenance
+run (962) holds the table lease, calls it, and records its result.
+
+**Two passes.** `removeOrphans` reclaims files of a live table that nothing protected reaches; `purge` empties a table
+whose status is `purged`. Each takes the table id (resolved from `lake_tables_managed` to its location
+`<storage root>/<namespace>/<table id>`, never a path from a request), the caller's held table lease and the run id.
+The remover takes no lease of its own.
+
+**The order inside a pass is fixed:**
+
+1. Refuse unless `lake_control.mode` is `normal` and the caller's lease answers a heartbeat.
+2. The clock-skew probe (below).
+3. A fresh reachability read, inside the pass, on its own statements; nothing read before the call is reused.
+4. The listing of every key under the table's location.
+5. The candidates.
+6. Delete batches of at most 1000 keys, each after a lease check and a mode check. A no stops the pass, deleting
+   nothing more.
+7. The pass's own marker, last.
+
+**Reachable** (record §9). The protected revisions are the current pointer, every revision whose `protected_until` is
+null or ahead of the catalog's `now()`, and every reader-pinned revision (§9 reader leases). From each revision's
+metadata file the walker reaches:
+
+- the file itself;
+- the direct entries of its metadata log, one level only;
+- for every snapshot: its manifest list, its manifests, and every live (`ADDED`/`EXISTING`) data and delete file;
+- the statistics and partition-statistics files.
+
+A metadata file or manifest it cannot read fails the pass, and nothing is deleted.
+
+**A candidate** is a listed key under the location that is:
+
+- not reached;
+- older than the orphan grace (`retention.orphan-grace-hours`), its age being the catalog's clock minus the listing's
+  `LastModified`;
+- not under `dp/`.
+
+Keys Iceberg handed the refusing FileIO are hints only. The same tests decide them, and a hint that fails one is counted
+as deferred with its reason (`reached`, `young`, `under_dp`, `outside_location`, `not_listed`). A key outside the
+location is never deleted.
+
+**The `dp/` rule.** Nothing under `dp/recipes/` is ever deleted, by either pass, at any age. The only other `dp/` keys
+deleted are clock markers, each by exact key:
+
+- *The pass's own marker* `dp/clock/<run id>` is deleted at the end (and on a skew refusal), whatever its age, but only
+  after a lease check and a mode check both answer yes. Otherwise it is left, and the result says why.
+- *Another run's marker* is deleted only when it is older than grace AND its run is terminal (the `RunStates` port: an
+  unknown run keeps it).
+
+Any other `dp/` key is never deleted. It is logged once per pass (`lake.removal.unexpected_dp_key`) and keeps a purge at
+*more to do*.
+
+**The clock-skew probe.** The probe works in four steps:
+
+1. Read the catalog clock (`clock_timestamp()`, the one function the remover reads time from).
+2. PUT the marker.
+3. Read the clock again.
+4. Read the marker's `LastModified`.
+
+The skew interval is [`LastModified − after`, `LastModified + 1 s − before`]. The pass runs only when both ends lie
+within ±3600 s; otherwise it is refused with `lake.maintenance.clock_skew` ([Pipeline Contract
+§13.25](pipeline-contract.md#1325-managed-lake)), nothing listed, and its one delete is its own marker under the rule
+above.
+
+**Purge** keeps every protection: a revision still protected or reader-pinned keeps its files. It answers *finished*
+when every listed key, the pass's own marker included, was confirmed deleted or is a recipe. Otherwise it answers
+*more to do*, with the keys left counted by reason: `young`, `reached`, `marker_run_live`, `marker_run_unknown`,
+`other_dp_key`, `delete_failed`, `outcome_unknown`, `not_attempted`. Purge never stamps the table.
+
+**What counts as deleted.** Only a key the store's response names in `deleted()`:
+
+- a key in `errors()`, or named in neither collection, is `delete_failed`, and later batches still run;
+- a call that throws or whose answer is lost leaves its whole batch `outcome_unknown` and the keys not yet sent
+  `not_attempted`, and the pass stops (`stopped: delete_failed`);
+- an unconfirmed marker delete leaves the marker.
+
+Nothing throws out of a pass for a delete failure. A later pass lists again and finishes the work.
+
+**The result** (the storage figures' input, 964):
+
+- the counts;
+- the stop reason and the marker's fate;
+- the purge answer;
+- the **inventory**: the listing (key, size, `LastModified`) minus the confirmed deletes;
+- the **visits**: one per (key, revision, snapshot) the walker reached, with the kind it was reached as (`metadata`,
+  `manifest_list`, `manifest`, `data`, `delete`, `statistics`, `partition_statistics`) and the snapshot id (none for a
+  metadata file).
+
+A refused pass returns neither. The events are [Observability §3.4T](observability.md#34t-the-lake-removers-events-958).
+
+---
+
+## 11. Maintenance runs
 
 A maintenance run is the frame every maintenance operation executes in (#957; dp-lake record §11, §11a call 34). This
 section describes the frame; the operations (cleanup, manifest rewrite, compaction, the purged table's deletion) and
@@ -687,13 +785,16 @@ reconciler and the notifier); the boot refuses otherwise, naming both keys
 
 **Records.** One audit event per admitted run when it ends, `lake.maintenance.run_finished`
 ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), actor the system user; log events
-[Observability §3.4T](observability.md#34t-lake-maintenance-run-events-957).
+[Observability §3.4U](observability.md#34u-lake-maintenance-run-events-957).
+
+---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-14 | v1.25 | 957 (#957) | New **§10 Maintenance runs**: one `lake-maintenance` task per table; the admission order (permission and mode, slot, declarations, scratch, one-statement run row, settlement, parts); the run's deadline on every lease; `busy` and `deadline` end the run; nothing concluded from an abandoned row; threads ≥ maintenance slots + 2. |
+| 2026-11-14 | v1.26 | 957 (#957) — renumbered at the spec merge after #958's v1.25 | New **§11 Maintenance runs** (§10 at the lane's base; #958's §10 landed first): one `lake-maintenance` task per table; the admission order (permission and mode, slot, declarations, scratch, one-statement run row, settlement, parts); the run's deadline on every lease; `busy` and `deadline` end the run; nothing concluded from an abandoned row; threads ≥ maintenance slots + 2. |
+| 2026-11-14 | v1.25 | 958 (#958) | New §10 **Removal and cleanup**: the remover's two passes (orphans, purge), their fixed order, the reachable set, the candidates and hints, the `dp/` rule and its two marker cases, the clock-skew probe (`lake.maintenance.clock_skew`), the purge answer, what counts as deleted, and the result (inventory and visits). No production caller before 962; no configuration key or migration. |
 | 2026-11-13 | v1.24 | 967 (#967) — renumbered at the spec sync after #935's v1.23 | §1 `partition` row and §7: the append's first scan refuses a value a numeric `truncate[N]` partition cannot hold (`lake.append.partition_value_out_of_range`, counts per partition field, never a value), after a required-null refusal and before any file is written; the definition stays valid. Temporary until apache/iceberg 17027 (decimal) and 13105 (int, long). |
 | 2026-11-13 | v1.23 | 935 (#935) — renumbered at the spec sync after #939's v1.22 | §1: the body's fourth key, `sort_field_ids` (1–4 field ids, required before the first release, refused for `BINARY` and, for now, the approximate `DECIMAL`), fixed by the table's first release ever, also after its discard (`locked`); a legacy keyless table stays unsorted; the order (ascending, nulls first) is written to Iceberg at creation with one `write.metadata.metrics.column.<name>` = `truncate(16)` property per sort column. §2: a release is refused `invalid_body` when its stored draft breaks the sort-column rule. §4: S includes the sort order; changing the sort columns is breaking, a sort order changed outside DP is drift whose exit is to put it back. §7: files stay stamped unsorted on a sorted table (dp-lake record §11a call 36). |
 | 2026-11-13 | v1.22 | 939 (#939) | §8: the protection stamp is `now()` plus `datapipelines.lake.retention.protection-days`, no longer `lake_control.protection_interval`, which the normal-mode sweep keeps equal to the setting (a write only when they differ, `lake.settle.protection_window_aligned`); a stamped deadline is never changed. The budget is checked before each of the protection step's two statements; the 16 s overrun and the 31 s wall clock are unchanged. No migration. |

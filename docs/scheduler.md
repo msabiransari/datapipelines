@@ -239,7 +239,7 @@ defined:
 
 The library stays inside this module: a module that declares a job compiles against the scheduler, not against
 db-scheduler. The managed lake's `lake-maintenance` task is the first keyed job
-([Lake §10](lake.md#10-maintenance-runs)): one instance per table, each run on the thread that took it, which is why
+([Lake §11](lake.md#11-maintenance-runs)): one instance per table, each run on the thread that took it, which is why
 `threads` must leave two threads beyond `max-concurrent-maintenance` (one for the maintenance planner, one always free
 for the dispatcher, the reconciler and the notifier); the boot refuses a smaller value
 ([Configuration §7](configuration.md#7-config-validation)).

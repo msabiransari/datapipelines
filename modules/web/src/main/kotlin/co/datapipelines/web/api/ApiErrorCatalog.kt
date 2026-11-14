@@ -569,6 +569,8 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED,
             // §13.25 (#957) — a maintenance run's deadline refusal: recorded in the run row, never returned by a route.
             PipelineErrorCodes.Lake.MAINTENANCE_DEADLINE,
+            // §13.25 (#958) — the remover's clock-skew refusal: a maintenance pass's result, no route reaches it.
+            PipelineErrorCodes.Lake.MAINTENANCE_CLOCK_SKEW,
         )
 
     /**

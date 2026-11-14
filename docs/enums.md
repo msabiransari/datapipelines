@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.51 (living document — updated as enums evolve)
+**Status:** v1.52 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -530,7 +530,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `lake.delivery.unknown` | Publication has no confirmed verdict and remains eligible for settlement. Same details as `lake.delivery.published`. |
 | `lake.delivery.settled` | A takeover and fresh revision observation, or an ended execution before publication, established a terminal delivery outcome. Written with the outcome's audit event in the same transaction. Same details as `lake.delivery.published`. |
 
-**Lake maintenance audit events** (same `audit_log` table, #957, [Lake: maintenance runs](lake.md#10-maintenance-runs)). One row per ADMITTED run, written when the run ends, outside any transaction of the table (a refused insert is logged, never retried, and does not change the run). `user_id` is the provisioned system user's id. A task that admitted nothing (no permission, the catalog not `normal`, no slot, an earlier run live) writes no row.
+**Lake maintenance audit events** (same `audit_log` table, #957, [Lake: maintenance runs](lake.md#11-maintenance-runs)). One row per ADMITTED run, written when the run ends, outside any transaction of the table (a refused insert is logged, never retried, and does not change the run). `user_id` is the provisioned system user's id. A task that admitted nothing (no permission, the catalog not `normal`, no slot, an earlier run live) writes no row.
 
 | Value | Trigger |
 |---|---|
@@ -577,7 +577,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `lake.delivery.*` | Delivery structure and landing refusals | pipeline-contract §13.25 |
 | `lake.append.*` | Managed append structure, barrier and publication refusals | pipeline-contract §13.25 |
 | `lake.definition.*` | The managed lake's table definitions (#798): an unknown table or version, a lifecycle refusal (`not_draft`, `not_released`, `version_conflict`, `applied_version`, `name_taken`), an invalid body, a change the supported-change policy will not apply (`reviewed_change`, `breaking_change`), a table changed outside DP (`drift`), a table another operation holds (`table_busy`), and authoring off in this environment (`authoring_disabled`) | pipeline-contract §13.25 (defined in [Lake §4](lake.md#4-the-supported-change-policy)) |
-| `lake.maintenance.*` | The managed lake's maintenance runs (#957): a commit refused because the run's deadline had passed (`lake.maintenance.deadline`, recorded in the run row, never an HTTP response) | pipeline-contract §13.25 |
+| `lake.maintenance.*` | The managed lake's maintenance passes (#958): the remover's clock-skew refusal (`lake.maintenance.clock_skew`), a pass's result and never a route's status; and its maintenance runs (#957): a commit refused because the run's deadline had passed (`lake.maintenance.deadline`, recorded in the run row, never an HTTP response) | pipeline-contract §13.25 (defined in [Lake §10](lake.md#10-removal-and-cleanup) and [Lake §11](lake.md#11-maintenance-runs)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 
@@ -1078,7 +1078,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `RefreshStatus` | [Dashboards §5](dashboards.md#5-the-runtime) (`visualization` declares it; §38 here is the wire table) | metadata-db (the V43 CHECK), rest-api §23.3, the dashboard runtime |
 | `EvaluationCaller`, `ParameterEvaluationStatus`, `QueryAttemptOutcome` | the [parameter-set workspace spec §2](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) (`parameters` declares them; §39–§41 here are the wire tables) | metadata-db (the V48 CHECKs), the History tab (ui-screens §4.23) |
 | `LakeTableStatus`, `LakeApplyState`, `LakeChangeClass` | [lake.md](lake.md) (`lake` declares them; §46–§48 here are the wire tables) | metadata-db (the V54 CHECKs), the lake surfaces (P8) |
-| `MaintenanceRunKind`, `MaintenanceRunState`, `MaintenanceOutcome` | [lake.md](lake.md#10-maintenance-runs) (`lake` declares them; §52–§54 here are the wire tables) | metadata-db (the V60 CHECKs), the run's audit event (§15) |
+| `MaintenanceRunKind`, `MaintenanceRunState`, `MaintenanceOutcome` | [lake.md](lake.md#11-maintenance-runs) (`lake` declares them; §52–§54 here are the wire tables) | metadata-db (the V60 CHECKs), the run's audit event (§15) |
 | `LakeDeliveryState`, `LakeDeliveryFailurePhase`, `LakeDeliveryAttemptOutcome` | metadata-db §4.53–§4.54 (`lake` declares them; §49–§51 here are the wire tables) | delivery landing, publication and settlement (the V55 CHECKs) |
 | `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
 
@@ -1259,7 +1259,7 @@ Stored in `lake_delivery_attempts.outcome` ([Metadata DB §4.54](metadata-db.md#
 
 ## 52. `MaintenanceRunKind` — what a maintenance run was admitted to do
 
-Stored in `lake_maintenance_runs.kind` ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs)), decided at admission from the table's status ([Lake: maintenance runs](lake.md#10-maintenance-runs)).
+Stored in `lake_maintenance_runs.kind` ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs)), decided at admission from the table's status ([Lake: maintenance runs](lake.md#11-maintenance-runs)).
 
 | Enum | Wire value | Meaning |
 |---|---|---|
@@ -1302,7 +1302,8 @@ Carried in `lake_maintenance_runs.parts_json[].outcome` and in `lake.maintenance
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-14 | v1.51 | 957 (#957) | New **§52 `MaintenanceRunKind`**, **§53 `MaintenanceRunState`** (V60's CHECKs) and **§54 `MaintenanceOutcome`** (the parts' outcome words), held to the Kotlin enums by `MaintenanceEnumsSpecDriftTest`; **§15** gains `lake.maintenance.run_finished` (held by `LakeMaintenanceAuditEventsSpecDriftTest`); **§16** registers the `lake.maintenance.*` domain (pipeline-contract §13.25). |
+| 2026-11-14 | v1.52 | 957 (#957) — renumbered at the spec merge after #958's v1.51 | New **§52 `MaintenanceRunKind`**, **§53 `MaintenanceRunState`** (V60's CHECKs) and **§54 `MaintenanceOutcome`** (the parts' outcome words), held to the Kotlin enums by `MaintenanceEnumsSpecDriftTest`; **§15** gains `lake.maintenance.run_finished` (held by `LakeMaintenanceAuditEventsSpecDriftTest`); **§16**: #958's `lake.maintenance.*` row gains `lake.maintenance.deadline` (pipeline-contract §13.25; one domain, one row). |
+| 2026-11-14 | v1.51 | 958 (#958) | **§16** registers the `lake.maintenance.*` domain (pipeline-contract §13.25): the lake remover's `lake.maintenance.clock_skew`. |
 | 2026-11-13 | v1.50 | 814 (#814) | **§15 lake definition audit events:** `lake.definition.discarded` (`via`, `current_version`) and `lake.definition.draft_purged` (`via`, `table_deleted`), each written inside its write's transaction (dp-lake record §12, erratum 2026-11-12); held to `LakeAuditEvents` by `LakeAuditEventsSpecDriftTest`, which now counts five events. |
 | 2026-11-11 | v1.49 | #894 endpoint-root audit provenance | **§15 `template.version.released`:** under an API root the cascaded row names the API — `cascade_from_api_endpoint_id` + the API's `cascade_from_version`, no `cascade_from_pipeline_id` (the owner's 2026-11-11 exception to the frozen release-dependencies record §11). Pipeline-root rows and every other event unchanged; rows written before #894 are not rewritten (`cascade_root.family` tells them apart). |
 | 2026-11-08 | v1.48 | 860 (#860) | **§31 `RendererKind`:** `chart` (the chart document v1, judged by the schema served at `/schemas/chart/1/`) replaces `plotly`, which is retired and refused as `visualization.validation.renderer_unsupported` with a message naming `chart`. **§32 `AssertionKind`:** `mark_count` replaces `trace_count`; `text_visible` on a chart is proven by the mechanical check or left unjudged, never refused. |
