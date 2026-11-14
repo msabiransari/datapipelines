@@ -49,10 +49,10 @@ class ParquetAppendWriterOrderedIntegrationTest {
 
     @Test
     fun `O1a - both sort columns supplied - the write scan orders by their staged positions and every file is in order and stamped`() {
-        h.withTable(O1_SCHEMA, PartitionSpec.unpartitioned(), O1_ORDER) { table ->
-            // Staged order note, score, id, region: region (field id 3, schema index 1) is staged position 4 and score
-            // (field id 12, schema index 2) staged position 2. A field id (3, 12) or a schema index used as the
-            // position is refused or orders by the wrong columns.
+        withO1Table { table ->
+            // Staged order note, score, id, region: region (field id 3, schema position 2) is staged position 4 and
+            // score (field id 4, schema position 3) staged position 2. A field id (3, 4) or a schema position (2, 3)
+            // used as the position orders by the wrong columns.
             h.withInput("SELECT note, score, id, region FROM ($O1_ROWS) r") { input ->
                 withClue("non-vacuity: the staged arrival order is not the table's") { arrivalSorted(table, input) shouldBe false }
                 val written = writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {}
@@ -74,7 +74,7 @@ class ParquetAppendWriterOrderedIntegrationTest {
 
     @Test
     fun `O1b - the optional second sort column left out - ordered by the first, stamped`() {
-        h.withTable(O1_SCHEMA, PartitionSpec.unpartitioned(), O1_ORDER) { table ->
+        withO1Table { table ->
             h.withInput("SELECT note, id, region FROM ($O1_ROWS) r") { input ->
                 withClue("non-vacuity") { arrivalSorted(table, input) shouldBe false }
                 val written = writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {}
@@ -87,7 +87,7 @@ class ParquetAppendWriterOrderedIntegrationTest {
 
     @Test
     fun `O4 - the optional first sort column left out by the delivery - the append succeeds, ordered by the remaining one, stamped`() {
-        h.withTable(O1_SCHEMA, PartitionSpec.unpartitioned(), O1_ORDER) { table ->
+        withO1Table { table ->
             h.withInput("SELECT score, note, id FROM ($O1_ROWS) r") { input ->
                 withClue("non-vacuity") { arrivalSorted(table, input) shouldBe false }
                 val written = writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {}
@@ -293,17 +293,37 @@ class ParquetAppendWriterOrderedIntegrationTest {
             else -> value
         }
 
+    /** O1's table after its schema history: field id, schema position and (in each test) staged position all differ. */
+    private fun withO1Table(block: (Table) -> Unit) {
+        h.withTable(O1_SCHEMA, PartitionSpec.unpartitioned(), O1_ORDER) { table ->
+            table.updateSchema().deleteColumn("retired").commit()
+            val schema = table.schema()
+            val ids = listOf("region", "score").map { name -> schema.findField(name).fieldId() }
+            val positions = listOf("region", "score").map { name -> schema.columns().indexOfFirst { it.name() == name } + 1 }
+            withClue("the fixture's field ids differ from their schema positions") {
+                (ids to positions) shouldBe
+                    (listOf(3, 4) to listOf(2, 3))
+            }
+            block(table)
+        }
+    }
+
     private companion object {
         val PROFILE = LakeProfileFixtures.builtIn()
         const val SMALL_ROW_GROUP = 4096L
         const val O2_ROWS = 3500
 
-        /** Non-consecutive field ids; schema order id, region, score, note. */
+        /**
+         * Created with a leading `retired` column that [withO1Table] then deletes: the catalog assigns fresh ids in
+         * schema order, so only schema history makes a field id differ from its position. Afterwards: schema order
+         * id, region, score, note with field ids 2, 3, 4, 5.
+         */
         val O1_SCHEMA =
             Schema(
-                Types.NestedField.required(7, "id", Types.LongType.get()),
+                Types.NestedField.optional(1, "retired", Types.StringType.get()),
+                Types.NestedField.required(2, "id", Types.LongType.get()),
                 Types.NestedField.optional(3, "region", Types.StringType.get()),
-                Types.NestedField.optional(12, "score", Types.IntegerType.get()),
+                Types.NestedField.optional(4, "score", Types.IntegerType.get()),
                 Types.NestedField.optional(5, "note", Types.StringType.get()),
             )
         val O1_ORDER: SortOrder =
