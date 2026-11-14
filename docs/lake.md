@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.28 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed)
+**Status:** v1.29 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -809,6 +809,44 @@ catalog's clock and the answer's computed-at time; the ledger read is served by 
 route, tool or screen calls it yet (P8 shows it, and decides how a feed stopped on purpose is cleared). Nobody types
 an expected schedule.
 
+**Keep rules** (`retention.keep`, record §11b call 42; #960). A rule keeps *the table as it stood at the end of
+every* day, week, month, quarter or year, for its `keep_for`, as an Iceberg TAG on that snapshot; Iceberg's own
+snapshot expiry then keeps the snapshot and its files until the tag's maximum age runs out, and removes the tag at the
+first expiry after that. Nobody names, creates or deletes a keep.
+
+- *The names* are computed from the period and its label, never from user text: `dp-keep-day-2026-10-31`,
+  `dp-keep-week-2026-W44` (the ISO week, Monday to Sunday, numbered in its ISO week-year: 28 December 2026 is
+  `2026-W53`, 30 December 2024 is `2025-W01`), `dp-keep-month-2026-10`, `dp-keep-quarter-2026-Q4`, `dp-keep-year-2026`.
+- *The period's end* E is the first instant of the next period in `retention.keep_time_zone`, the profile's CURRENT
+  zone: a load at 21:00 New York time on the 31st belongs to the 31st under `America/New_York` and to the 1st under
+  UTC. Only closed periods are kept (E strictly before now) and never one that ended before the table's row was
+  created.
+- *The kept snapshot* is the one current at E, proved by the table's snapshot log alone: the newest log entry at or
+  before E. A period with no commit keeps the snapshot of the period before it (one snapshot can carry several tags).
+  When the log does not reach E (that history has expired, or the table had no snapshot then) no tag is made, on no
+  snapshot, and the period is reported **not kept: history not available** (`history_not_available`, [Enums
+  §55](enums.md#55-keepnotkeptreason--why-a-period-a-keep-rule-asks-for-has-no-keep)). A snapshot that merely
+  survives from before E is never taken instead.
+- *The end* of a keep is `E + keep_for` by calendar arithmetic on E's date in the profile's zone (31 January + 1 month
+  is the last day of February, 29 February + 1 year is 28 February; a day can be 23 or 25 hours). Because Iceberg
+  counts a tag's age from its snapshot's commit time, the tag's maximum age is `the end − the snapshot's commit time`,
+  never the rule's duration. A keep stands up to and including its end; one whose end is past is not created.
+- *Reconciled by name.* A keep asked for and absent is created; one that exists is never moved to another snapshot and
+  never judged against the log again, and its maximum age is set again only when the end now asked for differs (a
+  lengthened or shortened rule, or a changed zone, which moves every end by the zones' difference); one no rule asks
+  for any more is removed (its snapshot then expires like any other, under §9's protection). A tag whose period the
+  current zone has not closed yet (the zone just moved later) stands, and is not made again when the period closes:
+  so a rule holds at most its 400 keeps, plus for some hours after a zone change at most two day periods (one of
+  any longer period) that the new zone has reopened.
+- *Never touched:* only a ref that is a TAG and whose name starts with `dp-keep-` is ever created, re-aged or removed.
+  `main`, every branch whatever its name, and `dp-hold-` tags (named keeps, call 43) are not. A branch holding a keep's
+  name gets no tag beside it and the period is reported **not kept: name taken by a branch** (`name_taken_by_branch`).
+- *One commit.* `KeepReconcile` computes the plan as a pure function; `KeepTags` applies it as ONE table commit
+  through the maintenance run (the lease, the fence and the revision trigger), and commits nothing when the plan
+  creates, re-ages and removes nothing (`lake.maintenance.keep_reconciled`). It deletes no file. The cleanup part
+  runs it before it expires anything (#962); until then nothing calls it, and an `archived` table is reconciled like
+  an active one, a `purged` one never.
+
 **The guard** (`LakeTuningSourceGuardTest`, record M8) is a source scan, not a data-flow analysis. It is red when code
 under `append/` or `maintenance/` (a) holds a numeric literal other than 0 and 1 that its allowlist does not name,
 (b) refers to a numeric constant declared anywhere else in the main sources, `profiles/` included, whatever the case
@@ -896,6 +934,7 @@ reconciler and the notifier); the boot refuses otherwise, naming both keys
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.29 | 960 (#960, dp-lake P6) — renumbered at the spec merge after #961's v1.28 | **§11 Profiles** gains *Keep rules*: the computed `dp-keep-` tag names, the period's end in the profile's current zone, the kept snapshot proved by the snapshot log alone ("not kept: history not available"), the keep's end and the tag's maximum age, reconcile by name (a changed zone moves ends, never snapshots; a reopened period's tag stands), what is never touched (branches, `main`, `dp-hold-`; "not kept: name taken by a branch"), and the one commit. |
 | 2026-11-14 | v1.28 | 961 (#961, dp-lake P6) | §11 **Profiles** gains **Lateness**: what the three `reporting.*` values mean — the median gap of a feed's last published deliveries, late beyond the factor (exactly at it is on time), "not enough deliveries to say" under the minimum or at a zero median, each feed on its own, every feed of the ledger listed, a deprecated, archived or purged table never flagged; computed when asked by `LakeFeedLateness.forTable` (profile first, then one ledger statement on the catalog's clock), served by V62's index. No route, tool or screen yet (P8). |
 | 2026-11-14 | v1.27 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.26 | New **§11 Profiles**: the profile table and its two built-ins, the start-up seed of `production` from the two `maintenance.*` keys, the closed key list with its rules (incl. `retention.keep`'s two limits and the three `reporting.*` keys), what is not in a profile, the service changes and their audit, the two pause keys left on the table, the append writer reading the profile at each append, and the tuning-source guard with its limits (rule (b) sees a numeric constant whatever the case of its name, and a fully qualified top-level read); a fractional value that rounds onto its bound is refused. §1 "Not in the body": the table's tuning is its profile; `policy_json` holds only the pause keys. |
 | 2026-11-14 | v1.26 | 957 (#957) — renumbered at the spec merge after #958's v1.25 | New **§11 Maintenance runs** (§10 at the lane's base; #958's §10 landed first): one `lake-maintenance` task per table; the admission order (permission and mode, slot, declarations, scratch, one-statement run row, settlement, parts); the run's deadline on every lease; `busy` and `deadline` end the run; nothing concluded from an abandoned row; threads ≥ maintenance slots + 2. |
