@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.63 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.64 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-14
@@ -84,6 +84,8 @@ lake_tables_managed ──1:N── lake_table_definition_versions (table_id, no
 lake_tables_managed ──1:N── lake_column_semantics (the applied version's columns, ON DELETE CASCADE — §4.51)
 lake_profiles ──1:N── lake_tables_managed (profile_id, NOT NULL, no cascade — §4.49, §4.56)
 users ──0:N── lake_profiles (created_by / updated_by; NULL = written by the system — §4.56)
+lake_tables_managed ──1:0..1── lake_table_measurements (the planner's figures, ON DELETE CASCADE — §4.57)
+lake_tables_managed ──1:N── lake_storage_usage (one row per UTC day, ON DELETE CASCADE — §4.58)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -1933,6 +1935,7 @@ CREATE INDEX idx_lake_tables_managed_profile ON lake_tables_managed (profile_id)
 - **`policy_json`** holds only the table's two optional pause keys since V61 (record call 38): `pause.compaction_until` and `pause.cleanup_until`, each an instant at most 7 days after the catalog's `now()`, set and cleared by `LakeTablePauses` (a `purged` table takes none). A new row writes `{}`. Before V61 it held a copy of four configuration values written once at creation and never read; V61 replaced every row's copy with `{}` ([lake.md Profiles](lake.md#11-profiles)). Never promoted.
 - **`profile_id`** is the profile every maintenance run and every append of this table reads its tuning from ([§4.56](#456-lake_profiles)); NOT NULL, no cascade. A new row takes the default profile in its own `INSERT` by a sub-select (`(SELECT id FROM lake_profiles WHERE is_default)`), so no row is ever without one; a new definition version leaves it unchanged. **`profile_assigned_at`** is when the table was last moved to its profile (the migration's time for a row that existed before V61). `idx_lake_tables_managed_profile` serves "which tables does this profile govern" and the FK.
 - The lifecycle columns (`status`, the stamps, `replacement_id`, `purge_allowed_after`) exist for P8 and the purge flow; P3 writes `active` only.
+- **`purge_deleted_at`** (V62, #959) is NULL until a purge deletion of the table's files has finished (record call 34, "When a purge deletion is finished"); #962 stamps it, the maintenance planner only reads it: purge deletion is due for a `purged` row whose `purge_deleted_at` is NULL once the final revision's `protected_until` plus the orphan grace have passed ([§4.57](#457-lake_table_measurements)).
 - `uq_lake_tables_managed_namespace_name` refuses a second table of the same name in a namespace (`lake.definition.name_taken`); its index prefix also serves the FK on `namespace_id`.
 
 ### 4.50 `lake_table_definition_versions`
@@ -2163,6 +2166,105 @@ CREATE UNIQUE INDEX uq_lake_profiles_one_default ON lake_profiles (is_default) W
 - **`seed_pending`**: V61 inserts `production` (default, `seed_pending = true`) and `development` (window `00:00-00:00`), both with the built-in values. With the lake enabled, the start-up seed runs one statement: it copies `datapipelines.lake.maintenance.window` and `.max-bytes-rewritten-per-run` into `production` and clears the mark, `WHERE seed_pending` — once per database; every service edit clears the mark too, so an edited profile is never overwritten.
 - **`created_by` / `updated_by`**: NULL means written by the system — V61's two inserts (no user exists on a fresh database) and the start-up seed, which moves `updated_at` and leaves `updated_by` NULL (the `workspaces.created_by` precedent). Every service write sets the actor it was given and `updated_at`; a service write with no actor is refused.
 
+### 4.57 `lake_table_measurements`
+
+**The maintenance planner's figures, one row per managed table** (V62; #959, record §11a call 34, §11b call 46, the P6 lane cut L8). The planner (`lake-maintenance-planner`, [lake.md Maintenance runs](lake.md#11-maintenance-runs)) reads the table's current snapshot's manifests through the delete-refusing metadata FileIO — no data file, no lease, no maintenance slot — and writes this row. Per environment and never promoted.
+
+```sql
+CREATE TABLE lake_table_measurements (
+    table_id                    UUID        PRIMARY KEY REFERENCES lake_tables_managed(id) ON DELETE CASCADE,
+    attempt_id                  UUID        NOT NULL,
+    attempted_at                TIMESTAMPTZ NOT NULL,
+    attempt_profile_id          UUID        NOT NULL,
+    attempt_profile_updated_at  TIMESTAMPTZ NOT NULL,
+    error_code                  TEXT        NULL,
+    measured_at                 TIMESTAMPTZ NULL,
+    snapshot_id                 BIGINT      NULL,
+    current_bytes               BIGINT      NULL,
+    current_rows                BIGINT      NULL,
+    data_files                  BIGINT      NULL,
+    delete_files                BIGINT      NULL,
+    manifests                   BIGINT      NULL,
+    unsorted_files              BIGINT      NULL,
+    small_files                 BIGINT      NULL,
+    unsorted_over_cap           BIGINT      NULL,
+    candidate_bytes             BIGINT      NULL,
+    figures_profile_id          UUID        NULL,
+    figures_profile_updated_at  TIMESTAMPTZ NULL,
+    CONSTRAINT chk_lake_table_measurements_figures CHECK (
+        coalesce(current_bytes, 0) >= 0 AND coalesce(current_rows, 0) >= 0 AND coalesce(data_files, 0) >= 0
+        AND coalesce(delete_files, 0) >= 0 AND coalesce(manifests, 0) >= 0 AND coalesce(unsorted_files, 0) >= 0
+        AND coalesce(small_files, 0) >= 0 AND coalesce(unsorted_over_cap, 0) >= 0 AND coalesce(candidate_bytes, 0) >= 0),
+    CONSTRAINT chk_lake_table_measurements_measured CHECK (
+        (measured_at IS NULL) = (figures_profile_id IS NULL) AND (measured_at IS NULL) = (figures_profile_updated_at IS NULL)),
+    CONSTRAINT chk_lake_table_measurements_snapshot CHECK (
+        snapshot_id IS NOT NULL OR (current_bytes IS NULL AND current_rows IS NULL AND data_files IS NULL
+            AND delete_files IS NULL AND manifests IS NULL AND unsorted_files IS NULL AND small_files IS NULL
+            AND unsorted_over_cap IS NULL AND candidate_bytes IS NULL))
+);
+```
+
+**Notes:**
+- **The attempt.** Every attempt stamps `attempt_id`, `attempted_at` and the profile pair it ran under (`attempt_profile_id`, `attempt_profile_updated_at`), failed ones too. A failure or a timeout also stamps `error_code` ([Enums §56](enums.md#56-the-lake-maintenance-planners-error-codes-and-not-due-reasons)) and keeps the last good figures. A success writes the figures, `measured_at` and the pair the profile-dependent figures were computed under, and clears `error_code` — `WHERE table_id = ? AND attempt_id = ?`: an attempt that a restart or another instance has since replaced writes nothing.
+- **Profile-independent figures:** `snapshot_id`, `current_bytes` and `current_rows` (the live data files' sums, not net of row deletes), `data_files`, `delete_files`, `manifests`, `unsorted_files` (data files not stamped with the table's sort order). **Profile-dependent:** `small_files` (small files in candidate partitions), `unsorted_over_cap` (unsorted files larger than the profile's bytes cap) and `candidate_bytes` (every candidate file counted once; files larger than the cap left out: they fit no run).
+- **Valid only under the same profile pair** (brief 959 D3a): the profile-dependent figures are used for a decision only while `figures_profile_id` and `figures_profile_updated_at` equal the table's current profile id and that profile's current `updated_at`; otherwise they are stale and compaction is not due until a measurement under the current profile succeeds. Nothing compares thresholds value by value.
+- A measured table with no current snapshot has `measured_at` set and every figure NULL: a figure whose source was not read is NULL, never zero (call 46).
+- The planner picks the tables whose last attempt is oldest (never attempted first; a table not yet attempted under its current profile pair counts as never attempted). `ON DELETE CASCADE`: the row goes with its table.
+
+### 4.58 `lake_storage_usage`
+
+**One row per managed table per UTC day** (V62; #959, cut L8): the day's latest current bytes, rows and files, with the time they were measured. Written by every successful measurement that read a snapshot (`ON CONFLICT (table_id, usage_day) DO UPDATE`); a day without one has no row.
+
+```sql
+CREATE TABLE lake_storage_usage (
+    table_id      UUID        NOT NULL REFERENCES lake_tables_managed(id) ON DELETE CASCADE,
+    usage_day     DATE        NOT NULL,
+    measured_at   TIMESTAMPTZ NOT NULL,
+    current_bytes BIGINT      NOT NULL,
+    current_rows  BIGINT      NOT NULL,
+    current_files BIGINT      NOT NULL,
+    PRIMARY KEY (table_id, usage_day),
+    CONSTRAINT chk_lake_storage_usage_figures CHECK (current_bytes >= 0 AND current_rows >= 0 AND current_files >= 0)
+);
+CREATE INDEX idx_lake_storage_usage_measured ON lake_storage_usage (measured_at);
+```
+
+**Notes:**
+- **Growth per week** (call 46) = current bytes now minus the `current_bytes` of the newest row measured at least 7 days ago, returned with that row's real `measured_at`; the baseline can be more than seven days old (no bound is promised; the time says how old). No such row: growth is NULL, never zero.
+- **Retention:** every planner pass deletes the rows measured more than 35 days ago in one statement (`idx_lake_storage_usage_measured`). `usage_day` is the UTC date of `measured_at`.
+
+### 4.59 `lake_maintenance_plan`
+
+**The latest plan, one row** (V62; #959 D3), overwritten by every planner pass.
+
+```sql
+CREATE TABLE lake_maintenance_plan (
+    id                  INT         PRIMARY KEY DEFAULT 1,
+    planned_at          TIMESTAMPTZ NOT NULL,
+    tables_with_work    INT         NOT NULL,
+    tasks_enqueued      INT         NOT NULL,
+    tasks_moved         INT         NOT NULL,
+    tasks_still_queued  INT         NOT NULL,
+    tables_measured     INT         NOT NULL,
+    tables_not_measured INT         NOT NULL,
+    tables_stale        INT         NOT NULL,
+    tables_rule_silent  INT         NOT NULL,
+    CONSTRAINT chk_lake_maintenance_plan_one CHECK (id = 1),
+    CONSTRAINT chk_lake_maintenance_plan_counts CHECK (
+        tables_with_work >= 0 AND tasks_enqueued >= 0 AND tasks_moved >= 0 AND tasks_still_queued >= 0
+        AND tables_measured >= 0 AND tables_not_measured >= 0 AND tables_stale >= 0 AND tables_rule_silent >= 0)
+);
+```
+
+**Notes:**
+- `tables_with_work`: tables given a task (at least one due part not held back). `tasks_enqueued`: new tasks; `tasks_moved`: tasks still queued from an earlier plan whose due time this plan moved to their new rank; `tasks_still_queued` is the "falling behind" count — the tasks this plan found still queued from an earlier one. `tables_not_measured`: tables of the page not measured (a failure, a timeout, or the abandoned-read limit reached). `tables_stale`: tables whose profile-dependent figures are stale ([§4.57](#457-lake_table_measurements)). `tables_rule_silent`: tables for which a rule did not say whether work is due (counted, never due — the brief's silence rule).
+- The run-history read the plan makes is one statement over [§4.55](#455-lake_maintenance_runs) — finished runs only, served by `idx_lake_maintenance_runs_finished`:
+
+```sql
+CREATE INDEX idx_lake_maintenance_runs_finished
+    ON lake_maintenance_runs (table_id, ended_at DESC, started_at DESC, id DESC) WHERE state = 'finished';
+```
+
 
 ## 5. Index Strategy Summary
 
@@ -2182,6 +2284,7 @@ CREATE UNIQUE INDEX uq_lake_profiles_one_default ON lake_profiles (is_default) W
 | `lake_maintenance_runs` | `lake_maintenance_runs_pkey` | via PK | Run identity — every later write of the row is `WHERE id = ? AND state = 'running'` ([§4.55](#455-lake_maintenance_runs)) |
 | `lake_maintenance_runs` | `uq_lake_maintenance_runs_running` | explicit (partial, unique) | V60 (#957): at most one `running` run per table — the admitting statement's `ON CONFLICT (table_id) WHERE state = 'running'` arbiter |
 | `lake_maintenance_runs` | `idx_lake_maintenance_runs_table_started` | explicit | V60 (#957): a table's run history, newest first |
+| `lake_maintenance_runs` | `idx_lake_maintenance_runs_finished` | explicit (partial) | V62 (#959): the planner's one run-history statement — a table's FINISHED runs newest first by end, start and id ([§4.59](#459-lake_maintenance_plan)) |
 | `users` | `users_pkey` | via PK | Lookup by id (hot — per-request `is_active` check, D13) |
 | `users` | `users_email_key` | via UNIQUE | Login lookup by email; enforces one account per email |
 | `users` | `uq_users_provider_subject` | explicit (unique) | OIDC identity lookup `(provider, provider_subject)` |
@@ -2324,6 +2427,10 @@ CREATE UNIQUE INDEX uq_lake_profiles_one_default ON lake_profiles (is_default) W
 | `lake_profiles` | `lake_profiles_pkey` | via PK | Lookup by id — `forTable`'s join ([§4.56](#456-lake_profiles)) |
 | `lake_profiles` | `uq_lake_profiles_name` | via UNIQUE | V61: one profile per name — every service method addresses a profile by name |
 | `lake_profiles` | `uq_lake_profiles_one_default` | explicit (partial, unique) | V61: at most one default (`WHERE is_default`); also the new table `INSERT`'s sub-select |
+| `lake_table_measurements` | `lake_table_measurements_pkey` | via PK | V62: one row per table — the attempt stamp and the conditional figures write ([§4.57](#457-lake_table_measurements)) |
+| `lake_storage_usage` | `lake_storage_usage_pkey` | via PK | V62: one row per table per UTC day — the measurement's upsert and the growth baseline read ([§4.58](#458-lake_storage_usage)) |
+| `lake_storage_usage` | `idx_lake_storage_usage_measured` | explicit | V62: the pass's prune of rows measured more than 35 days ago |
+| `lake_maintenance_plan` | `lake_maintenance_plan_pkey` | via PK | V62: the one plan row (`id = 1`) |
 | `lake_table_definition_versions` | `lake_table_definition_versions_pkey` | via PK | `(table_id, version)` fetch ([§4.50](#450-lake_table_definition_versions)) |
 | `lake_table_definition_versions` | `uq_lake_table_definition_versions_one_draft` | explicit (partial, unique) | V54: one DRAFT per table — the physical guard behind copy-on-write |
 | `lake_column_semantics` | `lake_column_semantics_pkey` | via PK | A table's columns by field id; its prefix serves the projection's delete-and-rebuild ([§4.51](#451-lake_column_semantics)) |
@@ -2411,6 +2518,9 @@ table and the test's expected-table list in the same commit.
 | `lake_maintenance_runs` | environment-local | LakeMaintenanceRun | — | — | This deployment's maintenance runs over its own lake: runtime coordination (the run's exclusion and deadline) and its record, never authored and meaningless beside another environment's catalog |
 | `lake_column_semantics` | derived | LakeTableDefinition | — | — | Rebuilt from the applied body inside the `applied` transaction; a receiver derives its own when it applies |
 | `lake_profiles` | environment-local | LakeProfile | — | — | This deployment's maintenance and write tuning (record call 35); per environment, never promoted — a receiver keeps its own profiles and its tables keep theirs |
+| `lake_table_measurements` | derived | LakeMaintenancePlan | — | — | Measured from THIS environment's Iceberg metadata by its planner; rebuilt by the next passes, never promoted |
+| `lake_storage_usage` | derived | LakeMaintenancePlan | — | — | Daily figures of this environment's tables, from its own measurements; kept 35 days, never promoted |
+| `lake_maintenance_plan` | environment-local | LakeMaintenancePlan | — | — | The latest plan of this deployment's maintenance queue: runtime state, meaningless beside another environment's |
 
 ---
 
@@ -2726,6 +2836,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.64 | V62 (#959, dp-lake P6) | **V62 — the lake maintenance planner.** New **§4.57 `lake_table_measurements`** (one row per table: the attempt stamp and its profile pair, the error, the profile-independent and profile-dependent figures with the pair they were computed under, NULL never zero), **§4.58 `lake_storage_usage`** (one row per table per UTC day, kept 35 days) and **§4.59 `lake_maintenance_plan`** (one row, the latest plan's counts); **§4.49 `lake_tables_managed` gains `purge_deleted_at`** (#962 stamps it, the planner reads it); `idx_lake_maintenance_runs_finished` serves the plan's one run-history statement. §3 ERD, §5 (five indexes) and §5A (two derived, one environment-local) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-14 | v1.63 | V61 (#956, dp-lake P6) — renumbered at the spec merge after #957's V60 and v1.62 | **V61 — lake maintenance profiles.** New **§4.56 `lake_profiles`** (name, the one-default partial unique index, the typed `values_json`, `seed_pending`, audit columns with NULL = written by the system; the built-ins `production` and `development`); **§4.49 `lake_tables_managed` gains `profile_id`** (NOT NULL, FK, no cascade; every existing row gets `production`) **and `profile_assigned_at`**, and its `policy_json` note is rewritten: the column now holds only the two pause keys, and V61 set every row's copy to `{}`. §3 ERD, §5 (four indexes) and §5A (`lake_profiles` environment-local) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-14 | v1.62 | 957 (#957, V60) | **§4.55 `lake_maintenance_runs`** (new): one row per admitted lake maintenance run, the run's exclusion (one `running` row per table, partial unique index) and its deadline; admitted by one statement that also abandons an expired predecessor; every later write conditional on `running`. |
 | 2026-11-13 | v1.61 | 939 (#939, no migration) | **§4.45** Notes: `lake_control.protection_interval` mirrors `datapipelines.lake.retention.protection-days` — the normal-mode settle sweep keeps it equal and stamps `protected_until` from the setting, not the column; the column's `DEFAULT` is only what a database holds before its first normal-mode tick. No schema change. |

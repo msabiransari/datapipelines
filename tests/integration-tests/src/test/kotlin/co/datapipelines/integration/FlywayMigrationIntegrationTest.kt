@@ -196,6 +196,9 @@ class FlywayMigrationIntegrationTest {
                 // #956 (V61) — lake maintenance profiles: the profile table with its two built-ins, every managed table's
                 // profile reference, and policy_json emptied to the table's pause keys (metadata-db §4.49, §4.56).
                 "61|lake profiles|true",
+                // #959 (V62) — the lake maintenance planner: measurements, daily usage, the one plan row, the purge
+                // deletion stamp and the run-history index (metadata-db §4.57–§4.59).
+                "62|lake maintenance plan|true",
             )
     }
 
@@ -1114,6 +1117,8 @@ class FlywayMigrationIntegrationTest {
                 "profile_assigned_at",
                 "profile_id",
                 "purge_allowed_after",
+                // #959 (V62) — when a purge deletion finished; 962 stamps it, the planner reads it (§4.49).
+                "purge_deleted_at",
                 "purged_at",
                 "purged_by",
                 "replacement_id",
@@ -1726,7 +1731,7 @@ class FlywayMigrationIntegrationTest {
 
     @Test
     @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (56 after #956)
-    fun `creates exactly the fifty-five tables of metadata-db §4`() {
+    fun `creates exactly the fifty-eight tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1771,6 +1776,10 @@ class FlywayMigrationIntegrationTest {
                 "lake_maintenance_runs",
                 // #956 (V61) — lake maintenance profiles (metadata-db §4.56).
                 "lake_profiles",
+                // #959 (V62) — the planner's measurements, daily usage and its one plan row (metadata-db §4.57–§4.59).
+                "lake_table_measurements",
+                "lake_storage_usage",
+                "lake_maintenance_plan",
                 // 118 (V25) — the learned semantic layer.
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
@@ -1900,6 +1909,13 @@ class FlywayMigrationIntegrationTest {
                 "lake_maintenance_runs.lake_maintenance_runs_pkey",
                 "lake_maintenance_runs.uq_lake_maintenance_runs_running",
                 "lake_maintenance_runs.idx_lake_maintenance_runs_table_started",
+                // #959 (V62) — the planner's run-history read (finished runs, newest first); its three tables' keys and
+                // the usage prune.
+                "lake_maintenance_runs.idx_lake_maintenance_runs_finished",
+                "lake_table_measurements.lake_table_measurements_pkey",
+                "lake_storage_usage.lake_storage_usage_pkey",
+                "lake_storage_usage.idx_lake_storage_usage_measured",
+                "lake_maintenance_plan.lake_maintenance_plan_pkey",
                 "lake_column_semantics.lake_column_semantics_pkey",
                 "lake_namespaces.lake_namespaces_pkey",
                 "lake_namespaces.uq_lake_namespaces_name",
@@ -2111,6 +2127,9 @@ class FlywayMigrationIntegrationTest {
                 "chk_lake_deliveries_state",
                 "chk_lake_delivery_attempts_outcome",
                 "chk_lake_delivery_attempts_sha256",
+                // #959 (V62) — the one plan row and its non-negative counts (§4.59); `plan` sorts before `runs`.
+                "chk_lake_maintenance_plan_counts",
+                "chk_lake_maintenance_plan_one",
                 // #957 (V60) — the run row's lists, ended iff not running, non-negative figures, the parts array (§4.55).
                 "chk_lake_maintenance_runs_ended",
                 "chk_lake_maintenance_runs_figures",
@@ -2133,6 +2152,8 @@ class FlywayMigrationIntegrationTest {
                 "chk_lake_reference_scans_scanner_version",
                 "chk_lake_reference_scans_status",
                 "chk_lake_reference_scans_version",
+                // #959 (V62) — a usage row's non-negative figures (§4.58); `s` sorts between `reference` and `table`.
+                "chk_lake_storage_usage_figures",
                 // #798 (V54) — the definition version's body shape, stamps, status, floor and surface (§4.50), before
                 // `chk_lake_table_format` (`d` < `f`).
                 "chk_lake_table_definition_versions_body",
@@ -2144,6 +2165,11 @@ class FlywayMigrationIntegrationTest {
                 // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
+                // #959 (V62) — a measurement's non-negative figures, the measured-time/profile-pair pairing, and every
+                // figure NULL without a snapshot (§4.57); `measurements` sorts between `format` and `references`.
+                "chk_lake_table_measurements_figures",
+                "chk_lake_table_measurements_measured",
+                "chk_lake_table_measurements_snapshot",
                 "chk_lake_table_references_counters",
                 "chk_lake_table_references_resolved",
                 "chk_lake_table_references_site",

@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.81 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.82 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-14
@@ -523,6 +523,19 @@ The `lake-maintenance` scheduler task, one instance per managed table ([Lake: ma
 | WARN | `lake.maintenance.close_refused` | The run's close found the row no longer `running` (a successor abandoned it): nothing is overwritten and nothing concluded | `run_id`, `table_id`, `state` (the state the worker would have written) |
 | INFO | `lake.maintenance.finished` | An admitted run ended (also after `close_refused`, with `state=abandoned`) | `run_id`, `table_id`, `state`, `error_code`, `parts` (`name:outcome` per part, comma-separated) |
 
+#### 3.4V Lake maintenance planner events (#959)
+
+The `lake-maintenance-planner` recurring task ([Lake: maintenance runs](lake.md#11-maintenance-runs)). Events carry table ids and counts only: no path, no storage endpoint, no message text, no credential. Failures use §3.4G's safe shape (`cause` = the class, the first SQLSTATE).
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| INFO | `lake.maintenance.planned` | A plan ended: its row (`lake_maintenance_plan`, [Metadata DB §4.59](metadata-db.md#459-lake_maintenance_plan)) was written | `tables_with_work`, `tasks_enqueued`, `tasks_moved`, `tasks_still_queued` (the "falling behind" count), `tables_measured`, `tables_not_measured`, `tables_stale`, `tables_rule_silent` |
+| WARN | `lake.maintenance.plan_reads_exhausted` | `plan-max-abandoned-reads` abandoned reads are still running: the plan measures nothing more, the page's rest is not attempted and not stamped, and the plan still decides and enqueues from the stored figures (once per plan) | `not_measured`, `abandoned_reads` |
+| WARN | `lake.maintenance.plan_read_abandoned` | A table's measurement was still running at `plan-table-timeout`: its attempt and error (`timeout`) are stamped, the last good figures kept, the reader retired with the read | `table_id`, `elapsed_ms`, `abandoned_reads` |
+| INFO | `lake.maintenance.plan_read_ended` | An abandoned read ended: it wrote nothing, closed its client, and its thread ended; the limit frees one | `table_id`, `published` (always `false`) |
+| WARN | `lake.maintenance.plan_measure_failed` | A measurement failed: its attempt and error code are stamped, the last good figures kept | `table_id`, `cause` |
+| WARN | `lake.maintenance.plan_write_failed` | A measurement's own database write failed: the row keeps what it held | `table_id`, `cause` |
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -825,6 +838,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.82 | 959 (#959) | **§3.4V** (new): the six `lake.maintenance.*` events of the maintenance planner: planned, plan_reads_exhausted, plan_read_abandoned, plan_read_ended, plan_measure_failed, plan_write_failed. |
 | 2026-11-14 | v1.81 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.80 | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |
 | 2026-11-14 | v1.80 | 957 (#957) — renumbered at the spec merge after #958's v1.79 | **§3.4U** (new; §3.4T at the lane's base, #958's §3.4T landed first): the ten `lake.maintenance.*` events of the per-table maintenance task: refused, skipped, held, waiting, admitted, abandoned, settlement_deferred, deadline_refused, close_refused, finished. |
 | 2026-11-14 | v1.79 | 958 (#958) | New **§3.4T**, the lake remover's six events: WARN `lake.removal.refused`, INFO `lake.removal.ended`, WARN `lake.removal.failed`, `lake.removal.batch_failed`, `lake.removal.marker_left` and `lake.removal.unexpected_dp_key`. Counts, identifiers and one relative unexpected key; never a key list or a credential. |

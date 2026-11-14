@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.27 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles)
+**Status:** v1.28 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #959, the maintenance planner)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -812,9 +812,9 @@ claims exactly these five rules.
 ## 11. Maintenance runs
 
 A maintenance run is the frame every maintenance operation executes in (#957; dp-lake record §11, §11a call 34). This
-section describes the frame; the operations (cleanup, manifest rewrite, compaction, the purged table's deletion) and
-the planner that enqueues runs are their own lanes, and until they land no part is registered and a run records
-`nothing_to_do`.
+section describes the frame and the planner that enqueues runs (#959); the operations (cleanup, manifest rewrite,
+compaction, the purged table's deletion) are their own lanes, and until they land no part is registered, the planner
+enqueues nothing and a run records `nothing_to_do`.
 
 **One task per table.** `lake-maintenance` is a keyed scheduler task whose key is the table id
 ([Scheduler: system jobs](scheduler.md#85-system-jobs)): enqueueing an instance that already exists changes nothing, so a
@@ -872,12 +872,80 @@ reconciler and the notifier); the boot refuses otherwise, naming both keys
 ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), actor the system user; log events
 [Observability §3.4U](observability.md#34u-lake-maintenance-run-events-957).
 
+**The planner** (#959; record §11a call 34, §11b call 46; the P6 lane cut L3, L8, L13, L18). `lake-maintenance-planner`
+is a recurring scheduler task, one run at a time cluster-wide, every `datapipelines.lake.maintenance.plan-interval`
+after the previous run ended ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)); its beans exist only
+with the lake enabled. Each run measures, decides, then enqueues; it writes only its three tables and the scheduler's
+queue, and table ids come from the catalog rows, never from a request.
+
+1. **Measure** ([Metadata DB §4.57](metadata-db.md#457-lake_table_measurements)). The `plan-page-size` managed tables
+   (not purged) whose last attempt is oldest; a table never attempted, or not yet attempted under its current profile
+   (id and `updated_at`), counts as never attempted, once: that attempt stamps the current pair whether it succeeds or
+   fails. One table at a time, each under `plan-table-timeout`: the measurer reads the table's profile once, then the
+   current snapshot's manifests through the delete-refusing metadata FileIO — no data file, no lease, no maintenance
+   slot — and computes the figures under that copy of the profile: current bytes, rows, data and delete files,
+   manifests and files not stamped with the table's sort order (profile-independent), and the small files in candidate
+   partitions, the unsorted files larger than the profile's cap and the candidate bytes (profile-dependent; a file both
+   small and unsorted counts once, a file larger than the cap is left out). A table with no snapshot is measured with
+   every figure NULL. A failure or a timeout stamps the attempt and its error and keeps the last good figures.
+2. **The planner's own readers.** Each measurement runs on a reader: one daemon thread with the object-store client it
+   built, reused for the next table when the measurement ends in time. A read still running at the bound is
+   **abandoned**: its attempt and error (`timeout`) are stamped, the reader is retired with the read (never reused, never
+   interrupted into a second use), and the next table gets a new reader, so one stalled read cannot stop the page. A
+   table with an abandoned read still running is not picked again until that read ends. At most
+   `plan-max-abandoned-reads` are outstanding; at the limit the plan measures nothing more, counts the page's rest as
+   not measured (`lake.maintenance.plan_reads_exhausted`), and still decides from the stored figures. An abandoned read
+   that ends writes nothing, closes its client on its own thread, and frees one.
+3. **One winner per attempt.** An attempt moves `running` → `publishing` (the reader, before it writes) or `running` →
+   `abandoned` (the pass, at the bound) by one compare-and-set; an abandoned attempt never publishes, and a reader that
+   won a moment before the bound gets its one bounded write waited for. The figures' write is also conditional on the
+   row's attempt stamp still being this attempt's (a restart or another instance may have attempted the table since).
+4. **Daily usage** ([§4.58](metadata-db.md#458-lake_storage_usage)): each successful measurement with a snapshot keeps
+   the UTC day's latest current bytes, rows and files; the pass deletes rows measured more than 35 days ago. Growth per
+   week = current bytes minus those of the newest row measured at least 7 days ago, returned with that row's real time
+   (it can be more than seven days old); none → NULL, never zero.
+5. **Decide** — `MaintenanceDue`, a pure function of the stored rows, the profile, the table's pauses, the run history
+   and `now`, exactly the record's "Which table gets which work", "Due, per operation" and "Order", plus: a table never
+   measured, or whose measurement failed, has no rewrite work (cleanup and purge deletion are due by time alone); stale
+   figures (another profile, or measured before the profile's last save) make compaction not due —
+   `not measured (profile changed)` — and add nothing to the score, while manifest rewrite is still decided from the
+   manifest count and the current threshold; an unsorted file larger than the cap is left out of the score, and a table
+   with nothing else to rewrite reports `capacity`; after a rewrite attempt that ended `capacity` with nothing committed
+   and nothing left for a fresh run, rewrite work waits `maintenance.cleanup_interval_hours` unless the profile or the
+   assignment changed since, while `deadline`, or `capacity` with a file left for a fresh run, is due again at the next
+   plan (L18); purge deletion is due for a `purged` table whose `purge_deleted_at` is NULL once the final revision's
+   `protected_until` plus the orphan grace have passed; an operation whose part is not registered is never due. When no
+   rule says, the work is not due and the table is counted (`tables_rule_silent`). The not-due words are
+   [Enums §56](enums.md#56-the-lake-maintenance-planners-error-codes-and-not-due-reasons).
+6. **Run history**: ONE statement per plan over the finished runs only (a `failed`, `abandoned` or `running` run supplies
+   nothing) and their attempted part entries: the last finished cleanup, the last finished rewrite (`manifest_rewrite` or
+   `compaction` `done` / `nothing_to_do`, or `compaction` `capacity` with something committed; the order's tie-break),
+   and the last rewrite attempt (an attempted `compaction` entry, with #969's `committed` and `left_for_fresh_run`; a
+   `capacity` entry without them gets no wait and is counted silent).
+7. **The gate** (L13) is one function used by the plan and, through #957's port, by the worker before each part: the
+   profile's window (`HH:MM-HH:MM`, UTC; it may cross midnight; a start equal to the end is the whole day) holds
+   compaction only; `pause.compaction_until` holds compaction and manifest rewrite; `pause.cleanup_until` holds cleanup;
+   nothing holds purge deletion. The worker records a held part `outside_window` (`outside window`) or `paused_until`
+   (`paused until <instant>`).
+8. **Enqueue.** A table gets a task only when at least one due part is not held. Every such table is ranked, whether its
+   task is new or still queued: rank reaches the scheduler as a due time, plan time + one millisecond per position —
+   `enqueueIfAbsent` for a new one, a move for one still queued, each its own statement; a running task is left, and a
+   queued task whose table has nothing due any more is left alone. The plan row
+   ([§4.59](metadata-db.md#459-lake_maintenance_plan)) is overwritten with the counts, `tasks_still_queued` being the
+   "falling behind" count; log events [Observability §3.4V](observability.md#34v-lake-maintenance-planner-events-959).
+
+**The figures read method** (`PlanFiguresReader.figures`, for P8) returns, per table, current size, rows and files, the
+small files and candidate bytes with their state (`current`, `stale`, `never_measured`,
+[Enums §55](enums.md#55-figuresstate--whether-a-tables-planner-figures-may-be-used)), growth per week with its baseline's
+time, and the measurement's times; a figure whose source was not read is NULL.
+
 ---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.28 | 959 (#959, dp-lake P6) | **§11 Maintenance runs** gains the planner: the recurring `lake-maintenance-planner` task and its four keys; measuring from the manifests on the planner's own readers (abandoned reads, their limit, one winner per attempt, the stamp fence); stale figures and the measured-first rule; daily usage and growth; the due function, the one run-history statement, the gate shared with the worker, and the ranked enqueue; the figures read method. |
 | 2026-11-14 | v1.27 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.26 | New **§11 Profiles**: the profile table and its two built-ins, the start-up seed of `production` from the two `maintenance.*` keys, the closed key list with its rules (incl. `retention.keep`'s two limits and the three `reporting.*` keys), what is not in a profile, the service changes and their audit, the two pause keys left on the table, the append writer reading the profile at each append, and the tuning-source guard with its limits (rule (b) sees a numeric constant whatever the case of its name, and a fully qualified top-level read); a fractional value that rounds onto its bound is refused. §1 "Not in the body": the table's tuning is its profile; `policy_json` holds only the pause keys. |
 | 2026-11-14 | v1.26 | 957 (#957) — renumbered at the spec merge after #958's v1.25 | New **§11 Maintenance runs** (§10 at the lane's base; #958's §10 landed first): one `lake-maintenance` task per table; the admission order (permission and mode, slot, declarations, scratch, one-statement run row, settlement, parts); the run's deadline on every lease; `busy` and `deadline` end the run; nothing concluded from an abandoned row; threads ≥ maintenance slots + 2. |
 | 2026-11-14 | v1.25 | 958 (#958) | New §10 **Removal and cleanup**: the remover's two passes (orphans, purge), their fixed order, the reachable set, the candidates and hints, the `dp/` rule and its two marker cases, the clock-skew probe (`lake.maintenance.clock_skew`), the purge answer, what counts as deleted, and the result (inventory and visits). No production caller before 962; no configuration key or migration. |
