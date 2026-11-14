@@ -190,14 +190,16 @@ class StorageInventoryIntegrationTest {
         val events = capturingLogEvents(log) { result = h.cleanup(observer = f.observer(dropsOne)).run(h.run(t)) }
 
         val r = requireNotNull(result)
-        val line = events.map { it.formattedMessage }.single { "event=lake.inventory.totals_mismatch" in it }
+        val lines = events.map { it.formattedMessage }.filter { "event=lake.inventory.totals_mismatch" in it }
         val listed = f.observations.last().inventory
-        println("(964 B8 mismatch) outcome=${r.outcome} deleted=${r.figures.files} observer=${r.details["observer"]} event: $line")
+        println("(964 B8 mismatch) outcome=${r.outcome} deleted=${r.figures.files} observer=${r.details["observer"]} event: $lines")
+        // The stored rows and the observer's outcome first: they are what D5 protects; the log line is its report.
         f.measured(t) shouldBe first
+        r.details["observer"] shouldBe ObserverOutcome.FAILED.wire
         r.outcome shouldBe MaintenanceOutcome.DONE
         r.figures.files shouldBe 1
         h.exists(orphan) shouldBe false
-        r.details["observer"] shouldBe ObserverOutcome.FAILED.wire
+        val line = lines.single()
         line shouldContain "listed_objects=${listed.size} listed_bytes=${listed.sumOf { it.size }}"
         line shouldContain "row_objects=${listed.size - 1}"
         line shouldNotContain h.target(t).keyPrefix
