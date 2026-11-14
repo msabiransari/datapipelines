@@ -8,6 +8,12 @@ import co.datapipelines.lake.LakeLeases
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.append.LakeAppendAutoConfiguration
 import co.datapipelines.lake.append.LakeAppendRuntime
+import co.datapipelines.lake.maintenance.cleanup.CleanupObserver
+import co.datapipelines.lake.maintenance.cleanup.CleanupPart
+import co.datapipelines.lake.maintenance.cleanup.CleanupReads
+import co.datapipelines.lake.maintenance.cleanup.CleanupRemoval
+import co.datapipelines.lake.maintenance.cleanup.MaintenanceRunStates
+import co.datapipelines.lake.maintenance.cleanup.PurgeDeletionPart
 import co.datapipelines.lake.maintenance.plan.MaintenanceDue
 import co.datapipelines.lake.maintenance.plan.MaintenancePlanner
 import co.datapipelines.lake.maintenance.plan.PlanBounds
@@ -16,6 +22,8 @@ import co.datapipelines.lake.maintenance.plan.PlanReaders
 import co.datapipelines.lake.maintenance.plan.PlanRepository
 import co.datapipelines.lake.maintenance.plan.ProfileMaintenanceGate
 import co.datapipelines.lake.maintenance.plan.TableMeasurer
+import co.datapipelines.lake.maintenance.remove.RunStates
+import co.datapipelines.lake.profiles.LakeProfiles
 import co.datapipelines.scheduler.SystemJobQueue
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
@@ -23,6 +31,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import software.amazon.awssdk.services.s3.S3Client
 import java.time.Clock
 import java.time.Duration
 import java.util.concurrent.Executors
@@ -104,6 +113,55 @@ class LakeMaintenanceAutoConfiguration {
             clock = Clock.systemUTC(),
         )
     }
+
+    /** #962 D5: the run rows' states, the only thing that lets the remover delete another run's clock marker. */
+    @Bean
+    fun lakeMaintenanceRunStates(dataSource: DataSource): RunStates = MaintenanceRunStates(LakeAppendRuntime.statements(dataSource))
+
+    /** #962: the remover and its reads, built once (958's rules; the catalog's clock; the deployment's grace). */
+    @Bean
+    fun lakeCleanupRemoval(
+        dataSource: DataSource,
+        properties: LakeProperties,
+        catalogs: LakeCatalogs,
+        lakeLeases: LakeLeases,
+        lakeS3Client: S3Client,
+        lakeMaintenanceRunStates: RunStates,
+    ): CleanupRemoval =
+        CleanupRemoval.of(properties, LakeAppendRuntime.statements(dataSource), catalogs, lakeLeases, lakeS3Client, lakeMaintenanceRunStates)
+
+    @Bean
+    fun lakeCleanupReads(
+        dataSource: DataSource,
+        properties: LakeProperties,
+        catalogs: LakeCatalogs,
+    ): CleanupReads = CleanupReads(LakeAppendRuntime.statements(dataSource), catalogs::metadataFileIo, properties.name)
+
+    /** #962 D2b: the default observer does nothing; 964's storage breakdown replaces it. */
+    @Bean
+    @ConditionalOnMissingBean
+    fun lakeCleanupObserver(): CleanupObserver = CleanupObserver.NONE
+
+    /**
+     * #962 D1: the `cleanup` part. Registering it makes the planner's cleanup due (959 L16). The expiry window is the
+     * DEPLOYMENT's `retention.protection-days`, never a profile value (call 35).
+     */
+    @Bean
+    fun lakeCleanupPart(
+        properties: LakeProperties,
+        lakeCleanupReads: CleanupReads,
+        lakeCleanupRemoval: CleanupRemoval,
+        lakeProfiles: LakeProfiles,
+        lakeCleanupObserver: CleanupObserver,
+    ): CleanupPart = CleanupPart.of(properties, lakeCleanupReads, lakeCleanupRemoval, lakeProfiles, lakeCleanupObserver)
+
+    /** #962 D1, D4: the `purge_deletion` part, the only part a `purged` table runs. */
+    @Bean
+    fun lakePurgeDeletionPart(
+        properties: LakeProperties,
+        lakeCleanupReads: CleanupReads,
+        lakeCleanupRemoval: CleanupRemoval,
+    ): PurgeDeletionPart = PurgeDeletionPart.of(properties, lakeCleanupReads, lakeCleanupRemoval)
 
     @Bean
     @ConditionalOnMissingBean

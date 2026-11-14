@@ -571,6 +571,8 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Lake.MAINTENANCE_DEADLINE,
             // §13.25 (#958) — the remover's clock-skew refusal: a maintenance pass's result, no route reaches it.
             PipelineErrorCodes.Lake.MAINTENANCE_CLOCK_SKEW,
+            // §13.25 (#962) — a cleanup or purge deletion that did not finish its removal: a run's error, no route.
+            PipelineErrorCodes.Lake.MAINTENANCE_CLEANUP_INCOMPLETE,
             // §13.25 (#956) — the profile and pause services have no route before P8.
             PipelineErrorCodes.Lake.PROFILE_INVALID,
             PipelineErrorCodes.Lake.PROFILE_NOT_FOUND,

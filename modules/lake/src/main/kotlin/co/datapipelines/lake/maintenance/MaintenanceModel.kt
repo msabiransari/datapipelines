@@ -51,15 +51,21 @@ data class PartFigures(
     }
 }
 
-/** A part's answer: its outcome, the figures of what it did, and the instant of a `paused_until`. */
+/**
+ * A part's answer: its outcome, the figures of what it did, the instant of a `paused_until`, and [details], the part's
+ * own result fields (#962 D3), written at the top level of its `parts_json` entry beside the fixed keys. A detail value
+ * is a JSON scalar, a list or a map of them; a detail never takes a fixed key's name ([PartRecord.FIXED_KEYS]).
+ */
 data class PartResult(
     val outcome: MaintenanceOutcome,
     val figures: PartFigures = PartFigures.NONE,
     val until: Instant? = null,
+    val details: Map<String, Any?> = emptyMap(),
 ) {
     init {
         require(outcome != MaintenanceOutcome.FAILED) { "a part never answers failed: it throws" }
         require((outcome == MaintenanceOutcome.PAUSED_UNTIL) == (until != null)) { "only paused_until carries an instant: $this" }
+        require(details.keys.none { it in PartRecord.FIXED_KEYS }) { "a part detail never takes a fixed key: ${details.keys}" }
     }
 
     companion object {
@@ -135,7 +141,15 @@ data class PartRecord(
     val reason: String? = null,
     /** A failed part's error code. */
     val errorCode: String? = null,
-)
+    /** The part's own result fields ([PartResult.details]); empty for a part recorded without being started or failed. */
+    val details: Map<String, Any?> = emptyMap(),
+) {
+    companion object {
+        /** The keys every `parts_json` entry carries (V60); a part's details are written beside them, never over them. */
+        val FIXED_KEYS: Set<String> =
+            setOf("name", "outcome", "attempted", "files", "bytes", "deferred_deletions", "until", "reason", "error_code")
+    }
+}
 
 /** The settlement step's figures in the run row (D6a). */
 data class SettlementRecord(

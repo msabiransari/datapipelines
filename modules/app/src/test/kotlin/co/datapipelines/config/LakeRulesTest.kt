@@ -94,6 +94,17 @@ class LakeRulesTest {
         enabled(LakeRules.JOB_TIMEOUT to "soon").single() shouldStartWith LakeRules.JOB_TIMEOUT
     }
 
+    /**
+     * #962's time recipe (C8, C9, C9a) runs at J = 3585 s, S = 5 s, G = 2 h. The rule admits it (7200 > 3585 + 5 + 3600 =
+     * 7190: G clears the bound by 10 s, the rule's minimum here) and refuses one hour less (3600 ≤ 7190).
+     */
+    @Test
+    fun `962 - the cleanup time recipe's settings are admitted and one hour less of grace is refused`() {
+        val recipe = arrayOf(LakeRules.JOB_TIMEOUT to "3585s", LakeRules.STATEMENT_TIMEOUT_SECONDS to "5")
+        enabled(LakeRules.ORPHAN_GRACE_HOURS to "2", *recipe) shouldContainExactly emptyList()
+        enabled(LakeRules.ORPHAN_GRACE_HOURS to "1", *recipe).single() shouldStartWith "${LakeRules.ORPHAN_GRACE_HOURS} × 3600 (3600)"
+    }
+
     @Test
     fun `the lease wait stays under the node query ceiling and a delivery's staging fits the scratch budget`() {
         enabled(LakeRules.LEASE_WAIT_SECONDS to "900").single() shouldStartWith LakeRules.LEASE_WAIT_SECONDS

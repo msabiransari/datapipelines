@@ -403,8 +403,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 516 → 518 with #956 (recounted with [STATUS_ROW_REGEX] on the merged document, after #957's row): §13.25
          * gains `lake.profile.invalid` and `lake.profile.not_found` (HTTP `—`, no route before P8), landed in the
          * SAME commit as their constants and `NEVER_RETURNED_LIVE` entries.
+         * 518 → 519 with #962: §13.25 gains `lake.maintenance.cleanup_incomplete` (HTTP `—`), a cleanup or purge
+         * deletion that did not finish its removal, landed in the SAME commit as its constant and its
+         * `NEVER_RETURNED_LIVE` entry.
          */
-        const val SECTION_13_ROW_COUNT = 518
+        const val SECTION_13_ROW_COUNT = 519
 
         /**
          * §12's distinct validation codes.
