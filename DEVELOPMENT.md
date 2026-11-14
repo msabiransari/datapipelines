@@ -1281,9 +1281,10 @@ Measured on the lane (#974, 2026-11-14): all three runs passed at four integrati
 Gate wall times were 48.0 / 42.7 / 43.2 min. Integration wall times were 26.1 min in M1 and
 26.2 min in M3, with 2.0× aggregate parallelism; M2's phase split was not preserved. The
 three recounts matched: 1564 files, 13346 tests, 0 failures, 0 errors, 15 skipped. A separate
-run starting at 22 GB demonstrated the two-fork fallback header, then failed when a full
-`/tmp` prevented DuckDB's native library extraction (#983). That run proves the fallback
-choice, not a passing fallback gate. Cleanup between M1 and M2 is a confound, so the wall-time
+start at 22 GB demonstrated the two-fork fallback header; no final verdict for that start was
+preserved. Another run started at 25 GB with four forks and failed its cycle; the lane reports
+full-`/tmp` native-library extraction failures (#983), but did not retain that cycle's detailed
+logs. Cleanup between M1 and M2 is a confound, so the wall-time
 improvement is not attributed to the fork feature. Observed MemAvailable troughs were 6–8.5 GB
 from starts of 27–34 GB; they do not guarantee 8 GB of headroom at the 24 GB admission floor.
 The long serialized class tracked in #982 limits parallelism; more than four forks were not
