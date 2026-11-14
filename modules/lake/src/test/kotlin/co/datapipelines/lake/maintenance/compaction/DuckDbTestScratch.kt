@@ -1,8 +1,8 @@
 package co.datapipelines.lake.maintenance.compaction
 
 import co.datapipelines.lake.LakeMinio
+import co.datapipelines.lake.LakeTestDuckDb
 import java.sql.Connection
-import java.sql.DriverManager
 import java.sql.ResultSet
 import java.time.Instant
 import java.util.concurrent.CopyOnWriteArrayList
@@ -33,27 +33,31 @@ internal class DuckDbTestScratch(
     ): CompactionScratchSession {
         opened.incrementAndGet()
         deadlines += deadline
-        val connection = DriverManager.getConnection("jdbc:duckdb:")
-        val storage = LakeMinio.storage(bucket = bucket, create = false)
-        connection.createStatement().use { st ->
-            st.execute("SET TimeZone = 'UTC'")
-            st.execute("INSTALL httpfs")
-            st.execute("LOAD httpfs")
-            // Test-only credentials of this JVM's MinIO; production binds them through LakeStagingStorage.
-            st.execute(
-                "CREATE SECRET lake (TYPE s3, KEY_ID '${quote(storage.accessKey)}', SECRET '${quote(storage.secretKey)}', " +
-                    "REGION '${quote(storage.region)}', ENDPOINT '${quote(storage.endpoint.removePrefix("http://"))}', " +
-                    "URL_STYLE 'path', USE_SSL false)",
-            )
-            st.execute("SET s3_url_compatibility_mode = true")
-        }
-        return Session(connection, reservation)
+        val database =
+            LakeTestDuckDb.open { connection ->
+                val storage = LakeMinio.storage(bucket = bucket, create = false)
+                connection.createStatement().use { st ->
+                    st.execute("SET TimeZone = 'UTC'")
+                    st.execute("INSTALL httpfs")
+                    st.execute("LOAD httpfs")
+                    // Test-only credentials of this JVM's MinIO; production binds them through LakeStagingStorage.
+                    st.execute(
+                        "CREATE SECRET lake (TYPE s3, KEY_ID '${quote(storage.accessKey)}', SECRET '${quote(storage.secretKey)}', " +
+                            "REGION '${quote(storage.region)}', ENDPOINT '${quote(storage.endpoint.removePrefix("http://"))}', " +
+                            "URL_STYLE 'path', USE_SSL false)",
+                    )
+                    st.execute("SET s3_url_compatibility_mode = true")
+                }
+            }
+        return Session(database, reservation)
     }
 
     private inner class Session(
-        private val connection: Connection,
+        private val database: LakeTestDuckDb,
         private val reservation: AutoCloseable,
     ) : CompactionScratchSession {
+        private val connection: Connection get() = database.connection
+
         override fun read(
             statement: CompactionStatement,
             files: List<String>,
@@ -71,7 +75,7 @@ internal class DuckDbTestScratch(
 
         override fun close() {
             closed.incrementAndGet()
-            connection.close()
+            database.close()
             reservation.close()
         }
     }

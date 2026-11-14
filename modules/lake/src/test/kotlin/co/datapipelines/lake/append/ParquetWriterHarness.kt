@@ -4,6 +4,7 @@ import co.datapipelines.lake.LakeCatalogs
 import co.datapipelines.lake.LakeMinio
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTestDb
+import co.datapipelines.lake.LakeTestDuckDb
 import co.datapipelines.lake.LeaseKind
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.LakeOrderKey
@@ -22,7 +23,6 @@ import java.io.ByteArrayInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.sql.Connection
-import java.sql.DriverManager
 import java.sql.ResultSet
 import java.util.UUID
 import java.util.function.Function
@@ -58,7 +58,8 @@ internal class ParquetWriterHarness {
         sql: String,
         block: (NativeInput) -> Unit,
     ) {
-        DriverManager.getConnection("jdbc:duckdb:").use { connection ->
+        LakeTestDuckDb.open().use { database ->
+            val connection = database.connection
             connection.createStatement().use { statement ->
                 statement.execute("SET memory_limit = '64MB'")
                 statement.execute("SET threads = 1")
