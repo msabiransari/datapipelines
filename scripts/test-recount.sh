@@ -140,8 +140,9 @@ for p, why in unreadable:
     print(f"unreadable result file: `{p}` — {why}")
 empty = [root for root, rel in per_root if not rel]
 for root in empty:
+    # Stage-capture callers consume this established diagnostic text.
     print(f"test-recount.sh: no test result XML under '{root}' "
-          "(modules/*/…, tests/*/…, module/build/…, test-results/…, or flat TEST-*.xml)", file=sys.stderr)
+          "(modules/*/…, tests/*/…, or TEST-*.xml at the root)", file=sys.stderr)
 if empty:
     sys.exit(3)
 PY
