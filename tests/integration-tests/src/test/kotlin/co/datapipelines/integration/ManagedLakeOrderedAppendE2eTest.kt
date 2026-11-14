@@ -44,8 +44,9 @@ import java.util.function.Function
  * it in Iceberg's string order whatever its collation (round 2 correction C1).
  *
  * O9 (`orders_o9`, sorted by `k`, then `id`): the staging keys are set so a delivery's scratch reservation
- * (`max-delivery-bytes` 8 MB × `staging-expansion-factor` 4 = 32 MiB, DuckDB's `max_temp_directory_size`) holds the landed and materialized relations (about 9 MB on disk:
- * the payload is one of 150 repeated strings, so it stores small) but not the sort's spill of 1,000,000 rows of
+ * (`max-delivery-bytes` 8 MB × `staging-expansion-factor` 4 = 32 MiB, DuckDB's `max_temp_directory_size`) holds the
+ * landed and materialized relations (about 9 MB on disk: the payload is one of 150 repeated strings, so it stores
+ * small) but not the sort's spill of 1,000,000 rows of
  * 240-character payloads (measured on the pinned driver at the same 128 MB memory limit: past 30 MiB of spill). The
  * ordered append fails with `pipeline.staging.scratch_limit_exceeded`, nothing is committed, the ledger row is FAILED in
  * phase `publish` with that code. The control is the same delivery to the same table with both sort columns left out
