@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.24 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal)
+**Status:** v1.25 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #957, maintenance runs)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -628,10 +628,72 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 ---
 
+## 10. Maintenance runs
+
+A maintenance run is the frame every maintenance operation executes in (#957; dp-lake record §11, §11a call 34). This
+section describes the frame; the operations (cleanup, manifest rewrite, compaction, the purged table's deletion) and
+the planner that enqueues runs are their own lanes, and until they land no part is registered and a run records
+`nothing_to_do`.
+
+**One task per table.** `lake-maintenance` is a keyed scheduler task whose key is the table id
+([Scheduler: system jobs](scheduler.md#85-system-jobs)): enqueueing an instance that already exists changes nothing, so a
+table has at most one task, cluster-wide. Its beans exist only when `datapipelines.lake.enabled=true`. The run
+executes on the scheduler thread that took the task.
+
+**The order, and what may be read when.** Rows of the metadata database may be read before admission; the table
+itself (its Iceberg metadata, its files) only after.
+
+1. The permission `lake.maintain` ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)), held only by the system identity with
+   no workspace (`SystemActorPrincipals.forInstance`); refused → `lake.maintenance.refused`, no row. Then the
+   catalog's mode: not `normal` → no row.
+2. A slot: one of `datapipelines.lake.admission.max-concurrent-maintenance`, tried without waiting; none free → the
+   task comes again in 30 s, no row.
+3. Each registered part declares, from database rows only, whether it expects to be due and the scratch it would need
+   (zero for none). A part is handed the table's row, never an Iceberg handle.
+4. Scratch for the sum of the declarations; a sum of zero reserves nothing. Refused → nothing is reserved and the run
+   goes on without scratch.
+5. **The run row** ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs)), one statement: it closes an
+   earlier `running` row of the table whose deadline has passed as `abandoned` and inserts the new `running` row with
+   `deadline_at = now() + admission.job-timeout` on the catalog's clock. An earlier `running` row not yet past its
+   deadline → no row, the slot and scratch are released, the task comes again at that deadline.
+6. Settlement: one page of the table's unsettled deliveries ([§8](#8-settlement-and-recovery)), from the first, with
+   the sweep's page size and a budget capped at the run's deadline. No maintenance lease is held while it runs (the
+   settler takes the table lease itself). A failure is logged (`lake.maintenance.settlement_deferred`) and recorded in
+   the row's `settlement_json`; the parts run either way.
+7. The parts, in the record's order (§54's outcomes, [Enums](enums.md#54-maintenanceoutcome--one-maintenance-parts-outcome)).
+   Before each one the worker checks the run's deadline and the thread's interrupt flag, then asks the gate (it may
+   hold a part `outside_window` or `paused_until`, with a reason; the others still run). A part not due now records
+   `nothing_to_do`; a part that needs scratch the run does not hold records `capacity` and is not started.
+8. The row is closed `finished` or `failed`, then the scratch and the slot are released, in a `finally`.
+
+**The run's deadline is every lease's deadline.** Every commit goes through the run: it acquires the table lease with
+the run's `deadline_at`, never a fresh job timeout, loads the table inside the lease, commits once, releases. The
+catalog fence ([§7](#7-append-publication)) then refuses any write past the deadline, so a run that outlives its row
+cannot write. A deadline already passed → `lake.maintenance.deadline` and the part ends `deadline`. A refused lease
+(another operation holds the table) → the part ends `busy`. Either ends the RUN: no later part is started, each later
+part the declarations expected to be due is recorded with the same outcome and `attempted: false`, the row closes
+`finished`, and the table's next run comes from a later plan. A part that throws, an unknown commit outcome or an
+interrupt ends the run `failed` with the error's code and the failure's class name, never a message or a stack.
+
+**Nothing is concluded from an abandoned row.** Every write after admission is conditional on `state = 'running'`. A
+worker whose row its successor marked `abandoned` keeps nothing: its close changes no row, it logs
+`lake.maintenance.close_refused` and its audit event says `state: abandoned`, `outcome_confirmed: false`. A row left
+`running` by a process that died is closed only by the next admission of its table.
+
+**Threads.** With the lake and the scheduler enabled, `datapipelines.scheduler.threads` must be at least
+`max-concurrent-maintenance` + 2 (one per admitted run, one for the planner, one always free for the dispatcher, the
+reconciler and the notifier); the boot refuses otherwise, naming both keys
+([Configuration §7](configuration.md#7-config-validation)). The default is 3.
+
+**Records.** One audit event per admitted run when it ends, `lake.maintenance.run_finished`
+([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), actor the system user; log events
+[Observability §3.4T](observability.md#34t-lake-maintenance-run-events-957).
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.25 | 957 (#957) | New **§10 Maintenance runs**: one `lake-maintenance` task per table; the admission order (permission and mode, slot, declarations, scratch, one-statement run row, settlement, parts); the run's deadline on every lease; `busy` and `deadline` end the run; nothing concluded from an abandoned row; threads ≥ maintenance slots + 2. |
 | 2026-11-13 | v1.24 | 967 (#967) — renumbered at the spec sync after #935's v1.23 | §1 `partition` row and §7: the append's first scan refuses a value a numeric `truncate[N]` partition cannot hold (`lake.append.partition_value_out_of_range`, counts per partition field, never a value), after a required-null refusal and before any file is written; the definition stays valid. Temporary until apache/iceberg 17027 (decimal) and 13105 (int, long). |
 | 2026-11-13 | v1.23 | 935 (#935) — renumbered at the spec sync after #939's v1.22 | §1: the body's fourth key, `sort_field_ids` (1–4 field ids, required before the first release, refused for `BINARY` and, for now, the approximate `DECIMAL`), fixed by the table's first release ever, also after its discard (`locked`); a legacy keyless table stays unsorted; the order (ascending, nulls first) is written to Iceberg at creation with one `write.metadata.metrics.column.<name>` = `truncate(16)` property per sort column. §2: a release is refused `invalid_body` when its stored draft breaks the sort-column rule. §4: S includes the sort order; changing the sort columns is breaking, a sort order changed outside DP is drift whose exit is to put it back. §7: files stay stamped unsorted on a sorted table (dp-lake record §11a call 36). |
 | 2026-11-13 | v1.22 | 939 (#939) | §8: the protection stamp is `now()` plus `datapipelines.lake.retention.protection-days`, no longer `lake_control.protection_interval`, which the normal-mode sweep keeps equal to the setting (a write only when they differ, `lake.settle.protection_window_aligned`); a stamped deadline is never changed. The budget is checked before each of the protection step's two statements; the 16 s overrun and the 31 s wall clock are unchanged. No migration. |

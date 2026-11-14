@@ -45,16 +45,19 @@ class RoleMatrixTest {
         }
     }
 
-    /** D7: implicitly a member of every workspace, with every permission — except the fenced two, which are nobody's. */
+    /**
+     * D7: implicitly a member of every workspace, with every permission — except the fenced two, which are nobody's, and
+     * the system-only rows, which are the system identity's alone (#957 D8).
+     */
     @Test
-    fun `a super admin is admitted the super_admin column - everything but the fenced rows`() {
+    fun `a super admin is admitted the super_admin column - everything but the fenced and the system-only rows`() {
         val column = catalog.filter { it.cells.superAdminAllowed }.mapNotNull { it.permission }.toSet()
         val principal = superAdminSession()
         val context = WorkspaceContext.superAdminOver(workspaceId, "acme", explicitRole = null)
 
         admitted(principal, context) shouldContainExactly column
-        column shouldBe Permission.entries.toSet() - RolePermissions.FENCED
-        RolePermissions.FENCED.forEach { permission ->
+        column shouldBe Permission.entries.toSet() - RolePermissions.FENCED - RolePermissions.SYSTEM_ONLY
+        (RolePermissions.FENCED + RolePermissions.SYSTEM_ONLY).forEach { permission ->
             (ScopeMatrix.allowed(principal, permission, context) as ScopeMatrix.Decision.Refused).code shouldBe
                 AuthErrorCodes.ROLE_REQUIRED
         }

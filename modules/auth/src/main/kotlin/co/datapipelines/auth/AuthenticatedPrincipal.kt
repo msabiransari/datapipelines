@@ -244,6 +244,10 @@ data class AuthenticatedPrincipal(
     fun holds(permission: Permission): Boolean =
         when {
             keyRole != null -> permission in RolePermissions.of(keyRole)
+            // #957 D8: the workspace-less system principal (SystemActorPrincipals.forInstance) holds the system-only
+            // permissions the resolver's system arm grants, and nothing else: no instance permission, no member one.
+            authMethod == AuthMethod.SYSTEM && workspace == null ->
+                permission in RolePermissions.SYSTEM_ONLY && PermissionResolution.resolver.holdsAsSystemActor(null, permission)
             permission in RolePermissions.INSTANCE -> PermissionResolution.resolver.holds(workspace?.id, null, superAdmin, permission)
             else -> workspace?.permits(permission) ?: false
         }

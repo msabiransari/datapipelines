@@ -79,6 +79,22 @@ class ScopeMatrixSpecDriftTest {
         withClue(mismatches.joinToString("\n")) { mismatches.shouldBeEmpty() }
     }
 
+    /** #957 D8: a system-only permission's row is ✗ in every member and key-role cell, and is not fenced. */
+    @Test
+    fun `a system-only row is refused in every cell and is not fenced`() {
+        val systemOnly = rows.filter { it.permission in RolePermissions.SYSTEM_ONLY }
+        systemOnly.mapNotNull { it.permission }.toSet() shouldBe RolePermissions.SYSTEM_ONLY
+        systemOnly.isNotEmpty() shouldBe true
+        systemOnly.forEach { row ->
+            withClue(row.label) {
+                row.cells.allowedRoles.shouldBeEmpty()
+                row.cells.superAdminAllowed shouldBe false
+                row.cells.fenced shouldBe false
+                row.keyRoles.shouldBeEmpty()
+            }
+        }
+    }
+
     /** Non-vacuity for the key-role columns: a parse that found no `✓` would pass the test above for a table of ✗. */
     @Test
     fun `the key-role columns name exactly the record's section 3-2 permissions`() {
@@ -105,9 +121,9 @@ class ScopeMatrixSpecDriftTest {
          * (#10 L1b: `visualization.*` and `dashboard.*` — read, create, update, version.manage, delete, release,
          * switch_version; the two imports landed with L1c, `dashboard.execute` with L2 and `dashboard.key.bind`
          * with L5), re-derived. 103 since #786 added `endpoint.release` and `endpoint.version.manage` (an API's release
-         * and its version lifecycle).
+         * and its version lifecycle). 104 since #957 added `lake.maintain` (system only, no route).
          */
-        const val PERMISSION_COUNT = 103
+        const val PERMISSION_COUNT = 104
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

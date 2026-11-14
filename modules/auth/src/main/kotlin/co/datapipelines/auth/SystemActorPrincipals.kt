@@ -38,4 +38,20 @@ object SystemActorPrincipals {
             workspace = WorkspaceContext(id = workspaceId, name = workspaceName, systemActor = true),
         )
     }
+
+    /**
+     * The system identity acting for the INSTANCE, in no workspace (#957 D8): the lake belongs to no workspace, and none
+     * is invented. [AuthenticatedPrincipal.holds] answers it through its workspace-less system arm: exactly the
+     * [RolePermissions.SYSTEM_ONLY] permissions the resolver's system arm grants, and nothing else (no instance permission,
+     * no member permission). Built only by the lake maintenance worker's wiring.
+     */
+    fun forInstance(actor: User): AuthenticatedPrincipal {
+        require(actor.kind == UserKind.SYSTEM) { "Only the system identity acts for the instance; ${actor.id} is ${actor.kind.wire}" }
+        return AuthenticatedPrincipal(
+            userId = actor.id,
+            email = actor.email,
+            displayName = actor.displayName,
+            authMethod = AuthMethod.SYSTEM,
+        )
+    }
 }

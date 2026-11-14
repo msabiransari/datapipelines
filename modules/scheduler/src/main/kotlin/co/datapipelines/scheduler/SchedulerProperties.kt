@@ -16,8 +16,12 @@ import java.time.Duration
 data class SchedulerProperties(
     /** This instance dispatches; `false` is API mode — the client exists, nothing polls (record §1, A19). */
     val enabled: Boolean = true,
-    /** db-scheduler worker threads. No task holds one for a pipeline's runtime (record §2.2). */
-    val threads: Int = 2,
+    /**
+     * db-scheduler worker threads. No task holds one for a pipeline's runtime (record §2.2). 3 since #957 (owner ruling
+     * 2026-11-13): a lake maintenance run holds one for its whole length, so the lake's boot rule asks for at least
+     * `datapipelines.lake.admission.max-concurrent-maintenance` + 2 (configuration.md §7).
+     */
+    val threads: Int = 3,
     /** db-scheduler's poll for due tasks. */
     val pollingIntervalSeconds: Long = 10,
     /** db-scheduler's execution heartbeat; a task is dead after [MISSED_HEARTBEATS_LIMIT] missed beats. */

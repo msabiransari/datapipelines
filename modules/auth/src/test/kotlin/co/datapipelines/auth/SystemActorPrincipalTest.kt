@@ -23,7 +23,7 @@ class SystemActorPrincipalTest {
     fun restore() = PermissionResolution.install(RolePermissionsResolver)
 
     @Test
-    fun `the system identity holds exactly pipeline execute, pipeline read, execution read and lake append - in any workspace`() {
+    fun `the system identity holds exactly pipeline execute, pipeline read, execution read, lake append and lake maintain - in any workspace`() {
         heldBy(principal(WORKSPACE_A)) shouldBe EXPECTED
         heldBy(principal(WORKSPACE_B)) shouldBe EXPECTED
     }
@@ -87,6 +87,45 @@ class SystemActorPrincipalTest {
         RolePermissions.of(KeyRole.PROMOTION_RECEIVER).none { it in manage + Permission.SCHEDULE_READ } shouldBe true
     }
 
+    @Test
+    fun `the fixed set has five permissions and the system-only one is among them (957 R14)`() {
+        EXPECTED.size shouldBe 5
+        RolePermissions.SYSTEM_ACTOR shouldBe EXPECTED
+        RolePermissions.SYSTEM_ONLY shouldBe SYSTEM_ONLY
+        (SYSTEM_ONLY - EXPECTED) shouldBe emptySet()
+    }
+
+    @Test
+    fun `the instance system principal holds lake maintain and nothing else - no member and no instance permission (957 R13c)`() {
+        val instance = SystemActorPrincipals.forInstance(systemRow())
+        instance.workspace shouldBe null
+        instance.authMethod shouldBe AuthMethod.SYSTEM
+        instance.holds(Permission.LAKE_MAINTAIN) shouldBe true
+        instance.holds(Permission.PIPELINE_EXECUTE) shouldBe false
+        instance.holds(Permission.LAKE_APPEND) shouldBe false
+        RolePermissions.INSTANCE.none { instance.holds(it) } shouldBe true
+        heldBy(instance) shouldBe SYSTEM_ONLY
+    }
+
+    @Test
+    fun `the instance system principal widens with its resolver arm only inside the system-only set (957 R13c)`() {
+        PermissionResolution.install(WidenedSystemArm)
+        heldBy(SystemActorPrincipals.forInstance(systemRow())) shouldBe SYSTEM_ONLY
+    }
+
+    @Test
+    fun `only the system row may be made into the instance principal`() {
+        shouldThrow<IllegalArgumentException> { SystemActorPrincipals.forInstance(systemRow().copy(kind = UserKind.HUMAN)) }
+        shouldThrow<IllegalArgumentException> { SystemActorPrincipals.forInstance(systemRow().copy(kind = UserKind.SERVICE)) }
+    }
+
+    @Test
+    fun `a person with no workspace holds no system-only permission, a super admin included (957 R13c)`() {
+        val admin = AuthenticatedPrincipal(userId = SYSTEM_ID, email = "a@x", displayName = "a", authMethod = AuthMethod.OIDC, superAdmin = true)
+        admin.holds(Permission.LAKE_MAINTAIN) shouldBe false
+        RolePermissions.SUPER_ADMIN.contains(Permission.LAKE_MAINTAIN) shouldBe false
+    }
+
     private fun heldBy(principal: AuthenticatedPrincipal): Set<Permission> = Permission.entries.filter(principal::holds).toSet()
 
     private fun principal(workspace: UUID) = SystemActorPrincipals.forWorkspace(systemRow(), workspace, "ws-$workspace")
@@ -122,7 +161,11 @@ class SystemActorPrincipalTest {
 
     private companion object {
         /** THE fixed set, written out (R2: execute pipelines, and the reads the reconciler needs). */
-        val EXPECTED = setOf(Permission.PIPELINE_EXECUTE, Permission.PIPELINE_READ, Permission.EXECUTION_READ, Permission.LAKE_APPEND)
+        val EXPECTED =
+            setOf(Permission.PIPELINE_EXECUTE, Permission.PIPELINE_READ, Permission.EXECUTION_READ, Permission.LAKE_APPEND, Permission.LAKE_MAINTAIN)
+
+        /** #957 D8: the system-only permissions, written out; one of the five above. */
+        val SYSTEM_ONLY = setOf(Permission.LAKE_MAINTAIN)
         val SYSTEM_ID: UUID = UUID.fromString("5a570000-0000-0000-0000-000000000001")
         val WORKSPACE_A: UUID = UUID.fromString("a0000000-0000-0000-0000-00000000000a")
         val WORKSPACE_B: UUID = UUID.fromString("b0000000-0000-0000-0000-00000000000b")

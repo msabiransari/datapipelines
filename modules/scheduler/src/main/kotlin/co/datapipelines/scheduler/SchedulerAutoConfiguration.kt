@@ -38,7 +38,8 @@ import java.util.UUID
  * identity's row, R2). What this configuration supplies to db-scheduler's starter — which it runs
  * BEFORE, so the starter's `@ConditionalOnMissingBean` defaults step aside: the JSON serializer and
  * this instance's scheduler name ([DbSchedulerCustomizer], A8), and the start gate
- * ([SchedulerStartGate], A19). The starter builds the `Scheduler` over the metadata `DataSource`
+ * ([SchedulerStartGate], A19). Since #957, one task per [KeyedSystemJob] / [RecurringSystemJob] bean another
+ * module declares ([SystemJobTaskRegistrar]) and the [SystemJobQueue] it enqueues through. The starter builds the `Scheduler` over the metadata `DataSource`
  * wrapped in `TransactionAwareDataSourceProxy` — which is what spike 1 proves.
  *
  * Conditional on a [SystemActorSource] bean: a slice context that wires no scheduler (a web slice
@@ -176,6 +177,10 @@ class SchedulerAutoConfiguration {
         properties: SchedulerProperties,
     ): RecurringTask<Void> = SchedulerTasks.reconcilerTask(reconciler, properties)
 
+    /** #957 D1 — the durable queue another module enqueues its keyed system jobs through. */
+    @Bean
+    fun systemJobQueue(scheduler: ObjectProvider<Scheduler>): SystemJobQueue = DbSchedulerSystemJobQueue { scheduler.getObject() }
+
     /** The management use cases REST calls — the one scheduler bean a transport may name. */
     @Bean
     @Suppress("LongParameterList")
@@ -214,6 +219,14 @@ class SchedulerAutoConfiguration {
         )
 
     companion object {
+        /**
+         * #957 D1 — one task bean per system job bean ([SystemJobTaskRegistrar]). Static: a registry post-processor is
+         * created before every other bean of this configuration.
+         */
+        @Bean
+        @JvmStatic
+        fun systemJobTaskRegistrar(): SystemJobTaskRegistrar = SystemJobTaskRegistrar()
+
         /** The one metadata transaction manager's bean name (module-structure §8.5; declared in `app`). */
         const val METADATA_TRANSACTION_MANAGER = "metadataTransactionManager"
 

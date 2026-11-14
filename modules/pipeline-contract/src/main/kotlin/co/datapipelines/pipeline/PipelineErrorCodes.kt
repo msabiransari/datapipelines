@@ -2306,6 +2306,15 @@ object PipelineErrorCodes {
          * the table and reason. Shared by the P4 delivery ledger and the P5 read gate.
          */
         const val TABLE_UNAVAILABLE = "lake.table.unavailable"
+
+        // #957 (dp-lake P6) — the maintenance run (§13.25, design record §11).
+
+        /**
+         * A maintenance run's commit was refused because the run's deadline (`lake_maintenance_runs.deadline_at`) had
+         * passed by the catalog's clock: at the acquire, or at the fenced write. The part ends `deadline`, nothing was
+         * committed. No route returns it (HTTP `—`); it is recorded in the run row's parts.
+         */
+        const val MAINTENANCE_DEADLINE = "lake.maintenance.deadline"
     }
 }
 

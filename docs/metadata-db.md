@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.61 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.62 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-13
@@ -2078,6 +2078,47 @@ V55 also adds `pipeline_versions.writes_managed_lake BOOLEAN NOT NULL DEFAULT FA
 ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DEFAULT FALSE;
 ```
 
+### 4.55 `lake_maintenance_runs`
+
+V60 (#957, dp-lake design §5.2, §11, §11a call 34) adds one row per ADMITTED run of the `lake-maintenance` scheduler task for one managed table ([Lake: maintenance runs](lake.md#10-maintenance-runs)). The row is the run's exclusion and its authority: it is written by ONE admitting statement before the run reads or writes the table, and its `deadline_at` (admission time + `admission.job-timeout`, on the catalog's clock) is the deadline every table lease of the run carries, so the catalog fence refuses a write past it. At most one row per table is `running` (`uq_lake_maintenance_runs_running`).
+
+```sql
+CREATE TABLE lake_maintenance_runs (
+    id                     UUID        PRIMARY KEY,
+    table_id               UUID        NOT NULL REFERENCES lake_tables_managed(id) ON DELETE CASCADE,
+    kind                   TEXT        NOT NULL,
+    state                  TEXT        NOT NULL,
+    deadline_at            TIMESTAMPTZ NOT NULL,
+    scratch_reserved_bytes BIGINT      NOT NULL DEFAULT 0,
+    files_touched          BIGINT      NOT NULL DEFAULT 0,
+    bytes_touched          BIGINT      NOT NULL DEFAULT 0,
+    deferred_deletions     BIGINT      NOT NULL DEFAULT 0,
+    parts_json             JSONB       NOT NULL DEFAULT '[]'::jsonb,
+    settlement_json        JSONB,
+    started_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at               TIMESTAMPTZ,
+    error_code             TEXT,
+    error_message          TEXT,
+    CONSTRAINT chk_lake_maintenance_runs_kind CHECK (kind IN ('maintenance', 'purge')),
+    CONSTRAINT chk_lake_maintenance_runs_state CHECK (state IN ('running', 'finished', 'failed', 'abandoned')),
+    CONSTRAINT chk_lake_maintenance_runs_ended CHECK ((state = 'running') = (ended_at IS NULL)),
+    CONSTRAINT chk_lake_maintenance_runs_figures CHECK (
+        scratch_reserved_bytes >= 0 AND files_touched >= 0 AND bytes_touched >= 0 AND deferred_deletions >= 0),
+    CONSTRAINT chk_lake_maintenance_runs_parts CHECK (jsonb_typeof(parts_json) = 'array')
+);
+
+-- The exclusion (§11a call 34, rule 1): one running run per table, whatever the instance that admitted it.
+CREATE UNIQUE INDEX uq_lake_maintenance_runs_running ON lake_maintenance_runs (table_id) WHERE state = 'running';
+
+-- A table's run history, newest first (the planner's and the table page's read).
+CREATE INDEX idx_lake_maintenance_runs_table_started ON lake_maintenance_runs (table_id, started_at DESC);
+```
+
+- **The admitting statement** closes an earlier `running` row of the table whose `deadline_at` has passed as `abandoned` (`error_code = 'outcome_not_confirmed'`) and inserts the new `running` row, both or neither, in one statement; an earlier `running` row not yet past its deadline admits nothing. A race between two instances is decided by the partial unique index: the loser inserts nothing.
+- **Every later write is conditional on `state = 'running'`**: the progress writes (`parts_json`, `settlement_json`, the summed figures) and the close (`finished` or `failed`, `ended_at`, `error_code`, `error_message`). A row its successor marked `abandoned` is never overwritten by its late worker, and nothing is concluded from it.
+- `parts_json` holds each part's `name`, `outcome` ([Enums §54](enums.md#54-maintenanceoutcome--one-maintenance-parts-outcome)), `attempted`, figures, and the gate's `reason`, a `paused_until` instant or a failed part's `error_code`; `files_touched`, `bytes_touched` and `deferred_deletions` are their sums. `error_code` is a catalogued code, `interrupted`, `unclassified` or `outcome_not_confirmed`; `error_message` is the failure's class name only, never an exception's text.
+- `ON DELETE CASCADE`: a managed table's row takes its run history with it; the application deletes no run row. How long rows are kept is #965.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -2093,6 +2134,9 @@ ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DE
 | `lake_delivery_attempts` | `lake_delivery_attempts_pkey` | via PK | Attempt identity |
 | `lake_delivery_attempts` | `lake_delivery_attempts_operation_id_key` | via UNIQUE | Join commit evidence by operation |
 | `lake_delivery_attempts` | `idx_lake_delivery_attempts_delivery` | explicit | Attempt history for a delivery |
+| `lake_maintenance_runs` | `lake_maintenance_runs_pkey` | via PK | Run identity — every later write of the row is `WHERE id = ? AND state = 'running'` ([§4.55](#455-lake_maintenance_runs)) |
+| `lake_maintenance_runs` | `uq_lake_maintenance_runs_running` | explicit (partial, unique) | V60 (#957): at most one `running` run per table — the admitting statement's `ON CONFLICT (table_id) WHERE state = 'running'` arbiter |
+| `lake_maintenance_runs` | `idx_lake_maintenance_runs_table_started` | explicit | V60 (#957): a table's run history, newest first |
 | `users` | `users_pkey` | via PK | Lookup by id (hot — per-request `is_active` check, D13) |
 | `users` | `users_email_key` | via UNIQUE | Login lookup by email; enforces one account per email |
 | `users` | `uq_users_provider_subject` | explicit (unique) | OIDC identity lookup `(provider, provider_subject)` |
@@ -2315,6 +2359,7 @@ table and the test's expected-table list in the same commit.
 | `lake_table_definition_versions` | promotable | LakeTableDefinition | `lake_table_definition_versions.version` | `(namespace, table, version)` | The promoted object (record §5.2): a RELEASED body transfers at its exact version number; the receiver applies it to its own table. The import path itself is P9's |
 | `lake_deliveries` | environment-local | LakeDelivery | — | — | Permanent evidence of deliveries ingested in this environment; never promoted or deleted with execution history |
 | `lake_delivery_attempts` | environment-local | LakeDelivery | — | — | Permanent publication attempt identities joined to this environment's revision log |
+| `lake_maintenance_runs` | environment-local | LakeMaintenanceRun | — | — | This deployment's maintenance runs over its own lake: runtime coordination (the run's exclusion and deadline) and its record, never authored and meaningless beside another environment's catalog |
 | `lake_column_semantics` | derived | LakeTableDefinition | — | — | Rebuilt from the applied body inside the `applied` transaction; a receiver derives its own when it applies |
 
 ---
@@ -2631,6 +2676,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.62 | 957 (#957, V60) | **§4.55 `lake_maintenance_runs`** (new): one row per admitted lake maintenance run, the run's exclusion (one `running` row per table, partial unique index) and its deadline; admitted by one statement that also abandons an expired predecessor; every later write conditional on `running`. |
 | 2026-11-13 | v1.61 | 939 (#939, no migration) | **§4.45** Notes: `lake_control.protection_interval` mirrors `datapipelines.lake.retention.protection-days` — the normal-mode settle sweep keeps it equal and stamps `protected_until` from the setting, not the column; the column's `DEFAULT` is only what a database holds before its first normal-mode tick. No schema change. |
 | 2026-11-12 | v1.60 | #905 review F1 (no migration) — renumbered at final sync after dependency-graph | §4.6: correct the lifecycle note to include the separate result-history UPDATE, which does not change `completed_at`. |
 | 2026-11-11 | v1.59 | #896 docs: ownership and grants as they are since V23 | **No schema change.** Text that still described the V4 `workspace_id` model is corrected to the V23 model: the §3 relationship diagram shows `owner_workspace_id` (ownership; NULL = an instance datasource) and the `datasource_workspaces` grant rows (visibility); the §4.10 note on `workspace_id` becomes the `owner_workspace_id` note — ownership only, the global NAME namespace, visibility by `GRANTED_PREDICATE`, the V4 → V23 history kept as history; §4.11 no longer says datasources "bind by visibility only"; §4.16's backfill note names the `w.is_deleted = FALSE` filter (a soft-deleted workspace got no grant), and its revoke note says a removed grant advances `generation` once while the definition, credential and incarnation stay. |
