@@ -794,8 +794,9 @@ pass's own clock marker is not counted as deleted.
 - A snapshot a live keep tag holds, until the keep ends.
 - Any key younger than `retention.orphan-grace-hours`, and any key outside the table's location.
 - Every recipe under `dp/recipes/`, by either pass, at any age; any `dp/` key that is not a clock marker.
-- Anything at all when something is unclear: outside `normal` mode, with the lease not answering, with the clocks
-  disagreeing, or with an unreadable metadata file or manifest, nothing is expired and nothing is deleted.
+- No further candidate is deleted when removal cannot establish safety: outside `normal` mode, with the lease not
+  answering, with the clocks disagreeing, or with an unreadable metadata file or manifest. The pass's own clock marker
+  follows its separate rule above. Keep-tag and expiry commits made before a later removal check fails remain committed.
 
 ### Purge deletion, and when it is finished
 
