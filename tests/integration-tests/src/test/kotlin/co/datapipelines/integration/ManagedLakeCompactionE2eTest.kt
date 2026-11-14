@@ -8,6 +8,8 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.comparables.shouldBeLessThan
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.longs.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -60,6 +62,12 @@ import kotlin.concurrent.thread
  * Settings: the production profile admits compaction all day and calls a partition due at two small files; the
  * compaction factor is 1 (C13 (b): a sort that spills cannot fit a reservation of its own input bytes); the assumed
  * rate is 1 GB a second, so time never limits a group here (time is G5's and C14a's).
+ *
+ * C14 stored (round 2, the lander's R2): (a) and (b) run through the worker and the compaction part, reading the stored
+ * `parts_json` entry. The worker is copied with its job timeout, and the compaction part with its port behind an
+ * observer that delegates to the production adapter and with a larger factor (so only the deadline, never the scratch,
+ * can stop its sort); its table uses the `development` profile with 64 KiB row groups, so 64,000,000 one-column rows
+ * reach the sort's first row only after the statement timeout's one-second grain (measured about 3 s).
  */
 @SpringBootTest(classes = [DatapipelinesApplication::class], webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -266,12 +274,143 @@ class ManagedLakeCompactionE2eTest {
         late.endReserved shouldBe late.startReserved
     }
 
+    @Test
+    fun `C14 a and b stored - through the worker and the part, a sort stopped before its first row, a deadline passed at the open`() {
+        // The table's own profile: `development` with the smallest row group, so the sort's input is read in many small
+        // ranges before its first row (more time per row with no more spill); compaction-wise the same as `production`.
+        // Its values are put back after the test: no other table of this class uses it.
+        val development =
+            jdbc.queryForObject("SELECT values_json::text FROM lake_profiles WHERE name = 'development'", String::class.java)
+        try {
+            storedDeadlineCases(development)
+        } finally {
+            jdbc.update(
+                "UPDATE lake_profiles SET values_json = ?::jsonb, updated_at = clock_timestamp() WHERE name = 'development'",
+                development,
+            )
+        }
+    }
+
+    private fun storedDeadlineCases(development: String?) {
+        requireNotNull(development) { "the development profile is seeded" }
+        val assigned =
+            jdbc.update(
+                "UPDATE lake_profiles SET values_json = jsonb_set(jsonb_set(values_json, '{write,row_group_bytes}', ?::jsonb), " +
+                    "'{maintenance,compact_min_small_files}', '2'), updated_at = clock_timestamp() WHERE name = 'development'",
+                MIN_ROW_GROUP_BYTES.toString(),
+            ) +
+                jdbc.update(
+                    "UPDATE lake_tables_managed SET profile_id = (SELECT id FROM lake_profiles WHERE name = 'development'), " +
+                        "profile_assigned_at = clock_timestamp() WHERE id = ?",
+                    tableId(DEADLINE),
+                )
+        assigned shouldBe 2
+        val pipeline = createPipeline(DEADLINE)
+        repeat(DEADLINE_DELIVERIES) { n -> deliver(pipeline, scrambledKeys(start = n * DEADLINE_ROWS, rows = DEADLINE_ROWS)) }
+        val before = revisions(DEADLINE)
+        val inputBytes = dataBytes(DEADLINE)
+        measure() shouldContain tableId(DEADLINE).toString()
+        // The part's settings with the largest factor whose declaration fits the ceiling: the whole sort's spill then fits
+        // the grant, so only the deadline can stop it (the production factor 1 is C13 (b)'s scratch case).
+        val factor = (ceilingBytes() / inputBytes).toInt()
+        withClue("the ceiling ${ceilingBytes()} must cover the input $inputBytes at least twice") { factor shouldBeGreaterThan 1 }
+
+        // The same sort timed with ample time, through the same worker, part and adapter: stopped at its first row by
+        // the consumer (the run fails, nothing commits), so the table stays due and nothing is drained (#994).
+        val timing = PortObserver(PortMode.STOP_AT_FIRST_ROW)
+        val timed = compact(DEADLINE, deadlineWorker(timing, factor, AMPLE))
+        withClue("the timing run: ${timed.part} ${timing.failure}") {
+            timed.state shouldBe "failed"
+            timing.rows.get() shouldBe 1L
+        }
+        revisions(DEADLINE) shouldBe before
+        val admittedAt = seen(timing.deadline).minus(AMPLE)
+        val toRead = Duration.between(admittedAt, seen(timing.readAt))
+        val toFirstRow = Duration.between(seen(timing.readAt), seen(timing.firstRowAt))
+        val toOpen = Duration.between(admittedAt, seen(timing.openAt))
+        println(
+            "case=c14_stored_timing input_bytes=$inputBytes factor=$factor to_open_ms=${toOpen.toMillis()} " +
+                "to_read_ms=${toRead.toMillis()} first_row_ms=${toFirstRow.toMillis()}",
+        )
+        withClue("the sort before its first row must outlast the statement timeout's one-second grain") {
+            toFirstRow.toMillis() shouldBeGreaterThan MIN_FIRST_ROW_MILLIS
+        }
+
+        // (a) a run whose deadline falls a quarter of the timed sort after the statement starts: the driver stops the sort
+        // before its first row, and the adapter's clock (not the message) makes it the part's deadline.
+        val quarter = toFirstRow.dividedBy(4)
+        val sorting = PortObserver(PortMode.PASS)
+        val stopped = compact(DEADLINE, deadlineWorker(sorting, factor, toRead.plus(quarter)))
+        withClue("(a): ${stopped.part} ${sorting.failure}") {
+            storedDeadline(stopped)
+            seen(sorting.readAt).isBefore(sorting.deadline) shouldBe true
+            sorting.rows.get() shouldBe 0L
+            Duration.between(seen(sorting.readAt), seen(sorting.deadline)) shouldBeLessThan toFirstRow
+            sorting.failure shouldBe DEADLINE_PASSED
+        }
+        println(
+            "case=c14_stored_a left_at_read_ms=${Duration.between(seen(sorting.readAt), seen(sorting.deadline)).toMillis()} " +
+                "failure_after_read_ms=${Duration.between(seen(sorting.readAt), seen(sorting.failedAt)).toMillis()} part=${stopped.part}",
+        )
+        revisions(DEADLINE) shouldBe before
+
+        // (b) the deadline has passed when the part opens its database: the open waits past it, then goes to the adapter.
+        val late = PortObserver(PortMode.OPEN_AFTER_DEADLINE)
+        val refused = compact(DEADLINE, deadlineWorker(late, factor, toRead.plus(quarter)))
+        withClue("(b): ${refused.part} ${late.failure}") {
+            storedDeadline(refused)
+            seen(late.openAt).isBefore(late.deadline) shouldBe true
+            late.readAt shouldBe null
+            late.failure shouldBe DEADLINE_PASSED
+        }
+        println("case=c14_stored_b part=${refused.part}")
+        revisions(DEADLINE) shouldBe before
+    }
+
+    private fun seen(at: Instant?): Instant = requireNotNull(at) { "the port observer did not see this step" }
+
+    /** C14's stored assertions: `deadline`, `committed` false and an integer `left_for_fresh_run` at the entry's top level. */
+    private fun storedDeadline(run: ObservedRun) {
+        run.state shouldBe "finished"
+        run.part.path("outcome").asText() shouldBe "deadline"
+        run.part.path("attempted").asBoolean() shouldBe true
+        run.part.has("committed") shouldBe true
+        run.part.path("committed").asBoolean() shouldBe false
+        run.part.path("left_for_fresh_run").isIntegralNumber shouldBe true
+        run.part.path("left_for_fresh_run").asLong() shouldBe dataKeys(DEADLINE).size.toLong()
+        run.reservations shouldBe 1
+        run.releases shouldBe 1
+        run.endReserved shouldBe run.startReserved
+        run.leftInScratch.shouldBeEmpty()
+    }
+
+    /**
+     * The production worker with ONE run's changes: the observed scratch, the job timeout [timeout], and its parts with
+     * the production compaction part copied twice by field — its port behind [port] (which delegates to the production
+     * adapter) and its settings with scratch factor [factor]. Every other part and collaborator is the bean's.
+     */
+    private fun deadlineWorker(
+        port: PortObserver,
+        factor: Int,
+        timeout: Duration,
+    ): (Any) -> Any =
+        { scratch ->
+            val compaction = bean(PART)
+            val settings = copyOf(field(compaction, "settings"), "scratchFactor" to factor)
+            val part = copyOf(copyOf(compaction, "scratch" to port.proxy()), "settings" to settings)
+            val parts = (field(bean(WORKER), "parts") as List<*>).map { if (it === compaction) part else it }
+            copyOf(copyOf(copyOf(bean(WORKER), "scratch" to scratch), "parts" to parts), "jobTimeout" to timeout)
+        }
+
     // --- the production beans, observed -------------------------------------------------------------------------------
 
     /** One worker run of [table] with the observing scratch; samples the budget and the scratch directory meanwhile. */
-    private fun compact(table: String): ObservedRun {
+    private fun compact(
+        table: String,
+        workerWith: (Any) -> Any = { scratch -> copyOf(bean(WORKER), "scratch" to scratch) },
+    ): ObservedRun {
         val observer = ScratchObserver()
-        val worker = copyOf(bean(WORKER), "scratch" to observer.proxy())
+        val worker = workerWith(observer.proxy())
         val start = budgetReserved()
         val peak = AtomicLong(start)
         val seen = ConcurrentHashMap.newKeySet<String>()
@@ -373,6 +512,87 @@ class ManagedLakeCompactionE2eTest {
             }
     }
 
+    /** What [PortObserver] does around the production adapter. */
+    private enum class PortMode {
+        /** Passes everything through and records it. */
+        PASS,
+
+        /** Stops the statement at its first row (the timing run): the consumer throws [StoppedAtFirstRow]. */
+        STOP_AT_FIRST_ROW,
+
+        /** Holds the open until the run's deadline has passed on the system clock, then hands it to the adapter. */
+        OPEN_AFTER_DEADLINE,
+    }
+
+    private class StoppedAtFirstRow : RuntimeException("the timing run stops at the first row")
+
+    /**
+     * The compaction part's port: the production adapter bean behind a proxy that records, on the system clock the
+     * adapter decides with, when the part opened and read, the deadline it handed over, the rows the sort handed over,
+     * and the class of the failure that left the open or the read.
+     */
+    private inner class PortObserver(
+        private val mode: PortMode,
+    ) {
+        @Volatile var deadline: Instant? = null
+
+        @Volatile var openAt: Instant? = null
+
+        @Volatile var readAt: Instant? = null
+
+        @Volatile var firstRowAt: Instant? = null
+
+        @Volatile var failedAt: Instant? = null
+
+        @Volatile var failure: String? = null
+        val rows = AtomicLong()
+        private val adapter = bean(PORT)
+
+        fun proxy(): Any =
+            Proxy.newProxyInstance(type(PORT).classLoader, arrayOf(type(PORT))) { _, method, args ->
+                if (method.name != "open") return@newProxyInstance unwrapped { method.invoke(adapter, *(args ?: emptyArray())) }
+                val until = args[1] as Instant
+                deadline = until
+                openAt = Instant.now()
+                if (mode == PortMode.OPEN_AFTER_DEADLINE) {
+                    while (!Instant.now().isAfter(until)) Thread.sleep(SAMPLE_MILLIS)
+                }
+                session(observed { method.invoke(adapter, *args) })
+            }
+
+        private fun session(real: Any): Any =
+            Proxy.newProxyInstance(type(SESSION).classLoader, arrayOf(type(SESSION))) { _, method, args ->
+                if (method.name == "read") {
+                    readAt = Instant.now()
+                    @Suppress("UNCHECKED_CAST")
+                    val consume = args[2] as (ResultSet) -> Unit
+                    val counted: (ResultSet) -> Unit = { cursor -> consume(counting(cursor)) }
+                    observed { method.invoke(real, args[0], args[1], counted) }
+                } else {
+                    unwrapped { method.invoke(real, *(args ?: emptyArray())) }
+                }
+            }
+
+        private fun counting(cursor: ResultSet): ResultSet =
+            Proxy.newProxyInstance(ResultSet::class.java.classLoader, arrayOf(ResultSet::class.java)) { _, method, args ->
+                val answer = unwrapped { method.invoke(cursor, *(args ?: emptyArray())) }
+                if (method.name == "next" && answer == true && rows.incrementAndGet() == 1L) {
+                    firstRowAt = Instant.now()
+                    if (mode == PortMode.STOP_AT_FIRST_ROW) throw StoppedAtFirstRow()
+                }
+                answer
+            } as ResultSet
+
+        private fun <T> observed(call: () -> T): T =
+            try {
+                unwrapped(call)
+            } catch (thrown: Exception) {
+                failedAt = Instant.now()
+                failure = thrown.javaClass.name
+                throw thrown
+            }
+    }
+
     /** 959's planner with a recording queue: measures and decides as in production; answers the keys it would enqueue. */
     private fun measure(): List<String> {
         val keys = CopyOnWriteArrayList<String>()
@@ -417,6 +637,26 @@ class ManagedLakeCompactionE2eTest {
                 .map { it.key() }
         }
     }
+
+    /** The bytes of the table's data objects in the bucket. */
+    private fun dataBytes(table: String): Long {
+        val location = keyOf(metadata(table)["location"].asText()).trimEnd('/')
+        return SharedE2e.s3Client().use { client ->
+            client
+                .listObjectsV2Paginator { it.bucket(BUCKET).prefix("$location/data/") }
+                .contents()
+                .filter { it.key().endsWith(".parquet") }
+                .sumOf { it.size() }
+        }
+    }
+
+    /** The most one run may declare (the production part's settings: `scratch-bytes` minus one delivery's reservation). */
+    private fun ceilingBytes(): Long = invoke(field(bean(PART), "settings"), "getDeclarationCeilingBytes") as Long
+
+    private fun field(
+        receiver: Any,
+        name: String,
+    ): Any = receiver.javaClass.getDeclaredField(name).also { it.isAccessible = true }.get(receiver)
 
     private fun keyOf(uri: String): String = uri.removePrefix("s3://$BUCKET/")
 
@@ -670,6 +910,11 @@ class ManagedLakeCompactionE2eTest {
         private const val SPILLS = "spills"
         private const val MISSING = "missing"
         private const val TIMING = "timing"
+        private const val DEADLINE = "deadline_sort"
+        private const val DEADLINE_DELIVERIES = 8
+        private const val DEADLINE_ROWS = 8_000_000L
+        private const val MIN_ROW_GROUP_BYTES = 64 * 1024L
+        private val AMPLE: Duration = Duration.ofMinutes(10)
         private const val TIMING_REPEATS = 2_500
         private const val TIMING_ROWS = 6_000L
         private const val TWO_GROUPS_ROWS = 100_000L
@@ -684,6 +929,8 @@ class ManagedLakeCompactionE2eTest {
         private const val PLANNER = "co.datapipelines.lake.maintenance.plan.MaintenancePlanner"
         private const val SCRATCH = "co.datapipelines.lake.maintenance.MaintenanceScratch"
         private const val PORT = "co.datapipelines.lake.maintenance.compaction.CompactionScratchPort"
+        private const val SESSION = "co.datapipelines.lake.maintenance.compaction.CompactionScratchSession"
+        private const val PART = "co.datapipelines.lake.maintenance.compaction.CompactionPart"
         private const val STATEMENT = "co.datapipelines.lake.maintenance.compaction.CompactionStatement"
         private const val DEADLINE_PASSED = "co.datapipelines.lake.maintenance.compaction.CompactionDeadlinePassed"
 
@@ -700,7 +947,14 @@ class ManagedLakeCompactionE2eTest {
 
         /** One partition, so its one group holds the removed file and nothing of the run commits. */
         private val TABLES
-            get() = listOf(TWO_GROUPS to TWO_GROUPS_FIELDS, SPILLS to SPILLS_FIELDS, MISSING to MISSING_FIELDS, TIMING to MISSING_FIELDS)
+            get() =
+                listOf(
+                    TWO_GROUPS to TWO_GROUPS_FIELDS,
+                    SPILLS to SPILLS_FIELDS,
+                    MISSING to MISSING_FIELDS,
+                    TIMING to MISSING_FIELDS,
+                    DEADLINE to DEADLINE_FIELDS,
+                )
 
         private const val MISSING_FIELDS =
             """{"fields":[{"id":1,"name":"id","type":"BIGINTEGER"},{"id":2,"name":"region","type":"STRING"},""" +
@@ -720,6 +974,19 @@ class ManagedLakeCompactionE2eTest {
         ): String =
             "SELECT i::BIGINT AS id, CASE WHEN i % 2 = 0 THEN 'eu' ELSE 'us' END AS region, ((i * 7919) % 1009)::INTEGER AS k, " +
                 "'p' AS payload FROM range($start, ${start + rows}) t(i)"
+
+        /**
+         * The stored deadline case's table: one integer column, its sort key. The engine's sort costs about the same per
+         * row whatever the row's width (measured: 4,500,000 rows of a 48-character key reached the first row in 0.42 s),
+         * while the deliveries that build the table cost per column, so the narrowest row gives the most sort per second
+         * of fixture.
+         */
+        private const val DEADLINE_FIELDS = """{"fields":[{"id":1,"name":"k","type":"BIGINTEGER"}],"sort_field_ids":[1]}"""
+
+        private fun scrambledKeys(
+            start: Long,
+            rows: Long,
+        ): String = "SELECT ((i * 7919) % 1000003)::BIGINT AS k FROM range($start, ${start + rows}) t(i)"
 
         private fun spilling(
             start: Long,
@@ -766,11 +1033,13 @@ class ManagedLakeCompactionE2eTest {
         fun properties(registry: DynamicPropertyRegistry) {
             ManagedLakeDeliveryProperties.register(registry, SECRET, oidc.issuer, LAKE, BUCKET)
             // Each delivery reserves 32 MB x 4 = 128 MiB: the 400,000-row inputs of the spilling table sort in their own
-            // delivery. The budget holds that and the adapter's 600 MiB reservation (C14), never at the same time.
+            // delivery. The budget holds that and the adapter's 950 MiB reservation (C14 through the adapter), never at
+            // the same time; 2 GB lets the stored C14 case's run declare enough for its whole sort to spill (only the
+            // deadline may stop it there).
             registry.add("datapipelines.lake.admission.max-delivery-bytes") { "32MB" }
             registry.add("datapipelines.lake.admission.staging-expansion-factor") { "4" }
             registry.add("datapipelines.lake.admission.staging-memory-limit") { "128MB" }
-            registry.add("datapipelines.lake.admission.scratch-bytes") { "1GB" }
+            registry.add("datapipelines.lake.admission.scratch-bytes") { "2GB" }
             registry.add("datapipelines.lake.maintenance.compaction-scratch-factor") { "1" }
             registry.add("datapipelines.lake.maintenance.compaction-bytes-per-second") { "1GB" }
             // The production planner runs at start and then a day later: only the test's measurements decide.
