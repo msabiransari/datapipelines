@@ -74,7 +74,7 @@ class CleanupWiringIntegrationTest {
         part["outcome"] shouldBe MaintenanceOutcome.DONE.wire
         part["tags_created"] shouldBe 2
         part["snapshots_expired"] shouldBe 1
-        part["files"] shouldBe 1 // the orphan: the expired snapshot's own files stay reached through the metadata log (958)
+        part["files"] shouldBe 1 // the orphan: still-protected pre-expiry revisions retain the expired snapshot's files
         h.exists(orphan) shouldBe false
         h.tags(t).size shouldBe 2
         println(
