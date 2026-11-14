@@ -110,7 +110,6 @@ class KeepTagsExpiryTest {
         today.end shouldBe midnight + Duration.ofDays(90)
         KeepTags.update(table, plan).commit()
         table.refresh()
-        table.refs()[today.name].shouldNotBeNull().maxRefAgeMs() shouldBe Duration.between(base.getValue(old), today.end).toMillis()
 
         simulate(table, base, today.end - Duration.ofDays(1))
         table.expireSnapshots().expireOlderThan(System.currentTimeMillis()).commit()
@@ -118,6 +117,8 @@ class KeepTagsExpiryTest {
         table.refs()[today.name].shouldNotBeNull().snapshotId() shouldBe old
         table.snapshot(old).shouldNotBeNull()
         io.fileExists(held.location()) shouldBe true
+        // checked after the day-89 expiry, so a wrong age shows first as the tag lost on day 89 (the K1 plant)
+        table.refs()[today.name].shouldNotBeNull().maxRefAgeMs() shouldBe Duration.between(base.getValue(old), today.end).toMillis()
 
         simulate(table, base, today.end + Duration.ofMinutes(1))
         table.expireSnapshots().expireOlderThan(System.currentTimeMillis()).commit()
