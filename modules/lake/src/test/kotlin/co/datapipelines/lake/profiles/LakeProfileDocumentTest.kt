@@ -128,6 +128,28 @@ class LakeProfileDocumentTest {
         refusal("not json") shouldBe ("$" to "json")
     }
 
+    @ParameterizedTest(name = "{0} = {1} is refused {2}")
+    @MethodSource("collapsing")
+    fun `a number that rounds onto a refused boundary is refused at the parser, before the typed value exists`(
+        key: String,
+        literal: String,
+        reason: String,
+    ) {
+        refusal(literally(key, literal)) shouldBe (key to reason)
+    }
+
+    @ParameterizedTest(name = "{0} = {1} round-trips")
+    @MethodSource("nearest")
+    fun `the nearest admitted number to each refused boundary keeps its bound through the canonical document`(
+        key: String,
+        literal: String,
+    ) {
+        val parsed = LakeProfileDocument.parse(literally(key, literal))
+        (parsed.compactSmallFileRatio > 0.0 && parsed.compactSmallFileRatio < 1.0) shouldBe true
+        (parsed.latenessOverdueFactor > 1.0 && parsed.latenessOverdueFactor <= MAX_FACTOR) shouldBe true
+        LakeProfileDocument.parse(LakeProfileDocument.toJson(parsed)) shouldBe parsed
+    }
+
     @Test
     fun `the refusal is the catalogued code with the key as details path`() {
         val failure = shouldThrow<DatapipelinesException> { LakeProfileDocument.parse(document("write.row_group_bytes" to "1")) }
@@ -152,6 +174,28 @@ class LakeProfileDocumentTest {
                 "reporting.lateness_sample" -> arrayOf(key to json, "reporting.lateness_min_deliveries" to "2")
                 else -> arrayOf(key to json)
             }
+
+        private const val MAX_FACTOR = 100.0
+        private const val RATIO = "maintenance.compact_small_file_ratio"
+        private const val FACTOR = "reporting.lateness_overdue_factor"
+
+        /**
+         * The built-in document with [key]'s value replaced by [literal] as TEXT: the number reaches the parser exactly
+         * as written, never re-serialized by a JSON library on the way (which would round it first).
+         */
+        private fun literally(
+            key: String,
+            literal: String,
+        ): String {
+            val anchor =
+                when (key) {
+                    RATIO -> "\"compact_small_file_ratio\": 0.75"
+                    FACTOR -> "\"lateness_overdue_factor\": 2"
+                    else -> error("no literal anchor for $key")
+                }
+            LakeProfileFixtures.BUILT_IN.split(anchor).size shouldBe 2
+            return LakeProfileFixtures.BUILT_IN.replace(anchor, anchor.substringBefore(": ") + ": " + literal)
+        }
 
         private fun refusal(json: String): Pair<String, String> {
             val failure = shouldThrow<DatapipelinesException> { LakeProfileDocument.parse(json) }
@@ -200,6 +244,24 @@ class LakeProfileDocumentTest {
                 arrayOf("reporting.lateness_min_deliveries", "1", "out_of_range"),
                 arrayOf("reporting.lateness_overdue_factor", "1", "out_of_range"),
                 arrayOf("reporting.lateness_overdue_factor", "100.01", "out_of_range"),
+            )
+
+        /** Admitted as a decimal, but its nearest double IS the refused bound (lane 956 r2 landing review, R2). */
+        @JvmStatic
+        fun collapsing(): List<Array<Any>> =
+            listOf(
+                arrayOf(RATIO, "0.99999999999999999", "out_of_range"),
+                arrayOf(RATIO, "1e-400", "out_of_range"),
+                arrayOf(FACTOR, "1.00000000000000001", "out_of_range"),
+            )
+
+        /** The nearest double inside each of the three bounds: 1 - 2^-53, the least subnormal, 1 + 2^-52. */
+        @JvmStatic
+        fun nearest(): List<Array<Any>> =
+            listOf(
+                arrayOf(RATIO, "0.9999999999999999"),
+                arrayOf(RATIO, "4.9e-324"),
+                arrayOf(FACTOR, "1.0000000000000002"),
             )
 
         @JvmStatic

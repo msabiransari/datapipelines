@@ -189,22 +189,35 @@ object LakeProfileDocument {
         return ZoneId.of(name)
     }
 
+    /**
+     * The two fractional values are typed `Double`, so each bound is checked on the written decimal AND on the double
+     * it becomes: a decimal inside a bound whose nearest double is the bound itself (`0.99999999999999999` is `1.0`,
+     * `1e-400` is `0.0`) is refused here, so the typed value and the canonical document [toJson] writes obey the same
+     * bounds as the number submitted.
+     */
     private fun ratio(root: ObjectNode): Double {
         val key = path(MAINTENANCE, COMPACT_SMALL_FILE_RATIO)
         val value = decimal(root.path(MAINTENANCE).path(COMPACT_SMALL_FILE_RATIO), key)
-        if (value.signum() <= 0 || value >= BigDecimal.ONE) {
+        val typed = value.toDouble()
+        val decimalInside = value.signum() > 0 && value < BigDecimal.ONE
+        val typedInside = typed > 0.0 && typed < 1.0
+        if (!decimalInside || !typedInside) {
             throw LakeProfileErrors.invalid(key, OUT_OF_RANGE, "must be above 0 and below 1")
         }
-        return value.toDouble()
+        return typed
     }
 
+    /** See [ratio]: the bound is checked on the decimal and on the double it becomes. */
     private fun overdueFactor(root: ObjectNode): Double {
         val key = path(REPORTING, LATENESS_OVERDUE_FACTOR)
         val value = decimal(root.path(REPORTING).path(LATENESS_OVERDUE_FACTOR), key)
-        if (value <= BigDecimal.ONE || value > MAX_OVERDUE_FACTOR) {
+        val typed = value.toDouble()
+        val decimalInside = value > BigDecimal.ONE && value <= MAX_OVERDUE_FACTOR
+        val typedInside = typed > 1.0 && typed <= MAX_OVERDUE_FACTOR.toDouble()
+        if (!decimalInside || !typedInside) {
             throw LakeProfileErrors.invalid(key, OUT_OF_RANGE, "must be above 1 and at most $MAX_OVERDUE_FACTOR")
         }
-        return value.toDouble()
+        return typed
     }
 
     private fun decimal(
