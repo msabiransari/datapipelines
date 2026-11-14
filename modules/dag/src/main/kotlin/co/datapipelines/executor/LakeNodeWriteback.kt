@@ -3,12 +3,15 @@ package co.datapipelines.executor
 import co.datapipelines.pipeline.LakeAppendColumn
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.LakeAppendSession
+import co.datapipelines.pipeline.LakeOrderKey
 import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.staging.DuckDbStaging
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import java.sql.ResultSet
+import java.sql.SQLException
 import java.sql.Statement
 import java.time.Instant
 import java.util.UUID
@@ -73,7 +76,7 @@ internal object LakeNodeWriteback {
                     ctx.handle.withStatement(node.id, statement) {
                         op.phase(OperationPhase.WRITING)
                         val input =
-                            StableInput(statement, table, columns, checkActive) { action ->
+                            StableInput(statement, table, columns, checkActive, StableInput.engineFailures(ctx.staging)) { action ->
                                 runBlocking(job) { ctx.handle.whileExecuting(node.id, statement, action) }
                             }
                         session.append(output, input, checkActive)
@@ -85,17 +88,42 @@ internal object LakeNodeWriteback {
         return NodeResult.of(node.id, written, startedAt)
     }
 
-    private class StableInput(
+    /**
+     * The materialized relation, scanned once per [scan] (#968 D1, D7). [orderBy] is validated before any statement runs
+     * and reaches the text only as integers and the contract's own fixed text ([LakeAppendInput.orderByClause]): a
+     * string key is compared by code points whatever collation the author's SQL gave the column (round 2 C1). A
+     * [SQLException] of the statement or of reading its rows leaves as what [classify] makes of it (staging's own
+     * engine-failure classification: a sort that outgrows the scratch reservation becomes
+     * `pipeline.staging.scratch_limit_exceeded`; anything unmatched is unchanged); nothing else is caught.
+     */
+    internal class StableInput(
         private val statement: Statement,
         private val table: String,
         override val originalColumns: List<LakeAppendColumn>,
         private val checkActive: () -> Unit,
+        private val classify: (SQLException) -> Exception,
         private val execute: (() -> Unit) -> Unit,
     ) : LakeAppendInput {
-        override fun scan(consume: (ResultSet) -> Unit) {
+        override fun scan(
+            orderBy: List<LakeOrderKey>,
+            consume: (ResultSet) -> Unit,
+        ) {
+            val sql = "SELECT * FROM $table" + LakeAppendInput.orderByClause(orderBy, originalColumns.size)
             checkActive()
-            execute { statement.executeQuery("SELECT * FROM $table").use(consume) }
+            execute {
+                try {
+                    statement.executeQuery(sql).use(consume)
+                } catch (e: SQLException) {
+                    throw classify(e)
+                }
+            }
             checkActive()
+        }
+
+        companion object {
+            /** Staging's own engine-failure classification when the staging is DuckDB; any other engine's failure is unchanged. */
+            fun engineFailures(staging: Any?): (SQLException) -> Exception =
+                (staging as? DuckDbStaging)?.let { it::classifyEngineFailure } ?: { it }
         }
     }
 }

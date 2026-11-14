@@ -235,7 +235,8 @@ internal object SharedE2e {
  * the fresh-deployment walkthrough. Derives the table list from `pg_tables` — a migration
  * that adds a table is included automatically, never a hand-copied list — excludes
  * `flyway_schema_history` (dropping it would make every later context re-migrate or
- * fail), truncates with CASCADE, and re-seeds the V4 `default` workspace and V53 lake-control singleton.
+ * fail), truncates with CASCADE, and re-seeds the V4 `default` workspace, the V53 lake-control singleton and the
+ * V61 built-in lake profiles.
  *
  * ALWAYS call [beforeSeeding] from the suite's first-test seed hook BEHIND its `seeded` flag — the
  * flag, not this object, provides the once-per-suite guarantee (several suites in one JVM each
@@ -251,6 +252,26 @@ internal object E2eClean {
 
     /** V53's required singleton must exist before the next managed-lake context's startup check. */
     private const val LAKE_CONTROL = "INSERT INTO lake_control (id, mode) VALUES (1, 'normal')"
+
+    /**
+     * V61's two built-in profiles, exactly as the migration inserts them (`production` the default, with its seed mark;
+     * `development` with the whole-day window). `lake_profiles.created_by` references `users`, so the CASCADE
+     * truncation empties it, and every new managed table takes the default profile by a sub-select (brief 956 D5).
+     * [E2eCleanSeedRestorationTest] pins this literal against a freshly migrated database.
+     */
+    internal val LAKE_PROFILES: String =
+        "INSERT INTO lake_profiles (name, is_default, seed_pending, values_json) VALUES " +
+            "('production', TRUE, TRUE, '${builtInProfile("02:00-05:00")}'), " +
+            "('development', FALSE, FALSE, '${builtInProfile("00:00-00:00")}') " +
+            "ON CONFLICT (name) DO NOTHING"
+
+    /** V61's built-in value document; the two built-ins differ only in the maintenance window. */
+    private fun builtInProfile(window: String): String =
+        """{"maintenance": {"window": "$window", "max_bytes_rewritten_per_run": 53687091200, """ +
+            """"target_file_bytes": 67108864, "compact_min_small_files": 5, "compact_small_file_ratio": 0.75, """ +
+            """"rewrite_manifests_min_count": 100, "cleanup_interval_hours": 24}, "write": {"row_group_bytes": 1048576}, """ +
+            """"retention": {"keep": [], "keep_time_zone": "UTC"}, """ +
+            """"reporting": {"lateness_sample": 20, "lateness_overdue_factor": 2, "lateness_min_deliveries": 5}}"""
 
     fun beforeSeeding() = clear(requireMigrated = true)
 
@@ -289,6 +310,7 @@ internal object E2eClean {
                 }
                 statement.execute(DEFAULT_WORKSPACE)
                 if ("lake_control" in tables) statement.execute(LAKE_CONTROL)
+                if ("lake_profiles" in tables) statement.execute(LAKE_PROFILES)
             }
         }
     }

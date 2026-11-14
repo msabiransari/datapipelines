@@ -79,19 +79,22 @@ class LakeDefinitionRepository(
         )
     }
 
-    /** Inserts the table row; false when the namespace already has a table of that name. */
+    /**
+     * Inserts the table row; false when the namespace already has a table of that name. The row takes the DEFAULT
+     * profile in this same statement (a sub-select, so no row is ever without one; V61, lake.md "Profiles") and an
+     * empty `policy_json`: the table's own keys are only its two pauses, set later (`LakeTablePauses`).
+     */
     fun insertTable(
         id: UUID,
         namespaceId: UUID,
         name: String,
-        policyJson: String,
         actor: UUID,
     ): Boolean =
         try {
             jdbc.update(
-                "INSERT INTO lake_tables_managed (id, namespace_id, name, policy_json, created_by) " +
-                    "VALUES (:id, :ns, :name, CAST(:policy AS jsonb), :actor)",
-                mapOf("id" to id, "ns" to namespaceId, "name" to name, "policy" to policyJson, "actor" to actor),
+                "INSERT INTO lake_tables_managed (id, namespace_id, name, policy_json, profile_id, created_by) " +
+                    "VALUES (:id, :ns, :name, '{}'::jsonb, $DEFAULT_PROFILE, :actor)",
+                mapOf("id" to id, "ns" to namespaceId, "name" to name, "actor" to actor),
             )
             true
         } catch (_: DuplicateKeyException) {
@@ -268,6 +271,9 @@ class LakeDefinitionRepository(
         )
 
     companion object {
+        /** The default profile's id, as every writer of `lake_tables_managed` names it (V61: exactly one row is marked). */
+        const val DEFAULT_PROFILE = "(SELECT id FROM lake_profiles WHERE is_default)"
+
         /** The house body hash (versioning §3.3, `ArtifactSql.HASH_EXPR`): sha256 over the stored jsonb's text. */
         const val HASH_EXPR = "encode(sha256(convert_to(CAST(:body AS jsonb)::text, 'UTF8')), 'hex')"
 

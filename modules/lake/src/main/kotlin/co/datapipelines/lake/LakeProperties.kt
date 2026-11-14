@@ -131,12 +131,32 @@ class LakeProperties(
                 "memoryLimit=$memoryLimit, egressProxy=$egressProxy, egressMaxAgeSeconds=$egressMaxAgeSeconds)"
     }
 
-    /** §6 `maintenance.*` (§11, P6) — bound, unused by P2. The window is UTC (call 8). */
+    /**
+     * §6 `maintenance.*` (§11, P6). [window] and [maxBytesRewrittenPerRun] are the `production` profile's seed only
+     * (#956). The four `plan-*` keys are the maintenance planner's (#959 D1; record §11a call 34, "The planner's own
+     * bounds"): they describe the deployment, not a table, so they are configuration and never a profile value.
+     * `LakeRules.checkLakeBounds` refuses a value outside its bounds at boot.
+     */
     class Maintenance(
         val window: String = DEFAULT_MAINTENANCE_WINDOW,
         val maxBytesRewrittenPerRun: DataSize = DataSize.ofGigabytes(DEFAULT_MAX_BYTES_REWRITTEN_GB),
+        /** The wait between the end of one plan and the start of the next; at least one minute. */
+        val planInterval: Duration = Duration.ofMinutes(DEFAULT_PLAN_INTERVAL_MINUTES),
+        /** The most tables one plan measures, oldest attempt first; 1 – 10,000. */
+        val planPageSize: Int = DEFAULT_PLAN_PAGE_SIZE,
+        /** The bound of one table's measurement; 1 second – 10 minutes. */
+        val planTableTimeout: Duration = Duration.ofSeconds(DEFAULT_PLAN_TABLE_TIMEOUT_SECONDS),
+        /** The most measurements given up at their bound and still running; at the limit a plan measures nothing more; 1 – 64. */
+        val planMaxAbandonedReads: Int = DEFAULT_PLAN_MAX_ABANDONED_READS,
+        /** #969 D4: scratch needed per byte of a rewrite group's input (the spike saw 2.5 – 2.9); at least 1. */
+        val compactionScratchFactor: Int = DEFAULT_COMPACTION_SCRATCH_FACTOR,
+        /** #969 D4: input bytes a rewrite group is assumed to get through per second (below the spike's 6.7 MiB); above 0. */
+        val compactionBytesPerSecond: DataSize = DataSize.ofMegabytes(DEFAULT_COMPACTION_MEGABYTES_PER_SECOND),
     ) {
-        override fun toString(): String = "Maintenance(window=$window, maxBytesRewrittenPerRun=$maxBytesRewrittenPerRun)"
+        override fun toString(): String =
+            "Maintenance(window=$window, maxBytesRewrittenPerRun=$maxBytesRewrittenPerRun, planInterval=$planInterval, " +
+                "planPageSize=$planPageSize, planTableTimeout=$planTableTimeout, planMaxAbandonedReads=$planMaxAbandonedReads, " +
+                "compactionScratchFactor=$compactionScratchFactor, compactionBytesPerSecond=$compactionBytesPerSecond)"
     }
 
     /** §6 `retention.*` (§8a, §9; P6/P7) — bound, unused by P2. The grace rule is enforced by `LakeRules` already. */
@@ -174,6 +194,12 @@ class LakeProperties(
         const val DEFAULT_EGRESS_MAX_AGE_SECONDS = 960L
         const val DEFAULT_MAINTENANCE_WINDOW = "02:00-05:00"
         const val DEFAULT_MAX_BYTES_REWRITTEN_GB = 50L
+        const val DEFAULT_PLAN_INTERVAL_MINUTES = 15L
+        const val DEFAULT_PLAN_PAGE_SIZE = 200
+        const val DEFAULT_PLAN_TABLE_TIMEOUT_SECONDS = 60L
+        const val DEFAULT_PLAN_MAX_ABANDONED_READS = 4
+        const val DEFAULT_COMPACTION_SCRATCH_FACTOR = 3
+        const val DEFAULT_COMPACTION_MEGABYTES_PER_SECOND = 4L
         const val DEFAULT_PROTECTION_DAYS = 7
         const val DEFAULT_ORPHAN_GRACE_HOURS = 72
 

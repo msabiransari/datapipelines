@@ -94,6 +94,17 @@ class LakeRulesTest {
         enabled(LakeRules.JOB_TIMEOUT to "soon").single() shouldStartWith LakeRules.JOB_TIMEOUT
     }
 
+    /**
+     * #962's time recipe (C8, C9, C9a) runs at J = 3585 s, S = 5 s, G = 2 h. The rule admits it (7200 > 3585 + 5 + 3600 =
+     * 7190: G clears the bound by 10 s, the rule's minimum here) and refuses one hour less (3600 ≤ 7190).
+     */
+    @Test
+    fun `962 - the cleanup time recipe's settings are admitted and one hour less of grace is refused`() {
+        val recipe = arrayOf(LakeRules.JOB_TIMEOUT to "3585s", LakeRules.STATEMENT_TIMEOUT_SECONDS to "5")
+        enabled(LakeRules.ORPHAN_GRACE_HOURS to "2", *recipe) shouldContainExactly emptyList()
+        enabled(LakeRules.ORPHAN_GRACE_HOURS to "1", *recipe).single() shouldStartWith "${LakeRules.ORPHAN_GRACE_HOURS} × 3600 (3600)"
+    }
+
     @Test
     fun `the lease wait stays under the node query ceiling and a delivery's staging fits the scratch budget`() {
         enabled(LakeRules.LEASE_WAIT_SECONDS to "900").single() shouldStartWith LakeRules.LEASE_WAIT_SECONDS
@@ -122,6 +133,49 @@ class LakeRulesTest {
         enabled(LakeRules.MAINTENANCE_WINDOW to "22:30-01:15") shouldContainExactly emptyList()
         // A statement timeout of zero fails positivity, and nothing downstream divides by it.
         enabled(LakeRules.STATEMENT_TIMEOUT_SECONDS to "0") shouldHaveSize 1
+    }
+
+    /** #956 D4 / P3: the seed copies the cap into `production`, so start-up refuses one under twice its 64 MiB target. */
+    @Test
+    fun `956 - the maintenance cap is refused under 128 MiB with its key named and admitted at 128 MiB`() {
+        enabled(LakeRules.MAX_BYTES_REWRITTEN to "100MB").single() shouldStartWith LakeRules.MAX_BYTES_REWRITTEN
+        enabled(LakeRules.MAX_BYTES_REWRITTEN to "134217727B").single() shouldStartWith LakeRules.MAX_BYTES_REWRITTEN
+        enabled(LakeRules.MAX_BYTES_REWRITTEN to "128MB") shouldContainExactly emptyList()
+        enabled(LakeRules.MAX_BYTES_REWRITTEN to "134217728B") shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.MAX_BYTES_REWRITTEN to "100MB")) shouldContainExactly emptyList()
+    }
+
+    /** #959 D1: the planner's four bounds, each refused one step outside and admitted at its edge, its key named. */
+    @Test
+    fun `959 - the planner's four keys are refused outside their bounds and admitted at their edges`() {
+        listOf("59s", "0", "soon").forEach { enabled(LakeRules.PLAN_INTERVAL to it).single() shouldStartWith LakeRules.PLAN_INTERVAL }
+        listOf("1m", "60s", "15m").forEach { enabled(LakeRules.PLAN_INTERVAL to it) shouldContainExactly emptyList() }
+        listOf(
+            "0",
+            "10001",
+            "-1",
+            "x",
+        ).forEach { enabled(LakeRules.PLAN_PAGE_SIZE to it).single() shouldStartWith LakeRules.PLAN_PAGE_SIZE }
+        listOf("1", "10000").forEach { enabled(LakeRules.PLAN_PAGE_SIZE to it) shouldContainExactly emptyList() }
+        listOf("999ms", "601s", "11m", "0s").forEach {
+            enabled(LakeRules.PLAN_TABLE_TIMEOUT to it).single() shouldStartWith LakeRules.PLAN_TABLE_TIMEOUT
+        }
+        listOf("1s", "10m", "600s").forEach { enabled(LakeRules.PLAN_TABLE_TIMEOUT to it) shouldContainExactly emptyList() }
+        listOf("0", "65").forEach {
+            enabled(LakeRules.PLAN_MAX_ABANDONED_READS to it).single() shouldStartWith LakeRules.PLAN_MAX_ABANDONED_READS
+        }
+        listOf("1", "64").forEach { enabled(LakeRules.PLAN_MAX_ABANDONED_READS to it) shouldContainExactly emptyList() }
+        // #969 D4: compaction's two values.
+        listOf("0", "-1", "x", "2147483648").forEach {
+            enabled(LakeRules.COMPACTION_SCRATCH_FACTOR to it).single() shouldStartWith LakeRules.COMPACTION_SCRATCH_FACTOR
+        }
+        listOf("1", "3").forEach { enabled(LakeRules.COMPACTION_SCRATCH_FACTOR to it) shouldContainExactly emptyList() }
+        listOf("0B", "0", "fast").forEach {
+            enabled(LakeRules.COMPACTION_BYTES_PER_SECOND to it).single() shouldStartWith LakeRules.COMPACTION_BYTES_PER_SECOND
+        }
+        listOf("1B", "4MB", "1GB").forEach { enabled(LakeRules.COMPACTION_BYTES_PER_SECOND to it) shouldContainExactly emptyList() }
+        // A disabled lake is never judged on them.
+        violations(mapOf(LakeRules.PLAN_PAGE_SIZE to "0", LakeRules.PLAN_INTERVAL to "1s")) shouldContainExactly emptyList()
     }
 
     /**

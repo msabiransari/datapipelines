@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.78 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.86 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-14
 
 ---
 
@@ -437,6 +437,7 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 | INFO | `lake.boot.ok` | Every check passed: the catalog shape, the four V53 triggers, the control row, the store reachable and honouring `If-None-Match: *` | `bucket`, `prefix` |
 | INFO | `lake.egress_proxy_verified` | #845: before the managed datasource is registered, the configured egress proxy declared the configured max-age at `/dp-egress` and a `HEAD` of the bucket through it reached the store (any store answer counts; only a proxy-generated 502/503/504 does not) | `proxy` (`host:port`), `max_age_seconds`, `reader_end_by_ms` (the bound a reader against a store that trickles on every attempt ends within: `LakeHttpBounds.egressReaderEndByMillis`, (`http_retries` + 1) × max-age + slack, [Lake §9](lake.md#9-reads)), `store` (the bucket URI, no credential), `store_status`, `duration_ms` |
 | WARN | `lake.egress_proxy_absent` | #845: `datapipelines.lake.reads.egress-proxy` is empty, so managed reads reach the store directly with no connection max-age ([Lake §9](lake.md#9-reads)) | — |
+| INFO | `lake.profile.seeded` | #956: the first start with the lake enabled copied `datapipelines.lake.maintenance.window` and `.max-bytes-rewritten-per-run` into the `production` profile and cleared its `seed_pending` mark ([Lake §11](lake.md#11-profiles)); logged once per database, by the instance whose statement changed the row — a later start, a second instance or an edited profile logs nothing | `profile` (`production`), `window`, `max_bytes_rewritten_per_run` |
 
 **The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put`, `lake.boot.egress_proxy` (#845: the configured egress proxy is malformed, does not answer within its 2 s connect / 5 s read bound, declares another max-age, or answers a 502/503/504 of its own for the store), and `lake.boot.datasource_name_taken` (#818, raised when the managed datasource is registered: another datasource holds `datapipelines.lake.name`) (what each means: Configuration §7). No credential, key, or object body appears in any of them.
 
@@ -488,6 +489,84 @@ as their conditional state/attempt changes. Their details contain only `table_id
 and `outcome`. A lost acknowledgement can record UNKNOWN followed by PUBLISHED and SETTLED without a second CAS.
 Ingestion storage setup failures use the staging boundary's fixed message and log only execution id and class;
 generated secret SQL, credentials and driver messages never reach an execution event or recipe.
+
+#### 3.4T The lake remover's events (#958)
+
+The one place a managed-lake object is deleted ([Lake §10](lake.md#10-removal-and-cleanup)). Every event carries the
+table id; all except `lake.removal.unexpected_dp_key` also carry the pass's run id. The unexpected-key event carries
+one relative key, as specified below; no event carries a key list, a presigned URL or a credential. A failure reports
+the exception class and first SQLSTATE in §3.4G's safe shape. Its production callers are the cleanup parts (§3.4W).
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| WARN | `lake.removal.refused` | A pass did nothing: the catalog is not in `normal` mode, the caller's lease did not answer, the table is not `purged` (a purge), or the clock-skew probe's interval left ±3600 s (`lake.maintenance.clock_skew`, [Pipeline Contract §13.25](pipeline-contract.md#1325-managed-lake)) | `table_id`, `run_id`, `reason` (`mode_not_normal` \| `lease_lost` \| `not_purged` \| `clock_skew`), `code` (the catalogued code or `none`), `marker` (`not_written` \| `removed` \| `left:<reason>`), `skew_lower_s`, `skew_upper_s` (`none` unless the probe ran) |
+| INFO | `lake.removal.ended` | A pass listed the table's location and ended, complete or stopped | `table_id`, `run_id`, `pass` (`orphans` \| `purge`), `listed`, `reached`, `deleted` (confirmed by the store), `bytes`, `left` (`<reason>=<count>` pairs), `stopped` (`lease_lost` \| `mode_changed` \| `delete_failed` \| `none`), `marker`, `purge` (`finished` \| `more_to_do` \| `none`) |
+| WARN | `lake.removal.failed` | The probe, the protected-graph walk, a catalog read or the listing failed: nothing was deleted, the pass's marker (if written) is left, and the caller sees the failure | `table_id`, `run_id`, `cause`, `sql_state` |
+| WARN | `lake.removal.batch_failed` | A delete batch's response named keys it did not delete (`outcome=failed`, later batches still run), or the call threw or its answer was lost (`outcome=unknown`, no further batch) | `table_id`, `run_id`, `keys` (the count), `outcome`, `cause`, `sql_state` |
+| WARN | `lake.removal.marker_left` | The pass's own `dp/clock/<run-id>` marker was not deleted: a lease or mode check said no or could not be made, or its delete was not confirmed. A later pass removes it once this run is terminal | `table_id`, `run_id`, `reason` (`lease_lost` \| `mode_changed` \| `check_failed` \| `delete_unconfirmed`) |
+| WARN | `lake.removal.unexpected_dp_key` | The listing holds keys under `dp/` that are neither a recipe nor a clock marker; they are never deleted and keep a purge at *more to do*. Once per pass | `table_id`, `count`, `first` (the first such key, relative to the table location) |
+
+#### 3.4U Lake maintenance run events (#957)
+
+The `lake-maintenance` scheduler task, one instance per managed table ([Lake: maintenance runs](lake.md#11-maintenance-runs)). A run's ids are the run row's (`lake_maintenance_runs.id`) and the table's; no event carries a path, a storage endpoint, a message text or a credential. Failures use §3.4G's safe shape (the class, the first SQLSTATE).
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| WARN | `lake.maintenance.refused` | The task's principal does not hold `lake.maintain`: the task ends before the slot, no row | `table_id`, `user_id`, `permission` |
+| INFO | `lake.maintenance.skipped` | The task ends with no row: the key is not a table id, the catalog is not in `normal` mode, or the table has no managed row | `table_id` (the key, at most 64 characters), `reason` (`invalid_key` \| `catalog_mode` \| `no_table`) |
+| INFO | `lake.maintenance.held` | No maintenance slot was free (`admission.max-concurrent-maintenance`): no row, the task comes again in 30 s | `table_id`, `again_at` |
+| INFO | `lake.maintenance.waiting` | An earlier run of the table is `running` and not past its deadline: no row, the slot and any scratch released, the task comes again at that deadline | `table_id`, `again_at` |
+| INFO | `lake.maintenance.admitted` | The run row was written; the run's deadline is every lease's deadline | `run_id`, `table_id`, `kind`, `deadline`, `scratch_reserved_bytes` |
+| WARN | `lake.maintenance.abandoned` | The admitting statement closed an earlier run past its deadline as `abandoned` (once per closed row) | `run_id` (the abandoned run), `table_id`, `successor_run_id` |
+| WARN | `lake.maintenance.settlement_deferred` | The settlement step before the first part stopped at a failing row or failed outside the rows; the parts run anyway and the run row records it | `run_id`, `table_id`, `cause`, `sql_state` |
+| WARN | `lake.maintenance.deadline_refused` | A commit was not attempted, or its lease was refused, because the run's deadline had passed: the part ends `deadline` | `run_id`, `table_id`, `deadline`, `code` (`lake.maintenance.deadline`) |
+| WARN | `lake.maintenance.close_refused` | The run's close found the row no longer `running` (a successor abandoned it): nothing is overwritten and nothing concluded | `run_id`, `table_id`, `state` (the state the worker would have written) |
+| INFO | `lake.maintenance.finished` | An admitted run ended (also after `close_refused`, with `state=abandoned`) | `run_id`, `table_id`, `state`, `error_code`, `parts` (`name:outcome` per part, comma-separated) |
+| INFO | `lake.maintenance.keep_reconciled` | #960: the keep rules' reconcile was applied to the run's table ([Lake §11 Profiles](lake.md#11-profiles)): one commit when the plan created, re-aged or removed a `dp-keep-` tag, none otherwise. Counts only; never a tag name or a snapshot id | `run_id`, `table_id`, `outcome` (`committed` \| `nothing_to_commit` \| `busy` \| `deadline`), `created`, `re_aged`, `removed`, `standing`, `not_kept` |
+
+#### 3.4V Lake maintenance planner events (#959)
+
+The `lake-maintenance-planner` recurring task ([Lake: maintenance runs](lake.md#11-maintenance-runs)). Events carry table ids and counts only: no path, no storage endpoint, no message text, no credential. Failures use §3.4G's safe shape (`cause` = the class, the first SQLSTATE).
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| INFO | `lake.maintenance.planned` | A plan ended: its row (`lake_maintenance_plan`, [Metadata DB §4.59](metadata-db.md#459-lake_maintenance_plan)) was written | `tables_with_work`, `tasks_enqueued`, `tasks_moved`, `tasks_still_queued` (the "falling behind" count), `tables_measured`, `tables_not_measured`, `tables_stale`, `tables_rule_silent` |
+| WARN | `lake.maintenance.plan_reads_exhausted` | `plan-max-abandoned-reads` abandoned reads are still running: the plan measures nothing more, the page's rest is not attempted and not stamped, and the plan still decides and enqueues from the stored figures (once per plan) | `not_measured`, `abandoned_reads` |
+| WARN | `lake.maintenance.plan_read_abandoned` | A table's measurement was still running at `plan-table-timeout`: the reader is retired with the read (still counted, its table excluded), then its error (`timeout`) is stamped, the last good figures kept; a stamp that fails ends the plan as thrown | `table_id`, `elapsed_ms`, `abandoned_reads` |
+| INFO | `lake.maintenance.plan_read_ended` | An abandoned read ended (also one whose client construction failed late): it wrote nothing, closed whatever client it held, and its thread ended; the limit frees one | `table_id`, `published` (always `false`) |
+| WARN | `lake.maintenance.plan_measure_failed` | A measurement failed (also a reader client that could not be built): its attempt and error code are stamped, the last good figures kept | `table_id`, `cause` |
+| WARN | `lake.maintenance.plan_write_failed` | A measurement's own database write failed: the row keeps what it held | `table_id`, `cause` |
+
+#### 3.4W Lake cleanup events (#962)
+
+The `cleanup` and `purge_deletion` maintenance parts ([Lake §10](lake.md#10-removal-and-cleanup)). Counts and ids only:
+no key, no location, no exception message, no credential; a failure is its code and its class (§3.4G's safe shape).
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| WARN | `lake.cleanup.stopped` | The part is about to throw after it took the table lease (`lake.maintenance.cleanup_incomplete`, `lake.maintenance.clock_skew`, or anything else thrown): the run ends `failed` and records no figures, so this line carries them. Once per throw | `part` (`cleanup` \| `purge_deletion`), `table_id`, `run_id`, `code`, `reason` (`mode` \| `delete_failed` \| `none`), `cause`, `tags_created`, `tags_changed`, `tags_removed`, `not_kept` (`<reason>=<count>` pairs), `snapshots_expired`, `floor` (an instant, `not_applicable` or `none`), `listed`, `deleted`, `bytes`, `left` and `hints_deferred` (`<reason>=<count>` pairs), `deferred`, `observer` |
+| WARN | `lake.cleanup.observer_failed` | The cleanup observer threw an exception: the cleanup ends as the remover's result says, and its result records `observer: failed` | `table_id`, `run_id`, `cause` (the class only) |
+
+#### 3.4X Lake storage breakdown events (#964)
+
+The cleanup's observer, the storage breakdown ([Lake §10](lake.md#10-removal-and-cleanup), *The storage breakdown*).
+Ids, counts and bytes only: no key, no location, no message.
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| WARN | `lake.inventory.totals_mismatch` | The six rows did not add up to the cleanup's listing: nothing is stored, the table's previous rows stay, and the cleanup records `observer: failed` (with `lake.cleanup.observer_failed`, §3.4W) | `table_id`, `run_id`, `listed_objects`, `listed_bytes`, `row_objects`, `row_bytes` |
+
+#### 3.4Y Lake compaction events (#969)
+
+The `compaction` part of a maintenance run ([Lake: maintenance runs](lake.md#11-maintenance-runs), *Compaction*). Ids and
+figures only: no file location, no storage endpoint, no message text, no credential. Failures use §3.4G's safe shape
+(`cause` = the class, the first SQLSTATE).
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| INFO | `lake.maintenance.compaction_group_committed` | One rewrite group committed (once per group): its outputs replaced its inputs in one `RewriteFiles` commit; nothing was deleted | `run_id`, `table_id`, `input_files`, `input_bytes`, `output_files`, `output_bytes`, `rows`, `read_write_seconds`, `lease_seconds` (the commit's lease), `scratch_peak_bytes` (the scratch database's file, WAL and spill directory, sampled while it wrote) |
+| WARN | `lake.maintenance.compaction_blocked` | The part ended with files no run can take (once per blocked result): the part's outcome is `capacity`. With `limit_source=scratch` and a group's input as the largest need, the scratch database ran out mid-sort: the evidence to raise `compaction-scratch-factor` or `admission.scratch-bytes` | `run_id`, `table_id`, `blocked` (files), `largest_need_bytes`, `limit_bytes`, `limit_source` (`cap` \| `scratch` \| `time`), `grant_bytes` (the run's scratch for the part), `committed`, `left_for_fresh_run` |
+| WARN | `lake.maintenance.compaction_deadline` | A statement or the open of the run's scratch database failed after the run's deadline: the clock decided it was the deadline (whatever the driver said), the group is abandoned and the part ends `deadline` | `deadline`, `cause`, `sql_state` |
 
 ### 3.5 Log destination
 
@@ -791,6 +870,14 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.86 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.84 and #964's v1.85 (its section renumbered §3.4X → §3.4Y) | **§3.4Y** (new): the compaction part's three events: INFO `lake.maintenance.compaction_group_committed` (one per committed group, with D9's figures), WARN `lake.maintenance.compaction_blocked` (one per `capacity` result: the blocked count, the largest need, the limit and its source, the grant) and WARN `lake.maintenance.compaction_deadline` (a scratch-database failure the clock judged to be the deadline; class and SQLSTATE only). |
+| 2026-11-14 | v1.85 | 964 (#964, dp-lake P6) | **§3.4X** (new): WARN `lake.inventory.totals_mismatch` — the storage breakdown's six rows did not add up to the cleanup's listing; nothing stored, the two totals logged (counts and bytes only). |
+| 2026-11-14 | v1.84 | 962 (#962, dp-lake P6) | **§3.4W** (new): the cleanup parts' two events, WARN `lake.cleanup.stopped` (the figures of a part that throws, counts only) and WARN `lake.cleanup.observer_failed` (the observer's exception class; the cleanup unchanged). §3.4T: the remover's production callers are these parts. |
+| 2026-11-14 | v1.83 | 959 (#959) — renumbered at the spec merge after #960's v1.82 | **§3.4V** (new): the six `lake.maintenance.*` events of the maintenance planner: planned, plan_reads_exhausted, plan_read_abandoned, plan_read_ended, plan_measure_failed, plan_write_failed. |
+| 2026-11-14 | v1.82 | 960 (#960, dp-lake P6) | **§3.4U**: new INFO `lake.maintenance.keep_reconciled` (`run_id`, `table_id`, `outcome`, `created`, `re_aged`, `removed`, `standing`, `not_kept`) — the keep rules' reconcile applied to a run's table, one commit or none. |
+| 2026-11-14 | v1.81 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.80 | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |
+| 2026-11-14 | v1.80 | 957 (#957) — renumbered at the spec merge after #958's v1.79 | **§3.4U** (new; §3.4T at the lane's base, #958's §3.4T landed first): the ten `lake.maintenance.*` events of the per-table maintenance task: refused, skipped, held, waiting, admitted, abandoned, settlement_deferred, deadline_refused, close_refused, finished. |
+| 2026-11-14 | v1.79 | 958 (#958) | New **§3.4T**, the lake remover's six events: WARN `lake.removal.refused`, INFO `lake.removal.ended`, WARN `lake.removal.failed`, `lake.removal.batch_failed`, `lake.removal.marker_left` and `lake.removal.unexpected_dp_key`. Counts, identifiers and one relative unexpected key; never a key list or a credential. |
 | 2026-11-13 | v1.78 | 939 (#939) | **§3.4S**: new INFO `lake.settle.protection_window_aligned` (`days`) — the settle sweep set `lake_control.protection_interval` to this instance's `retention.protection-days`; logged only when the row changed. |
 | 2026-11-13 | v1.77 | 806 merge review (#806) | **§3.4**: catalogue the web module's `staging.scratch.health` transition WARN and recovery INFO already described in §6.1. Every non-`UP` transition retains the usable-byte reading, including an unwritable directory; a failed reading reports `unknown`. |
 | 2026-11-13 | v1.76 | 806 (#806) | **§4.1**: four untagged byte gauges, `datapipelines.staging.scratch.capacity`, `.reserved`, `.leftover` (`NaN` until the leftover sweep has counted) and `.usable` (`NaN` when the reading throws), read at every scrape. **§6.1**: the `diskSpace` bullet's "nothing writes to local disk" reasoning corrected (DuckDB staging, #795), and the DuckDB scratch signal described — the status-only `duckdb_scratch` indicator on the management port's `/actuator/health`, never a `/health` component, its rows, and what its `UP` does and does not establish (owner ruling 2026-11-12 for the surface). §6.4 unchanged: the indicator carries no detail. |

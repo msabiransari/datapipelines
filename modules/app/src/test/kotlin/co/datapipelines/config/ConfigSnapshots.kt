@@ -107,6 +107,12 @@ internal object ConfigSnapshots {
             rawYaml[key]?.toString()?.let { raw -> PLACEHOLDER_DEFAULT.find(raw)?.groupValues?.get(1) ?: raw }
         }
 
+    /** §3.29 (#957) — the scheduler's shipped switch and thread count, read off `application.yml` like [lakeDefaults]. */
+    fun schedulerDefaults(): Map<String, String?> =
+        SchedulerThreadsRules.KEYS.associateWith { key ->
+            rawYaml[key]?.toString()?.let { raw -> PLACEHOLDER_DEFAULT.find(raw)?.groupValues?.get(1) ?: raw }
+        }
+
     private val rawYaml: Map<String, Any?> by lazy {
         YamlPropertySourceLoader()
             .load("application.yml", FileSystemResource(repoFile("modules/app/src/main/resources/application.yml")))

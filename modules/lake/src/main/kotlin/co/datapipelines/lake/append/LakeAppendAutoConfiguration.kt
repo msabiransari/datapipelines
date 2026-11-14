@@ -16,6 +16,7 @@ import co.datapipelines.lake.delivery.DeliveryLedgerRepository
 import co.datapipelines.lake.delivery.LakeProjectionInvalidation
 import co.datapipelines.lake.delivery.LakeStagingStorage
 import co.datapipelines.lake.delivery.TrustedDeliveryListing
+import co.datapipelines.lake.profiles.LakeProfiles
 import co.datapipelines.lake.settle.DeliverySettlementRepository
 import co.datapipelines.lake.settle.DeliverySettler
 import co.datapipelines.lake.settle.LakeMetadataReads
@@ -96,6 +97,7 @@ class LakeAppendRuntime(
             },
             heartbeat,
             settler,
+            LakeProfiles.over(named, transaction, audit),
         )
     val port: LakeAppendPort =
         ManagedLakeAppendPort(

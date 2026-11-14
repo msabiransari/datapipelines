@@ -33,7 +33,7 @@ class SchedulerUnitTest {
     fun `the documented defaults and the bounds that keep shutdown and the window scan honest`() {
         val p = SchedulerProperties()
         listOf(p.enabled, p.threads, p.pollingIntervalSeconds, p.heartbeatIntervalSeconds, p.tickIntervalSeconds) shouldBe
-            listOf(true, 2, 10L, 30L, 10L)
+            listOf(true, 3, 10L, 30L, 10L)
         listOf(p.maxConcurrentRuns, p.latenessSeconds, p.catchUpMaxAgeSeconds, p.shutdownWaitSeconds) shouldBe listOf(4, 600L, 86_400L, 5L)
         listOf(p.minIntervalSeconds, p.maxSchedulesPerWorkspace) shouldBe listOf(300L, 100)
         p.startGrace shouldBe Duration.ofMinutes(3)

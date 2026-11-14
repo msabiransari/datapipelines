@@ -547,7 +547,7 @@ datapipelines:
   scheduler:
     # This instance dispatches; false = API mode (REST works, nothing fires from here).
     enabled: ${DATAPIPELINES_SCHEDULER_ENABLED:true}
-    threads: ${DATAPIPELINES_SCHEDULER_THREADS:2}
+    threads: ${DATAPIPELINES_SCHEDULER_THREADS:3}
     polling-interval-seconds: ${DATAPIPELINES_SCHEDULER_POLLING_INTERVAL_SECONDS:10}
     heartbeat-interval-seconds: ${DATAPIPELINES_SCHEDULER_HEARTBEAT_INTERVAL_SECONDS:30}
     tick-interval-seconds: ${DATAPIPELINES_SCHEDULER_TICK_INTERVAL_SECONDS:10}
@@ -700,6 +700,15 @@ datapipelines:
     maintenance:
       window: ${DATAPIPELINES_LAKE_MAINTENANCE_WINDOW:02:00-05:00}
       max-bytes-rewritten-per-run: ${DATAPIPELINES_LAKE_MAINTENANCE_MAX_BYTES_REWRITTEN_PER_RUN:50GB}
+      # #959: the maintenance planner's own bounds (deployment configuration, never a profile value; configuration.md §3.36).
+      plan-interval: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_INTERVAL:15m}
+      plan-page-size: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_PAGE_SIZE:200}
+      plan-table-timeout: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_TABLE_TIMEOUT:60s}
+      plan-max-abandoned-reads: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_MAX_ABANDONED_READS:4}
+      # #969: compaction's two deployment values (configuration.md §3.36): scratch per byte of a group's input, and the
+      # input bytes a group is assumed to get through per second (MB = MiB in Spring's DataSize).
+      compaction-scratch-factor: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_SCRATCH_FACTOR:3}
+      compaction-bytes-per-second: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_BYTES_PER_SECOND:4MB}
     retention:
       protection-days: ${DATAPIPELINES_LAKE_RETENTION_PROTECTION_DAYS:7}
       orphan-grace-hours: ${DATAPIPELINES_LAKE_RETENTION_ORPHAN_GRACE_HOURS:72}

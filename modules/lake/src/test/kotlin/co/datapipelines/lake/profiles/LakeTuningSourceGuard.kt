@@ -1,0 +1,489 @@
+package co.datapipelines.lake.profiles
+
+/** One Kotlin source: its repository-relative path and its text. */
+internal data class GuardSource(
+    val path: String,
+    val text: String,
+)
+
+/** A rule broken at [path]: [rule] is one of `a` to `e`, [what] the token that broke it. */
+internal data class GuardViolation(
+    val rule: Char,
+    val path: String,
+    val what: String,
+)
+
+/** One admitted token in one file (relative to `co/datapipelines/lake/`), with why it is not a tuning value. */
+internal data class Admitted(
+    val file: String,
+    val token: String,
+    val reason: String,
+)
+
+/**
+ * The five rules of `LakeTuningSourceGuardTest` (record M8, brief 956 C.2) over a set of sources. A source scan, not a
+ * data-flow analysis: what it cannot see is listed in the test's KDoc and in lake.md "Profiles". Scoped code is every
+ * file under `modules/lake/src/main/kotlin/co/datapipelines/lake/append/` or `.../maintenance/`, sub-packages included.
+ */
+internal object LakeTuningSourceGuard {
+    const val LAKE = "modules/lake/src/main/kotlin/co/datapipelines/lake/"
+
+    /**
+     * The allowlist, one entry per line (later P6 lanes add theirs): protocol and safety bounds, unit conversions,
+     * format, grammar and codec facts, never a tuning value. Rule (a) matches the token inside the offending line;
+     * rules (b) and (c) match it exactly against the referenced `Owner.NAME` or the read.
+     */
+    val ALLOWLIST: List<Admitted> =
+        listOf(
+            Admitted("append/AppendColumnCheck.kt", "MAX_PRECISION = 38", "the largest decimal precision: a format bound"),
+            Admitted("append/AppendColumnCheck.kt", "UNSIGNED_LONG_PRECISION = 20", "digits of the unsigned 64-bit maximum: a type fact"),
+            Admitted("append/AppendCommitter.kt", "MAX_ATTEMPTS = 3", "commit attempts: a §8 safety rule (call 35)"),
+            Admitted("append/AppendValues.kt", "NANOS_PER_MICRO = 1_000", "a unit conversion"),
+            Admitted("append/CommitClassifier.kt", "MAX_CHAIN = 16", "cause-chain walk bound: a safety bound"),
+            Admitted("append/LakeAppendAutoConfiguration.kt", "STATEMENT_TIMEOUT_SECONDS = 5", "a statement timeout: protocol"),
+            Admitted("append/LakeBoundedJdbcTemplate.kt", "SOCKET_SLACK_SECONDS = 5", "socket slack over the statement timeout"),
+            Admitted("append/LakeBoundedJdbcTemplate.kt", "MILLIS_PER_SECOND = 1_000", "a unit conversion"),
+            Admitted("append/ManagedLakeAppendPort.kt", "parts.size != 2", "a target is `namespace.table`: two parts, a grammar fact"),
+            Admitted("append/RecipeWriter.kt", "PRECONDITION_FAILED = 412", "a failed conditional PUT: protocol"),
+            Admitted("append/ParquetAppendWriter.kt", "TableProperties.PARQUET_COMPRESSION", "SETS the codec, zstd (code, call 35)"),
+            Admitted("append/ParquetAppendWriter.kt", "TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES", "SETS it from the profile"),
+            Admitted("append/LakeWritebackRunner.kt", "LakeApplyLeases.APPLY_LEASE_TTL", "the table lease's TTL: lease protocol"),
+            Admitted("append/LakeWritebackRunner.kt", "LakeApplyLeases.DEFAULT_POLL_INTERVAL", "the busy lease's poll: lease protocol"),
+            Admitted("append/AppendRecipeAssembler.kt", ".properties()[\"dp.definition.version\"]", "the definition identity"),
+            Admitted("maintenance/remove/LakeObjectDeleter.kt", "MAX_BATCH = 1000", "S3 DeleteObjects per-request maximum: protocol"),
+            Admitted("maintenance/remove/ClockSkewProbe.kt", "Duration.ofSeconds(3_600)", "the record's skew bound (call 33): safety"),
+            Admitted("maintenance/MaintenanceRun.kt", "Duration.ofSeconds(60)", "the maintenance lease's TTL: lease protocol"),
+            Admitted("maintenance/MaintenanceRun.kt", "Duration.ofSeconds(20)", "its heartbeat, TTL / 3: lease protocol"),
+            Admitted("maintenance/MaintenanceRunRepository.kt", "MILLIS_PER_SECOND = 1000L", "a unit conversion"),
+            Admitted("maintenance/MaintenanceRunRepository.kt", "MAX_MESSAGE = 500", "stored message length cap: a format bound"),
+            Admitted("maintenance/MaintenanceWorker.kt", "Duration.ofSeconds(30)", "no free slot: again in 30 s (957 D3 step 2)"),
+            Admitted("maintenance/MaintenanceWorker.kt", "MAX_KEY_LOGGED = 64", "logged key length cap: log safety"),
+            Admitted("maintenance/DeliveryMaintenanceSettlement.kt", "LakeSettlementSweep.SETTLE_PAGE_SIZE", "the sweep's page (957 D6a)"),
+            Admitted("maintenance/DeliveryMaintenanceSettlement.kt", "LakeSettlementSweep.SWEEP_BUDGET", "the sweep's budget (957 D6a)"),
+            Admitted("maintenance/plan/PlanRepository.kt", "USAGE_RETENTION_DAYS = 35", "usage rows kept 35 days: a record rule (cut L8)"),
+            Admitted("maintenance/plan/PlanFigures.kt", "GROWTH_BASELINE_DAYS = 7", "growth per WEEK: call 46's definition"),
+            Admitted("maintenance/plan/TableMeasurer.kt", "LakeMetadataReads.METADATA_MAX_BYTES", "metadata read cap: a safety bound"),
+            Admitted(
+                "maintenance/compaction/CompactionGroupPlanner.kt",
+                "MIN_FILES_TO_MERGE = 2",
+                "call 34's \"at least two\": a record rule",
+            ),
+            Admitted("maintenance/compaction/CompactionPart.kt", "ORDER = 3", "the record's run order: cleanup, manifests, compaction"),
+            Admitted("maintenance/compaction/CompactionPart.kt", "NANOS_PER_SECOND = 1e9", "a unit conversion"),
+            Admitted("maintenance/compaction/CompactionSettings.kt", "MILLIS_PER_SECOND = 1_000L", "a unit conversion"),
+            Admitted(
+                "maintenance/compaction/CompactionRewriter.kt",
+                "CHECK_EVERY_ROWS = 1_000L",
+                "rows between the stream's deadline checks (D8): a check cadence, no table's tuning",
+            ),
+            Admitted(
+                "maintenance/compaction/CompactionTables.kt",
+                ".properties()",
+                "the pinned handle's location provider, built as Iceberg builds a table's own: where files go, not tuning",
+            ),
+            Admitted("maintenance/manifests/ManifestFold.kt", "MIN_GROUP = 2", "two manifests are the fewest that fold: grammar"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "(targetBytes - 1) / 2", "under HALF, including odd targets: 963 D2a"),
+            Admitted("maintenance/manifests/ManifestRewritePart.kt", "ORDER = 2", "second in the record's order (call 34)"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "PropertyUtil", "reads the manifest target core rolls at (963 D2a)"),
+            Admitted("maintenance/manifests/ManifestFold.kt", ".properties()", "the table's manifest target, never a profile value"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "TableProperties.MANIFEST_TARGET_SIZE_BYTES", "core's own target key"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "TableProperties.MANIFEST_TARGET_SIZE_BYTES_DEFAULT", "core's default"),
+        )
+
+    /** The LakeProperties groups scoped code may read (rule c), each with why it is not a profile value. */
+    val ADMITTED_GROUPS: List<Admitted> =
+        listOf(
+            Admitted("*", "properties.admission", "server-wide admission capacity: configuration until the ingestion design"),
+            Admitted("*", "properties.storage", "where the lake's bucket is: deployment, not tuning"),
+            Admitted("*", "properties.catalog", "catalog lock and lease timeouts: protocol (record call 35)"),
+            Admitted("*", "properties.name", "the managed lake's datasource name"),
+            Admitted("*", "properties.retention", "protection days and orphan grace: one value per deployment (rule e)"),
+        )
+
+    /**
+     * #959 D1: the planner's four `maintenance.plan-*` keys, which rules (c) and (d) admit when read as
+     * `properties.maintenance.<member>`: they describe the deployment (how often it plans, how much one plan measures),
+     * one value per deployment, never a profile value or the tuning of a table. #969 D4 adds compaction's two
+     * deployment values (the scratch per input byte and the assumed rate): what the deployment's engine needs and
+     * gets through, one value per deployment, never a profile value. Any other `maintenance` read stays red.
+     */
+    val ADMITTED_PLAN_KEYS: List<Admitted> =
+        listOf(
+            Admitted("*", "planInterval", "the plan's period: deployment configuration (#959 D1)"),
+            Admitted("*", "planPageSize", "tables one plan measures: deployment configuration (#959 D1)"),
+            Admitted("*", "planTableTimeout", "one measurement's bound: deployment configuration (#959 D1)"),
+            Admitted("*", "planMaxAbandonedReads", "abandoned reads one instance tolerates: deployment configuration (#959 D1)"),
+            Admitted("*", "compactionScratchFactor", "scratch per byte of a group's input: deployment configuration (#969 D4)"),
+            Admitted("*", "compactionBytesPerSecond", "a group's assumed rate: deployment configuration (#969 D4)"),
+        )
+
+    /** The files rule (d) admits: the start-up seed, its wiring and the boot rule. */
+    val SEED_READERS: Set<String> =
+        setOf(
+            "${LAKE}profiles/LakeProfileSeed.kt",
+            "${LAKE}profiles/LakeProfilesAutoConfiguration.kt",
+            "modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt",
+        )
+
+    /** The roots rule (d) scans. */
+    val SEED_ROOTS: List<String> = listOf("modules/lake/src/main/", "modules/web/src/main/", "modules/app/src/main/")
+
+    private val SCOPED = Regex("""^${Regex.escape(LAKE)}(append|maintenance)/""")
+    private val MAINTENANCE = Regex("""^${Regex.escape(LAKE)}maintenance/""")
+    private val NUMBER = Regex("""(?<![\w.])(0[xX][0-9a-fA-F_]+[uUlL]*|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?[uUlLfF]*)(?![\w.])""")
+    private val TRIVIAL = setOf("0", "1", "0L", "1L", "0.0", "1.0")
+    private val NUMERIC_VAL =
+        Regex("""\b(?:const\s+)?val\s+([A-Za-z_]\w*)\s*(?::\s*[\w.<>?, ]+?)?\s*=\s*(?:-?\d|(?:java\.time\.)?Duration\.|DataSize\.)""")
+    private val TYPE_DECLARATION =
+        Regex("""\b(?:(companion)\s+object(?:\s+([A-Z]\w*))?|(class|object|interface)\s+([A-Z]\w*))""")
+    private val DECLARATION_START =
+        Regex("""\n\s*(?:(?:private|internal|public|data|enum|sealed|abstract|open)\s+)*(?:class|object|interface|fun|val|var)\b""")
+    private val PACKAGE = Regex("""^\s*package\s+([\w.]+)""", RegexOption.MULTILINE)
+    private val HEADER_LINE = Regex("""^\s*(?:package|import)\s.*$""", RegexOption.MULTILINE)
+    private val TABLE_PROPERTY = Regex("""\.properties\(\)(?:\[\s*"[^"]*"\s*])?|\bPropertyUtil\b|\bTableProperties\.[A-Z_]+""")
+    private val PLAN_MEMBER = ADMITTED_PLAN_KEYS.joinToString("|") { it.token }
+    private val LAKE_GROUP = Regex("""\b(?:lakeProperties|properties)\.([a-z]\w*+)(?!\.(?:$PLAN_MEMBER)\b)""")
+    private val PLAN_READ = Regex("""(?:lakeProperties|properties)\.maintenance\.(?:$PLAN_MEMBER)""")
+    private val SEED_MEMBER =
+        Regex(
+            """\b(?:lakeProperties|properties)\.maintenance\.(?:$PLAN_MEMBER)\b|""" +
+                """\.maintenance\b(?!\s*[:(])|\bmaintenance\.(?:window|maxBytesRewrittenPerRun)\b""",
+        )
+    private val SEED_KEY =
+        Regex("""(?:lake|PREFIX)\.maintenance\.(?:window|max-bytes-rewritten-per-run)|LAKE_MAINTENANCE_(?:WINDOW|MAX_BYTES)""")
+    private val RETENTION_READ = Regex("""([\w.]*)\.(protectionDays|orphanGraceHours)\b""")
+    private val RETENTION_KEY = Regex("""protection_days|orphan_grace_hours""")
+    private val FROM_PROPERTIES = Regex("""(?:^|\.)\w*[pP]roperties\.retention$""")
+
+    fun violations(sources: List<GuardSource>): List<GuardViolation> {
+        val scoped = sources.filter { SCOPED.containsMatchIn(it.path) }
+        return scoped.flatMap { literals(it) } +
+            constantReferences(sources, scoped) +
+            scoped.flatMap { tuningReads(it) } +
+            seedReaders(sources) +
+            sources.filter { MAINTENANCE.containsMatchIn(it.path) }.flatMap { retention(it) }
+    }
+
+    /** (a) A numeric literal other than 0 and 1 in scoped code, unless its line holds an allowlisted token. */
+    private fun literals(source: GuardSource): List<GuardViolation> =
+        KotlinText.code(source.text).lines().flatMap { line ->
+            NUMBER
+                .findAll(line)
+                .map { it.groupValues[1] }
+                .filter { it !in TRIVIAL && !admittedIn(source.path, line) }
+                .map { GuardViolation('a', source.path, "$it in `${line.trim()}`") }
+                .toList()
+        }
+
+    /**
+     * (b) Scoped code referring to a numeric constant declared outside `append/` and `maintenance/`, anywhere in the
+     * given sources (`profiles/` included), whatever the case of its name: a `const val`, or a `val` set from a number,
+     * a `Duration` or a `DataSize`, declared at top level, in an `object` or in a companion object. A reference is
+     * `Owner.name` (`Class.name` or `Class.Companion.name` for a companion), `package.name` for a top-level one, an
+     * import of it, or a bare `name` in the declaring package. A constructor parameter, a class's instance property
+     * (a `LakeProfile` property among them) and a local value are not constants.
+     */
+    private fun constantReferences(
+        sources: List<GuardSource>,
+        scoped: List<GuardSource>,
+    ): List<GuardViolation> {
+        val declared = sources.filter { !SCOPED.containsMatchIn(it.path) }.flatMap { declaredConstants(it) }
+        return scoped.flatMap { source ->
+            val code = KotlinText.code(source.text)
+            val pkg = PACKAGE.find(source.text)?.groupValues?.get(1)
+            declared
+                .filter { constant -> code.contains(constant.name) && refersTo(constant, code, pkg) }
+                .filter { constant -> !admittedExactly(source.path, constant.qualified) }
+                .map { GuardViolation('b', source.path, "${it.qualified} (declared in ${it.path})") }
+        }
+    }
+
+    /** (c) Scoped code reading an Iceberg table property or a LakeProperties group the allowlist does not name. */
+    private fun tuningReads(source: GuardSource): List<GuardViolation> {
+        val iceberg =
+            TABLE_PROPERTY
+                .findAll(KotlinText.withoutComments(source.text))
+                .map { it.value }
+                .filter { !admittedExactly(source.path, it) }
+        val groups =
+            LAKE_GROUP
+                .findAll(KotlinText.code(source.text))
+                .map { "properties.${it.groupValues[1]}" }
+                .filter { group -> ADMITTED_GROUPS.none { it.token == group } }
+        return (iceberg + groups).distinct().map { GuardViolation('c', source.path, it) }.toList()
+    }
+
+    /** (d) Anything but the seed, its wiring and the boot rule reading the two `maintenance.*` values. */
+    private fun seedReaders(sources: List<GuardSource>): List<GuardViolation> =
+        sources
+            .filter { source -> SEED_ROOTS.any { source.path.startsWith(it) } && source.path !in SEED_READERS }
+            .flatMap { source ->
+                val members =
+                    SEED_MEMBER
+                        .findAll(HEADER_LINE.replace(KotlinText.code(source.text), ""))
+                        .map { it.value }
+                        .filterNot { PLAN_READ.matches(it) }
+                val keys = SEED_KEY.findAll(KotlinText.withoutComments(source.text)).map { it.value }
+                (members + keys).distinct().map { GuardViolation('d', source.path, it) }.toList()
+            }
+
+    /**
+     * (e) Code under `maintenance/` reading protection days or the orphan grace from anything but LakeProperties: a
+     * read is admitted only as `properties.retention.<value>` (any `...Properties` receiver) or through a name the file
+     * types `Retention`; the old policy keys in a string are a read of a store that no longer holds them.
+     */
+    private fun retention(source: GuardSource): List<GuardViolation> {
+        val code = KotlinText.code(source.text)
+        val reads =
+            RETENTION_READ
+                .findAll(code)
+                .filter { !fromProperties(it.groupValues[1], code) }
+                .map { it.value }
+        val keys = RETENTION_KEY.findAll(KotlinText.withoutComments(source.text)).map { it.value }
+        return (reads + keys).distinct().map { GuardViolation('e', source.path, it) }.toList()
+    }
+
+    private fun fromProperties(
+        receiver: String,
+        code: String,
+    ): Boolean {
+        if (FROM_PROPERTIES.containsMatchIn(receiver)) return true
+        val name = receiver.substringAfterLast('.')
+        return name.isNotEmpty() && Regex("""\b${Regex.escape(name)}\s*:\s*(?:LakeProperties\.)?Retention\b""").containsMatchIn(code)
+    }
+
+    private fun admittedIn(
+        path: String,
+        line: String,
+    ): Boolean = ALLOWLIST.any { path == LAKE + it.file && line.contains(it.token) }
+
+    private fun admittedExactly(
+        path: String,
+        token: String,
+    ): Boolean = ALLOWLIST.any { path == LAKE + it.file && token == it.token }
+
+    /** A numeric constant: [patterns] find a reference to it; a top-level one is also read bare in its [topLevelPackage]. */
+    private data class DeclaredConstant(
+        val path: String,
+        val name: String,
+        val qualified: String,
+        val patterns: List<Regex>,
+        val topLevelPackage: String? = null,
+    )
+
+    /** A type with a body: its name (a companion's is its class's), a companion's own name, whether it holds constants. */
+    private data class Owner(
+        val name: String,
+        val companion: String?,
+        val holdsConstants: Boolean,
+        val body: IntRange,
+    )
+
+    private fun refersTo(
+        constant: DeclaredConstant,
+        code: String,
+        pkg: String?,
+    ): Boolean =
+        constant.patterns.any { it.containsMatchIn(code) } ||
+            (constant.topLevelPackage != null && constant.topLevelPackage == pkg && bare(constant.name).containsMatchIn(code))
+
+    private fun bare(name: String): Regex = Regex("""(?<![\w.])${Regex.escape(name)}\b""")
+
+    private fun declaredConstants(source: GuardSource): List<DeclaredConstant> {
+        val code = KotlinText.code(source.text)
+        val pkg = PACKAGE.find(source.text)?.groupValues?.get(1) ?: return emptyList()
+        val owners = owners(code)
+        return NUMERIC_VAL
+            .findAll(code)
+            .mapNotNull { match ->
+                val name = match.groupValues[1]
+                val block = enclosingBlock(code, match.range.first) ?: return@mapNotNull topLevel(source.path, pkg, name)
+                val owner = owners.firstOrNull { it.body.first == block && it.holdsConstants } ?: return@mapNotNull null
+                val via = Regex.escape(owner.name) + (owner.companion?.let { "(?:\\.${Regex.escape(it)})?" } ?: "")
+                val patterns =
+                    listOf(
+                        Regex("""\b$via\.${Regex.escape(name)}\b"""),
+                        Regex("""\bimport\s+${Regex.escape(pkg)}(?:\.\w+)*\.$via\.${Regex.escape(name)}\b"""),
+                    )
+                DeclaredConstant(source.path, name, "${owner.name}.$name", patterns)
+            }.distinctBy { it.qualified }
+            .toList()
+    }
+
+    private fun topLevel(
+        path: String,
+        pkg: String,
+        name: String,
+    ): DeclaredConstant {
+        val qualified = "$pkg.$name"
+        val patterns =
+            listOf(
+                Regex("""(?<![\w.])${Regex.escape(qualified)}\b"""),
+                Regex("""\bimport\s+${Regex.escape(qualified)}\b"""),
+            )
+        return DeclaredConstant(path, name, qualified, patterns, topLevelPackage = pkg)
+    }
+
+    /**
+     * Every type declaration with a body. A companion object takes its class's name (`Class.name` reads its members);
+     * an `object` and a companion hold constants, a class or interface body holds instance properties.
+     */
+    private fun owners(code: String): List<Owner> {
+        val found = TYPE_DECLARATION.findAll(code).map { it to body(code, it.range.last + 1) }.toList()
+        return found.mapNotNull { (match, body) ->
+            if (body.isEmpty()) return@mapNotNull null
+            if (match.groupValues[1].isEmpty()) {
+                Owner(match.groupValues[4], null, match.groupValues[3] == "object", body)
+            } else {
+                val outer =
+                    found
+                        .filter { (other, range) -> other.groupValues[1].isEmpty() && match.range.first in range }
+                        .minByOrNull { (_, range) -> range.last - range.first }
+                        ?: return@mapNotNull null
+                Owner(outer.first.groupValues[4], match.groupValues[2].ifEmpty { "Companion" }, true, body)
+            }
+        }
+    }
+
+    /**
+     * The `{` of the innermost block around [at], or null at top level. Inside an unclosed `(` the declaration is a
+     * parameter (a constructor property among them), never a constant: -1 is returned so that no owner matches.
+     */
+    private fun enclosingBlock(
+        code: String,
+        at: Int,
+    ): Int? {
+        var braces = 0
+        var parens = 0
+        for (i in at - 1 downTo 0) {
+            val c = code[i]
+            when {
+                c == '}' -> braces++
+                c == '{' -> if (braces == 0) return i else braces--
+                braces > 0 -> Unit
+                c == ')' -> parens++
+                c == '(' -> if (parens == 0) return -1 else parens--
+            }
+        }
+        return null
+    }
+
+    /**
+     * The body of the type declared just before [from]: its first brace outside parentheses, to the matching one; an
+     * empty range when the declaration has no body (a newline at depth 0 followed by another declaration ends it).
+     */
+    private fun body(
+        code: String,
+        from: Int,
+    ): IntRange {
+        var parens = 0
+        var i = from
+        while (i < code.length) {
+            val c = code[i]
+            when {
+                c == '(' -> parens++
+                c == ')' -> parens--
+                parens == 0 && c == '{' -> return i..closing(code, i)
+                parens == 0 && DECLARATION_START.matchesAt(code, i) -> return IntRange.EMPTY
+            }
+            i++
+        }
+        return IntRange.EMPTY
+    }
+
+    private fun closing(
+        code: String,
+        open: Int,
+    ): Int {
+        var depth = 0
+        for (i in open until code.length) {
+            if (code[i] == '{') depth++
+            if (code[i] == '}' && --depth == 0) return i
+        }
+        return code.length - 1
+    }
+}
+
+/** Kotlin text with its comments (and, for [code], its string contents) blanked; line structure kept. */
+internal object KotlinText {
+    fun code(text: String): String = strip(text, keepStrings = false)
+
+    fun withoutComments(text: String): String = strip(text, keepStrings = true)
+
+    @Suppress("CyclomaticComplexMethod", "NestedBlockDepth")
+    private fun strip(
+        text: String,
+        keepStrings: Boolean,
+    ): String {
+        val out = StringBuilder(text.length)
+        var i = 0
+        while (i < text.length) {
+            when {
+                text.startsWith("/*", i) -> {
+                    i = skipBlockComment(text, i, out)
+                }
+
+                text.startsWith("//", i) -> {
+                    while (i < text.length && text[i] != '\n') i++
+                }
+
+                text.startsWith("\"\"\"", i) -> {
+                    val end = text.indexOf("\"\"\"", i + RAW_QUOTE).let { if (it < 0) text.length else it + RAW_QUOTE }
+                    val literal = text.substring(i, end)
+                    out.append(if (keepStrings) literal else "\"\"" + "\n".repeat(literal.count { it == '\n' }))
+                    i = end
+                }
+
+                text[i] == '"' || text[i] == '\'' -> {
+                    val quote = text[i]
+                    var j = i + 1
+                    while (j < text.length && text[j] != quote && text[j] != '\n') {
+                        if (text[j] == '\\') j++
+                        j++
+                    }
+                    val end = minOf(j + 1, text.length)
+                    out.append(if (keepStrings) text.substring(i, end) else "$quote$quote")
+                    i = end
+                }
+
+                else -> {
+                    out.append(text[i])
+                    i++
+                }
+            }
+        }
+        return out.toString()
+    }
+
+    /** Skips a block comment starting at [start] (Kotlin block comments nest), keeping its newlines; returns the next index. */
+    private fun skipBlockComment(
+        text: String,
+        start: Int,
+        out: StringBuilder,
+    ): Int {
+        var depth = 0
+        var i = start
+        while (i < text.length) {
+            when {
+                text.startsWith("/*", i) -> {
+                    depth++
+                    i += 2
+                }
+
+                text.startsWith("*/", i) -> {
+                    depth--
+                    i += 2
+                    if (depth == 0) return i
+                }
+
+                else -> {
+                    if (text[i] == '\n') out.append('\n')
+                    i++
+                }
+            }
+        }
+        return i
+    }
+
+    private const val RAW_QUOTE = 3
+}

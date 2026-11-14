@@ -221,6 +221,16 @@ class DomainConfiguration {
     ): LakeCatalogStartupCheck = LakeCatalogStartupCheck(bootCheck)
 
     /**
+     * #956 D3 — the `production` lake profile's one-time seed from the two `maintenance.*` keys, after the catalog check.
+     * A no-op unless `datapipelines.lake.enabled=true`, when `lake`'s auto-configuration declares the seed it calls.
+     */
+    @Bean
+    fun lakeProfileSeedStartup(
+        seed: org.springframework.beans.factory.ObjectProvider<co.datapipelines.lake.profiles.LakeProfileSeed>,
+        lakeCatalogStartupCheck: LakeCatalogStartupCheck,
+    ): LakeProfileSeedStartup = LakeProfileSeedStartup(seed, lakeCatalogStartupCheck)
+
+    /**
      * The system service account (auth.md §4.5, R7), provisioned at boot. Unconditional: it
      * is a referential precondition of the schema — `created_by` / `executed_by` are NOT NULL
      * — not a feature an operator opts into, and its absence would surface as a foreign-key

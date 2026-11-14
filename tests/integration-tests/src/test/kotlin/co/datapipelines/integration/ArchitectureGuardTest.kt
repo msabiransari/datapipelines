@@ -512,6 +512,9 @@ class ArchitectureGuardTest {
          * the jobs that close and delete them.
          * #799's conditional lake recovery, its runtime aggregate and its metadata read are internal jobs too.
          * #818 adds the managed lake freshness tick, reader keeper and registry refresh pass.
+         * #957 adds the lake maintenance worker, its run, and the scheduler's system-job seam.
+         * #959 adds the maintenance planner, its measurer, its readers and its repository (the figures READ,
+         * `PlanFiguresReader`, is P8's and deliberately not listed).
          */
         val JOB_SERVICE =
             Regex(
@@ -520,7 +523,9 @@ class ArchitectureGuardTest {
                     "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|ScheduleNotifier|SchedulerTasks|SchedulerAdmission|" +
                     "ParameterEvaluationSweeper|ParameterEvaluationRetention|ManagedLakeFreshnessScheduler|" +
                     "ReaderLeaseKeeper|refreshManagedGenerations|" +
-                    "LakeSettlementScheduler|LakeSettlementSweep|LakeMetadataReads|LakeAppendRuntime)\\b",
+                    "LakeSettlementScheduler|LakeSettlementSweep|LakeMetadataReads|LakeAppendRuntime|" +
+                    "MaintenanceWorker|MaintenanceRun|KeyedSystemJob|RecurringSystemJob|SystemJobQueue|" +
+                    "MaintenancePlanner|TableMeasurer|PlanReaders|PlanRepository)\\b",
             )
 
         /** The ordinary evaluate's call sites (spec §4.5) — the REST route, the dashboard runtime, the MCP tool. */

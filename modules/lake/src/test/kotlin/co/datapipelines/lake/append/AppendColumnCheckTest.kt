@@ -2,6 +2,7 @@ package co.datapipelines.lake.append
 
 import co.datapipelines.pipeline.LakeAppendColumn
 import co.datapipelines.pipeline.LakeAppendInput
+import co.datapipelines.pipeline.LakeOrderKey
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -195,7 +196,10 @@ class AppendColumnCheckTest {
         values: List<List<Any?>> = emptyList(),
     ): LakeAppendInput =
         object : LakeAppendInput {
-            override fun scan(consume: (ResultSet) -> Unit) {
+            override fun scan(
+                orderBy: List<LakeOrderKey>,
+                consume: (ResultSet) -> Unit,
+            ) {
                 val metadata = mockk<ResultSetMetaData>()
                 every { metadata.columnCount } returns columns.size
                 every { metadata.isNullable(any()) } returns ResultSetMetaData.columnNoNulls

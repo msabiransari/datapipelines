@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.24 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal)
+**Status:** v1.36 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown; #969, compaction)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -79,8 +79,8 @@ writes it as the Iceberg table's sort order, and nothing changes it afterwards (
 
 **Not in the body:** the table's name and namespace (they are the table row's), Iceberg properties (DP sets a closed
 list itself, `dp.definition.version` among them, and one `write.metadata.metrics.column.<name>` = `truncate(16)` per
-sort column, so every writer keeps the sort columns' bounds) and the retention and maintenance policy (the table
-row's `policy_json`, filled from the lake's configured defaults when the table is created).
+sort column, so every writer keeps the sort columns' bounds) and the table's maintenance and write tuning (its
+profile, §11; the table row names it in `profile_id`, and its `policy_json` holds only the two pause keys).
 
 **Validation before storage.** A body is parsed and checked before anything is written; the first broken rule is
 refused as `lake.definition.invalid_body` with `details.path` (for example `fields[2].precision`) and `details.reason`
@@ -367,13 +367,26 @@ checked. The definition stays valid (owner ruling 2026-11-13). The refusal is te
 the value inside its type, decimal in apache/iceberg issue 17027, `int` and `long` in issue 13105 (closed as not
 planned) and 17027's discussion; a tripwire test in the lake module goes red when either changes.
 
-Files go under the table's `data/` prefix, using Zstandard Parquet, stamped unsorted (sort order id 0, also on a
-table with sort columns: rows are written in arrival order until ordered appends ship, and a stamp never claims an
-order the file was not written in), and its applied
+Files go under the table's `data/` prefix, using Zstandard Parquet and the applied
 partition transforms: identity, year, month, day, hour, bucket or truncate. Exceeding
 `max-open-partitions-per-append` fails. An empty result still creates a publication snapshot and permanent
 duplicate evidence, with no data file. The worker never deletes its files, even after a failure or unknown
 outcome. Every Iceberg FileIO refuses and records library deletion requests for later maintenance.
+
+**Files are written in the table's order (#968).** On a table with sort columns the second scan of the stable result,
+the one that writes, reads it ordered by the sort columns, each ascending with nulls first (the first scan stays in
+arrival order); a string sort column is compared by Unicode code points, Iceberg's string order, whatever collation the
+pipeline's SQL gave it (a `COLLATE NOCASE` column is still written upper case before lower case), and every file is stamped with the table's sort order id: the order and the stamp come from one value,
+so a file never claims an order it was not written in. Each partition's files are in that order, and within one
+partition consecutive files overlap on the first sort column at most at one boundary value. A sort column the result
+does not supply (an optional column left out) is all nulls, so the order by the others is the table's. A legacy table
+without sort columns is written as before: in arrival order, stamped unsorted (sort order id 0), with no ordering in
+the scan. The sort spills into the delivery's existing scratch reservation (`max-delivery-bytes` ×
+`staging-expansion-factor`) on the staging connection's own memory limit; a sort that does not fit fails the append
+with `pipeline.staging.scratch_limit_exceeded`, the delivery ends `FAILED` in phase `publish` with that code, and
+nothing is committed. A sort that exhausts the staging memory limit instead is reported as `lake.append.failed`, with
+`pipeline.staging.memory_limit_exceeded` in the delivery's failure code. A floating-point column is never a sort column
+(#935, until #971); the writer refuses to order by one.
 
 Before committing, DP conditionally creates
 `<table-location>/dp/recipes/<feed>/<delivery-id>/<operation-id>.json` with `If-None-Match: *`.
@@ -628,10 +641,592 @@ is an error. The same loss applies when the full protection-window deadline is r
 
 ---
 
+## 10. Removal and cleanup
+
+The remover (#958, dp-lake P6; `modules/lake`'s `maintenance/remove` package) is the only code that deletes an object
+of the managed lake (design record §8b "One remover, one policy"). Iceberg never deletes: the catalog's FileIO refuses
+every request (§7) and hands the key on as a hint. All S3 deletes are in one file, `LakeObjectDeleter.kt`, and
+`LakeDeletionArchitectureTest` fails when `deleteObject`, `deleteObjects`, `DeleteObjectRequest` or
+`DeleteObjectsRequest` appears in any other main source. Its production callers are the two maintenance parts below,
+`cleanup` and `purge_deletion` (#962, `maintenance/cleanup`): each holds the table lease, calls the remover and records
+its result on the run row ([§11 Maintenance runs](#11-maintenance-runs)).
+
+**Two passes.** `removeOrphans` reclaims files of a live table that nothing protected reaches; `purge` empties a table
+whose status is `purged`. Each takes the table id (resolved from `lake_tables_managed` to its location
+`<storage root>/<namespace>/<table id>`, never a path from a request), the caller's held table lease and the run id.
+The remover takes no lease of its own.
+
+**The order inside a pass is fixed:**
+
+1. Refuse unless `lake_control.mode` is `normal` and the caller's lease answers a heartbeat.
+2. The clock-skew probe (below).
+3. A fresh reachability read, inside the pass, on its own statements; nothing read before the call is reused.
+4. The listing of every key under the table's location.
+5. The candidates.
+6. Delete batches of at most 1000 keys, each after a lease check and a mode check. A no stops the pass, deleting
+   nothing more.
+7. The pass's own marker, last.
+
+**Reachable** (record §9). The protected revisions are the current pointer, every revision whose `protected_until` is
+null or ahead of the catalog's `now()`, and every reader-pinned revision (§9 reader leases). From each revision's
+metadata file the walker reaches:
+
+- the file itself;
+- the direct entries of its metadata log, one level only;
+- for every snapshot: its manifest list, its manifests, and every live (`ADDED`/`EXISTING`) data and delete file;
+- the statistics and partition-statistics files.
+
+A metadata file or manifest it cannot read fails the pass, and nothing is deleted.
+
+**A candidate** is a listed key under the location that is:
+
+- not reached;
+- older than the orphan grace (`retention.orphan-grace-hours`), its age being the catalog's clock minus the listing's
+  `LastModified`;
+- not under `dp/`.
+
+Keys Iceberg handed the refusing FileIO are hints only. The same tests decide them, and a hint that fails one is counted
+as deferred with its reason (`reached`, `young`, `under_dp`, `outside_location`, `not_listed`). A key outside the
+location is never deleted.
+
+**The `dp/` rule.** Nothing under `dp/recipes/` is ever deleted, by either pass, at any age. The only other `dp/` keys
+deleted are clock markers, each by exact key:
+
+- *The pass's own marker* `dp/clock/<run id>` is deleted at the end (and on a skew refusal), whatever its age, but only
+  after a lease check and a mode check both answer yes. Otherwise it is left, and the result says why.
+- *Another run's marker* is deleted only when it is older than grace AND its run is terminal (the `RunStates` port: an
+  unknown run keeps it).
+
+Any other `dp/` key is never deleted. It is logged once per pass (`lake.removal.unexpected_dp_key`) and keeps a purge at
+*more to do*.
+
+**The clock-skew probe.** The probe works in four steps:
+
+1. Read the catalog clock (`clock_timestamp()`, the one function the remover reads time from).
+2. PUT the marker.
+3. Read the clock again.
+4. Read the marker's `LastModified`.
+
+The skew interval is [`LastModified − after`, `LastModified + 1 s − before`]. The pass runs only when both ends lie
+within ±3600 s; otherwise it is refused with `lake.maintenance.clock_skew` ([Pipeline Contract
+§13.25](pipeline-contract.md#1325-managed-lake)), nothing listed, and its one delete is its own marker under the rule
+above.
+
+**Purge** keeps every protection: a revision still protected or reader-pinned keeps its files. It answers *finished*
+when every listed key, the pass's own marker included, was confirmed deleted or is a recipe. Otherwise it answers
+*more to do*, with the keys left counted by reason: `young`, `reached`, `marker_run_live`, `marker_run_unknown`,
+`other_dp_key`, `delete_failed`, `outcome_unknown`, `not_attempted`. Purge never stamps the table.
+
+**What counts as deleted.** Only a key the store's response names in `deleted()`:
+
+- a key in `errors()`, or named in neither collection, is `delete_failed`, and later batches still run;
+- a call that throws or whose answer is lost leaves its whole batch `outcome_unknown` and the keys not yet sent
+  `not_attempted`, and the pass stops (`stopped: delete_failed`);
+- an unconfirmed marker delete leaves the marker.
+
+Nothing throws out of a pass for a delete failure. A later pass lists again and finishes the work.
+
+**The result** (the storage figures' input, 964):
+
+- the counts;
+- the stop reason and the marker's fate;
+- the purge answer;
+- the **inventory**: the listing (key, size, `LastModified`) minus the confirmed deletes;
+- the **visits**: one per (key, revision, snapshot) the walker reached, with the kind it was reached as (`metadata`,
+  `manifest_list`, `manifest`, `data`, `delete`, `statistics`, `partition_statistics`) and the snapshot id (none for a
+  metadata file).
+
+A refused pass returns neither. The events are [Observability §3.4T](observability.md#34t-the-lake-removers-events-958).
+
+### What a cleanup does, in order
+
+The `cleanup` part runs for a table whose status is `active`, `deprecated` or `archived`, when the planner finds it due
+(never cleaned, or the last cleanup that ended `done` or `nothing_to_do` in a `finished` run is older than the profile's
+`maintenance.cleanup_interval_hours`; the part checks this again after admission). It declares no scratch. It takes the
+table lease once and holds it to the end; an append meanwhile waits up to `admission.lease-wait-seconds`.
+
+1. Refuse unless `lake_control.mode` is `normal` (a restore can begin between admission and the part): nothing written.
+2. Load the table fresh from the catalog.
+3. **Keeps first.** The profile's keep plan ([§11 Profiles](#11-profiles), *Keep rules*) is applied: one commit when the
+   plan creates, re-ages or removes a `dp-keep-` tag, none when it only reports periods. A kept snapshot is therefore
+   tagged before the expiry below could reach it.
+4. **Expiry.** The floor is the earlier of `now() − retention.protection-days` (the DEPLOYMENT's window, never a profile
+   value) and the commit time of the oldest protected revision's snapshot (protected: `protected_until` null or ahead,
+   or the revision pinned by a reader, §9). Snapshots older than the floor that no kept ref points at are expired in one
+   commit; Iceberg's file deletes are refused and handed to the remover as hints. No snapshot older than the floor, no
+   commit.
+5. Read the catalog's clock (the listing time), then the remover's orphan pass with those hints.
+6. The cleanup observer (one call, only when the pass listed the table; an observer failure is logged and recorded as
+   `observer: failed`, and never changes the cleanup).
+7. Release the lease.
+
+A table that was never published (no snapshot) does steps 1, 5, 6 and 7, and its floor is recorded as
+`not_applicable`. A tag or expiry commit made before a later step stops stays committed; the next cleanup starts
+from a fresh read.
+
+**How a cleanup ends.** Only the first row counts as a finished cleanup and resets the interval; after every other row
+the next plan finds the cleanup due again.
+
+| What happened | The part | The run |
+|---|---|---|
+| The remover's pass completed (keys left young, reached, protected or under `dp/` are normal) | `done` when a tag commit, an expiry commit or a deletion happened, else `nothing_to_do` | goes on |
+| The table lease was refused at the acquire | `busy`; later parts not attempted | `finished` |
+| The run's deadline had passed, or the remover stopped `lease_lost` | `deadline`; later parts not attempted | `finished` |
+| The remover refused for clock skew | throws `lake.maintenance.clock_skew` | `failed` |
+| The mode is not `normal` (the part's own check, the remover's refusal, or a stop between batches) | throws `lake.maintenance.cleanup_incomplete`, `details.reason` = `mode` | `failed` |
+| A key's delete failed, a batch's outcome is unknown, or the pass's own marker could not be removed | throws `lake.maintenance.cleanup_incomplete`, `details.reason` = `delete_failed` | `failed` |
+| Anything else thrown (the load, a commit) | propagates as it is | `failed` |
+
+A failed run records no figures, so before it throws the part logs them, counts only, in `lake.cleanup.stopped`
+([Observability §3.4W](observability.md#34w-lake-cleanup-events-962)). The part's figures on the run row
+(`parts_json`, [Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs), scalars only): `tags_created`,
+`tags_changed`, `tags_removed`, `not_kept_<reason>` per reason, `snapshots_expired`, `floor` (absent before the expiry
+step), `listed`, `deleted`, `left_<reason>` per reason the remover left a key for, `hints_deferred_<reason>`,
+`observer` (`ok` | `failed` | `not_called`), `purge` (a purge deletion's answer), `purge_stamped`; a reason that did not
+occur has no key. The run's sums: files and bytes deleted, and deferred deletions (the keys left that a later pass may
+still delete: young, a marker whose run is live or unknown, a failed or unknown delete, a batch not attempted). The
+pass's own clock marker is not counted as deleted.
+
+### What is never deleted
+
+- Anything a protected revision reaches: the current pointer, every revision whose `protected_until` is null or ahead,
+  every reader-pinned revision (§9), whatever the table's profile says.
+- A snapshot a live keep tag holds, until the keep ends.
+- Any key younger than `retention.orphan-grace-hours`, and any key outside the table's location.
+- Every recipe under `dp/recipes/`, by either pass, at any age; any `dp/` key that is not a clock marker.
+- No further candidate is deleted when removal cannot establish safety: outside `normal` mode, with the lease not
+  answering, with the clocks disagreeing, or with an unreadable metadata file or manifest. The pass's own clock marker
+  follows its separate rule above. Keep-tag and expiry commits made before a later removal check fails remain committed.
+
+### Purge deletion, and when it is finished
+
+The `purge_deletion` part is the only part a `purged` table runs; it declares no scratch and does not consult keep tags
+(a purge ends the table's keeps). It checks again, itself, under the table lease: the status is `purged`,
+`purge_deleted_at` is null, and the final revision (the newest dropped revision of this table id) has a
+`protected_until` that is set and has passed by more than `retention.orphan-grace-hours`. Then the remover's purge pass.
+
+- *Finished* (every listed key deleted or a recipe): `purge_deleted_at` is stamped in the same pass, and the planner
+  never enqueues the table again.
+- *More to do*: no stamp; the keys left are the run's deferred deletions, and the next plan enqueues the table again.
+- Both are `done`, or `nothing_to_do` when no key was deleted. Every other ending is the cleanup's table above, and
+  never stamps.
+
+### The storage breakdown
+
+Every cleanup whose remover pass listed the table (a complete pass, or one stopped after its listing) stores the
+table's **storage breakdown**: the cleanup's own listing, as it stands after its expiry and removals, and its own walk,
+sorted into six rows. No second listing and no second walk; nothing is read from the store for it. Every listed object
+falls in exactly one row, the first that fits, in this order, so the rows add up to the listing's total by construction:
+
+| Row (`lake_storage_inventory.row_name`) | What falls in it |
+|---|---|
+| DP's own records (`dp_records`) | every object under the table's `dp/`: the recipes, which are never deleted, and the remover's clock markers |
+| table metadata (`table_metadata`) | metadata files, manifest lists, manifests and statistics files reachable from a protected revision, the current one included |
+| current (`current`) | data and delete files the current snapshot names |
+| held by history (`history`) | data and delete files, not current, that a history snapshot reaches |
+| held by keep rules (`keep_held`) | data and delete files that only keep-held snapshots reach |
+| not referenced (`not_referenced`) | every other object: files awaiting removal after the grace, and files a run in flight has written and not yet committed (a listing cannot tell the two apart, so the row is named for what is known) |
+
+**Held by keep rules.** A snapshot is *keep-held* when the current metadata lists it, it is older than the floor this
+cleanup's expiry used, and a `dp-keep-` or `dp-hold-` tag points at it: without the tag this cleanup would have
+expired it. Every other snapshot the walk reaches a file through is a *history* snapshot, including a tagged one the
+window still covers; an earlier protected revision listing a keep-held snapshot does not make it history. So "held by
+keep rules" is what the table would stop holding, once the protection window has passed, if every keep on it ended
+now: a file a keep-held snapshot shares with a history or the current snapshot is counted there, and moves to this row
+only when the keep is the last thing holding it. A table never published has no snapshot and no floor: its three
+snapshot rows are zero, and its committed metadata is still table metadata.
+
+**As old as the last cleanup.** The six rows carry one time, the catalog's clock at the cleanup's listing, and the run
+that measured them; the total is "in the bucket at" that time, never the bucket now. The planner's current size
+([§11 Maintenance runs](#11-maintenance-runs)) is fresher and can differ: two sources, two times, never summed. Each
+cleanup replaces the table's six rows in one transaction ([Metadata DB §4.60](metadata-db.md#460-lake_storage_inventory));
+a refused cleanup and a purge deletion leave them as they were, so a purged table keeps its last breakdown. A table
+with no stored breakdown is "not measured yet", never zero. If the rows ever fail to add up to the listing, nothing is
+stored, the previous rows stay, `lake.inventory.totals_mismatch` logs the two totals
+([Observability §3.4X](observability.md#34x-lake-storage-breakdown-events-964)) and the cleanup records
+`observer: failed`; the cleanup itself is unchanged. The breakdown is figures only: nothing that decides a deletion
+reads it.
+
+## 11. Profiles
+
+A **profile** is a named set of maintenance and write values (design record §11a call 35; [Metadata DB
+§4.56](metadata-db.md#456-lake_profiles)). Every managed table names exactly one (`lake_tables_managed.profile_id`,
+NOT NULL); every maintenance run and every append of the table reads its tuning from that profile and from nowhere
+else, so there is one place to read why a table behaves as it does. Profiles are per environment and never promoted.
+
+**The built-ins.** The migration creates `production` (the default) and `development` (the same values, window
+`00:00-00:00`, the whole day). A new table takes the default profile in its own `INSERT`; a new definition version
+of a table leaves its profile unchanged. With the lake enabled, the first start copies
+`datapipelines.lake.maintenance.window` and `.max-bytes-rewritten-per-run` into `production` once, in one statement
+guarded by `seed_pending` (`lake.profile.seeded`); an edited profile is never overwritten, and nothing reads those two
+keys afterwards ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)). The boot refuses a cap under
+128 MiB, so the seeded profile passes its own rule.
+
+**The keys** (the list is closed; every key is required; byte sizes are whole bytes):
+
+| Key | Built-in | Rule at save |
+|---|---|---|
+| `maintenance.window` | `02:00-05:00` (`development`: `00:00-00:00`) | `HH:MM-HH:MM` in UTC; start = end is the whole day |
+| `maintenance.max_bytes_rewritten_per_run` | 50 GiB | at least twice `maintenance.target_file_bytes` |
+| `maintenance.target_file_bytes` | 64 MiB | 16 MiB – 512 MiB |
+| `maintenance.compact_min_small_files` | 5 | at least 2 |
+| `maintenance.compact_small_file_ratio` | 0.75 | above 0, below 1 |
+| `maintenance.rewrite_manifests_min_count` | 100 | at least 2 |
+| `maintenance.cleanup_interval_hours` | 24 | at least 1 |
+| `write.row_group_bytes` | 1 MiB | at least 64 KiB, at most the target file size |
+| `retention.keep` | `[]` | a list of `{period, keep_for: {n, unit}}`, below |
+| `retention.keep_time_zone` | `UTC` | an IANA zone the JVM resolves |
+| `reporting.lateness_sample` | 20 | 2 – 200 |
+| `reporting.lateness_overdue_factor` | 2 | above 1, at most 100 |
+| `reporting.lateness_min_deliveries` | 5 | 2 – the sample |
+
+The two fractional rules hold for the number as the profile keeps it (a double) as well as for the number written: a
+value nearer to a bound than a double can tell apart from it (`0.99999999999999999` for the ratio, `1e-400`, or
+`1.00000000000000001` for the factor) is the bound itself once kept, and is refused `out_of_range`.
+
+`retention.keep`: `period` is one of `day`, `week`, `month`, `quarter`, `year`, at most one rule per period; `unit` is
+`days`, `months` or `years`, with `n` a whole number in 1–146,100, 1–4,800 or 1–400. Two limits, decided the same on
+any save date and in any zone: `keep_for` is at least one period long (in days at least the period's longest length,
+1/7/31/92/366; in months at least 1, or 3 for a quarter, 12 for a year; in years at least 1), and a rule keeps at most
+400 live keeps (`keep_for` in months ÷ the period's months, for a month, quarter or year rule counted in months or
+years; otherwise the longest `keep_for` in days over a 400-year Gregorian cycle ÷ the period's shortest length,
+1/7/28/90/365; both rounded up).
+
+A refusal is `lake.profile.invalid` with `details.path` (the key) and `details.reason` (`unknown_key`, `required`,
+`type`, `whole_number`, `out_of_range`, `grammar`, `time_zone`, `below_twice_target`, `above_target`, `above_sample`,
+`duplicate_period`, …), before anything is written; a profile that does not exist is `lake.profile.not_found`.
+
+**Not in a profile** (record call 35): `retention.protection_days` and `retention.orphan_grace_hours` are one value per
+deployment (configuration) and are refused as unknown keys; the admission values, the codec (zstd), commit attempts
+and timeouts stay where they are.
+
+**Changes.** `LakeProfiles` creates, edits, moves the default mark and assigns a table; each change is one transaction
+with its audit row (`lake.profile.created`, `lake.profile.updated`, `lake.profile.assigned`; [Enums
+§15](enums.md#15-authauditevent--auth-audit-log-events)), takes effect at the next read and rewrites nothing (no Iceberg commit, no revision). A
+change that changes nothing writes nothing. No route, tool or screen reaches it yet (P8 adds them with their roles).
+
+**Pauses** stay on the table: `policy_json` holds only `pause.compaction_until` and `pause.cleanup_until` (record call
+38), each an instant at most 7 days after the catalog's `now()`, or absent. `LakeTablePauses` sets or clears one key at
+a time with a `lake.table.pause_changed` audit row; a set beyond 7 days is refused `lake.profile.invalid` with the key's
+path, and a `purged` table takes no pause (clearing is always allowed).
+
+**The append writer** reads the table's profile at the start of each append (`LakeProfiles.forTable`): it rolls a data
+file at `maintenance.target_file_bytes` and sets `write.parquet.row-group-size-bytes` from `write.row_group_bytes`. An
+edit or a reassignment applies at the next append, with no restart.
+
+**Lateness** (record §11b call 46; `co.datapipelines.lake.reporting`, #961) is judged per feed from the delivery
+ledger ([§6](#6-deliveries)) with the table's three `reporting.*` values, when asked; nothing is stored and nothing is
+scheduled. A feed's **usual interval** is the median gap between the `published_at` of its last
+`reporting.lateness_sample` deliveries whose state is `PUBLISHED` (an even number of gaps takes the mean of the two
+middle ones), and the feed is **late** when the time since its last such delivery exceeds
+`reporting.lateness_overdue_factor` times that interval; exactly that much is on time. The answer is **not enough
+deliveries to say**, never late and never on time, when fewer than `reporting.lateness_min_deliveries` published
+deliveries are in the sample or the median gap is zero (gaps 0, 0, 0, 10 min already give zero). Each feed is judged
+on its own, so two rhythms on one table do not make each other late. A `FAILED`, `UNKNOWN` or unpublished delivery
+adds no interval and is never the "last delivery"; a feed with only such deliveries is still listed, as not enough
+deliveries to say. A
+`deprecated`, `archived` or `purged` table is never flagged: every feed is **not judged**. `LakeFeedLateness.forTable`
+reads the profile through `LakeProfiles.forTable` and then the ledger in one statement whose `now()` is the
+catalog's clock and the answer's computed-at time; the ledger read is served by `idx_lake_deliveries_published`
+([Metadata DB §4.53](metadata-db.md#453-lake_deliveries)). A reassignment or an edit applies at the next read. No
+route, tool or screen calls it yet (P8 shows it, and decides how a feed stopped on purpose is cleared). Nobody types
+an expected schedule.
+
+**Keep rules** (`retention.keep`, record §11b call 42; #960). A rule keeps *the table as it stood at the end of
+every* day, week, month, quarter or year, for its `keep_for`, as an Iceberg TAG on that snapshot; Iceberg's own
+snapshot expiry then keeps the snapshot and its files until the tag's maximum age runs out, and removes the tag at the
+first expiry after that. Nobody names, creates or deletes a keep.
+
+- *The names* are computed from the period and its label, never from user text: `dp-keep-day-2026-10-31`,
+  `dp-keep-week-2026-W44` (the ISO week, Monday to Sunday, numbered in its ISO week-year: 28 December 2026 is
+  `2026-W53`, 30 December 2024 is `2025-W01`), `dp-keep-month-2026-10`, `dp-keep-quarter-2026-Q4`, `dp-keep-year-2026`.
+- *The period's end* E is the first instant of the next period in `retention.keep_time_zone`, the profile's CURRENT
+  zone: a load at 21:00 New York time on the 31st belongs to the 31st under `America/New_York` and to the 1st under
+  UTC. Only closed periods are kept (E strictly before now) and never one that ended before the table's row was
+  created.
+- *The kept snapshot* is the one current at E, proved by the table's snapshot log alone: the newest log entry at or
+  before E. A period with no commit keeps the snapshot of the period before it (one snapshot can carry several tags).
+  When the log does not reach E (that history has expired, or the table had no snapshot then) no tag is made, on no
+  snapshot, and the period is reported **not kept: history not available** (`history_not_available`, [Enums
+  §55](enums.md#55-keepnotkeptreason--why-a-period-a-keep-rule-asks-for-has-no-keep)). A snapshot that merely
+  survives from before E is never taken instead.
+- *The end* of a keep is `E + keep_for` by calendar arithmetic on E's date in the profile's zone (31 January + 1 month
+  is the last day of February, 29 February + 1 year is 28 February; a day can be 23 or 25 hours). Because Iceberg
+  counts a tag's age from its snapshot's commit time, the tag's maximum age is `the end − the snapshot's commit time`,
+  never the rule's duration. A keep stands up to and including its end; one whose end is past is not created.
+- *Reconciled by name.* A keep asked for and absent is created; one that exists is never moved to another snapshot and
+  never judged against the log again, and its maximum age is set again only when the end now asked for differs (a
+  lengthened or shortened rule, or a changed zone, which moves every end by the zones' difference); one no rule asks
+  for any more is removed (its snapshot then expires like any other, under §9's protection). A tag whose period the
+  current zone has not closed yet (the zone just moved later) stands, and is not made again when the period closes:
+  so a rule holds at most its 400 keeps, plus for some hours after a zone change at most two day periods (one of
+  any longer period) that the new zone has reopened.
+- *Never touched:* only a ref that is a TAG and whose name starts with `dp-keep-` is ever created, re-aged or removed.
+  `main`, every branch whatever its name, and `dp-hold-` tags (named keeps, call 43) are not. A branch holding a keep's
+  name gets no tag beside it and the period is reported **not kept: name taken by a branch** (`name_taken_by_branch`).
+- *One commit.* `KeepReconcile` computes the plan as a pure function; `KeepTags` applies it as ONE table commit
+  through the maintenance run (the lease, the fence and the revision trigger), and commits nothing when the plan
+  creates, re-ages and removes nothing (`lake.maintenance.keep_reconciled`). It deletes no file. The cleanup part
+  runs it before it expires anything (#962); until then nothing calls it, and an `archived` table is reconciled like
+  an active one, a `purged` one never.
+
+**The guard** (`LakeTuningSourceGuardTest`, record M8) is a source scan, not a data-flow analysis. It is red when code
+under `append/` or `maintenance/` (a) holds a numeric literal other than 0 and 1 that its allowlist does not name,
+(b) refers to a numeric constant declared anywhere else in the main sources, `profiles/` included, whatever the case
+of its name — a `const val`, or a `val` set from a number, a `Duration` or a `DataSize`, at top level, in an `object`
+or in a companion object — read as `Owner.name`, `Class.Companion.name`, a fully qualified `package.name`, through an
+import, or bare in the declaring package (a constructor parameter, an instance property such as every `LakeProfile`
+property, and a local value are not constants), (c) reads an
+Iceberg table property or a `LakeProperties` group its allowlist does not name; when (d) anything in the lake, web or
+app main sources but the seed, its wiring and the boot rule reads the two seed keys; and when (e) code under
+`maintenance/` reads protection days or the orphan grace from anything but `LakeProperties`. Each allowlist entry is
+one line with its reason. What it cannot see: a value computed from an admitted constant or from 0 and 1 (a `val`
+whose initialiser does not start with a number, a `Duration` or a `DataSize`, a getter or a function returning a
+number); a number reached by reflection, a resource or a string parsed at run time; a constant reached through an
+import alias of its owner; a `LakeProperties` read through a receiver not named `properties` or `lakeProperties`. M8
+claims exactly these five rules.
+
+---
+
+## 11. Maintenance runs
+
+A maintenance run is the frame every maintenance operation executes in (#957; dp-lake record §11, §11a call 34). This
+section describes the frame, the planner that enqueues runs (#959), the manifest rewrite (#963) and compaction
+(#969); the cleanup and the purged table's deletion (#962) are [§10](#10-removal-and-cleanup)'s.
+
+**One task per table.** `lake-maintenance` is a keyed scheduler task whose key is the table id
+([Scheduler: system jobs](scheduler.md#85-system-jobs)): enqueueing an instance that already exists changes nothing, so a
+table has at most one task, cluster-wide. Its beans exist only when `datapipelines.lake.enabled=true`. The run
+executes on the scheduler thread that took the task.
+
+**The order, and what may be read when.** Rows of the metadata database may be read before admission; the table
+itself (its Iceberg metadata, its files) only after.
+
+1. The permission `lake.maintain` ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)), held only by the system identity with
+   no workspace (`SystemActorPrincipals.forInstance`); refused → `lake.maintenance.refused`, no row. Then the
+   catalog's mode: not `normal` → no row.
+2. A slot: one of `datapipelines.lake.admission.max-concurrent-maintenance`, tried without waiting; none free → the
+   task comes again in 30 s, no row.
+3. Each registered part declares, from database rows only, whether it expects to be due and the scratch it would need
+   (zero for none). A part is handed the table's row, never an Iceberg handle.
+4. Scratch for the sum of the declarations; a sum of zero reserves nothing. Refused → nothing is reserved and the run
+   goes on without scratch.
+5. **The run row** ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs)), one statement: it closes an
+   earlier `running` row of the table whose deadline has passed as `abandoned` and inserts the new `running` row with
+   `deadline_at = now() + admission.job-timeout` on the catalog's clock. An earlier `running` row not yet past its
+   deadline → no row, the slot and scratch are released, the task comes again at that deadline.
+6. Settlement: one page of the table's unsettled deliveries ([§8](#8-settlement-and-recovery)), from the first, with
+   the sweep's page size and a budget capped at the run's deadline. No maintenance lease is held while it runs (the
+   settler takes the table lease itself). A failure is logged (`lake.maintenance.settlement_deferred`) and recorded in
+   the row's `settlement_json`; the parts run either way.
+7. The parts, in the record's order (§54's outcomes, [Enums](enums.md#54-maintenanceoutcome--one-maintenance-parts-outcome)).
+   Before each one the worker checks the run's deadline and the thread's interrupt flag, then asks the gate (it may
+   hold a part `outside_window` or `paused_until`, with a reason; the others still run). A part not due now records
+   `nothing_to_do`; a part that needs scratch the run does not hold records `capacity` and is not started.
+8. The row is closed `finished` or `failed`, then the scratch and the slot are released, in a `finally`.
+
+**The run's deadline is every lease's deadline.** Every commit goes through the run: it acquires the table lease with
+the run's `deadline_at`, never a fresh job timeout, loads the table inside the lease, commits once, releases. The
+catalog fence ([§7](#7-append-publication)) refuses a write whose catalog transaction starts after the deadline.
+A write that already passed the fence may finish later, even after a successor marked the run `abandoned`; the
+successor's lease acquire waits behind that transaction's lease-row lock. A deadline already passed →
+`lake.maintenance.deadline` and the part ends `deadline`. A refused lease
+(another operation holds the table) → the part ends `busy`. Either ends the RUN: no later part is started, each later
+part the declarations expected to be due is recorded with the same outcome and `attempted: false`, the row closes
+`finished`, and the table's next run comes from a later plan. A part that throws, an unknown commit outcome or an
+interrupt ends the run `failed` with the error's code and the failure's class name, never a message or a stack.
+
+**Nothing is concluded from an abandoned row.** Every write after admission is conditional on `state = 'running'`. A
+worker whose row its successor marked `abandoned` keeps nothing: its close changes no row, it logs
+`lake.maintenance.close_refused` and its audit event says `state: abandoned`, `outcome_confirmed: false`. A row left
+`running` by a process that died is closed only by the next admission of its table.
+
+**Threads.** With the lake and the scheduler enabled, `datapipelines.scheduler.threads` must be at least
+`max-concurrent-maintenance` + 2 (one per admitted run, one for the planner, one always free for the dispatcher, the
+reconciler and the notifier); the boot refuses otherwise, naming both keys
+([Configuration §7](configuration.md#7-config-validation)). The default is 3.
+
+**Records.** One audit event per admitted run when it ends, `lake.maintenance.run_finished`
+([Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), actor the system user; log events
+[Observability §3.4U](observability.md#34u-lake-maintenance-run-events-957).
+
+**The planner** (#959; record §11a call 34, §11b call 46; the P6 lane cut L3, L8, L13, L18). `lake-maintenance-planner`
+is a recurring scheduler task, one run at a time cluster-wide, every `datapipelines.lake.maintenance.plan-interval`
+after the previous run ended ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)); its beans exist only
+with the lake enabled. Each run measures, decides, then enqueues; it writes only its three tables and the scheduler's
+queue, and table ids come from the catalog rows, never from a request.
+
+1. **Measure** ([Metadata DB §4.57](metadata-db.md#457-lake_table_measurements)). The `plan-page-size` managed tables
+   (not purged) whose last attempt is oldest; a table never attempted, or not yet attempted under its current profile
+   (id and `updated_at`), counts as never attempted, once: that attempt stamps the current pair whether it succeeds or
+   fails. One table at a time, each under `plan-table-timeout`: the measurer reads the table's profile once, then the
+   current snapshot's manifests through the delete-refusing metadata FileIO — no data file, no lease, no maintenance
+   slot — and computes the figures under that copy of the profile: current bytes, rows, data and delete files,
+   manifests and files not stamped with the table's sort order (profile-independent), and the small files in candidate
+   partitions, the unsorted files larger than the profile's cap and the candidate bytes (profile-dependent; a file both
+   small and unsorted counts once, a file larger than the cap is left out). A table with no snapshot is measured with
+   every figure NULL. A failure (also a reader client that cannot be built) or a timeout stamps the attempt and its
+   error and keeps the last good figures.
+2. **The planner's own readers.** Each measurement runs on a reader: one daemon thread with the object-store client it
+   built, reused for the next table when the measurement ends in time. A read still running at the bound is
+   **abandoned**: the reader is retired with the read (never reused, never interrupted into a second use) and only then
+   is its error (`timeout`) stamped, so a stamp that fails still leaves the read counted and its table excluded (the
+   failure ends the plan as thrown); the next table gets a new reader, so one stalled read cannot stop the page. A
+   table with an abandoned read still running is not picked again until that read ends. At most
+   `plan-max-abandoned-reads` are outstanding; at the limit the plan measures nothing more, counts the page's rest as
+   not measured (`lake.maintenance.plan_reads_exhausted`), and still decides from the stored figures. Building the
+   client is part of the read: an abandoned read that ends, also one whose client construction failed late, writes
+   nothing, closes whatever client it holds on its own thread, and frees one.
+3. **One winner per attempt.** An attempt moves `running` → `publishing` (the reader, before it writes) or `running` →
+   `abandoned` (the pass, at the bound) by one compare-and-set; an abandoned attempt never publishes, and a reader that
+   won a moment before the bound gets its one bounded write waited for. The figures' write is also conditional on the
+   row's attempt stamp still being this attempt's (a restart or another instance may have attempted the table since).
+4. **Daily usage** ([§4.58](metadata-db.md#458-lake_storage_usage)): each successful measurement with a snapshot keeps
+   the UTC day's latest current bytes, rows and files; the pass deletes rows measured more than 35 days ago. Growth per
+   week = current bytes minus those of the newest row measured at least 7 days ago, returned with that row's real time
+   (it can be more than seven days old); none → NULL, never zero.
+5. **Decide** — `MaintenanceDue`, a pure function of the stored rows, the profile, the table's pauses, the run history
+   and `now`, exactly the record's "Which table gets which work", "Due, per operation" and "Order", plus: a table never
+   measured, or whose measurement failed, has no rewrite work (cleanup and purge deletion are due by time alone); stale
+   figures (another profile, or measured before the profile's last save) make compaction not due —
+   `not measured (profile changed)` — and add nothing to the score, while manifest rewrite is still decided from the
+   manifest count and the current threshold; an unsorted file larger than the cap is left out of the score, and a table
+   with nothing else to rewrite reports `capacity`; after a rewrite attempt that ended `capacity` with nothing committed
+   and nothing left for a fresh run, rewrite work waits `maintenance.cleanup_interval_hours` unless the profile or the
+   assignment changed since, while `deadline`, or `capacity` with a file left for a fresh run, is due again at the next
+   plan (L18); purge deletion is due for a `purged` table whose `purge_deleted_at` is NULL once the final revision's
+   `protected_until` plus the orphan grace have passed; an operation whose part is not registered is never due. When no
+   rule says, the work is not due and the table is counted (`tables_rule_silent`). The not-due words are
+   [Enums §57](enums.md#57-the-lake-maintenance-planners-error-codes-and-not-due-reasons).
+6. **Run history**: ONE statement per plan over the finished runs only (a `failed`, `abandoned` or `running` run supplies
+   nothing) and their attempted part entries: the last finished cleanup, the last finished rewrite (`manifest_rewrite` or
+   `compaction` `done` / `nothing_to_do`, or `compaction` `capacity` with something committed; the order's tie-break),
+   and the last rewrite attempt (an attempted `compaction` entry, with #969's `committed` and `left_for_fresh_run`; a
+   `capacity` entry without them gets no wait and is counted silent).
+7. **The gate** (L13) is one function used by the plan and, through #957's port, by the worker before each part: the
+   profile's window (`HH:MM-HH:MM`, UTC; it may cross midnight; a start equal to the end is the whole day) holds
+   compaction only; `pause.compaction_until` holds compaction and manifest rewrite; `pause.cleanup_until` holds cleanup;
+   nothing holds purge deletion. The worker records a held part `outside_window` (`outside window`) or `paused_until`
+   (`paused until <instant>`).
+8. **Enqueue.** A table gets a task only when at least one due part is not held. Every such table is ranked, whether its
+   task is new or still queued: rank reaches the scheduler as a due time, plan time + one millisecond per position —
+   `enqueueIfAbsent` for a new one, a move for one still queued, each its own statement; a running task is left, and a
+   queued task whose table has nothing due any more is left alone. The plan row
+   ([§4.59](metadata-db.md#459-lake_maintenance_plan)) is overwritten with the counts, `tasks_still_queued` being the
+   "falling behind" count; log events [Observability §3.4V](observability.md#34v-lake-maintenance-planner-events-959).
+
+**The figures read method** (`PlanFiguresReader.figures`, for P8) returns, per table, current size, rows and files, the
+small files and candidate bytes with their state (`current`, `stale`, `never_measured`,
+[Enums §56](enums.md#56-figuresstate--whether-a-tables-planner-figures-may-be-used)), growth per week with its baseline's
+time, and the measurement's times; a figure whose source was not read is NULL.
+
+**The manifest rewrite** (#963; record §11, §11a call 34, §8a, §8b; the P6 lane cut L10, L14). The part
+`manifest_rewrite` runs second in a run (after cleanup, before compaction), needs no scratch, and applies to `active`
+and `deprecated` tables with a snapshot (never `archived` or `purged`).
+
+- **When.** After admission the part re-reads the table: it is due when the current snapshot lists at least the
+  profile's `maintenance.rewrite_manifests_min_count` manifests (data and delete), otherwise `nothing_to_do`.
+  `pause.compaction_until` holds it (`paused_until`); the window does not (the gate above).
+- **What folds.** From the current snapshot's manifest list alone (no manifest is opened), a candidate is a data
+  manifest shorter than half the table's `commit.manifest.target-size-bytes` (Iceberg's 8 MiB when unset). Candidates
+  are grouped by partition spec; a group with at least two candidates folds. Delete manifests and manifests at or over
+  half the target are left as they are.
+- **Due with nothing to fold.** The count rule decides due; the candidate rule decides progress. A table whose
+  manifests are all near the target, or one small manifest per spec, stays due by the count and gets a run that reads
+  the manifest list and records `nothing_to_do` with the reason `nothing to fold`: no lease, no commit, no revision row.
+  This is accepted: the threshold is the record's, and the planner is not changed.
+- **What it changes.** One commit through the run (the table lease with the run's deadline, the fence, the revision
+  trigger): the folding candidates are read and rewritten, every spec's entries into one writer that rolls at the target
+  size. Only which manifests list the files changes: the live data and delete files, the rows, every snapshot's totals,
+  earlier snapshots and tags are unchanged. The new manifests are written inside the commit, under the lease. The
+  replaced manifests stay in the bucket (the library's deletes are refused) until the remover takes them at a later
+  cleanup, once no protected revision reaches them; a reader pinned to an earlier revision still reads it.
+- **Fewer is not promised.** The new manifests carry the current schema in their headers and roll on their new size,
+  so after a schema or documentation change a rewrite can come out with as many manifests, or more. The part compares
+  the counts after the commit: fewer → `done` with `folded: true`; not fewer → `done` with `folded: false`; never a
+  retry in the same run. The next run decides afresh from the new list.
+- **Recorded** on its `parts_json` entry ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs)): `files` =
+  the manifests replaced, `bytes` = their lengths, and `folded`, `manifests_before`, `manifests_after` (when the new
+  list was read), `lease_held_millis`; a run with nothing to fold records `reason` and `manifests_before`. `busy`,
+  `deadline` and an unknown commit outcome are the run's (above). No log event of its own.
+- **The lease.** The rewrite holds the table lease while it reads and writes the folded manifests. Measured on the
+  lane's machine (module Postgres and MinIO, files with column metrics, every manifest a candidate): 1,000 or 10,000
+  data files in 200 or 1,000 manifests folded to one manifest with the lease held 0.2–0.5 s.
+
+**Compaction** (#969; record §11a call 34 "Progress inside a table", call 36 items 4–5, call 41; the P6 lane cut L18,
+L19). The run's third part, `compaction`, after cleanup and manifest rewrite. It is registered whenever the lake is
+enabled: the web module supplies the run's scratch reservation (the staging factory's `prepareDelivery`, from the
+aggregate deliveries reserve from) and the part's scratch database.
+
+- **What it rewrites.** The candidates of ONE rule, the same function the planner measures with
+  (`CompactionCandidateRule`), so a table the plan calls due is a table the part finds work in. A file is *small* below
+  `maintenance.compact_small_file_ratio × target_file_bytes`; a partition of one partition spec holding at least
+  `compact_min_small_files` small files is a *candidate partition*; on a table with sort columns a file not stamped with
+  the table's sort order is *unsorted* whatever its size (a legacy table has none). A *candidate* is unsorted, or small in
+  a candidate partition. A table holding a delete file is not rewritten: the part fails (DP writes none).
+- **Declared and due.** At admission, from database rows only, the part declares `compaction-scratch-factor` × the
+  smaller of the profile's `max_bytes_rewritten_per_run` and the stored measurement's candidate bytes, never more than
+  `admission.scratch-bytes` less one delivery's reservation; a table not `active`/`deprecated`, never measured or
+  measured under another profile declares zero and is not due. After admission the table is read again (one pinned
+  snapshot): with a positive admission declaration the part is due when it holds a candidate. A refused
+  reservation records `capacity`, `attempted:false`, reason `scratch_refused`; it opens no scratch database and
+  rewrites nothing. A table with no current measurement declares zero and remains `nothing_to_do`.
+- **The group.** One partition of one spec. A file's *need* is its size when it is unsorted, and its size plus the
+  smallest other candidate of its partition when it is a small file already in order (no other candidate → it waits;
+  it is never rewritten alone). Groups are formed per partition from the eligible files, oldest first (data sequence
+  number, then location), each taking files while their sizes stay within the limit now; the group holding the oldest
+  candidate runs first. Before every group the part reads the clock and plans again with the time left; a group that
+  would cross what is left of the run's cap is not started and not shrunk.
+- **The rewrite.** The group's rows are read by field id and ordered by the table's sort order (ascending, nulls
+  first) in the run's scratch database ([Staging §8.5](staging.md#85-the-duckdb-engine), *The trusted scratch
+  database*), the file locations bound as one array, never spliced into the statement; the Java writer writes the
+  outputs, stamped with the table's sort order, before any lease. The commit is ONE `RewriteFiles` through the run's
+  lease, the catalog fence and the revision trigger (`validateFromSnapshot` the planned snapshot): the inputs are
+  replaced by the outputs and **nothing is deleted** — the old files stay for the remover. One scratch database per run,
+  opened when the first group starts, closed (files deleted, reservation released) in a `finally`.
+- **The limits, and what `capacity` means.** The *whole-run limit* is the smallest of the profile's cap (source `cap`),
+  the most scratch any run can be granted ÷ the factor (`scratch`) and a whole `job-timeout` at
+  `compaction-bytes-per-second` (`time`); the *limit now* is the smallest of that, this run's grant ÷ the factor and the
+  time left at the same rate. A file whose need is above the whole-run limit is **blocked**: left exactly as it is, still
+  a candidate, and the part ends `capacity` with the blocked count, the largest need, the limit and its source. A file
+  within the whole-run limit but above the limit now is **left for a fresh run** (the earlier parts or groups used the
+  time or the grant): not `capacity`; with nothing blocked the part ends `deadline` and the next plan enqueues it again.
+  The scratch database running out mid-sort blocks that group with source `scratch` (the factor was too low for it;
+  the blocked event carries its input bytes and the grant).
+- **The three remedies** for a file blocked by the cap or by scratch: raise the profile's
+  `maintenance.max_bytes_rewritten_per_run`; or give the table a profile with a larger one; or, when `scratch` set the
+  limit, raise the server's `admission.scratch-bytes` (or `compaction-scratch-factor`, when the blocked event shows the
+  sort needed more than the factor allowed). A file blocked by `time` needs a longer `admission.job-timeout` or a higher
+  measured `compaction-bytes-per-second` ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)).
+- **The deadline.** A deadline that passes while rows stream (the stream checks between batches; the scratch database's
+  statement carries the time left as its timeout, decided by the clock, never by the driver's message) abandons the
+  group: nothing written is committed, and the unstarted groups are left for a fresh run. A lease another operation
+  holds ends the part `busy`. Precedence of the outcome: `busy`, `capacity`, `deadline`, `done`, else `nothing_to_do`.
+- **What the run row keeps.** The part's `parts_json` entry ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs))
+  carries, besides the common keys, `committed` (whether any group committed), `left_for_fresh_run` (files), `blocked`
+  (files), and for a blocked result `largest_need_bytes`, `limit_bytes` and `limit_source`; `groups` lists each committed
+  group's `input_files`, `input_bytes`, `output_files`, `output_bytes`, `rows`, `read_write_seconds`, `lease_seconds`
+  and `scratch_peak_bytes`. The planner reads `committed` and `left_for_fresh_run` (step 6 above). Log events
+  [Observability §3.4Y](observability.md#34y-lake-compaction-events-969).
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.36 | #969 merge review F1 | **§11 Compaction:** due work is decided by its positive declaration and current candidates; a refused scratch reservation is `capacity` / `scratch_refused`, with nothing opened or rewritten. |
+| 2026-11-14 | v1.35 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #963's v1.32, #962's v1.33 and #964's v1.34 | **§11 Maintenance runs** gains *Compaction*: the one candidate rule shared with the planner, the declaration and the due check, the rewrite group (one partition of one spec, the need of a small in-order file, oldest first, re-planned before each group), the rewrite (sorted by field id in the run's trusted scratch database, written before the lease, one `RewriteFiles` commit, nothing deleted), the whole-run limit and the limit now, `capacity` and its three remedies, the deadline, and the run row's compaction keys. The section's opening names compaction among the landed parts. |
+| 2026-11-14 | v1.34 | 964 (#964, dp-lake P6) | **§10 Removal and cleanup** gains *The storage breakdown*: one inventory per cleanup from its own listing and walk, six rows in first-fit order (DP's own records, table metadata, current, held by history, held by keep rules, not referenced), what "held by keep rules" means, one time per inventory (as old as the last cleanup), replaced per cleanup, "not measured yet", and the totals check. |
+| 2026-11-14 | v1.33 | 962 (#962, dp-lake P6) — renumbered at the spec merge after #963's v1.32 | **§10 Removal and cleanup** gains its callers: *What a cleanup does, in order* (mode check, fresh load, keeps first, expiry over the deployment window's floor with Iceberg's deletes handed to the remover, the listing time and the orphan pass, the observer, the release; a never-published table's `not_applicable` floor), *How a cleanup ends* (one row per ending; only a completed pass resets the interval; `lake.maintenance.cleanup_incomplete` with reason `mode` or `delete_failed`; the figures on the run row and in `lake.cleanup.stopped`), *What is never deleted*, and *Purge deletion, and when it is finished* (the part's own re-check, the stamp only on *finished*). Replaces "No production code calls the remover yet". |
+| 2026-11-14 | v1.32 | 963 (#963, dp-lake P6) | **§11 Maintenance runs** gains the manifest rewrite: the part `manifest_rewrite` (second, no scratch, `active` and `deprecated`), due by the manifest count and held only by the compaction pause, the candidate rule (data manifests under half the target, two per spec), due with nothing to fold, the one commit and what it leaves unchanged, the replaced manifests left for the remover, `folded` and the counts on the run row, the lease measurement. The section's opening no longer says no part is registered. |
+| 2026-11-14 | v1.31 | 959 (#959, dp-lake P6) — renumbered at the spec merge after #961's v1.28, #960's v1.29 and #968's v1.30 | **§11 Maintenance runs** gains the planner: the recurring `lake-maintenance-planner` task and its four keys; measuring from the manifests on the planner's own readers (abandoned reads retired before their stamp, their limit, the client built inside the read, one winner per attempt, the stamp fence); stale figures and the measured-first rule; daily usage and growth; the due function, the one run-history statement, the gate shared with the worker, and the ranked enqueue; the figures read method. |
+| 2026-11-14 | v1.30 | 968 (#968, dp-lake P6) — renumbered at the spec merge after #961's v1.28 and #960's v1.29 | §7: on a table with sort columns the append's writing scan is ordered by the sort columns (ascending, nulls first) and every file is stamped with the table's order, from one value; an unsupplied optional sort column is skipped; a legacy table keeps arrival order and the unsorted stamp; a sort that does not fit the scratch reservation fails with `pipeline.staging.scratch_limit_exceeded` (ledger `FAILED`, phase `publish`, that code), a memory-limit failure stays `lake.append.failed` with its staging code in the ledger; a string sort column is compared by code points whatever its collation (round 2). Replaces #935's "files stay stamped unsorted". |
+| 2026-11-14 | v1.29 | 960 (#960, dp-lake P6) — renumbered at the spec merge after #961's v1.28 | **§11 Profiles** gains *Keep rules*: the computed `dp-keep-` tag names, the period's end in the profile's current zone, the kept snapshot proved by the snapshot log alone ("not kept: history not available"), the keep's end and the tag's maximum age, reconcile by name (a changed zone moves ends, never snapshots; a reopened period's tag stands), what is never touched (branches, `main`, `dp-hold-`; "not kept: name taken by a branch"), and the one commit. |
+| 2026-11-14 | v1.28 | 961 (#961, dp-lake P6) | §11 **Profiles** gains **Lateness**: what the three `reporting.*` values mean — the median gap of a feed's last published deliveries, late beyond the factor (exactly at it is on time), "not enough deliveries to say" under the minimum or at a zero median, each feed on its own, every feed of the ledger listed, a deprecated, archived or purged table never flagged; computed when asked by `LakeFeedLateness.forTable` (profile first, then one ledger statement on the catalog's clock), served by V62's index. No route, tool or screen yet (P8). |
+| 2026-11-14 | v1.27 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.26 | New **§11 Profiles**: the profile table and its two built-ins, the start-up seed of `production` from the two `maintenance.*` keys, the closed key list with its rules (incl. `retention.keep`'s two limits and the three `reporting.*` keys), what is not in a profile, the service changes and their audit, the two pause keys left on the table, the append writer reading the profile at each append, and the tuning-source guard with its limits (rule (b) sees a numeric constant whatever the case of its name, and a fully qualified top-level read); a fractional value that rounds onto its bound is refused. §1 "Not in the body": the table's tuning is its profile; `policy_json` holds only the pause keys. |
+| 2026-11-14 | v1.26 | 957 (#957) — renumbered at the spec merge after #958's v1.25 | New **§11 Maintenance runs** (§10 at the lane's base; #958's §10 landed first): one `lake-maintenance` task per table; the admission order (permission and mode, slot, declarations, scratch, one-statement run row, settlement, parts); the run's deadline on every lease; `busy` and `deadline` end the run; nothing concluded from an abandoned row; threads ≥ maintenance slots + 2. |
+| 2026-11-14 | v1.25 | 958 (#958) | New §10 **Removal and cleanup**: the remover's two passes (orphans, purge), their fixed order, the reachable set, the candidates and hints, the `dp/` rule and its two marker cases, the clock-skew probe (`lake.maintenance.clock_skew`), the purge answer, what counts as deleted, and the result (inventory and visits). No production caller before 962; no configuration key or migration. |
 | 2026-11-13 | v1.24 | 967 (#967) — renumbered at the spec sync after #935's v1.23 | §1 `partition` row and §7: the append's first scan refuses a value a numeric `truncate[N]` partition cannot hold (`lake.append.partition_value_out_of_range`, counts per partition field, never a value), after a required-null refusal and before any file is written; the definition stays valid. Temporary until apache/iceberg 17027 (decimal) and 13105 (int, long). |
 | 2026-11-13 | v1.23 | 935 (#935) — renumbered at the spec sync after #939's v1.22 | §1: the body's fourth key, `sort_field_ids` (1–4 field ids, required before the first release, refused for `BINARY` and, for now, the approximate `DECIMAL`), fixed by the table's first release ever, also after its discard (`locked`); a legacy keyless table stays unsorted; the order (ascending, nulls first) is written to Iceberg at creation with one `write.metadata.metrics.column.<name>` = `truncate(16)` property per sort column. §2: a release is refused `invalid_body` when its stored draft breaks the sort-column rule. §4: S includes the sort order; changing the sort columns is breaking, a sort order changed outside DP is drift whose exit is to put it back. §7: files stay stamped unsorted on a sorted table (dp-lake record §11a call 36). |
 | 2026-11-13 | v1.22 | 939 (#939) | §8: the protection stamp is `now()` plus `datapipelines.lake.retention.protection-days`, no longer `lake_control.protection_interval`, which the normal-mode sweep keeps equal to the setting (a write only when they differ, `lake.settle.protection_window_aligned`); a stamped deadline is never changed. The budget is checked before each of the protection step's two statements; the 16 s overrun and the 31 s wall clock are unchanged. No migration. |

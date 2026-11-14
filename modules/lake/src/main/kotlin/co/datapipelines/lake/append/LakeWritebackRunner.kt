@@ -19,10 +19,12 @@ import co.datapipelines.lake.delivery.DeliveryTarget
 import co.datapipelines.lake.delivery.LakeDelivery
 import co.datapipelines.lake.delivery.LakeDeliveryFailurePhase
 import co.datapipelines.lake.delivery.LakeDeliveryState
+import co.datapipelines.lake.profiles.LakeProfiles
 import co.datapipelines.lake.settle.DeliverySettler
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.LakeExecutionInput
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineErrorCodes.Lake
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.typesystem.DatapipelinesException
@@ -57,6 +59,7 @@ class LakeWritebackRunner(
     private val recipes: RecipeWriterFactory,
     private val heartbeat: LakeAppendHeartbeat,
     private val settler: DeliverySettler,
+    private val profiles: LakeProfiles,
 ) {
     private val committer = AppendCommitter(deliveries)
     private val writer = ParquetAppendWriter()
@@ -140,6 +143,7 @@ class LakeWritebackRunner(
                             request.rows,
                             row.operationId,
                             properties.admission.maxOpenPartitionsPerAppend,
+                            profiles.forTable(row.tableId), // #956 D9: the profile as it is NOW, read at every append
                             checkActive,
                         )
                     checkActive()
@@ -192,7 +196,12 @@ class LakeWritebackRunner(
     private fun publicFailure(failure: Throwable): Throwable =
         when {
             failure is CancellationException || failure is Error -> failure
+
             failure is DatapipelinesException && failure.code.startsWith("lake.") && !failure.code.startsWith("lake.catalog.") -> failure
+
+            // #968 D7: an ordered scan that outgrows the delivery's scratch reservation; the author can act on it.
+            failure is DatapipelinesException && failure.code == PipelineErrorCodes.Staging.SCRATCH_LIMIT_EXCEEDED -> failure
+
             else -> refusal(Lake.APPEND_FAILED, "The append could not be published; inspect its recorded delivery outcome.")
         }
 

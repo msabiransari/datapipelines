@@ -1,6 +1,7 @@
 package co.datapipelines.lake.append
 
 import co.datapipelines.lake.LakeTestDb
+import co.datapipelines.lake.profiles.LakeProfileFixtures
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.apache.iceberg.NullOrder
@@ -14,8 +15,9 @@ import java.util.UUID
 
 /**
  * The append writer on a table that has sort columns (lake.md §7; dp-lake design record §11a call 36 item 4 and input
- * (d)): I8 every file is stamped unsorted, since the writer writes in arrival order and a stamp never claims an order the
- * file was not written in; I9 a sort column beyond Iceberg's first 100 columns still gets its bounds.
+ * (d)): I8 every file is stamped with the table's order, since the writer writes in that order (#968, call 37) and a
+ * stamp never claims an order the file was not written in; I9 a sort column beyond Iceberg's first 100 columns still gets
+ * its bounds.
  */
 class ParquetAppendWriterSortedTableIntegrationTest {
     private val h = ParquetWriterHarness()
@@ -25,7 +27,7 @@ class ParquetAppendWriterSortedTableIntegrationTest {
     fun reset() = LakeTestDb.reset()
 
     @Test
-    fun `I8 - a sorted table's appended files are stamped unsorted`() {
+    fun `I8 - a sorted table's appended files are stamped with the table's order`() {
         val schema =
             Schema(
                 Types.NestedField.required(1, "id", Types.LongType.get()),
@@ -39,11 +41,11 @@ class ParquetAppendWriterSortedTableIntegrationTest {
                 .build()
         h.withTable(schema, PartitionSpec.unpartitioned(), order) { table ->
             h.withInput("SELECT * FROM (VALUES (2::BIGINT, 'b'), (1::BIGINT, 'a'), (3::BIGINT, NULL)) t(id, label)") { input ->
-                val written = writer.write(table, input, UUID.randomUUID(), 1) {}
+                val written = writer.write(table, input, UUID.randomUUID(), 1, LakeProfileFixtures.builtIn()) {}
                 println("(I8) table order ${table.sortOrder()}; file orders ${written.files.map { it.sortOrderId() }}")
                 table.sortOrder().orderId() shouldNotBe 0
                 written.files.size shouldBe 1
-                written.files.map { it.sortOrderId() } shouldBe listOf(0)
+                written.files.map { it.sortOrderId() } shouldBe listOf(table.sortOrder().orderId())
             }
         }
     }
@@ -55,7 +57,7 @@ class ParquetAppendWriterSortedTableIntegrationTest {
         val columns = (1..WIDTH).joinToString(", ") { "(i + $it)::BIGINT AS c$it" }
         h.withTable(schema, PartitionSpec.unpartitioned(), order) { table ->
             h.withInput("SELECT $columns FROM range(3) t(i)") { input ->
-                val file = writer.write(table, input, UUID.randomUUID(), 1) {}.files.single()
+                val file = writer.write(table, input, UUID.randomUUID(), 1, LakeProfileFixtures.builtIn()) {}.files.single()
                 val bounded = file.lowerBounds().keys.sorted()
                 println("(I9) properties ${table.properties().filterKeys { it.contains("metrics") }}; lower-bound ids $bounded")
                 file.lowerBounds().containsKey(WIDTH) shouldBe true

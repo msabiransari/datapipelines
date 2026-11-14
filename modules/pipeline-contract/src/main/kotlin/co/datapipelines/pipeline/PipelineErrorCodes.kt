@@ -2306,6 +2306,45 @@ object PipelineErrorCodes {
          * the table and reason. Shared by the P4 delivery ledger and the P5 read gate.
          */
         const val TABLE_UNAVAILABLE = "lake.table.unavailable"
+
+        // #957 (dp-lake P6) — the maintenance run (§13.25, design record §11).
+
+        /**
+         * A maintenance run's commit was refused because the run's deadline (`lake_maintenance_runs.deadline_at`) had
+         * passed by the catalog's clock: at the acquire, or at the fenced write. The part ends `deadline`, nothing was
+         * committed. No route returns it (HTTP `—`); it is recorded in the run row's parts.
+         */
+        const val MAINTENANCE_DEADLINE = "lake.maintenance.deadline"
+        // #958 (dp-lake P6) — the remover (§13.25, design record §8a (iii); the cut's L7 spells it in snake_case).
+
+        /**
+         * The remover's clock-skew probe found the catalog and the object store more than 3600 s apart: the pass listed
+         * nothing and deleted no candidate. Recorded on the maintenance run, never returned by a route.
+         */
+        const val MAINTENANCE_CLOCK_SKEW = "lake.maintenance.clock_skew"
+
+        // #962 (dp-lake P6) — the cleanup pass and the purge deletion (§13.25, the cut's §3).
+
+        /**
+         * A cleanup or purge deletion did not finish its removal: the catalog left `normal` mode (`details.reason` =
+         * `mode`), or a delete failed or its outcome is unknown (`delete_failed`). The run ends `failed`; a tag or expiry
+         * commit made before stays, nothing more is deleted, and the next plan finds the work due again. Not retryable by
+         * the caller; recorded on the maintenance run, never returned by a route.
+         */
+        const val MAINTENANCE_CLEANUP_INCOMPLETE = "lake.maintenance.cleanup_incomplete"
+
+        // #956 (dp-lake P6) — the maintenance profiles and the table pauses (§13.25, design record §11a calls 35
+        // and 38). No route returns them before P8 (HTTP `—`): the services have no handler yet.
+
+        /**
+         * A profile document, or a table pause, broke a rule of lake.md "Profiles": an unknown or missing key, a wrong
+         * type, a value outside its range, a pause more than 7 days ahead or on a purged table, a taken profile name.
+         * `details.path` names the key, `details.reason` the rule; nothing was written.
+         */
+        const val PROFILE_INVALID = "lake.profile.invalid"
+
+        /** No lake profile by that name. */
+        const val PROFILE_NOT_FOUND = "lake.profile.not_found"
     }
 }
 

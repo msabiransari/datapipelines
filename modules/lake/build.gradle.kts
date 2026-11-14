@@ -1,8 +1,8 @@
 // module-structure.md §5.21 — the managed lake (dp-lake design record §3a, call 12). Allowed internal
 // deps (root build.gradle.kts): typesystem, persistence, datasources, staging, pipeline-contract,
 // scheduler, auth. P2 (#785) compiles against typesystem, persistence and pipeline-contract; P3 (#798) adds
-// auth for AuditEventSink. The rest are allowed ahead for P1/P4–P7 and stay undeclared until something
-// compiles against them (§4.2's rule).
+// auth for AuditEventSink; P6 (#957) adds scheduler for the system-job seam. The rest are allowed ahead and stay
+// undeclared until something compiles against them (§4.2's rule).
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
@@ -16,6 +16,9 @@ dependencies {
     implementation(project(":modules:pipeline-contract"))
     // AuditEventSink: the definitions' lake.definition.* audit events, strict inside the applied transaction (P3, #798).
     implementation(project(":modules:auth"))
+    // KeyedSystemJob / SystemJobOutcome: the lake-maintenance task's seam (#957 D1). The scheduler declares db-scheduler
+    // as `implementation`, so no db-scheduler type reaches this module's compile classpath: the boundary holds by it.
+    implementation(project(":modules:scheduler"))
 
     // Jackson stays at the product's pin: Iceberg 1.12.0's POMs import jackson-bom 2.22.2, which wins
     // over the conventions' platform(jackson-bom 2.21.7) under default resolution (E1 #774 / E2).
@@ -67,6 +70,10 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
     testImplementation(project(":modules:log-capture"))
+    // #959 — the planner's scheduler-harness cases (N9, N10, N12, N13b, N14) drive the library's manual scheduler
+    // (`testhelper`, in the core jar) over the real scheduled_tasks table, as the scheduler module's own seam suite does.
+    // Test-only: the MAIN compile classpath still holds no db-scheduler type (the boundary of line 19 holds).
+    testImplementation(libs.db.scheduler)
     // Actual materialized input cursors exercise unsigned widths and microsecond temporal values.
     testRuntimeOnly(libs.duckdb.jdbc)
 }

@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.50 (living document — updated as enums evolve)
+**Status:** v1.57 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -530,6 +530,21 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `lake.delivery.unknown` | Publication has no confirmed verdict and remains eligible for settlement. Same details as `lake.delivery.published`. |
 | `lake.delivery.settled` | A takeover and fresh revision observation, or an ended execution before publication, established a terminal delivery outcome. Written with the outcome's audit event in the same transaction. Same details as `lake.delivery.published`. |
 
+**Lake profile audit events** (same `audit_log` table; emitted by the managed lake's maintenance profiles and table pauses, [Lake "Profiles"](lake.md#11-profiles), #956). Each row is written by the service INSIDE the transaction of the change it records (strict: a refused audit insert rolls the change back), once per change; a save that changes nothing writes no row. `user_id` is the acting person: a service write without one is refused. The start-up seed of the `production` profile and the migration's two built-in profiles write no row (the system wrote them; `updated_by` stays NULL). `details` carries ids, names, key paths and instants; never a credential.
+
+| Value | Trigger |
+|---|---|
+| `lake.profile.created` | A profile was created. `details` carries `profile_id` and `profile` (the name) |
+| `lake.profile.updated` | A profile's values changed, or the default mark moved to it. `details` carries `profile_id`, `profile` and `changed`: the dotted keys whose values changed, or `["default"]` when the mark moved (then also `previous_default`, the profile that lost it) |
+| `lake.profile.assigned` | A managed table was moved to another profile. `details` carries `table_id`, `namespace`, `table`, `profile` and `previous_profile` |
+| `lake.table.pause_changed` | One of a table's two pause keys was set or cleared. `details` carries `table_id`, `namespace`, `table`, `key` (`pause.compaction_until` \| `pause.cleanup_until`), `until` (the new instant, null when cleared) and `previous` |
+
+**Lake maintenance audit events** (same `audit_log` table, #957, [Lake: maintenance runs](lake.md#11-maintenance-runs)). One row per ADMITTED run, written when the run ends, outside any transaction of the table (a refused insert is logged, never retried, and does not change the run). `user_id` is the provisioned system user's id. A task that admitted nothing (no permission, the catalog not `normal`, no slot, an earlier run live) writes no row.
+
+| Value | Trigger |
+|---|---|
+| `lake.maintenance.run_finished` | An admitted maintenance run ended. `details` carry `table_id`, `run_id`, `kind` (§52), `state` (§53: `finished`, `failed`, or `abandoned` when its close was refused because a successor had taken the table), `outcome_confirmed` (false only for that refused close), `error_code`, and `parts`: each part's `name`, `outcome` (§54) and `attempted`. No figures beyond those, no paths, no message text, no credentials. |
+
 ---
 
 ## 16. Error Code Domains (prefix catalog)
@@ -571,6 +586,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `lake.delivery.*` | Delivery structure and landing refusals | pipeline-contract §13.25 |
 | `lake.append.*` | Managed append structure, barrier and publication refusals | pipeline-contract §13.25 |
 | `lake.definition.*` | The managed lake's table definitions (#798): an unknown table or version, a lifecycle refusal (`not_draft`, `not_released`, `version_conflict`, `applied_version`, `name_taken`), an invalid body, a change the supported-change policy will not apply (`reviewed_change`, `breaking_change`), a table changed outside DP (`drift`), a table another operation holds (`table_busy`), and authoring off in this environment (`authoring_disabled`) | pipeline-contract §13.25 (defined in [Lake §4](lake.md#4-the-supported-change-policy)) |
+| `lake.maintenance.*` | The managed lake's maintenance passes (#958): the remover's clock-skew refusal (`lake.maintenance.clock_skew`), a pass's result and never a route's status; and its maintenance runs (#957): a commit refused because the run's deadline had passed (`lake.maintenance.deadline`, recorded in the run row, never an HTTP response) | pipeline-contract §13.25 (defined in [Lake §10](lake.md#10-removal-and-cleanup) and [Lake §11](lake.md#11-maintenance-runs)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 
@@ -1071,6 +1087,9 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `RefreshStatus` | [Dashboards §5](dashboards.md#5-the-runtime) (`visualization` declares it; §38 here is the wire table) | metadata-db (the V43 CHECK), rest-api §23.3, the dashboard runtime |
 | `EvaluationCaller`, `ParameterEvaluationStatus`, `QueryAttemptOutcome` | the [parameter-set workspace spec §2](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) (`parameters` declares them; §39–§41 here are the wire tables) | metadata-db (the V48 CHECKs), the History tab (ui-screens §4.23) |
 | `LakeTableStatus`, `LakeApplyState`, `LakeChangeClass` | [lake.md](lake.md) (`lake` declares them; §46–§48 here are the wire tables) | metadata-db (the V54 CHECKs), the lake surfaces (P8) |
+| `MaintenanceRunKind`, `MaintenanceRunState`, `MaintenanceOutcome` | [lake.md](lake.md#11-maintenance-runs) (`lake` declares them; §52–§54 here are the wire tables) | metadata-db (the V60 CHECKs), the run's audit event (§15) |
+| `IncompleteReason`, `ObserverOutcome`, `ObservedRefType` | [lake.md](lake.md#10-removal-and-cleanup) (`lake` declares them in `maintenance/cleanup`; §58–§60 here are the wire tables) | the run row's `parts_json`, `lake.cleanup.stopped`, the cleanup observer (#964) |
+| `StorageRow` | [lake.md](lake.md#10-removal-and-cleanup) (`lake` declares it in `maintenance/inventory`; §62 here is the wire table) | metadata-db (the V64 CHECK), the storage breakdown's read for P8 |
 | `LakeDeliveryState`, `LakeDeliveryFailurePhase`, `LakeDeliveryAttemptOutcome` | metadata-db §4.53–§4.54 (`lake` declares them; §49–§51 here are the wire tables) | delivery landing, publication and settlement (the V55 CHECKs) |
 | `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
 
@@ -1249,10 +1268,153 @@ Stored in `lake_delivery_attempts.outcome` ([Metadata DB §4.54](metadata-db.md#
 
 ---
 
+## 52. `MaintenanceRunKind` — what a maintenance run was admitted to do
+
+Stored in `lake_maintenance_runs.kind` ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs)), decided at admission from the table's status ([Lake: maintenance runs](lake.md#11-maintenance-runs)).
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `MAINTENANCE` | `maintenance` | The registered maintenance parts, in the record's order (cleanup, manifest rewrite, compaction) |
+| `PURGE` | `purge` | A purged table: its deletion part alone |
+
+---
+
+## 53. `MaintenanceRunState` — one maintenance run's state
+
+Stored in `lake_maintenance_runs.state`. At most one row per table is `running`; every write after admission is conditional on `running`.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `RUNNING` | `running` | Admitted and not yet closed; its `deadline_at` is every lease's deadline |
+| `FINISHED` | `finished` | Closed by its worker after every part was recorded (a `busy` or `deadline` part ends the run `finished`: those words live in the parts) |
+| `FAILED` | `failed` | Closed by its worker after a part threw, an unknown commit outcome or an interrupt; `error_code` names it |
+| `ABANDONED` | `abandoned` | Closed by its SUCCESSOR's admitting statement once its deadline had passed (`error_code = outcome_not_confirmed`); its late worker never overwrites it and nothing is concluded from it |
+
+---
+
+## 54. `MaintenanceOutcome` — one maintenance part's outcome
+
+Carried in `lake_maintenance_runs.parts_json[].outcome` and in `lake.maintenance.run_finished`'s `parts` (§15). A part answers one of the first seven; `failed` is recorded by the worker only.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `DONE` | `done` | The part did its work |
+| `NOTHING_TO_DO` | `nothing_to_do` | The part was not due, or found nothing to do; also every part of a run with none due |
+| `BUSY` | `busy` | The table lease was refused: the run ends, later due parts are recorded `busy` with `attempted: false` |
+| `DEADLINE` | `deadline` | The run's deadline passed (`lake.maintenance.deadline`): the run ends, later due parts are recorded `deadline` with `attempted: false` |
+| `CAPACITY` | `capacity` | The part needs scratch the run does not hold; not started, it comes again with the table's next task |
+| `OUTSIDE_WINDOW` | `outside_window` | The gate holds the part outside its window |
+| `PAUSED_UNTIL` | `paused_until` | The gate holds the part until the instant in `until` |
+| `FAILED` | `failed` | Recorded only: the part threw; the run ends `failed` and later parts are not run |
+
+---
+
+## 55. `KeepNotKeptReason` — why a period a keep rule asks for has no keep
+
+Carried in the keep reconcile's result (`KeepPlan.notKept`, #960), which the cleanup part reports per period ([Lake §11 Profiles](lake.md#11-profiles)); the table page shows it as "not kept: …". Never stored by #960.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `HISTORY_NOT_AVAILABLE` | `history_not_available` | The table's snapshot log does not reach the period's end (its history has expired, or the table had no snapshot then): no tag is made, on no snapshot |
+| `NAME_TAKEN_BY_BRANCH` | `name_taken_by_branch` | A branch holds the keep's tag name: no tag is made and the branch is left as it is |
+
+---
+
+## 56. `FiguresState` — whether a table's planner figures may be used
+
+Returned by the planner's figures read method (`PlanFiguresReader.figures`, for P8) beside the small-files and candidate-bytes figures ([Metadata DB §4.57](metadata-db.md#457-lake_table_measurements)); not stored.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `CURRENT` | `current` | The profile-dependent figures were computed under the table's current profile id and that profile's current `updated_at` |
+| `STALE` | `stale` | They were computed under another profile, or before the profile's last save: the plan treats compaction as not due (`not measured (profile changed)`) until a measurement under the current profile succeeds |
+| `NEVER_MEASURED` | `never_measured` | No measurement has succeeded: every figure is NULL, never zero |
+
+---
+
+## 57. The lake maintenance planner's error codes and not-due reasons
+
+**Error codes** stamped in `lake_table_measurements.error_code` by a measurement attempt that did not succeed (the last good figures are kept): `timeout` (the read did not end within `plan-table-timeout` and was abandoned), `metadata_too_large` (the table's metadata file inflates past the metadata read cap), otherwise the failure's catalogued code or `unclassified` (the maintenance worker's mapping).
+
+**Not-due reasons** the plan reports for a part with no task (`MaintenanceDue`, [Lake: maintenance runs](lake.md#11-maintenance-runs)); a part held by the gate carries the gate's words instead (`outside window`, `paused until <instant>`, §54):
+
+| Reason | Meaning |
+|---|---|
+| `not measured` | Never measured, or the last measurement failed: no rewrite work |
+| `not measured (profile changed)` | The figures are stale (§56): compaction is not due until remeasured |
+| `not registered` | The operation's part is not registered with the worker: measured and reported, never a task |
+| `capacity` | Every unsorted file left is larger than the profile's cap: it fits no run |
+| `capacity (waiting)` | The last rewrite attempt ended `capacity` with nothing committed and nothing left for a fresh run: not due again before `maintenance.cleanup_interval_hours`, unless the profile or the assignment changed since |
+| `rule silent` | No rule says whether the work is due: not due, counted in the plan row (`tables_rule_silent`) |
+
+---
+
+## 58. `IncompleteReason` — why a cleanup did not finish its removal (#962)
+
+The `details.reason` of `lake.maintenance.cleanup_incomplete` ([Pipeline Contract §13.25](pipeline-contract.md#1325-managed-lake)) and the `reason` of `lake.cleanup.stopped`; the run ends `failed` and the next plan finds the work due again ([Lake §10](lake.md#10-removal-and-cleanup)).
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `MODE` | `mode` | The catalog is not in `normal` mode: at the part's own check before its first write, at the remover's start, or between two delete batches |
+| `DELETE_FAILED` | `delete_failed` | A key's delete failed, a batch's outcome is unknown (its keys `outcome_unknown`, the rest `not_attempted`), or the pass's own clock marker could not be removed as planned |
+
+---
+
+## 59. `ObserverOutcome` — the cleanup observer's call (#962)
+
+The `observer` field of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `OK` | `ok` | The observer was called once and returned |
+| `FAILED` | `failed` | The observer threw an exception: logged as `lake.cleanup.observer_failed`; the cleanup's outcome is unchanged |
+| `NOT_CALLED` | `not_called` | The remover's pass returned no inventory (refused, or never reached), or the part is a purge deletion |
+
+---
+
+## 60. `ObservedRefType` — a ref's type in a cleanup observation (#962)
+
+A ref of the table's metadata after the expiry, as the cleanup hands it to the observer (`CleanupObservation.refs`, for #964); not stored by #962.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `TAG` | `tag` | An Iceberg tag (a `dp-keep-` keep, or any other tag) |
+| `BRANCH` | `branch` | An Iceberg branch, `main` included |
+
+---
+
+## 61. The cleanup's expiry floor spelling (#962)
+
+The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped` is the instant the expiry used (ISO-8601, UTC), or `not_applicable` for a table with no snapshot, which expires nothing; before the expiry step (a part that ended `busy` or `deadline` first, or stopped earlier) the key is absent from `parts_json` and `none` in `lake.cleanup.stopped`. A purge deletion records no floor.
+
+---
+
+## 62. `StorageRow` — a row of a table's storage breakdown (#964)
+
+`lake_storage_inventory.row_name` (V64's CHECK, [Metadata DB §4.60](metadata-db.md#460-lake_storage_inventory)): the six rows of the inventory a cleanup stores ([Lake §10](lake.md#10-removal-and-cleanup), *The storage breakdown*). Listed in their first-fit order — an object falls in the first row that fits it, so every listed object is in exactly one row and the six add up to the listing.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `DP_RECORDS` | `dp_records` | Every object under the table's `dp/`: the recipes and the remover's clock markers |
+| `TABLE_METADATA` | `table_metadata` | Metadata files, manifest lists, manifests and statistics files reachable from a protected revision, the current one included |
+| `CURRENT` | `current` | Data and delete files the current snapshot names |
+| `HISTORY` | `history` | Data and delete files, not current, that a history snapshot reaches |
+| `KEEP_HELD` | `keep_held` | Data and delete files that only keep-held snapshots reach ("held by keep rules") |
+| `NOT_REFERENCED` | `not_referenced` | Every other object: files awaiting removal after grace, and files a run in flight has written and not committed |
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.57 | 964 (#964, dp-lake P6) | New **§62 `StorageRow`**: the six rows of a table's storage breakdown in their first-fit order (`dp_records`, `table_metadata`, `current`, `history`, `keep_held`, `not_referenced`; V64's CHECK), held to the Kotlin enum by `InventoryGuardsTest`. |
+| 2026-11-14 | v1.56 | 962 (#962, dp-lake P6) | New **§58 `IncompleteReason`** (`mode`, `delete_failed`: `lake.maintenance.cleanup_incomplete`'s reason), **§59 `ObserverOutcome`** (`ok`, `failed`, `not_called`), **§60 `ObservedRefType`** (`tag`, `branch`) and **§61** the expiry floor's spelling (an instant or `not_applicable`), held to the Kotlin values by `CleanupEnumsSpecDriftTest`. |
+| 2026-11-14 | v1.55 | 959 (#959) — renumbered at the spec merge after #960's §55 and v1.54 | New **§56 `FiguresState`** (current, stale, never measured: the planner figures' read state, D3a) and **§57** the planner's error codes and not-due reasons, held to the Kotlin values by `PlanEnumsSpecDriftTest`. |
+| 2026-11-14 | v1.54 | 960 (#960, dp-lake P6) | New **§55 `KeepNotKeptReason`**: the two reasons a period a keep rule asks for gets no keep (`history_not_available`, `name_taken_by_branch`), held to the Kotlin enum by `KeepEnumsSpecDriftTest`. |
+| 2026-11-14 | v1.53 | 956 (#956) — renumbered at the spec merge after #957's v1.52 | **§15 lake profile audit events:** `lake.profile.created`, `lake.profile.updated`, `lake.profile.assigned` and `lake.table.pause_changed`, each written by the service inside its change's transaction, once per change; held to `LakeProfileAuditEvents` by `LakeProfileAuditEventsSpecDriftTest`. |
+| 2026-11-14 | v1.52 | 957 (#957) — renumbered at the spec merge after #958's v1.51 | New **§52 `MaintenanceRunKind`**, **§53 `MaintenanceRunState`** (V60's CHECKs) and **§54 `MaintenanceOutcome`** (the parts' outcome words), held to the Kotlin enums by `MaintenanceEnumsSpecDriftTest`; **§15** gains `lake.maintenance.run_finished` (held to `LakeMaintenanceAuditEvents.ALL` by `MaintenanceEnumsSpecDriftTest`); **§16**: #958's `lake.maintenance.*` row gains `lake.maintenance.deadline` (pipeline-contract §13.25; one domain, one row). |
+| 2026-11-14 | v1.51 | 958 (#958) | **§16** registers the `lake.maintenance.*` domain (pipeline-contract §13.25): the lake remover's `lake.maintenance.clock_skew`. |
 | 2026-11-13 | v1.50 | 814 (#814) | **§15 lake definition audit events:** `lake.definition.discarded` (`via`, `current_version`) and `lake.definition.draft_purged` (`via`, `table_deleted`), each written inside its write's transaction (dp-lake record §12, erratum 2026-11-12); held to `LakeAuditEvents` by `LakeAuditEventsSpecDriftTest`, which now counts five events. |
 | 2026-11-11 | v1.49 | #894 endpoint-root audit provenance | **§15 `template.version.released`:** under an API root the cascaded row names the API — `cascade_from_api_endpoint_id` + the API's `cascade_from_version`, no `cascade_from_pipeline_id` (the owner's 2026-11-11 exception to the frozen release-dependencies record §11). Pipeline-root rows and every other event unchanged; rows written before #894 are not rewritten (`cascade_root.family` tells them apart). |
 | 2026-11-08 | v1.48 | 860 (#860) | **§31 `RendererKind`:** `chart` (the chart document v1, judged by the schema served at `/schemas/chart/1/`) replaces `plotly`, which is retired and refused as `visualization.validation.renderer_unsupported` with a message naming `chart`. **§32 `AssertionKind`:** `mark_count` replaces `trace_count`; `text_visible` on a chart is proven by the mechanical check or left unjudged, never refused. |

@@ -73,6 +73,12 @@ internal object LakeRules {
     const val EGRESS_MAX_AGE_SECONDS = "$PREFIX.reads.egress-max-age-seconds"
     const val MAINTENANCE_WINDOW = "$PREFIX.maintenance.window"
     const val MAX_BYTES_REWRITTEN = "$PREFIX.maintenance.max-bytes-rewritten-per-run"
+    const val PLAN_INTERVAL = "$PREFIX.maintenance.plan-interval"
+    const val PLAN_PAGE_SIZE = "$PREFIX.maintenance.plan-page-size"
+    const val PLAN_TABLE_TIMEOUT = "$PREFIX.maintenance.plan-table-timeout"
+    const val PLAN_MAX_ABANDONED_READS = "$PREFIX.maintenance.plan-max-abandoned-reads"
+    const val COMPACTION_SCRATCH_FACTOR = "$PREFIX.maintenance.compaction-scratch-factor"
+    const val COMPACTION_BYTES_PER_SECOND = "$PREFIX.maintenance.compaction-bytes-per-second"
     const val PROTECTION_DAYS = "$PREFIX.retention.protection-days"
     const val ORPHAN_GRACE_HOURS = "$PREFIX.retention.orphan-grace-hours"
 
@@ -110,6 +116,12 @@ internal object LakeRules {
             EGRESS_MAX_AGE_SECONDS,
             MAINTENANCE_WINDOW,
             MAX_BYTES_REWRITTEN,
+            PLAN_INTERVAL,
+            PLAN_PAGE_SIZE,
+            PLAN_TABLE_TIMEOUT,
+            PLAN_MAX_ABANDONED_READS,
+            COMPACTION_SCRATCH_FACTOR,
+            COMPACTION_BYTES_PER_SECOND,
             PROTECTION_DAYS,
             ORPHAN_GRACE_HOURS,
         )
@@ -272,17 +284,71 @@ internal object LakeRules {
         }
     }
 
-    /** The catalog timeouts and the maintenance budget positive; the window `HH:MM-HH:MM` (UTC). */
+    /**
+     * The catalog timeouts and the maintenance budget positive; the window `HH:MM-HH:MM` (UTC).
+     *
+     * #956 D4: the budget is also at least [SEED_CAP_FLOOR_BYTES], because the start-up seed copies it into the
+     * `production` profile, whose save rule wants the cap at least twice its target file size (lake.md Profiles).
+     *
+     * #959 D1: the planner's four bounds — `plan-interval` at least one minute, `plan-page-size` 1 – 10,000,
+     * `plan-table-timeout` 1 second – 10 minutes, `plan-max-abandoned-reads` 1 – 64 ([planBounds]).
+     *
+     * #969 D4: compaction's two deployment values — `compaction-scratch-factor` a whole number of at least 1,
+     * `compaction-bytes-per-second` a positive size ([compactionBounds]).
+     */
     fun checkLakeBounds(
         snapshot: ConfigSnapshot,
         violations: MutableList<String>,
     ) {
         if (!enabled(snapshot)) return
         positiveLong(snapshot, LOCK_TIMEOUT_SECONDS, violations)
-        dataSize(snapshot, MAX_BYTES_REWRITTEN, violations)
+        val cap = dataSize(snapshot, MAX_BYTES_REWRITTEN, violations)
+        if (cap != null && cap.toBytes() < SEED_CAP_FLOOR_BYTES) {
+            violations +=
+                "$MAX_BYTES_REWRITTEN must be at least 128MB, twice the production profile's built-in target file size " +
+                "(§3.36, lake.md Profiles)."
+        }
         if (!WINDOW.matches(value(snapshot, MAINTENANCE_WINDOW))) {
             violations += "$MAINTENANCE_WINDOW must be HH:MM-HH:MM in UTC (§3.36)."
         }
+        planBounds(snapshot, violations)
+        compactionBounds(snapshot, violations)
+    }
+
+    /** #969 D4 — a term of [checkLakeBounds]: the scratch per byte of a group's input and the rate a group is assumed to get. */
+    private fun compactionBounds(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        positiveInt(snapshot, COMPACTION_SCRATCH_FACTOR, violations)
+        dataSize(snapshot, COMPACTION_BYTES_PER_SECOND, violations)
+    }
+
+    /** #959 D1 — a term of [checkLakeBounds], not a check of its own: each key refused outside its bounds, named. */
+    private fun planBounds(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        val interval = duration(snapshot, PLAN_INTERVAL, violations)
+        if (interval != null && interval < PLAN_INTERVAL_MIN) {
+            violations += "$PLAN_INTERVAL must be at least 1m (§3.36)."
+        }
+        val timeout = duration(snapshot, PLAN_TABLE_TIMEOUT, violations)
+        if (timeout != null && (timeout < PLAN_TABLE_TIMEOUT_MIN || timeout > PLAN_TABLE_TIMEOUT_MAX)) {
+            violations += "$PLAN_TABLE_TIMEOUT must be between 1s and 10m (§3.36)."
+        }
+        wholeNumberWithin(snapshot, PLAN_PAGE_SIZE, PLAN_PAGE_SIZE_MAX, violations)
+        wholeNumberWithin(snapshot, PLAN_MAX_ABANDONED_READS, PLAN_MAX_ABANDONED_READS_MAX, violations)
+    }
+
+    private fun wholeNumberWithin(
+        snapshot: ConfigSnapshot,
+        key: String,
+        max: Int,
+        violations: MutableList<String>,
+    ) {
+        val parsed = value(snapshot, key).toIntOrNull()
+        if (parsed == null || parsed < 1 || parsed > max) violations += "$key must be a whole number from 1 to $max (§3.36)."
     }
 
     /**
@@ -416,6 +482,19 @@ internal object LakeRules {
         if (parsed == null) violations += "$key must be a positive duration such as 2h or 90m (§3.36)."
         return parsed
     }
+
+    /**
+     * #956 D4: twice the built-in `maintenance.target_file_bytes` of the `production` profile (64 MiB, V61), the value
+     * the seed's cap must clear; the seed only writes an unedited `production`, so its target is always that one.
+     */
+    private const val SEED_CAP_FLOOR_BYTES = 2L * 64 * 1024 * 1024
+
+    /** #959 D1 — the planner's bounds (record §11a call 34, "The planner's own bounds"; the fourth is brief 959's). */
+    private val PLAN_INTERVAL_MIN: Duration = Duration.ofMinutes(1)
+    private val PLAN_TABLE_TIMEOUT_MIN: Duration = Duration.ofSeconds(1)
+    private val PLAN_TABLE_TIMEOUT_MAX: Duration = Duration.ofMinutes(10)
+    private const val PLAN_PAGE_SIZE_MAX = 10_000
+    private const val PLAN_MAX_ABANDONED_READS_MAX = 64
 
     /** #845 D1: the proxy may never cut a healthy query before the executor's own longest timeout, plus this slack. */
     private const val EGRESS_MAX_AGE_SLACK_SECONDS = 30L

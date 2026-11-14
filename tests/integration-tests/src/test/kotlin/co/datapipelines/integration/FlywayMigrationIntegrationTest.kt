@@ -190,6 +190,20 @@ class FlywayMigrationIntegrationTest {
                 // #874 (V59) — the datasource's local incarnation UUID and generation counter (metadata-db §4.10),
                 // backfilled by their DEFAULTs on every row, soft-deleted ones included.
                 "59|datasource incarnation|true",
+                // #957 (V60) — lake maintenance runs: one row per admitted run, one `running` row per table
+                // (partial unique index), the run's deadline (metadata-db §4.55).
+                "60|lake maintenance runs|true",
+                // #956 (V61) — lake maintenance profiles: the profile table with its two built-ins, every managed table's
+                // profile reference, and policy_json emptied to the table's pause keys (metadata-db §4.49, §4.56).
+                "61|lake profiles|true",
+                // #961 (V62) — the published deliveries' index: a feed's newest published deliveries of one table in
+                // order, for lateness per feed (metadata-db §4.53).
+                "62|lake deliveries published index|true",
+                // #959 (V63) — the lake maintenance planner: measurements, daily usage, the one plan row, the purge
+                // deletion stamp and the run-history index (metadata-db §4.57–§4.59).
+                "63|lake maintenance plan|true",
+                // #964 (V64) — the lake storage breakdown: the latest six-row inventory per table (metadata-db §4.60).
+                "64|lake storage inventory|true",
             )
     }
 
@@ -994,6 +1008,72 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #957 (V60) — the maintenance run row: the closed kind and state lists, ended iff not running, and the partial
+     * unique index that makes "one running run per table" a database fact.
+     */
+    @Test
+    fun `V60 creates lake maintenance runs with one running row per table`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN " +
+                "('chk_lake_maintenance_runs_kind', 'chk_lake_maintenance_runs_state', 'chk_lake_maintenance_runs_ended') " +
+                "ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_lake_maintenance_runs_ended|CHECK (((state = 'running'::text) = (ended_at IS NULL)))",
+                "chk_lake_maintenance_runs_kind|CHECK ((kind = ANY (ARRAY['maintenance'::text, 'purge'::text])))",
+                "chk_lake_maintenance_runs_state|CHECK ((state = ANY (ARRAY['running'::text, 'finished'::text, " +
+                    "'failed'::text, 'abandoned'::text])))",
+            )
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'uq_lake_maintenance_runs_running'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE UNIQUE INDEX uq_lake_maintenance_runs_running ON public.lake_maintenance_runs USING btree " +
+                    "(table_id) WHERE (state = 'running'::text)",
+            )
+        columnsOf("lake_maintenance_runs") shouldContainExactlyInAnyOrder
+            listOf(
+                "bytes_touched",
+                "deadline_at",
+                "deferred_deletions",
+                "ended_at",
+                "error_code",
+                "error_message",
+                "files_touched",
+                "id",
+                "kind",
+                "parts_json",
+                "scratch_reserved_bytes",
+                "settlement_json",
+                "started_at",
+                "state",
+                "table_id",
+            )
+    }
+
+    /**
+     * #964 (V64) — the latest storage breakdown: the six row names (the `StorageRow` wire values) and non-negative
+     * figures as CHECKs, one row per table and row name, and every column. Behaviour is the lake module's
+     * `StorageInventoryIntegrationTest`; this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V64 creates the lake storage inventory with its six row names`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'lake_storage_inventory'::regclass " +
+                "ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_lake_storage_inventory_figures|CHECK (((object_count >= 0) AND (bytes >= 0)))",
+                "chk_lake_storage_inventory_row|CHECK ((row_name = ANY (ARRAY['dp_records'::text, 'table_metadata'::text, " +
+                    "'current'::text, 'history'::text, 'keep_held'::text, 'not_referenced'::text])))",
+                "lake_storage_inventory_pkey|PRIMARY KEY (table_id, row_name)",
+                "lake_storage_inventory_table_id_fkey|FOREIGN KEY (table_id) REFERENCES lake_tables_managed(id) ON DELETE CASCADE",
+            )
+        columnsOf("lake_storage_inventory") shouldContainExactlyInAnyOrder
+            listOf("bytes", "measured_at", "object_count", "row_name", "run_id", "table_id")
+    }
+
+    /**
      * #798 (V54) — managed lake table definitions, read from the SHIPPED database: the closed lists the
      * `lake.definitions` enums mirror (table status, apply state, version status, origin), the pointer/state pairing,
      * the one-DRAFT index and every column. Behaviour is `LakeDefinitionRepositoryIntegrationTest`'s; this pins
@@ -1060,7 +1140,12 @@ class FlywayMigrationIntegrationTest {
                 "name",
                 "namespace_id",
                 "policy_json",
+                // #956 (V61) — the table's profile and when it was assigned (§4.49).
+                "profile_assigned_at",
+                "profile_id",
                 "purge_allowed_after",
+                // #959 (V63) — when a purge deletion finished; 962 stamps it, the planner reads it (§4.49).
+                "purge_deleted_at",
                 "purged_at",
                 "purged_by",
                 "replacement_id",
@@ -1672,8 +1757,8 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (54 after #786)
-    fun `creates exactly the fifty-four tables of metadata-db §4`() {
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (56 after #956)
+    fun `creates exactly the fifty-eight tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1714,6 +1799,16 @@ class FlywayMigrationIntegrationTest {
                 "lake_column_semantics",
                 "lake_deliveries",
                 "lake_delivery_attempts",
+                // #957 (V60) — the maintenance run rows (metadata-db §4.55).
+                "lake_maintenance_runs",
+                // #956 (V61) — lake maintenance profiles (metadata-db §4.56).
+                "lake_profiles",
+                // #959 (V63) — the planner's measurements, daily usage and its one plan row (metadata-db §4.57–§4.59).
+                "lake_table_measurements",
+                "lake_storage_usage",
+                "lake_maintenance_plan",
+                // #964 (V64) — the latest storage breakdown per table (metadata-db §4.60).
+                "lake_storage_inventory",
                 // 118 (V25) — the learned semantic layer.
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
@@ -1836,9 +1931,24 @@ class FlywayMigrationIntegrationTest {
                 "lake_deliveries.lake_deliveries_pkey",
                 "lake_deliveries.uq_lake_deliveries_key",
                 "lake_deliveries.idx_lake_deliveries_unsettled_page",
+                // #961 (V62) — a feed's newest published deliveries, partial on PUBLISHED (lateness, metadata-db §4.53).
+                "lake_deliveries.idx_lake_deliveries_published",
                 "lake_delivery_attempts.lake_delivery_attempts_pkey",
                 "lake_delivery_attempts.lake_delivery_attempts_operation_id_key",
                 "lake_delivery_attempts.idx_lake_delivery_attempts_delivery",
+                // #957 (V60) — the run's identity, one running run per table, a table's history (metadata-db §5).
+                "lake_maintenance_runs.lake_maintenance_runs_pkey",
+                "lake_maintenance_runs.uq_lake_maintenance_runs_running",
+                "lake_maintenance_runs.idx_lake_maintenance_runs_table_started",
+                // #959 (V63) — the planner's run-history read (finished runs, newest first); its three tables' keys and
+                // the usage prune.
+                "lake_maintenance_runs.idx_lake_maintenance_runs_finished",
+                "lake_table_measurements.lake_table_measurements_pkey",
+                "lake_storage_usage.lake_storage_usage_pkey",
+                "lake_storage_usage.idx_lake_storage_usage_measured",
+                "lake_maintenance_plan.lake_maintenance_plan_pkey",
+                // #964 (V64) — one row per table and storage row.
+                "lake_storage_inventory.lake_storage_inventory_pkey",
                 "lake_column_semantics.lake_column_semantics_pkey",
                 "lake_namespaces.lake_namespaces_pkey",
                 "lake_namespaces.uq_lake_namespaces_name",
@@ -1846,6 +1956,11 @@ class FlywayMigrationIntegrationTest {
                 "lake_table_definition_versions.uq_lake_table_definition_versions_one_draft",
                 "lake_tables_managed.lake_tables_managed_pkey",
                 "lake_tables_managed.uq_lake_tables_managed_namespace_name",
+                // #956 (V61) — a profile's PK, its name once, at most one default; the tables a profile governs.
+                "lake_profiles.lake_profiles_pkey",
+                "lake_profiles.uq_lake_profiles_name",
+                "lake_profiles.uq_lake_profiles_one_default",
+                "lake_tables_managed.idx_lake_tables_managed_profile",
                 // 118 (V25) — every read is per datasource; the workspace half is partial.
                 "learned_facts.idx_learned_facts_datasource",
                 // 7e (V36) — the successor of a retired fact (partial: few facts supersede one).
@@ -2045,10 +2160,23 @@ class FlywayMigrationIntegrationTest {
                 "chk_lake_deliveries_state",
                 "chk_lake_delivery_attempts_outcome",
                 "chk_lake_delivery_attempts_sha256",
+                // #959 (V63) — the one plan row and its non-negative counts (§4.59); `plan` sorts before `runs`.
+                "chk_lake_maintenance_plan_counts",
+                "chk_lake_maintenance_plan_one",
+                // #957 (V60) — the run row's lists, ended iff not running, non-negative figures, the parts array (§4.55).
+                "chk_lake_maintenance_runs_ended",
+                "chk_lake_maintenance_runs_figures",
+                "chk_lake_maintenance_runs_kind",
+                "chk_lake_maintenance_runs_parts",
+                "chk_lake_maintenance_runs_state",
                 "chk_lake_namespaces_description",
                 "chk_lake_namespaces_name",
                 "chk_lake_namespaces_stamps",
                 "chk_lake_namespaces_status",
+                // #956 (V61) — a profile's name grammar and its object-shaped values (§4.56); `p` sorts between
+                // `namespaces` and `reference` (the database collation skips `_` at the first level).
+                "chk_lake_profiles_name",
+                "chk_lake_profiles_values",
                 // #778 (V52) — the scan's family/status lists, version floors and reasons shape (§4.41), sorted before
                 // `chk_lake_table_format` (`r` < `t`); the reference's counters, resolved-identity pairing and site
                 // (§4.42), sorted after it (`f` < `r`).
@@ -2057,6 +2185,12 @@ class FlywayMigrationIntegrationTest {
                 "chk_lake_reference_scans_scanner_version",
                 "chk_lake_reference_scans_status",
                 "chk_lake_reference_scans_version",
+                // #964 (V64) — an inventory row's non-negative figures and its six row names (§4.60); `inventory` sorts
+                // before `usage`.
+                "chk_lake_storage_inventory_figures",
+                "chk_lake_storage_inventory_row",
+                // #959 (V63) — a usage row's non-negative figures (§4.58); `s` sorts between `reference` and `table`.
+                "chk_lake_storage_usage_figures",
                 // #798 (V54) — the definition version's body shape, stamps, status, floor and surface (§4.50), before
                 // `chk_lake_table_format` (`d` < `f`).
                 "chk_lake_table_definition_versions_body",
@@ -2068,6 +2202,11 @@ class FlywayMigrationIntegrationTest {
                 // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
+                // #959 (V63) — a measurement's non-negative figures, the measured-time/profile-pair pairing, and every
+                // figure NULL without a snapshot (§4.57); `measurements` sorts between `format` and `references`.
+                "chk_lake_table_measurements_figures",
+                "chk_lake_table_measurements_measured",
+                "chk_lake_table_measurements_snapshot",
                 "chk_lake_table_references_counters",
                 "chk_lake_table_references_resolved",
                 "chk_lake_table_references_site",

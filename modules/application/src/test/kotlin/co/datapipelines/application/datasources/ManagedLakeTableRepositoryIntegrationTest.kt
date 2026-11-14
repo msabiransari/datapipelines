@@ -47,6 +47,7 @@ class ManagedLakeTableRepositoryIntegrationTest {
                 "lake_tables, datasources, users CASCADE",
             emptyMap<String, Any>(),
         )
+        jdbc.update(DEFAULT_PROFILE, emptyMap<String, Any>())
         userId = UUID.randomUUID()
         jdbc.update(
             "INSERT INTO users (id, email, display_name, provider, provider_subject) VALUES (:id, :email, 'T', 'google', :sub)",
@@ -184,7 +185,8 @@ class ManagedLakeTableRepositoryIntegrationTest {
         val id = UUID.randomUUID()
         jdbc.update(
             "INSERT INTO lake_tables_managed (id, namespace_id, name, status, deprecated_at, deprecated_by, replacement_id, " +
-                "policy_json, created_by) VALUES (:id, :ns, :name, :status, CAST(:dep AS timestamptz), :depBy, :rep, '{}', :by)",
+                "policy_json, profile_id, created_by) VALUES (:id, :ns, :name, :status, CAST(:dep AS timestamptz), :depBy, :rep, '{}', " +
+                "(SELECT id FROM lake_profiles WHERE is_default), :by)",
             mapOf(
                 "id" to id,
                 "ns" to namespaceId,
@@ -254,5 +256,20 @@ class ManagedLakeTableRepositoryIntegrationTest {
 
     private companion object {
         const val LAKE = "lake"
+
+        /**
+         * V61's `production` profile (the default), re-inserted after the truncation: `lake_profiles.created_by`
+         * references `users`, so `TRUNCATE users CASCADE` empties it, and a managed table's INSERT takes the default
+         * profile by a sub-select (brief 956 D5). Nothing here reads its values; they are the built-ins so the row stays
+         * a valid profile for any later reader of this database.
+         */
+        const val DEFAULT_PROFILE =
+            "INSERT INTO lake_profiles (name, is_default, seed_pending, values_json) VALUES ('production', TRUE, TRUE, " +
+                "'{\"maintenance\": {\"window\": \"02:00-05:00\", \"max_bytes_rewritten_per_run\": 53687091200, " +
+                "\"target_file_bytes\": 67108864, \"compact_min_small_files\": 5, \"compact_small_file_ratio\": 0.75, " +
+                "\"rewrite_manifests_min_count\": 100, \"cleanup_interval_hours\": 24}, " +
+                "\"write\": {\"row_group_bytes\": 1048576}, \"retention\": {\"keep\": [], \"keep_time_zone\": \"UTC\"}, " +
+                "\"reporting\": {\"lateness_sample\": 20, \"lateness_overdue_factor\": 2, \"lateness_min_deliveries\": 5}}') " +
+                "ON CONFLICT (name) DO NOTHING"
     }
 }

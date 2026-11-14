@@ -1,6 +1,7 @@
 package co.datapipelines.lake.append
 
 import co.datapipelines.lake.LakeTestDb
+import co.datapipelines.lake.profiles.LakeProfileFixtures
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -33,7 +34,7 @@ class ParquetAppendWriterIntegrationTest {
         h.withTable(VALUE_SCHEMA) { table ->
             h.withInput(VALUE_SQL) { input ->
                 val operation = UUID.randomUUID()
-                val written = writer.write(table, input, operation, 1) {}
+                val written = writer.write(table, input, operation, 1, LakeProfileFixtures.builtIn()) {}
                 input.scans shouldBe 2
                 written.rows shouldBe 1
                 written.files.size shouldBe 1
@@ -74,7 +75,7 @@ class ParquetAppendWriterIntegrationTest {
             }
         h.withTable(PARTITION_SCHEMA, spec) { table ->
             h.withInput(sql) { input ->
-                val written = writer.write(table, input, UUID.randomUUID(), 16) {}
+                val written = writer.write(table, input, UUID.randomUUID(), 16, LakeProfileFixtures.builtIn()) {}
                 val expectedRows = if (partitionFunction == "bucket") 1024L else 3L
                 written.rows shouldBe expectedRows
                 written.files.sumOf { it.recordCount() } shouldBe expectedRows
@@ -91,7 +92,7 @@ class ParquetAppendWriterIntegrationTest {
     fun `a required null anywhere stops before the first data file is created`() {
         h.withTable(ID_SCHEMA) { table ->
             h.withInput("SELECT * FROM (VALUES (1::BIGINT), (NULL::BIGINT)) t(id)") { input ->
-                val failure = shouldThrow<DatapipelinesException> { writer.write(table, input, UUID.randomUUID(), 1) {} }
+                val failure = shouldThrow<DatapipelinesException> { writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {} }
                 failure.code shouldBe PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED
                 input.scans shouldBe 1
                 h.dataKeys(table) shouldBe emptyList()
@@ -105,7 +106,7 @@ class ParquetAppendWriterIntegrationTest {
         val spec = PartitionSpec.builderFor(PARTITION_SCHEMA).identity("region").build()
         h.withTable(PARTITION_SCHEMA, spec) { table ->
             h.withInput("SELECT i::BIGINT AS id, now() AS at, i::VARCHAR AS region FROM range(3) t(i)") { input ->
-                val failure = shouldThrow<DatapipelinesException> { writer.write(table, input, UUID.randomUUID(), 2) {} }
+                val failure = shouldThrow<DatapipelinesException> { writer.write(table, input, UUID.randomUUID(), 2, PROFILE) {} }
                 failure.code shouldBe PipelineErrorCodes.Lake.APPEND_TOO_MANY_PARTITIONS
                 h.dataKeys(table).size shouldBe 2
                 table.currentSnapshot() shouldBe null
@@ -119,7 +120,7 @@ class ParquetAppendWriterIntegrationTest {
             h.withInput("SELECT i::BIGINT AS id FROM range(3) t(i)") { input ->
                 var writes = 0
                 shouldThrow<CancellationException> {
-                    writer.write(table, input, UUID.randomUUID(), 1) {
+                    writer.write(table, input, UUID.randomUUID(), 1, LakeProfileFixtures.builtIn()) {
                         if (input.scans == 2 && ++writes == 2) throw CancellationException("Cancelled by caller.")
                     }
                 }
@@ -133,7 +134,7 @@ class ParquetAppendWriterIntegrationTest {
     fun `an empty staged result creates no data file`() {
         h.withTable(ID_SCHEMA) { table ->
             h.withInput("SELECT 1::BIGINT AS id WHERE false") { input ->
-                writer.write(table, input, UUID.randomUUID(), 1) {} shouldBe WrittenAppend(0, emptyList())
+                writer.write(table, input, UUID.randomUUID(), 1, LakeProfileFixtures.builtIn()) {} shouldBe WrittenAppend(0, emptyList())
                 h.dataKeys(table) shouldBe emptyList()
             }
         }
@@ -198,6 +199,9 @@ class ParquetAppendWriterIntegrationTest {
     }
 
     private companion object {
+        /** The built-in production profile (#956): these cases are about values, not sizes. */
+        val PROFILE = LakeProfileFixtures.builtIn()
+
         const val SECONDS_PER_HOUR = 3600L
         val ID_SCHEMA = Schema(Types.NestedField.required(1, "id", Types.LongType.get()))
         val PARTITION_SCHEMA =
