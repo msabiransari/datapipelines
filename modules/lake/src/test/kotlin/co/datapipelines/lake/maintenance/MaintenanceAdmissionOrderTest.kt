@@ -109,6 +109,18 @@ class MaintenanceAdmissionOrderTest {
     }
 
     @Test
+    fun `a scratch part first due after declaration is capacity and never starts`() {
+        val store = RecordingStore()
+        val part = TracingPart("compaction", scratch = 100, expectsDue = false, due = true, store = store)
+
+        worker(store, listOf(part)).run(table.id.toString()) shouldBe SystemJobOutcome.Done
+
+        trace.filter { it.startsWith("reserve:") || it.startsWith("run:") } shouldContainExactly emptyList()
+        trace.takeLast(3) shouldContainExactly
+            listOf("progress:compaction=capacity", "close:finished:compaction=capacity", "slot.release")
+    }
+
+    @Test
     fun `an earlier live run - no row, the slot and the reservation released, the task again at that deadline`() {
         val live = Instant.parse("2026-11-14T05:00:00Z")
         val store = RecordingStore(earlierLive = live)

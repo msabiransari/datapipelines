@@ -849,8 +849,10 @@ itself (its Iceberg metadata, its files) only after.
 
 **The run's deadline is every lease's deadline.** Every commit goes through the run: it acquires the table lease with
 the run's `deadline_at`, never a fresh job timeout, loads the table inside the lease, commits once, releases. The
-catalog fence ([§7](#7-append-publication)) then refuses any write past the deadline, so a run that outlives its row
-cannot write. A deadline already passed → `lake.maintenance.deadline` and the part ends `deadline`. A refused lease
+catalog fence ([§7](#7-append-publication)) refuses a write whose catalog transaction starts after the deadline.
+A write that already passed the fence may finish later, even after a successor marked the run `abandoned`; the
+successor's lease acquire waits behind that transaction's lease-row lock. A deadline already passed →
+`lake.maintenance.deadline` and the part ends `deadline`. A refused lease
 (another operation holds the table) → the part ends `busy`. Either ends the RUN: no later part is started, each later
 part the declarations expected to be due is recorded with the same outcome and `attempted: false`, the row closes
 `finished`, and the table's next run comes from a later plan. A part that throws, an unknown commit outcome or an

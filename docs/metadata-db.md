@@ -2096,7 +2096,7 @@ ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DE
 
 ### 4.55 `lake_maintenance_runs`
 
-V60 (#957, dp-lake design §5.2, §11, §11a call 34) adds one row per ADMITTED run of the `lake-maintenance` scheduler task for one managed table ([Lake: maintenance runs](lake.md#11-maintenance-runs)). The row is the run's exclusion and its authority: it is written by ONE admitting statement before the run reads or writes the table, and its `deadline_at` (admission time + `admission.job-timeout`, on the catalog's clock) is the deadline every table lease of the run carries, so the catalog fence refuses a write past it. At most one row per table is `running` (`uq_lake_maintenance_runs_running`).
+V60 (#957, dp-lake design §5.2, §11, §11a call 34) adds one row per ADMITTED run of the `lake-maintenance` scheduler task for one managed table ([Lake: maintenance runs](lake.md#11-maintenance-runs)). The row is the run's exclusion and its authority: it is written by ONE admitting statement before the run reads or writes the table, and its `deadline_at` (admission time + `admission.job-timeout`, on the catalog's clock) is the deadline every table lease of the run carries, so the catalog fence refuses a write whose transaction starts past it. A transaction that already passed the fence may finish after the deadline and the run's abandonment; a successor's lease acquire waits behind its lease-row lock. At most one row per table is `running` (`uq_lake_maintenance_runs_running`).
 
 ```sql
 CREATE TABLE lake_maintenance_runs (

@@ -63,8 +63,8 @@ internal class MaintenancePartLoop(
             records += PartRecord(part.name, MaintenanceOutcome.NOTHING_TO_DO, attempted = false)
             return null
         }
-        if (declaration.expectsDue && declaration.scratchBytes > 0 && run.scratchBytes(part) == 0L) {
-            // D3 step 7: the reservation was refused; the part is not run and comes again with the table's next task.
+        if (declaration.scratchBytes > 0 && run.scratchBytes(part) == 0L) {
+            // D3 step 7: scratch was refused or the part first became due after declaration, so it waits for the next task.
             records += PartRecord(part.name, MaintenanceOutcome.CAPACITY, attempted = false, reason = REASON_SCRATCH_REFUSED)
             return null
         }
