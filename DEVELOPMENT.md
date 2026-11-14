@@ -1276,15 +1276,18 @@ short machine gives a slower gate, never a red one. `GATE_E2E_FORKS` overrides t
 downward (garbage or a value below 1 falls back to 4 with one stderr line). The header always
 names what was chosen.
 
-Measured on the lane (#974, 2026-11-14): three gate runs on this machine read `integration forks: 4`
-in the header and passed (gate wall 48.0 / 42.7 / 43.2 min; integration suite 26.1 / 26.2 min;
-aggregate integration parallelism 2.0× in every run, test recount identical across all three:
-1564 files, 13346 tests, 0 failures, 0 errors, 15 skipped). A run that started at 22 GB available
-took the fallback path exactly as designed (header said `repository default`, gate still green).
-The gate consumed ~19–22 GB of that floor in its worst samples (MemAvailable trough 6–8.5 GB from
-starts of 27–34 GB), so the 24 GB floor leaves roughly 8 GB of headroom; do not lower it without
-re-measuring. The suite wall is dominated by one serialized test class (#982), so
-more forks than 4 do not shorten it.
+Measured on the lane (#974, 2026-11-14): all three runs passed at four integration forks
+(M1 pinned by the caller; M2 and M3 chose four automatically and printed the new header).
+Gate wall times were 48.0 / 42.7 / 43.2 min. Integration wall times were 26.1 min in M1 and
+26.2 min in M3, with 2.0× aggregate parallelism; M2's phase split was not preserved. The
+three recounts matched: 1564 files, 13346 tests, 0 failures, 0 errors, 15 skipped. A separate
+run starting at 22 GB demonstrated the two-fork fallback header, then failed when a full
+`/tmp` prevented DuckDB's native library extraction (#983). That run proves the fallback
+choice, not a passing fallback gate. Cleanup between M1 and M2 is a confound, so the wall-time
+improvement is not attributed to the fork feature. Observed MemAvailable troughs were 6–8.5 GB
+from starts of 27–34 GB; they do not guarantee 8 GB of headroom at the 24 GB admission floor.
+The long serialized class tracked in #982 limits parallelism; more than four forks were not
+measured. Do not lower the owner-selected floor without re-measuring.
 
 **The pre-gate's build cache (#480).** Only `scripts/pregate.sh` uses it (§9.4). It is Gradle's
 local directory cache, `~/.gradle/caches/build-cache-1` (under `GRADLE_USER_HOME` when that is set),
