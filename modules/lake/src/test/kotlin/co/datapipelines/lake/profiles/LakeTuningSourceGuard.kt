@@ -52,6 +52,14 @@ internal object LakeTuningSourceGuard {
             Admitted("append/AppendRecipeAssembler.kt", ".properties()[\"dp.definition.version\"]", "the definition identity"),
             Admitted("maintenance/remove/LakeObjectDeleter.kt", "MAX_BATCH = 1000", "S3 DeleteObjects per-request maximum: protocol"),
             Admitted("maintenance/remove/ClockSkewProbe.kt", "Duration.ofSeconds(3_600)", "the record's skew bound (call 33): safety"),
+            Admitted("maintenance/MaintenanceRun.kt", "Duration.ofSeconds(60)", "the maintenance lease's TTL: lease protocol"),
+            Admitted("maintenance/MaintenanceRun.kt", "Duration.ofSeconds(20)", "its heartbeat, TTL / 3: lease protocol"),
+            Admitted("maintenance/MaintenanceRunRepository.kt", "MILLIS_PER_SECOND = 1000L", "a unit conversion"),
+            Admitted("maintenance/MaintenanceRunRepository.kt", "MAX_MESSAGE = 500", "stored message length cap: a format bound"),
+            Admitted("maintenance/MaintenanceWorker.kt", "Duration.ofSeconds(30)", "no free slot: again in 30 s (957 D3 step 2)"),
+            Admitted("maintenance/MaintenanceWorker.kt", "MAX_KEY_LOGGED = 64", "logged key length cap: log safety"),
+            Admitted("maintenance/DeliveryMaintenanceSettlement.kt", "LakeSettlementSweep.SETTLE_PAGE_SIZE", "the sweep's page (957 D6a)"),
+            Admitted("maintenance/DeliveryMaintenanceSettlement.kt", "LakeSettlementSweep.SWEEP_BUDGET", "the sweep's budget (957 D6a)"),
         )
 
     /** The LakeProperties groups scoped code may read (rule c), each with why it is not a profile value. */

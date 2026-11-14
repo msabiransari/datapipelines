@@ -49,7 +49,7 @@ class LakeTuningSourceGuardTest {
             real.count { it.path.startsWith("${LAKE}append/") } shouldBeGreaterThanOrEqual MIN_APPEND_FILES
         }
         LakeTuningSourceGuard.SEED_READERS.forEach { path -> withClue(path) { real.map { it.path } shouldContain path } }
-        realViolations.shouldBeEmpty()
+        withClue("every violation, one per line:\n" + realViolations.joinToString("\n")) { realViolations.shouldBeEmpty() }
     }
 
     @Test
