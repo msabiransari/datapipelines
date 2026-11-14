@@ -158,6 +158,7 @@ object CompactionGroupPlanner {
     ) {
         var current = mutableListOf<CompactionCandidate>()
         var bytes = 0L
+
         fun closeCurrent() {
             if (worthRewriting(current)) groups += current.toList() else waiting += current
             current = mutableListOf()

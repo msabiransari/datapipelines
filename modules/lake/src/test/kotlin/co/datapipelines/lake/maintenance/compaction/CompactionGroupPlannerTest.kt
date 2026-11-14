@@ -73,7 +73,13 @@ class CompactionGroupPlannerTest {
 
     @Test
     fun `G2 files of two specs in what looks like one partition form two groups`() {
-        val files = listOf(small("old1", 10, 1, "0/day=1"), small("old2", 10, 2, "0/day=1"), small("new1", 10, 3, "1/day=1"), small("new2", 10, 4, "1/day=1"))
+        val files =
+            listOf(
+                small("old1", 10, 1, "0/day=1"),
+                small("old2", 10, 2, "0/day=1"),
+                small("new1", 10, 3, "1/day=1"),
+                small("new2", 10, 4, "1/day=1"),
+            )
         CompactionGroupPlanner.plan(files, limits()).keys() shouldContainExactly listOf(listOf("old1", "old2"), listOf("new1", "new2"))
     }
 
@@ -101,12 +107,19 @@ class CompactionGroupPlannerTest {
     @Test
     fun `G5 the smallest of cap, scratch and time always wins, named in that order on a tie`() {
         val file = listOf(unsorted("u", 60, 1))
-        CompactionGroupPlanner.plan(file, limits(cap = 128, grant = 100, factor = 2)).limit shouldBe GroupLimit(50 * MIB, LimitSource.SCRATCH)
-        CompactionGroupPlanner.plan(file, limits(cap = 128, grant = 100, factor = 2)).blocked.single().candidate.key shouldBe "u"
+        CompactionGroupPlanner.plan(file, limits(cap = 128, grant = 100, factor = 2)).limit shouldBe
+            GroupLimit(50 * MIB, LimitSource.SCRATCH)
+        CompactionGroupPlanner
+            .plan(file, limits(cap = 128, grant = 100, factor = 2))
+            .blocked
+            .single()
+            .candidate.key shouldBe "u"
         CompactionGroupPlanner.plan(file, limits(cap = 128, wholeRun = 40)).limit shouldBe GroupLimit(40 * MIB, LimitSource.TIME)
         CompactionGroupPlanner.plan(file, limits(cap = 40, wholeRun = 40)).limit shouldBe GroupLimit(40 * MIB, LimitSource.CAP)
-        CompactionGroupPlanner.plan(file, limits(cap = 128, grant = 40, wholeRun = 40)).limit shouldBe GroupLimit(40 * MIB, LimitSource.SCRATCH)
-        CompactionGroupPlanner.plan(file, limits(cap = 32, grant = 100, factor = 2, wholeRun = 40)).limit shouldBe GroupLimit(32 * MIB, LimitSource.CAP)
+        CompactionGroupPlanner.plan(file, limits(cap = 128, grant = 40, wholeRun = 40)).limit shouldBe
+            GroupLimit(40 * MIB, LimitSource.SCRATCH)
+        CompactionGroupPlanner.plan(file, limits(cap = 32, grant = 100, factor = 2, wholeRun = 40)).limit shouldBe
+            GroupLimit(32 * MIB, LimitSource.CAP)
     }
 
     @Test
@@ -184,7 +197,11 @@ class CompactionGroupPlannerTest {
             val oldest = all.minWith(compareBy({ it.sequenceNumber }, { it.key }))
             plan.groups.first().first() shouldBe oldest
             // one group per run: the run's cap is used up by it
-            val done = plan.groups.first().map { it.key }.toSet()
+            val done =
+                plan.groups
+                    .first()
+                    .map { it.key }
+                    .toSet()
             big = big.filter { it.key !in done }
             busy = busy.filter { it.key !in done } + listOf(small("busy-new-$seq", 10, seq++, P2), small("busy-new-$seq", 10, seq++, P2))
             plans++
@@ -204,8 +221,10 @@ class CompactionGroupPlannerTest {
         candidates shouldContainExactly (1..5).map { "small$it" }
 
         val sorted = CompactionCandidateRule(profile(), tableSortOrderId = 1)
-        val stamped = listOf(Fact("full-unsorted", "0/p=1", 64 * MIB, sortOrderId = 0), Fact("full-sorted", "0/p=1", 64 * MIB, sortOrderId = 1))
-        sorted.candidates(stamped, Fact::partition, Fact::size, Fact::sortOrderId).map { it.key } shouldContainExactly listOf("full-unsorted")
+        val stamped =
+            listOf(Fact("full-unsorted", "0/p=1", 64 * MIB, sortOrderId = 0), Fact("full-sorted", "0/p=1", 64 * MIB, sortOrderId = 1))
+        sorted.candidates(stamped, Fact::partition, Fact::size, Fact::sortOrderId).map { it.key } shouldContainExactly
+            listOf("full-unsorted")
     }
 
     internal data class Fact(

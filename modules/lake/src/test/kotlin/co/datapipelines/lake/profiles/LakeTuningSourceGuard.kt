@@ -63,7 +63,11 @@ internal object LakeTuningSourceGuard {
             Admitted("maintenance/plan/PlanRepository.kt", "USAGE_RETENTION_DAYS = 35", "usage rows kept 35 days: a record rule (cut L8)"),
             Admitted("maintenance/plan/PlanFigures.kt", "GROWTH_BASELINE_DAYS = 7", "growth per WEEK: call 46's definition"),
             Admitted("maintenance/plan/TableMeasurer.kt", "LakeMetadataReads.METADATA_MAX_BYTES", "metadata read cap: a safety bound"),
-            Admitted("maintenance/compaction/CompactionGroupPlanner.kt", "MIN_FILES_TO_MERGE = 2", "call 34's \"at least two\": a record rule"),
+            Admitted(
+                "maintenance/compaction/CompactionGroupPlanner.kt",
+                "MIN_FILES_TO_MERGE = 2",
+                "call 34's \"at least two\": a record rule",
+            ),
         )
 
     /** The LakeProperties groups scoped code may read (rule c), each with why it is not a profile value. */

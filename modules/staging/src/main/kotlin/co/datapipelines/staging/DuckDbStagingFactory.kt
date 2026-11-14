@@ -44,6 +44,11 @@ import java.util.concurrent.ConcurrentHashMap
  *    off, `memory_limit` and `max_temp_directory_size` ([DuckDbConfigurationReadBack]); a database
  *    where any of them did not take is never handed out.
  *
+ * **The trusted scratch database** ([StagingPreparation.openTrusted], #969 D5) runs this same
+ * sequence with ONE difference: step 3 leaves `enable_external_access` on, and step 4 reads back the
+ * other three. It is handed out as a [TrustedScratchDatabase] (DP's root, one body at a time), never
+ * as a [Staging]; its close is this factory's finalizer.
+ *
  * Any failure after the reservation closes the root, deletes the files THAT attempt created (none
  * when it failed before its marker was written) and releases the reservation (`try`/`finally`).
  * Setup failures surface as `creation_failed`; sanitized trusted initialization refusals retain
@@ -112,7 +117,11 @@ class DuckDbStagingFactory internal constructor(
     ): StagingPreparation {
         sweepOnce(executionId)
         val reservation = budget.reserve(executionId, reservationBytes)
-        return ReservedStagingPreparation(reservation) { initializer -> open(executionId, reservation, initializer) }
+        return ReservedStagingPreparation(
+            reservation,
+            trustedOpener = { initializer -> openTrusted(executionId, reservation, initializer) },
+            opener = { initializer -> open(executionId, reservation, initializer) },
+        )
     }
 
     /**
@@ -155,7 +164,46 @@ class DuckDbStagingFactory internal constructor(
         executionId: UUID,
         reservation: ScratchReservation,
         initializer: TrustedStagingInitializer,
-    ): DuckDbStaging {
+    ): DuckDbStaging =
+        openDatabase(executionId, reservation, initializer, OpenEntry.AUTHOR) { opened, files ->
+            val pool =
+                DuckDbLeasePool(executionId, properties.maxConnections, opened::duplicate) {
+                    finalize(executionId, opened, files, reservation)
+                }
+            DuckDbStaging(executionId, pool, properties, files, reservation)
+        }
+
+    private fun openTrusted(
+        executionId: UUID,
+        reservation: ScratchReservation,
+        initializer: TrustedStagingInitializer,
+    ): TrustedScratchDatabase =
+        openDatabase(executionId, reservation, initializer, OpenEntry.TRUSTED_SCRATCH) { opened, files ->
+            DuckDbTrustedScratchDatabase(
+                executionId,
+                opened,
+                files,
+                reservation.bytes,
+                DuckDbEngineFailures(executionId, properties.memoryLimitBytes, reservation.bytes),
+            ) { finalize(executionId, opened, files, reservation) }
+        }
+
+    /** Which entry opens: the author database (external access off) or the trusted scratch database (left on). */
+    private enum class OpenEntry(
+        val externalAccessOff: Boolean,
+    ) {
+        AUTHOR(externalAccessOff = true),
+        TRUSTED_SCRATCH(externalAccessOff = false),
+    }
+
+    /** The open sequence (class KDoc), shared by both entries; [handOut] builds what the caller gets. */
+    private fun <T> openDatabase(
+        executionId: UUID,
+        reservation: ScratchReservation,
+        initializer: TrustedStagingInitializer,
+        entry: OpenEntry,
+        handOut: (DuckDBConnection, DuckDbStagingFiles) -> T,
+    ): T {
         val files = DuckDbStagingFiles(properties.scratchDir, executionId)
         var root: DuckDBConnection? = null
         var claimedId = false
@@ -172,16 +220,12 @@ class DuckDbStagingFactory internal constructor(
                     markerWritten = true
                     val opened = connect("$URL_PREFIX${files.database}", openProperties()).unwrap(DuckDBConnection::class.java)
                     root = opened
-                    applyLockedConfiguration(opened, files, reservation.bytes, initializer, executionId)
-                    val pool =
-                        DuckDbLeasePool(executionId, properties.maxConnections, opened::duplicate) {
-                            finalize(executionId, opened, files, reservation)
-                        }
+                    applyLockedConfiguration(opened, files, reservation.bytes, initializer, executionId, entry)
                     val bytes = files.diskBytes()
                     if (bytes > reservation.bytes) {
                         throw StagingScratchLimitException(executionId, reservation.bytes, bytes, engineReading = null)
                     }
-                    return DuckDbStaging(executionId, pool, properties, files, reservation).also { handedOut = true }
+                    return handOut(opened, files).also { handedOut = true }
                 } catch (e: SQLException) {
                     e
                 } catch (e: IOException) {
@@ -212,6 +256,7 @@ class DuckDbStagingFactory internal constructor(
         reservationBytes: Long,
         initializer: TrustedStagingInitializer,
         executionId: UUID,
+        entry: OpenEntry,
     ) {
         val settings =
             listOf(
@@ -227,11 +272,20 @@ class DuckDbStagingFactory internal constructor(
         root.createStatement().use { st -> settings.forEach { st.execute(it) } }
         initializer.initializeSafely(root, executionId, log)
         root.createStatement().use { st ->
-            st.execute("SET enable_external_access = false")
+            if (entry.externalAccessOff) st.execute("SET enable_external_access = false")
             st.execute("SET lock_configuration = true")
         }
-        val readBack = DuckDbConfigurationReadBack.sql(properties.memoryLimitBytes, reservationBytes)
-        val failed = root.createStatement().use { st -> st.executeQuery(readBack).use(DuckDbConfigurationReadBack::failures) }
+        val (readBack, checks) =
+            if (entry.externalAccessOff) {
+                DuckDbConfigurationReadBack.sql(properties.memoryLimitBytes, reservationBytes) to DuckDbConfigurationReadBack.CHECKS
+            } else {
+                DuckDbConfigurationReadBack.trustedSql(properties.memoryLimitBytes, reservationBytes) to
+                    DuckDbConfigurationReadBack.TRUSTED_CHECKS
+            }
+        val failed =
+            root.createStatement().use { st ->
+                st.executeQuery(readBack).use { DuckDbConfigurationReadBack.failuresOf(it, checks) }
+            }
         // Server log only (creationFailed): the caller gets the fixed text.
         if (failed.isNotEmpty()) throw SQLException("the staging database's locked configuration did not take: ${failed.joinToString()}")
     }
@@ -350,7 +404,10 @@ class DuckDbStagingFactory internal constructor(
  * `90% of available disk space`), which never meets it (measured, lane #795 round two).
  */
 internal object DuckDbConfigurationReadBack {
-    private val CHECKS = listOf("lock_configuration", "enable_external_access off", "memory_limit", "max_temp_directory_size")
+    val CHECKS = listOf("lock_configuration", "enable_external_access off", "memory_limit", "max_temp_directory_size")
+
+    /** The trusted scratch database's checks (#969 D5): [CHECKS] but external access, which it leaves on. */
+    val TRUSTED_CHECKS = listOf("lock_configuration", "memory_limit", "max_temp_directory_size")
 
     fun sql(
         memoryLimitBytes: Long,
@@ -360,6 +417,21 @@ internal object DuckDbConfigurationReadBack {
             "current_setting('memory_limit') = format_bytes($memoryLimitBytes), " +
             "current_setting('max_temp_directory_size') = format_bytes($reservationBytes)"
 
+    /** [sql] without the external-access column, for the trusted scratch database: one column per [TRUSTED_CHECKS]. */
+    fun trustedSql(
+        memoryLimitBytes: Long,
+        reservationBytes: Long,
+    ): String =
+        "SELECT current_setting('lock_configuration'), " +
+            "current_setting('memory_limit') = format_bytes($memoryLimitBytes), " +
+            "current_setting('max_temp_directory_size') = format_bytes($reservationBytes)"
+
     /** The checks of [sql]'s row that do not hold — a NULL counts as not holding; all of them without a row. */
-    fun failures(rs: ResultSet): List<String> = if (rs.next()) CHECKS.filterIndexed { i, _ -> !rs.getBoolean(i + 1) } else CHECKS
+    fun failures(rs: ResultSet): List<String> = failuresOf(rs, CHECKS)
+
+    /** The [checks] of a read-back row that do not hold, by the same rule as [failures]. */
+    fun failuresOf(
+        rs: ResultSet,
+        checks: List<String>,
+    ): List<String> = if (rs.next()) checks.filterIndexed { i, _ -> !rs.getBoolean(i + 1) } else checks
 }
