@@ -72,11 +72,23 @@ class MaintenanceRun internal constructor(
     private val catalogs: LakeCatalogs,
     private val heartbeats: ScheduledExecutorService,
     private val hooks: MaintenanceRunHooks,
+    /**
+     * The scratch bytes each part expecting to be due DECLARED at admission, whether or not the reservation was granted
+     * (#969 C1): a part tells "I declared nothing" from "my declaration was refused" by comparing it with [scratchBytes].
+     */
+    private val declared: Map<String, Long> = scratch,
 ) {
     private var held: LeaseHandle? = null
 
     /** The scratch bytes reserved for [part] at admission: its declaration when the reservation was granted, else 0. */
     fun scratchBytes(part: MaintenancePart): Long = scratch[part.name] ?: 0L
+
+    /**
+     * The scratch bytes [part] declared at admission when it expected to be due, granted or not; 0 when it declared
+     * none. Above 0 with [scratchBytes] at 0 means the reservation was refused: 957's loop records that part `capacity`
+     * with reason `scratch_refused` once the part says it is due.
+     */
+    fun declaredScratchBytes(part: MaintenancePart): Long = declared[part.name] ?: 0L
 
     /** True once the catalog's clock has reached [deadline] (one statement). */
     fun pastDeadline(): Boolean = !leases.catalogNowPlus(Duration.ZERO).isBefore(deadline)

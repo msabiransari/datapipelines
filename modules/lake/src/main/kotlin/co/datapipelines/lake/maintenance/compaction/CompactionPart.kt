@@ -33,7 +33,9 @@ import java.util.UUID
  *   measurement's candidate bytes, at most [CompactionSettings.declarationCeilingBytes]; not due (zero) for a table
  *   that is not `active`/`deprecated`, never measured, or measured under another profile pair (959 D3a).
  * - [dueNow]: the table read again after admission: any candidate (or a delete file, which [run] refuses), and only
- *   when the run holds this part's scratch (a declaration of zero is not due, D4).
+ *   when this part declared scratch at admission (a declaration of zero is not due, D4). A positive declaration whose
+ *   reservation was refused IS due when the table has candidates: 957's loop then records it `capacity` with reason
+ *   `scratch_refused` and never calls [run], so nothing is opened or rewritten without a grant.
  * - [run]: plans once for what no run can take (`capacity`), then before every group re-reads the clock and plans again
  *   with the time left now; a group that would cross what is left of the run's cap is not started (D3). One scratch
  *   database per run, opened when the first group starts and closed in `finally` (D5 step 6).
@@ -70,9 +72,10 @@ class CompactionPart(
 
     override fun dueNow(run: MaintenanceRun): Boolean {
         if (run.table.status !in PlanStatus.REWRITTEN) return false
-        // D4: a part that declared zero (no current measurement) is not due: it holds no scratch to rewrite with, and
-        // 959's next measurement declares it. A refused reservation never gets here (957's loop records it first).
-        if (run.scratchBytes(this) <= 0L) return false
+        // D4: a part that declared zero (no current measurement) is not due: it has no scratch to rewrite with, and
+        // 959's next measurement declares it. A positive declaration whose reservation was refused goes on: when the
+        // table is due, 957's loop (which asks dueNow first) records `capacity` / `scratch_refused` and never runs it.
+        if (run.declaredScratchBytes(this) <= 0L) return false
         val row = tables.row(run.table.id) ?: return false
         return io().use { io ->
             val pinned = tables.pinned(run.table, io)
