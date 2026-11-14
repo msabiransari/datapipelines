@@ -567,6 +567,8 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Lake.DEFINITION_AUTHORING_DISABLED,
             // §13.25 (#811) — an apply outcome, returned in the release's result; no route before P8.
             PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED,
+            // §13.25 (#958) — the remover's clock-skew refusal: a maintenance pass's result, no route reaches it.
+            PipelineErrorCodes.Lake.MAINTENANCE_CLOCK_SKEW,
         )
 
     /**
