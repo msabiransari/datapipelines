@@ -38,7 +38,7 @@ class DeliveryLedgerIntegrationTest {
         )
         val definitions = LakeDefinitionRepository(NamedParameterJdbcTemplate(bounded))
         val namespace = definitions.namespaceId("delivery", actor)
-        definitions.insertTable(tableId, namespace, "orders", "{}", actor) shouldBe true
+        definitions.insertTable(tableId, namespace, "orders", actor) shouldBe true
     }
 
     @Test

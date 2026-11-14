@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.80 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.81 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-14
@@ -437,6 +437,7 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 | INFO | `lake.boot.ok` | Every check passed: the catalog shape, the four V53 triggers, the control row, the store reachable and honouring `If-None-Match: *` | `bucket`, `prefix` |
 | INFO | `lake.egress_proxy_verified` | #845: before the managed datasource is registered, the configured egress proxy declared the configured max-age at `/dp-egress` and a `HEAD` of the bucket through it reached the store (any store answer counts; only a proxy-generated 502/503/504 does not) | `proxy` (`host:port`), `max_age_seconds`, `reader_end_by_ms` (the bound a reader against a store that trickles on every attempt ends within: `LakeHttpBounds.egressReaderEndByMillis`, (`http_retries` + 1) × max-age + slack, [Lake §9](lake.md#9-reads)), `store` (the bucket URI, no credential), `store_status`, `duration_ms` |
 | WARN | `lake.egress_proxy_absent` | #845: `datapipelines.lake.reads.egress-proxy` is empty, so managed reads reach the store directly with no connection max-age ([Lake §9](lake.md#9-reads)) | — |
+| INFO | `lake.profile.seeded` | #956: the first start with the lake enabled copied `datapipelines.lake.maintenance.window` and `.max-bytes-rewritten-per-run` into the `production` profile and cleared its `seed_pending` mark ([Lake §11](lake.md#11-profiles)); logged once per database, by the instance whose statement changed the row — a later start, a second instance or an edited profile logs nothing | `profile` (`production`), `window`, `max_bytes_rewritten_per_run` |
 
 **The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put`, `lake.boot.egress_proxy` (#845: the configured egress proxy is malformed, does not answer within its 2 s connect / 5 s read bound, declares another max-age, or answers a 502/503/504 of its own for the store), and `lake.boot.datasource_name_taken` (#818, raised when the managed datasource is registered: another datasource holds `datapipelines.lake.name`) (what each means: Configuration §7). No credential, key, or object body appears in any of them.
 
@@ -824,6 +825,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.81 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.80 | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |
 | 2026-11-14 | v1.80 | 957 (#957) — renumbered at the spec merge after #958's v1.79 | **§3.4U** (new; §3.4T at the lane's base, #958's §3.4T landed first): the ten `lake.maintenance.*` events of the per-table maintenance task: refused, skipped, held, waiting, admitted, abandoned, settlement_deferred, deadline_refused, close_refused, finished. |
 | 2026-11-14 | v1.79 | 958 (#958) | New **§3.4T**, the lake remover's six events: WARN `lake.removal.refused`, INFO `lake.removal.ended`, WARN `lake.removal.failed`, `lake.removal.batch_failed`, `lake.removal.marker_left` and `lake.removal.unexpected_dp_key`. Counts, identifiers and one relative unexpected key; never a key list or a credential. |
 | 2026-11-13 | v1.78 | 939 (#939) | **§3.4S**: new INFO `lake.settle.protection_window_aligned` (`days`) — the settle sweep set `lake_control.protection_interval` to this instance's `retention.protection-days`; logged only when the row changed. |

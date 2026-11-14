@@ -32,7 +32,6 @@ class LakeDefinitionService(
     private val applier: LakeDefinitionApplier,
     private val leases: LakeLeases,
     private val jobTimeout: Duration,
-    private val policyJson: String,
     private val tx: TransactionTemplate,
     private val audit: AuditEventSink,
     private val authoring: AuthoringGuard,
@@ -58,7 +57,7 @@ class LakeDefinitionService(
         return inTransaction {
             val namespaceId = definitions.namespaceId(namespace, actor)
             val tableId = UUID.randomUUID()
-            if (!definitions.insertTable(tableId, namespaceId, table, policyJson, actor)) {
+            if (!definitions.insertTable(tableId, namespaceId, table, actor)) {
                 throw LakeDefinitionErrors.nameTaken(namespace, table)
             }
             definitions.insertDraft(tableId, FIRST_VERSION, LakeDefinitionBodies.toJson(body), actor, via)

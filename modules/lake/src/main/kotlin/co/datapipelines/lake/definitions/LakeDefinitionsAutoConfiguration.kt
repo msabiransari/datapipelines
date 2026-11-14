@@ -68,7 +68,6 @@ class LakeDefinitionsAutoConfiguration {
             applier = lakeDefinitionApplier,
             leases = lakeLeases,
             jobTimeout = properties.admission.jobTimeout,
-            policyJson = LakeTablePolicy.defaultsJson(properties),
             tx = TransactionTemplate(transactionManager),
             audit = audit,
             authoring = AuthoringGuard.from(environment),

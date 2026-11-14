@@ -1,6 +1,7 @@
 package co.datapipelines.lake.append
 
 import co.datapipelines.lake.LakeTestDb
+import co.datapipelines.lake.profiles.LakeProfileFixtures
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.apache.iceberg.NullOrder
@@ -39,7 +40,7 @@ class ParquetAppendWriterSortedTableIntegrationTest {
                 .build()
         h.withTable(schema, PartitionSpec.unpartitioned(), order) { table ->
             h.withInput("SELECT * FROM (VALUES (2::BIGINT, 'b'), (1::BIGINT, 'a'), (3::BIGINT, NULL)) t(id, label)") { input ->
-                val written = writer.write(table, input, UUID.randomUUID(), 1) {}
+                val written = writer.write(table, input, UUID.randomUUID(), 1, LakeProfileFixtures.builtIn()) {}
                 println("(I8) table order ${table.sortOrder()}; file orders ${written.files.map { it.sortOrderId() }}")
                 table.sortOrder().orderId() shouldNotBe 0
                 written.files.size shouldBe 1
@@ -55,7 +56,7 @@ class ParquetAppendWriterSortedTableIntegrationTest {
         val columns = (1..WIDTH).joinToString(", ") { "(i + $it)::BIGINT AS c$it" }
         h.withTable(schema, PartitionSpec.unpartitioned(), order) { table ->
             h.withInput("SELECT $columns FROM range(3) t(i)") { input ->
-                val file = writer.write(table, input, UUID.randomUUID(), 1) {}.files.single()
+                val file = writer.write(table, input, UUID.randomUUID(), 1, LakeProfileFixtures.builtIn()) {}.files.single()
                 val bounded = file.lowerBounds().keys.sorted()
                 println("(I9) properties ${table.properties().filterKeys { it.contains("metrics") }}; lower-bound ids $bounded")
                 file.lowerBounds().containsKey(WIDTH) shouldBe true

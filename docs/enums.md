@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.52 (living document — updated as enums evolve)
+**Status:** v1.53 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -529,6 +529,15 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `lake.delivery.failed` | Conditional delivery and attempt stamps recorded a definite failure. The delivery row records its phase and safe failure code. Same details as `lake.delivery.published`. |
 | `lake.delivery.unknown` | Publication has no confirmed verdict and remains eligible for settlement. Same details as `lake.delivery.published`. |
 | `lake.delivery.settled` | A takeover and fresh revision observation, or an ended execution before publication, established a terminal delivery outcome. Written with the outcome's audit event in the same transaction. Same details as `lake.delivery.published`. |
+
+**Lake profile audit events** (same `audit_log` table; emitted by the managed lake's maintenance profiles and table pauses, [Lake "Profiles"](lake.md#11-profiles), #956). Each row is written by the service INSIDE the transaction of the change it records (strict: a refused audit insert rolls the change back), once per change; a save that changes nothing writes no row. `user_id` is the acting person: a service write without one is refused. The start-up seed of the `production` profile and the migration's two built-in profiles write no row (the system wrote them; `updated_by` stays NULL). `details` carries ids, names, key paths and instants; never a credential.
+
+| Value | Trigger |
+|---|---|
+| `lake.profile.created` | A profile was created. `details` carries `profile_id` and `profile` (the name) |
+| `lake.profile.updated` | A profile's values changed, or the default mark moved to it. `details` carries `profile_id`, `profile` and `changed`: the dotted keys whose values changed, or `["default"]` when the mark moved (then also `previous_default`, the profile that lost it) |
+| `lake.profile.assigned` | A managed table was moved to another profile. `details` carries `table_id`, `namespace`, `table`, `profile` and `previous_profile` |
+| `lake.table.pause_changed` | One of a table's two pause keys was set or cleared. `details` carries `table_id`, `namespace`, `table`, `key` (`pause.compaction_until` \| `pause.cleanup_until`), `until` (the new instant, null when cleared) and `previous` |
 
 **Lake maintenance audit events** (same `audit_log` table, #957, [Lake: maintenance runs](lake.md#11-maintenance-runs)). One row per ADMITTED run, written when the run ends, outside any transaction of the table (a refused insert is logged, never retried, and does not change the run). `user_id` is the provisioned system user's id. A task that admitted nothing (no permission, the catalog not `normal`, no slot, an earlier run live) writes no row.
 
@@ -1302,6 +1311,7 @@ Carried in `lake_maintenance_runs.parts_json[].outcome` and in `lake.maintenance
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.53 | 956 (#956) — renumbered at the spec merge after #957's v1.52 | **§15 lake profile audit events:** `lake.profile.created`, `lake.profile.updated`, `lake.profile.assigned` and `lake.table.pause_changed`, each written by the service inside its change's transaction, once per change; held to `LakeProfileAuditEvents` by `LakeProfileAuditEventsSpecDriftTest`. |
 | 2026-11-14 | v1.52 | 957 (#957) — renumbered at the spec merge after #958's v1.51 | New **§52 `MaintenanceRunKind`**, **§53 `MaintenanceRunState`** (V60's CHECKs) and **§54 `MaintenanceOutcome`** (the parts' outcome words), held to the Kotlin enums by `MaintenanceEnumsSpecDriftTest`; **§15** gains `lake.maintenance.run_finished` (held to `LakeMaintenanceAuditEvents.ALL` by `MaintenanceEnumsSpecDriftTest`); **§16**: #958's `lake.maintenance.*` row gains `lake.maintenance.deadline` (pipeline-contract §13.25; one domain, one row). |
 | 2026-11-14 | v1.51 | 958 (#958) | **§16** registers the `lake.maintenance.*` domain (pipeline-contract §13.25): the lake remover's `lake.maintenance.clock_skew`. |
 | 2026-11-13 | v1.50 | 814 (#814) | **§15 lake definition audit events:** `lake.definition.discarded` (`via`, `current_version`) and `lake.definition.draft_purged` (`via`, `table_deleted`), each written inside its write's transaction (dp-lake record §12, erratum 2026-11-12); held to `LakeAuditEvents` by `LakeAuditEventsSpecDriftTest`, which now counts five events. |

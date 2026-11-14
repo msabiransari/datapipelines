@@ -19,6 +19,7 @@ import co.datapipelines.lake.delivery.DeliveryTarget
 import co.datapipelines.lake.delivery.LakeDelivery
 import co.datapipelines.lake.delivery.LakeDeliveryFailurePhase
 import co.datapipelines.lake.delivery.LakeDeliveryState
+import co.datapipelines.lake.profiles.LakeProfiles
 import co.datapipelines.lake.settle.DeliverySettler
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.LakeAppendInput
@@ -57,6 +58,7 @@ class LakeWritebackRunner(
     private val recipes: RecipeWriterFactory,
     private val heartbeat: LakeAppendHeartbeat,
     private val settler: DeliverySettler,
+    private val profiles: LakeProfiles,
 ) {
     private val committer = AppendCommitter(deliveries)
     private val writer = ParquetAppendWriter()
@@ -140,6 +142,7 @@ class LakeWritebackRunner(
                             request.rows,
                             row.operationId,
                             properties.admission.maxOpenPartitionsPerAppend,
+                            profiles.forTable(row.tableId), // #956 D9: the profile as it is NOW, read at every append
                             checkActive,
                         )
                     checkActive()

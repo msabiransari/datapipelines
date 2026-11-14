@@ -2411,8 +2411,9 @@ class ManagedLakeReadsE2eTest {
             connection.createStatement().use {
                 it.execute("INSERT INTO lake_namespaces (id, name, status, created_by) VALUES ('$namespace', 'sales', 'active', '$actor')")
                 it.execute(
-                    "INSERT INTO lake_tables_managed (id, namespace_id, name, status, policy_json, created_by) " +
-                        "VALUES ('${UUID.randomUUID()}', '$namespace', 'trips', 'active', '{}', '$actor')",
+                    "INSERT INTO lake_tables_managed (id, namespace_id, name, status, policy_json, profile_id, created_by) " +
+                        "VALUES ('${UUID.randomUUID()}', '$namespace', 'trips', 'active', '{}', " +
+                        "(SELECT id FROM lake_profiles WHERE is_default), '$actor')",
                 )
             }
             underLease(connection) {
