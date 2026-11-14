@@ -71,7 +71,7 @@ data class TableFigures(
     val currentBytes: Long?,
     val currentRows: Long?,
     val dataFiles: Long?,
-    val deleteFiles: Long?,
+    val deleteFileCount: Long?,
     val manifests: Long?,
     /** Data files not stamped with the table's sort order; zero on a table with no sort columns. */
     val unsortedFiles: Long?,

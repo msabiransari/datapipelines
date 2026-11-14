@@ -62,7 +62,7 @@ class PlanMeasureIntegrationTest {
         val figures = row.figures.shouldNotBeNull()
         figures.snapshotId shouldNotBe null
         figures.dataFiles shouldBe 8
-        figures.deleteFiles shouldBe 1
+        figures.deleteFileCount shouldBe 1
         figures.currentBytes shouldBe 87 * MIB + DELETE_BYTES
         figures.currentRows shouldBe 8 * PlanHarness.RECORDS
         figures.manifests shouldBe 2

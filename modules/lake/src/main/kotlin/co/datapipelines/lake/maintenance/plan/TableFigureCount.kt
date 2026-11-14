@@ -46,7 +46,7 @@ class TableFigureCount(
     private var bytes = 0L
     private var rows = 0L
     private var dataFiles = 0L
-    private var deleteFiles = 0L
+    private var deleteFileCount = 0L
     private var unsorted = 0L
     private var unsortedOverCap = 0L
     private var unsortedFittingBytes = 0L
@@ -69,7 +69,7 @@ class TableFigureCount(
     }
 
     fun addDelete(sizeBytes: Long) {
-        deleteFiles++
+        deleteFileCount++
         bytes += sizeBytes
     }
 
@@ -87,7 +87,7 @@ class TableFigureCount(
             currentBytes = bytes,
             currentRows = rows,
             dataFiles = dataFiles,
-            deleteFiles = deleteFiles,
+            deleteFileCount = deleteFileCount,
             manifests = manifests,
             unsortedFiles = unsorted,
             smallFiles = smallInCandidates,

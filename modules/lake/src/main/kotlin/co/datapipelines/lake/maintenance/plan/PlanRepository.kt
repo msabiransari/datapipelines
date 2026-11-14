@@ -107,7 +107,7 @@ class PlanRepository(
                 "bytes" to figures.currentBytes,
                 "rows" to figures.currentRows,
                 "dataFiles" to figures.dataFiles,
-                "deleteFiles" to figures.deleteFiles,
+                "deleteFileCount" to figures.deleteFileCount,
                 "manifests" to figures.manifests,
                 "unsorted" to figures.unsortedFiles,
                 "small" to figures.smallFiles,
@@ -115,7 +115,7 @@ class PlanRepository(
                 "candidate" to figures.candidateBytes,
                 "profile" to profile.id,
                 "updated" to Timestamp.from(profile.updatedAt),
-                "files" to figures.dataFiles?.let { it + (figures.deleteFiles ?: 0) },
+                "files" to figures.dataFiles?.let { it + (figures.deleteFileCount ?: 0) },
             )
         return jdbc.queryForObject(PUBLISH_SQL, params, Int::class.java) == 1
     }
@@ -244,7 +244,7 @@ class PlanRepository(
                         currentBytes = long("current_bytes"),
                         currentRows = long("current_rows"),
                         dataFiles = long("data_files"),
-                        deleteFiles = long("delete_files"),
+                        deleteFileCount = long("delete_files"),
                         manifests = long("manifests"),
                         unsortedFiles = long("unsorted_files"),
                         smallFiles = long("small_files"),
@@ -268,7 +268,7 @@ class PlanRepository(
 
         private const val PUBLISH_SQL =
             "WITH m AS (UPDATE lake_table_measurements SET error_code = NULL, measured_at = now(), snapshot_id = :snapshot, " +
-                "current_bytes = :bytes, current_rows = :rows, data_files = :dataFiles, delete_files = :deleteFiles, " +
+                "current_bytes = :bytes, current_rows = :rows, data_files = :dataFiles, delete_files = :deleteFileCount, " +
                 "manifests = :manifests, unsorted_files = :unsorted, small_files = :small, unsorted_over_cap = :overCap, " +
                 "candidate_bytes = :candidate, figures_profile_id = :profile, figures_profile_updated_at = :updated " +
                 "WHERE table_id = :table AND attempt_id = :attempt RETURNING table_id, measured_at), " +
