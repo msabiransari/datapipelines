@@ -60,6 +60,9 @@ internal object LakeTuningSourceGuard {
             Admitted("maintenance/MaintenanceWorker.kt", "MAX_KEY_LOGGED = 64", "logged key length cap: log safety"),
             Admitted("maintenance/DeliveryMaintenanceSettlement.kt", "LakeSettlementSweep.SETTLE_PAGE_SIZE", "the sweep's page (957 D6a)"),
             Admitted("maintenance/DeliveryMaintenanceSettlement.kt", "LakeSettlementSweep.SWEEP_BUDGET", "the sweep's budget (957 D6a)"),
+            Admitted("maintenance/plan/PlanRepository.kt", "USAGE_RETENTION_DAYS = 35", "usage rows kept 35 days: a record rule (cut L8)"),
+            Admitted("maintenance/plan/PlanFigures.kt", "GROWTH_BASELINE_DAYS = 7", "growth per WEEK: call 46's definition"),
+            Admitted("maintenance/plan/TableMeasurer.kt", "LakeMetadataReads.METADATA_MAX_BYTES", "metadata read cap: a safety bound"),
         )
 
     /** The LakeProperties groups scoped code may read (rule c), each with why it is not a profile value. */
@@ -70,6 +73,19 @@ internal object LakeTuningSourceGuard {
             Admitted("*", "properties.catalog", "catalog lock and lease timeouts: protocol (record call 35)"),
             Admitted("*", "properties.name", "the managed lake's datasource name"),
             Admitted("*", "properties.retention", "protection days and orphan grace: one value per deployment (rule e)"),
+        )
+
+    /**
+     * #959 D1: the planner's four `maintenance.plan-*` keys, which rules (c) and (d) admit when read as
+     * `properties.maintenance.<member>`: they describe the deployment (how often it plans, how much one plan measures),
+     * one value per deployment, never a profile value or the tuning of a table. Any other `maintenance` read stays red.
+     */
+    val ADMITTED_PLAN_KEYS: List<Admitted> =
+        listOf(
+            Admitted("*", "planInterval", "the plan's period: deployment configuration (#959 D1)"),
+            Admitted("*", "planPageSize", "tables one plan measures: deployment configuration (#959 D1)"),
+            Admitted("*", "planTableTimeout", "one measurement's bound: deployment configuration (#959 D1)"),
+            Admitted("*", "planMaxAbandonedReads", "abandoned reads one instance tolerates: deployment configuration (#959 D1)"),
         )
 
     /** The files rule (d) admits: the start-up seed, its wiring and the boot rule. */
@@ -96,8 +112,11 @@ internal object LakeTuningSourceGuard {
     private val PACKAGE = Regex("""^\s*package\s+([\w.]+)""", RegexOption.MULTILINE)
     private val HEADER_LINE = Regex("""^\s*(?:package|import)\s.*$""", RegexOption.MULTILINE)
     private val TABLE_PROPERTY = Regex("""\.properties\(\)(?:\[\s*"[^"]*"\s*])?|\bPropertyUtil\b|\bTableProperties\.[A-Z_]+""")
-    private val LAKE_GROUP = Regex("""\b(?:lakeProperties|properties)\.([a-z]\w*)""")
-    private val SEED_MEMBER = Regex("""\.maintenance\b(?!\s*[:(])|\bmaintenance\.(?:window|maxBytesRewrittenPerRun)\b""")
+    private val PLAN_MEMBER = ADMITTED_PLAN_KEYS.joinToString("|") { it.token }
+    private val LAKE_GROUP = Regex("""\b(?:lakeProperties|properties)\.([a-z]\w*+)(?!\.(?:$PLAN_MEMBER)\b)""")
+    private val PLAN_READ = Regex("""(?:lakeProperties|properties)\.maintenance\.(?:$PLAN_MEMBER)""")
+    private val SEED_MEMBER =
+        Regex("""\b(?:lakeProperties|properties)\.maintenance\.(?:$PLAN_MEMBER)\b|\.maintenance\b(?!\s*[:(])|\bmaintenance\.(?:window|maxBytesRewrittenPerRun)\b""")
     private val SEED_KEY =
         Regex("""(?:lake|PREFIX)\.maintenance\.(?:window|max-bytes-rewritten-per-run)|LAKE_MAINTENANCE_(?:WINDOW|MAX_BYTES)""")
     private val RETENTION_READ = Regex("""([\w.]*)\.(protectionDays|orphanGraceHours)\b""")
@@ -167,7 +186,11 @@ internal object LakeTuningSourceGuard {
         sources
             .filter { source -> SEED_ROOTS.any { source.path.startsWith(it) } && source.path !in SEED_READERS }
             .flatMap { source ->
-                val members = SEED_MEMBER.findAll(HEADER_LINE.replace(KotlinText.code(source.text), "")).map { it.value }
+                val members =
+                    SEED_MEMBER
+                        .findAll(HEADER_LINE.replace(KotlinText.code(source.text), ""))
+                        .map { it.value }
+                        .filterNot { PLAN_READ.matches(it) }
                 val keys = SEED_KEY.findAll(KotlinText.withoutComments(source.text)).map { it.value }
                 (members + keys).distinct().map { GuardViolation('d', source.path, it) }.toList()
             }

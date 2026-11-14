@@ -8,6 +8,15 @@ import co.datapipelines.lake.LakeLeases
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.append.LakeAppendAutoConfiguration
 import co.datapipelines.lake.append.LakeAppendRuntime
+import co.datapipelines.lake.maintenance.plan.MaintenanceDue
+import co.datapipelines.lake.maintenance.plan.MaintenancePlanner
+import co.datapipelines.lake.maintenance.plan.PlanBounds
+import co.datapipelines.lake.maintenance.plan.PlanFiguresReader
+import co.datapipelines.lake.maintenance.plan.PlanReaders
+import co.datapipelines.lake.maintenance.plan.PlanRepository
+import co.datapipelines.lake.maintenance.plan.ProfileMaintenanceGate
+import co.datapipelines.lake.maintenance.plan.TableMeasurer
+import co.datapipelines.scheduler.SystemJobQueue
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
@@ -25,8 +34,11 @@ import javax.sql.DataSource
  * `KeyedSystemJob`; the scheduler module turns it into its db-scheduler task (`SystemJobTaskRegistrar`), so nothing here
  * names a db-scheduler type. No request path constructs the worker: it is reached from the scheduler only.
  *
- * The gate and the scratch are ports with defaults: [MaintenanceGate.ADMIT_ALL] until 959's gate, [MaintenanceScratch.NONE]
- * until 969's reservation over staging's budget. A bean of either type replaces the default.
+ * The gate and the scratch are ports with defaults: the gate is 959's [ProfileMaintenanceGate] (the window and the pauses),
+ * the scratch [MaintenanceScratch.NONE] until 969's reservation over staging's budget. A bean of either type replaces it.
+ *
+ * #959: the planner (`lake-maintenance-planner`, a `RecurringSystemJob`) and its readers, repository and figures read
+ * live here too; like the worker, it is reached from the scheduler only.
  */
 @AutoConfiguration(after = [LakeAppendAutoConfiguration::class])
 @ConditionalOnProperty(prefix = LakeProperties.PREFIX, name = ["enabled"], havingValue = "true")
@@ -35,9 +47,57 @@ class LakeMaintenanceAutoConfiguration {
     fun lakeMaintenanceRunRepository(dataSource: DataSource): MaintenanceRunRepository =
         MaintenanceRunRepository(NamedParameterJdbcTemplate(LakeAppendRuntime.statements(dataSource)))
 
+    /** #959 D6 (the cut's L13): the window-and-pause gate, the same pure function the planner decides with. */
     @Bean
     @ConditionalOnMissingBean
-    fun lakeMaintenanceGate(): MaintenanceGate = MaintenanceGate.ADMIT_ALL
+    fun lakeMaintenanceGate(dataSource: DataSource): MaintenanceGate =
+        ProfileMaintenanceGate(NamedParameterJdbcTemplate(LakeAppendRuntime.statements(dataSource)))
+
+    @Bean
+    fun lakeMaintenancePlanRepository(dataSource: DataSource): PlanRepository =
+        PlanRepository(NamedParameterJdbcTemplate(LakeAppendRuntime.statements(dataSource)))
+
+    /** #959 D8: the planner's figures with their times, one read per table (P8's table page). */
+    @Bean
+    fun lakeMaintenancePlanFigures(dataSource: DataSource): PlanFiguresReader =
+        PlanFiguresReader(NamedParameterJdbcTemplate(LakeAppendRuntime.statements(dataSource)))
+
+    /** #959 D2: the planner's own readers over the delete-refusing metadata FileIO; closing the context stops them. */
+    @Bean
+    fun lakeMaintenancePlanReaders(catalogs: LakeCatalogs): PlanReaders = PlanReaders(catalogs::metadataFileIo)
+
+    @Suppress("LongParameterList")
+    @Bean
+    fun lakeMaintenancePlanner(
+        dataSource: DataSource,
+        properties: LakeProperties,
+        lakeMaintenancePlanRepository: PlanRepository,
+        lakeMaintenancePlanReaders: PlanReaders,
+        lakeMaintenanceWorker: MaintenanceWorker,
+        parts: ObjectProvider<MaintenancePart>,
+        queue: ObjectProvider<SystemJobQueue>,
+    ): MaintenancePlanner {
+        // The four plan-* keys are deployment configuration, never a profile value (D1; LakeTuningSourceGuard admits them).
+        val bounds =
+            PlanBounds(
+                interval = properties.maintenance.planInterval,
+                pageSize = properties.maintenance.planPageSize,
+                tableTimeout = properties.maintenance.planTableTimeout,
+                maxAbandonedReads = properties.maintenance.planMaxAbandonedReads,
+            )
+        return MaintenancePlanner(
+            bounds = bounds,
+            repository = lakeMaintenancePlanRepository,
+            measurer = TableMeasurer(NamedParameterJdbcTemplate(LakeAppendRuntime.statements(dataSource)), properties.name),
+            readers = lakeMaintenancePlanReaders,
+            due = MaintenanceDue(Duration.ofHours(properties.retention.orphanGraceHours.toLong())),
+            // Looked up per plan: the queue is the scheduler's, built after the job beans its tasks wrap.
+            queue = { queue.getObject() },
+            worker = lakeMaintenanceWorker,
+            registered = { parts.orderedStream().map { it.name }.toList().toSet() },
+            clock = Clock.systemUTC(),
+        )
+    }
 
     @Bean
     @ConditionalOnMissingBean

@@ -700,6 +700,11 @@ datapipelines:
     maintenance:
       window: ${DATAPIPELINES_LAKE_MAINTENANCE_WINDOW:02:00-05:00}
       max-bytes-rewritten-per-run: ${DATAPIPELINES_LAKE_MAINTENANCE_MAX_BYTES_REWRITTEN_PER_RUN:50GB}
+      # #959: the maintenance planner's own bounds (deployment configuration, never a profile value; configuration.md §3.36).
+      plan-interval: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_INTERVAL:15m}
+      plan-page-size: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_PAGE_SIZE:200}
+      plan-table-timeout: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_TABLE_TIMEOUT:60s}
+      plan-max-abandoned-reads: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_MAX_ABANDONED_READS:4}
     retention:
       protection-days: ${DATAPIPELINES_LAKE_RETENTION_PROTECTION_DAYS:7}
       orphan-grace-hours: ${DATAPIPELINES_LAKE_RETENTION_ORPHAN_GRACE_HOURS:72}

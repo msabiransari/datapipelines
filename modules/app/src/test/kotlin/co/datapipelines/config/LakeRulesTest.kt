@@ -134,6 +134,25 @@ class LakeRulesTest {
         violations(mapOf(LakeRules.MAX_BYTES_REWRITTEN to "100MB")) shouldContainExactly emptyList()
     }
 
+    /** #959 D1: the planner's four bounds, each refused one step outside and admitted at its edge, its key named. */
+    @Test
+    fun `959 - the planner's four keys are refused outside their bounds and admitted at their edges`() {
+        listOf("59s", "0", "soon").forEach { enabled(LakeRules.PLAN_INTERVAL to it).single() shouldStartWith LakeRules.PLAN_INTERVAL }
+        listOf("1m", "60s", "15m").forEach { enabled(LakeRules.PLAN_INTERVAL to it) shouldContainExactly emptyList() }
+        listOf("0", "10001", "-1", "x").forEach { enabled(LakeRules.PLAN_PAGE_SIZE to it).single() shouldStartWith LakeRules.PLAN_PAGE_SIZE }
+        listOf("1", "10000").forEach { enabled(LakeRules.PLAN_PAGE_SIZE to it) shouldContainExactly emptyList() }
+        listOf("999ms", "601s", "11m", "0s").forEach {
+            enabled(LakeRules.PLAN_TABLE_TIMEOUT to it).single() shouldStartWith LakeRules.PLAN_TABLE_TIMEOUT
+        }
+        listOf("1s", "10m", "600s").forEach { enabled(LakeRules.PLAN_TABLE_TIMEOUT to it) shouldContainExactly emptyList() }
+        listOf("0", "65").forEach {
+            enabled(LakeRules.PLAN_MAX_ABANDONED_READS to it).single() shouldStartWith LakeRules.PLAN_MAX_ABANDONED_READS
+        }
+        listOf("1", "64").forEach { enabled(LakeRules.PLAN_MAX_ABANDONED_READS to it) shouldContainExactly emptyList() }
+        // A disabled lake is never judged on them.
+        violations(mapOf(LakeRules.PLAN_PAGE_SIZE to "0", LakeRules.PLAN_INTERVAL to "1s")) shouldContainExactly emptyList()
+    }
+
     /**
      * #804 — the DuckDB staging admission is judged with the lake DISABLED, at every boundary:
      * DuckDB's 1 MiB memory floor (exactly 1 MiB in, one byte below out), the one-reservation rule

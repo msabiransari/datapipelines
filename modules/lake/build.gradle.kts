@@ -70,6 +70,10 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // #756 — the shared snapshot log capture (module-structure §5.23); test-only, testImplementation alone.
     testImplementation(project(":modules:log-capture"))
+    // #959 — the planner's scheduler-harness cases (N9, N10, N12, N13b, N14) drive the library's manual scheduler
+    // (`testhelper`, in the core jar) over the real scheduled_tasks table, as the scheduler module's own seam suite does.
+    // Test-only: the MAIN compile classpath still holds no db-scheduler type (the boundary of line 19 holds).
+    testImplementation(libs.db.scheduler)
     // Actual materialized input cursors exercise unsigned widths and microsecond temporal values.
     testRuntimeOnly(libs.duckdb.jdbc)
 }
