@@ -236,7 +236,7 @@ internal object SharedE2e {
  * that adds a table is included automatically, never a hand-copied list — excludes
  * `flyway_schema_history` (dropping it would make every later context re-migrate or
  * fail), truncates with CASCADE, and re-seeds the V4 `default` workspace, the V53 lake-control singleton and the
- * V60 built-in lake profiles.
+ * V61 built-in lake profiles.
  *
  * ALWAYS call [beforeSeeding] from the suite's first-test seed hook BEHIND its `seeded` flag — the
  * flag, not this object, provides the once-per-suite guarantee (several suites in one JVM each
@@ -254,7 +254,7 @@ internal object E2eClean {
     private const val LAKE_CONTROL = "INSERT INTO lake_control (id, mode) VALUES (1, 'normal')"
 
     /**
-     * V60's two built-in profiles, exactly as the migration inserts them (`production` the default, with its seed mark;
+     * V61's two built-in profiles, exactly as the migration inserts them (`production` the default, with its seed mark;
      * `development` with the whole-day window). `lake_profiles.created_by` references `users`, so the CASCADE
      * truncation empties it, and every new managed table takes the default profile by a sub-select (brief 956 D5).
      * [E2eCleanSeedRestorationTest] pins this literal against a freshly migrated database.
@@ -265,7 +265,7 @@ internal object E2eClean {
             "('development', FALSE, FALSE, '${builtInProfile("00:00-00:00")}') " +
             "ON CONFLICT (name) DO NOTHING"
 
-    /** V60's built-in value document; the two built-ins differ only in the maintenance window. */
+    /** V61's built-in value document; the two built-ins differ only in the maintenance window. */
     private fun builtInProfile(window: String): String =
         """{"maintenance": {"window": "$window", "max_bytes_rewritten_per_run": 53687091200, """ +
             """"target_file_bytes": 67108864, "compact_min_small_files": 5, "compact_small_file_ratio": 0.75, """ +

@@ -1,5 +1,5 @@
 -- =============================================================================
--- V60 — lake maintenance profiles (#956, dp-lake P6; design record §11a call 35, lane cut L5)
+-- V61 — lake maintenance profiles (#956, dp-lake P6; design record §11a call 35, lane cut L5)
 --
 -- 1. lake_profiles — the deployment's maintenance and write profiles: one row per profile, a name, the default
 --    mark (the partial unique index uq_lake_profiles_one_default allows at most one; the service never leaves

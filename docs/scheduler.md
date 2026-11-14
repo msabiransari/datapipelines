@@ -1,6 +1,6 @@
 # Scheduler Specification
 
-**Status:** v1.13 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
+**Status:** v1.14 (slices 1–4 of #9 — optional notification delivery implemented; the application credential remains pending)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
@@ -183,7 +183,7 @@ An `unknown` run is watched for 24 hours. If its execution later reports a real 
 
 A schedule fires as the **system identity** — the one `System` account every deployment provisions ([Auth §4.5](auth.md#45-the-system-service-account-r7)) — never as the person who created it. So a creator who is demoted to viewer, removed from the workspace or deactivated does not stop their schedules, and a schedule never gains or loses power when its creator's role changes.
 
-The system identity holds exactly four permissions, in every workspace: `pipeline.read`, `pipeline.execute`, `execution.read` and `lake.append`. A lake-writing pipeline additionally requires `lake.append` when its schedule is created or updated; launch checks the system actor’s own authority. It holds no role, no instance permission and no credential: there is no API key, no session and no password for it, and a request that tried to present it is refused. Every launch still ASKS for `pipeline.execute` — a scheduled run is not exempt from permissions because it is internal.
+The system identity holds exactly five permissions: in every workspace `pipeline.read`, `pipeline.execute`, `execution.read` and `lake.append`; and, as the instance with no workspace, `lake.maintain` alone, which no person, role or key can hold (#957, [Auth §4.5](auth.md#45-the-system-service-account-r7)). A lake-writing pipeline additionally requires `lake.append` when its schedule is created or updated; launch checks the system actor’s own authority. It holds no role, no instance permission and no credential: there is no API key, no session and no password for it, and a request that tried to present it is refused. Every launch still ASKS for `pipeline.execute` — a scheduled run is not exempt from permissions because it is internal.
 
 What people may do (auth.md §7.6): every member **reads** schedules (a promoter through the promoter lens — the list pages over the schedules the lens admits, read in keyset windows so a create or delete between two windows neither duplicates nor drops a visible one, #257, #277); authors, workspace admins and super admins **create, edit, pause, resume, unblock, delete and Run now**. Executions a schedule fired are visible to every member with `execution.read`, not only to their executor — visibility, not ownership: cancelling one still needs `execution.cancel_all`.
 
@@ -203,7 +203,7 @@ A scheduled execution has the instance's ordinary execution timeout (`datapipeli
 
 ### 8.1 One dispatcher, any number of instances
 
-Every instance serves the schedule REST routes. An instance with `datapipelines.scheduler.enabled: true` also dispatches; `false` is **API mode** — it runs no scheduler task, so it never sends scheduler mail (§2.3's sender runs only on dispatching instances). Among dispatching instances there is ONE dispatcher: the tick is a single cluster-wide task, and each tick locks the due schedules it handles, so two instances never record the same occurrence twice and never launch one occurrence twice (an occurrence is a unique row, and a start claim is a conditional write). Run tasks are spread over the dispatching instances' worker threads (`threads`, default 2); a worker holds a thread only while it admits and launches, never for the pipeline's runtime.
+Every instance serves the schedule REST routes. An instance with `datapipelines.scheduler.enabled: true` also dispatches; `false` is **API mode** — it runs no scheduler task, so it never sends scheduler mail (§2.3's sender runs only on dispatching instances). Among dispatching instances there is ONE dispatcher: the tick is a single cluster-wide task, and each tick locks the due schedules it handles, so two instances never record the same occurrence twice and never launch one occurrence twice (an occurrence is a unique row, and a start claim is a conditional write). Run tasks are spread over the dispatching instances' worker threads (`threads`, default 3: with the managed lake enabled it must be at least `datapipelines.lake.admission.max-concurrent-maintenance` + 2, §8.5); a worker holds a thread only while it admits and launches, never for the pipeline's runtime.
 
 If an instance dies, its in-progress tasks are revived elsewhere after six missed heartbeats (`heartbeat-interval-seconds`, default 30 s). A revived task never launches again: it finds the claim, and either the execution exists (the run is `running`) or it does not (the run is `unknown`, and the schedule blocks).
 
@@ -223,6 +223,27 @@ Metrics ([Observability §4.1](observability.md#41-metric-naming)): `datapipelin
 
 People manage schedules on the **Schedules** page (`/schedules`, in the rail's Operate group — [UI Screens §4.20](ui-screens.md#420-schedules), slice 2). The rail's Schedules item lands on the **Schedules home** (`/overview/schedules`, [UI Screens §4.20a](ui-screens.md#420a-schedules-home-584), #584) — the workspace's schedules counted by condition and by how each one's latest run ended, what fires next and what changed last, all from one read of the same §20.1 list through the reader's lens — and its View all opens this page. It adds nothing to this spec: every read and every write it makes is a call to [REST §20](rest-api.md#20-schedules) with the person's session, so what the page can do is exactly what §20 and [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) allow — every member reads, authors and admins write, a hidden button is never the authority. What it shows is this spec made visible: the next five occurrences as §3's function computes them, a blocked schedule's reason (§5.2) beside **Unblock**, and a run's history with its trail and — for a reader who may read executions — the execution's own messages merged in time order (the design revision's R10). Its preview of a pattern is §20.3, the same function the dispatcher uses. Elsewhere in the UI the same truth is pre-read before the fact: the pipelines explorer's **discard dialog lists the schedules that run the pipeline** (the Usage tab's by-target read, [UI Screens §4.3d](ui-screens.md#43d-lifecycle-verbs--the-two-workspaces-102-the-explorers-legs-retired-by-401-and-398), #273) — a discard succeeds, and each listed schedule then blocks at its next run per §5.2 (`pointer_null`, `target_not_found`) until it is repointed or deleted.
 
+### 8.5 System jobs
+
+Another module's internal work runs on this queue without knowing db-scheduler (#957). It declares a bean of one of two
+types, and the scheduler's auto-configuration builds its task in `SchedulerTasks.kt`, still the only place a task is
+defined:
+
+- **`KeyedSystemJob`**: one durable task instance per KEY. `run(key)` answers `Done` (the instance is removed) or
+  `AgainAt(instant)` (the same instance comes again then). Instances are enqueued and moved through
+  **`SystemJobQueue`**: `enqueueIfAbsent(job, key, at)` enqueues unless the instance exists (one per job and key,
+  cluster-wide); `move(job, key, at)` moves a QUEUED instance and answers false, changing nothing, for one that is
+  running or absent. Queued instances are handed out in due-time order.
+- **`RecurringSystemJob`**: `run()` every `fixedDelay` after the previous run ended, on one instance at a time
+  cluster-wide; a run still going when the next is due makes that one skip.
+
+The library stays inside this module: a module that declares a job compiles against the scheduler, not against
+db-scheduler. The managed lake's `lake-maintenance` task is the first keyed job
+([Lake §11](lake.md#11-maintenance-runs)): one instance per table, each run on the thread that took it, which is why
+`threads` must leave two threads beyond `max-concurrent-maintenance` (one for the maintenance planner, one always free
+for the dispatcher, the reconciler and the notifier); the boot refuses a smaller value
+([Configuration §7](configuration.md#7-config-validation)).
+
 ---
 
 ## 9. Not in slice 1
@@ -239,6 +260,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.14 | 957 (#957) | §6: the system identity holds five permissions, `lake.maintain` only with no workspace. §8.1: `threads` default 2 → 3. New **§8.5 System jobs**: `KeyedSystemJob`, `RecurringSystemJob` and `SystemJobQueue` (enqueue-if-absent, move a queued instance only); the lake's `lake-maintenance` task is the first; threads ≥ maintenance slots + 2. |
 | 2026-11-12 | v1.13 | 325 (#325) | §5.1: the lifecycle-write bound is capped at 25 s below the 30 s start wait (else a fail-closed run ends `unknown`, not `record_unwritable`); a refused run's late RUNNING insert is reaped by the stale sweep beside its `record_unwritable` trail — stated, not fixed. |
 | 2026-11-11 | v1.12 | #786 U2 schedules pin exact versions | §1, §2.1: payload schema 2 — `{"pipeline", "version": <int>}` pins one exact version; `current`/`latest` refused by name; the pin is validated at save under the pinned pipeline's workspace guard (eligible: RELEASED, or DRAFT where authoring is enabled); a stored schema-1 payload is refused `payload_schema_unsupported`, never upgraded at read time; the upgrade converts live schema-1 schedules in place (only the version selector changes). §5: `not_started` gains `version_not_eligible` and `payload_schema_unsupported` (both block); `pointer_null` is schema-1 history. Round 7: the launch re-checks the pinned version's eligibility on the same read as the body (a prepared copy can outlive a repin and the old version's discard); the conversion pins each queued run to ITS OWN pipeline's CURRENT. |
 | 2026-11-05 | v1.11 | 799 (#799), ruling (c) | §6 adds lake append to the system actor’s fixed permission set; lake-writing schedule saves also require the caller’s lake append permission. |

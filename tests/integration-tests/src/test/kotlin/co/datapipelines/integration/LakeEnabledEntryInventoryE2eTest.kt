@@ -105,8 +105,11 @@ class LakeEnabledEntryInventoryE2eTest {
         /** The property literal exactly as `LakeSettlementSchedulingConfiguration` tests its condition. */
         const val LAKE_ENABLED_CONDITION = "datapipelines.lake.enabled=true"
 
-        /** One conditional job is documented today; a scan that matches none is a broken boot, not a leaner table. */
-        const val CONDITIONAL_FLOOR = 1
+        /**
+         * Two conditional jobs are documented today (the settlement sweep and, since #957, the `lake-maintenance` task); a
+         * scan that matches fewer is a broken boot, not a leaner table.
+         */
+        const val CONDITIONAL_FLOOR = 2
 
         val IN_CONTEXT_FAMILIES = listOf("servlet", "filter", "security-chain", "handler-mapping", "scheduled", "scheduler-task")
 

@@ -12,7 +12,7 @@ import java.sql.DriverManager
 
 /**
  * A shared-data reset must leave the database as a fresh migration leaves it for what the next context needs: V53's
- * singleton for the managed-lake startup check, and V60's built-in lake profiles, without which no managed table can
+ * singleton for the managed-lake startup check, and V61's built-in lake profiles, without which no managed table can
  * be created (its INSERT takes the default profile by a sub-select).
  */
 @SpringBootTest(classes = [DatapipelinesApplication::class], webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)

@@ -190,9 +190,12 @@ class FlywayMigrationIntegrationTest {
                 // #874 (V59) — the datasource's local incarnation UUID and generation counter (metadata-db §4.10),
                 // backfilled by their DEFAULTs on every row, soft-deleted ones included.
                 "59|datasource incarnation|true",
-                // #956 (V60) — lake maintenance profiles: the profile table with its two built-ins, every managed table's
-                // profile reference, and policy_json emptied to the table's pause keys (metadata-db §4.49, §4.55).
-                "60|lake profiles|true",
+                // #957 (V60) — lake maintenance runs: one row per admitted run, one `running` row per table
+                // (partial unique index), the run's deadline (metadata-db §4.55).
+                "60|lake maintenance runs|true",
+                // #956 (V61) — lake maintenance profiles: the profile table with its two built-ins, every managed table's
+                // profile reference, and policy_json emptied to the table's pause keys (metadata-db §4.49, §4.56).
+                "61|lake profiles|true",
             )
     }
 
@@ -997,6 +1000,50 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #957 (V60) — the maintenance run row: the closed kind and state lists, ended iff not running, and the partial
+     * unique index that makes "one running run per table" a database fact.
+     */
+    @Test
+    fun `V60 creates lake maintenance runs with one running row per table`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN " +
+                "('chk_lake_maintenance_runs_kind', 'chk_lake_maintenance_runs_state', 'chk_lake_maintenance_runs_ended') " +
+                "ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_lake_maintenance_runs_ended|CHECK (((state = 'running'::text) = (ended_at IS NULL)))",
+                "chk_lake_maintenance_runs_kind|CHECK ((kind = ANY (ARRAY['maintenance'::text, 'purge'::text])))",
+                "chk_lake_maintenance_runs_state|CHECK ((state = ANY (ARRAY['running'::text, 'finished'::text, " +
+                    "'failed'::text, 'abandoned'::text])))",
+            )
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'uq_lake_maintenance_runs_running'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE UNIQUE INDEX uq_lake_maintenance_runs_running ON public.lake_maintenance_runs USING btree " +
+                    "(table_id) WHERE (state = 'running'::text)",
+            )
+        columnsOf("lake_maintenance_runs") shouldContainExactlyInAnyOrder
+            listOf(
+                "bytes_touched",
+                "deadline_at",
+                "deferred_deletions",
+                "ended_at",
+                "error_code",
+                "error_message",
+                "files_touched",
+                "id",
+                "kind",
+                "parts_json",
+                "scratch_reserved_bytes",
+                "settlement_json",
+                "started_at",
+                "state",
+                "table_id",
+            )
+    }
+
+    /**
      * #798 (V54) — managed lake table definitions, read from the SHIPPED database: the closed lists the
      * `lake.definitions` enums mirror (table status, apply state, version status, origin), the pointer/state pairing,
      * the one-DRAFT index and every column. Behaviour is `LakeDefinitionRepositoryIntegrationTest`'s; this pins
@@ -1063,7 +1110,7 @@ class FlywayMigrationIntegrationTest {
                 "name",
                 "namespace_id",
                 "policy_json",
-                // #956 (V60) — the table's profile and when it was assigned (§4.49).
+                // #956 (V61) — the table's profile and when it was assigned (§4.49).
                 "profile_assigned_at",
                 "profile_id",
                 "purge_allowed_after",
@@ -1678,7 +1725,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (54 after #786)
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (56 after #956)
     fun `creates exactly the fifty-five tables of metadata-db §4`() {
         val tables =
             query(
@@ -1720,7 +1767,9 @@ class FlywayMigrationIntegrationTest {
                 "lake_column_semantics",
                 "lake_deliveries",
                 "lake_delivery_attempts",
-                // #956 (V60) — lake maintenance profiles (metadata-db §4.55).
+                // #957 (V60) — the maintenance run rows (metadata-db §4.55).
+                "lake_maintenance_runs",
+                // #956 (V61) — lake maintenance profiles (metadata-db §4.56).
                 "lake_profiles",
                 // 118 (V25) — the learned semantic layer.
                 "learned_facts",
@@ -1847,6 +1896,10 @@ class FlywayMigrationIntegrationTest {
                 "lake_delivery_attempts.lake_delivery_attempts_pkey",
                 "lake_delivery_attempts.lake_delivery_attempts_operation_id_key",
                 "lake_delivery_attempts.idx_lake_delivery_attempts_delivery",
+                // #957 (V60) — the run's identity, one running run per table, a table's history (metadata-db §5).
+                "lake_maintenance_runs.lake_maintenance_runs_pkey",
+                "lake_maintenance_runs.uq_lake_maintenance_runs_running",
+                "lake_maintenance_runs.idx_lake_maintenance_runs_table_started",
                 "lake_column_semantics.lake_column_semantics_pkey",
                 "lake_namespaces.lake_namespaces_pkey",
                 "lake_namespaces.uq_lake_namespaces_name",
@@ -1854,7 +1907,7 @@ class FlywayMigrationIntegrationTest {
                 "lake_table_definition_versions.uq_lake_table_definition_versions_one_draft",
                 "lake_tables_managed.lake_tables_managed_pkey",
                 "lake_tables_managed.uq_lake_tables_managed_namespace_name",
-                // #956 (V60) — a profile's PK, its name once, at most one default; the tables a profile governs.
+                // #956 (V61) — a profile's PK, its name once, at most one default; the tables a profile governs.
                 "lake_profiles.lake_profiles_pkey",
                 "lake_profiles.uq_lake_profiles_name",
                 "lake_profiles.uq_lake_profiles_one_default",
@@ -2058,11 +2111,17 @@ class FlywayMigrationIntegrationTest {
                 "chk_lake_deliveries_state",
                 "chk_lake_delivery_attempts_outcome",
                 "chk_lake_delivery_attempts_sha256",
+                // #957 (V60) — the run row's lists, ended iff not running, non-negative figures, the parts array (§4.55).
+                "chk_lake_maintenance_runs_ended",
+                "chk_lake_maintenance_runs_figures",
+                "chk_lake_maintenance_runs_kind",
+                "chk_lake_maintenance_runs_parts",
+                "chk_lake_maintenance_runs_state",
                 "chk_lake_namespaces_description",
                 "chk_lake_namespaces_name",
                 "chk_lake_namespaces_stamps",
                 "chk_lake_namespaces_status",
-                // #956 (V60) — a profile's name grammar and its object-shaped values (§4.55); `p` sorts between
+                // #956 (V61) — a profile's name grammar and its object-shaped values (§4.56); `p` sorts between
                 // `namespaces` and `reference` (the database collation skips `_` at the first level).
                 "chk_lake_profiles_name",
                 "chk_lake_profiles_values",

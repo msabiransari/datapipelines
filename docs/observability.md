@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.80 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.81 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-14
@@ -506,6 +506,23 @@ the exception class and first SQLSTATE in §3.4G's safe shape. Nothing in produc
 | WARN | `lake.removal.marker_left` | The pass's own `dp/clock/<run-id>` marker was not deleted: a lease or mode check said no or could not be made, or its delete was not confirmed. A later pass removes it once this run is terminal | `table_id`, `run_id`, `reason` (`lease_lost` \| `mode_changed` \| `check_failed` \| `delete_unconfirmed`) |
 | WARN | `lake.removal.unexpected_dp_key` | The listing holds keys under `dp/` that are neither a recipe nor a clock marker; they are never deleted and keep a purge at *more to do*. Once per pass | `table_id`, `count`, `first` (the first such key, relative to the table location) |
 
+#### 3.4U Lake maintenance run events (#957)
+
+The `lake-maintenance` scheduler task, one instance per managed table ([Lake: maintenance runs](lake.md#11-maintenance-runs)). A run's ids are the run row's (`lake_maintenance_runs.id`) and the table's; no event carries a path, a storage endpoint, a message text or a credential. Failures use §3.4G's safe shape (the class, the first SQLSTATE).
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| WARN | `lake.maintenance.refused` | The task's principal does not hold `lake.maintain`: the task ends before the slot, no row | `table_id`, `user_id`, `permission` |
+| INFO | `lake.maintenance.skipped` | The task ends with no row: the key is not a table id, the catalog is not in `normal` mode, or the table has no managed row | `table_id` (the key, at most 64 characters), `reason` (`invalid_key` \| `catalog_mode` \| `no_table`) |
+| INFO | `lake.maintenance.held` | No maintenance slot was free (`admission.max-concurrent-maintenance`): no row, the task comes again in 30 s | `table_id`, `again_at` |
+| INFO | `lake.maintenance.waiting` | An earlier run of the table is `running` and not past its deadline: no row, the slot and any scratch released, the task comes again at that deadline | `table_id`, `again_at` |
+| INFO | `lake.maintenance.admitted` | The run row was written; the run's deadline is every lease's deadline | `run_id`, `table_id`, `kind`, `deadline`, `scratch_reserved_bytes` |
+| WARN | `lake.maintenance.abandoned` | The admitting statement closed an earlier run past its deadline as `abandoned` (once per closed row) | `run_id` (the abandoned run), `table_id`, `successor_run_id` |
+| WARN | `lake.maintenance.settlement_deferred` | The settlement step before the first part stopped at a failing row or failed outside the rows; the parts run anyway and the run row records it | `run_id`, `table_id`, `cause`, `sql_state` |
+| WARN | `lake.maintenance.deadline_refused` | A commit was not attempted, or its lease was refused, because the run's deadline had passed: the part ends `deadline` | `run_id`, `table_id`, `deadline`, `code` (`lake.maintenance.deadline`) |
+| WARN | `lake.maintenance.close_refused` | The run's close found the row no longer `running` (a successor abandoned it): nothing is overwritten and nothing concluded | `run_id`, `table_id`, `state` (the state the worker would have written) |
+| INFO | `lake.maintenance.finished` | An admitted run ended (also after `close_refused`, with `state=abandoned`) | `run_id`, `table_id`, `state`, `error_code`, `parts` (`name:outcome` per part, comma-separated) |
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -808,8 +825,9 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.81 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.80 | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |
+| 2026-11-14 | v1.80 | 957 (#957) — renumbered at the spec merge after #958's v1.79 | **§3.4U** (new; §3.4T at the lane's base, #958's §3.4T landed first): the ten `lake.maintenance.*` events of the per-table maintenance task: refused, skipped, held, waiting, admitted, abandoned, settlement_deferred, deadline_refused, close_refused, finished. |
 | 2026-11-14 | v1.79 | 958 (#958) | New **§3.4T**, the lake remover's six events: WARN `lake.removal.refused`, INFO `lake.removal.ended`, WARN `lake.removal.failed`, `lake.removal.batch_failed`, `lake.removal.marker_left` and `lake.removal.unexpected_dp_key`. Counts, identifiers and one relative unexpected key; never a key list or a credential. |
-| 2026-11-14 | v1.80 | 956 (#956, dp-lake P6) | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |
 | 2026-11-13 | v1.78 | 939 (#939) | **§3.4S**: new INFO `lake.settle.protection_window_aligned` (`days`) — the settle sweep set `lake_control.protection_interval` to this instance's `retention.protection-days`; logged only when the row changed. |
 | 2026-11-13 | v1.77 | 806 merge review (#806) | **§3.4**: catalogue the web module's `staging.scratch.health` transition WARN and recovery INFO already described in §6.1. Every non-`UP` transition retains the usable-byte reading, including an unwritable directory; a failed reading reports `unknown`. |
 | 2026-11-13 | v1.76 | 806 (#806) | **§4.1**: four untagged byte gauges, `datapipelines.staging.scratch.capacity`, `.reserved`, `.leftover` (`NaN` until the leftover sweep has counted) and `.usable` (`NaN` when the reading throws), read at every scrape. **§6.1**: the `diskSpace` bullet's "nothing writes to local disk" reasoning corrected (DuckDB staging, #795), and the DuckDB scratch signal described — the status-only `duckdb_scratch` indicator on the management port's `/actuator/health`, never a `/health` component, its rows, and what its `UP` does and does not establish (owner ruling 2026-11-12 for the surface). §6.4 unchanged: the indicator carries no detail. |

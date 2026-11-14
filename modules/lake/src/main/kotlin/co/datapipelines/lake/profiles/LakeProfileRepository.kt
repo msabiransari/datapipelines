@@ -8,7 +8,7 @@ import java.sql.ResultSet
 import java.time.Instant
 import java.util.UUID
 
-/** One `lake_profiles` row (metadata-db §4.55) with its values parsed. A NULL actor is the system (D1). */
+/** One `lake_profiles` row (metadata-db §4.56) with its values parsed. A NULL actor is the system (D1). */
 data class StoredLakeProfile(
     val id: UUID,
     val name: String,
@@ -33,7 +33,7 @@ internal data class LakeTablePolicyRow(
 )
 
 /**
- * The SQL of the profiles and of a table's profile reference and pauses (V60). Every statement is parameterised; a
+ * The SQL of the profiles and of a table's profile reference and pauses (V61). Every statement is parameterised; a
  * value document is bound as ONE JSONB parameter, never concatenated. Transactions are the caller's.
  */
 @Suppress("TooManyFunctions") // one method per statement

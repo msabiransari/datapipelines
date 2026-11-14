@@ -35,6 +35,7 @@ import co.datapipelines.auth.Permission.EXECUTION_READ
 import co.datapipelines.auth.Permission.EXECUTION_READ_ALL
 import co.datapipelines.auth.Permission.EXECUTION_RESULT_READ
 import co.datapipelines.auth.Permission.LAKE_APPEND
+import co.datapipelines.auth.Permission.LAKE_MAINTAIN
 import co.datapipelines.auth.Permission.LAKE_TABLE_MANAGE
 import co.datapipelines.auth.Permission.MCP_KEY_CREATE
 import co.datapipelines.auth.Permission.MCP_KEY_OWN
@@ -329,12 +330,22 @@ object RolePermissions {
      * auth.md §7.6: no member holds it, no key carries it, the role walk never sees it. It is
      * answered through [PermissionResolver.holdsAsSystemActor] — the seam's system arm — so a
      * test context can prove a widened set is caught (`SystemActorPrincipalTest`). A later executor
-     * (reports) adds its own permission here with that executor.
+     * (reports) adds its own permission here with that executor. It also carries every [SYSTEM_ONLY] permission (#957).
      */
-    val SYSTEM_ACTOR: Set<Permission> = setOf(PIPELINE_EXECUTE, PIPELINE_READ, EXECUTION_READ, LAKE_APPEND)
+    val SYSTEM_ACTOR: Set<Permission> = setOf(PIPELINE_EXECUTE, PIPELINE_READ, EXECUTION_READ, LAKE_APPEND, LAKE_MAINTAIN)
 
-    /** D7: a super admin holds every permission in every workspace — except the [FENCED] ones, which are nobody's. */
-    val SUPER_ADMIN: Set<Permission> = Permission.entries.toSet() - FENCED
+    /**
+     * #957 D8 — the permissions only the system identity holds: no member role, no key role and no super admin. Their
+     * auth.md §7.6 rows are ✗ in every cell and are not fenced (`ScopeMatrixSpecDriftTest`). A workspace-less system
+     * principal (`SystemActorPrincipals.forInstance`) holds these and nothing else.
+     */
+    val SYSTEM_ONLY: Set<Permission> = setOf(LAKE_MAINTAIN)
+
+    /**
+     * D7: a super admin holds every permission in every workspace — except the [FENCED] ones, which are nobody's, and the
+     * [SYSTEM_ONLY] ones, which are the system identity's alone (#957).
+     */
+    val SUPER_ADMIN: Set<Permission> = Permission.entries.toSet() - FENCED - SYSTEM_ONLY
 
     /**
      * The INSTANCE permissions: held by a super admin and by no workspace role, because none of

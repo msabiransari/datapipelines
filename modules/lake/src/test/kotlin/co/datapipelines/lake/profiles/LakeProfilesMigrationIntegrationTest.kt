@@ -9,7 +9,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource
 import java.util.UUID
 
 /**
- * P1 (brief 956 A): V60 on a fresh database with no user, and on an upgrade database whose managed tables carry the
+ * P1 (brief 956 A): V61 on a fresh database with no user, and on an upgrade database whose managed tables carry the
  * old four-key `policy_json`. Each case migrates its own empty database with the shipped files, so the state checked
  * is the migration's and nothing a suite wrote.
  */
@@ -39,7 +39,7 @@ class LakeProfilesMigrationIntegrationTest {
 
     @Test
     fun `on an upgrade database every existing table gets production, an assignment time and an empty policy`() {
-        val jdbc = migrated("lake_profiles_upgrade", upTo = 59)
+        val jdbc = migrated("lake_profiles_upgrade", upTo = 60)
         val user = UUID.randomUUID()
         val namespace = UUID.randomUUID()
         jdbc.update(
@@ -57,7 +57,7 @@ class LakeProfilesMigrationIntegrationTest {
                 user,
             )
         }
-        applyFrom(jdbc, 60)
+        applyFrom(jdbc, 61)
         val tables =
             jdbc.queryForList(
                 "SELECT t.policy_json::text AS policy_json, t.profile_assigned_at, p.name AS profile FROM lake_tables_managed t " +
@@ -95,7 +95,7 @@ class LakeProfilesMigrationIntegrationTest {
     private companion object {
         val VERSION = Regex("""^V(\d+)__""")
 
-        /** The four keys `LakeTablePolicy` wrote before V60. */
+        /** The four keys `LakeTablePolicy` wrote before V61. */
         const val OLD_POLICY =
             """{"retention": {"protection_days": 7, "orphan_grace_hours": 24},
                 "maintenance": {"window": "02:00-05:00", "max_bytes_rewritten_per_run": 53687091200}}"""

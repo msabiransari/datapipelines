@@ -77,8 +77,10 @@ class ConfigValidator(
          * 47 since #325 added `ExecutorRules.checkLifecycleWriteCeiling` (§3.2 — the lifecycle bound under the start wait).
          * 48 since #804 added `LakeRules.checkStagingAdmission` (§3.36 — the DuckDB staging admission keys,
          * judged whether or not the lake is enabled).
+         * 49 since #957 added `SchedulerThreadsRules.checkMaintenanceThreads` (§3.29 / §7 — scheduler threads ≥
+         * max-concurrent-maintenance + 2 with the lake and the scheduler enabled).
          */
-        internal const val CHECK_COUNT = 48
+        internal const val CHECK_COUNT = 49
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -179,6 +181,8 @@ class ConfigValidator(
             LakeRules.checkLakeAdmission(snapshot, violations)
             LakeRules.checkLakeBounds(snapshot, violations)
             LakeRules.checkLakeReads(snapshot, violations)
+            // §3.29 / §7 (#957) — with the lake and the scheduler on, enough scheduler threads for maintenance; own file.
+            SchedulerThreadsRules.checkMaintenanceThreads(snapshot, violations)
             return ValidationReport(violations, warnings)
         }
 
@@ -933,6 +937,8 @@ class ConfigValidator(
                 dashboards = DashboardRuntimeRules.KEYS.associateWith { environment.getProperty(it) },
                 // §3.36 (#785) — raw strings, but the four S3 credentials as PRESENCE only (LakeRules.carried).
                 lake = LakeRules.KEYS.associateWith { LakeRules.carried(it, environment.getProperty(it)) },
+                // §3.29 / §7 (#957) — the scheduler's switch and thread count, raw, for the maintenance-threads rule.
+                scheduler = SchedulerThreadsRules.KEYS.associateWith { environment.getProperty(it) },
                 // §3.31 (#279) — the request-body cap, raw (a malformed value is a named violation).
                 webMaxRequestBytes = environment.getProperty("datapipelines.web.max-request-bytes"),
                 activeProfiles = environment.activeProfiles.toSet(),
@@ -1171,6 +1177,8 @@ internal data class ConfigSnapshot(
     val dashboards: Map<String, String?> = emptyMap(),
     /** §3.36 (#785) — every `datapipelines.lake.*` key as its raw string (`LakeRules.KEYS`); the S3 credentials as presence only. */
     val lake: Map<String, String?> = emptyMap(),
+    /** §3.29 (#957) — `datapipelines.scheduler.enabled` and `.threads` as raw strings (`SchedulerThreadsRules.KEYS`). */
+    val scheduler: Map<String, String?> = emptyMap(),
     /** §3.31 (#279) — `datapipelines.web.max-request-bytes`, raw so a bad value is a NAMED violation. */
     val webMaxRequestBytes: String? = null,
     val activeProfiles: Set<String>,
@@ -1248,6 +1256,7 @@ internal data class ConfigSnapshot(
             "scriptJs=$scriptJs, scriptJsLoaderPath=$scriptJsLoaderPath, " +
             "parameters=$parameters, " +
             "lake=$lake, " +
+            "scheduler=$scheduler, " +
             "webMaxRequestBytes=$webMaxRequestBytes, " +
             "orgTimezone=$orgTimezone, " +
             "activeProfiles=$activeProfiles, " +

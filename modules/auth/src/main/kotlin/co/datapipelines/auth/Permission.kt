@@ -120,6 +120,12 @@ enum class Permission(
     LAKE_TABLE_MANAGE("lake_table.manage"),
     LAKE_APPEND("lake.append"),
 
+    /**
+     * #957 — run a managed table's maintenance (the maintenance worker's service check; no route). System only
+     * ([RolePermissions.SYSTEM_ONLY]): no member role, no key role and no super admin holds it.
+     */
+    LAKE_MAINTAIN("lake.maintain"),
+
     // §2.4 — published endpoints, semantics, reference
     ENDPOINT_READ("endpoint.read"),
     ENDPOINT_PUBLISH("endpoint.publish"),

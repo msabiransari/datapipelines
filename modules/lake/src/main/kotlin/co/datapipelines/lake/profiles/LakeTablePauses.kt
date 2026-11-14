@@ -113,7 +113,7 @@ class LakeTablePauses internal constructor(
         private const val PAUSE = "pause"
         private val mapper = JsonMapper.builder().build()
 
-        /** Reads the pause keys; any other key in `policy_json` is a store that broke V60's contract. */
+        /** Reads the pause keys; any other key in `policy_json` is a store that broke V61's contract. */
         fun parse(policyJson: String): LakeTablePause {
             val root = mapper.readTree(policyJson) as? ObjectNode ?: error("policy_json is not an object")
             check(root.fieldNames().asSequence().all { it == PAUSE }) { "policy_json holds keys other than pause" }

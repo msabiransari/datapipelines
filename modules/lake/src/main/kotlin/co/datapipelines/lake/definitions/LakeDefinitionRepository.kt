@@ -81,7 +81,7 @@ class LakeDefinitionRepository(
 
     /**
      * Inserts the table row; false when the namespace already has a table of that name. The row takes the DEFAULT
-     * profile in this same statement (a sub-select, so no row is ever without one; V60, lake.md "Profiles") and an
+     * profile in this same statement (a sub-select, so no row is ever without one; V61, lake.md "Profiles") and an
      * empty `policy_json`: the table's own keys are only its two pauses, set later (`LakeTablePauses`).
      */
     fun insertTable(
@@ -271,7 +271,7 @@ class LakeDefinitionRepository(
         )
 
     companion object {
-        /** The default profile's id, as every writer of `lake_tables_managed` names it (V60: exactly one row is marked). */
+        /** The default profile's id, as every writer of `lake_tables_managed` names it (V61: exactly one row is marked). */
         const val DEFAULT_PROFILE = "(SELECT id FROM lake_profiles WHERE is_default)"
 
         /** The house body hash (versioning §3.3, `ArtifactSql.HASH_EXPR`): sha256 over the stored jsonb's text. */

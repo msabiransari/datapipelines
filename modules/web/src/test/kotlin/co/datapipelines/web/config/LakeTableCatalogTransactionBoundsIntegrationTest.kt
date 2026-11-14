@@ -382,7 +382,7 @@ class LakeTableCatalogTransactionBoundsIntegrationTest {
         const val LAKE = "lake"
 
         /**
-         * V60's `production` profile (the default), re-inserted after the truncation: `lake_profiles.created_by`
+         * V61's `production` profile (the default), re-inserted after the truncation: `lake_profiles.created_by`
          * references `users`, so `TRUNCATE users CASCADE` empties it, and a managed table's INSERT takes the default
          * profile by a sub-select (brief 956 D5). Nothing here reads its values; they are the built-ins so the row stays
          * a valid profile for any later reader of this database.

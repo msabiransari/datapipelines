@@ -87,6 +87,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt",
                 // #325 — the §3.2 lifecycle-write ceiling, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/ExecutorRules.kt",
+                // #957 — the scheduler-threads rule for lake maintenance (D9), split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/SchedulerThreadsRules.kt",
             )
     }
 }

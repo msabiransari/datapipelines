@@ -5,7 +5,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.transaction.support.TransactionTemplate
 
 /**
- * The `production` profile's one-time seed (brief 956 D3, lane cut L5): V60 inserts `production` with the built-in
+ * The `production` profile's one-time seed (brief 956 D3, lane cut L5): V61 inserts `production` with the built-in
  * values and `seed_pending`; the first start with the lake enabled copies `datapipelines.lake.maintenance.window` and
  * `.max-bytes-rewritten-per-run` into it in ONE statement guarded by `WHERE seed_pending`, and clears the mark. It
  * runs once per database and never again overwrites a profile (a service edit clears the mark too); two instances

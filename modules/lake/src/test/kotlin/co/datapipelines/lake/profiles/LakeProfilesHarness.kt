@@ -14,7 +14,7 @@ import java.util.UUID
 /**
  * The profile and pause services wired as `LakeProfilesAutoConfiguration` wires them, over the module's one Postgres
  * and the definitions harness (tables are created through `LakeDefinitionService`, the production path). [reset]
- * empties the definitions and puts the two built-in profiles back exactly as V60 leaves them, so suites that run after
+ * empties the definitions and puts the two built-in profiles back exactly as V61 leaves them, so suites that run after
  * these see the migration's state. [clock] is the pause service's catalog clock (the database's `now()` by default).
  */
 internal class LakeProfilesHarness {
@@ -67,7 +67,7 @@ internal class LakeProfilesHarness {
 
     fun profileCount(): Int = requireNotNull(jdbc.queryForObject("SELECT count(*) FROM lake_profiles", Int::class.java))
 
-    /** The two built-ins with V60's values, marks and NULL actors; every other profile removed (no table refers to one). */
+    /** The two built-ins with V61's values, marks and NULL actors; every other profile removed (no table refers to one). */
     private fun restoreBuiltIns() {
         jdbc.update("UPDATE lake_profiles SET is_default = FALSE WHERE is_default")
         jdbc.update("DELETE FROM lake_profiles WHERE name NOT IN ('production', 'development')")
@@ -93,7 +93,7 @@ internal class LakeProfilesHarness {
     }
 
     companion object {
-        /** V60's `development` document: the built-in values with the whole-day window. */
+        /** V61's `development` document: the built-in values with the whole-day window. */
         val DEVELOPMENT: String = LakeProfileFixtures.document("maintenance.window" to "\"00:00-00:00\"")
     }
 }
