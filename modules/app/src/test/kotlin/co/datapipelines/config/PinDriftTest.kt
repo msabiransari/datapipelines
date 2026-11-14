@@ -3,6 +3,7 @@ package co.datapipelines.config
 import co.datapipelines.config.DriverVersionSpecDriftTest.Companion.DUCKDB
 import co.datapipelines.config.DriverVersionSpecDriftTest.Companion.H2
 import co.datapipelines.config.DriverVersionSpecDriftTest.Companion.SQLITE_JDBC
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -60,6 +61,16 @@ class PinDriftTest {
             mapOf("build-managed" to listOf("lock/gradle.lockfile:1:1.4.0", "lock/gradle.lockfile:2:1.3.0"))
         report.staleAllow shouldContainExactly listOf(stale)
         report.staleAllow.single() shouldBeSameInstanceAs stale
+    }
+
+    @Test
+    fun `the DuckDB rehearsal's next patch raises the third component, zeroes the fourth and refuses other shapes`() {
+        DriverVersionSpecDriftTest.nextPatch("2.7.4.1") shouldBe "2.7.5.0"
+        DriverVersionSpecDriftTest.nextPatch("1.9.9.0") shouldBe "1.9.10.0"
+        listOf("2.7.4", "2.7.4.1.0", "2.7.x.1", "2.7..1", "").forEach { malformed ->
+            shouldThrow<IllegalStateException> { DriverVersionSpecDriftTest.nextPatch(malformed) }.message shouldBe
+                "duckdb-jdbc $malformed is not four numeric components"
+        }
     }
 
     @Test

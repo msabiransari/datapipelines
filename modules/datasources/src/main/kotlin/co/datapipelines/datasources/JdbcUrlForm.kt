@@ -27,7 +27,7 @@ import co.datapipelines.typesystem.Dialect
  *    [Form.Unknown], **refused** (fail-closed: a form nobody has classified is not one a rule
  *    can reason about).
  *
- * DuckDB is embedded always and case-SENSITIVE (#941; duckdb_jdbc 1.5.5.1, probed in a forked
+ * DuckDB is embedded always and case-SENSITIVE (#941; duckdb_jdbc 1.5.6.0, probed 2026-11-13 in a forked
  * JVM by `DuckDbMemoryFormParityTest`): exactly `:memory:` (or the empty sub-name) is in-process
  * memory, while `jdbc:duckdb::MEMORY:` and `::Memory:` create literal files named `:MEMORY:` and
  * `:Memory:`, so a mixed-case variant is the file the driver opens. Named memory forms remain

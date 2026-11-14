@@ -606,7 +606,7 @@ class SchemaIntrospectorRoutingTest {
 
     @Test
     fun `schemas excludes duckdb's pg_catalog beside information_schema`() {
-        // Verified against the pinned duckdb_jdbc 1.5.5.1: getSchemas() reports main,
+        // Verified 2026-11-13 against the pinned duckdb_jdbc 1.5.6.0: getSchemas() reports main,
         // information_schema and pg_catalog — the bare {information_schema} default leaked
         // pg_catalog into the listing. No arm64 DuckDB-flavored container matrix here; like
         // MSSQL, this is the mocked-metadata unit verification.
@@ -779,7 +779,7 @@ class SchemaIntrospectorRoutingTest {
                 shouldThrow<DatasourceUnreachableException> { introspector.columns(name, "deals") }
             },
             {
-                // (a) DuckDB 1.5.5.x closed connection — plain java.sql.SQLException, NULL
+                // (a) DuckDB 1.5.6 closed connection (verified 2026-11-13) — plain java.sql.SQLException, NULL
                 // SQLState, vendor code 0, the JDBC layer's own "Connection was closed" text
                 // (native errors are ALSO plain null-state SQLExceptions with different
                 // messages, so the message is the only discriminator — live-pinned in

@@ -568,7 +568,7 @@ leaves through that proxy (DuckDB's `http_proxy`, set before the generation's lo
 A managed read's object-store connection lives at most `egress-max-age-seconds`; a trickling store's connection is
 cut there, and the reader ends by the end-by bound below. This
 is a hygiene bound, not a safety premise: reader leases are the safety premise. A healthy keep-alive connection older
-than the max-age is also cut, and the next request retries on a fresh one (`http_retries`); measured with DuckDB 1.5.5,
+than the max-age is also cut, and the next request retries on a fresh one (`http_retries`); measured 2026-11-07 with DuckDB 1.5.5,
 a query's proxy connections close when the query ends, so within the max-age floor below a healthy query does not meet
 one. The bound is per connection, not per query. httpfs retries a cut transfer too, so a store that trickles on EVERY
 attempt ends a reader, counted from its first GET, by **end-by = (`http_retries` + 1) × max-age + slack**, where

@@ -200,8 +200,8 @@ class LakeInstanceOwner private constructor(
      * owns into its own close, each on its own thread, so every physical close is attempted independently — before the
      * pool's Hikari shutdown, whose first act is a wait on connection creation.
      *
-     * Why a close and not a bare interrupt, and why one thread per handle (read off the pinned duckdb_jdbc 1.5.5.1
-     * bytecode): `DuckDBConnection.interrupt()` is package-private and refuses to run unless the caller holds the
+     * Why a close and not a bare interrupt, and why one thread per handle (read off the pinned duckdb_jdbc 1.5.6.0
+     * bytecode, verified 2026-11-13): `DuckDBConnection.interrupt()` is package-private and refuses to run unless the caller holds the
      * connection's `connRefLock`; the public route to it is `close()`, which takes that lock, calls `interrupt()`
      * FIRST, and only then closes the connection's statements — and a statement's close waits on the statement lock
      * the running `execute` holds until the engine returns. So one handle's close returns only once its reader has

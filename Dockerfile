@@ -25,13 +25,13 @@ RUN groupadd --system --gid 999 datapipelines && useradd --system --uid 999 --gi
 # The platform directory follows the build's TARGETARCH (BuildKit fills it): `docker build`
 # on Apple Silicon produces a linux/arm64 image, whose DuckDB looks for linux_arm64
 # extensions — hard-coding linux_amd64 here made the runtime LOAD-only against an EMPTY
-# directory on arm64 (found by the 089 live gate: pool init failed with
+# directory on arm64 (found by the 089 live gate, measured 2026-09-08: pool init failed with
 # ".../v1.5.5/linux_arm64/httpfs.duckdb_extension not found"). The layout
 # (<dir>/v<ver>/<platform>/<name>) is what a custom extension_directory still requires,
 # verified by the 089 §7.3 spike on this exact base image with --network none.
 # `|| exit 1` because /bin/sh runs this loop without `set -e`: a failed curl must fail the
 # build, not just one iteration.
-ARG DUCKDB_CORE_VERSION=1.5.5
+ARG DUCKDB_CORE_VERSION=1.5.6
 ARG TARGETARCH
 COPY deploy/duckdb-extensions.sha256 /tmp/duckdb-extensions.sha256
 RUN case "$TARGETARCH" in \

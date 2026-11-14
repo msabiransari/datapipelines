@@ -19,7 +19,7 @@ package co.datapipelines.datasources
  *  - each [indexes] query: rows of `index_name`, `is_unique`, `is_primary`, plus EITHER
  *    `ordinal`+`column_name` (one row per key column, in key order) or an `expressions` text
  *    carrying the whole key list — DuckDB's `duckdb_indexes()` exposes an explicit index's
- *    columns only as that expression-list text (verified 1.5.5.1: `['"label"', fare]`), which
+ *    columns only as that expression-list text (verified 1.5.6.0, 2026-11-13: `['"label"', fare]`), which
  *    the reader parses conservatively.
  *  - [columnStats]: one row per column of `column_name` plus any of `n_distinct`,
  *    `null_fraction`, `min_value`, `max_value` — or a `histogram_bounds` text (Postgres's

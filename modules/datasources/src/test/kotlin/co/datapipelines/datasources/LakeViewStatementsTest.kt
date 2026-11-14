@@ -170,7 +170,7 @@ class LakeViewStatementsTest {
     @Test
     fun `hive_partitioning is unconditional - a registered-but-absent partition column cannot disable pruning`() {
         // Both tables carry no partition_column distinction at this layer: the clause is always
-        // emitted (verified harmless on a plain file against duckdb_jdbc 1.5.5.1).
+        // emitted (verified harmless on a plain file against duckdb_jdbc 1.5.6.0, 2026-11-13).
         val statements = LakeViewStatements.forTables(listOf(table(listOf("nyc"), "plain")), lake)
         statements.single { it.startsWith("CREATE OR REPLACE VIEW") } shouldContain "hive_partitioning = true"
     }

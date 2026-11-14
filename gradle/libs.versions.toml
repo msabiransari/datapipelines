@@ -150,7 +150,7 @@ httpcomponents-core5 = "5.4.3"
 tomcat = "10.1.59"
 
 # --- Not managed by the Spring Boot BOM: exact pins required -----------------
-duckdb-jdbc = "1.5.5.1"
+duckdb-jdbc = "1.5.6.0"
 # awssdk s3: the 089 §F MinIO suites' bucket/upload client — test-scoped in
 # tests/integration-tests (the MinIO E2E) and modules/datasources (the LAKE
 # connectivity probe), and since #785 PRODUCTION-scoped in modules/lake (the

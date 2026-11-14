@@ -13,7 +13,9 @@ import kotlin.math.pow
  * low-speed threshold (duckdb-httpfs#519). Live reader leases protect snapshots independently of termination.
  * A silent-store test observes roughly 30.1 seconds with these settings and 120.5 seconds at engine defaults.
  *
- * ## The engine's semantics (read off DuckDB v1.5.5 `src/main/http/http_util.cpp` and the settings table, probed)
+ * ## The engine's semantics (read off DuckDB v1.5.6 `src/main/http/http_util.cpp` and the settings table, probed)
+ *
+ * The file is v1.5.5's blob unchanged, verified 2026-11-13 against both tags' trees.
  *
  * - `http_timeout` (seconds) is the client's connection, write AND read timeout alike ("HTTP timeout
  *   read/write/connection/retry"); a stalled store therefore costs at most one of each per attempt.

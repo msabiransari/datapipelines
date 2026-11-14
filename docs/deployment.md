@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.71
+**Status:** v1.72
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-13
@@ -34,7 +34,7 @@ This is **lighter than the core specs** — most operational concerns are the op
 
 - **Base image**: `eclipse-temurin:21-jre` (the Ubuntu glibc JRE 21 image, chosen over a smaller alpine base because argon2-jvm loads its native library through JNA, which ships glibc binaries).
 - **Layers**: single stage: the boot jar is built on the host (`./gradlew :modules:app:bootJar`) and copied in; the image adds the DuckDB extension bundle, the GraalJS isolate with its pre-installed resource cache, and the third-party notices file.
-- **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.5, pre-populated under `/opt/duckdb/extensions/v1.5.5/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build). The eight decompressed binaries (four per platform) are pinned in `deploy/duckdb-extensions.sha256`; the extension build layer runs `sha256sum -c --ignore-missing --strict` before `USER` and refuses a mismatch. `/app/THIRD-PARTY-NOTICES` includes the extensions at their footer commits, their copyrights and licences, and their pinned linked closure: direct and transitive vcpkg ports, the DuckDB core `third_party` components, and code bundled inside ports (the committed closure files and re-pin procedure are described below).
+- **Bundled DuckDB extensions (dp-lake)**: `httpfs`, `aws`, `iceberg` and `avro` for DuckDB core v1.5.6, pre-populated under `/opt/duckdb/extensions/v1.5.6/<platform>/` (`<platform>` = `linux_amd64` or `linux_arm64`, following the build's `TARGETARCH`) and activated by the image's `ENV DATAPIPELINES_DUCKDB_EXTENSION_DIRECTORY` — a LAKE datasource `LOAD`s them from disk and never `INSTALL`s at runtime, so no egress to `extensions.duckdb.org` is needed ([Configuration §3.25](configuration.md)). Adds ~108 MB uncompressed (~39 MB downloaded at build). The eight decompressed binaries (four per platform) are pinned in `deploy/duckdb-extensions.sha256`; the extension build layer runs `sha256sum -c --ignore-missing --strict` before `USER` and refuses a mismatch. `/app/THIRD-PARTY-NOTICES` includes the extensions at their footer commits, their copyrights and licences, and their pinned linked closure: direct and transitive vcpkg ports, the DuckDB core `third_party` components, and code bundled inside ports (the committed closure files and re-pin procedure are described below).
 - **Size target**: < 250 MB compressed.
 - **User**: non-root `datapipelines`, a system account with fixed ids: UID 999, GID 999 (`groupadd --system --gid 999`, `useradd --system --uid 999`, Dockerfile); the reference chart's application Deployment pins `runAsUser`/`runAsGroup`/`fsGroup` to 999 (`ImageUserPinSpecDriftTest` holds the three equal), and a pod that runs the application under its own numeric user names 999; Compose sets no `user:` and inherits the image account (the egress renderer's no-override rule, §4.3, is unchanged); the chart's `egress-config-render` init container is the one deliberate exception — it runs this image as 65532 with an `fsGroup`-backed `emptyDir`.
 - **Entrypoint**: `["java", "-Dpolyglot.engine.userResourceCache=/opt/graaljs/resources", "-jar", "/app/datapipelines.jar"]` (exec form). The image defines no JVM-flags hook: a JVM option variable (`JAVA_TOOL_OPTIONS` and friends) would reach the JVM without one, which is why the shipped deploy files refuse those names (§6.4, §9).
@@ -44,14 +44,29 @@ This is **lighter than the core specs** — most operational concerns are the op
 reads the resolved version; build checks and the drift guard cover the related pins
 and detected statements described below. A bump follows these steps in order:
 
-1. **Catalog.** Edit `duckdb-jdbc`. Dependency locking is strict, so the next resolution
-   refuses the edit until step 2 has run.
+1. **Catalog.** Edit `duckdb-jdbc`. Dependency locking is strict, but a stale lock does not
+   always refuse the edit (DEVELOPMENT.md §6.2, #566: a lowered request can resolve to the
+   locked higher version). For a raised version, the check that refuses it is the first task
+   that resolves the configuration, a compile or test task. Measured 2026-11-13 (#936) with the
+   catalog at 1.5.6.0 and one lockfile left at 1.5.5.1, `:modules:lake:test` failed with "Cannot
+   find a version of 'org.duckdb:duckdb_jdbc' that satisfies the version constraints …
+   {strictly 1.5.5.1} … Dependency version enforced by Dependency Locking", while
+   `:modules:lake:dependencies` on the same configuration exited 0 and only marked the line
+   `FAILED`. Either way, read the lock diff of step 2.
 2. **Locks and verification metadata.** Regenerate every `gradle.lockfile` and
    `gradle/verification-metadata.xml` from a cold `GRADLE_USER_HOME` with CI's cold
    command, as DEVELOPMENT.md §6.2 and §6.3 describe, and review the added checksums.
    What the jar states about the driver follows the resolution with no edit: the
    datasources jar's generated `duckdb-version.properties`, the site's version token and
-   `DuckDbVersionTest`'s `PRAGMA version` oracle.
+   `DuckDbVersionTest`'s `PRAGMA version` oracle. **Run the cold command after steps 3–5,
+   not before:** it builds `:modules:app:bootJar`, whose `generateThirdPartyNotices` task
+   refuses a catalog core that is not the Dockerfile `ARG` ("DUCKDB_CORE_VERSION <old> is
+   not the core of the catalog's duckdb-jdbc <new>"), so a run made between the catalog
+   edit and step 3 fails there, part-way through writing locks and metadata (#936: its
+   output was discarded). The order that works is step 1, steps 3–5, then one complete
+   cold run from a new cold home. The metadata writer adds the new driver's jar and pom
+   but keeps the old version's `<component>` block: remove that block by hand, so the
+   metadata diff is the old component out and the new one in.
 3. **Core ARG and checksums.** Set the Dockerfile's `DUCKDB_CORE_VERSION` to the catalog
    version's first three components: the core the driver reports as `PRAGMA version`
    (`v<core>`), which keys the extension repository (the JDBC patch version 404s there).
@@ -87,9 +102,29 @@ and detected statements described below. A bump follows these steps in order:
    non-allowlisted DuckDB context names that version somewhere in the tree. Review
    its reasoned ownership exclusions, including generated files, frozen snapshots,
    and the sample-data CLI pins and manifests; those have separate update procedures.
+   The guard's bump rehearsal derives its hypothetical from the catalog (the third
+   component raised by one, the fourth set to 0), so no bump edits it (#936). Two places
+   the red list does not name move too: `ThirdPartyNoticesTest`'s fixtures (the four
+   `<name>:v<core>+<commit>` coordinates from step 3's annotations, and the fixture
+   literals that copy the committed closures' core, commits and "another version" cases),
+   and the agent docs golden under `modules/mcp-server/src/test/resources/docs-golden/`,
+   which holds the rendered core version: regenerate it with DEVELOPMENT.md §10.1a's
+   command and read the diff — only the version token moves. Re-measure the
+   extension-loaded function catalog too, whatever `DuckDbCarrierCatalogTest` says (its
+   catalog excludes extension functions): with `httpfs`, `aws`, `avro` and `iceberg`
+   loaded from the bundled files at the step 3 commits, list the distinct function names
+   with that test's filter and compare them with the previous bump's list; an added name
+   that can carry or run SQL is an author-SQL guard change, not a bump.
 7. **Posture evidence.** Rerun the dp-lake read-posture evidence harness (spike E9,
    #775) against the new driver and extensions. A changed result is a finding to resolve
-   before the bump lands.
+   before the bump lands. The harness is not in this tree: it lives with the project's
+   private evidence, has its own Gradle build, and is hard-wired to lane 775's container
+   names, env file, Gradle home, build directory, ports and scratch paths. Run a COPY,
+   never the original: first isolation edits only (those names, paths and ports, so
+   nothing of the original run is read or written), then the pin (the driver, and the
+   core where it pins extensions), each saved as its own diff. Compare the copy's `CASE`
+   lines with the committed transcript: the identities and verdicts match line for line,
+   and paths, ports, ids and timings inside a line are volatile.
 8. **Prove it.** Run `:modules:app:generateThirdPartyNotices`, the buildSrc licence
    fixtures, `DockerfileDuckDbExtensionPinTest` and `DriverVersionSpecDriftTest`, rebuild
    the jar, and prove one bad sum refuses the image build before building the restored
@@ -1697,6 +1732,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-13 | v1.72 | #936 DuckDB patch bump to duckdb_jdbc 1.5.6.0 (core 1.5.6) | **§3.1:** the image's core and extension bundle move to v1.5.6 (httpfs, aws, iceberg and avro at the commits the build stage reads). The runbook records what the bump taught: step 1 names the check that refuses a raised catalog version left without regenerated locks (the first task that resolves the configuration; the `dependencies` report exits 0); step 2's cold command runs after steps 3–5, because `generateThirdPartyNotices` refuses a catalog core that is not the Dockerfile `ARG`, and the metadata writer keeps the old driver's component, which is removed by hand; step 6's rehearsal derives the next patch from the catalog, and the notices fixtures, the docs golden and the extension-loaded function catalog move with the bump; step 7 runs a copy of the posture harness and compares its case lines. |
 | 2026-11-12 | v1.71 | #753/#754 image account ids and distribution — renumbered at final sync after dependency-graph | **§3.1:** the image's `datapipelines` account has fixed ids, UID/GID 999 (the id the unpinned system account already received), and the reference chart's application pod `securityContext` pins `runAsUser`/`runAsGroup`/`fsGroup` to the same 999 instead of 1000, an id the image never had; `ImageUserPinSpecDriftTest` holds the Dockerfile, the chart and this bullet equal. Chart 0.4.0 → 0.4.1. The section no longer claims a registry publish: nothing in this repository pushes the image; build it from a checkout and point Compose or the chart at it. |
 | 2026-11-11 | v1.70 | #895 upgrade conversion, one rollback boundary | **§8.2:** the APIs and the schedules convert in ONE transaction, APIs first — a refused or failed conversion leaves every API, schedule and queued run as it was, and a restart after the fix converts everything; the migrations Flyway applied stay applied; a concurrent writer rolls the conversion back and it is retried from fresh rows up to three times (`event=upgrade.conversion.retry`); success lines are logged only after the commit. Replaces the schedules-only "ONE transaction" sentence of v1.68. |
 | 2026-11-11 | v1.69 | #889 demo API retirement through the lifecycle | **Appendix B, the demo API:** where authoring is enabled, blanking the key (or a manifest that drops a path) retires a released demo API through the API version verbs — draft purged, every released version discarded, the row kept; the revoked demo key gets `401`, another valid bound key `503 endpoint.pipeline_not_released` — instead of deleting it; a key set again releases a new version of the same API. Where authoring is disabled the managed key is revoked but the API is not retired and keeps serving to other valid bound keys — a known limitation tracked by #897, with the operator's workaround. |

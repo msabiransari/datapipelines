@@ -224,8 +224,8 @@ class LakeDialectAdapterTest {
 
     @Test
     fun `a bundled extension directory turns the S3 setup into SET + bare LOADs - never an INSTALL`() {
-        // 089 §D (the §7.3 spike's CAN verdict): with the directory set, the statements are
-        // SET extension_directory first, then bare LOADs — in DuckDB v1.5.5 LOAD reads only
+        // 089 §D (the §7.3 spike's CAN verdict, re-probed 2026-11-13): with the directory set, the statements are
+        // SET extension_directory first, then bare LOADs — in DuckDB v1.5.6 LOAD reads only
         // already-present files, so an INSTALL would be the ONLY network path, and it is gone.
         val init =
             lakeBundled.connectionInit(

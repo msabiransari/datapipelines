@@ -94,8 +94,8 @@ class DialectAdaptersTest {
                 "db_denydatawriter",
                 "guest",
             )
-        // DuckDB is Postgres-lineage: its engine catalogs report as plain rows (verified against
-        // the pinned duckdb_jdbc 1.5.5.1 — getSchemas() returns main, information_schema,
+        // DuckDB is Postgres-lineage: its engine catalogs report as plain rows (verified 2026-11-13 against
+        // the pinned duckdb_jdbc 1.5.6.0 — getSchemas() returns main, information_schema,
         // pg_catalog), so the bare {information_schema} default leaks pg_catalog. The two DOTTED
         // entries are 087's: once the listing carries catalogs, DuckDB's own `system` and `temp`
         // catalogs become visible and EACH holds a schema called `main` (probed 2026-09-07:

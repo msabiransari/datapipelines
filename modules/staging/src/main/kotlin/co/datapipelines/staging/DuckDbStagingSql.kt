@@ -121,7 +121,7 @@ internal object DuckDbStagingSql {
 /**
  * Turns the engine's own failures into the catalogued staging codes (staging.md §8.5, §7.2). The
  * pinned driver reports every engine error with SQLState `null`, so the classification reads the
- * error class at the START of the engine's message — text measured on 1.5.5.1 (lane #795 probes
+ * error class at the START of the engine's message — text measured on 1.5.6.0, 2026-11-13 (lane #795 probes
  * 13, 15, 16) and pinned by `DuckDbEngineFailuresTest`:
  *
  *  - an `Out of Memory Error` whose text says the limit "was set by the 'max_temp_directory_size'
