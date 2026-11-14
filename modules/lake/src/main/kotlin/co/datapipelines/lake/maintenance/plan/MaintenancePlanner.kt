@@ -126,13 +126,14 @@ class MaintenancePlanner(
         val profile = repository.startAttempt(target.tableId, attempt.id) ?: return Measured.NO
         val reader = readers.reader()
         val started = System.nanoTime()
-        val future = reader.submit { io -> read(io, reader, target, profile, attempt) }
+        val future = reader.submit { read(reader, target, profile, attempt) }
         return try {
             if (future.get(bounds.tableTimeout.toNanos(), TimeUnit.NANOSECONDS)) Measured.YES else Measured.NO
         } catch (_: TimeoutException) {
             timedOut(target, reader, attempt, future, started)
         } catch (failure: ExecutionException) {
-            // The reader won and its database write threw: the attempt keeps whatever the row held.
+            // The reader won and its database write threw (a failed read or client construction is stamped by the
+            // reader, never thrown): the attempt keeps whatever the row held.
             LOG.warn(
                 "event=lake.maintenance.plan_write_failed table_id={} cause={}",
                 target.tableId,
@@ -168,7 +169,8 @@ class MaintenancePlanner(
                 Measured.NO
             }
         }
-        repository.fail(target.tableId, attempt.id, PlanErrors.TIMEOUT)
+        // Retired and tracked FIRST: the abandoned reader stays counted, its table excluded and the reader never reused,
+        // whatever the stamp below does. A stamp that throws reaches the scheduler boundary as it was thrown.
         readers.retire(reader, target.tableId)
         LOG.warn(
             "event=lake.maintenance.plan_read_abandoned table_id={} elapsed_ms={} abandoned_reads={}",
@@ -176,36 +178,44 @@ class MaintenancePlanner(
             TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started),
             readers.outstanding(),
         )
+        repository.fail(target.tableId, attempt.id, PlanErrors.TIMEOUT)
         return Measured.NO
     }
 
     /**
-     * On the reader's thread: the measurement, then `running` → `publishing` and only then the write (figures, or the
-     * failure's code). Finding `abandoned`, it writes nothing, closes its client and lets its thread end.
+     * On the reader's thread: the client (built on the reader's first use) and the measurement, then `running` →
+     * `publishing` and only then the write (figures, or the failure's code). A client that cannot be built is a failed
+     * read like any other. Finding `abandoned`, it writes nothing, closes whatever client it holds and lets its thread
+     * end. The compare-and-set runs in a `finally`: even a throwable the measurement does not catch settles the attempt,
+     * so an abandoned reader always ends and frees its place.
      */
     @Suppress("TooGenericExceptionCaught") // a failed read is stamped with its code; nothing is rethrown into the pass
     private fun read(
-        io: org.apache.iceberg.io.FileIO,
         reader: PlanReaders.Reader,
         target: PlanTarget,
         profile: ProfileCopy,
         attempt: PlanAttempt,
     ): Boolean {
-        val result: Result<TableFigures> =
-            try {
-                Result.success(measurer.measure(io, target, profile.profile))
-            } catch (failure: Exception) {
-                Result.failure(failure)
+        var result: Result<TableFigures>? = null
+        var won = false
+        try {
+            result =
+                try {
+                    Result.success(measurer.measure(reader.client(), target, profile.profile))
+                } catch (failure: Exception) {
+                    Result.failure(failure)
+                }
+        } finally {
+            hooks.beforeReaderSet(target.tableId)
+            won = attempt.state.compareAndSet(AttemptState.RUNNING, AttemptState.PUBLISHING)
+            hooks.afterReaderSet(target.tableId)
+            if (!won) {
+                reader.endAbandoned()
+                LOG.info("event=lake.maintenance.plan_read_ended table_id={} published=false", target.tableId)
             }
-        hooks.beforeReaderSet(target.tableId)
-        val won = attempt.state.compareAndSet(AttemptState.RUNNING, AttemptState.PUBLISHING)
-        hooks.afterReaderSet(target.tableId)
-        if (!won) {
-            reader.endAbandoned()
-            LOG.info("event=lake.maintenance.plan_read_ended table_id={} published=false", target.tableId)
-            return false
         }
-        val failure = result.exceptionOrNull()
+        if (!won) return false
+        val failure = checkNotNull(result).exceptionOrNull()
         if (failure != null) {
             LOG.warn("event=lake.maintenance.plan_measure_failed table_id={} cause={}", target.tableId, FailureShape.cause(failure))
             repository.fail(target.tableId, attempt.id, PlanErrors.codeOf(failure))

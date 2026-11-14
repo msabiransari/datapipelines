@@ -15,6 +15,7 @@ import org.apache.iceberg.FileFormat
 import org.apache.iceberg.FileMetadata
 import org.apache.iceberg.SortOrder
 import org.apache.iceberg.Table
+import org.apache.iceberg.io.FileIO
 import java.sql.Timestamp
 import java.time.Clock
 import java.time.Duration
@@ -55,8 +56,13 @@ internal class PlanHarness {
         m.close()
     }
 
-    fun readers(name: String = threadName): PlanReaders =
-        PlanReaders(ioFactory = { StallingFileIo(m.defs.catalogs.metadataFileIo(), control) }, threadName = name)
+    fun readers(
+        name: String = threadName,
+        ioFactory: () -> FileIO = ::client,
+    ): PlanReaders = PlanReaders(ioFactory = ioFactory, threadName = name)
+
+    /** A reader's client as production builds it (the catalog's `metadataFileIo()`), steered by [control]. */
+    fun client(): FileIO = StallingFileIo(m.defs.catalogs.metadataFileIo(), control)
 
     @Suppress("LongParameterList")
     fun planner(
@@ -69,6 +75,7 @@ internal class PlanHarness {
         worker: KeyedSystemJob = WORKER,
         clock: Clock = Clock.systemUTC(),
         hooks: PlanRaceHooks = PlanRaceHooks.NONE,
+        repository: PlanRepository = this.repository,
     ): MaintenancePlanner =
         MaintenancePlanner(
             bounds = PlanBounds(Duration.ofMinutes(15), pageSize, tableTimeout, maxAbandonedReads),

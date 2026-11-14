@@ -64,10 +64,22 @@ class PlanReaders(
         var ended: Boolean = false
             private set
 
-        /** Runs [task] on the reader's thread with its client (built there, on first use). */
-        fun <T> submit(task: (FileIO) -> T): Future<T> = executor.submit<T> { task(io ?: ioFactory().also { io = it }) }
+        /**
+         * Runs [task] on the reader's thread. The task asks for the client with [client]: building it is part of the
+         * task, so a construction that fails or blocks meets the same failure, state and cleanup handling as the read.
+         */
+        fun <T> submit(task: () -> T): Future<T> = executor.submit<T>(task)
 
-        /** On the reader's own thread, after an abandoned read: closes its client and lets the thread end. */
+        /**
+         * The reader's client, built on first use; call it on the reader's own thread (inside [submit]). A construction
+         * that throws leaves no client: the next use builds again.
+         */
+        fun client(): FileIO = io ?: ioFactory().also { io = it }
+
+        /**
+         * On the reader's own thread, after an abandoned read (also one whose client was never built): closes whatever
+         * client it holds and lets the thread end. Idempotent.
+         */
         internal fun endAbandoned() {
             try {
                 io?.close()

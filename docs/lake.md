@@ -956,15 +956,18 @@ queue, and table ids come from the catalog rows, never from a request.
    manifests and files not stamped with the table's sort order (profile-independent), and the small files in candidate
    partitions, the unsorted files larger than the profile's cap and the candidate bytes (profile-dependent; a file both
    small and unsorted counts once, a file larger than the cap is left out). A table with no snapshot is measured with
-   every figure NULL. A failure or a timeout stamps the attempt and its error and keeps the last good figures.
+   every figure NULL. A failure (also a reader client that cannot be built) or a timeout stamps the attempt and its
+   error and keeps the last good figures.
 2. **The planner's own readers.** Each measurement runs on a reader: one daemon thread with the object-store client it
    built, reused for the next table when the measurement ends in time. A read still running at the bound is
-   **abandoned**: its attempt and error (`timeout`) are stamped, the reader is retired with the read (never reused, never
-   interrupted into a second use), and the next table gets a new reader, so one stalled read cannot stop the page. A
+   **abandoned**: the reader is retired with the read (never reused, never interrupted into a second use) and only then
+   is its error (`timeout`) stamped, so a stamp that fails still leaves the read counted and its table excluded (the
+   failure ends the plan as thrown); the next table gets a new reader, so one stalled read cannot stop the page. A
    table with an abandoned read still running is not picked again until that read ends. At most
    `plan-max-abandoned-reads` are outstanding; at the limit the plan measures nothing more, counts the page's rest as
-   not measured (`lake.maintenance.plan_reads_exhausted`), and still decides from the stored figures. An abandoned read
-   that ends writes nothing, closes its client on its own thread, and frees one.
+   not measured (`lake.maintenance.plan_reads_exhausted`), and still decides from the stored figures. Building the
+   client is part of the read: an abandoned read that ends, also one whose client construction failed late, writes
+   nothing, closes whatever client it holds on its own thread, and frees one.
 3. **One winner per attempt.** An attempt moves `running` → `publishing` (the reader, before it writes) or `running` →
    `abandoned` (the pass, at the bound) by one compare-and-set; an abandoned attempt never publishes, and a reader that
    won a moment before the bound gets its one bounded write waited for. The figures' write is also conditional on the
@@ -1014,7 +1017,7 @@ time, and the measurement's times; a figure whose source was not read is NULL.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-14 | v1.31 | 959 (#959, dp-lake P6) — renumbered at the spec merge after #961's v1.28, #960's v1.29 and #968's v1.30 | **§11 Maintenance runs** gains the planner: the recurring `lake-maintenance-planner` task and its four keys; measuring from the manifests on the planner's own readers (abandoned reads, their limit, one winner per attempt, the stamp fence); stale figures and the measured-first rule; daily usage and growth; the due function, the one run-history statement, the gate shared with the worker, and the ranked enqueue; the figures read method. |
+| 2026-11-14 | v1.31 | 959 (#959, dp-lake P6) — renumbered at the spec merge after #961's v1.28, #960's v1.29 and #968's v1.30 | **§11 Maintenance runs** gains the planner: the recurring `lake-maintenance-planner` task and its four keys; measuring from the manifests on the planner's own readers (abandoned reads retired before their stamp, their limit, the client built inside the read, one winner per attempt, the stamp fence); stale figures and the measured-first rule; daily usage and growth; the due function, the one run-history statement, the gate shared with the worker, and the ranked enqueue; the figures read method. |
 | 2026-11-14 | v1.30 | 968 (#968, dp-lake P6) — renumbered at the spec merge after #961's v1.28 and #960's v1.29 | §7: on a table with sort columns the append's writing scan is ordered by the sort columns (ascending, nulls first) and every file is stamped with the table's order, from one value; an unsupplied optional sort column is skipped; a legacy table keeps arrival order and the unsorted stamp; a sort that does not fit the scratch reservation fails with `pipeline.staging.scratch_limit_exceeded` (ledger `FAILED`, phase `publish`, that code), a memory-limit failure stays `lake.append.failed` with its staging code in the ledger; a string sort column is compared by code points whatever its collation (round 2). Replaces #935's "files stay stamped unsorted". |
 | 2026-11-14 | v1.29 | 960 (#960, dp-lake P6) — renumbered at the spec merge after #961's v1.28 | **§11 Profiles** gains *Keep rules*: the computed `dp-keep-` tag names, the period's end in the profile's current zone, the kept snapshot proved by the snapshot log alone ("not kept: history not available"), the keep's end and the tag's maximum age, reconcile by name (a changed zone moves ends, never snapshots; a reopened period's tag stands), what is never touched (branches, `main`, `dp-hold-`; "not kept: name taken by a branch"), and the one commit. |
 | 2026-11-14 | v1.28 | 961 (#961, dp-lake P6) | §11 **Profiles** gains **Lateness**: what the three `reporting.*` values mean — the median gap of a feed's last published deliveries, late beyond the factor (exactly at it is on time), "not enough deliveries to say" under the minimum or at a zero median, each feed on its own, every feed of the ledger listed, a deprecated, archived or purged table never flagged; computed when asked by `LakeFeedLateness.forTable` (profile first, then one ledger statement on the catalog's clock), served by V62's index. No route, tool or screen yet (P8). |

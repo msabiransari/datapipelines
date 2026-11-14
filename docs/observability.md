@@ -532,9 +532,9 @@ The `lake-maintenance-planner` recurring task ([Lake: maintenance runs](lake.md#
 |---|---|---|---|
 | INFO | `lake.maintenance.planned` | A plan ended: its row (`lake_maintenance_plan`, [Metadata DB §4.59](metadata-db.md#459-lake_maintenance_plan)) was written | `tables_with_work`, `tasks_enqueued`, `tasks_moved`, `tasks_still_queued` (the "falling behind" count), `tables_measured`, `tables_not_measured`, `tables_stale`, `tables_rule_silent` |
 | WARN | `lake.maintenance.plan_reads_exhausted` | `plan-max-abandoned-reads` abandoned reads are still running: the plan measures nothing more, the page's rest is not attempted and not stamped, and the plan still decides and enqueues from the stored figures (once per plan) | `not_measured`, `abandoned_reads` |
-| WARN | `lake.maintenance.plan_read_abandoned` | A table's measurement was still running at `plan-table-timeout`: its attempt and error (`timeout`) are stamped, the last good figures kept, the reader retired with the read | `table_id`, `elapsed_ms`, `abandoned_reads` |
-| INFO | `lake.maintenance.plan_read_ended` | An abandoned read ended: it wrote nothing, closed its client, and its thread ended; the limit frees one | `table_id`, `published` (always `false`) |
-| WARN | `lake.maintenance.plan_measure_failed` | A measurement failed: its attempt and error code are stamped, the last good figures kept | `table_id`, `cause` |
+| WARN | `lake.maintenance.plan_read_abandoned` | A table's measurement was still running at `plan-table-timeout`: the reader is retired with the read (still counted, its table excluded), then its error (`timeout`) is stamped, the last good figures kept; a stamp that fails ends the plan as thrown | `table_id`, `elapsed_ms`, `abandoned_reads` |
+| INFO | `lake.maintenance.plan_read_ended` | An abandoned read ended (also one whose client construction failed late): it wrote nothing, closed whatever client it held, and its thread ended; the limit frees one | `table_id`, `published` (always `false`) |
+| WARN | `lake.maintenance.plan_measure_failed` | A measurement failed (also a reader client that could not be built): its attempt and error code are stamped, the last good figures kept | `table_id`, `cause` |
 | WARN | `lake.maintenance.plan_write_failed` | A measurement's own database write failed: the row keeps what it held | `table_id`, `cause` |
 
 ### 3.5 Log destination

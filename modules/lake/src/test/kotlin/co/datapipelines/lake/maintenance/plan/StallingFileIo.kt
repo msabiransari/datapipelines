@@ -19,18 +19,24 @@ import java.util.concurrent.atomic.AtomicInteger
  *   never answers; the property `ScriptedFileIo.STALL` models, here over the REAL manifests in MinIO, because the
  *   measurer reads a real snapshot);
  * - [fail]: every read of the table's metadata file throws at once;
- * - [metadataReads]: the tables whose metadata file was opened, in order: the attempt sequence.
+ * - [metadataReads]: the tables whose metadata file was opened, in order: the attempt sequence;
+ * - [metadataReaders]: for each such open, the thread (the reader) that opened it.
  */
 internal class StallControl {
     private val stalls = ConcurrentHashMap<UUID, Stall>()
     private val failing: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
     val metadataReads: MutableList<UUID> = CopyOnWriteArrayList()
+    val metadataReaders: MutableList<Pair<UUID, Thread>> = CopyOnWriteArrayList()
     val clientsBuilt = AtomicInteger()
     val clientsClosed = AtomicInteger()
 
     class Stall {
         val entered = CountDownLatch(1)
         val released = CountDownLatch(1)
+
+        /** The reader thread blocked in this stall, set before [entered] opens. */
+        @Volatile
+        var thread: Thread? = null
     }
 
     fun stall(table: UUID): Stall = Stall().also { stalls[table] = it }
@@ -53,12 +59,14 @@ internal class StallControl {
         val table = tableOf(path) ?: return
         if (path.endsWith(".metadata.json") || path.endsWith(".metadata.json.gz")) {
             metadataReads += table
+            metadataReaders += table to Thread.currentThread()
             if (table in failing) error("scripted read failure")
         }
         if (path.endsWith(".avro")) stalls[table]?.let(::block)
     }
 
     private fun block(stall: Stall) {
+        stall.thread = Thread.currentThread()
         stall.entered.countDown()
         while (true) {
             try {
