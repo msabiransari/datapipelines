@@ -105,13 +105,14 @@ class ManifestRewriteIntegrationTest {
         val entry = h.entry(h.run(table))
 
         entry["outcome"].asText() shouldBe "done"
-        entry["folded"].asBoolean() shouldBe true
-        entry["manifests_after"].asInt() shouldBe 2
+        // The grouping first: the number of manifests per spec and which entries each lists (brief W1a), then the figures.
         val after = h.entriesByManifest(h.loaded(table))
         withClue("one manifest per spec, each listing exactly the entries of its spec: $after") {
             after.map { it.first }.sorted() shouldBe bySpec.keys.sorted()
             after.forEach { (spec, paths) -> paths shouldBe bySpec.getValue(spec) }
         }
+        entry["folded"].asBoolean() shouldBe true
+        entry["manifests_after"].asInt() shouldBe 2
         assertUnchanged(before, h.loaded(table))
     }
 
