@@ -491,9 +491,10 @@ generated secret SQL, credentials and driver messages never reach an execution e
 
 #### 3.4T The lake remover's events (#958)
 
-The one place a managed-lake object is deleted ([Lake §10](lake.md#10-removal-and-cleanup)). Every line carries the
-table id and the pass's run id; counts, never a key list, a presigned URL or a credential. A failure reports the
-exception class and first SQLSTATE in §3.4G's safe shape. Nothing in production calls the remover before 962.
+The one place a managed-lake object is deleted ([Lake §10](lake.md#10-removal-and-cleanup)). Every event carries the
+table id; all except `lake.removal.unexpected_dp_key` also carry the pass's run id. The unexpected-key event carries
+one relative key, as specified below; no event carries a key list, a presigned URL or a credential. A failure reports
+the exception class and first SQLSTATE in §3.4G's safe shape. Nothing in production calls the remover before 962.
 
 | Level | Event | When | Fields |
 |---|---|---|---|
@@ -806,7 +807,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-14 | v1.79 | 958 (#958) | New **§3.4T**, the lake remover's six events: WARN `lake.removal.refused`, INFO `lake.removal.ended`, WARN `lake.removal.failed`, `lake.removal.batch_failed`, `lake.removal.marker_left` and `lake.removal.unexpected_dp_key`. Counts and the run id only; never a key list or a credential. |
+| 2026-11-14 | v1.79 | 958 (#958) | New **§3.4T**, the lake remover's six events: WARN `lake.removal.refused`, INFO `lake.removal.ended`, WARN `lake.removal.failed`, `lake.removal.batch_failed`, `lake.removal.marker_left` and `lake.removal.unexpected_dp_key`. Counts, identifiers and one relative unexpected key; never a key list or a credential. |
 | 2026-11-13 | v1.78 | 939 (#939) | **§3.4S**: new INFO `lake.settle.protection_window_aligned` (`days`) — the settle sweep set `lake_control.protection_interval` to this instance's `retention.protection-days`; logged only when the row changed. |
 | 2026-11-13 | v1.77 | 806 merge review (#806) | **§3.4**: catalogue the web module's `staging.scratch.health` transition WARN and recovery INFO already described in §6.1. Every non-`UP` transition retains the usable-byte reading, including an unwritable directory; a failed reading reports `unknown`. |
 | 2026-11-13 | v1.76 | 806 (#806) | **§4.1**: four untagged byte gauges, `datapipelines.staging.scratch.capacity`, `.reserved`, `.leftover` (`NaN` until the leftover sweep has counted) and `.usable` (`NaN` when the reading throws), read at every scrape. **§6.1**: the `diskSpace` bullet's "nothing writes to local disk" reasoning corrected (DuckDB staging, #795), and the DuckDB scratch signal described — the status-only `duckdb_scratch` indicator on the management port's `/actuator/health`, never a `/health` component, its rows, and what its `UP` does and does not establish (owner ruling 2026-11-12 for the surface). §6.4 unchanged: the indicator carries no detail. |
