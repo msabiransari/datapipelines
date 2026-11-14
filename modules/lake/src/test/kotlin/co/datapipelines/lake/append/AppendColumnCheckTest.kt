@@ -195,7 +195,10 @@ class AppendColumnCheckTest {
         values: List<List<Any?>> = emptyList(),
     ): LakeAppendInput =
         object : LakeAppendInput {
-            override fun scan(consume: (ResultSet) -> Unit) {
+            override fun scan(
+                orderBy: List<Int>,
+                consume: (ResultSet) -> Unit,
+            ) {
                 val metadata = mockk<ResultSetMetaData>()
                 every { metadata.columnCount } returns columns.size
                 every { metadata.isNullable(any()) } returns ResultSetMetaData.columnNoNulls

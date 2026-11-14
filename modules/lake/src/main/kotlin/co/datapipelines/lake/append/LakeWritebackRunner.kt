@@ -24,6 +24,7 @@ import co.datapipelines.lake.settle.DeliverySettler
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.LakeExecutionInput
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineErrorCodes.Lake
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.typesystem.DatapipelinesException
@@ -195,7 +196,12 @@ class LakeWritebackRunner(
     private fun publicFailure(failure: Throwable): Throwable =
         when {
             failure is CancellationException || failure is Error -> failure
+
             failure is DatapipelinesException && failure.code.startsWith("lake.") && !failure.code.startsWith("lake.catalog.") -> failure
+
+            // #968 D7: an ordered scan that outgrows the delivery's scratch reservation; the author can act on it.
+            failure is DatapipelinesException && failure.code == PipelineErrorCodes.Staging.SCRATCH_LIMIT_EXCEEDED -> failure
+
             else -> refusal(Lake.APPEND_FAILED, "The append could not be published; inspect its recorded delivery outcome.")
         }
 

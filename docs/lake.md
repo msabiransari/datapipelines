@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.27 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles)
+**Status:** v1.28 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #968, ordered appends)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -367,13 +367,25 @@ checked. The definition stays valid (owner ruling 2026-11-13). The refusal is te
 the value inside its type, decimal in apache/iceberg issue 17027, `int` and `long` in issue 13105 (closed as not
 planned) and 17027's discussion; a tripwire test in the lake module goes red when either changes.
 
-Files go under the table's `data/` prefix, using Zstandard Parquet, stamped unsorted (sort order id 0, also on a
-table with sort columns: rows are written in arrival order until ordered appends ship, and a stamp never claims an
-order the file was not written in), and its applied
+Files go under the table's `data/` prefix, using Zstandard Parquet and the applied
 partition transforms: identity, year, month, day, hour, bucket or truncate. Exceeding
 `max-open-partitions-per-append` fails. An empty result still creates a publication snapshot and permanent
 duplicate evidence, with no data file. The worker never deletes its files, even after a failure or unknown
 outcome. Every Iceberg FileIO refuses and records library deletion requests for later maintenance.
+
+**Files are written in the table's order (#968).** On a table with sort columns the second scan of the stable result,
+the one that writes, reads it ordered by the sort columns, each ascending with nulls first (the first scan stays in
+arrival order), and every file is stamped with the table's sort order id: the order and the stamp come from one value,
+so a file never claims an order it was not written in. Each partition's files are in that order, and within one
+partition consecutive files overlap on the first sort column at most at one boundary value. A sort column the result
+does not supply (an optional column left out) is all nulls, so the order by the others is the table's. A legacy table
+without sort columns is written as before: in arrival order, stamped unsorted (sort order id 0), with no ordering in
+the scan. The sort spills into the delivery's existing scratch reservation (`max-delivery-bytes` ×
+`staging-expansion-factor`) on the staging connection's own memory limit; a sort that does not fit fails the append
+with `pipeline.staging.scratch_limit_exceeded`, the delivery ends `FAILED` in phase `publish` with that code, and
+nothing is committed. A sort that exhausts the staging memory limit instead is reported as `lake.append.failed`, with
+`pipeline.staging.memory_limit_exceeded` in the delivery's failure code. A floating-point column is never a sort column
+(#935, until #971); the writer refuses to order by one.
 
 Before committing, DP conditionally creates
 `<table-location>/dp/recipes/<feed>/<delivery-id>/<operation-id>.json` with `If-None-Match: *`.
@@ -878,6 +890,7 @@ reconciler and the notifier); the boot refuses otherwise, naming both keys
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.28 | 968 (#968, dp-lake P6) | §7: on a table with sort columns the append's writing scan is ordered by the sort columns (ascending, nulls first) and every file is stamped with the table's order, from one value; an unsupplied optional sort column is skipped; a legacy table keeps arrival order and the unsorted stamp; a sort that does not fit the scratch reservation fails with `pipeline.staging.scratch_limit_exceeded` (ledger `FAILED`, phase `publish`, that code), a memory-limit failure stays `lake.append.failed` with its staging code in the ledger. Replaces #935's "files stay stamped unsorted". |
 | 2026-11-14 | v1.27 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.26 | New **§11 Profiles**: the profile table and its two built-ins, the start-up seed of `production` from the two `maintenance.*` keys, the closed key list with its rules (incl. `retention.keep`'s two limits and the three `reporting.*` keys), what is not in a profile, the service changes and their audit, the two pause keys left on the table, the append writer reading the profile at each append, and the tuning-source guard with its limits (rule (b) sees a numeric constant whatever the case of its name, and a fully qualified top-level read); a fractional value that rounds onto its bound is refused. §1 "Not in the body": the table's tuning is its profile; `policy_json` holds only the pause keys. |
 | 2026-11-14 | v1.26 | 957 (#957) — renumbered at the spec merge after #958's v1.25 | New **§11 Maintenance runs** (§10 at the lane's base; #958's §10 landed first): one `lake-maintenance` task per table; the admission order (permission and mode, slot, declarations, scratch, one-statement run row, settlement, parts); the run's deadline on every lease; `busy` and `deadline` end the run; nothing concluded from an abandoned row; threads ≥ maintenance slots + 2. |
 | 2026-11-14 | v1.25 | 958 (#958) | New §10 **Removal and cleanup**: the remover's two passes (orphans, purge), their fixed order, the reachable set, the candidates and hints, the `dp/` rule and its two marker cases, the clock-skew probe (`lake.maintenance.clock_skew`), the purge answer, what counts as deleted, and the result (inventory and visits). No production caller before 962; no configuration key or migration. |

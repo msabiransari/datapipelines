@@ -124,11 +124,22 @@ internal class ParquetWriterHarness {
         var scans: Int = 0
             private set
 
-        override fun scan(consume: (ResultSet) -> Unit) {
+        /** Every scan's `orderBy` and statement text, in scan order (#968: the check scan first, then the write). */
+        val orders = mutableListOf<List<Int>>()
+        val statements = mutableListOf<String>()
+
+        override fun scan(
+            orderBy: List<Int>,
+            consume: (ResultSet) -> Unit,
+        ) {
             scans++
+            orders += orderBy
             connection.createStatement().use { statement ->
                 statement.queryTimeout = QUERY_TIMEOUT_SECONDS
-                statement.executeQuery("SELECT * FROM append_input799").use(consume)
+                val columns = statement.executeQuery("SELECT * FROM append_input799 LIMIT 0").use { it.metaData.columnCount }
+                val sql = "SELECT * FROM append_input799" + LakeAppendInput.orderByClause(orderBy, columns)
+                statements += sql
+                statement.executeQuery(sql).use(consume)
             }
         }
     }

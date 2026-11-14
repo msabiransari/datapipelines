@@ -15,8 +15,9 @@ import java.util.UUID
 
 /**
  * The append writer on a table that has sort columns (lake.md §7; dp-lake design record §11a call 36 item 4 and input
- * (d)): I8 every file is stamped unsorted, since the writer writes in arrival order and a stamp never claims an order the
- * file was not written in; I9 a sort column beyond Iceberg's first 100 columns still gets its bounds.
+ * (d)): I8 every file is stamped with the table's order, since the writer writes in that order (#968, call 37) and a
+ * stamp never claims an order the file was not written in; I9 a sort column beyond Iceberg's first 100 columns still gets
+ * its bounds.
  */
 class ParquetAppendWriterSortedTableIntegrationTest {
     private val h = ParquetWriterHarness()
@@ -26,7 +27,7 @@ class ParquetAppendWriterSortedTableIntegrationTest {
     fun reset() = LakeTestDb.reset()
 
     @Test
-    fun `I8 - a sorted table's appended files are stamped unsorted`() {
+    fun `I8 - a sorted table's appended files are stamped with the table's order`() {
         val schema =
             Schema(
                 Types.NestedField.required(1, "id", Types.LongType.get()),
@@ -44,7 +45,7 @@ class ParquetAppendWriterSortedTableIntegrationTest {
                 println("(I8) table order ${table.sortOrder()}; file orders ${written.files.map { it.sortOrderId() }}")
                 table.sortOrder().orderId() shouldNotBe 0
                 written.files.size shouldBe 1
-                written.files.map { it.sortOrderId() } shouldBe listOf(0)
+                written.files.map { it.sortOrderId() } shouldBe listOf(table.sortOrder().orderId())
             }
         }
     }
