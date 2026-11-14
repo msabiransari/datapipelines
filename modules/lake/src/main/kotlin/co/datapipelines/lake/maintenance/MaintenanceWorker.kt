@@ -120,7 +120,7 @@ class MaintenanceWorker(
                             admission.runId,
                         )
                     }
-                    val run = context.open(admission.runId, table, admission.deadline, perPart)
+                    val run = context.open(admission.runId, table, admission.deadline, perPart, reservation)
                     execute(run, kind, eligible, declared, actorId)
                     SystemJobOutcome.Done
                 }

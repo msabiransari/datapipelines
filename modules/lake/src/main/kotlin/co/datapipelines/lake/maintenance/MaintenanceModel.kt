@@ -51,15 +51,22 @@ data class PartFigures(
     }
 }
 
-/** A part's answer: its outcome, the figures of what it did, and the instant of a `paused_until`. */
+/**
+ * A part's answer: its outcome, the figures of what it did, and the instant of a `paused_until`. [details] are the
+ * part's own fields, written at the top level of its `parts_json` entry beside the common ones (#969: compaction's
+ * `committed` and `left_for_fresh_run`, which 959's plan reads, and its blocked files and group figures); a key may
+ * not repeat a common one ([PartRecord.COMMON_KEYS]).
+ */
 data class PartResult(
     val outcome: MaintenanceOutcome,
     val figures: PartFigures = PartFigures.NONE,
     val until: Instant? = null,
+    val details: Map<String, Any?> = emptyMap(),
 ) {
     init {
         require(outcome != MaintenanceOutcome.FAILED) { "a part never answers failed: it throws" }
         require((outcome == MaintenanceOutcome.PAUSED_UNTIL) == (until != null)) { "only paused_until carries an instant: $this" }
+        require(details.keys.none { it in PartRecord.COMMON_KEYS }) { "a part's details never repeat a common key: ${details.keys}" }
     }
 
     companion object {
@@ -135,7 +142,15 @@ data class PartRecord(
     val reason: String? = null,
     /** A failed part's error code. */
     val errorCode: String? = null,
-)
+    /** The part's own fields ([PartResult.details]), at the top level of its entry. */
+    val details: Map<String, Any?> = emptyMap(),
+) {
+    companion object {
+        /** The keys every `parts_json` entry carries; a part's [details] never repeat one. */
+        val COMMON_KEYS: Set<String> =
+            setOf("name", "outcome", "attempted", "files", "bytes", "deferred_deletions", "until", "reason", "error_code")
+    }
+}
 
 /** The settlement step's figures in the run row (D6a). */
 data class SettlementRecord(

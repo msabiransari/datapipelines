@@ -62,6 +62,12 @@ class MaintenanceRun internal constructor(
     /** `lake_maintenance_runs.deadline_at`, on the catalog's clock. */
     val deadline: Instant,
     private val scratch: Map<String, Long>,
+    /**
+     * The scratch reservation the worker holds for this run (#969 D5 step 1; null when none was granted). A part hands
+     * it to the port that opens the run's scratch database; the worker closes it after the run in any case, which is a
+     * no-op once a database that took it has closed.
+     */
+    val scratchReservation: AutoCloseable?,
     private val leases: LakeLeases,
     private val catalogs: LakeCatalogs,
     private val heartbeats: ScheduledExecutorService,

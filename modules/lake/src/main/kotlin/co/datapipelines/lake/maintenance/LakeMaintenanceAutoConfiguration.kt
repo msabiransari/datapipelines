@@ -8,6 +8,10 @@ import co.datapipelines.lake.LakeLeases
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.append.LakeAppendAutoConfiguration
 import co.datapipelines.lake.append.LakeAppendRuntime
+import co.datapipelines.lake.maintenance.compaction.CompactionPart
+import co.datapipelines.lake.maintenance.compaction.CompactionScratchPort
+import co.datapipelines.lake.maintenance.compaction.CompactionSettings
+import co.datapipelines.lake.maintenance.compaction.CompactionTables
 import co.datapipelines.lake.maintenance.plan.MaintenanceDue
 import co.datapipelines.lake.maintenance.plan.MaintenancePlanner
 import co.datapipelines.lake.maintenance.plan.PlanBounds
@@ -19,6 +23,7 @@ import co.datapipelines.lake.maintenance.plan.TableMeasurer
 import co.datapipelines.scheduler.SystemJobQueue
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
@@ -35,7 +40,8 @@ import javax.sql.DataSource
  * names a db-scheduler type. No request path constructs the worker: it is reached from the scheduler only.
  *
  * The gate and the scratch are ports with defaults: the gate is 959's [ProfileMaintenanceGate] (the window and the pauses),
- * the scratch [MaintenanceScratch.NONE] until 969's reservation over staging's budget. A bean of either type replaces it.
+ * the scratch [MaintenanceScratch.NONE]; the web module supplies 969's reservation over staging's budget (the staging
+ * factory's `prepareDelivery`). A bean of either type replaces the default.
  *
  * #959: the planner (`lake-maintenance-planner`, a `RecurringSystemJob`) and its readers, repository and figures read
  * live here too; like the worker, it is reached from the scheduler only.
@@ -108,6 +114,45 @@ class LakeMaintenanceAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     fun lakeMaintenanceScratch(): MaintenanceScratch = MaintenanceScratch.NONE
+
+    /**
+     * #969: the `compaction` part, registered wherever the application supplies its scratch database port (the web
+     * module, beside the staging factory; D5 step 5). Its scratch is declared from database rows and reserved by the
+     * worker through [MaintenanceScratch]; the part hands the run's reservation to the port.
+     */
+    @Bean
+    @ConditionalOnBean(CompactionScratchPort::class)
+    fun lakeMaintenanceCompaction(
+        dataSource: DataSource,
+        properties: LakeProperties,
+        catalogs: LakeCatalogs,
+        lakeMaintenancePlanRepository: PlanRepository,
+        port: CompactionScratchPort,
+    ): CompactionPart {
+        val statements = LakeAppendRuntime.statements(dataSource)
+        val leases = LakeLeases(statements, lockTimeout = Duration.ofSeconds(properties.catalog.lockTimeoutSeconds))
+        val admission = properties.admission
+        return CompactionPart(
+            tables = CompactionTables(NamedParameterJdbcTemplate(statements), properties.name),
+            measurements = lakeMaintenancePlanRepository::measurement,
+            io = catalogs::metadataFileIo,
+            scratch = port,
+            settings =
+                CompactionSettings(
+                    scratchFactor = properties.maintenance.compactionScratchFactor,
+                    bytesPerSecond = properties.maintenance.compactionBytesPerSecond.toBytes(),
+                    jobTimeout = admission.jobTimeout,
+                    declarationCeilingBytes =
+                        CompactionSettings.ceiling(
+                            admission.scratchBytes.toBytes(),
+                            admission.maxDeliveryBytes.toBytes(),
+                            admission.stagingExpansionFactor,
+                        ),
+                ),
+            catalogNow = { leases.catalogNowPlus(Duration.ZERO) },
+            clock = Clock.systemUTC(),
+        )
+    }
 
     /**
      * The heartbeat of a lease a maintenance part holds across several steps (D5). Daemon; shut down with the context.

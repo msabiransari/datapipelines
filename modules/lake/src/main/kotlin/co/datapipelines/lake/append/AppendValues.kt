@@ -2,6 +2,7 @@ package co.datapipelines.lake.append
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import org.apache.iceberg.data.Record
 import org.apache.iceberg.types.Type
 import org.apache.iceberg.types.Types
 import java.math.BigDecimal
@@ -18,6 +19,15 @@ import java.time.temporal.ChronoUnit
 
 /** Native JDBC values for the generic Parquet writer: no canonical text fallback and no JVM timezone conversion. */
 internal object AppendValues {
+    /** One row of [rows] into [into], field by field in [bindings]' order (an append and a compaction rewrite, #969 D6). */
+    fun readRow(
+        rows: ResultSet,
+        bindings: List<AppendColumnBinding>,
+        into: Record,
+    ) {
+        bindings.forEachIndexed { index, binding -> into.set(index, read(rows, binding)) }
+    }
+
     fun read(
         rows: ResultSet,
         binding: AppendColumnBinding,

@@ -177,7 +177,7 @@ class MaintenanceRunRepository(
     fun partsJson(parts: List<PartRecord>): String =
         mapper.writeValueAsString(
             parts.map { part ->
-                linkedMapOf(
+                linkedMapOf<String, Any?>(
                     "name" to part.name,
                     "outcome" to part.outcome.wire,
                     "attempted" to part.attempted,
@@ -187,7 +187,7 @@ class MaintenanceRunRepository(
                     "until" to part.until?.toString(),
                     "reason" to part.reason,
                     "error_code" to part.errorCode,
-                )
+                ).apply { putAll(part.details) }
             },
         )
 
