@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.63 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.64 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-14
@@ -2063,10 +2063,14 @@ CREATE TABLE lake_deliveries (
 -- V57 (#844) replaced V55's idx_lake_deliveries_unsettled ON lake_deliveries (table_id, state) with:
 CREATE INDEX idx_lake_deliveries_unsettled_page ON lake_deliveries (table_id, id)
     WHERE state IN ('RECEIVED', 'PUBLISHING', 'UNKNOWN');
+-- V62 (#961): a feed's newest published deliveries of one table, in order (lateness per feed).
+CREATE INDEX idx_lake_deliveries_published ON lake_deliveries (table_id, feed, published_at DESC)
+    WHERE state = 'PUBLISHED';
 ```
 
 **Notes:**
 - **V57 (#844): the settlement page's index.** The sweep reads one table's unsettled deliveries a keyset page at a time (`WHERE table_id = ? AND state IN (…) AND id > ? ORDER BY id LIMIT 50`). V55's `(table_id, state)` index served the filter but not the order, so a page could read and sort the table's whole backlog. `(table_id, id)` under the same partial predicate makes the page an index range scan that stops after its rows; the page is the predicate's only reader, so the new index replaces the old one rather than joining it. `UnsettledPageIndexIntegrationTest` pins the plan (no `Sort`, no `Filter`, `id >` in the index condition) under PostgreSQL's default plan cache. A server forced to generic plans (`plan_cache_mode = force_generic_plan`) keeps the keyset bound as a filter instead (#859).
+- **V62 (#961): the published deliveries' index.** Lateness per feed ([Lake §11 Profiles](lake.md#11-profiles)) reads, for one table, every feed the ledger knows and each feed's last `reporting.lateness_sample` published deliveries: a window over `(feed ORDER BY published_at DESC)` restricted to `state = 'PUBLISHED' AND published_at IS NOT NULL`. V55's and V57's indexes cover unsettled deliveries only, so the read would scan and sort the table's whole ledger. `(table_id, feed, published_at DESC)` under the `PUBLISHED` predicate is the window's partition and order; `LakeFeedLatenessIntegrationTest` pins the plan on a table with 10,000 deliveries beside 30,000 of another table. No row is written; the read is computed when asked and nothing is stored.
 
 ### 4.54 `lake_delivery_attempts`
 
@@ -2176,6 +2180,7 @@ CREATE UNIQUE INDEX uq_lake_profiles_one_default ON lake_profiles (is_default) W
 | `lake_deliveries` | `lake_deliveries_pkey` | via PK | Permanent delivery identity |
 | `lake_deliveries` | `uq_lake_deliveries_key` | via UNIQUE | Deduplicate table, feed and delivery id |
 | `lake_deliveries` | `idx_lake_deliveries_unsettled_page` | explicit | V57 (#844): the settlement sweep's keyset page — one table's unsettled deliveries in id order, partial on the unsettled states; replaces V55's `idx_lake_deliveries_unsettled` |
+| `lake_deliveries` | `idx_lake_deliveries_published` | explicit | V62 (#961): lateness per feed — one table's published deliveries by feed, newest first, partial on `state = 'PUBLISHED'` |
 | `lake_delivery_attempts` | `lake_delivery_attempts_pkey` | via PK | Attempt identity |
 | `lake_delivery_attempts` | `lake_delivery_attempts_operation_id_key` | via UNIQUE | Join commit evidence by operation |
 | `lake_delivery_attempts` | `idx_lake_delivery_attempts_delivery` | explicit | Attempt history for a delivery |
@@ -2726,6 +2731,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.64 | V62 (#961, dp-lake P6) | **§4.53 `lake_deliveries` gains `idx_lake_deliveries_published`** `(table_id, feed, published_at DESC) WHERE state = 'PUBLISHED'`: the lateness read's window (a feed's last published deliveries of one table) is an index scan in order instead of a scan and sort of the ledger. §5 gains the row. No column, no data change. Down path documented in the migration header, not shipped. |
 | 2026-11-14 | v1.63 | V61 (#956, dp-lake P6) — renumbered at the spec merge after #957's V60 and v1.62 | **V61 — lake maintenance profiles.** New **§4.56 `lake_profiles`** (name, the one-default partial unique index, the typed `values_json`, `seed_pending`, audit columns with NULL = written by the system; the built-ins `production` and `development`); **§4.49 `lake_tables_managed` gains `profile_id`** (NOT NULL, FK, no cascade; every existing row gets `production`) **and `profile_assigned_at`**, and its `policy_json` note is rewritten: the column now holds only the two pause keys, and V61 set every row's copy to `{}`. §3 ERD, §5 (four indexes) and §5A (`lake_profiles` environment-local) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-14 | v1.62 | 957 (#957, V60) | **§4.55 `lake_maintenance_runs`** (new): one row per admitted lake maintenance run, the run's exclusion (one `running` row per table, partial unique index) and its deadline; admitted by one statement that also abandons an expired predecessor; every later write conditional on `running`. |
 | 2026-11-13 | v1.61 | 939 (#939, no migration) | **§4.45** Notes: `lake_control.protection_interval` mirrors `datapipelines.lake.retention.protection-days` — the normal-mode settle sweep keeps it equal and stamps `protected_until` from the setting, not the column; the column's `DEFAULT` is only what a database holds before its first normal-mode tick. No schema change. |
