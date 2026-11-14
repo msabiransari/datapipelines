@@ -272,14 +272,21 @@ internal object KotlinText {
         var i = 0
         while (i < text.length) {
             when {
-                text.startsWith("/*", i) -> i = skipBlockComment(text, i, out)
-                text.startsWith("//", i) -> while (i < text.length && text[i] != '\n') i++
+                text.startsWith("/*", i) -> {
+                    i = skipBlockComment(text, i, out)
+                }
+
+                text.startsWith("//", i) -> {
+                    while (i < text.length && text[i] != '\n') i++
+                }
+
                 text.startsWith("\"\"\"", i) -> {
                     val end = text.indexOf("\"\"\"", i + RAW_QUOTE).let { if (it < 0) text.length else it + RAW_QUOTE }
                     val literal = text.substring(i, end)
                     out.append(if (keepStrings) literal else "\"\"" + "\n".repeat(literal.count { it == '\n' }))
                     i = end
                 }
+
                 text[i] == '"' || text[i] == '\'' -> {
                     val quote = text[i]
                     var j = i + 1
@@ -291,6 +298,7 @@ internal object KotlinText {
                     out.append(if (keepStrings) text.substring(i, end) else "$quote$quote")
                     i = end
                 }
+
                 else -> {
                     out.append(text[i])
                     i++
@@ -314,11 +322,13 @@ internal object KotlinText {
                     depth++
                     i += 2
                 }
+
                 text.startsWith("*/", i) -> {
                     depth--
                     i += 2
                     if (depth == 0) return i
                 }
+
                 else -> {
                     if (text[i] == '\n') out.append('\n')
                     i++

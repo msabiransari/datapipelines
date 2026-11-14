@@ -136,15 +136,13 @@ class LakeWritebackRunner(
                 catalogs.open(lease).use { session ->
                     val table = session.loadTable(request.target.namespace, request.target.table)
                     val provenance = recipeInputs.build(request, table)
-                    // #956 D9: the table's profile as it is NOW, read at every append (no restart, no cached copy).
-                    val profile = profiles.forTable(row.tableId)
                     val files =
                         writer.write(
                             table,
                             request.rows,
                             row.operationId,
                             properties.admission.maxOpenPartitionsPerAppend,
-                            profile,
+                            profiles.forTable(row.tableId), // #956 D9: the profile as it is NOW, read at every append
                             checkActive,
                         )
                     checkActive()

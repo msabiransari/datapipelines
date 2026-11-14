@@ -28,6 +28,7 @@ internal object KeepRulesReader {
         return rules
     }
 
+    @Suppress("ThrowsCount") // period, unit and each limit breach are distinct catalogued reasons
     private fun rule(
         element: JsonNode,
         key: String,
@@ -45,14 +46,16 @@ internal object KeepRulesReader {
         val n = LakeProfileDocument.whole(duration.path("n"), key, 1, unit.maxN.toLong(), index).toInt()
         val rule = KeepRule(period, KeepDuration(n, unit))
         when (KeepRuleLimits.breach(rule)) {
-            KeepRuleLimits.Breach.SHORTER_THAN_PERIOD ->
+            KeepRuleLimits.Breach.SHORTER_THAN_PERIOD -> {
                 throw LakeProfileErrors.invalid(
                     key,
                     KeepRuleLimits.Breach.SHORTER_THAN_PERIOD.reason,
                     "keep_for ($n ${unit.wire}) must be at least one ${period.wire} long for every ${period.wire}",
                     index,
                 )
-            KeepRuleLimits.Breach.TOO_MANY_KEEPS ->
+            }
+
+            KeepRuleLimits.Breach.TOO_MANY_KEEPS -> {
                 throw LakeProfileErrors.invalid(
                     key,
                     KeepRuleLimits.Breach.TOO_MANY_KEEPS.reason,
@@ -60,11 +63,14 @@ internal object KeepRulesReader {
                         "at most ${KeepRuleLimits.MAX_LIVE_KEEPS}",
                     index,
                 )
-            null -> Unit
+            }
+
+            null -> {}
         }
         return rule
     }
 
+    @Suppress("ThrowsCount") // type, unknown key and missing key are distinct catalogued reasons
     private fun objectWith(
         node: JsonNode,
         keys: Set<String>,

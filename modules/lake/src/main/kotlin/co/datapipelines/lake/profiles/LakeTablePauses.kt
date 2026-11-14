@@ -121,6 +121,7 @@ class LakeTablePauses internal constructor(
             check(pause.isMissingNode || pause is ObjectNode) { "policy_json pause is not an object" }
             val fields = LakePauseKind.entries.map { it.field }.toSet()
             check(pause.fieldNames().asSequence().all { it in fields }) { "policy_json pause holds an unknown key" }
+
             fun instant(kind: LakePauseKind): Instant? =
                 pause.path(kind.field).takeIf { it.isTextual }?.let {
                     try {

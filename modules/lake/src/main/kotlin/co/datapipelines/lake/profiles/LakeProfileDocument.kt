@@ -46,6 +46,7 @@ object LakeProfileDocument {
             REPORTING to listOf(LATENESS_SAMPLE, LATENESS_OVERDUE_FACTOR, LATENESS_MIN_DELIVERIES),
         )
 
+    @Suppress("SwallowedException") // a client's malformed document: a 4xx refusal carrying the parser's message
     fun parse(json: String): LakeProfile {
         val root =
             try {
@@ -127,6 +128,7 @@ object LakeProfileDocument {
         key: String,
     ): String = "$group.$key"
 
+    @Suppress("ThrowsCount") // each refusal names its own key and reason in details
     private fun checkKeys(root: ObjectNode) {
         root.fieldNames().forEach { group ->
             if (group !in KEYS) throw LakeProfileErrors.invalid(group, UNKNOWN_KEY, "$group is not a profile key")
@@ -143,6 +145,7 @@ object LakeProfileDocument {
         }
     }
 
+    @Suppress("ThrowsCount") // each cross-key rule is its own catalogued reason
     private fun checkAcrossKeys(profile: LakeProfile) {
         if (profile.maxBytesRewrittenPerRun / 2 < profile.targetFileBytes) {
             throw LakeProfileErrors.invalid(
@@ -229,6 +232,7 @@ object LakeProfileDocument {
     ): Int = whole(root.path(group).path(key), path(group, key), min.toLong(), max.toLong()).toInt()
 
     /** A whole number in `min..max`; a fraction, a string or a number beyond a long is refused. */
+    @Suppress("ThrowsCount") // type, whole number and range are three distinct reasons
     internal fun whole(
         node: JsonNode,
         key: String,

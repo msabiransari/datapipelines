@@ -135,7 +135,11 @@ class LakeProfiles internal constructor(
         after: LakeProfile,
     ): List<String> {
         val old = LakeProfileDocument.flatten(before)
-        return LakeProfileDocument.flatten(after).filter { (key, value) -> old[key] != value }.keys.toList()
+        return LakeProfileDocument
+            .flatten(after)
+            .filter { (key, value) -> old[key] != value }
+            .keys
+            .toList()
     }
 
     private fun <T> inTransaction(block: () -> T): T {

@@ -67,25 +67,20 @@ class LakeProfileProtectionIntegrationTest {
         table: String,
         file: String,
     ) {
+        val location = "s3://settle/$table/metadata/$file.json"
+        val (sql, parameters) =
+            if (file == "one") {
+                "INSERT INTO iceberg_tables (catalog_name, table_namespace, table_name, metadata_location, iceberg_type) " +
+                    "VALUES ('lake', 'settle', ?, ?, 'TABLE')" to listOf(table, location)
+            } else {
+                "UPDATE iceberg_tables SET metadata_location = ? WHERE table_namespace = 'settle' AND table_name = ?" to
+                    listOf(location, table)
+            }
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "settle.$table")
         try {
             h.fencedConnection(lease).use { connection ->
-                val sql =
-                    if (file == "one") {
-                        "INSERT INTO iceberg_tables (catalog_name, table_namespace, table_name, metadata_location, iceberg_type) " +
-                            "VALUES ('lake', 'settle', ?, ?, 'TABLE')"
-                    } else {
-                        "UPDATE iceberg_tables SET metadata_location = ? WHERE table_namespace = 'settle' AND table_name = ?"
-                    }
                 connection.prepareStatement(sql).use { statement ->
-                    val location = "s3://settle/$table/metadata/$file.json"
-                    if (file == "one") {
-                        statement.setString(1, table)
-                        statement.setString(2, location)
-                    } else {
-                        statement.setString(1, location)
-                        statement.setString(2, table)
-                    }
+                    parameters.forEachIndexed { index, value -> statement.setString(index + 1, value) }
                     statement.executeUpdate() shouldBe 1
                 }
             }

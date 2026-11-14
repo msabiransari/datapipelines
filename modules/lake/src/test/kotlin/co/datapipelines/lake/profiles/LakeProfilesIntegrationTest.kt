@@ -34,7 +34,10 @@ class LakeProfilesIntegrationTest {
         val second = h.table("returns")
         h.profiles.profileNameOf(second) shouldBe "development"
         h.profiles.profileNameOf(first) shouldBe "production"
-        h.profiles.list().filter { it.isDefault }.map { it.name } shouldBe listOf("development")
+        h.profiles
+            .list()
+            .filter { it.isDefault }
+            .map { it.name } shouldBe listOf("development")
     }
 
     @Test
