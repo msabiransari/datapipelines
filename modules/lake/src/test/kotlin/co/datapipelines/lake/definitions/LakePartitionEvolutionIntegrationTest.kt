@@ -37,7 +37,7 @@ class LakePartitionEvolutionIntegrationTest {
         outcome shouldBe LakeApplyOutcome.Applied(2, committed = true)
         after shouldBe before + 1
         spec shouldBe listOf(4 to "day", 1 to "bucket[8]", 2 to "truncate[4]")
-        LakeTableShape.of(load()) shouldBe LakeTableShape.of(LakeDefinitionBodies.parse(V2_PARTITIONED, null))
+        LakeTableShape.of(load()) shouldBe LakeTableShape.of(LakeDefinitionBodies.parse(V2_PARTITIONED, null, null))
         h.table(v1.tableId).let { (it.applyState to it.appliedVersionHere) shouldBe (LakeApplyState.APPLIED to 2) }
     }
 

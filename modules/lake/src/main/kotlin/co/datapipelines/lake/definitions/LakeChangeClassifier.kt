@@ -33,6 +33,9 @@ enum class LakeChangeKind(
     MAKE_REQUIRED(LakeChangeClass.BREAKING),
     IDENTIFIER_FIELDS(LakeChangeClass.BREAKING),
     TYPE_CHANGE(LakeChangeClass.BREAKING),
+
+    /** Any difference in the sort order (columns, their order, direction, null order, transform): fixed for life. */
+    SORT_ORDER(LakeChangeClass.BREAKING),
     ;
 
     val wire: String get() = name.lowercase()
@@ -70,7 +73,13 @@ object LakeChangeClassifier {
             } else {
                 emptyList()
             }
-        val all = changes + identifierChange
+        val sortOrderChange =
+            if (current.sortOrder != intent.sortOrder) {
+                listOf(LakeChange(LakeChangeKind.SORT_ORDER, null, "sort order ${current.sortOrder} → ${intent.sortOrder}"))
+            } else {
+                emptyList()
+            }
+        val all = changes + identifierChange + sortOrderChange
         val changeClass = all.maxOfOrNull { it.kind.changeClass } ?: LakeChangeClass.COMPATIBLE
         return LakeChangeVerdict(changeClass, all)
     }

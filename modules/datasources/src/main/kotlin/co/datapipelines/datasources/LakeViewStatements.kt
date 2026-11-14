@@ -44,7 +44,7 @@ import co.datapipelines.typesystem.DatapipelinesException
  *
  * When the datasource's registered tables span EXACTLY ONE distinct namespace, the last
  * statement is `SET search_path = '<head>.<rest>'` (the catalog.schema spelling — verified to
- * resolve bare table names on duckdb_jdbc 1.5.5.1; the bare-schema spelling resolves too, but
+ * resolve bare table names on duckdb_jdbc 1.5.6.0, 2026-11-13; the bare-schema spelling resolves too, but
  * the catalog-qualified form cannot drift into a same-named schema elsewhere). With ZERO or
  * MULTIPLE distinct namespaces nothing is set: there is no defensible default, and fully
  * qualified names are required. [planForTables] adds one health condition to the rule (#129):

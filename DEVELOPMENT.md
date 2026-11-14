@@ -351,6 +351,12 @@ new entries must be exactly the artifacts your change introduced — on every co
 test runtime included: #8's test-only isolate aggregator records all four platform binaries
 (under both `org.graalvm.polyglot` and `org.graalvm.js`), though none of them ships in the jar.
 
+On a DuckDB bump this command runs after [deployment.md §3.1](docs/deployment.md#31-docker-image)'s
+steps 3–5, never between the catalog edit and the Dockerfile `ARG`: its `:modules:app:bootJar`
+runs the notices task, which refuses a catalog core ahead of the `ARG` (#936). The writer adds
+new components and keeps the ones nothing resolves any more (the old driver's block stayed in
+#936): remove those by hand and say so in the review.
+
 #### Hand-verified entries
 
 The regeneration above **rewrites `gradle/verification-metadata.xml` and drops

@@ -12,7 +12,7 @@ import java.sql.SQLException
 import java.util.UUID
 
 /**
- * [DuckDbEngineFailures] over the engine's own messages, copied from the pinned 1.5.5.1 (lane #795
+ * [DuckDbEngineFailures] over the engine's own messages, copied from 1.5.5.1 and re-measured on the pinned 1.5.6.0, 2026-11-13 (lane #795
  * probes 13, 15, 16, 19). A driver bump that rewords one turns its case red here before a node
  * reports an out-of-memory as an author error. The negatives are the point of the anchoring: text an
  * author can make the engine say, or a refusal that merely names the spill setting, is not a code.

@@ -51,10 +51,10 @@ internal class AppendPublicationHarness {
     var watchesClosed = 0
     private var managedId: UUID? = null
 
-    fun reset() {
+    /** Releases `publish799.orders` with [body]; the default is one required `id` and no partition. */
+    fun reset(body: String = DEFAULT_BODY) {
         h.reset()
         jdbc.execute("TRUNCATE lake_delivery_attempts, lake_deliveries")
-        val body = LakeDefinitionFixtures.body(listOf(LakeDefinitionFixtures.field(1, "id", "BIGINTEGER", "required" to true)))
         val draft = h.service.createDraft(NAMESPACE, TABLE, body, h.actor, WriteSurface.SESSION)
         h.service.release(draft.tableId, draft.version, h.actor, WriteSurface.SESSION)
         managedId = draft.tableId
@@ -160,5 +160,6 @@ internal class AppendPublicationHarness {
     companion object {
         const val NAMESPACE = "publish799"
         const val TABLE = "orders"
+        val DEFAULT_BODY = LakeDefinitionFixtures.body(listOf(LakeDefinitionFixtures.field(1, "id", "BIGINTEGER", "required" to true)))
     }
 }

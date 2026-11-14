@@ -11,8 +11,31 @@ import org.junit.jupiter.api.Test
 import java.security.MessageDigest
 import java.util.HexFormat
 
-/** A sibling's future draft contents cannot be certified by an earlier target's immutable recipe. */
+/**
+ * A sibling's future draft contents cannot be certified by an earlier target's immutable recipe; the recipe of a sorted
+ * table carries its sort columns in the applied definition (#935 I10).
+ */
 class RecipeProvenanceIntegrationTest {
+    @Test
+    fun `I10 - the recipe of an append to a sorted table embeds sort_field_ids in applied_definition`() {
+        val h = AppendPublicationHarness()
+        h.reset()
+        h.withRequest { request, _ ->
+            val execution = execution(request)
+            execution.lineage.templateUsed(REFERENCE)
+            execution.lineage.nodeResolved("first")
+            execution.lineage.nodeResolved("sibling")
+            h.withTable { table ->
+                val assembler = AppendRecipeAssembler(h.h.definitions, h.deliveries, h.leases)
+                val publication = assembler.build(request.copy(execution = execution), table)
+                val applied = RecipeFixtures.document.build(publication).path("applied_definition")
+                println("(I10) applied_definition = $applied; table order ${table.sortOrder()}")
+                applied.path("version").asInt() shouldBe 1
+                applied.path("body").path("sort_field_ids").map { it.asInt() } shouldBe listOf(1)
+            }
+        }
+    }
+
     @Test
     fun `an early recipe freezes unresolved sibling nodes and a later complete observation becomes eligible`() {
         val h = AppendPublicationHarness()

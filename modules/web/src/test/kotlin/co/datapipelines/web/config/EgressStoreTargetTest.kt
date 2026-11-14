@@ -9,7 +9,7 @@ import java.net.URI
 
 /**
  * #862 — the ONE store-authority derivation is pinned form by form against probe A's wire observations (lane 862
- * evidence `probe-a-output.txt`): each case here is what DuckDB httpfs v1.5.5 actually puts on the wire for that
+ * evidence `probe-a-output.txt`): each case here is what DuckDB httpfs v1.5.5 put on the wire, measured 2026-11-08, for that
  * configuration, so the boot check's HEAD, the datasource's secret and the proxy's allowlist all derive the SAME
  * authority and never an invented alias of it. The blank-endpoint cases pin the regional AWS form (case E: the
  * engine resolves `s3.<region>.amazonaws.com`, default region us-east-1 — not the legacy global endpoint today's

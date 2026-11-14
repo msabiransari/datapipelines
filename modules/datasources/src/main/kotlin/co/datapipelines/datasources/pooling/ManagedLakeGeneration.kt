@@ -69,7 +69,7 @@ data class ManagedLakeGeneration(
          * 2. Disable the local filesystem. A lease can then reach no local file, whether by a table
          *    function, `ATTACH` or `COPY`. The managed reader serves every workspace (the grant the
          *    registrar writes), so the instance must not expose the server's disk to any of them.
-         *    Spilling to `temp_directory` is refused too, measured on 1.5.5.1. The reader's
+         *    Spilling to `temp_directory` is refused too, measured on 1.5.6.0, 2026-11-13. The reader's
          *    `memory_limit` is therefore its working-set bound (`reads.memory-limit`).
          * 3. Lock the configuration, so no lease can turn either setting back.
          *

@@ -470,10 +470,11 @@ class SettlementWholeTickBoundIntegrationTest {
         const val HEARTBEAT = "UPDATE lake_control SET last_sweep_at"
 
         /**
-         * The tick's work checks before verification's first, for a table with no deliveries: the protection page, the
-         * table page, before and after the table's mode read, before the target, before the row page, the projection.
+         * The tick's work checks before verification's first, for a table with no deliveries: before the protection
+         * step's window alignment and before its stamp (#939), the table page, before and after the table's mode read,
+         * before the target, before the row page, the projection.
          */
-        const val FIRST_VERIFY_CHECK = 8
+        const val FIRST_VERIFY_CHECK = 9
 
         val LEASED = listOf("find_table", "lock_timeout", "takeover")
 

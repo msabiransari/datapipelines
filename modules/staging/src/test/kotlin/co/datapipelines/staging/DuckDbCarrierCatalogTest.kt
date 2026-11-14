@@ -105,7 +105,7 @@ class DuckDbCarrierCatalogTest {
         const val NANOS_PER_MILLI = 1_000_000L
         const val LISTED = 20
 
-        /** Measured on 1.5.5.1 by the lander and the orchestrator (2026-11-03): 5 ASCII + 18 non-ASCII. */
+        /** Measured on 1.5.5.1 by the lander and the orchestrator (2026-11-03), on 1.5.6.0 (2026-11-13): 5 ASCII + 18 non-ASCII. */
         const val MEASURED_SEPARATORS = 23
         const val MEASURED_NON_ASCII_SEPARATORS = 18
         const val MEASURED_QUERY_FORMS = 2 * MEASURED_SEPARATORS

@@ -90,7 +90,7 @@ class EmbeddedDialectBehaviorTest {
         h2Thrown.sqlState shouldBe "90007"
         h2Thrown.errorCode shouldBe 90007
 
-        // duckdb_jdbc 1.5.5.1: a closed connection reports getSchema() failure as a PLAIN
+        // duckdb_jdbc 1.5.6.0 (re-probed 2026-11-13): a closed connection reports getSchema() failure as a PLAIN
         // java.sql.SQLException — NULL SQLState, vendor code 0, message exactly
         // "Connection was closed" (the JDBC layer's own lifecycle text). Native errors are
         // ALSO plain null-state SQLExceptions with DIFFERENT messages, so the message is the
@@ -202,7 +202,7 @@ class EmbeddedDialectBehaviorTest {
     fun `DS-SEC-20 - the configuration lock freezes every hardened setting and leaves session state settable`() {
         // #816: with `lock_configuration` at open, even the two toggles the external-access lock
         // left runtime-settable are refused, and so is the lock itself. Session state is not
-        // configuration: `SET search_path`, `SET schema` and `USE` still run (measured, 1.5.5.1).
+        // configuration: `SET search_path`, `SET schema` and `USE` still run (measured, 1.5.6.0, 2026-11-13).
         onHardenedDuckdb { connection ->
             (HARDENED_SETTINGS + CONFIGURATION_LOCK).forEach { key ->
                 val value = if (key == CONFIGURATION_LOCK) "false" else "true"

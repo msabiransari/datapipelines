@@ -1000,7 +1000,7 @@ Shipped in 107 as the MCP tool `sql_probe` ([MCP §6.2.34](mcp-server.md#6234-sq
 | POSTGRES | `EXPLAIN <sql>` | root `QUERY PLAN` line: `seq` for `Seq Scan`, `index:<name>` for `Index [Only] Scan using`; row estimate from the root's `rows=N` |
 | MYSQL | `EXPLAIN <sql>` | first row's `type` (`ALL` → `seq`; else `index:<key>` when a key is read) and `rows` estimate |
 | H2 | `EXPLAIN <sql>` | the access path rides in the rewritten statement's `/* ... */` comment — `/* PUBLIC.TRIPS.tableScan */` → `seq`, `/* PUBLIC.IDX_CITY: CITY = 'x' */` → `index:PUBLIC.IDX_CITY`; no row estimate |
-| DUCKDB / LAKE | `EXPLAIN <sql>` | the box-drawing plan text; the pruning marker is `Scanning Files: x/y` → `partition_prune x/y` with `partitions_scanned`/`partitions_total`; row estimate from the root's `~N rows` annotation. With no static file filter the marker is ABSENT (and a filter selecting every file is optimized away entirely) — the partitions fields stay null, the honest "no pruning information", never `y/y`. DuckDB 1.5.5.1 still prunes through `CAST`/`UPPER` on the partition column (verified) — a function on the column does NOT defeat the pruning this marker reports |
+| DUCKDB / LAKE | `EXPLAIN <sql>` | the box-drawing plan text; the pruning marker is `Scanning Files: x/y` → `partition_prune x/y` with `partitions_scanned`/`partitions_total`; row estimate from the root's `~N rows` annotation. With no static file filter the marker is ABSENT (and a filter selecting every file is optimized away entirely) — the partitions fields stay null, the honest "no pruning information", never `y/y`. DuckDB 1.5.6.0 still prunes through `CAST`/`UPPER` on the partition column (verified, re-probed 2026-11-13 by `SqlProbeLakeTest`) — a function on the column does NOT defeat the pruning this marker reports |
 | SQLITE | `EXPLAIN QUERY PLAN <sql>` | the `detail` column: `SCAN t` → `seq`, `SEARCH t USING [COVERING] INDEX <name>` → `index:<name>`; no row estimate |
 | ORACLE / MSSQL | none — `plan: null` | `EXPLAIN PLAN FOR` writes a plan TABLE and `SHOWPLAN` needs session state; neither is a read, so no wrapper is declared |
 
@@ -1435,7 +1435,7 @@ partitions it names.
 **The search-path rule — when bare table names resolve.** When ALL of the datasource's
 registered tables share EXACTLY ONE distinct namespace, the last statement is
 `SET search_path = '<catalog>.<schema>'` (verified to resolve bare table names on duckdb_jdbc
-1.5.5.1; the catalog-qualified spelling cannot drift into a same-named schema elsewhere) —
+1.5.6.0, re-probed 2026-11-13; the catalog-qualified spelling cannot drift into a same-named schema elsewhere) —
 provided at least one table in that namespace is emission-healthy (158, #129): the prelude
 creates no schema for an all-refused namespace, so a search path naming one would fail every
 physical connection, and the count of namespaces still reads ALL registered rows, so a broken
@@ -1495,12 +1495,12 @@ come from is the operator key `datapipelines.duckdb.extension-directory`
 ([configuration.md §3.25](configuration.md#325-duckdb-extension-directory-dp-lake)):
 
 - **Set — the shipped image**: the published image bundles the four extensions for DuckDB
-  core **v1.5.5** under `/opt/duckdb/extensions/v1.5.5/<platform>/` (+108 MB uncompressed),
+  core **v1.5.6** under `/opt/duckdb/extensions/v1.5.6/<platform>/` (+108 MB uncompressed),
   the `<platform>` following the image build's architecture (`linux_amd64` or `linux_arm64`
   via the Dockerfile's `TARGETARCH` mapping), and
   exports the variable from the Dockerfile. Every lake connection then runs
-  `SET extension_directory` plus BARE `LOAD`s and **never an `INSTALL`** — in DuckDB v1.5.5
-  `LOAD` strictly loads already-present files (no download code path runs at all, measured in
+  `SET extension_directory` plus BARE `LOAD`s and **never an `INSTALL`** — in DuckDB v1.5.6
+  `LOAD` strictly loads already-present files (no download code path runs at all, re-probed 2026-11-13 on v1.5.6 and first measured in
   the 089 §7.3 spike with `--network none`), so **a hardened dp-lake deployment needs no
   egress to `extensions.duckdb.org` at all**.
 - **Unset**: the explicit `INSTALL`+`LOAD` pairs developer machines rely on — which requires

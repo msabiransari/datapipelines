@@ -70,9 +70,9 @@ import kotlin.io.path.relativeTo
  *
  * ## The pruning proof
  *
- * DuckDB 1.5.5.1's `EXPLAIN ANALYZE` reports, on the `TABLE_SCAN` operator of a
+ * DuckDB 1.5.6.0's `EXPLAIN ANALYZE` reports, on the `TABLE_SCAN` operator of a
  * `read_parquet … hive_partitioning = true` scan, the lines `Scanning Files: k/n` and
- * `Total Files Read: k` (verified 2026-09-08 against the pinned jar — a `pickup_date =` key
+ * `Total Files Read: k` (verified 2026-09-08 on 1.5.5.1, re-probed 2026-11-13 against the pinned jar — a `pickup_date =` key
  * predicate on a three-partition hive layout prints `Scanning Files: 1/3` +
  * `Total Files Read: 1` and names the single file it opened; the same aggregate with no
  * predicate prints `Total Files Read: 3`). Both queries run as DQL nodes through the real
@@ -104,10 +104,10 @@ class LakeMinioE2eTest {
         registerTable(
             name = "trips_iceberg",
             format = "iceberg",
-            // The current METADATA FILE, not the table root: DuckDB 1.5.5.1 resolves a root
+            // The current METADATA FILE, not the table root: DuckDB 1.5.6.0 resolves a root
             // location through version-hint.text by CONSTRUCTING `v<n>.metadata.json` /
             // `<n>.metadata.json` filenames, which never match the Iceberg spec's
-            // `%05d-<uuid>.metadata.json` names pyiceberg writes (measured 2026-09-08 against
+            // `%05d-<uuid>.metadata.json` names pyiceberg writes (measured 2026-09-08 on 1.5.5.1, re-probed 2026-11-13 against
             // the pinned jar — root, root+version, and every version_name_format glob all
             // fail; only the explicit metadata file scans). The newest metadata file is
             // discovered at seed time so a regenerated fixture needs no test edit.

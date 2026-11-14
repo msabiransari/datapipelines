@@ -15,9 +15,9 @@ import java.sql.DriverManager
  * `jdbc:duckdb:`, the registry's table rows as the catalog, a hive-partitioned Parquet fixture
  * written by DuckDB itself). This is the T199 measurement as a test: the pruning signal is
  * DuckDB's static `Scanning Files: x/y` plan marker, live-probed against duckdb_jdbc 1.5.5.1
- * (2026-09-09) — plain `EXPLAIN` carries it, so the probe never runs the statement twice.
+ * (2026-09-09; re-probed on 1.5.6.0, 2026-11-13) — plain `EXPLAIN` carries it, so the probe never runs the statement twice.
  *
- * One finding the probe KDoc records: DuckDB 1.5.5.1 evaluates a deterministic predicate on the
+ * One finding the probe KDoc records: DuckDB 1.5.6.0 (re-probed 2026-11-13) evaluates a deterministic predicate on the
  * partition column per PARTITION VALUE, so `CAST`/`UPPER` on the partition column prune too —
  * the "unpruned" arm is a predicate the engine cannot fold onto partition values, which reports
  * no marker (null/null, the honest "no pruning information").

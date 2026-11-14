@@ -33,7 +33,7 @@ class LakeDefinitionLifecycleIntegrationTest {
         val draft = h.service.createDraft("sales", "orders", ORDERS_V1, h.actor, WriteSurface.MCP)
         draft.version shouldBe 1
         draft.status shouldBe PipelineVersionStatus.DRAFT
-        draft.bodyJson shouldBe LakeDefinitionBodies.toJson(LakeDefinitionBodies.parse(ORDERS_V1, null)).let(::jsonbText)
+        draft.bodyJson shouldBe LakeDefinitionBodies.toJson(LakeDefinitionBodies.parse(ORDERS_V1, null, null)).let(::jsonbText)
         val table = h.table(draft.tableId)
         (table.status to table.applyState) shouldBe (LakeTableStatus.ACTIVE to null)
         table.currentDefinitionVersion shouldBe null

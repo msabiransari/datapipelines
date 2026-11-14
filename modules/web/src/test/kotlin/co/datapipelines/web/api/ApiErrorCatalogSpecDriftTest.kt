@@ -50,6 +50,13 @@ class ApiErrorCatalogSpecDriftTest {
         }
     }
 
+    @Test
+    fun `the truncate partition refusal is a 400 with its own message, not the lake family line (#967)`() {
+        val code = PipelineErrorCodes.Lake.APPEND_PARTITION_VALUE_OUT_OF_RANGE
+        ApiErrorCatalog.statusFor(code) shouldBe HttpStatus.BAD_REQUEST
+        ApiErrorCatalog.userMessageFor(code) shouldBe "The staged result has values a truncate partition cannot hold."
+    }
+
     /** §13.2–§13.12 rows: `| \`code\` | HTTP | … |` with a numeric or em-dash HTTP cell. */
     private fun parseStatusRows(spec: String): List<Pair<String, Int?>> =
         spec
@@ -384,8 +391,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 512 → 513 with #803: §13.5 gains `pipeline.staging.scratch_blocked` (500, the `pipeline.staging.`
          * family default — no explicit catalog row), the permanent scratch refusal beside leftover files, landed
          * in the SAME commit as its `PipelineErrorCodes.Staging` and `StagingErrorCodes` constants.
+         * 513 → 514 with #967 (recounted with [STATUS_ROW_REGEX]): §13.25 gains
+         * `lake.append.partition_value_out_of_range` (400), the append's refusal of a value a numeric `truncate`
+         * partition cannot hold, landed in the SAME commit as its constant and catalog rows.
          */
-        const val SECTION_13_ROW_COUNT = 513
+        const val SECTION_13_ROW_COUNT = 514
 
         /**
          * §12's distinct validation codes.

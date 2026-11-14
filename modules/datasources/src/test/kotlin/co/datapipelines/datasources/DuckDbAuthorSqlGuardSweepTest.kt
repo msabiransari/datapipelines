@@ -29,7 +29,7 @@ import java.sql.SQLException
  *    separator the engine accepts) that the gate PASSES is executed over JDBC and must fail.
  *
  * Non-vacuity floor: at least [FLOOR] accepted forms (23 separators × 2 spellings on the pinned
- * 1.5.5.1); fewer means the sweep stopped seeing separators, and the test is red. Falsified at
+ * 1.5.6.0, re-measured 2026-11-13); fewer means the sweep stopped seeing separators, and the test is red. Falsified at
  * birth (handback, gate G3): with the gate's separator class reverted to `\s`, the U+00A0 form is
  * accepted by the engine and passed by the gate — red.
  */
@@ -113,7 +113,7 @@ class DuckDbAuthorSqlGuardSweepTest {
         }
 
     private companion object {
-        /** 23 separators × the unquoted and quoted spelling, on the pinned 1.5.5.1. */
+        /** 23 separators × the unquoted and quoted spelling, on the pinned 1.5.6.0, re-measured 2026-11-13. */
         const val FLOOR = 46
 
         /** U+0001–U+2FFFF minus the 2,048 surrogates, × 2 spellings. */
