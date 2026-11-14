@@ -315,26 +315,8 @@ class ManagedLakeCompactionE2eTest {
         val factor = (ceilingBytes() / inputBytes).toInt()
         withClue("the ceiling ${ceilingBytes()} must cover the input $inputBytes at least twice") { factor shouldBeGreaterThan 1 }
 
-        // The same sort timed with ample time, through the same worker, part and adapter: stopped at its first row by
-        // the consumer (the run fails, nothing commits), so the table stays due and nothing is drained (#994).
-        val timing = PortObserver(PortMode.STOP_AT_FIRST_ROW)
-        val timed = compact(DEADLINE, deadlineWorker(timing, factor, AMPLE))
-        withClue("the timing run: ${timed.part} ${timing.failure}") {
-            timed.state shouldBe "failed"
-            timing.rows.get() shouldBe 1L
-        }
+        val (toRead, toFirstRow) = timedSort(factor, inputBytes)
         revisions(DEADLINE) shouldBe before
-        val admittedAt = seen(timing.deadline).minus(AMPLE)
-        val toRead = Duration.between(admittedAt, seen(timing.readAt))
-        val toFirstRow = Duration.between(seen(timing.readAt), seen(timing.firstRowAt))
-        val toOpen = Duration.between(admittedAt, seen(timing.openAt))
-        println(
-            "case=c14_stored_timing input_bytes=$inputBytes factor=$factor to_open_ms=${toOpen.toMillis()} " +
-                "to_read_ms=${toRead.toMillis()} first_row_ms=${toFirstRow.toMillis()}",
-        )
-        withClue("the sort before its first row must outlast the statement timeout's one-second grain") {
-            toFirstRow.toMillis() shouldBeGreaterThan MIN_FIRST_ROW_MILLIS
-        }
 
         // (a) a run whose deadline falls a quarter of the timed sort after the statement starts: the driver stops the sort
         // before its first row, and the adapter's clock (not the message) makes it the part's deadline.
@@ -365,6 +347,35 @@ class ManagedLakeCompactionE2eTest {
         }
         println("case=c14_stored_b part=${refused.part}")
         revisions(DEADLINE) shouldBe before
+    }
+
+    /**
+     * The deadline table's sort timed with ample time, through the same worker, part and adapter: stopped at its first
+     * row by the consumer (the run fails, nothing commits), so the table stays due and nothing is drained (#994). Answers
+     * the time from admission to the statement's read and from the read to the first sorted row.
+     */
+    private fun timedSort(
+        factor: Int,
+        inputBytes: Long,
+    ): Pair<Duration, Duration> {
+        val timing = PortObserver(PortMode.STOP_AT_FIRST_ROW)
+        val timed = compact(DEADLINE, deadlineWorker(timing, factor, AMPLE))
+        withClue("the timing run: ${timed.part} ${timing.failure}") {
+            timed.state shouldBe "failed"
+            timing.rows.get() shouldBe 1L
+        }
+        val admittedAt = seen(timing.deadline).minus(AMPLE)
+        val toRead = Duration.between(admittedAt, seen(timing.readAt))
+        val toFirstRow = Duration.between(seen(timing.readAt), seen(timing.firstRowAt))
+        val toOpen = Duration.between(admittedAt, seen(timing.openAt))
+        println(
+            "case=c14_stored_timing input_bytes=$inputBytes factor=$factor to_open_ms=${toOpen.toMillis()} " +
+                "to_read_ms=${toRead.toMillis()} first_row_ms=${toFirstRow.toMillis()}",
+        )
+        withClue("the sort before its first row must outlast the statement timeout's one-second grain") {
+            toFirstRow.toMillis() shouldBeGreaterThan MIN_FIRST_ROW_MILLIS
+        }
+        return toRead to toFirstRow
     }
 
     private fun seen(at: Instant?): Instant = requireNotNull(at) { "the port observer did not see this step" }
@@ -656,7 +667,11 @@ class ManagedLakeCompactionE2eTest {
     private fun field(
         receiver: Any,
         name: String,
-    ): Any = receiver.javaClass.getDeclaredField(name).also { it.isAccessible = true }.get(receiver)
+    ): Any =
+        receiver.javaClass
+            .getDeclaredField(name)
+            .also { it.isAccessible = true }
+            .get(receiver)
 
     private fun keyOf(uri: String): String = uri.removePrefix("s3://$BUCKET/")
 
