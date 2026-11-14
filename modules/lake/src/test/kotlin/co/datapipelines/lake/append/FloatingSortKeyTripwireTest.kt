@@ -8,7 +8,7 @@ import java.sql.Statement
 
 /**
  * #968 O12, the tripwire for #971: plain DuckDB on the pinned driver, no catalog, no store. `ORDER BY` on a `DOUBLE`
- * key returns every `-0.0` as `0.0` (duckdb/duckdb#25417; reproduced on 1.5.5 and 1.5.6), so a floating column is
+ * key returns every `-0.0` as `0.0` (duckdb/duckdb#25417; probed on 1.5.5 and 1.5.6 on 2026-11-13), so a floating column is
  * never a sort column (owner ruling 2026-11-13T18:23:58Z; brief 935's definition rule, [AppendOrder.keys]).
  * This asserts today's defect on purpose. Nobody announces the fix to us (the upstream issue is closed): when a driver
  * bump turns this red, the lane it goes red in turns the assertion round (the sign is kept; a regression test from then

@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.54 (living document — updated as enums evolve)
+**Status:** v1.55 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1318,10 +1318,40 @@ Carried in the keep reconcile's result (`KeepPlan.notKept`, #960), which the cle
 
 ---
 
+## 56. `FiguresState` — whether a table's planner figures may be used
+
+Returned by the planner's figures read method (`PlanFiguresReader.figures`, for P8) beside the small-files and candidate-bytes figures ([Metadata DB §4.57](metadata-db.md#457-lake_table_measurements)); not stored.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `CURRENT` | `current` | The profile-dependent figures were computed under the table's current profile id and that profile's current `updated_at` |
+| `STALE` | `stale` | They were computed under another profile, or before the profile's last save: the plan treats compaction as not due (`not measured (profile changed)`) until a measurement under the current profile succeeds |
+| `NEVER_MEASURED` | `never_measured` | No measurement has succeeded: every figure is NULL, never zero |
+
+---
+
+## 57. The lake maintenance planner's error codes and not-due reasons
+
+**Error codes** stamped in `lake_table_measurements.error_code` by a measurement attempt that did not succeed (the last good figures are kept): `timeout` (the read did not end within `plan-table-timeout` and was abandoned), `metadata_too_large` (the table's metadata file inflates past the metadata read cap), otherwise the failure's catalogued code or `unclassified` (the maintenance worker's mapping).
+
+**Not-due reasons** the plan reports for a part with no task (`MaintenanceDue`, [Lake: maintenance runs](lake.md#11-maintenance-runs)); a part held by the gate carries the gate's words instead (`outside window`, `paused until <instant>`, §54):
+
+| Reason | Meaning |
+|---|---|
+| `not measured` | Never measured, or the last measurement failed: no rewrite work |
+| `not measured (profile changed)` | The figures are stale (§56): compaction is not due until remeasured |
+| `not registered` | The operation's part is not registered with the worker: measured and reported, never a task |
+| `capacity` | Every unsorted file left is larger than the profile's cap: it fits no run |
+| `capacity (waiting)` | The last rewrite attempt ended `capacity` with nothing committed and nothing left for a fresh run: not due again before `maintenance.cleanup_interval_hours`, unless the profile or the assignment changed since |
+| `rule silent` | No rule says whether the work is due: not due, counted in the plan row (`tables_rule_silent`) |
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.55 | 959 (#959) — renumbered at the spec merge after #960's §55 and v1.54 | New **§56 `FiguresState`** (current, stale, never measured: the planner figures' read state, D3a) and **§57** the planner's error codes and not-due reasons, held to the Kotlin values by `PlanEnumsSpecDriftTest`. |
 | 2026-11-14 | v1.54 | 960 (#960, dp-lake P6) | New **§55 `KeepNotKeptReason`**: the two reasons a period a keep rule asks for gets no keep (`history_not_available`, `name_taken_by_branch`), held to the Kotlin enum by `KeepEnumsSpecDriftTest`. |
 | 2026-11-14 | v1.53 | 956 (#956) — renumbered at the spec merge after #957's v1.52 | **§15 lake profile audit events:** `lake.profile.created`, `lake.profile.updated`, `lake.profile.assigned` and `lake.table.pause_changed`, each written by the service inside its change's transaction, once per change; held to `LakeProfileAuditEvents` by `LakeProfileAuditEventsSpecDriftTest`. |
 | 2026-11-14 | v1.52 | 957 (#957) — renumbered at the spec merge after #958's v1.51 | New **§52 `MaintenanceRunKind`**, **§53 `MaintenanceRunState`** (V60's CHECKs) and **§54 `MaintenanceOutcome`** (the parts' outcome words), held to the Kotlin enums by `MaintenanceEnumsSpecDriftTest`; **§15** gains `lake.maintenance.run_finished` (held to `LakeMaintenanceAuditEvents.ALL` by `MaintenanceEnumsSpecDriftTest`); **§16**: #958's `lake.maintenance.*` row gains `lake.maintenance.deadline` (pipeline-contract §13.25; one domain, one row). |
