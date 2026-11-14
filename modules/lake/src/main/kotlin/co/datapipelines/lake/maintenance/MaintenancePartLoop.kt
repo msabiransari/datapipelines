@@ -83,6 +83,7 @@ internal class MaintenancePartLoop(
                 attempted = true,
                 figures = result.figures,
                 until = result.until,
+                reason = result.reason,
                 details = result.details,
             )
         return result.outcome.takeIf { it == MaintenanceOutcome.BUSY || it == MaintenanceOutcome.DEADLINE }

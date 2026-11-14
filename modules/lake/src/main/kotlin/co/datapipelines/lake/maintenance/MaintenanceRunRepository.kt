@@ -173,7 +173,7 @@ class MaintenanceRunRepository(
     fun forTable(tableId: UUID): List<MaintenanceRunRow> =
         jdbc.query("SELECT * FROM lake_maintenance_runs WHERE table_id = :t ORDER BY started_at, id", mapOf("t" to tableId), ::row)
 
-    /** The `parts_json` value of [parts], in the wire shape the migration documents. */
+    /** The `parts_json` value of [parts], in the wire shape the migration documents; a part's details follow its keys. */
     fun partsJson(parts: List<PartRecord>): String =
         mapper.writeValueAsString(
             parts.map { part ->

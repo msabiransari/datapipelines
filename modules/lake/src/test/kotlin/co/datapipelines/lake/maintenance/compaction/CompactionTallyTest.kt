@@ -50,7 +50,7 @@ class CompactionTallyTest {
         val nothing = CompactionTally().result()
         nothing.details.keys shouldContainAll listOf("committed", "left_for_fresh_run", "blocked", "groups")
         nothing.details["committed"] shouldBe false
-        (nothing.details.keys intersect PartRecord.COMMON_KEYS) shouldBe emptySet()
+        (nothing.details.keys intersect PartRecord.KEYS) shouldBe emptySet()
     }
 
     @Test

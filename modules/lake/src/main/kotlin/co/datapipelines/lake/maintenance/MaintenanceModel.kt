@@ -52,25 +52,40 @@ data class PartFigures(
 }
 
 /**
- * A part's answer: its outcome, the figures of what it did, and the instant of a `paused_until`. [details] are the
- * part's own fields, written at the top level of its `parts_json` entry beside the common ones (#969: compaction's
- * `committed` and `left_for_fresh_run`, which 959's plan reads, and its blocked files and group figures); a key may
- * not repeat a common one ([PartRecord.COMMON_KEYS]).
+ * A part's answer: its outcome, the figures of what it did, the instant of a `paused_until`, the part's own [reason]
+ * (`nothing to fold`, #963) and its own [details]: further figures written at the top level of its `parts_json` entry
+ * (`folded`, `manifests_before`, #963; `committed`, `left_for_fresh_run`, `groups`, #969). A detail's name is `[a-z_]+`
+ * and never one of the entry's own keys ([PartRecord.KEYS]); its value is a boolean, an integer or a string, or a list
+ * of flat objects whose values are booleans, numbers or strings (#969's `groups`, one object per committed group).
  */
 data class PartResult(
     val outcome: MaintenanceOutcome,
     val figures: PartFigures = PartFigures.NONE,
     val until: Instant? = null,
-    val details: Map<String, Any?> = emptyMap(),
+    val reason: String? = null,
+    val details: Map<String, Any> = emptyMap(),
 ) {
     init {
         require(outcome != MaintenanceOutcome.FAILED) { "a part never answers failed: it throws" }
         require((outcome == MaintenanceOutcome.PAUSED_UNTIL) == (until != null)) { "only paused_until carries an instant: $this" }
-        require(details.keys.none { it in PartRecord.COMMON_KEYS }) { "a part's details never repeat a common key: ${details.keys}" }
+        details.forEach { (key, value) ->
+            require(DETAIL_NAME.matches(key) && key !in PartRecord.KEYS) { "a detail is named [a-z_]+ and is not an entry key: $key" }
+            require(scalar(value) || flatObjects(value)) { "a detail is a boolean, integer or string, or a list of flat objects: $key" }
+        }
     }
 
     companion object {
         val NOTHING_TO_DO = PartResult(MaintenanceOutcome.NOTHING_TO_DO)
+        private val DETAIL_NAME = Regex("[a-z_]+")
+
+        private fun scalar(value: Any): Boolean = value is Boolean || value is Int || value is Long || value is String
+
+        private fun flatObjects(value: Any): Boolean =
+            value is List<*> &&
+                value.all { item ->
+                    item is Map<*, *> &&
+                        item.all { (key, field) -> key is String && (field is Boolean || field is Number || field is String) }
+                }
     }
 }
 
@@ -142,12 +157,12 @@ data class PartRecord(
     val reason: String? = null,
     /** A failed part's error code. */
     val errorCode: String? = null,
-    /** The part's own fields ([PartResult.details]), at the top level of its entry. */
-    val details: Map<String, Any?> = emptyMap(),
+    /** The part's own figures ([PartResult.details]), written beside the keys above. */
+    val details: Map<String, Any> = emptyMap(),
 ) {
     companion object {
-        /** The keys every `parts_json` entry carries; a part's [details] never repeat one. */
-        val COMMON_KEYS: Set<String> =
+        /** The keys every `parts_json` entry carries; a part's detail never takes one of them. */
+        val KEYS: Set<String> =
             setOf("name", "outcome", "attempted", "files", "bytes", "deferred_deletions", "until", "reason", "error_code")
     }
 }

@@ -72,15 +72,17 @@ class CompactionTally {
 
     fun result(): PartResult {
         val details =
-            linkedMapOf<String, Any?>(
+            linkedMapOf<String, Any>(
                 "committed" to committed,
                 "left_for_fresh_run" to leftForFreshRun,
                 "blocked" to blocked,
             )
         if (blocked > 0) {
-            details["largest_need_bytes"] = largestNeedBytes
-            details["limit_bytes"] = limit?.bytes
-            details["limit_source"] = limit?.source?.wire
+            largestNeedBytes?.let { details["largest_need_bytes"] = it }
+            limit?.let {
+                details["limit_bytes"] = it.bytes
+                details["limit_source"] = it.source.wire
+            }
         }
         details["groups"] = groups.map(GroupFigures::wire)
         return PartResult(

@@ -12,6 +12,7 @@ import co.datapipelines.lake.maintenance.compaction.CompactionPart
 import co.datapipelines.lake.maintenance.compaction.CompactionScratchPort
 import co.datapipelines.lake.maintenance.compaction.CompactionSettings
 import co.datapipelines.lake.maintenance.compaction.CompactionTables
+import co.datapipelines.lake.maintenance.manifests.ManifestRewritePart
 import co.datapipelines.lake.maintenance.plan.MaintenanceDue
 import co.datapipelines.lake.maintenance.plan.MaintenancePlanner
 import co.datapipelines.lake.maintenance.plan.PlanBounds
@@ -20,6 +21,7 @@ import co.datapipelines.lake.maintenance.plan.PlanReaders
 import co.datapipelines.lake.maintenance.plan.PlanRepository
 import co.datapipelines.lake.maintenance.plan.ProfileMaintenanceGate
 import co.datapipelines.lake.maintenance.plan.TableMeasurer
+import co.datapipelines.lake.profiles.LakeProfiles
 import co.datapipelines.scheduler.SystemJobQueue
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
@@ -114,6 +116,19 @@ class LakeMaintenanceAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     fun lakeMaintenanceScratch(): MaintenanceScratch = MaintenanceScratch.NONE
+
+    /**
+     * #963: the part `manifest_rewrite`, second in a run's order. It reads the manifest list with no lease through the
+     * delete-refusing metadata FileIO, and its threshold from the table's profile.
+     */
+    @Bean
+    fun lakeMaintenanceManifestRewrite(
+        dataSource: DataSource,
+        properties: LakeProperties,
+        catalogs: LakeCatalogs,
+        profiles: LakeProfiles,
+    ): MaintenancePart =
+        ManifestRewritePart.over(NamedParameterJdbcTemplate(LakeAppendRuntime.statements(dataSource)), properties.name, catalogs, profiles)
 
     /**
      * #969: the `compaction` part, registered wherever the application supplies its scratch database port (the web
