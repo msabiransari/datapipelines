@@ -51,19 +51,32 @@ data class PartFigures(
     }
 }
 
-/** A part's answer: its outcome, the figures of what it did, and the instant of a `paused_until`. */
+/**
+ * A part's answer: its outcome, the figures of what it did, the instant of a `paused_until`, the part's own [reason]
+ * (`nothing to fold`, #963) and its own [details]: further figures written at the top level of its `parts_json` entry
+ * (`folded`, `manifests_before`, #963; `committed`, `left_for_fresh_run`, #969). A detail's name is `[a-z_]+` and never
+ * one of the entry's own keys ([PartRecord.KEYS]); its value is a boolean, an integer or a string.
+ */
 data class PartResult(
     val outcome: MaintenanceOutcome,
     val figures: PartFigures = PartFigures.NONE,
     val until: Instant? = null,
+    val reason: String? = null,
+    val details: Map<String, Any> = emptyMap(),
 ) {
     init {
         require(outcome != MaintenanceOutcome.FAILED) { "a part never answers failed: it throws" }
         require((outcome == MaintenanceOutcome.PAUSED_UNTIL) == (until != null)) { "only paused_until carries an instant: $this" }
+        details.forEach { (key, value) ->
+            require(DETAIL_NAME.matches(key) && key !in PartRecord.KEYS) { "a detail is named [a-z_]+ and is not an entry key: $key" }
+            val scalar = value is Boolean || value is Int || value is Long || value is String
+            require(scalar) { "a detail is a boolean, integer or string: $key" }
+        }
     }
 
     companion object {
         val NOTHING_TO_DO = PartResult(MaintenanceOutcome.NOTHING_TO_DO)
+        private val DETAIL_NAME = Regex("[a-z_]+")
     }
 }
 
@@ -135,7 +148,15 @@ data class PartRecord(
     val reason: String? = null,
     /** A failed part's error code. */
     val errorCode: String? = null,
-)
+    /** The part's own figures ([PartResult.details]), written beside the keys above. */
+    val details: Map<String, Any> = emptyMap(),
+) {
+    companion object {
+        /** The keys every `parts_json` entry carries; a part's detail never takes one of them. */
+        val KEYS: Set<String> =
+            setOf("name", "outcome", "attempted", "files", "bytes", "deferred_deletions", "until", "reason", "error_code")
+    }
+}
 
 /** The settlement step's figures in the run row (D6a). */
 data class SettlementRecord(

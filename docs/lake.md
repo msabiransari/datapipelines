@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.31 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner)
+**Status:** v1.32 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -881,9 +881,9 @@ claims exactly these five rules.
 ## 11. Maintenance runs
 
 A maintenance run is the frame every maintenance operation executes in (#957; dp-lake record §11, §11a call 34). This
-section describes the frame and the planner that enqueues runs (#959); the operations (cleanup, manifest rewrite,
-compaction, the purged table's deletion) are their own lanes, and until they land no part is registered, the planner
-enqueues nothing and a run records `nothing_to_do`.
+section describes the frame, the planner that enqueues runs (#959) and the manifest rewrite (#963); the other
+operations (cleanup, compaction, the purged table's deletion) are their own lanes, and until they land their parts are
+not registered, the planner finds them never due and a run records nothing for them.
 
 **One task per table.** `lake-maintenance` is a keyed scheduler task whose key is the table id
 ([Scheduler: system jobs](scheduler.md#85-system-jobs)): enqueueing an instance that already exists changes nothing, so a
@@ -1011,12 +1011,46 @@ small files and candidate bytes with their state (`current`, `stale`, `never_mea
 [Enums §56](enums.md#56-figuresstate--whether-a-tables-planner-figures-may-be-used)), growth per week with its baseline's
 time, and the measurement's times; a figure whose source was not read is NULL.
 
+**The manifest rewrite** (#963; record §11, §11a call 34, §8a, §8b; the P6 lane cut L10, L14). The part
+`manifest_rewrite` runs second in a run (after cleanup, before compaction), needs no scratch, and applies to `active`
+and `deprecated` tables with a snapshot (never `archived` or `purged`).
+
+- **When.** After admission the part re-reads the table: it is due when the current snapshot lists at least the
+  profile's `maintenance.rewrite_manifests_min_count` manifests (data and delete), otherwise `nothing_to_do`.
+  `pause.compaction_until` holds it (`paused_until`); the window does not (the gate above).
+- **What folds.** From the current snapshot's manifest list alone (no manifest is opened), a candidate is a data
+  manifest shorter than half the table's `commit.manifest.target-size-bytes` (Iceberg's 8 MiB when unset). Candidates
+  are grouped by partition spec; a group with at least two candidates folds. Delete manifests and manifests at or over
+  half the target are left as they are.
+- **Due with nothing to fold.** The count rule decides due; the candidate rule decides progress. A table whose
+  manifests are all near the target, or one small manifest per spec, stays due by the count and gets a run that reads
+  the manifest list and records `nothing_to_do` with the reason `nothing to fold`: no lease, no commit, no revision row.
+  This is accepted: the threshold is the record's, and the planner is not changed.
+- **What it changes.** One commit through the run (the table lease with the run's deadline, the fence, the revision
+  trigger): the folding candidates are read and rewritten, every spec's entries into one writer that rolls at the target
+  size. Only which manifests list the files changes: the live data and delete files, the rows, every snapshot's totals,
+  earlier snapshots and tags are unchanged. The new manifests are written inside the commit, under the lease. The
+  replaced manifests stay in the bucket (the library's deletes are refused) until the remover takes them at a later
+  cleanup, once no protected revision reaches them; a reader pinned to an earlier revision still reads it.
+- **Fewer is not promised.** The new manifests carry the current schema in their headers and roll on their new size,
+  so after a schema or documentation change a rewrite can come out with as many manifests, or more. The part compares
+  the counts after the commit: fewer → `done` with `folded: true`; not fewer → `done` with `folded: false`; never a
+  retry in the same run. The next run decides afresh from the new list.
+- **Recorded** on its `parts_json` entry ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs)): `files` =
+  the manifests replaced, `bytes` = their lengths, and `folded`, `manifests_before`, `manifests_after` (when the new
+  list was read), `lease_held_millis`; a run with nothing to fold records `reason` and `manifests_before`. `busy`,
+  `deadline` and an unknown commit outcome are the run's (above). No log event of its own.
+- **The lease.** The rewrite holds the table lease while it reads and writes the folded manifests. Measured on the
+  lane's machine (module Postgres and MinIO, files with column metrics, every manifest a candidate): 1,000 or 10,000
+  data files in 200 or 1,000 manifests folded to one manifest with the lease held 0.2–0.5 s.
+
 ---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.32 | 963 (#963, dp-lake P6) | **§11 Maintenance runs** gains the manifest rewrite: the part `manifest_rewrite` (second, no scratch, `active` and `deprecated`), due by the manifest count and held only by the compaction pause, the candidate rule (data manifests under half the target, two per spec), due with nothing to fold, the one commit and what it leaves unchanged, the replaced manifests left for the remover, `folded` and the counts on the run row, the lease measurement. The section's opening no longer says no part is registered. |
 | 2026-11-14 | v1.31 | 959 (#959, dp-lake P6) — renumbered at the spec merge after #961's v1.28, #960's v1.29 and #968's v1.30 | **§11 Maintenance runs** gains the planner: the recurring `lake-maintenance-planner` task and its four keys; measuring from the manifests on the planner's own readers (abandoned reads retired before their stamp, their limit, the client built inside the read, one winner per attempt, the stamp fence); stale figures and the measured-first rule; daily usage and growth; the due function, the one run-history statement, the gate shared with the worker, and the ranked enqueue; the figures read method. |
 | 2026-11-14 | v1.30 | 968 (#968, dp-lake P6) — renumbered at the spec merge after #961's v1.28 and #960's v1.29 | §7: on a table with sort columns the append's writing scan is ordered by the sort columns (ascending, nulls first) and every file is stamped with the table's order, from one value; an unsupplied optional sort column is skipped; a legacy table keeps arrival order and the unsorted stamp; a sort that does not fit the scratch reservation fails with `pipeline.staging.scratch_limit_exceeded` (ledger `FAILED`, phase `publish`, that code), a memory-limit failure stays `lake.append.failed` with its staging code in the ledger; a string sort column is compared by code points whatever its collation (round 2). Replaces #935's "files stay stamped unsorted". |
 | 2026-11-14 | v1.29 | 960 (#960, dp-lake P6) — renumbered at the spec merge after #961's v1.28 | **§11 Profiles** gains *Keep rules*: the computed `dp-keep-` tag names, the period's end in the profile's current zone, the kept snapshot proved by the snapshot log alone ("not kept: history not available"), the keep's end and the tag's maximum age, reconcile by name (a changed zone moves ends, never snapshots; a reopened period's tag stands), what is never touched (branches, `main`, `dp-hold-`; "not kept: name taken by a branch"), and the one commit. |
