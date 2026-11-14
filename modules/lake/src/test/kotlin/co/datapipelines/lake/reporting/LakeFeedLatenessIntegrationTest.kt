@@ -74,7 +74,7 @@ class LakeFeedLatenessIntegrationTest {
         val table = h.table("orders")
         rhythm(table, "hourly", every = Duration.ofHours(1), lastAgo = Duration.ofHours(3), count = 8)
         deliver(table, "hourly", "FAILED", publishedAgo = Duration.ofMinutes(1), id = "failed-stamped")
-        val late = lateness.forTable(table).feeds.single().verdict.shouldBeInstanceOf<FeedVerdict.Late>()
+        val late = onlyVerdict(table).shouldBeInstanceOf<FeedVerdict.Late>()
         withClue("since-last ${late.sinceLast}") { (late.sinceLast >= Duration.ofHours(3)) shouldBe true }
     }
 
@@ -108,14 +108,14 @@ class LakeFeedLatenessIntegrationTest {
     fun `F6 - a table moved to a profile with another factor is judged by the new factor at the next read`() {
         val table = h.table("orders")
         rhythm(table, "hourly", every = Duration.ofHours(1), lastAgo = Duration.ofHours(3), count = 8)
-        lateness.forTable(table).feeds.single().verdict.shouldBeInstanceOf<FeedVerdict.Late>()
+        onlyVerdict(table).shouldBeInstanceOf<FeedVerdict.Late>()
 
         h.profiles.create("patient", document("reporting.lateness_overdue_factor" to "4"), h.actor)
         h.profiles.assign(table, "patient", h.actor)
-        lateness.forTable(table).feeds.single().verdict.shouldBeInstanceOf<FeedVerdict.OnTime>()
+        onlyVerdict(table).shouldBeInstanceOf<FeedVerdict.OnTime>()
 
         h.profiles.assign(table, "production", h.actor)
-        lateness.forTable(table).feeds.single().verdict.shouldBeInstanceOf<FeedVerdict.Late>()
+        onlyVerdict(table).shouldBeInstanceOf<FeedVerdict.Late>()
     }
 
     @Test
@@ -124,7 +124,7 @@ class LakeFeedLatenessIntegrationTest {
         // 20 daily deliveries, then 3 hourly ones, the last 3 h ago: a sample of 4 sees only the hourly rhythm.
         rhythm(table, "feed", every = Duration.ofDays(1), lastAgo = Duration.ofDays(1).plusHours(5), count = 20)
         rhythm(table, "feed", every = Duration.ofHours(1), lastAgo = Duration.ofHours(3), count = 3, prefix = "h")
-        lateness.forTable(table).feeds.single().verdict.shouldBeInstanceOf<FeedVerdict.OnTime>().usualInterval shouldBe Duration.ofDays(1)
+        onlyVerdict(table).shouldBeInstanceOf<FeedVerdict.OnTime>().usualInterval shouldBe Duration.ofDays(1)
 
         h.profiles.create(
             "short",
@@ -132,11 +132,15 @@ class LakeFeedLatenessIntegrationTest {
             h.actor,
         )
         h.profiles.assign(table, "short", h.actor)
-        lateness.forTable(table).feeds.single().verdict.shouldBeInstanceOf<FeedVerdict.Late>().usualInterval shouldBe Duration.ofHours(1)
+        onlyVerdict(table).shouldBeInstanceOf<FeedVerdict.Late>().usualInterval shouldBe Duration.ofHours(1)
 
         h.profiles.create("demanding", document("reporting.lateness_sample" to "200", "reporting.lateness_min_deliveries" to "50"), h.actor)
         h.profiles.assign(table, "demanding", h.actor)
-        lateness.forTable(table).feeds.single().verdict shouldBe FeedVerdict.NotEnoughDeliveries(23)
+        lateness
+            .forTable(table)
+            .feeds
+            .single()
+            .verdict shouldBe FeedVerdict.NotEnoughDeliveries(23)
     }
 
     @Test
@@ -176,6 +180,12 @@ class LakeFeedLatenessIntegrationTest {
         }
         val result = lateness.forTable(table)
         result.feeds.map { it.feed } shouldContainExactly (0 until BULK_FEEDS).map { "feed_$it" }
+    }
+
+    /** The verdict of [table]'s one feed, read now. */
+    private fun onlyVerdict(table: UUID): FeedVerdict {
+        val feeds = lateness.forTable(table).feeds
+        return feeds.single().verdict
     }
 
     /** [count] PUBLISHED deliveries of [feed], [every] apart, the newest [lastAgo] before [anchor]. */
