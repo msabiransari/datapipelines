@@ -3,7 +3,11 @@ package co.datapipelines.scheduler
 import com.github.kagkarlsson.scheduler.Scheduler
 import com.github.kagkarlsson.scheduler.boot.config.DbSchedulerStarter
 import com.github.kagkarlsson.scheduler.task.CompletionHandler
+import com.github.kagkarlsson.scheduler.task.DeadExecutionHandler
+import com.github.kagkarlsson.scheduler.task.ExecutionContext
+import com.github.kagkarlsson.scheduler.task.FailureHandler
 import com.github.kagkarlsson.scheduler.task.TaskDescriptor
+import com.github.kagkarlsson.scheduler.task.TaskInstance
 import com.github.kagkarlsson.scheduler.task.helper.CustomTask
 import com.github.kagkarlsson.scheduler.task.helper.RecurringTask
 import com.github.kagkarlsson.scheduler.task.helper.Tasks
@@ -12,11 +16,12 @@ import org.slf4j.LoggerFactory
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.ApplicationListener
 import java.util.UUID
+import java.util.function.Function
 
 /**
- * The scheduler's db-scheduler tasks (scheduler design revision §2.2; the notifier since #442b) —
- * the only place a db-scheduler task is defined. Task data is a run id string at most; the JSON serializer
- * ([SchedulerAutoConfiguration]) writes it, never Java serialization (A8).
+ * The scheduler's db-scheduler tasks (scheduler design revision §2.2; the notifier since #442b; the system jobs'
+ * tasks since #957) — the only place a db-scheduler task is defined. Task data is a run id or a system job's key
+ * string at most; the JSON serializer ([SchedulerAutoConfiguration]) writes it, never Java serialization (A8).
  */
 object SchedulerTasks {
     const val DISPATCHER = "schedule-dispatcher"
@@ -66,6 +71,46 @@ object SchedulerTasks {
         notifier: ScheduleNotifier,
         properties: SchedulerProperties,
     ): RecurringTask<Void> = Tasks.recurring(NOTIFIER, FixedDelay.of(properties.tickInterval)).execute { _, _ -> notifier.tick() }
+
+    /** #957 D1 — a [KeyedSystemJob]'s task: one instance per key, the key as both the instance id and the data. */
+    fun keyedTask(job: KeyedSystemJob): KeyedSystemTask = KeyedSystemTask(job)
+
+    /**
+     * #957 D1 — a [RecurringSystemJob]'s task: one durable row, so one instance at a time cluster-wide; the next run is
+     * due [RecurringSystemJob.fixedDelay] after the previous one ended, so a run still going skips the next.
+     */
+    fun recurringTask(job: RecurringSystemJob): RecurringTask<Void> =
+        Tasks.recurring(job.name, FixedDelay.of(job.fixedDelay)).execute { _, _ -> job.run() }
+}
+
+/**
+ * #957 D1 — the task of one [KeyedSystemJob]. The library's defaults of `Tasks.custom`, as the run task has them: no
+ * start-up instance, failure retried after `Tasks.DEFAULT_RETRY_INTERVAL`, a dead execution revived, the default
+ * priority. [instances] is the job's own sentence for the entry inventory, read there by reflection.
+ */
+class KeyedSystemTask internal constructor(
+    private val job: KeyedSystemJob,
+) : CustomTask<String>(
+        job.name,
+        String::class.java,
+        null,
+        Function.identity(),
+        FailureHandler.OnFailureRetryLater(Tasks.DEFAULT_RETRY_INTERVAL),
+        DeadExecutionHandler.ReviveDeadExecution(),
+        DEFAULT_PRIORITY,
+    ) {
+    /** The entry inventory's schedule cell for this one-time task (auth.md §8.6.1). */
+    val instances: String
+        get() = job.instances
+
+    override fun execute(
+        taskInstance: TaskInstance<String>,
+        executionContext: ExecutionContext,
+    ): CompletionHandler<String> =
+        when (val outcome = job.run(taskInstance.data ?: taskInstance.id)) {
+            SystemJobOutcome.Done -> CompletionHandler.OnCompleteRemove()
+            is SystemJobOutcome.AgainAt -> CompletionHandler { complete, operations -> operations.reschedule(complete, outcome.at) }
+        }
 }
 
 /**

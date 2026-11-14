@@ -397,8 +397,11 @@ class ApiErrorCatalogSpecDriftTest {
          *
          * 514 → 515 with #958: §13.25's `lake.maintenance.clock_skew` (HTTP `—`), the lake remover's clock-skew
          * refusal, listed in `NEVER_RETURNED_LIVE`; landed in the SAME commit as its constant.
+         * 515 → 516 with #957 (recounted with [STATUS_ROW_REGEX] on the merged document, after #958's row):
+         * §13.25 gains `lake.maintenance.deadline` (—), a maintenance run's deadline refusal, landed in the SAME
+         * commit as its constant and its NEVER_RETURNED_LIVE entry.
          */
-        const val SECTION_13_ROW_COUNT = 515
+        const val SECTION_13_ROW_COUNT = 516
 
         /**
          * §12's distinct validation codes.

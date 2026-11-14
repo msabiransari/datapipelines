@@ -447,7 +447,10 @@ internal object EntryRuntime {
                     }
                 Entry("scheduler-task", name, "recurring", rendered)
             } else {
-                Entry("scheduler-task", name, "one-time", "one instance per recorded run")
+                // #957: a keyed system task states its own instances (`KeyedSystemTask.instances`); the
+                // schedule-run task carries no such property and keeps the fixed sentence.
+                val instances = task.javaClass.methods.firstOrNull { it.name == "getInstances" && it.parameterCount == 0 }
+                Entry("scheduler-task", name, "one-time", instances?.invoke(task) as String? ?: "one instance per recorded run")
             }
         }
 
