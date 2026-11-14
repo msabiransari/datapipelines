@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -30,8 +31,14 @@ class LakeFeedLatenessIntegrationTest {
     private val h = LakeProfilesHarness()
     private val lateness = LakeFeedLateness(h.definitions.named, h.profiles)
 
+    /** The catalog's clock read once per case: every fixture time is this minus its age, so gaps are exact. */
+    private lateinit var anchor: Instant
+
     @BeforeEach
-    fun reset() = h.reset()
+    fun reset() {
+        h.reset()
+        anchor = LakeTestDb.leases.catalogNowPlus(Duration.ZERO)
+    }
 
     @Test
     fun `F5 - two feeds with different rhythms on one table are judged separately at the same now`() {
@@ -171,7 +178,7 @@ class LakeFeedLatenessIntegrationTest {
         result.feeds.map { it.feed } shouldContainExactly (0 until BULK_FEEDS).map { "feed_$it" }
     }
 
-    /** [count] PUBLISHED deliveries of [feed], [every] apart, the newest [lastAgo] before the catalog's now. */
+    /** [count] PUBLISHED deliveries of [feed], [every] apart, the newest [lastAgo] before [anchor]. */
     private fun rhythm(
         table: UUID,
         feed: String,
@@ -191,13 +198,12 @@ class LakeFeedLatenessIntegrationTest {
         h.jdbc.update(
             "INSERT INTO lake_deliveries (id, table_id, feed, delivery_id, fingerprint, state, operation_id, execution_id, " +
                 "pipeline_id, published_at) VALUES (gen_random_uuid(), ?, ?, ?, repeat('a', 64), ?, gen_random_uuid(), " +
-                "gen_random_uuid(), gen_random_uuid(), CASE WHEN ?::bigint IS NULL THEN NULL ELSE now() - make_interval(secs => ?::bigint) END)",
+                "gen_random_uuid(), gen_random_uuid(), ?)",
             table,
             feed,
             id,
             state,
-            publishedAgo?.seconds,
-            publishedAgo?.seconds,
+            publishedAgo?.let { java.sql.Timestamp.from(anchor.minus(it)) },
         )
     }
 
