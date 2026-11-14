@@ -56,7 +56,7 @@ internal class MaintenancePartLoop(
             }
 
             GateAnswer.Admit -> {
-                Unit
+                // admitted: the checks below decide whether the part runs
             }
         }
         if (!part.dueNow(run)) {
