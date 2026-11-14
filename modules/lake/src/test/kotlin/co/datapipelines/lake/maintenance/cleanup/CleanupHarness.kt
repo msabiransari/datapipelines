@@ -7,6 +7,7 @@ import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.LeaseHandle
 import co.datapipelines.lake.LeaseOutcome
 import co.datapipelines.lake.maintenance.plan.MaintenanceDue
+import co.datapipelines.lake.maintenance.MaintenanceGate
 import co.datapipelines.lake.maintenance.MaintenanceHarness
 import co.datapipelines.lake.maintenance.MaintenancePart
 import co.datapipelines.lake.maintenance.MaintenanceRun
@@ -208,12 +209,13 @@ internal class CleanupHarness(
         return keys
     }
 
-    /** The production worker with both parts (or [parts]) and [jobTimeout]. */
+    /** The production worker with both parts (or [parts]), [jobTimeout] and [gate] (957's admit-all unless given). */
     fun worker(
         parts: List<MaintenancePart> = listOf(cleanup(), purge()),
         jobTimeout: Duration = Duration.ofHours(1),
         hooks: MaintenanceRunHooks = MaintenanceRunHooks.NONE,
-    ): MaintenanceWorker = m.worker(parts, jobTimeout = jobTimeout, hooks = hooks, clock = Clock.systemUTC())
+        gate: MaintenanceGate = MaintenanceGate.ADMIT_ALL,
+    ): MaintenanceWorker = m.worker(parts, gate = gate, jobTimeout = jobTimeout, hooks = hooks, clock = Clock.systemUTC())
 
     /** The planner's due rule (959) for [table] now, with both parts registered and this deployment's grace. */
     fun due(table: MaintenanceTable): TableDue =
