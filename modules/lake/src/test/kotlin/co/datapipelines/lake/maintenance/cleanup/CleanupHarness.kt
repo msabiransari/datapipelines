@@ -119,6 +119,16 @@ internal class CleanupHarness(
 
     fun purge(): PurgeDeletionPart = PurgeDeletionPart.of(properties, reads, removal)
 
+    /** The cleanup with its own remover clock (C9 runs a store-behind and a store-ahead table side by side). */
+    fun cleanupWith(removerClock: TestClock): CleanupPart =
+        CleanupPart.of(
+            properties,
+            reads,
+            CleanupRemoval.of(properties, jdbc, m.defs.catalogs, m.leases, store, runStates, partClock, removerClock),
+            profiles,
+            observer,
+        )
+
     /** This deployment's properties with `retention.protection-days` = [days] (C1: a non-default window). */
     fun withWindow(days: Int): LakeProperties =
         LakeProperties(enabled = true, storage = properties.storage, retention = LakeProperties.Retention(days, graceHours))
@@ -219,6 +229,21 @@ internal class CleanupHarness(
     fun metadata(table: MaintenanceTable): TableMetadata = requireNotNull(reads.metadata(table)) { "no pointer for ${table.name}" }
 
     fun snapshotIds(table: MaintenanceTable): List<Long> = metadata(table).snapshots().map { it.snapshotId() }
+
+    /** The data file keys [snapshotId] of [table] names (a read-only scan over the current metadata file, no lease). */
+    fun snapshotFiles(
+        table: MaintenanceTable,
+        snapshotId: Long,
+    ): Set<String> {
+        val io = m.defs.catalogs.metadataFileIo()
+        val ops = org.apache.iceberg.StaticTableOperations(metadata(table).metadataFileLocation(), io)
+        return org.apache.iceberg
+            .BaseTable(ops, table.leaseName)
+            .newScan()
+            .useSnapshot(snapshotId)
+            .planFiles()
+            .use { tasks -> tasks.mapNotNull { target(table).keyOf(it.file().location()) }.toSet() }
+    }
 
     fun revisionCount(table: MaintenanceTable): Int = m.revisions(table)
 
@@ -413,10 +438,19 @@ internal class CleanupHarness(
     /** An orphan under [table]'s `data/` (a file no snapshot names), PUT now; answers its key. */
     fun orphan(table: MaintenanceTable): String = "${target(table).keyPrefix}data/orphan-${UUID.randomUUID()}.parquet".also { put(it) }
 
-    private fun dataFile(t: Table): DataFile =
+    private fun dataFile(t: Table): DataFile = dataFileAt(t, "${t.location()}/data/${UUID.randomUUID()}.parquet")
+
+    /** A fresh output location under [table]'s `data/` (a producer writes it lease-free before its commit, C8). */
+    fun outputLocation(table: MaintenanceTable): String = "${target(table).location.trimEnd('/')}/data/out-${UUID.randomUUID()}.parquet"
+
+    /** A one-row data file entry at [location] in [t]'s partition spec. */
+    fun dataFileAt(
+        t: Table,
+        location: String,
+    ): DataFile =
         DataFiles
             .builder(t.spec())
-            .withPath("${t.location()}/data/${UUID.randomUUID()}.parquet")
+            .withPath(location)
             .withFormat(FileFormat.PARQUET)
             .withFileSizeInBytes(SMALL.toLong())
             .withRecordCount(1)
