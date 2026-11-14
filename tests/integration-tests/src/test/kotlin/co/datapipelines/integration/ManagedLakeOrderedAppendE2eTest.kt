@@ -34,13 +34,17 @@ import java.util.function.Function
 
 /**
  * #968 (dp-lake design record §11a call 37, row M14): appends through the production runtime, native staging, the
- * fenced catalog and S3, to a table with sort columns (`k`, then `id`).
+ * fenced catalog and S3, to tables with sort columns. Each test has its own table, so neither sees the other's files or
+ * revisions in any method order (round 2 correction C2).
  *
- * O11: the committed files, read back with Iceberg's own Parquet reader and `SortOrderComparators` (reached by
- * reflection at run time: this module compiles against app only), carry the table's order id and are in its order.
+ * O11 (`orders_o11`, sorted by `k`, then `label`, then `id`): the committed files, read back with Iceberg's own Parquet
+ * reader and `SortOrderComparators` (reached by reflection at run time: this module compiles against app only), carry
+ * the table's order id and are in its order. The author's SQL attaches `COLLATE NOCASE` to the string sort column
+ * `label` (mixed-case values inside every tie of `k`; JDBC still reports `VARCHAR`), so the production scan must order
+ * it in Iceberg's string order whatever its collation (round 2 correction C1).
  *
- * O9: the staging keys are set so a delivery's scratch reservation (`max-delivery-bytes` 8 MB × `staging-expansion-factor`
- * 4 = 32 MiB, DuckDB's `max_temp_directory_size`) holds the landed and materialized relations (about 9 MB on disk:
+ * O9 (`orders_o9`, sorted by `k`, then `id`): the staging keys are set so a delivery's scratch reservation
+ * (`max-delivery-bytes` 8 MB × `staging-expansion-factor` 4 = 32 MiB, DuckDB's `max_temp_directory_size`) holds the landed and materialized relations (about 9 MB on disk:
  * the payload is one of 150 repeated strings, so it stores small) but not the sort's spill of 1,000,000 rows of
  * 240-character payloads (measured on the pinned driver at the same 128 MB memory limit: past 30 MiB of spill). The
  * ordered append fails with `pipeline.staging.scratch_limit_exceeded`, nothing is committed, the ledger row is FAILED in
@@ -113,7 +117,8 @@ class ManagedLakeOrderedAppendE2eTest {
                 .extract()
                 .response()
         withClue("datasource creation code=${created.jsonPath().getString("error.code")}") { created.statusCode() shouldBe 201 }
-        Reflect.createSortedTable(context, ADMIN)
+        Reflect.createSortedTable(context, ADMIN, O11_TABLE, O11_FIELDS)
+        Reflect.createSortedTable(context, ADMIN, O9_TABLE, O9_FIELDS)
         withClue("O9's reservation keys override the shared fixture's") {
             listOf("max-delivery-bytes", "staging-expansion-factor", "staging-memory-limit").map {
                 context.environment.getProperty("datapipelines.lake.admission.$it")
@@ -129,12 +134,12 @@ class ManagedLakeOrderedAppendE2eTest {
 
     @Test
     fun `O11 - a delivery through the production runtime commits files stamped with the table's order and in it`() {
-        val pipeline = createPipeline("SELECT * FROM staged")
-        val batch = putDelivery(O11_ROWS)
+        val pipeline = createPipeline("SELECT id, k, label COLLATE NOCASE AS label, payload FROM staged", O11_TABLE)
+        val batch = putDelivery(O11_ROWS, label = MIXED_CASE_LABELS)
         val events = execute(pipeline, batch)
         withClue(events) { events.contains("pipeline_completed") shouldBe true }
         state(batch) shouldBe "PUBLISHED"
-        val committed = IcebergOracle().committed(metadataLocation())
+        val committed = IcebergOracle().committed(metadataLocation(O11_TABLE), O11_TABLE)
         println("case=o11 order_id=${committed.orderId} files=${committed.files.map { it.sortOrderId to it.rows }}")
         committed.orderId shouldBeGreaterThan 0
         committed.files.size shouldBeGreaterThan 0
@@ -150,32 +155,35 @@ class ManagedLakeOrderedAppendE2eTest {
 
     @Test
     fun `O9 - a sort that outgrows the scratch reservation fails with the staging code, the unsorted control publishes`() {
-        val before = revisions()
-        val control = createPipeline("SELECT payload FROM staged")
+        val before = revisions(O9_TABLE)
+        val control = createPipeline("SELECT payload FROM staged", O9_TABLE)
         val controlBatch = putDelivery(O9_ROWS, O9_WIDTH, SPREAD_KEYS)
         val controlEvents = E2eSse.parseEvents(execute(control, controlBatch), json)
         withClue("the same rows with no sort, same reservation: ${controlEvents.filter { it.first == "node_failed" }}") {
             controlEvents.any { it.first == "pipeline_completed" } shouldBe true
         }
         state(controlBatch) shouldBe "PUBLISHED"
-        val revisions = revisions()
+        val revisions = revisions(O9_TABLE)
         revisions shouldBe before + 1
         println("case=o9_control ledger=PUBLISHED rows=$O9_ROWS")
 
-        val sorted = createPipeline("SELECT * FROM staged")
+        val sorted = createPipeline("SELECT * FROM staged", O9_TABLE)
         val batch = putDelivery(O9_ROWS, O9_WIDTH, SPREAD_KEYS)
-        val location = metadataLocation()
+        val location = metadataLocation(O9_TABLE)
         val events = E2eSse.parseEvents(execute(sorted, batch), json)
         val failed = events.single { it.first == "node_failed" }.second
         println("case=o9 node_failed=$failed ledger=${ledger(batch)}")
         failed.path("node_id").asText() shouldBe "append"
         withClue("the ledger row") { ledger(batch) shouldBe Triple("FAILED", "publish", SCRATCH_LIMIT_EXCEEDED) }
         withClue("the caller's code") { failed.path("error").path("code").asText() shouldBe SCRATCH_LIMIT_EXCEEDED }
-        revisions() shouldBe revisions
-        metadataLocation() shouldBe location
+        revisions(O9_TABLE) shouldBe revisions
+        metadataLocation(O9_TABLE) shouldBe location
     }
 
-    private fun createPipeline(appendSql: String): String {
+    private fun createPipeline(
+        appendSql: String,
+        table: String,
+    ): String {
         val suffix = UUID.randomUUID().toString().replace("-", "")
         listOf("land" to "SELECT * FROM delivery", "append" to appendSql).forEach { (node, sql) ->
             given()
@@ -210,7 +218,7 @@ class ManagedLakeOrderedAppendE2eTest {
                    "output":{"target":"tempdb","table":"staged"},"depends_on":[]},
                   {"id":"append","description":"Publish in the table's order","type":"DQL","source":"tempdb",
                    "template":{"id":"$WORKSPACE_NAME/append_$suffix.sql","version":1},
-                   "output":{"target":"datasource","datasource":"$LAKE","table":"$NAMESPACE.orders","mode":"append"},
+                   "output":{"target":"datasource","datasource":"$LAKE","table":"$NAMESPACE.$table","mode":"append"},
                    "depends_on":["land"]}]}
                 """.trimIndent(),
             ).post("/api/v1/pipelines")
@@ -223,13 +231,14 @@ class ManagedLakeOrderedAppendE2eTest {
 
     /**
      * A Parquet delivery written by DuckDB (on the test runtime through app) at test time: `k` is the SQL expression
-     * [keys] over the row number `i`; `payload` is one of 150 strings of [width] characters. Nothing is kept in the
-     * repository.
+     * [keys] over the row number `i`; `payload` is one of 150 strings of [width] characters; `label`, when [label] is
+     * given, is that SQL expression over `i`. Nothing is kept in the repository.
      */
     private fun putDelivery(
         rows: Long,
         width: Int = 8,
         keys: String = SCRAMBLED_KEYS,
+        label: String? = null,
     ): String {
         val batch = "batch_" + UUID.randomUUID().toString()
         val dir = Files.createTempDirectory("lane968")
@@ -238,7 +247,7 @@ class ManagedLakeOrderedAppendE2eTest {
             DriverManager.getConnection("jdbc:duckdb:").use { connection ->
                 connection.createStatement().use { statement ->
                     statement.execute(
-                        "COPY (SELECT i::BIGINT AS id, $keys AS k, " +
+                        "COPY (SELECT i::BIGINT AS id, $keys AS k, " + (label?.let { "$it AS label, " } ?: "") +
                             "repeat(chr((65 + i % 3)::INTEGER), $width) || (i % 50)::VARCHAR AS payload FROM range($rows) t(i)) " +
                             "TO '$file' (FORMAT parquet, COMPRESSION zstd)",
                     )
@@ -285,17 +294,25 @@ class ManagedLakeOrderedAppendE2eTest {
                 batch,
             ).single()
 
-    private fun revisions(): Int =
-        requireNotNull(jdbc.queryForObject("SELECT count(*) FROM lake_table_revisions WHERE namespace = ?", Int::class.java, NAMESPACE))
-
-    private fun metadataLocation(): String =
+    private fun revisions(table: String): Int =
         requireNotNull(
             jdbc.queryForObject(
-                "SELECT metadata_location FROM iceberg_tables WHERE table_namespace = ? AND table_name = 'orders'",
+                "SELECT count(*) FROM lake_table_revisions WHERE namespace = ? AND table_name = ?",
+                Int::class.java,
+                NAMESPACE,
+                table,
+            ),
+        )
+
+    private fun metadataLocation(table: String): String =
+        requireNotNull(
+            jdbc.queryForObject(
+                "SELECT metadata_location FROM iceberg_tables WHERE table_namespace = ? AND table_name = ?",
                 String::class.java,
                 NAMESPACE,
+                table,
             ),
-        ) { "the catalog has no metadata location for $NAMESPACE.orders" }
+        ) { "the catalog has no metadata location for $NAMESPACE.$table" }
 
     private fun jwt(user: UUID): String =
         if (user == ADMIN) {
@@ -342,7 +359,10 @@ class ManagedLakeOrderedAppendE2eTest {
             }
 
         @Suppress("UNCHECKED_CAST")
-        fun committed(metadataLocation: String): Committed {
+        fun committed(
+            metadataLocation: String,
+            tableName: String,
+        ): Committed {
             val ops =
                 Class
                     .forName("org.apache.iceberg.StaticTableOperations")
@@ -352,7 +372,7 @@ class ManagedLakeOrderedAppendE2eTest {
                 Class
                     .forName("org.apache.iceberg.BaseTable")
                     .getConstructor(type("org.apache.iceberg.TableOperations"), String::class.java)
-                    .newInstance(ops, "$NAMESPACE.orders")
+                    .newInstance(ops, "$NAMESPACE.$tableName")
             val schema = call(TABLE, table, "schema")
             val order = call(TABLE, table, "sortOrder")
             val orderId = call("org.apache.iceberg.SortOrder", order, "orderId") as Int
@@ -422,11 +442,13 @@ class ManagedLakeOrderedAppendE2eTest {
                 .invoke(wrapper, record)
     }
 
-    /** Runtime access to the definition service (as [ManagedLakeRuntimeAccess] does): the sorted table of this class. */
+    /** Runtime access to the definition service (as [ManagedLakeRuntimeAccess] does): one sorted table per test. */
     private object Reflect {
         fun createSortedTable(
             context: ApplicationContext,
             actor: UUID,
+            table: String,
+            body: String,
         ) {
             val definitions = context.getBean(Class.forName("co.datapipelines.lake.definitions.LakeDefinitionService"))
             val surface =
@@ -436,9 +458,8 @@ class ManagedLakeOrderedAppendE2eTest {
                     definitions,
                     "createDraft",
                     NAMESPACE,
-                    "orders",
-                    """{"fields":[{"id":1,"name":"id","type":"BIGINTEGER"},""" +
-                        """{"id":2,"name":"k","type":"INTEGER"},{"id":3,"name":"payload","type":"STRING"}],"sort_field_ids":[2,1]}""",
+                    table,
+                    body,
                     actor,
                     surface,
                 )
@@ -473,6 +494,24 @@ class ManagedLakeOrderedAppendE2eTest {
         private const val O11_ROWS = 5_000L
         private const val O9_ROWS = 1_000_000L
         private const val O9_WIDTH = 240
+        private const val O11_TABLE = "orders_o11"
+        private const val O9_TABLE = "orders_o9"
+
+        /** O11's table: sorted by `k`, then the string `label`, then `id`; every sort column optional. */
+        private const val O11_FIELDS =
+            """{"fields":[{"id":1,"name":"id","type":"BIGINTEGER"},{"id":2,"name":"k","type":"INTEGER"},""" +
+                """{"id":3,"name":"label","type":"STRING"},{"id":4,"name":"payload","type":"STRING"}],"sort_field_ids":[2,3,1]}"""
+
+        /** O9's table: sorted by `k`, then `id`, both optional (its control leaves both out). */
+        private const val O9_FIELDS =
+            """{"fields":[{"id":1,"name":"id","type":"BIGINTEGER"},{"id":2,"name":"k","type":"INTEGER"},""" +
+                """{"id":3,"name":"payload","type":"STRING"}],"sort_field_ids":[2,1]}"""
+
+        /**
+         * Mixed-case labels whose binary (Iceberg) order `A < B < E < a < b < e` differs from `NOCASE`'s, scattered
+         * inside every tie of `k`, null every thirteenth row.
+         */
+        private const val MIXED_CASE_LABELS = "CASE WHEN i % 13 = 0 THEN NULL ELSE ['a', 'B', 'A', 'b', 'e', 'E'][(i * 31) % 6 + 1] END"
 
         /** 101 repeated values in scrambled arrival order, null every ninth row: ties and nulls first are both visible. */
         private const val SCRAMBLED_KEYS = "CASE WHEN i % 9 = 0 THEN NULL ELSE ((i * 7919) % 101)::INTEGER END"

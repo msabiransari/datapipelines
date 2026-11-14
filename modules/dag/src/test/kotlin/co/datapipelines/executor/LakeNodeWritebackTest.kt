@@ -163,6 +163,38 @@ class LakeNodeWritebackTest {
         }
     }
 
+    /**
+     * Round 2 correction C1, on the production [LakeNodeWriteback.StableInput] and the real staging engine: the author's
+     * SQL attaches `COLLATE NOCASE` (JDBC still reports `VARCHAR`); a text key still returns Iceberg's string order
+     * (binary, code points), every value unchanged.
+     */
+    @Test
+    fun `C1 - a text key orders a NOCASE-collated column in binary order on the real staging engine, values unchanged`() {
+        withNative { context ->
+            val output = NodeOutput.Datasource("managed", "ns.orders", WriteMode.APPEND)
+            val labels = mutableListOf<String?>()
+            val session =
+                RecordingSession { input ->
+                    input.scan(listOf(2)) { rows -> while (rows.next()) labels += rows.getString(2) }
+                    COLLATED_ORDER.size.toLong()
+                }
+            LakeNodeWriteback.run(
+                ExecutableNode.from(Fixtures.node("append", output = output)),
+                output,
+                SqlBindTranslator.translate(
+                    "SELECT id, label COLLATE NOCASE AS label FROM (VALUES (1, 'b'), (2, 'A'), (3, NULL), (4, 'é'), " +
+                        "(5, 'B'), (6, 'a'), (7, 'e'), (8, 'E')) t(id, label)",
+                    emptyMap(),
+                ),
+                context,
+                ResolvedQueryTimeout(10, QueryTimeoutSource.APPLICATION),
+                Instant.now(),
+                session,
+            ) { }
+            labels shouldBe COLLATED_ORDER
+        }
+    }
+
     private fun stableInput(
         statement: Statement,
         classify: (SQLException) -> Exception = { it },
@@ -246,6 +278,9 @@ class LakeNodeWritebackTest {
 
     private companion object {
         const val SIX = 6
+
+        /** Iceberg's string order (code points): upper case before lower case, `é` (U+00E9) after `e`; nulls first. */
+        val COLLATED_ORDER = listOf(null, "A", "B", "E", "a", "b", "e", "é")
         const val SPILL_LIMIT =
             "Out of Memory Error: failed to offload data block of size 256.0 KiB (1.0 MiB/1.0 MiB used). " +
                 "This limit was set by the 'max_temp_directory_size' setting."

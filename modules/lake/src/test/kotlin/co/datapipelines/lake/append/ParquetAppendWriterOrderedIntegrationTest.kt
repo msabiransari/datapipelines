@@ -236,6 +236,43 @@ class ParquetAppendWriterOrderedIntegrationTest {
         }
     }
 
+    /**
+     * Round 2 correction C1: an author may attach a collation to a string sort column (`COLLATE NOCASE`; JDBC still
+     * reports the admitted `VARCHAR`, so the column check accepts it). The write scan must still produce Iceberg's string
+     * order (code points), with every value unchanged, while the files are stamped with the table's order.
+     */
+    @Test
+    fun `C1 - a string sort column the author collated NOCASE is written in Iceberg's string order, mixed case, stamped`() {
+        val schema =
+            Schema(
+                Types.NestedField.required(2, "id", Types.LongType.get()),
+                Types.NestedField.optional(5, "k", Types.StringType.get()),
+            )
+        val order = SortOrder.builderFor(schema).asc("k", NullOrder.NULLS_FIRST).build()
+        h.withTable(schema, PartitionSpec.unpartitioned(), order) { table ->
+            h.withInput("SELECT id, k COLLATE NOCASE AS k FROM (VALUES $C1_ROWS) t(id, k)") { input ->
+                withClue("non-vacuity: the staged column carries NOCASE, so a plain ordinal ORDER BY is not Iceberg's order") {
+                    nocaseOrder(input) shouldNotBe C1_ORDER
+                }
+                withClue("non-vacuity: the staged arrival order is not the table's") { arrivalSorted(table, input) shouldBe false }
+                val written = writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {}
+                println("(C1) statements ${input.statements}")
+                written.rows shouldBe C1_ORDER.size.toLong()
+                assertInTableOrder(table, written.files)
+                withClue("Iceberg's string order, every value unchanged") {
+                    h.read(table, written.files).map { it.getField("k") } shouldBe C1_ORDER
+                }
+            }
+        }
+    }
+
+    /** The staged `k` (position 2) through a plain ordinal `ORDER BY 2 ASC NULLS FIRST`: the staged column's own collation. */
+    private fun nocaseOrder(input: ParquetWriterHarness.NativeInput): List<String?> {
+        val values = mutableListOf<String?>()
+        input.scan(listOf(2)) { rows -> while (rows.next()) values += rows.getString(2) }
+        return values
+    }
+
     /** Every file is stamped with the table's order and its rows, read by Iceberg, are in the comparator's order. */
     private fun assertInTableOrder(
         table: Table,
@@ -312,6 +349,12 @@ class ParquetAppendWriterOrderedIntegrationTest {
         val PROFILE = LakeProfileFixtures.builtIn()
         const val SMALL_ROW_GROUP = 4096L
         const val O2_ROWS = 3500
+
+        /** C1: mixed case and one accented letter, staged in an order that is neither binary nor NOCASE. */
+        const val C1_ROWS = "(1, 'b'), (2, 'A'), (3, NULL), (4, 'é'), (5, 'B'), (6, 'a'), (7, 'e'), (8, 'E')"
+
+        /** Iceberg's string order (Unicode code points, as UTF-8 bytes): upper case before lower case, `é` (U+00E9) last. */
+        val C1_ORDER = listOf(null, "A", "B", "E", "a", "b", "e", "é")
 
         /**
          * Created with a leading `retired` column that [withO1Table] then deletes: the catalog assigns fresh ids in
