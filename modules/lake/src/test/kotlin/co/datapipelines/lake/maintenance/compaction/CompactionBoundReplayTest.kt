@@ -8,8 +8,11 @@ import kotlin.random.Random
 /**
  * G6 (M4's bound, replayed; brief 969 §A): over generated file sets with writes stopped, planning and applying groups
  * until nothing is planned takes at most 2W + S groups (W files not stamped with the table's order, S small files in
- * order, none capacity-blocked), and never plans a file written at target size and in order. A group's outputs are the
- * writer's: one stream cut at the target, so whole target-size files and at most one remainder, all stamped in order.
+ * order, none capacity-blocked), never plans a file written at target size and in order, and never applies a group of
+ * one small in-order file. (The last is asserted directly: a lone rewrite adds a group without removing a small file,
+ * but the bound's slack absorbed it in every generated set when it was planted, so the bound alone cannot see it.) A
+ * group's outputs are the writer's: one stream cut at the target, so whole target-size files and at most one remainder,
+ * all stamped in order.
  */
 class CompactionBoundReplayTest {
     private val profile = CompactionGroupPlannerTest.profile()
@@ -25,7 +28,7 @@ class CompactionBoundReplayTest {
     )
 
     @Test
-    fun `G6 at most 2W + S groups drain the backlog, and no full-size in-order file is ever planned`() {
+    fun `G6 at most 2W + S groups drain the backlog, no full-size in-order file is planned, no small one is rewritten alone`() {
         val random = Random(SEED)
         var nonVacuous = 0
         repeat(SETS) { set ->
@@ -56,6 +59,8 @@ class CompactionBoundReplayTest {
                 )
             if (plan.groups.isEmpty()) return applied
             plan.groups.forEach { group ->
+                // never applied: one small file already in order, alone (the record's "worth rewriting", call 34)
+                (group.size == 1 && !group.single().needsSort) shouldBe false
                 val keys = group.map { it.key }.toSet()
                 val inputs = files.filter { it.key in keys }
                 inputs.forEach { input ->
