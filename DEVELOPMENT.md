@@ -810,8 +810,11 @@ own terms and the recount sees every module's results.
 **Why the recount and not the exit code.** A `--continue` build exits non-zero for a lint task
 while every test passed; a pipe reports the pipe's last stage; a backgrounded `…; echo $?` reports
 the *shell's* last command. `scripts/test-recount.sh` reads the JUnit XML both trees wrote —
-`modules/*/` **and** `tests/*/` — plus `TEST-*.xml` directly at the results root for flat CI
-artifacts — and prints `files/tests/failures/errors/skipped/unreadable`. It exits 0 regardless of
+`modules/*/` **and** `tests/*/` — plus flat `TEST-*.xml`, browser artifact `test-results/` and
+module-only gate artifact `*/build/test-results/` trees — and prints
+`files/tests/failures/errors/skipped/unreadable`. The module-only shape is read only when the
+root has neither `modules/` nor `tests/`, keeping the repository's separate buildSrc guards out.
+It exits 0 regardless of
 the counts, 2 for a root that is not a directory, and 3 when no result XML is found. It is committed
 rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
 total for four consecutive rounds before it existed. A test JVM that HotSpot's own handler kills (the
@@ -840,16 +843,27 @@ applies the conventions' `-XX:ErrorFile` (anywhere else, in the JVM's working di
 reports are counted (`older reports exist, not from this step: N`), never attributed or deleted.
 The pre-gate also keeps the lines in `stage-<id>.crash-reports.txt` beside the run's manifest.
 
-**One recount over a CI run (#669).** CI's results are four artifacts: `gate-reports` (every test
-task of the gate job) and `browser-reports-1` … `browser-reports-3` (one per browser shard). Download
-each into its OWN directory — `gh run download` lands a single named artifact flat in `-D` — and
-pass every root to one recount, which prints ONE line over all of them:
+**One recount over a CI run (#669).** The gate and browser results span four artifacts:
+`gate-reports` (every test task of the gate job) and `browser-reports-1` … `browser-reports-3`
+(one per browser shard); integration results are recounted separately. Download each into its
+OWN directory. `gh run download` preserves the artifact's member paths under `-D`: the gate's
+upload paths share `modules/`, so its XML lands under `app/build/test-results/` and its sibling
+module directories. The browser paths share that module's build directory, so its XML lands
+under `test-results/test/`. The recount reads both artifact shapes, repository trees and flat
+XML. Pass every root to one
+recount, which prints ONE line over all of them:
 
 ```bash
-D=$(mktemp -d); R=<run-id>; gh run download "$R" -n gate-reports -D "$D/gate" || echo "DOWNLOAD FAILED gate-reports"
-for i in 1 2 3; do gh run download "$R" -n "browser-reports-$i" -D "$D/browser-$i" || echo "DOWNLOAD FAILED browser-reports-$i"; done
-./scripts/test-recount.sh "$D/gate" "$D/browser-1" "$D/browser-2" "$D/browser-3"
-./scripts/test-recount.sh "$D/browser-1" "$D/browser-2" "$D/browser-3"    # the browser suite alone
+(
+  D=$(mktemp -d) || exit
+  R=<run-id>
+  gh run download "$R" -n gate-reports -D "$D/gate" || exit
+  for i in 1 2 3; do
+    gh run download "$R" -n "browser-reports-$i" -D "$D/browser-$i" || exit
+  done
+  ./scripts/test-recount.sh "$D/gate" "$D/browser-1" "$D/browser-2" "$D/browser-3" || exit
+  ./scripts/test-recount.sh "$D/browser-1" "$D/browser-2" "$D/browser-3"    # the browser suite alone
+)
 ```
 
 Read every exit: a missing root is exit 2, a root with no XML exit 3, and the same `TEST-*.xml`
@@ -1197,9 +1211,13 @@ history: 90 minutes at #290 (the integration job's figure), its build step 70 of
 (the serial stopgap's last form, 9c22b3404): 170, step 150 — run 43354061464 had reached the
 100-minute build ceiling with 11,796 unit tests passing and browser cases still passing, without
 completed browser XML, and the dependency-graph tip's separate local serial browser run took 83
-minutes for 735 cases. Since #669 the browser suite is the `browser` job's: the gate job's budget
-is 80 INITIAL (build step 60), to be set from the first run on `next`. The integration job retains
-its own 90-minute budget.
+minutes for 735 cases. Since #669 the browser suite is the `browser` job's. Its first sharded
+run on `next`, [43574307936](https://github.com/msabiransari/datapipelines/actions/runs/43574307936)
+at `c3c1dad1a` (2026-11-14), measured the successful gate build step at 32.48 minutes and the
+whole gate job at 35.80. The build step's limit is **50 minutes**: 1.5 times the observation,
+rounded up to five minutes. The job's **70 minutes** keeps another 20 for setup, reports and
+uploads. These replace the initial 60/80 projections; the integration job retains its own
+90-minute budget. One cold run is the measurement; the headroom is a sizing choice.
 
 Before #290 the four green jobs took
 48–57 min, and 19–23 of those were the coverage-report step RE-RUNNING tests: Kover 0.9.9's report
@@ -1225,9 +1243,12 @@ round-robin gives 23.3 / 28.5 / 30.5 min per leg (51 classes each); a fourth leg
 slowest at ≈ 24 class-minutes — under the `integration` job's 50–55 — so it would cost a runner
 and shorten nothing. Each leg is its own runner and its own Postgres (#933);
 `BrowserSuite.checkConnectionBudget` prints the shared server's client count once per class and
-fails a class above 340. The budgets are initial values — gate step 60 / job 80, browser step 60 /
-job 75 — until the first run on `next` measures them (#669). `browser-verdict` is red unless
-every leg succeeded: the one check name the `main` ruleset requires for the suite.
+fails a class above 340. The first sharded run on `next` (43574307936, above) measured successful
+browser build steps of **23.58 / 26.40 / 31.72 minutes**, whole jobs **24.13 / 26.93 / 32.42**.
+Every browser leg gets a **50-minute step / 65-minute job**: 1.5 times the slowest observed step,
+rounded up to five minutes, plus 15 for setup, the summary and uploads. The gate gets **50/70**,
+as above. `browser-verdict` is red unless every leg succeeded: the one check name the `main`
+ruleset requires for the suite.
 
 **Measured on 2026-09-12** (2 × 24-core Xeon, 96 threads, 64 GB, NVMe, native Docker, Ubuntu
 26.04) — the numbers to size against:
@@ -1263,6 +1284,32 @@ By the budget above that is roughly 45 GB at peak — one such gate, not two, on
 works for the fork knobs: a `-D` system property or an `ORG_GRADLE_PROJECT_*` variable loses to the
 repo's `gradle.properties` (measured 2026-09-19 with an init-script probe), so the profile is
 arguments, not environment.
+
+**The gate picks its own integration forks (#974).** A gate is exclusive (#485), and
+`scripts/gate.sh` spends that exclusivity: it appends `-Pdp.test.forks.e2e=4` for the integration
+suite by itself, and a value in `GATE_GRADLE_ARGS` still wins when it already pins one. Four forks
+need memory: when `MemAvailable` at the gate's start is below `GATE_E2E_MEM_FLOOR_MB` — default
+24576 MB (24 GB), the gate's own measured peak footprint (java 21822 MiB + containers 2261 MiB,
+#974 run of 2026-11-13; the brief's 1.5× formula of 36 GB would refuse the machine the run was
+measured on, whose quiet start peaks near 28 GB available — owner ruling 2026-11-13) — the gate
+runs the repository default (`dp.test.forks.e2e=2`) instead and prints a header line saying so: a
+short machine gives a slower gate, never a red one. `GATE_E2E_FORKS` overrides the count upward or
+downward (garbage or a value below 1 falls back to 4 with one stderr line). The header always
+names what was chosen.
+
+Measured on the lane (#974, 2026-11-14): all three runs passed at four integration forks
+(M1 pinned by the caller; M2 and M3 chose four automatically and printed the new header).
+Gate wall times were 48.0 / 42.7 / 43.2 min. Integration wall times were 26.1 min in M1 and
+26.2 min in M3, with 2.0× aggregate parallelism; M2's phase split was not preserved. The
+three recounts matched: 1564 files, 13346 tests, 0 failures, 0 errors, 15 skipped. A separate
+start at 22 GB demonstrated the two-fork fallback header; no final verdict for that start was
+preserved. Another run started at 25 GB with four forks and failed its cycle; the lane reports
+full-`/tmp` native-library extraction failures (#983), but did not retain that cycle's detailed
+logs. Cleanup between M1 and M2 is a confound, so the wall-time
+improvement is not attributed to the fork feature. Observed MemAvailable troughs were 6–8.5 GB
+from starts of 27–34 GB; they do not guarantee 8 GB of headroom at the 24 GB admission floor.
+The long serialized class tracked in #982 limits parallelism; more than four forks were not
+measured. Do not lower the owner-selected floor without re-measuring.
 
 **The pre-gate's build cache (#480).** Only `scripts/pregate.sh` uses it (§9.4). It is Gradle's
 local directory cache, `~/.gradle/caches/build-cache-1` (under `GRADLE_USER_HOME` when that is set),

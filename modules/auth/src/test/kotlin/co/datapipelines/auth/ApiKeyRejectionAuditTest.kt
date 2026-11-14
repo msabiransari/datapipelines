@@ -15,6 +15,7 @@ import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 import org.springframework.mock.web.MockFilterChain
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -140,13 +141,24 @@ class ApiKeyRejectionAuditTest {
 
         // The entry point answers the stashed fault: 503, the catalogued envelope, no native text.
         val response = MockHttpServletResponse()
-        AuthEntryPoint(writer).commence(request, response, InsufficientAuthenticationException("unauthenticated"))
+        val correlationId = "00000000-2200-4000-8000-000000000001"
+        val previousCorrelationId = MDC.get(AuthErrorWriter.MDC_KEY)
+        try {
+            MDC.put(AuthErrorWriter.MDC_KEY, correlationId)
+            AuthEntryPoint(writer).commence(request, response, InsufficientAuthenticationException("unauthenticated"))
+        } finally {
+            if (previousCorrelationId == null) {
+                MDC.remove(AuthErrorWriter.MDC_KEY)
+            } else {
+                MDC.put(AuthErrorWriter.MDC_KEY, previousCorrelationId)
+            }
+        }
         response.status shouldBe HTTP_SERVICE_UNAVAILABLE
         val body = ObjectMapper().readTree(response.contentAsString)
         body.path("error").path("code").asText() shouldBe AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
-        body.path("correlation_id").asText().isNotBlank() shouldBe true
+        body.path("correlation_id").asText() shouldBe correlationId
         response.contentAsString shouldNotContain "emory"
-        response.contentAsString shouldNotContain "-22"
+        body.path("error").toString() shouldNotContain "-22"
     }
 
     private companion object {

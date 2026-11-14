@@ -7,7 +7,7 @@
 #
 # WHAT RUNS WHERE —
 #
-#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 80-minute budget, #290, #669):
+#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 70-minute budget, #290, #669):
 #     ./scripts/helm-check.sh               — the reference Helm chart (deploy/helm/datapipelines)
 #         is linted and rendered by a PINNED helm binary (#411): `helm lint --strict` plus ten
 #         template cases — defaults render no `env:` block at all, both `duckdb.*` values render
@@ -66,15 +66,17 @@
 #         browser XML was incomplete. The combined dependency-graph tip has 735 browser
 #         cases; its separate local serial run took 83 min. The serial stopgap allowed
 #         150 min for the build and 170 for the job (9c22b3404).
-#         #669 (the structural fix): the browser suite is the `browser` job's. The step's
-#         ceiling is 60 and the job's 80 — INITIAL values (the step without the suite
-#         projected ≈ 17 min on 2026-10-21 and the unit suites have grown since); the first
-#         run on `next` measures them and #669's follow-up sets them from that measurement.
+#         #669 (the structural fix): the browser suite is the `browser` job's. The first
+#         sharded run on `next`, 43574307936 at c3c1dad1a (2026-11-14), measured this job's
+#         build step at 32.48 min and the whole job at 35.80. The step's ceiling is 50 min:
+#         1.5 times its observed duration, rounded UP to five minutes. The job's 70 keeps
+#         20 minutes for setup, reports and uploads. These replace the initial 60/80
+#         projections; one cold run is the measurement, the headroom is a sizing choice.
 #     ./scripts/docs-audit.sh               — doc-structure checks over docs/ AND the served
 #         manual: `:modules:mcp-server:docsExport` renders it into build/skill-docs first
 #         (offline — the build step above resolved its classpath; 242a). No network.
 #
-#   browser (ubuntu-latest, Docker; three parallel legs, 75-minute budget each, #669):
+#   browser (ubuntu-latest, Docker; three parallel legs, 65-minute budget each, #669):
 #     ./gradlew :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted
 #               -Pdp.browser.shard=<i>/3   — the Playwright browser suite, split across
 #         `matrix.shard` 1..3 by buildSrc/src/main/kotlin/BrowserShards.kt: the *Test.kt
@@ -107,9 +109,11 @@
 #         the shared server's client count once per class and fails a class above 340 — read
 #         each leg's highest printed count on the first run (D6/669b). A leg uploads
 #         `browser-reports-<i>` (its JUnit XML and the #698 site-section captures), and on
-#         failure `browser-traces-<i>` (#717, Playwright traces). Budgets: step 60, job 75 —
-#         INITIAL (the leg figure is local class time and a CI runner is slower); #669's
-#         follow-up sets them from the first measured run.
+#         failure `browser-traces-<i>` (#717, Playwright traces). Run 43574307936 on `next`
+#         (c3c1dad1a, 2026-11-14) measured successful build steps of 23.58 / 26.40 / 31.72 min,
+#         whole jobs 24.13 / 26.93 / 32.42. Every leg gets a 50-minute step ceiling: 1.5 times
+#         the slowest observed step, rounded UP to five minutes; the job's 65 keeps another
+#         15 for setup, the summary and uploads. One cold run, with deliberate headroom.
 #
 #   integration (ubuntu-latest, Docker available and used):
 #     ./gradlew integrationTest             — the Testcontainers E2E suite AND the
@@ -182,9 +186,9 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     # 90 since #290 over a measured 48–57 min; 120 as #669's stopgap (2026-10-21); 170 as the
-    # serial stopgap's last form (2026-11-13, 9c22b3404); 80 INITIAL since the browser suite
-    # left this job (#669): the build step's 60 plus the reports' 20 (header).
-    timeout-minutes: 80
+    # serial stopgap's last form (2026-11-13, 9c22b3404); 70 from the first sharded run
+    # (43574307936): the measured 32.48-minute step gets 50, plus 20 for reports (header).
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -231,10 +235,10 @@ jobs:
         # Its own ceiling, 20 min under the job's: a hung build still leaves the steps below
         # (the reports, the failure summary, the artifact) their time (#290). The ceiling grew
         # 70 → 100 (2026-10-21) → 150 (2026-11-13, 9c22b3404) as the serial browser suite
-        # outgrew each one; 60 INITIAL since the suite is the `browser` job's — excluded here
-        # the way scripts/gate.sh does, its test classes still compiled (header). The first
-        # run on `next` measures it and #669's follow-up sets it from that measurement.
-        timeout-minutes: 60
+        # outgrew each one; the suite is now the `browser` job's, excluded here the way
+        # scripts/gate.sh does, its test classes still compiled. Run 43574307936 measured
+        # 32.48 minutes here: 1.5 times that, rounded UP to five minutes, gives 50 (header).
+        timeout-minutes: 50
         run: >-
           ./gradlew build ktlintCheck detekt --continue
           -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
@@ -313,10 +317,10 @@ jobs:
   # each leg compiles what it needs, so the run's wall clock is the slower of the two jobs.
   browser:
     runs-on: ubuntu-latest
-    # The step's 60 plus 15 for setup, the summary and the artifact. INITIAL (header): the
-    # 2026-11-13 serial run's slowest leg is ≈ 30.5 class-minutes and a CI runner is slower
-    # than the dev box; #669's follow-up sets both from the first measured run.
-    timeout-minutes: 75
+    # Run 43574307936 measured the slowest successful step at 31.72 min, its job at 32.42.
+    # The step gets 50 (1.5 times the observation, rounded UP to five minutes), plus 15
+    # for setup, the summary and the artifact: 65 in all (header, #669).
+    timeout-minutes: 65
     strategy:
       # One red leg must not cancel the others: every leg's verdict is read (and a red one
       # re-run alone, `gh run rerun <id> --failed`).
@@ -366,7 +370,7 @@ jobs:
       # BrowserSuite reads GitHub's CI env var for its CI patience; no property is needed.
       - name: browser suite, shard ${{ matrix.shard }} of 3 (Playwright + Testcontainers — Docker required)
         id: build
-        timeout-minutes: 60
+        timeout-minutes: 50
         run: >-
           ./gradlew :tests:browser-tests:test -x :tests:browser-tests:verifyTestsExecuted
           -Pdp.browser.shard=${{ matrix.shard }}/3

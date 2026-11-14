@@ -90,10 +90,15 @@ class UiExceptionHandlerTest {
                 IllegalStateException("argon2id_verify failed: Memory allocation error (-22)"),
             )
 
-        val page = handler.onAuth(error, mockRequest(method = "POST")).shouldBeInstanceOf<ModelAndView>()
+        val correlationId = UUID.fromString("00000000-2200-4000-8000-000000000001")
+        val page =
+            CorrelationId
+                .withId(correlationId) { handler.onAuth(error, mockRequest(method = "POST")) }
+                .shouldBeInstanceOf<ModelAndView>()
         page.status shouldBe HttpStatus.SERVICE_UNAVAILABLE
         page.viewName shouldBe "error/500"
-        page.model.values.joinToString().let { model ->
+        page.model["correlationId"] shouldBe correlationId.toString()
+        page.model.filterKeys { it != "correlationId" }.values.joinToString().let { model ->
             model shouldNotContain "emory"
             model shouldNotContain "-22"
         }
