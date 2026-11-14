@@ -9,6 +9,8 @@
 #   ./scripts/test-recount.sh <results-root>
 #   → the same counts over that root's own modules/* and tests/* build/test-results
 #     trees, plus TEST-*.xml files directly at the root (flat CI artifacts).
+#     A browser-shard artifact uses its upload paths' common build directory as
+#     its root, so test-results/**/*.xml directly under that root is read too.
 #     Never walk recursively from the root: sibling worktrees and saved snapshots
 #     contain duplicate results. #441: the
 #     pre-gate snapshots each stage's XML under .pregate-logs/runs/<run-id>/<stage>/, so
@@ -95,6 +97,7 @@ per_root: list[tuple[str, list[str]]] = []
 for root in roots:
     rel = (glob.glob("modules/*/build/test-results/**/*.xml", root_dir=root, recursive=True) +
            glob.glob("tests/*/build/test-results/**/*.xml", root_dir=root, recursive=True) +
+           glob.glob("test-results/**/*.xml", root_dir=root, recursive=True) +
            glob.glob("TEST-*.xml", root_dir=root))
     per_root.append((root, rel))
 # #669: one class's result file under two roots would be counted twice — refuse, count nothing.

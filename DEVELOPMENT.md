@@ -840,16 +840,25 @@ applies the conventions' `-XX:ErrorFile` (anywhere else, in the JVM's working di
 reports are counted (`older reports exist, not from this step: N`), never attributed or deleted.
 The pre-gate also keeps the lines in `stage-<id>.crash-reports.txt` beside the run's manifest.
 
-**One recount over a CI run (#669).** CI's results are four artifacts: `gate-reports` (every test
-task of the gate job) and `browser-reports-1` … `browser-reports-3` (one per browser shard). Download
-each into its OWN directory — `gh run download` lands a single named artifact flat in `-D` — and
-pass every root to one recount, which prints ONE line over all of them:
+**One recount over a CI run (#669).** The gate and browser results span four artifacts:
+`gate-reports` (every test task of the gate job) and `browser-reports-1` … `browser-reports-3`
+(one per browser shard); integration results are recounted separately. Download each into its
+OWN directory. `gh run download` preserves the artifact's member paths under `-D`: the browser
+upload paths share the module's build directory, so its XML lands under `test-results/test/`.
+The recount reads that prefix as well as module trees and flat XML. Pass every root to one
+recount, which prints ONE line over all of them:
 
 ```bash
-D=$(mktemp -d); R=<run-id>; gh run download "$R" -n gate-reports -D "$D/gate" || echo "DOWNLOAD FAILED gate-reports"
-for i in 1 2 3; do gh run download "$R" -n "browser-reports-$i" -D "$D/browser-$i" || echo "DOWNLOAD FAILED browser-reports-$i"; done
-./scripts/test-recount.sh "$D/gate" "$D/browser-1" "$D/browser-2" "$D/browser-3"
-./scripts/test-recount.sh "$D/browser-1" "$D/browser-2" "$D/browser-3"    # the browser suite alone
+(
+  D=$(mktemp -d) || exit
+  R=<run-id>
+  gh run download "$R" -n gate-reports -D "$D/gate" || exit
+  for i in 1 2 3; do
+    gh run download "$R" -n "browser-reports-$i" -D "$D/browser-$i" || exit
+  done
+  ./scripts/test-recount.sh "$D/gate" "$D/browser-1" "$D/browser-2" "$D/browser-3" || exit
+  ./scripts/test-recount.sh "$D/browser-1" "$D/browser-2" "$D/browser-3"    # the browser suite alone
+)
 ```
 
 Read every exit: a missing root is exit 2, a root with no XML exit 3, and the same `TEST-*.xml`

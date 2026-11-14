@@ -965,3 +965,18 @@ fe_ran="$(printf '%s\n' $fe_ids | sort -u | wc -l | tr -d ' ')"
 [ "$fe_ran" -ge 8 ] || fail "#974: only $fe_ran of 8 cases ran"
 ok "#974: $fe_ran cases — caller wins first, garbage forks falls back once, a short machine falls back loudly, memory admits four forks"
 echo '  fork-decision self-test: PASS'
+
+# #669: upload-artifact roots browser reports at their common build directory.
+# Recount this real layout beside a module artifact, and still refuse overlap.
+recount_gate="$T/recount-gate"
+recount_browser="$T/recount-browser"
+mkdir -p "$recount_gate/modules/web/build/test-results/test" "$recount_browser/test-results/test"
+echo '<testsuite name="WebTest" tests="2" failures="0" errors="0" skipped="0"/>' > "$recount_gate/modules/web/build/test-results/test/TEST-WebTest.xml"
+echo '<testsuite name="BrowserTest" tests="3" failures="0" errors="0" skipped="0"/>' > "$recount_browser/test-results/test/TEST-BrowserTest.xml"
+recount_sum="$(bash "$ROOT/scripts/test-recount.sh" "$recount_gate" "$recount_browser")" || fail '#669: browser artifact layout was not recounted'
+[ "$recount_sum" = 'files=2 tests=5 failures=0 errors=0 skipped=0 unreadable=0' ] || fail '#669: artifact recount lost or duplicated a result'
+cp "$recount_gate/modules/web/build/test-results/test/TEST-WebTest.xml" "$recount_browser/test-results/test/TEST-WebTest.xml"
+recount_rc=0
+bash "$ROOT/scripts/test-recount.sh" "$recount_gate" "$recount_browser" > "$T/recount-out" 2> "$T/recount-err" || recount_rc=$?
+[ "$recount_rc" -eq 4 ] && [ ! -s "$T/recount-out" ] && grep -q 'TEST-WebTest.xml' "$T/recount-err" || fail '#669: overlapping artifact roots were accepted'
+ok '#669: browser artifact root recounted and cross-artifact duplicate refused'
