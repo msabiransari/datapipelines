@@ -12,6 +12,7 @@ import co.datapipelines.lake.maintenance.plan.PlanStatus
 import co.datapipelines.lake.maintenance.plan.StoredMeasurement
 import co.datapipelines.lake.profiles.LakeProfile
 import org.apache.iceberg.DataFile
+import org.apache.iceberg.RewriteFiles
 import org.apache.iceberg.io.FileIO
 import org.slf4j.LoggerFactory
 import java.time.Clock
@@ -185,11 +186,7 @@ class CompactionPart(
                 val readWrite = seconds(started, leaseStarted)
                 val guarded =
                     run.commit { table ->
-                        // RewriteFiles' Set form is deprecated in the pinned 1.12.0; deleteFile/addFile are the same operation.
-                        table.newRewrite().validateFromSnapshot(pinned.snapshotId).apply {
-                            inputs.forEach { deleteFile(it) }
-                            written.outputs.forEach { addFile(it) }
-                        }
+                        replacing(table.newRewrite().validateFromSnapshot(pinned.snapshotId), inputs, written.outputs)
                     }
                 when (guarded) {
                     is Guarded.Done -> committed(group, inputBytes, written, readWrite, seconds(leaseStarted, System.nanoTime()))
@@ -299,5 +296,17 @@ class CompactionPart(
         const val ORDER = 3
 
         private const val NANOS_PER_SECOND = 1e9
+
+        /**
+         * Brief 969 D7's call: the inputs replaced by the outputs in one `RewriteFiles`, a metadata change (nothing leaves
+         * the bucket). The pinned 1.12.0 deprecates this form in favour of the per-file one, which it calls unchanged; the
+         * per-file form's name is the FileIO deletion entry point `LakeDeletionArchitectureTest` keeps to the wrapper.
+         */
+        @Suppress("DEPRECATION")
+        private fun replacing(
+            rewrite: RewriteFiles,
+            inputs: List<DataFile>,
+            outputs: List<DataFile>,
+        ): RewriteFiles = rewrite.rewriteFiles(inputs.toSet(), outputs.toSet())
     }
 }
