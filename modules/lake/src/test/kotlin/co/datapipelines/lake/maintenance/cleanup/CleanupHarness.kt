@@ -1,5 +1,6 @@
 package co.datapipelines.lake.maintenance.cleanup
 
+import co.datapipelines.lake.LakeLeases
 import co.datapipelines.lake.LakeMinio
 import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTestDb
@@ -103,6 +104,7 @@ internal class CleanupHarness(
         faults.deleteCalls.clear()
         store.age = Duration.ZERO
         store.young.clear()
+        store.agedMarkers.clear()
         partClock.reset()
         removerClock.reset()
         observer.clear()
@@ -127,7 +129,74 @@ internal class CleanupHarness(
         lifetime: Duration = Duration.ofHours(1),
         runId: UUID = UUID.randomUUID(),
         hooks: MaintenanceRunHooks = MaintenanceRunHooks.NONE,
-    ): MaintenanceRun = MaintenanceRunContext(m.leases, m.defs.catalogs, m.heartbeats, hooks).open(runId, table, m.dbNow() + lifetime, emptyMap())
+        leases: LakeLeases = m.leases,
+    ): MaintenanceRun = MaintenanceRunContext(leases, m.defs.catalogs, m.heartbeats, hooks).open(runId, table, m.dbNow() + lifetime, emptyMap())
+
+    /** The production lease protocol with a lock wait long enough that an acquire WAITS behind a held commit (C7). */
+    fun patientLeases(): LakeLeases = LakeLeases(jdbc, holderInstance = "lake-test-962", lockTimeout = Duration.ofSeconds(PATIENT_SECONDS))
+
+    /**
+     * An append's commit under [lease] (the caller's writer lease, its deadline its own): the data file is PUT first, then
+     * committed through the catalog session; answers the file's key. [beforeCommit] runs after the PUT.
+     */
+    fun appendUnder(
+        table: MaintenanceTable,
+        lease: LeaseHandle,
+        beforeCommit: (String) -> Unit = {},
+    ): String {
+        var key = ""
+        m.defs.catalogs.open(lease).use { session ->
+            val loaded = session.loadTable(table.namespace, table.name)
+            session.write {
+                val file = dataFile(loaded)
+                key = requireNotNull(target(table).keyOf(file.location()))
+                put(key)
+                files[key] = file
+                beforeCommit(key)
+                loaded.newAppend().appendFile(file).commit()
+            }
+        }
+        return key
+    }
+
+    /** A run row of [table] in [state] with no parts (a crashed or a live run of another worker, C15). */
+    fun runRow(
+        table: MaintenanceTable,
+        state: String,
+        runId: UUID = UUID.randomUUID(),
+    ): UUID {
+        jdbc.update(
+            "INSERT INTO lake_maintenance_runs (id, table_id, kind, state, deadline_at, ended_at)" +
+                " VALUES (?, ?, 'maintenance', ?, now(), CASE WHEN ? = 'running' THEN NULL ELSE now() END)",
+            runId,
+            table.id,
+            state,
+            state,
+        )
+        return runId
+    }
+
+    fun setRunState(
+        runId: UUID,
+        state: String,
+    ) = check(jdbc.update("UPDATE lake_maintenance_runs SET state = ?, ended_at = now() WHERE id = ?", state, runId) == 1)
+
+    /** [count] orphans under [table]'s `data/`, PUT on [threads] threads; answers their keys. */
+    fun orphans(
+        table: MaintenanceTable,
+        count: Int,
+        threads: Int = PUT_THREADS,
+    ): List<String> {
+        val prefix = "${target(table).keyPrefix}data/orphan-"
+        val keys = (0 until count).map { "$prefix${UUID.randomUUID()}.parquet" }
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(threads)
+        try {
+            keys.map { key -> pool.submit { put(key) } }.forEach { it.get() }
+        } finally {
+            pool.shutdownNow()
+        }
+        return keys
+    }
 
     /** The production worker with both parts (or [parts]) and [jobTimeout]. */
     fun worker(
@@ -358,6 +427,8 @@ internal class CleanupHarness(
         /** The recipe's grace (brief 962 C8): G = 2 h, admitted with J = 3585 s and S = 5 s (`LakeRulesTest`). */
         const val GRACE_HOURS = 2
         const val SMALL = 16
+        const val PATIENT_SECONDS = 60L
+        const val PUT_THREADS = 16
         val REGISTERED: Set<String> = setOf(MaintenancePartNames.CLEANUP, MaintenancePartNames.PURGE_DELETION)
 
         /** Older than any grace a case uses. */
@@ -378,6 +449,9 @@ internal class AgingS3Client(
 
     val young: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
+    /** Keys aged by [age] even under `dp/clock/`: ANOTHER run's marker (C15), never the probing pass's own. */
+    val agedMarkers: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     override fun listObjectsV2(request: ListObjectsV2Request): software.amazon.awssdk.services.s3.model.ListObjectsV2Response {
         val response = real.listObjectsV2(request)
         val shift = age
@@ -386,7 +460,8 @@ internal class AgingS3Client(
             .toBuilder()
             .contents(
                 response.contents().map { o ->
-                    if (CLOCK in o.key() || o.key() in young) o else o.toBuilder().lastModified(o.lastModified().minus(shift)).build()
+                    val exempt = (CLOCK in o.key() && o.key() !in agedMarkers) || o.key() in young
+                    if (exempt) o else o.toBuilder().lastModified(o.lastModified().minus(shift)).build()
                 },
             ).build()
     }
