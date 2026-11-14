@@ -63,6 +63,13 @@ internal object LakeTuningSourceGuard {
             Admitted("maintenance/plan/PlanRepository.kt", "USAGE_RETENTION_DAYS = 35", "usage rows kept 35 days: a record rule (cut L8)"),
             Admitted("maintenance/plan/PlanFigures.kt", "GROWTH_BASELINE_DAYS = 7", "growth per WEEK: call 46's definition"),
             Admitted("maintenance/plan/TableMeasurer.kt", "LakeMetadataReads.METADATA_MAX_BYTES", "metadata read cap: a safety bound"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "MIN_GROUP = 2", "two manifests are the fewest that fold: grammar"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "(targetBytes - 1) / 2", "under HALF, including odd targets: 963 D2a"),
+            Admitted("maintenance/manifests/ManifestRewritePart.kt", "ORDER = 2", "second in the record's order (call 34)"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "PropertyUtil", "reads the manifest target core rolls at (963 D2a)"),
+            Admitted("maintenance/manifests/ManifestFold.kt", ".properties()", "the table's manifest target, never a profile value"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "TableProperties.MANIFEST_TARGET_SIZE_BYTES", "core's own target key"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "TableProperties.MANIFEST_TARGET_SIZE_BYTES_DEFAULT", "core's default"),
         )
 
     /** The LakeProperties groups scoped code may read (rule c), each with why it is not a profile value. */

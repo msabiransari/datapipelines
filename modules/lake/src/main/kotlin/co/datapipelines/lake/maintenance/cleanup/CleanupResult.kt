@@ -59,23 +59,28 @@ data class CleanupFigures(
 
     fun figures(): PartFigures = PartFigures(files = deleted.toLong(), bytes = bytesDeleted, deferredDeletions = deferred)
 
-    /** The part's own `parts_json` fields (957's [co.datapipelines.lake.maintenance.PartResult.details]). */
-    fun details(): Map<String, Any?> =
-        linkedMapOf(
-            "tags_created" to tagsCreated,
-            "tags_changed" to tagsChanged,
-            "tags_removed" to tagsRemoved,
-            "not_kept" to notKept.entries.associate { it.key.wire to it.value },
-            "snapshots_expired" to snapshotsExpired,
-            "floor" to floor?.wire,
-            "listed" to listed,
-            "deleted" to deleted,
-            "left" to left.entries.associate { it.key.wire to it.value },
-            "hints_deferred" to hintsDeferred.entries.associate { it.key.wire to it.value },
-            "observer" to observer.wire,
-            "purge" to purge?.wire,
-            "purge_stamped" to stamped,
-        )
+    /**
+     * The part's own `parts_json` fields ([co.datapipelines.lake.maintenance.PartResult.details]: scalars only, named
+     * `[a-z_]+`). A count by reason is one key per reason that occurred (`left_young`, `not_kept_history_not_available`,
+     * `hints_deferred_reached`); a value not known yet (the floor before the expiry step, a cleanup's purge answer) is
+     * absent, never null.
+     */
+    fun details(): Map<String, Any> =
+        buildMap {
+            put("tags_created", tagsCreated)
+            put("tags_changed", tagsChanged)
+            put("tags_removed", tagsRemoved)
+            notKept.forEach { (reason, count) -> put("not_kept_${reason.wire}", count) }
+            put("snapshots_expired", snapshotsExpired)
+            floor?.let { put("floor", it.wire) }
+            put("listed", listed)
+            put("deleted", deleted)
+            left.forEach { (reason, count) -> put("left_${reason.wire}", count) }
+            hintsDeferred.forEach { (reason, count) -> put("hints_deferred_${reason.wire}", count) }
+            put("observer", observer.wire)
+            purge?.let { put("purge", it.wire) }
+            put("purge_stamped", stamped)
+        }
 
     companion object {
         val DEFERRED: Set<LeftReason> =

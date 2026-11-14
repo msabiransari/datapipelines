@@ -14,6 +14,7 @@ import co.datapipelines.lake.maintenance.cleanup.CleanupReads
 import co.datapipelines.lake.maintenance.cleanup.CleanupRemoval
 import co.datapipelines.lake.maintenance.cleanup.MaintenanceRunStates
 import co.datapipelines.lake.maintenance.cleanup.PurgeDeletionPart
+import co.datapipelines.lake.maintenance.manifests.ManifestRewritePart
 import co.datapipelines.lake.maintenance.plan.MaintenanceDue
 import co.datapipelines.lake.maintenance.plan.MaintenancePlanner
 import co.datapipelines.lake.maintenance.plan.PlanBounds
@@ -173,6 +174,19 @@ class LakeMaintenanceAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     fun lakeMaintenanceScratch(): MaintenanceScratch = MaintenanceScratch.NONE
+
+    /**
+     * #963: the part `manifest_rewrite`, second in a run's order. It reads the manifest list with no lease through the
+     * delete-refusing metadata FileIO, and its threshold from the table's profile.
+     */
+    @Bean
+    fun lakeMaintenanceManifestRewrite(
+        dataSource: DataSource,
+        properties: LakeProperties,
+        catalogs: LakeCatalogs,
+        profiles: LakeProfiles,
+    ): MaintenancePart =
+        ManifestRewritePart.over(NamedParameterJdbcTemplate(LakeAppendRuntime.statements(dataSource)), properties.name, catalogs, profiles)
 
     /**
      * The heartbeat of a lease a maintenance part holds across several steps (D5). Daemon; shut down with the context.

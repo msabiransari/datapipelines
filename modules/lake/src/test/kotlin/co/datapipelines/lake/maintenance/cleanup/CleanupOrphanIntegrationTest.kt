@@ -133,8 +133,8 @@ class CleanupOrphanIntegrationTest {
         terminal.values.forEach { h.exists(target.markerKey(it)) shouldBe false }
         h.exists(target.markerKey(live)) shouldBe true
         h.exists(target.markerKey(unknown)) shouldBe true
-        (first.details["left"] as Map<*, *>)["marker_run_live"] shouldBe 1
-        (first.details["left"] as Map<*, *>)["marker_run_unknown"] shouldBe 1
+        first.details["left_marker_run_live"] shouldBe 1
+        first.details["left_marker_run_unknown"] shouldBe 1
         first.figures.files shouldBe terminal.size.toLong()
 
         h.setRunState(live, "failed") // the live run crashes and is recorded
@@ -144,8 +144,9 @@ class CleanupOrphanIntegrationTest {
         h.exists(target.markerKey(live)) shouldBe false
         h.exists(target.markerKey(unknown)) shouldBe true
         second.figures.files shouldBe 1
+        val left = first.details.filterKeys { it.startsWith("left_") }
         println(
-            "(962 C15) pass1 deleted=${first.figures.files} expected=3 (finished, failed, abandoned) left=${first.details["left"]}; " +
+            "(962 C15) pass1 deleted=${first.figures.files} expected=3 (finished, failed, abandoned) left=$left; " +
                 "pass2 deleted=${second.figures.files} expected=1 (the run now failed); the marker with no row stays",
         )
     }

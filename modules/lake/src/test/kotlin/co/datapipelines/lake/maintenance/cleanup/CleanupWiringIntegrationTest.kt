@@ -129,12 +129,13 @@ class CleanupWiringIntegrationTest {
         row.state shouldBe "finished"
         val part = cleanupPart(row)
         part["outcome"] shouldBe MaintenanceOutcome.DONE.wire
-        (part["left"] as Map<*, *>)["young"] shouldBe 1
+        part["left_young"] shouldBe 1
         h.exists(aged) shouldBe false
         h.exists(young) shouldBe true
         later.ran.get() shouldBe 1
         h.planned(t) shouldBe false
-        println("(962 C14a ii) outcome=${part["outcome"]} deleted=${part["files"]} expected=1 left=${part["left"]} due again=false")
+        val left = part.filterKeys { it.startsWith("left_") }
+        println("(962 C14a ii) outcome=${part["outcome"]} deleted=${part["files"]} expected=1 left=$left due again=false")
     }
 
     @Test

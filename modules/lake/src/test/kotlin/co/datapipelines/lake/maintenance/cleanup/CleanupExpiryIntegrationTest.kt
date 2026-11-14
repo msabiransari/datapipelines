@@ -136,9 +136,10 @@ class CleanupExpiryIntegrationTest {
         h.revisionCount(t) shouldBe revisions
         result.details["tags_created"] shouldBe 0
         result.details["snapshots_expired"] shouldBe 0
-        result.details["not_kept"] shouldBe mapOf("history_not_available" to 2, "name_taken_by_branch" to 1)
+        result.details.filterKeys { it.startsWith("not_kept_") } shouldBe
+            mapOf("not_kept_history_not_available" to 2, "not_kept_name_taken_by_branch" to 1)
         println(
-            "(962 C3r) not_kept=${result.details["not_kept"]} revisions=$revisions→${h.revisionCount(
+            "(962 C3r) not_kept=${result.details.filterKeys { it.startsWith("not_kept_") }} revisions=$revisions→${h.revisionCount(
                 t,
             )} deleted=${result.figures.files} expected=0",
         )

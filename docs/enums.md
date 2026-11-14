@@ -1384,7 +1384,7 @@ A ref of the table's metadata after the expiry, as the cleanup hands it to the o
 
 ## 61. The cleanup's expiry floor spelling (#962)
 
-The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped` is the instant the expiry used (ISO-8601, UTC), or `not_applicable` for a table with no snapshot, which expires nothing; before the expiry step (a part that ended `busy` or `deadline` first, or stopped earlier) it is `null` in `parts_json` and `none` in `lake.cleanup.stopped`. A purge deletion records no floor.
+The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped` is the instant the expiry used (ISO-8601, UTC), or `not_applicable` for a table with no snapshot, which expires nothing; before the expiry step (a part that ended `busy` or `deadline` first, or stopped earlier) the key is absent from `parts_json` and `none` in `lake.cleanup.stopped`. A purge deletion records no floor.
 
 ---
 

@@ -103,7 +103,7 @@ class PurgeDeletionIntegrationTest {
         first["purge"] shouldBe "more_to_do"
         first["purge_stamped"] shouldBe false
         first["deferred_deletions"] shouldBe 1
-        (first["left"] as Map<*, *>)["young"] shouldBe 1
+        first["left_young"] shouldBe 1
         h.m
             .rows(p)
             .single()
@@ -123,8 +123,9 @@ class PurgeDeletionIntegrationTest {
         h.exists(young) shouldBe false
         h.purgeDeletedAt(p) shouldNotBe null
         h.planned(p) shouldBe false
+        val left = first.filterKeys { it.startsWith("left_") }
         println(
-            "(962 C13) pass1 deleted=${first["files"]} left=${first["left"]} deferred=${first["deferred_deletions"]} stamped=false " +
+            "(962 C13) pass1 deleted=${first["files"]} left=$left deferred=${first["deferred_deletions"]} stamped=false " +
                 "enqueued again=true; pass2 deleted=${second["files"]} expected=1 (the aged key) stamped=true",
         )
     }
