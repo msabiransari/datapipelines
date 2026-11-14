@@ -74,6 +74,16 @@ class FeedLatenessTest {
     }
 
     @Test
+    fun `F3 - a decimal factor keeps its written boundary`() {
+        // 2.3 is not exactly representable as a double; its written boundary is still 138 minutes.
+        val times = history(hours(1), hours(1), hours(1), hours(1), hours(1))
+        val at = Duration.ofMinutes(138)
+        judge(times, since = at.minusNanos(1), factor = 2.3) shouldBe FeedVerdict.OnTime(hours(1), at.minusNanos(1))
+        judge(times, since = at, factor = 2.3) shouldBe FeedVerdict.OnTime(hours(1), at)
+        judge(times, since = at.plusNanos(1), factor = 2.3) shouldBe FeedVerdict.Late(hours(1), at.plusNanos(1))
+    }
+
+    @Test
     fun `F4 - only the last sample deliveries count and an older rhythm is ignored`() {
         // Ten weekly gaps, then five hourly ones: with a sample of 6 deliveries (5 gaps) the feed is hourly.
         val weekly = List(10) { Duration.ofDays(7) }

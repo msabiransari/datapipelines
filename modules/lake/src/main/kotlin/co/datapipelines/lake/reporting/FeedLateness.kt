@@ -44,8 +44,8 @@ sealed interface FeedVerdict {
  * gap of zero, is [FeedVerdict.NotEnoughDeliveries]: never late and never on time when the data cannot say.
  *
  * The comparison is exact: the interval is held in nanoseconds as a [BigDecimal] (a mean of two gaps can end in half a
- * nanosecond) and multiplied by the factor's exact binary value, so "exactly at the factor" is never decided by
- * floating-point rounding.
+ * nanosecond) and multiplied by the factor's decimal representation, so "exactly at the factor" is never decided
+ * by the double's binary rounding error.
  */
 object FeedLateness {
     /**
@@ -68,7 +68,7 @@ object FeedLateness {
         if (interval.signum() == 0) return FeedVerdict.NotEnoughDeliveries(newestFirst.size)
         val sinceLast = Duration.between(newestFirst.first(), now)
         val usual = Duration.ofNanos(interval.setScale(0, RoundingMode.DOWN).longValueExact())
-        val overdueAfter = interval.multiply(BigDecimal(overdueFactor))
+        val overdueAfter = interval.multiply(BigDecimal.valueOf(overdueFactor))
         return if (BigDecimal.valueOf(sinceLast.toNanos()) > overdueAfter) {
             FeedVerdict.Late(usual, sinceLast)
         } else {
