@@ -1206,9 +1206,13 @@ history: 90 minutes at #290 (the integration job's figure), its build step 70 of
 (the serial stopgap's last form, 9c22b3404): 170, step 150 — run 43354061464 had reached the
 100-minute build ceiling with 11,796 unit tests passing and browser cases still passing, without
 completed browser XML, and the dependency-graph tip's separate local serial browser run took 83
-minutes for 735 cases. Since #669 the browser suite is the `browser` job's: the gate job's budget
-is 80 INITIAL (build step 60), to be set from the first run on `next`. The integration job retains
-its own 90-minute budget.
+minutes for 735 cases. Since #669 the browser suite is the `browser` job's. Its first sharded
+run on `next`, [43574307936](https://github.com/msabiransari/datapipelines/actions/runs/43574307936)
+at `c3c1dad1a` (2026-11-14), measured the successful gate build step at 32.48 minutes and the
+whole gate job at 35.80. The build step's limit is **50 minutes**: 1.5 times the observation,
+rounded up to five minutes. The job's **70 minutes** keeps another 20 for setup, reports and
+uploads. These replace the initial 60/80 projections; the integration job retains its own
+90-minute budget. One cold run is the measurement; the headroom is a sizing choice.
 
 Before #290 the four green jobs took
 48–57 min, and 19–23 of those were the coverage-report step RE-RUNNING tests: Kover 0.9.9's report
@@ -1234,9 +1238,12 @@ round-robin gives 23.3 / 28.5 / 30.5 min per leg (51 classes each); a fourth leg
 slowest at ≈ 24 class-minutes — under the `integration` job's 50–55 — so it would cost a runner
 and shorten nothing. Each leg is its own runner and its own Postgres (#933);
 `BrowserSuite.checkConnectionBudget` prints the shared server's client count once per class and
-fails a class above 340. The budgets are initial values — gate step 60 / job 80, browser step 60 /
-job 75 — until the first run on `next` measures them (#669). `browser-verdict` is red unless
-every leg succeeded: the one check name the `main` ruleset requires for the suite.
+fails a class above 340. The first sharded run on `next` (43574307936, above) measured successful
+browser build steps of **23.58 / 26.40 / 31.72 minutes**, whole jobs **24.13 / 26.93 / 32.42**.
+Every browser leg gets a **50-minute step / 65-minute job**: 1.5 times the slowest observed step,
+rounded up to five minutes, plus 15 for setup, the summary and uploads. The gate gets **50/70**,
+as above. `browser-verdict` is red unless every leg succeeded: the one check name the `main`
+ruleset requires for the suite.
 
 **Measured on 2026-09-12** (2 × 24-core Xeon, 96 threads, 64 GB, NVMe, native Docker, Ubuntu
 26.04) — the numbers to size against:
