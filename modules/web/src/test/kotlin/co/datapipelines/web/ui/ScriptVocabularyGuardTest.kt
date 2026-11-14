@@ -53,7 +53,8 @@ import kotlin.text.RegexOption.IGNORE_CASE
  *     Iceberg's own transforms (identity, year/month/day/hour, bucket, truncate) under the body key
  *     `partition[].transform` (dp-lake design record §5.1 and §8 step 4, #798): the lake
  *     definitions package, `docs/lake.md`, and the append's `Truncate*` classes that apply Iceberg's own
- *     `truncate` to refuse a value its partition cannot hold (#967).
+ *     `truncate` to refuse a value its partition cannot hold (#967), and the append's sort-order check,
+ *     which refuses a sort field whose Iceberg transform is not identity (#968 D6).
  *   - **XSLT XML element** — the #461 source guard recognizes `xsl:transform`; only its
  *     exact regex declaration is admitted, never the script-node noun beside it.
  */
@@ -276,6 +277,11 @@ class ScriptVocabularyGuardTest {
                     Regex("^modules/lake/src/(?:main|test)/kotlin/co/datapipelines/lake/append/Truncate[A-Za-z]*\\.kt$"),
                     Regex("transform", setOf(IGNORE_CASE)),
                     "Iceberg partition transforms: the append's truncate partition refusal calls Iceberg's own function (#967)",
+                ),
+                Triple(
+                    Regex("^modules/lake/src/\\w+/kotlin/co/datapipelines/lake/append/(?:ParquetAppendWriter|AppendOrderTest)\\.kt$"),
+                    Regex("transform", setOf(IGNORE_CASE)),
+                    "Iceberg sort-order transforms: the append refuses a sort field whose Iceberg transform is not identity (#968 D6)",
                 ),
                 Triple(
                     Regex("^docs/lake\\.md$"),

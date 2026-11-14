@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.84 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.85 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-14
@@ -495,7 +495,7 @@ generated secret SQL, credentials and driver messages never reach an execution e
 The one place a managed-lake object is deleted ([Lake §10](lake.md#10-removal-and-cleanup)). Every event carries the
 table id; all except `lake.removal.unexpected_dp_key` also carry the pass's run id. The unexpected-key event carries
 one relative key, as specified below; no event carries a key list, a presigned URL or a credential. A failure reports
-the exception class and first SQLSTATE in §3.4G's safe shape. Nothing in production calls the remover before 962.
+the exception class and first SQLSTATE in §3.4G's safe shape. Its production callers are the cleanup parts (§3.4W).
 
 | Level | Event | When | Fields |
 |---|---|---|---|
@@ -537,7 +537,17 @@ The `lake-maintenance-planner` recurring task ([Lake: maintenance runs](lake.md#
 | WARN | `lake.maintenance.plan_measure_failed` | A measurement failed (also a reader client that could not be built): its attempt and error code are stamped, the last good figures kept | `table_id`, `cause` |
 | WARN | `lake.maintenance.plan_write_failed` | A measurement's own database write failed: the row keeps what it held | `table_id`, `cause` |
 
-#### 3.4W Lake compaction events (#969)
+#### 3.4W Lake cleanup events (#962)
+
+The `cleanup` and `purge_deletion` maintenance parts ([Lake §10](lake.md#10-removal-and-cleanup)). Counts and ids only:
+no key, no location, no exception message, no credential; a failure is its code and its class (§3.4G's safe shape).
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| WARN | `lake.cleanup.stopped` | The part is about to throw after it took the table lease (`lake.maintenance.cleanup_incomplete`, `lake.maintenance.clock_skew`, or anything else thrown): the run ends `failed` and records no figures, so this line carries them. Once per throw | `part` (`cleanup` \| `purge_deletion`), `table_id`, `run_id`, `code`, `reason` (`mode` \| `delete_failed` \| `none`), `cause`, `tags_created`, `tags_changed`, `tags_removed`, `not_kept` (`<reason>=<count>` pairs), `snapshots_expired`, `floor` (an instant, `not_applicable` or `none`), `listed`, `deleted`, `bytes`, `left` and `hints_deferred` (`<reason>=<count>` pairs), `deferred`, `observer` |
+| WARN | `lake.cleanup.observer_failed` | The cleanup observer threw an exception: the cleanup ends as the remover's result says, and its result records `observer: failed` | `table_id`, `run_id`, `cause` (the class only) |
+
+#### 3.4X Lake compaction events (#969)
 
 The `compaction` part of a maintenance run ([Lake: maintenance runs](lake.md#11-maintenance-runs), *Compaction*). Ids and
 figures only: no file location, no storage endpoint, no message text, no credential. Failures use §3.4G's safe shape
@@ -851,7 +861,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-14 | v1.84 | 969 (#969, dp-lake P6) | **§3.4W** (new): the compaction part's three events: INFO `lake.maintenance.compaction_group_committed` (one per committed group, with D9's figures), WARN `lake.maintenance.compaction_blocked` (one per `capacity` result: the blocked count, the largest need, the limit and its source, the grant) and WARN `lake.maintenance.compaction_deadline` (a scratch-database failure the clock judged to be the deadline; class and SQLSTATE only). |
+| 2026-11-14 | v1.85 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.84 | **§3.4X** (new): the compaction part's three events: INFO `lake.maintenance.compaction_group_committed` (one per committed group, with D9's figures), WARN `lake.maintenance.compaction_blocked` (one per `capacity` result: the blocked count, the largest need, the limit and its source, the grant) and WARN `lake.maintenance.compaction_deadline` (a scratch-database failure the clock judged to be the deadline; class and SQLSTATE only). |
+| 2026-11-14 | v1.84 | 962 (#962, dp-lake P6) | **§3.4W** (new): the cleanup parts' two events, WARN `lake.cleanup.stopped` (the figures of a part that throws, counts only) and WARN `lake.cleanup.observer_failed` (the observer's exception class; the cleanup unchanged). §3.4T: the remover's production callers are these parts. |
 | 2026-11-14 | v1.83 | 959 (#959) — renumbered at the spec merge after #960's v1.82 | **§3.4V** (new): the six `lake.maintenance.*` events of the maintenance planner: planned, plan_reads_exhausted, plan_read_abandoned, plan_read_ended, plan_measure_failed, plan_write_failed. |
 | 2026-11-14 | v1.82 | 960 (#960, dp-lake P6) | **§3.4U**: new INFO `lake.maintenance.keep_reconciled` (`run_id`, `table_id`, `outcome`, `created`, `re_aged`, `removed`, `standing`, `not_kept`) — the keep rules' reconcile applied to a run's table, one commit or none. |
 | 2026-11-14 | v1.81 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.80 | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |

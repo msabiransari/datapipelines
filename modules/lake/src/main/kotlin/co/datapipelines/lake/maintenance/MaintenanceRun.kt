@@ -110,6 +110,12 @@ class MaintenanceRun internal constructor(
         return withLease { Guarded.Done(block()) }
     }
 
+    /**
+     * The table lease [underLease] holds, for a step that must hand it on (962: the remover re-checks the caller's lease
+     * before every batch). Only inside [underLease]'s block; anywhere else it throws.
+     */
+    internal fun heldLease(): LeaseHandle = checkNotNull(held) { "heldLease is only called inside underLease" }
+
     private fun <T> withLease(block: (LeaseHandle) -> Guarded<T>): Guarded<T> =
         when (val outcome = leases.acquire(LeaseKind.TABLE, table.leaseName, runId, TTL, deadline, OPERATION)) {
             is LeaseOutcome.Acquired -> {

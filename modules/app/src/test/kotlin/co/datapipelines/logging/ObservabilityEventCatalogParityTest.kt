@@ -240,7 +240,7 @@ class ObservabilityEventCatalogParityTest {
         val ENFORCED =
             mapOf(
                 "parameter" to 20,
-                "lake" to 9,
+                "lake" to 84,
                 "mail" to 8,
                 "persistence" to 10,
                 "scheduler" to 12,
