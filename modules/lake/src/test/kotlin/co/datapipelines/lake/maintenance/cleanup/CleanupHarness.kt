@@ -217,12 +217,15 @@ internal class CleanupHarness(
         gate: MaintenanceGate = MaintenanceGate.ADMIT_ALL,
     ): MaintenanceWorker = m.worker(parts, gate = gate, jobTimeout = jobTimeout, hooks = hooks, clock = Clock.systemUTC())
 
-    /** The planner's due rule (959) for [table] now, with both parts registered and this deployment's grace. */
-    fun due(table: MaintenanceTable): TableDue =
+    /**
+     * The planner's due rule (959) for [table] now, with both parts registered and this deployment's grace; null when the
+     * plan does not decide for the table at all (a purged table whose deletion is finished is not among its inputs).
+     */
+    fun due(table: MaintenanceTable): TableDue? =
         MaintenanceDue(grace)
             .plan(p.repository.decisionInputs(), REGISTERED, p.repository.catalogNow())
             .tables
-            .single { it.tableId == table.id }
+            .singleOrNull { it.tableId == table.id }
 
     fun table(name: String): MaintenanceTable = m.table(name)
 
