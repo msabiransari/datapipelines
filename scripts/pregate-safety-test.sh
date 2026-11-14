@@ -882,3 +882,86 @@ gc_ran="$(printf '%s\n' $gc_ids | sort -u | wc -l | tr -d ' ')"
 [ "$gc_ran" -ge 23 ] || fail "#132: only $gc_ran of 23 cases ran"
 ok "#132: $gc_ran cases — a crash word a fresh failed JUnit XML carries is a test failure; anything else stays a crash"
 echo '  crash-report self-test: PASS'
+
+# ---- #974: gate_e2e_fork_args: the exclusive gate's own integration fork count --------------
+# Caller args pinning dp.test.forks.e2e win first; an empty GATE_E2E_FORKS means the
+# default 4 silently; garbage or <1 falls back to it with ONE stderr line; MemAvailable
+# below the floor (or unreadable) appends nothing and the header says why; otherwise
+# -Pdp.test.forks.e2e=<forks> is printed with the decision in the header. Every branch
+# returns 0. Every case runs; the block fails at its end on any RED or when fewer than
+# 13 cases ran.
+fe_ids=''; fe_red=0
+fe_check() { # fe_check <case> <expected> <actual>
+  fe_ids="$fe_ids ${1%%[a-z]}"
+  if [ "$2" = "$3" ]; then ok "#974 $1: $2"; else echo "  RED  #974 $1: expected $2, got $3" >&2; fe_red=$((fe_red + 1)); fi
+}
+fe_run() { # fe_run <mem> <floor> <raw> [caller args...] — sets $fe_out, keeps stderr in $fe_err
+  # Both via files: this helper runs in the caller's shell — capturing stdout through a
+  # command substitution would run gate_e2e_fork_args in a SUBSHELL and lose $fe_err.
+  fe_err="$T/fe-stderr"
+  gate_e2e_fork_args "$@" 2> "$fe_err" > "$T/fe-stdout"
+  fe_out="$(cat "$T/fe-stdout")"
+}
+fe_header() { cat "$fe_err"; }
+
+fe_run 24083 36864 ''
+fe_check F1a no-arg "$([ -z "$fe_out" ] && echo no-arg)"
+fe_check F1b ' integration forks: repository default (MemAvailable 24 GB below floor 36 GB)' "$(fe_header)"
+
+fe_run 40000 36864 ''
+fe_check F2a '-Pdp.test.forks.e2e=4' "$fe_out"
+fe_check F2b ' integration forks: 4 (MemAvailable 40 GB, floor 36 GB)' "$(fe_header)"
+
+fe_run 40000 36864 6
+fe_check F2c '-Pdp.test.forks.e2e=6' "$fe_out"
+fe_check F2d ' integration forks: 6 (MemAvailable 40 GB, floor 36 GB)' "$(fe_header)"
+
+fe_run 24083 36864 '' '-Pdp.test.forks.e2e=2'
+fe_check F3a no-arg "$([ -z "$fe_out" ] && echo no-arg)"
+fe_check F3b ' integration forks: caller-set (GATE_GRADLE_ARGS pins dp.test.forks.e2e)' "$(fe_header)"
+fe_run 40000 36864 '' '--max-workers=12' '-Pdp.test.forks.e2e=8'
+fe_check F3c no-arg "$([ -z "$fe_out" ] && echo no-arg)"
+fe_check F3d ' integration forks: caller-set (GATE_GRADLE_ARGS pins dp.test.forks.e2e)' "$(fe_header)"
+
+fe_run 40000 36864 'abc'
+fe_check F4a '-Pdp.test.forks.e2e=4' "$fe_out"
+# TWO stderr lines: the ONE fallback warning + the always-on decision header (D5).
+fe_check F4b 2 "$(wc -l < "$fe_err")"
+fe_check F4c 1 "$(grep -c 'is not an integer of at least 1' "$fe_err")"
+fe_run 40000 36864 0
+fe_check F4d '-Pdp.test.forks.e2e=4' "$fe_out"
+fe_check F4e 1 "$(grep -c 'is not an integer of at least 1' "$fe_err")"
+
+fe_run 24083 36864 ''
+fe_check F4f 0 "$(grep -c 'is not an integer of at least 1' "$fe_err")"
+
+fe_run '' 36864 ''
+fe_check F5a no-arg "$([ -z "$fe_out" ] && echo no-arg)"
+fe_check F5b ' integration forks: repository default (MemAvailable unreadable, floor 36 GB)' "$(fe_header)"
+
+fe_check F6a 24576 "$(GATE_E2E_MEM_FLOOR_MB=abc gate_e2e_mem_floor_mb 2>/dev/null)"
+GATE_E2E_MEM_FLOOR_MB=abc gate_e2e_mem_floor_mb 2> "$fe_err" > /dev/null
+fe_check F6b 1 "$(wc -l < "$fe_err")"
+fe_check F6c 5000 "$(GATE_E2E_MEM_FLOOR_MB=5000 gate_e2e_mem_floor_mb 2>/dev/null)"
+
+fe_check F7a 24 "$(gate_e2e_gb 24083)"
+fe_check F7b 36 "$(gate_e2e_gb 36864)"
+fe_check F7c 1 "$(gate_e2e_gb 1023)"
+fe_check F7d 0 "$(gate_e2e_gb 0)"
+
+# The wiring itself: gate.sh reads MemAvailable, calls the function, and appends the
+# result into GATE_EXTRA_ARGS — in that order, AFTER the lib is sourced, so the cycles'
+# run() calls below read the array with the fork argument in it (C18-style source check).
+wiring="$(awk '
+  /lib\/gate-stages\.sh/ && /^source/ { s = NR }
+  /MemAvailable:/ { r = NR }
+  /gate_e2e_fork_args "\$mem_avail"/ { c = NR }
+  /GATE_EXTRA_ARGS\+=/ { a = NR }
+  END { print ((s && r && c && a && s < r && r < c && c < a) ? "wired" : "unwired") }' "$ROOT/scripts/gate.sh")"
+fe_check W1 wired "$wiring"
+
+fe_ran="$(printf '%s\n' $fe_ids | sort -u | wc -l | tr -d ' ')"
+[ "$fe_red" -eq 0 ] || fail "#974: $fe_red case(s) RED"
+[ "$fe_ran" -ge 8 ] || fail "#974: only $fe_ran of 8 cases ran"
+ok "#974: $fe_ran cases — caller wins first, garbage forks falls back once, a short machine falls back loudly, memory admits four forks"
+echo '  fork-decision self-test: PASS'

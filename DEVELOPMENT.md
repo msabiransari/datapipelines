@@ -1264,6 +1264,28 @@ works for the fork knobs: a `-D` system property or an `ORG_GRADLE_PROJECT_*` va
 repo's `gradle.properties` (measured 2026-09-19 with an init-script probe), so the profile is
 arguments, not environment.
 
+**The gate picks its own integration forks (#974).** A gate is exclusive (#485), and
+`scripts/gate.sh` spends that exclusivity: it appends `-Pdp.test.forks.e2e=4` for the integration
+suite by itself, and a value in `GATE_GRADLE_ARGS` still wins when it already pins one. Four forks
+need memory: when `MemAvailable` at the gate's start is below `GATE_E2E_MEM_FLOOR_MB` — default
+24576 MB (24 GB), the gate's own measured peak footprint (java 21822 MiB + containers 2261 MiB,
+#974 run of 2026-11-13; the brief's 1.5× formula of 36 GB would refuse the machine the run was
+measured on, whose quiet start peaks near 28 GB available — owner ruling 2026-11-13) — the gate
+runs the repository default (`dp.test.forks.e2e=2`) instead and prints a header line saying so: a
+short machine gives a slower gate, never a red one. `GATE_E2E_FORKS` overrides the count upward or
+downward (garbage or a value below 1 falls back to 4 with one stderr line). The header always
+names what was chosen.
+
+Measured on the lane (#974, 2026-11-14): three gate runs on this machine read `integration forks: 4`
+in the header and passed (gate wall 48.0 / 42.7 / 43.2 min; integration suite 26.1 / 26.2 min;
+aggregate integration parallelism 2.0× in every run, test recount identical across all three:
+1564 files, 13346 tests, 0 failures, 0 errors, 15 skipped). A run that started at 22 GB available
+took the fallback path exactly as designed (header said `repository default`, gate still green).
+The gate consumed ~19–22 GB of that floor in its worst samples (MemAvailable trough 6–8.5 GB from
+starts of 27–34 GB), so the 24 GB floor leaves roughly 8 GB of headroom; do not lower it without
+re-measuring. The suite wall is dominated by one serialized test class (#982), so
+more forks than 4 do not shorten it.
+
 **The pre-gate's build cache (#480).** Only `scripts/pregate.sh` uses it (§9.4). It is Gradle's
 local directory cache, `~/.gradle/caches/build-cache-1` (under `GRADLE_USER_HOME` when that is set),
 shared by every worktree and every build of this user on the machine; there is no remote cache and
