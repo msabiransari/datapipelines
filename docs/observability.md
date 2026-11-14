@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.83 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.84 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-14
@@ -537,6 +537,18 @@ The `lake-maintenance-planner` recurring task ([Lake: maintenance runs](lake.md#
 | WARN | `lake.maintenance.plan_measure_failed` | A measurement failed (also a reader client that could not be built): its attempt and error code are stamped, the last good figures kept | `table_id`, `cause` |
 | WARN | `lake.maintenance.plan_write_failed` | A measurement's own database write failed: the row keeps what it held | `table_id`, `cause` |
 
+#### 3.4W Lake compaction events (#969)
+
+The `compaction` part of a maintenance run ([Lake: maintenance runs](lake.md#11-maintenance-runs), *Compaction*). Ids and
+figures only: no file location, no storage endpoint, no message text, no credential. Failures use §3.4G's safe shape
+(`cause` = the class, the first SQLSTATE).
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| INFO | `lake.maintenance.compaction_group_committed` | One rewrite group committed (once per group): its outputs replaced its inputs in one `RewriteFiles` commit; nothing was deleted | `run_id`, `table_id`, `input_files`, `input_bytes`, `output_files`, `output_bytes`, `rows`, `read_write_seconds`, `lease_seconds` (the commit's lease), `scratch_peak_bytes` (the scratch database's file, WAL and spill directory, sampled while it wrote) |
+| WARN | `lake.maintenance.compaction_blocked` | The part ended with files no run can take (once per blocked result): the part's outcome is `capacity`. With `limit_source=scratch` and a group's input as the largest need, the scratch database ran out mid-sort: the evidence to raise `compaction-scratch-factor` or `admission.scratch-bytes` | `run_id`, `table_id`, `blocked` (files), `largest_need_bytes`, `limit_bytes`, `limit_source` (`cap` \| `scratch` \| `time`), `grant_bytes` (the run's scratch for the part), `committed`, `left_for_fresh_run` |
+| WARN | `lake.maintenance.compaction_deadline` | A statement or the open of the run's scratch database failed after the run's deadline: the clock decided it was the deadline (whatever the driver said), the group is abandoned and the part ends `deadline` | `deadline`, `cause`, `sql_state` |
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -839,6 +851,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.84 | 969 (#969, dp-lake P6) | **§3.4W** (new): the compaction part's three events: INFO `lake.maintenance.compaction_group_committed` (one per committed group, with D9's figures), WARN `lake.maintenance.compaction_blocked` (one per `capacity` result: the blocked count, the largest need, the limit and its source, the grant) and WARN `lake.maintenance.compaction_deadline` (a scratch-database failure the clock judged to be the deadline; class and SQLSTATE only). |
 | 2026-11-14 | v1.83 | 959 (#959) — renumbered at the spec merge after #960's v1.82 | **§3.4V** (new): the six `lake.maintenance.*` events of the maintenance planner: planned, plan_reads_exhausted, plan_read_abandoned, plan_read_ended, plan_measure_failed, plan_write_failed. |
 | 2026-11-14 | v1.82 | 960 (#960, dp-lake P6) | **§3.4U**: new INFO `lake.maintenance.keep_reconciled` (`run_id`, `table_id`, `outcome`, `created`, `re_aged`, `removed`, `standing`, `not_kept`) — the keep rules' reconcile applied to a run's table, one commit or none. |
 | 2026-11-14 | v1.81 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.80 | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |

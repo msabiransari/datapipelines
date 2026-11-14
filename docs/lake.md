@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.31 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner)
+**Status:** v1.32 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #969, compaction)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -1011,12 +1011,67 @@ small files and candidate bytes with their state (`current`, `stale`, `never_mea
 [Enums §56](enums.md#56-figuresstate--whether-a-tables-planner-figures-may-be-used)), growth per week with its baseline's
 time, and the measurement's times; a figure whose source was not read is NULL.
 
+**Compaction** (#969; record §11a call 34 "Progress inside a table", call 36 items 4–5, call 41; the P6 lane cut L18,
+L19). The run's third part, `compaction`, after cleanup and manifest rewrite. It is registered whenever the lake is
+enabled: the web module supplies the run's scratch reservation (the staging factory's `prepareDelivery`, from the
+aggregate deliveries reserve from) and the part's scratch database.
+
+- **What it rewrites.** The candidates of ONE rule, the same function the planner measures with
+  (`CompactionCandidateRule`), so a table the plan calls due is a table the part finds work in. A file is *small* below
+  `maintenance.compact_small_file_ratio × target_file_bytes`; a partition of one partition spec holding at least
+  `compact_min_small_files` small files is a *candidate partition*; on a table with sort columns a file not stamped with
+  the table's sort order is *unsorted* whatever its size (a legacy table has none). A *candidate* is unsorted, or small in
+  a candidate partition. A table holding a delete file is not rewritten: the part fails (DP writes none).
+- **Declared and due.** At admission, from database rows only, the part declares `compaction-scratch-factor` × the
+  smaller of the profile's `max_bytes_rewritten_per_run` and the stored measurement's candidate bytes, never more than
+  `admission.scratch-bytes` less one delivery's reservation; a table not `active`/`deprecated`, never measured or
+  measured under another profile declares zero and is not due. After admission the table is read again (one pinned
+  snapshot): the part is due when it holds a candidate AND the run holds the part's scratch.
+- **The group.** One partition of one spec. A file's *need* is its size when it is unsorted, and its size plus the
+  smallest other candidate of its partition when it is a small file already in order (no other candidate → it waits;
+  it is never rewritten alone). Groups are formed per partition from the eligible files, oldest first (data sequence
+  number, then location), each taking files while their sizes stay within the limit now; the group holding the oldest
+  candidate runs first. Before every group the part reads the clock and plans again with the time left; a group that
+  would cross what is left of the run's cap is not started and not shrunk.
+- **The rewrite.** The group's rows are read by field id and ordered by the table's sort order (ascending, nulls
+  first) in the run's scratch database ([Staging §8.5](staging.md#85-the-duckdb-engine), *The trusted scratch
+  database*), the file locations bound as one array, never spliced into the statement; the Java writer writes the
+  outputs, stamped with the table's sort order, before any lease. The commit is ONE `RewriteFiles` through the run's
+  lease, the catalog fence and the revision trigger (`validateFromSnapshot` the planned snapshot): the inputs are
+  replaced by the outputs and **nothing is deleted** — the old files stay for the remover. One scratch database per run,
+  opened when the first group starts, closed (files deleted, reservation released) in a `finally`.
+- **The limits, and what `capacity` means.** The *whole-run limit* is the smallest of the profile's cap (source `cap`),
+  the most scratch any run can be granted ÷ the factor (`scratch`) and a whole `job-timeout` at
+  `compaction-bytes-per-second` (`time`); the *limit now* is the smallest of that, this run's grant ÷ the factor and the
+  time left at the same rate. A file whose need is above the whole-run limit is **blocked**: left exactly as it is, still
+  a candidate, and the part ends `capacity` with the blocked count, the largest need, the limit and its source. A file
+  within the whole-run limit but above the limit now is **left for a fresh run** (the earlier parts or groups used the
+  time or the grant): not `capacity`; with nothing blocked the part ends `deadline` and the next plan enqueues it again.
+  The scratch database running out mid-sort blocks that group with source `scratch` (the factor was too low for it;
+  the blocked event carries its input bytes and the grant).
+- **The three remedies** for a file blocked by the cap or by scratch: raise the profile's
+  `maintenance.max_bytes_rewritten_per_run`; or give the table a profile with a larger one; or, when `scratch` set the
+  limit, raise the server's `admission.scratch-bytes` (or `compaction-scratch-factor`, when the blocked event shows the
+  sort needed more than the factor allowed). A file blocked by `time` needs a longer `admission.job-timeout` or a higher
+  measured `compaction-bytes-per-second` ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)).
+- **The deadline.** A deadline that passes while rows stream (the stream checks between batches; the scratch database's
+  statement carries the time left as its timeout, decided by the clock, never by the driver's message) abandons the
+  group: nothing written is committed, and the unstarted groups are left for a fresh run. A lease another operation
+  holds ends the part `busy`. Precedence of the outcome: `busy`, `capacity`, `deadline`, `done`, else `nothing_to_do`.
+- **What the run row keeps.** The part's `parts_json` entry ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs))
+  carries, besides the common keys, `committed` (whether any group committed), `left_for_fresh_run` (files), `blocked`
+  (files), and for a blocked result `largest_need_bytes`, `limit_bytes` and `limit_source`; `groups` lists each committed
+  group's `input_files`, `input_bytes`, `output_files`, `output_bytes`, `rows`, `read_write_seconds`, `lease_seconds`
+  and `scratch_peak_bytes`. The planner reads `committed` and `left_for_fresh_run` (step 6 above). Log events
+  [Observability §3.4W](observability.md#34w-lake-compaction-events-969).
+
 ---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.32 | 969 (#969, dp-lake P6) | **§11 Maintenance runs** gains *Compaction*: the one candidate rule shared with the planner, the declaration and the due check, the rewrite group (one partition of one spec, the need of a small in-order file, oldest first, re-planned before each group), the rewrite (sorted by field id in the run's trusted scratch database, written before the lease, one `RewriteFiles` commit, nothing deleted), the whole-run limit and the limit now, `capacity` and its three remedies, the deadline, and the run row's compaction keys. |
 | 2026-11-14 | v1.31 | 959 (#959, dp-lake P6) — renumbered at the spec merge after #961's v1.28, #960's v1.29 and #968's v1.30 | **§11 Maintenance runs** gains the planner: the recurring `lake-maintenance-planner` task and its four keys; measuring from the manifests on the planner's own readers (abandoned reads retired before their stamp, their limit, the client built inside the read, one winner per attempt, the stamp fence); stale figures and the measured-first rule; daily usage and growth; the due function, the one run-history statement, the gate shared with the worker, and the ranked enqueue; the figures read method. |
 | 2026-11-14 | v1.30 | 968 (#968, dp-lake P6) — renumbered at the spec merge after #961's v1.28 and #960's v1.29 | §7: on a table with sort columns the append's writing scan is ordered by the sort columns (ascending, nulls first) and every file is stamped with the table's order, from one value; an unsupplied optional sort column is skipped; a legacy table keeps arrival order and the unsorted stamp; a sort that does not fit the scratch reservation fails with `pipeline.staging.scratch_limit_exceeded` (ledger `FAILED`, phase `publish`, that code), a memory-limit failure stays `lake.append.failed` with its staging code in the ledger; a string sort column is compared by code points whatever its collation (round 2). Replaces #935's "files stay stamped unsorted". |
 | 2026-11-14 | v1.29 | 960 (#960, dp-lake P6) — renumbered at the spec merge after #961's v1.28 | **§11 Profiles** gains *Keep rules*: the computed `dp-keep-` tag names, the period's end in the profile's current zone, the kept snapshot proved by the snapshot log alone ("not kept: history not available"), the keep's end and the tag's maximum age, reconcile by name (a changed zone moves ends, never snapshots; a reopened period's tag stands), what is never touched (branches, `main`, `dp-hold-`; "not kept: name taken by a branch"), and the one commit. |
