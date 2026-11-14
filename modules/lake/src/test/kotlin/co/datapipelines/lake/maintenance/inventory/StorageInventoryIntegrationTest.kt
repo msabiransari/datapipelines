@@ -56,7 +56,7 @@ class StorageInventoryIntegrationTest {
         f.tag(t, "dp-hold-k5", s2) // a tagged snapshot still inside the window
         val recipe = f.objectAt(t, "dp/recipes/2026/11/14/k5.json", RECIPE)
         val abandoned = h.orphan(t).also { h.store.young += it }
-        val inFlight = f.objectAt(t, "data/in-flight-${s4}.parquet", IN_FLIGHT).also { h.store.young += it }
+        val inFlight = f.objectAt(t, "data/in-flight-$s4.parquet", IN_FLIGHT).also { h.store.young += it }
         h.put(abandoned, ABANDONED)
         val oldOrphan = h.orphan(t) // past the grace and unreached: the same cleanup deletes it (B7 is not vacuous)
         h.finalise(t)
@@ -81,7 +81,8 @@ class StorageInventoryIntegrationTest {
         println("(964 B5/K5) expected=$expected")
         println("(964 B5/K5) measured=${stored.breakdown.rows}")
         println(
-            "(964 B5/K5) snapshots sA=$sA s1=$s1 s2=$s2 s4=$s4 expired=${result.details["snapshots_expired"]} floor=${result.details["floor"]} " +
+            "(964 B5/K5) snapshots sA=$sA s1=$s1 s2=$s2 s4=$s4 expired=${result.details["snapshots_expired"]} " +
+                "floor=${result.details["floor"]} " +
                 "deleted=${result.figures.files} listing=${listing.size}/${listing.sumOf { it.size }} at=${stored.measuredAt}",
         )
         stored.breakdown.rows shouldBe expected
@@ -125,9 +126,11 @@ class StorageInventoryIntegrationTest {
         planner.measuredAt shouldNotBe null
         (planner.measuredAt!! < stored.measuredAt) shouldBe true
         // Neither read returns a figure of the other, so no method can return their sum.
-        StorageInventory.Measured::class.java.declaredFields.map { it.name }.toSet() shouldBe setOf("measuredAt", "runId", "breakdown")
-        PlanFigures::class.java.declaredFields.none { it.type == StorageInventory::class.java || it.type == StorageBreakdown::class.java } shouldBe
-            true
+        StorageInventory.Measured::class.java.declaredFields
+            .map { it.name }
+            .toSet() shouldBe setOf("measuredAt", "runId", "breakdown")
+        val inventoryTypes = setOf(StorageInventory::class.java, StorageBreakdown::class.java)
+        PlanFigures::class.java.declaredFields.none { it.type in inventoryTypes } shouldBe true
     }
 
     @Test
@@ -149,7 +152,10 @@ class StorageInventoryIntegrationTest {
         h.cleanup(observer = f.observer()).run(secondRun)
         val second = f.measured(t)
 
-        println("(964 B8 replace) first=${first.runId}@${first.measuredAt} ${first.breakdown}; second=${second.runId}@${second.measuredAt} ${second.breakdown}")
+        println(
+            "(964 B8 replace) first=${first.runId}@${first.measuredAt} ${first.breakdown}; " +
+                "second=${second.runId}@${second.measuredAt} ${second.breakdown}",
+        )
         first.runId shouldBe firstRun.runId
         second.runId shouldBe secondRun.runId
         (second.measuredAt > first.measuredAt) shouldBe true

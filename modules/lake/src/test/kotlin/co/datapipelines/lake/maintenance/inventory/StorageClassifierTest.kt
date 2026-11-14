@@ -126,7 +126,15 @@ class StorageClassifierTest {
         val recipe = key("dp/recipes/r.json")
         val listing = listOf(ListedObject(metadata, 100, T0), ListedObject(data, 20, T0), ListedObject(recipe, 3, T0))
         val input =
-            ClassifierInput(LOCATION, listing, mapOf(metadata to reach(FileKind.METADATA)), null, emptyList(), emptyList(), ExpiryFloor.NotApplicable)
+            ClassifierInput(
+                location = LOCATION,
+                listing = listing,
+                reached = mapOf(metadata to reach(FileKind.METADATA)),
+                currentSnapshotId = null,
+                snapshots = emptyList(),
+                refs = emptyList(),
+                floor = ExpiryFloor.NotApplicable,
+            )
 
         val breakdown = StorageBreakdown.of(listing, StorageClassifier.place(input))
 
@@ -154,7 +162,10 @@ class StorageClassifierTest {
         val random = Random(SEED)
         var nonEmptyRows = 0
         repeat(ROUNDS) {
-            val listing = (0 until random.nextInt(MAX_KEYS)).map { i -> ListedObject(key(randomPath(random, i)), random.nextInt(MAX_SIZE).toLong(), T0) }
+            val listing =
+                (0 until random.nextInt(MAX_KEYS)).map { i ->
+                    ListedObject(key(randomPath(random, i)), random.nextInt(MAX_SIZE).toLong(), T0)
+                }
             val reached =
                 listing
                     .filter { random.nextBoolean() }

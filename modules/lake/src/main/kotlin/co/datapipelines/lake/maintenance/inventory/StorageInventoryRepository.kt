@@ -43,7 +43,8 @@ class StorageInventoryRepository(
         tx.executeWithoutResult {
             jdbc.update("DELETE FROM lake_storage_inventory WHERE table_id = ?", tableId)
             jdbc.batchUpdate(
-                "INSERT INTO lake_storage_inventory (table_id, row_name, object_count, bytes, measured_at, run_id) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO lake_storage_inventory (table_id, row_name, object_count, bytes, measured_at, run_id) " +
+                    "VALUES (?, ?, ?, ?, ?, ?)",
                 breakdown.rows.map { (row, figure) -> arrayOf<Any>(tableId, row.wire, figure.objects, figure.bytes, at, runId) },
             )
         }

@@ -16,7 +16,8 @@ import java.util.UUID
 class InventoryGuardsTest {
     @Test
     fun `D7 nothing in the remove or cleanup packages reads the inventory's table, package or classifier`() {
-        val forbidden = Regex("""lake_storage_inventory|maintenance\.inventory|StorageClassifier|StorageInventory|StorageBreakdown|StorageRow""")
+        val forbidden =
+            Regex("""lake_storage_inventory|maintenance\.inventory|StorageClassifier|StorageInventory|StorageBreakdown|StorageRow""")
         val scanned =
             listOf("remove", "cleanup").flatMap { pkg ->
                 LakeTestDb

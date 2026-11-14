@@ -18,7 +18,8 @@ class StorageBreakdown private constructor(
 
     override fun hashCode(): Int = rows.hashCode()
 
-    override fun toString(): String = rows.entries.joinToString(prefix = "StorageBreakdown(", postfix = ")") { (r, f) -> "${r.wire}=${f.objects}/${f.bytes}" }
+    override fun toString(): String =
+        rows.entries.joinToString(prefix = "StorageBreakdown(", postfix = ")") { (r, f) -> "${r.wire}=${f.objects}/${f.bytes}" }
 
     companion object {
         /**

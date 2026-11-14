@@ -35,7 +35,10 @@ internal class InventoryFixture(
     /** The production observer (or one over [classification]), recording what it was handed first. */
     fun observer(classification: StorageClassification = StorageClassifier): CleanupObserver {
         val real = StorageInventoryObserver(repository, classification)
-        return CleanupObserver { observations += it; real.observed(it) }
+        return CleanupObserver {
+            observations += it
+            real.observed(it)
+        }
     }
 
     /** One data file of [size] bytes appended in one commit; answers the new snapshot id and the file's key. */

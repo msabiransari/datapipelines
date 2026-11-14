@@ -160,7 +160,8 @@ class LakeMaintenanceAutoConfiguration {
     /** #962 D2b, #964: the cleanup's observer is the storage breakdown (one inventory per cleanup); another bean replaces it. */
     @Bean
     @ConditionalOnMissingBean
-    fun lakeCleanupObserver(lakeStorageInventory: StorageInventoryRepository): CleanupObserver = StorageInventoryObserver(lakeStorageInventory)
+    fun lakeCleanupObserver(lakeStorageInventory: StorageInventoryRepository): CleanupObserver =
+        StorageInventoryObserver(lakeStorageInventory)
 
     /**
      * #962 D1: the `cleanup` part. Registering it makes the planner's cleanup due (959 L16). The expiry window is the
