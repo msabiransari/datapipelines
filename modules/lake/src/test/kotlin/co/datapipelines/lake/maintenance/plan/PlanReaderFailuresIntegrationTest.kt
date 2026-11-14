@@ -114,7 +114,7 @@ class PlanReaderFailuresIntegrationTest {
     }
 
     @Test
-    fun `N3d - a client that cannot be built is a classified measurement failure - good figures kept, rewrite work held back until a measurement succeeds`() {
+    fun `N3d - a client that cannot be built is a classified failure - figures kept, rewrite work held back until success`() {
         val table = h.table("compactable")
         h.assign(table, "development")
         h.append(table, *Array(SMALL_FILES) { FileSpec("2026-11-01", MIB) })
@@ -139,7 +139,9 @@ class PlanReaderFailuresIntegrationTest {
             (COMPACTION in it.due || COMPACTION in it.held) shouldBe false
             it.notDue[COMPACTION] shouldBe NotDueReason.NOT_MEASURED
         }
-        h.repository.lastPlan()!!.second.tablesNotMeasured shouldBe 1
+        h.repository
+            .lastPlan()!!
+            .second.tablesNotMeasured shouldBe 1
         readers.outstanding() shouldBe 0
 
         // the same reader builds its client on the next use; the measurement succeeds and the work is back
@@ -181,7 +183,9 @@ class PlanReaderFailuresIntegrationTest {
         val measuredAgain = h.measurement(table).shouldNotBeNull()
         measuredAgain.errorCode.shouldBeNull()
         measuredAgain.measuredAt!!.isAfter(before.measuredAt) shouldBe true
-        h.repository.lastPlan()!!.second.tablesMeasured shouldBe 1
+        h.repository
+            .lastPlan()!!
+            .second.tablesMeasured shouldBe 1
         readers.close()
     }
 
