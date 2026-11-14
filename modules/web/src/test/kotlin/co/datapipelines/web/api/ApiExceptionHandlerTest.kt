@@ -21,6 +21,7 @@ import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.mock.web.MockHttpServletRequest
@@ -93,22 +94,30 @@ class ApiExceptionHandlerTest {
      */
     @Test
     fun `a native verification fault is a 503 envelope free of the native cause`() {
-        val error =
-            co.datapipelines.auth.SecretVerificationUnavailableException(
-                -22,
-                IllegalStateException("argon2id_verify failed: Memory allocation error (-22)"),
-            )
+        val previousCorrelationId = MDC.get(CorrelationId.MDC_KEY)
+        val correlationId = "00000000-2200-4000-8000-000000000001"
+        MDC.put(CorrelationId.MDC_KEY, correlationId)
+        try {
+            val error =
+                co.datapipelines.auth.SecretVerificationUnavailableException(
+                    -22,
+                    IllegalStateException("argon2id_verify failed: Memory allocation error (-22)"),
+                )
 
-        val response = ApiExceptionHandler().onAuth(error, MockHttpServletRequest("POST", "/api/v1/auth/password"))
+            val response = ApiExceptionHandler().onAuth(error, MockHttpServletRequest("POST", "/api/v1/auth/password"))
 
-        response.statusCode.value() shouldBe 503
-        val tree = jacksonObjectMapper().valueToTree<JsonNode>(response.body)
-        tree["error"]["code"].asText() shouldBe co.datapipelines.auth.AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
-        tree["error"]["message"].asText() shouldBe "Secret verification is temporarily unavailable"
-        tree["error"]["details"].size() shouldBe 0
-        val json = jacksonObjectMapper().writeValueAsString(response.body)
-        json.contains("emory") shouldBe false
-        json.contains("-22") shouldBe false
+            response.statusCode.value() shouldBe 503
+            val tree = jacksonObjectMapper().valueToTree<JsonNode>(response.body)
+            tree["error"]["code"].asText() shouldBe co.datapipelines.auth.AuthErrorCodes.SECRET_VERIFICATION_UNAVAILABLE
+            tree["error"]["message"].asText() shouldBe "Secret verification is temporarily unavailable"
+            tree["error"]["details"].size() shouldBe 0
+            tree["correlation_id"].asText() shouldBe correlationId
+            val json = jacksonObjectMapper().writeValueAsString(tree["error"])
+            json.contains("emory") shouldBe false
+            json.contains("-22") shouldBe false
+        } finally {
+            if (previousCorrelationId == null) MDC.remove(CorrelationId.MDC_KEY) else MDC.put(CorrelationId.MDC_KEY, previousCorrelationId)
+        }
     }
 
     @Test
