@@ -22,7 +22,7 @@
 --   DROP INDEX idx_lake_tables_managed_profile;
 --   ALTER TABLE lake_tables_managed DROP COLUMN profile_assigned_at, DROP COLUMN profile_id;
 --   DROP TABLE lake_profiles;
---   DELETE FROM flyway_schema_history WHERE version = '60';
+--   DELETE FROM flyway_schema_history WHERE version = '61';
 --   (the dropped policy_json keys are not restored: nothing read them.)
 -- =============================================================================
 
