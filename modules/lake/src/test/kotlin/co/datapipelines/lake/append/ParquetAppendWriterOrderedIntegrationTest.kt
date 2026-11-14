@@ -2,6 +2,7 @@ package co.datapipelines.lake.append
 
 import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.profiles.LakeProfileFixtures
+import co.datapipelines.pipeline.LakeOrderKey
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.assertSoftly
@@ -57,7 +58,7 @@ class ParquetAppendWriterOrderedIntegrationTest {
                 withClue("non-vacuity: the staged arrival order is not the table's") { arrivalSorted(table, input) shouldBe false }
                 val written = writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {}
                 println("(O1a) orders ${input.orders}; statements ${input.statements}")
-                input.orders.takeLast(2) shouldBe listOf(emptyList(), listOf(4, 2))
+                input.orders.takeLast(2) shouldBe listOf(emptyList(), listOf(LakeOrderKey(4, binaryText = true), LakeOrderKey(2)))
                 written.rows shouldBe O1_ROW_COUNT
                 assertInTableOrder(table, written.files)
                 val rows = h.read(table, written.files)
@@ -78,7 +79,7 @@ class ParquetAppendWriterOrderedIntegrationTest {
             h.withInput("SELECT note, id, region FROM ($O1_ROWS) r") { input ->
                 withClue("non-vacuity") { arrivalSorted(table, input) shouldBe false }
                 val written = writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {}
-                input.orders.takeLast(2) shouldBe listOf(emptyList(), listOf(3))
+                input.orders.takeLast(2) shouldBe listOf(emptyList(), listOf(LakeOrderKey(3, binaryText = true)))
                 assertInTableOrder(table, written.files)
                 h.read(table, written.files).all { it.getField("score") == null } shouldBe true
             }
@@ -91,7 +92,7 @@ class ParquetAppendWriterOrderedIntegrationTest {
             h.withInput("SELECT score, note, id FROM ($O1_ROWS) r") { input ->
                 withClue("non-vacuity") { arrivalSorted(table, input) shouldBe false }
                 val written = writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {}
-                input.orders.takeLast(2) shouldBe listOf(emptyList(), listOf(1))
+                input.orders.takeLast(2) shouldBe listOf(emptyList(), listOf(LakeOrderKey(1)))
                 written.rows shouldBe O1_ROW_COUNT
                 assertInTableOrder(table, written.files)
                 val rows = h.read(table, written.files)
@@ -257,6 +258,10 @@ class ParquetAppendWriterOrderedIntegrationTest {
                 withClue("non-vacuity: the staged arrival order is not the table's") { arrivalSorted(table, input) shouldBe false }
                 val written = writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {}
                 println("(C1) statements ${input.statements}")
+                withClue("the write scan's key: k by code points, through the contract's fixed text") {
+                    input.orders.last() shouldBe listOf(LakeOrderKey(2, binaryText = true))
+                    input.statements.last() shouldBe "SELECT * FROM append_input799 ORDER BY #2 COLLATE \"binary\" ASC NULLS FIRST"
+                }
                 written.rows shouldBe C1_ORDER.size.toLong()
                 assertInTableOrder(table, written.files)
                 withClue("Iceberg's string order, every value unchanged") {
@@ -266,10 +271,44 @@ class ParquetAppendWriterOrderedIntegrationTest {
         }
     }
 
+    /**
+     * Round 2 Security: the write scan's statement gains integers and the contract's fixed text only. Field and staged
+     * column names written as SQL (a quote, a statement terminator, a positional reference with a collation) never reach
+     * it; the rows are still in the table's order.
+     */
+    @Test
+    fun `C1 - hostile field and column names never reach the write scan's statement`() {
+        val text = "k\"; DROP TABLE append_input799; --"
+        val number = "#1 COLLATE \"nocase\""
+        val schema =
+            Schema(
+                Types.NestedField.required(2, number, Types.LongType.get()),
+                Types.NestedField.optional(5, text, Types.StringType.get()),
+            )
+        val order =
+            SortOrder
+                .builderFor(schema)
+                .asc(text, NullOrder.NULLS_FIRST)
+                .asc(number, NullOrder.NULLS_FIRST)
+                .build()
+        h.withTable(schema, PartitionSpec.unpartitioned(), order) { table ->
+            val staged = "SELECT id AS ${quoted(number)}, k COLLATE NOCASE AS ${quoted(text)} FROM (VALUES $C1_ROWS) t(id, k)"
+            h.withInput(staged) { input ->
+                val written = writer.write(table, input, UUID.randomUUID(), 1, PROFILE) {}
+                input.statements.last() shouldBe
+                    "SELECT * FROM append_input799 ORDER BY #2 COLLATE \"binary\" ASC NULLS FIRST, 1 ASC NULLS FIRST"
+                assertInTableOrder(table, written.files)
+                h.read(table, written.files).map { it.getField(text) } shouldBe C1_ORDER
+            }
+        }
+    }
+
+    private fun quoted(name: String) = "\"" + name.replace("\"", "\"\"") + "\""
+
     /** The staged `k` (position 2) through a plain ordinal `ORDER BY 2 ASC NULLS FIRST`: the staged column's own collation. */
     private fun nocaseOrder(input: ParquetWriterHarness.NativeInput): List<String?> {
         val values = mutableListOf<String?>()
-        input.scan(listOf(2)) { rows -> while (rows.next()) values += rows.getString(2) }
+        input.scan(listOf(LakeOrderKey(2))) { rows -> while (rows.next()) values += rows.getString(2) }
         return values
     }
 

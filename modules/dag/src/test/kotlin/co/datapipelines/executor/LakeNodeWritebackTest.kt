@@ -3,6 +3,7 @@ package co.datapipelines.executor
 import co.datapipelines.pipeline.LakeAppendColumn
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.LakeAppendSession
+import co.datapipelines.pipeline.LakeOrderKey
 import co.datapipelines.pipeline.LakeStatementExecution
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.WriteMode
@@ -97,7 +98,12 @@ class LakeNodeWritebackTest {
 
     @Test
     fun `O10 - a position outside the relation, a repeated position and five positions are refused before any statement`() {
-        listOf(listOf(0), listOf(SIX + 1), listOf(2, 2), listOf(1, 2, 3, 4, 5)).forEach { orderBy ->
+        val refused =
+            listOf(listOf(0), listOf(SIX + 1), listOf(2, 2), listOf(1, 2, 3, 4, 5)).map { positions ->
+                positions.map { LakeOrderKey(it) }
+            } +
+                listOf(listOf(LakeOrderKey(2), LakeOrderKey(2, binaryText = true)), listOf(LakeOrderKey(0, binaryText = true)))
+        refused.forEach { orderBy ->
             val statement = RecordingStatement()
             shouldThrow<IllegalArgumentException> { stableInput(statement).scan(orderBy) { } }
             statement.executed shouldBe emptyList()
@@ -107,8 +113,11 @@ class LakeNodeWritebackTest {
     @Test
     fun `O10 - positions reach the text as integers, ascending and nulls first, and no order sends today's text`() {
         val ordered = RecordingStatement()
-        stableInput(ordered).scan(listOf(2, 1)) { }
+        stableInput(ordered).scan(listOf(LakeOrderKey(2), LakeOrderKey(1))) { }
         ordered.executed shouldBe listOf("SELECT * FROM \"dp_append_t\" ORDER BY 2 ASC NULLS FIRST, 1 ASC NULLS FIRST")
+        val text = RecordingStatement()
+        stableInput(text).scan(listOf(LakeOrderKey(2), LakeOrderKey(1, binaryText = true))) { }
+        text.executed shouldBe listOf("SELECT * FROM \"dp_append_t\" ORDER BY 2 ASC NULLS FIRST, #1 COLLATE \"binary\" ASC NULLS FIRST")
         val plain = RecordingStatement()
         stableInput(plain).scan { }
         plain.executed shouldBe listOf("SELECT * FROM \"dp_append_t\"")
@@ -119,11 +128,11 @@ class LakeNodeWritebackTest {
         withNative { context ->
             val classify = (context.staging as DuckDbStaging)::classifyEngineFailure
             val atExecute = RecordingStatement(failOnExecute = SQLException(SPILL_LIMIT))
-            shouldThrow<StagingScratchLimitException> { stableInput(atExecute, classify).scan(listOf(1)) { } }
+            shouldThrow<StagingScratchLimitException> { stableInput(atExecute, classify).scan(listOf(LakeOrderKey(1))) { } }
                 .code shouldBe "pipeline.staging.scratch_limit_exceeded"
             val whileReading = RecordingStatement(failOnNext = SQLException(SPILL_LIMIT))
             shouldThrow<StagingScratchLimitException> {
-                stableInput(whileReading, classify).scan(listOf(1)) { rows -> rows.next() }
+                stableInput(whileReading, classify).scan(listOf(LakeOrderKey(1))) { rows -> rows.next() }
             }.cause.shouldBeInstanceOf<SQLException>()
             val other = SQLException("Binder Error: something else")
             val input = stableInput(RecordingStatement(failOnNext = other), classify)
@@ -138,7 +147,7 @@ class LakeNodeWritebackTest {
             val scans = mutableListOf<List<String>>()
             val session =
                 RecordingSession { input ->
-                    listOf(emptyList(), listOf(2, 1)).forEach { orderBy ->
+                    listOf(emptyList(), listOf(LakeOrderKey(2, binaryText = true), LakeOrderKey(1))).forEach { orderBy ->
                         input.scan(orderBy) { rows ->
                             val values = mutableListOf<String>()
                             while (rows.next()) values += "${rows.getInt(1)}/${rows.getString(2)}"
@@ -175,7 +184,7 @@ class LakeNodeWritebackTest {
             val labels = mutableListOf<String?>()
             val session =
                 RecordingSession { input ->
-                    input.scan(listOf(2)) { rows -> while (rows.next()) labels += rows.getString(2) }
+                    input.scan(listOf(LakeOrderKey(2, binaryText = true))) { rows -> while (rows.next()) labels += rows.getString(2) }
                     COLLATED_ORDER.size.toLong()
                 }
             LakeNodeWriteback.run(
@@ -195,13 +204,32 @@ class LakeNodeWritebackTest {
         }
     }
 
+    /**
+     * Round 2 Security: the statement gains integers and the contract's fixed text only. Hostile column names and type
+     * names in the relation's metadata never reach it, whatever keys are asked for.
+     */
+    @Test
+    fun `C1 - hostile column names and types never reach the ordered statement`() {
+        val hostile =
+            listOf(
+                LakeAppendColumn("\"; DROP TABLE dp_append_t; --", "VARCHAR COLLATE nocase", 0, 0),
+                LakeAppendColumn("#1 COLLATE \"nocase\"", "INTEGER); DROP TABLE x; --", 0, 0),
+                LakeAppendColumn("') OR 1=1 --", "VARCHAR", 0, 0),
+            )
+        val statement = RecordingStatement()
+        stableInput(statement, columns = hostile).scan(listOf(LakeOrderKey(1, binaryText = true), LakeOrderKey(3), LakeOrderKey(2))) { }
+        statement.executed shouldBe
+            listOf("SELECT * FROM \"dp_append_t\" ORDER BY #1 COLLATE \"binary\" ASC NULLS FIRST, 3 ASC NULLS FIRST, 2 ASC NULLS FIRST")
+    }
+
     private fun stableInput(
         statement: Statement,
         classify: (SQLException) -> Exception = { it },
+        columns: List<LakeAppendColumn> = (1..SIX).map { LakeAppendColumn("c$it", "INTEGER", 0, 0) },
     ) = LakeNodeWriteback.StableInput(
         statement,
         "\"dp_append_t\"",
-        (1..SIX).map { LakeAppendColumn("c$it", "INTEGER", 0, 0) },
+        columns,
         {},
         classify,
     ) { action -> action() }

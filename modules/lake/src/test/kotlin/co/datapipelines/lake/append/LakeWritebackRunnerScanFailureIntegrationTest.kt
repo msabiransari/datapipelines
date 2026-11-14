@@ -3,6 +3,7 @@ package co.datapipelines.lake.append
 import co.datapipelines.lake.LakeMinio
 import co.datapipelines.lake.delivery.LakeDeliveryState
 import co.datapipelines.pipeline.LakeAppendInput
+import co.datapipelines.pipeline.LakeOrderKey
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -58,7 +59,7 @@ class LakeWritebackRunnerScanFailureIntegrationTest {
                 val failing =
                     object : LakeAppendInput by rows {
                         override fun scan(
-                            orderBy: List<Int>,
+                            orderBy: List<LakeOrderKey>,
                             consume: (ResultSet) -> Unit,
                         ) {
                             if (rows.scans == 1) throw thrown

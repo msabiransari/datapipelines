@@ -1,5 +1,6 @@
 package co.datapipelines.lake.append
 
+import co.datapipelines.pipeline.LakeOrderKey
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -16,7 +17,7 @@ import org.junit.jupiter.api.Test
  */
 class AppendOrderTest {
     @Test
-    fun `D2 - positions follow the sort order and come from each source field's staged position`() {
+    fun `D2 - keys follow the sort order and take each source field's staged position`() {
         val order =
             SortOrder
                 .builderFor(SCHEMA)
@@ -24,7 +25,7 @@ class AppendOrderTest {
                 .asc("score", NullOrder.NULLS_FIRST)
                 .build()
         // Staged order: score at 2, region at 4; field ids 3 and 12 and schema indexes 1 and 2 are all different.
-        AppendOrder.positions(order, bindings(region = 4, score = 2)) shouldBe listOf(4, 2)
+        AppendOrder.keys(order, bindings(region = 4, score = 2)) shouldBe listOf(LakeOrderKey(4, binaryText = true), LakeOrderKey(2))
     }
 
     @Test
@@ -35,25 +36,52 @@ class AppendOrderTest {
                 .asc("region", NullOrder.NULLS_FIRST)
                 .asc("score", NullOrder.NULLS_FIRST)
                 .build()
-        AppendOrder.positions(order, bindings(region = null, score = 1)) shouldBe listOf(1)
-        AppendOrder.positions(order, bindings(region = 3, score = null)) shouldBe listOf(3)
+        AppendOrder.keys(order, bindings(region = null, score = 1)) shouldBe listOf(LakeOrderKey(1))
+        AppendOrder.keys(order, bindings(region = 3, score = null)) shouldBe listOf(LakeOrderKey(3, binaryText = true))
     }
 
     @Test
-    fun `D4 - a sorted table's value stamps the table's order, a legacy table's stamps unsorted with no positions`() {
+    fun `D4 - a sorted table's value stamps the table's order, a legacy table's stamps unsorted with no keys`() {
         val order = SortOrder.builderFor(SCHEMA).asc("score", NullOrder.NULLS_FIRST).build()
         val sorted = AppendOrder.of(order, bindings(region = 4, score = 2))
         sorted.stamp shouldBe order
-        sorted.positions shouldBe listOf(2)
+        sorted.keys shouldBe listOf(LakeOrderKey(2))
         val legacy = AppendOrder.of(SortOrder.unsorted(), bindings(region = 4, score = 2))
         legacy.stamp shouldBe SortOrder.unsorted()
-        legacy.positions shouldBe emptyList()
+        legacy.keys shouldBe emptyList()
+    }
+
+    /**
+     * Round 2 correction C1: the flag that makes the scan compare code points whatever the staged collation is set from
+     * the table's field type: on a string sort field and on no other type 935 admits (the engine refuses to collate
+     * a non-string column, so a wrong flag would fail every append to that table).
+     */
+    @Test
+    fun `C1 - a string sort field's key compares code points, no other admitted sort type's does`() {
+        val types =
+            mapOf(
+                "boolean" to Types.BooleanType.get(),
+                "int" to Types.IntegerType.get(),
+                "long" to Types.LongType.get(),
+                "decimal" to Types.DecimalType.of(10, 2),
+                "string" to Types.StringType.get(),
+                "date" to Types.DateType.get(),
+                "time" to Types.TimeType.get(),
+                "timestamptz" to Types.TimestampType.withZone(),
+            )
+        val flags =
+            types.mapValues { (_, type) ->
+                val schema = Schema(Types.NestedField.optional(21, "v", type))
+                val binding = AppendColumnBinding(schema.findField(21), 2, type.asPrimitiveType())
+                AppendOrder.keys(SortOrder.builderFor(schema).asc("v", NullOrder.NULLS_FIRST).build(), listOf(binding)).single()
+            }
+        flags shouldBe types.mapValues { (name, _) -> LakeOrderKey(2, binaryText = name == "string") }
     }
 
     @Test
     fun `O8 - a double sort column fails naming the field`() {
         val order = SortOrder.builderFor(SCHEMA).asc("approx", NullOrder.NULLS_FIRST).build()
-        val failure = shouldThrow<IllegalStateException> { AppendOrder.positions(order, bindings(region = 4, score = 2, approx = 1)) }
+        val failure = shouldThrow<IllegalStateException> { AppendOrder.keys(order, bindings(region = 4, score = 2, approx = 1)) }
         failure.message shouldContain "'approx'"
         failure.message shouldContain "floating-point"
     }
@@ -61,7 +89,7 @@ class AppendOrderTest {
     @Test
     fun `O8 - a float sort column fails naming the field, also when the delivery leaves it out`() {
         val order = SortOrder.builderFor(SCHEMA).asc("ratio", NullOrder.NULLS_FIRST).build()
-        shouldThrow<IllegalStateException> { AppendOrder.positions(order, bindings(region = 4, score = 2)) }.message shouldContain "'ratio'"
+        shouldThrow<IllegalStateException> { AppendOrder.keys(order, bindings(region = 4, score = 2)) }.message shouldContain "'ratio'"
     }
 
     @Test
@@ -73,7 +101,7 @@ class AppendOrderTest {
                 SortOrder.builderFor(SCHEMA).asc(Expressions.bucket<Int>("score", 4), NullOrder.NULLS_FIRST).build(),
             )
         orders.forEach { order ->
-            val refused = shouldThrow<IllegalStateException> { AppendOrder.positions(order, bindings(region = 4, score = 2)) }
+            val refused = shouldThrow<IllegalStateException> { AppendOrder.keys(order, bindings(region = 4, score = 2)) }
             refused.message shouldContain "'score'"
         }
     }

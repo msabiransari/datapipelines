@@ -6,6 +6,7 @@ import co.datapipelines.lake.LakeProperties
 import co.datapipelines.lake.LakeTestDb
 import co.datapipelines.lake.LeaseKind
 import co.datapipelines.pipeline.LakeAppendInput
+import co.datapipelines.pipeline.LakeOrderKey
 import org.apache.iceberg.DataFile
 import org.apache.iceberg.PartitionSpec
 import org.apache.iceberg.Schema
@@ -125,11 +126,11 @@ internal class ParquetWriterHarness {
             private set
 
         /** Every scan's `orderBy` and statement text, in scan order (#968: the check scan first, then the write). */
-        val orders = mutableListOf<List<Int>>()
+        val orders = mutableListOf<List<LakeOrderKey>>()
         val statements = mutableListOf<String>()
 
         override fun scan(
-            orderBy: List<Int>,
+            orderBy: List<LakeOrderKey>,
             consume: (ResultSet) -> Unit,
         ) {
             scans++

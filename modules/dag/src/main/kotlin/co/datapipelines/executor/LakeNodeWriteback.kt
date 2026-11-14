@@ -3,6 +3,7 @@ package co.datapipelines.executor
 import co.datapipelines.pipeline.LakeAppendColumn
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.LakeAppendSession
+import co.datapipelines.pipeline.LakeOrderKey
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.staging.DuckDbStaging
 import kotlinx.coroutines.currentCoroutineContext
@@ -89,7 +90,8 @@ internal object LakeNodeWriteback {
 
     /**
      * The materialized relation, scanned once per [scan] (#968 D1, D7). [orderBy] is validated before any statement runs
-     * and reaches the text as integers only. A [SQLException] of the statement or of reading its rows leaves as what
+     * and reaches the text only as integers and the contract's own fixed text ([LakeAppendInput.orderByClause]): a
+     * string key is compared by code points whatever collation the author's SQL gave the column (round 2 C1). A [SQLException] of the statement or of reading its rows leaves as what
      * [classify] makes of it (staging's own engine-failure classification: a sort that outgrows the scratch reservation
      * becomes `pipeline.staging.scratch_limit_exceeded`; anything unmatched is unchanged); nothing else is caught.
      */
@@ -102,7 +104,7 @@ internal object LakeNodeWriteback {
         private val execute: (() -> Unit) -> Unit,
     ) : LakeAppendInput {
         override fun scan(
-            orderBy: List<Int>,
+            orderBy: List<LakeOrderKey>,
             consume: (ResultSet) -> Unit,
         ) {
             val sql = "SELECT * FROM $table" + LakeAppendInput.orderByClause(orderBy, originalColumns.size)

@@ -2,6 +2,7 @@ package co.datapipelines.lake.append
 
 import co.datapipelines.lake.profiles.LakeProfile
 import co.datapipelines.pipeline.LakeAppendInput
+import co.datapipelines.pipeline.LakeOrderKey
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import org.apache.iceberg.DataFile
@@ -32,12 +33,12 @@ data class WrittenAppend(
 /**
  * The order an append is written in and the order its files are stamped with: ONE value, so a file is never stamped
  * with an order it was not written in (#968 D4; dp-lake design record §11a call 36 item 4, call 37). A table with sort
- * columns: its [SortOrder] and the staged [positions] of those columns ([AppendOrder.positions]). A legacy table
- * (unsorted): no positions and [SortOrder.unsorted], today's arrival-order append.
+ * columns: its [SortOrder] and the scan [keys] of those columns ([AppendOrder.keys]). A legacy table (unsorted): no
+ * keys and [SortOrder.unsorted], today's arrival-order append.
  */
 class AppendOrder private constructor(
     val stamp: SortOrder,
-    val positions: List<Int>,
+    val keys: List<LakeOrderKey>,
 ) {
     companion object {
         /** The value [ParquetAppendWriter] reads both its scan order and its files' stamp from. */
@@ -48,23 +49,25 @@ class AppendOrder private constructor(
             if (order.isUnsorted) {
                 AppendOrder(SortOrder.unsorted(), emptyList())
             } else {
-                AppendOrder(order, positions(order, bindings))
+                AppendOrder(order, keys(order, bindings))
             }
 
         /**
-         * #968 D2: the 1-based staged position of each sort field, in the sort order's order, from the binding of its
-         * source field id. A sort column the delivery does not supply (an optional column left out) is skipped: all its
-         * values are null, so the order by the others is the table's order.
+         * #968 D2: the scan key of each sort field, in the sort order's order: the 1-based staged position from the
+         * binding of its source field id, and for a string field [LakeOrderKey.binaryText], so the scan compares code
+         * points (Iceberg's string order) whatever collation the staged column carries (round 2 correction C1). A sort
+         * column the delivery does not supply (an optional column left out, its binding without a source position) is
+         * skipped: all its values are null, so the order by the others is the table's order.
          *
          * An order the definition body cannot spell (descending, nulls last, a transform; #968 D6) and a floating sort
          * column (D5: DuckDB's sort loses the sign of zero, duckdb/duckdb#25417; brief 935 refuses such a table until
          * #971) fail with [IllegalStateException] naming the field: the definition rule keeps such a table from
          * existing, so reaching here is a defect, not a delivery's refusal.
          */
-        fun positions(
+        fun keys(
             order: SortOrder,
             bindings: List<AppendColumnBinding>,
-        ): List<Int> {
+        ): List<LakeOrderKey> {
             val byFieldId = bindings.associateBy { it.field.fieldId() }
             return order.fields().mapNotNull { sort ->
                 val binding = byFieldId[sort.sourceId()]
@@ -79,7 +82,7 @@ class AppendOrder private constructor(
                 check(type != Type.TypeID.FLOAT && type != Type.TypeID.DOUBLE) {
                     "The sort column '$name' is a floating-point column; an append never orders by one (#971)."
                 }
-                binding.sourceIndex
+                binding.sourceIndex?.let { LakeOrderKey(it, binaryText = type == Type.TypeID.STRING) }
             }
         }
     }
@@ -144,7 +147,7 @@ class ParquetAppendWriter {
             }
         task.use { writer ->
             val row = GenericRecord.create(plan.schema)
-            input.scan(order.positions) { rows ->
+            input.scan(order.keys) { rows ->
                 while (rows.next()) {
                     checkActive()
                     plan.bindings.forEachIndexed { index, binding -> row.set(index, AppendValues.read(rows, binding)) }
