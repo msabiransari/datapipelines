@@ -129,7 +129,7 @@ internal class RemoverHarness(
     ): Fixture {
         val id = UUID.randomUUID()
         val definitions = LakeDefinitionRepository(named)
-        check(definitions.insertTable(id, definitions.namespaceId(namespace, ACTOR), name, "{}", ACTOR))
+        check(definitions.insertTable(id, definitions.namespaceId(namespace, ACTOR), name, ACTOR))
         val lease = LakeTestDb.lease(LeaseKind.TABLE, "$namespace.$name", ttl = LEASE_TTL)
         val session = catalogs.open(lease).also { sessions += it }
         val table = session.createTable(namespace, name, id, SCHEMA, PartitionSpec.unpartitioned(), SortOrder.unsorted(), 1)
