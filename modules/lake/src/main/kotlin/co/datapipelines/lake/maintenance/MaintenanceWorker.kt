@@ -45,12 +45,18 @@ class MaintenanceWorker(
     private val parts = parts.sortedWith(compareBy({ it.order }, { it.name }))
 
     init {
-        require(this.parts.map { it.name }.toSet().size == this.parts.size) { "maintenance part names are unique: ${this.parts.map { it.name }}" }
+        require(
+            this.parts
+                .map { it.name }
+                .toSet()
+                .size == this.parts.size,
+        ) { "maintenance part names are unique: ${this.parts.map { it.name }}" }
     }
 
     override val name: String = NAME
     override val instances: String = INSTANCES
 
+    @Suppress("ReturnCount") // D3 step 1: each check before the slot ends the task with no row, one guard per check, in order
     override fun run(key: String): SystemJobOutcome {
         val tableId = runCatching { UUID.fromString(key) }.getOrNull() ?: return skipped(key, REASON_INVALID_KEY)
         val actor = principal()
@@ -96,6 +102,7 @@ class MaintenanceWorker(
                     LOG.info("event=lake.maintenance.waiting table_id={} again_at={}", table.id, again)
                     SystemJobOutcome.AgainAt(again)
                 }
+
                 is Admission.Admitted -> {
                     LOG.info(
                         "event=lake.maintenance.admitted run_id={} table_id={} kind={} deadline={} scratch_reserved_bytes={}",
@@ -106,7 +113,12 @@ class MaintenanceWorker(
                         reserved,
                     )
                     admission.abandoned.forEach { old ->
-                        LOG.warn("event=lake.maintenance.abandoned run_id={} table_id={} successor_run_id={}", old, table.id, admission.runId)
+                        LOG.warn(
+                            "event=lake.maintenance.abandoned run_id={} table_id={} successor_run_id={}",
+                            old,
+                            table.id,
+                            admission.runId,
+                        )
                     }
                     val run = context.open(admission.runId, table, admission.deadline, perPart)
                     execute(run, kind, eligible, declared, actorId)
@@ -186,7 +198,8 @@ class MaintenanceWorker(
                     "state" to recordedState.wire,
                     "outcome_confirmed" to closed,
                     "error_code" to recordedCode,
-                    "parts" to recordedParts.map { linkedMapOf("name" to it.name, "outcome" to it.outcome.wire, "attempted" to it.attempted) },
+                    "parts" to
+                        recordedParts.map { linkedMapOf("name" to it.name, "outcome" to it.outcome.wire, "attempted" to it.attempted) },
                 ),
         )
         LOG.info(

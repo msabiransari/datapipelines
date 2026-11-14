@@ -23,7 +23,7 @@ class SystemActorPrincipalTest {
     fun restore() = PermissionResolution.install(RolePermissionsResolver)
 
     @Test
-    fun `the system identity holds exactly pipeline execute, pipeline read, execution read, lake append and lake maintain - in any workspace`() {
+    fun `the system identity holds exactly pipeline execute, pipeline read, execution read, lake append, lake maintain - any workspace`() {
         heldBy(principal(WORKSPACE_A)) shouldBe EXPECTED
         heldBy(principal(WORKSPACE_B)) shouldBe EXPECTED
     }
@@ -121,7 +121,8 @@ class SystemActorPrincipalTest {
 
     @Test
     fun `a person with no workspace holds no system-only permission, a super admin included (957 R13c)`() {
-        val admin = AuthenticatedPrincipal(userId = SYSTEM_ID, email = "a@x", displayName = "a", authMethod = AuthMethod.OIDC, superAdmin = true)
+        val admin =
+            AuthenticatedPrincipal(userId = SYSTEM_ID, email = "a@x", displayName = "a", authMethod = AuthMethod.OIDC, superAdmin = true)
         admin.holds(Permission.LAKE_MAINTAIN) shouldBe false
         RolePermissions.SUPER_ADMIN.contains(Permission.LAKE_MAINTAIN) shouldBe false
     }
@@ -162,7 +163,13 @@ class SystemActorPrincipalTest {
     private companion object {
         /** THE fixed set, written out (R2: execute pipelines, and the reads the reconciler needs). */
         val EXPECTED =
-            setOf(Permission.PIPELINE_EXECUTE, Permission.PIPELINE_READ, Permission.EXECUTION_READ, Permission.LAKE_APPEND, Permission.LAKE_MAINTAIN)
+            setOf(
+                Permission.PIPELINE_EXECUTE,
+                Permission.PIPELINE_READ,
+                Permission.EXECUTION_READ,
+                Permission.LAKE_APPEND,
+                Permission.LAKE_MAINTAIN,
+            )
 
         /** #957 D8: the system-only permissions, written out; one of the five above. */
         val SYSTEM_ONLY = setOf(Permission.LAKE_MAINTAIN)

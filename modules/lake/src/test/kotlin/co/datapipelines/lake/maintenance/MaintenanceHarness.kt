@@ -31,7 +31,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 internal class MaintenanceHarness(
     /** A short lock wait: a takeover of a lease another transaction holds answers `Busy` quickly. */
-    val leases: LakeLeases = LakeLeases(LakeTestDb.jdbc, holderInstance = "lake-test-957", lockTimeout = Duration.ofMillis(LOCK_TIMEOUT_MILLIS)),
+    val leases: LakeLeases =
+        LakeLeases(LakeTestDb.jdbc, holderInstance = "lake-test-957", lockTimeout = Duration.ofMillis(LOCK_TIMEOUT_MILLIS)),
 ) {
     val defs = LakeDefinitionsHarness(leases = leases)
     val named = NamedParameterJdbcTemplate(LakeTestDb.dataSource)
@@ -113,7 +114,11 @@ internal class MaintenanceHarness(
 
     /** The marker properties the test parts committed, by part name. */
     fun markers(table: MaintenanceTable): Set<String> =
-        properties(table).keys.filter { it.startsWith(MARKER) }.map { it.removePrefix(MARKER) }.toSet()
+        properties(table)
+            .keys
+            .filter { it.startsWith(MARKER) }
+            .map { it.removePrefix(MARKER) }
+            .toSet()
 
     fun revisions(table: MaintenanceTable): Int = defs.revisions(table.namespace, table.name)
 
@@ -208,7 +213,12 @@ internal class MarkerPart(
         trace?.add("run:$name")
         before(run)
         if (!commits) return PartResult(MaintenanceOutcome.DONE)
-        return when (val guarded = run.commit { table -> table.updateProperties().set(MaintenanceHarness.MARKER + name, run.runId.toString()) }) {
+        return when (
+            val guarded =
+                run.commit { table ->
+                    table.updateProperties().set(MaintenanceHarness.MARKER + name, run.runId.toString())
+                }
+        ) {
             is Guarded.Done -> PartResult(MaintenanceOutcome.DONE)
             is Guarded.Refused -> PartResult(guarded.outcome)
         }

@@ -39,8 +39,9 @@ import java.util.UUID
  * BEFORE, so the starter's `@ConditionalOnMissingBean` defaults step aside: the JSON serializer and
  * this instance's scheduler name ([DbSchedulerCustomizer], A8), and the start gate
  * ([SchedulerStartGate], A19). Since #957, one task per [KeyedSystemJob] / [RecurringSystemJob] bean another
- * module declares ([SystemJobTaskRegistrar]) and the [SystemJobQueue] it enqueues through. The starter builds the `Scheduler` over the metadata `DataSource`
- * wrapped in `TransactionAwareDataSourceProxy` — which is what spike 1 proves.
+ * module declares ([SystemJobTaskRegistrar]) and the [SystemJobQueue] it enqueues through. The starter builds
+ * the `Scheduler` over the metadata `DataSource` wrapped in `TransactionAwareDataSourceProxy` — which is what
+ * spike 1 proves.
  *
  * Conditional on a [SystemActorSource] bean: a slice context that wires no scheduler (a web slice
  * test, a module-slice suite) gets none of it — nor the notification beans it imports
@@ -50,6 +51,7 @@ import java.util.UUID
 @ConditionalOnBean(SystemActorSource::class)
 @EnableConfigurationProperties(SchedulerProperties::class)
 @Import(SchedulerNotificationConfiguration::class)
+@Suppress("TooManyFunctions") // the wiring class: one function per bean; #957's system-job queue is the 20th
 class SchedulerAutoConfiguration {
     /** The scheduler's clock — injectable, so a test can drive time (record §8's controlled clock). */
     @Bean

@@ -60,7 +60,9 @@ class SystemJobTaskRegistrar : BeanDefinitionRegistryPostProcessor {
         factory.getBeanNamesForType(KeyedSystemJob::class.java, true, false).forEach { jobBean ->
             registry.registerBeanDefinition(
                 "$jobBean$TASK_SUFFIX",
-                RootBeanDefinition(KeyedSystemTask::class.java) { SchedulerTasks.keyedTask(beans.getBean(jobBean, KeyedSystemJob::class.java)) },
+                RootBeanDefinition(
+                    KeyedSystemTask::class.java,
+                ) { SchedulerTasks.keyedTask(beans.getBean(jobBean, KeyedSystemJob::class.java)) },
             )
         }
         factory.getBeanNamesForType(RecurringSystemJob::class.java, true, false).forEach { jobBean ->

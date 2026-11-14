@@ -59,7 +59,12 @@ class MaintenanceRunRepository(
                     "JOIN lake_namespaces n ON n.id = t.namespace_id WHERE t.id = :id",
                 mapOf("id" to tableId),
             ) { rs, _ ->
-                MaintenanceTable(rs.getObject("id", UUID::class.java), rs.getString("namespace"), rs.getString("name"), rs.getString("status"))
+                MaintenanceTable(
+                    rs.getObject("id", UUID::class.java),
+                    rs.getString("namespace"),
+                    rs.getString("name"),
+                    rs.getString("status"),
+                )
             }.singleOrNull()
 
     /** True when `lake_control.mode` is `normal` (D3 step 1): a restoring or replaying catalog admits no run. */
@@ -149,7 +154,9 @@ class MaintenanceRunRepository(
         errorCode: String?,
         errorMessage: String?,
     ): Boolean {
-        require(state == MaintenanceRunState.FINISHED || state == MaintenanceRunState.FAILED) { "a worker closes finished or failed: $state" }
+        require(
+            state == MaintenanceRunState.FINISHED || state == MaintenanceRunState.FAILED,
+        ) { "a worker closes finished or failed: $state" }
         return jdbc.update(
             "UPDATE lake_maintenance_runs SET state = :state, ended_at = now(), parts_json = CAST(:parts AS jsonb), " +
                 "settlement_json = CAST(:settlement AS jsonb), files_touched = :files, bytes_touched = :bytes, " +

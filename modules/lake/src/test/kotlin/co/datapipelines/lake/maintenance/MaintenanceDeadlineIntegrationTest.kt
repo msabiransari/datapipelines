@@ -48,7 +48,13 @@ class MaintenanceDeadlineIntegrationTest {
             }
         val part = MarkerPart("cleanup", 1)
 
-        val outcome = h.worker(parts = listOf(part), hooks = hooks, jobTimeout = Duration.ofMillis(R10_TIMEOUT_MILLIS)).run(table.id.toString())
+        val outcome =
+            h
+                .worker(
+                    parts = listOf(part),
+                    hooks = hooks,
+                    jobTimeout = Duration.ofMillis(R10_TIMEOUT_MILLIS),
+                ).run(table.id.toString())
 
         outcome shouldBe SystemJobOutcome.Done
         val failure = requireNotNull(refusal.get()) { "the fence never refused the write" }

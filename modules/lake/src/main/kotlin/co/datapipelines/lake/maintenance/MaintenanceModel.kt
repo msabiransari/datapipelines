@@ -39,7 +39,12 @@ data class PartFigures(
         require(files >= 0 && bytes >= 0 && deferredDeletions >= 0) { "part figures are never negative: $this" }
     }
 
-    operator fun plus(other: PartFigures) = PartFigures(files + other.files, bytes + other.bytes, deferredDeletions + other.deferredDeletions)
+    operator fun plus(other: PartFigures) =
+        PartFigures(
+            files + other.files,
+            bytes + other.bytes,
+            deferredDeletions + other.deferredDeletions,
+        )
 
     companion object {
         val NONE = PartFigures()

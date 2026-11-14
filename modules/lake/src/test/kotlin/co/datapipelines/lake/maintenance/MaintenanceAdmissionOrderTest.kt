@@ -50,7 +50,10 @@ class MaintenanceAdmissionOrderTest {
     @Test
     fun `no part due - the row is written, nothing to do, nothing reserved`() {
         val store = RecordingStore()
-        worker(store, listOf(TracingPart("cleanup", scratch = 100, expectsDue = false, due = false, store = store))).run(table.id.toString())
+        worker(
+            store,
+            listOf(TracingPart("cleanup", scratch = 100, expectsDue = false, due = false, store = store)),
+        ).run(table.id.toString())
 
         trace shouldContainExactly
             listOf(
@@ -69,7 +72,10 @@ class MaintenanceAdmissionOrderTest {
     @Test
     fun `every declaration zero - reserve is never called`() {
         val store = RecordingStore()
-        worker(store, listOf(TracingPart("cleanup", store = store), TracingPart("rewrite", order = 2, store = store))).run(table.id.toString())
+        worker(
+            store,
+            listOf(TracingPart("cleanup", store = store), TracingPart("rewrite", order = 2, store = store)),
+        ).run(table.id.toString())
 
         trace.filter { it.startsWith("reserve") || it.startsWith("scratch") } shouldContainExactly emptyList()
         trace.first { it.startsWith("admit") } shouldBe "admit:scratch=0"
@@ -125,8 +131,13 @@ class MaintenanceAdmissionOrderTest {
 
     @Test
     fun `a declaration is handed nothing that can read the table`() {
-        val fields = MaintenanceTable::class.java.declaredFields.filterNot { java.lang.reflect.Modifier.isStatic(it.modifiers) }
-        fields.map { it.type.name } shouldContainExactly listOf("java.util.UUID", "java.lang.String", "java.lang.String", "java.lang.String")
+        val fields =
+            MaintenanceTable::class.java.declaredFields.filterNot {
+                java.lang.reflect.Modifier
+                    .isStatic(it.modifiers)
+            }
+        fields.map { it.type.name } shouldContainExactly
+            listOf("java.util.UUID", "java.lang.String", "java.lang.String", "java.lang.String")
     }
 
     private var scratchHeld = false

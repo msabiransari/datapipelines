@@ -50,10 +50,14 @@ internal class MaintenancePartLoop(
     ): MaintenanceOutcome? {
         when (val answer = gate.admit(run.table, part)) {
             is GateAnswer.Held -> {
-                records += PartRecord(part.name, answer.result.outcome, attempted = false, until = answer.result.until, reason = answer.reason)
+                records +=
+                    PartRecord(part.name, answer.result.outcome, attempted = false, until = answer.result.until, reason = answer.reason)
                 return null
             }
-            GateAnswer.Admit -> Unit
+
+            GateAnswer.Admit -> {
+                Unit
+            }
         }
         if (!part.dueNow(run)) {
             records += PartRecord(part.name, MaintenanceOutcome.NOTHING_TO_DO, attempted = false)

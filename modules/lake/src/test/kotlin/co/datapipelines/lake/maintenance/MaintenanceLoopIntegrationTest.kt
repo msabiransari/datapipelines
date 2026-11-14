@@ -34,7 +34,12 @@ class MaintenanceLoopIntegrationTest {
     fun `parts run in their order, each committing through the run`() {
         val table = h.table()
         val trace = mutableListOf<String>()
-        val parts = listOf(MarkerPart("compaction", 3, trace = trace), MarkerPart("cleanup", 1, trace = trace), MarkerPart("rewrite", 2, trace = trace))
+        val parts =
+            listOf(
+                MarkerPart("compaction", 3, trace = trace),
+                MarkerPart("cleanup", 1, trace = trace),
+                MarkerPart("rewrite", 2, trace = trace),
+            )
 
         h.worker(parts = parts).run(table.id.toString()) shouldBe SystemJobOutcome.Done
 
@@ -44,7 +49,9 @@ class MaintenanceLoopIntegrationTest {
         row.state shouldBe "finished"
         parts(row).map { it["name"].asText() to it["outcome"].asText() } shouldContainExactly
             listOf("cleanup" to "done", "rewrite" to "done", "compaction" to "done")
-        h.audit.events.single().details["state"] shouldBe "finished"
+        h.audit.events
+            .single()
+            .details["state"] shouldBe "finished"
     }
 
     @Test
@@ -53,7 +60,13 @@ class MaintenanceLoopIntegrationTest {
         val held = MarkerPart("rewrite", 2)
         val gate =
             MaintenanceGate { _, part ->
-                if (part.name == "rewrite") GateAnswer.Held(PartResult(MaintenanceOutcome.OUTSIDE_WINDOW), "window_closed") else GateAnswer.Admit
+                if (part.name ==
+                    "rewrite"
+                ) {
+                    GateAnswer.Held(PartResult(MaintenanceOutcome.OUTSIDE_WINDOW), "window_closed")
+                } else {
+                    GateAnswer.Admit
+                }
             }
 
         h.worker(parts = listOf(MarkerPart("cleanup", 1), held, MarkerPart("compaction", 3)), gate = gate).run(table.id.toString())
@@ -109,8 +122,13 @@ class MaintenanceLoopIntegrationTest {
         parts(row).map { it["name"].asText() to it["outcome"].asText() } shouldContainExactly
             listOf("cleanup" to "done", "rewrite" to "failed")
         parts(row)[1]["error_code"].asText() shouldBe MaintenanceErrors.UNCLASSIFIED
-        h.audit.events.single().details["state"] shouldBe "failed"
-        h.audit.events.single().details.toString() shouldNotContain "hunter2"
+        h.audit.events
+            .single()
+            .details["state"] shouldBe "failed"
+        h.audit.events
+            .single()
+            .details
+            .toString() shouldNotContain "hunter2"
         h.leaseRows() shouldBe 0
     }
 

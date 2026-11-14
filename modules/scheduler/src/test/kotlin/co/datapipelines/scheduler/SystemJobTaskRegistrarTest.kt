@@ -67,6 +67,7 @@ class SystemJobTaskRegistrarTest {
     }
 
     @Configuration(proxyBeanMethods = false)
+    @Suppress("UtilityClassWithPublicConstructor") // Spring instantiates a @Configuration CLASS; its one bean is static
     open class NoJobs {
         companion object {
             @Bean

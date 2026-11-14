@@ -124,8 +124,14 @@ class MaintenanceRun internal constructor(
                     leases.release(runId)
                 }
             }
-            LeaseOutcome.DeadlinePassed -> deadlineRefusal()
-            LeaseOutcome.Busy -> Guarded.Refused(MaintenanceOutcome.BUSY, PipelineErrorCodes.Lake.TABLE_BUSY)
+
+            LeaseOutcome.DeadlinePassed -> {
+                deadlineRefusal()
+            }
+
+            LeaseOutcome.Busy -> {
+                Guarded.Refused(MaintenanceOutcome.BUSY, PipelineErrorCodes.Lake.TABLE_BUSY)
+            }
         }
 
     private fun commitUnder(

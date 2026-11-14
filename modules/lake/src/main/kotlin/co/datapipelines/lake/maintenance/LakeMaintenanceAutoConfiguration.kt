@@ -50,7 +50,11 @@ class LakeMaintenanceAutoConfiguration {
      */
     @Bean
     fun lakeMaintenanceHeartbeats(): MaintenanceHeartbeats =
-        MaintenanceHeartbeats(Executors.newSingleThreadScheduledExecutor { task -> Thread(task, HEARTBEAT_THREAD).apply { isDaemon = true } })
+        MaintenanceHeartbeats(
+            Executors.newSingleThreadScheduledExecutor { task ->
+                Thread(task, HEARTBEAT_THREAD).apply { isDaemon = true }
+            },
+        )
 
     @Suppress("LongParameterList")
     @Bean
@@ -67,7 +71,8 @@ class LakeMaintenanceAutoConfiguration {
         audit: AuditEventSink,
         users: ObjectProvider<UserService>,
     ): MaintenanceWorker {
-        val leases = LakeLeases(LakeAppendRuntime.statements(dataSource), lockTimeout = Duration.ofSeconds(properties.catalog.lockTimeoutSeconds))
+        val leases =
+            LakeLeases(LakeAppendRuntime.statements(dataSource), lockTimeout = Duration.ofSeconds(properties.catalog.lockTimeoutSeconds))
         // The provisioned system row, read on the first run (the seeder writes it at boot, after this bean exists).
         val principal by lazy { SystemActorPrincipals.forInstance(users.getObject().systemActor()) }
         return MaintenanceWorker(

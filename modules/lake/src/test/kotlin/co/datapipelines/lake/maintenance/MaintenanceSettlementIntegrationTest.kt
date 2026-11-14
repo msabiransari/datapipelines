@@ -105,8 +105,11 @@ class MaintenanceSettlementIntegrationTest {
             }
         val part = MarkerPart("cleanup", 1)
 
-        h.worker(parts = listOf(part), settlement = settlement(repairTransaction = TransactionTemplate(DataSourceTransactionManager(refusing))))
-            .run(table.id.toString())
+        h
+            .worker(
+                parts = listOf(part),
+                settlement = settlement(repairTransaction = TransactionTemplate(DataSourceTransactionManager(refusing))),
+            ).run(table.id.toString())
 
         h.markers(table) shouldBe setOf("cleanup")
         val row = h.rows(table).single()
@@ -143,7 +146,14 @@ class MaintenanceSettlementIntegrationTest {
                 .receive(
                     ReceiveDelivery(
                         table.id,
-                        DeliveryManifest(DeliveryKey("orders", "one"), emptyList(), emptyList(), DeliveryFormat.Csv, "a".repeat(FINGERPRINT), 1),
+                        DeliveryManifest(
+                            DeliveryKey("orders", "one"),
+                            emptyList(),
+                            emptyList(),
+                            DeliveryFormat.Csv,
+                            "a".repeat(FINGERPRINT),
+                            1,
+                        ),
                         UUID.randomUUID(),
                         UUID.randomUUID(),
                         UUID.randomUUID(),
