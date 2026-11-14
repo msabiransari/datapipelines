@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.27 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles)
+**Status:** v1.28 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -791,6 +791,24 @@ path, and a `purged` table takes no pause (clearing is always allowed).
 file at `maintenance.target_file_bytes` and sets `write.parquet.row-group-size-bytes` from `write.row_group_bytes`. An
 edit or a reassignment applies at the next append, with no restart.
 
+**Lateness** (record §11b call 46; `co.datapipelines.lake.reporting`, #961) is judged per feed from the delivery
+ledger ([§6](#6-deliveries)) with the table's three `reporting.*` values, when asked; nothing is stored and nothing is
+scheduled. A feed's **usual interval** is the median gap between the `published_at` of its last
+`reporting.lateness_sample` deliveries whose state is `PUBLISHED` (an even number of gaps takes the mean of the two
+middle ones), and the feed is **late** when the time since its last such delivery exceeds
+`reporting.lateness_overdue_factor` times that interval; exactly that much is on time. The answer is **not enough
+deliveries to say**, never late and never on time, when fewer than `reporting.lateness_min_deliveries` published
+deliveries are in the sample or the median gap is zero (gaps 0, 0, 0, 10 min already give zero). Each feed is judged
+on its own, so two rhythms on one table do not make each other late. A `FAILED`, `UNKNOWN` or unpublished delivery
+adds no interval and is never the "last delivery"; a feed with only such deliveries is still listed, as not enough
+deliveries to say. A
+`deprecated`, `archived` or `purged` table is never flagged: every feed is **not judged**. `LakeFeedLateness.forTable`
+reads the profile through `LakeProfiles.forTable` and then the ledger in one statement whose `now()` is the
+catalog's clock and the answer's computed-at time; the ledger read is served by `idx_lake_deliveries_published`
+([Metadata DB §4.53](metadata-db.md#453-lake_deliveries)). A reassignment or an edit applies at the next read. No
+route, tool or screen calls it yet (P8 shows it, and decides how a feed stopped on purpose is cleared). Nobody types
+an expected schedule.
+
 **The guard** (`LakeTuningSourceGuardTest`, record M8) is a source scan, not a data-flow analysis. It is red when code
 under `append/` or `maintenance/` (a) holds a numeric literal other than 0 and 1 that its allowlist does not name,
 (b) refers to a numeric constant declared anywhere else in the main sources, `profiles/` included, whatever the case
@@ -878,6 +896,7 @@ reconciler and the notifier); the boot refuses otherwise, naming both keys
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.28 | 961 (#961, dp-lake P6) | §11 **Profiles** gains **Lateness**: what the three `reporting.*` values mean — the median gap of a feed's last published deliveries, late beyond the factor (exactly at it is on time), "not enough deliveries to say" under the minimum or at a zero median, each feed on its own, every feed of the ledger listed, a deprecated, archived or purged table never flagged; computed when asked by `LakeFeedLateness.forTable` (profile first, then one ledger statement on the catalog's clock), served by V62's index. No route, tool or screen yet (P8). |
 | 2026-11-14 | v1.27 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.26 | New **§11 Profiles**: the profile table and its two built-ins, the start-up seed of `production` from the two `maintenance.*` keys, the closed key list with its rules (incl. `retention.keep`'s two limits and the three `reporting.*` keys), what is not in a profile, the service changes and their audit, the two pause keys left on the table, the append writer reading the profile at each append, and the tuning-source guard with its limits (rule (b) sees a numeric constant whatever the case of its name, and a fully qualified top-level read); a fractional value that rounds onto its bound is refused. §1 "Not in the body": the table's tuning is its profile; `policy_json` holds only the pause keys. |
 | 2026-11-14 | v1.26 | 957 (#957) — renumbered at the spec merge after #958's v1.25 | New **§11 Maintenance runs** (§10 at the lane's base; #958's §10 landed first): one `lake-maintenance` task per table; the admission order (permission and mode, slot, declarations, scratch, one-statement run row, settlement, parts); the run's deadline on every lease; `busy` and `deadline` end the run; nothing concluded from an abandoned row; threads ≥ maintenance slots + 2. |
 | 2026-11-14 | v1.25 | 958 (#958) | New §10 **Removal and cleanup**: the remover's two passes (orphans, purge), their fixed order, the reachable set, the candidates and hints, the `dp/` rule and its two marker cases, the clock-skew probe (`lake.maintenance.clock_skew`), the purge answer, what counts as deleted, and the result (inventory and visits). No production caller before 962; no configuration key or migration. |

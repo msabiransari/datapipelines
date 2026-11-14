@@ -196,6 +196,9 @@ class FlywayMigrationIntegrationTest {
                 // #956 (V61) — lake maintenance profiles: the profile table with its two built-ins, every managed table's
                 // profile reference, and policy_json emptied to the table's pause keys (metadata-db §4.49, §4.56).
                 "61|lake profiles|true",
+                // #961 (V62) — the published deliveries' index: a feed's newest published deliveries of one table in
+                // order, for lateness per feed (metadata-db §4.53).
+                "62|lake deliveries published index|true",
             )
     }
 
@@ -1893,6 +1896,8 @@ class FlywayMigrationIntegrationTest {
                 "lake_deliveries.lake_deliveries_pkey",
                 "lake_deliveries.uq_lake_deliveries_key",
                 "lake_deliveries.idx_lake_deliveries_unsettled_page",
+                // #961 (V62) — a feed's newest published deliveries, partial on PUBLISHED (lateness, metadata-db §4.53).
+                "lake_deliveries.idx_lake_deliveries_published",
                 "lake_delivery_attempts.lake_delivery_attempts_pkey",
                 "lake_delivery_attempts.lake_delivery_attempts_operation_id_key",
                 "lake_delivery_attempts.idx_lake_delivery_attempts_delivery",
