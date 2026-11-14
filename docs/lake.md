@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.33 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts)
+**Status:** v1.34 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -811,6 +811,42 @@ The `purge_deletion` part is the only part a `purged` table runs; it declares no
 - Both are `done`, or `nothing_to_do` when no key was deleted. Every other ending is the cleanup's table above, and
   never stamps.
 
+### The storage breakdown
+
+Every cleanup whose remover pass listed the table (a complete pass, or one stopped after its listing) stores the
+table's **storage breakdown**: the cleanup's own listing, as it stands after its expiry and removals, and its own walk,
+sorted into six rows. No second listing and no second walk; nothing is read from the store for it. Every listed object
+falls in exactly one row, the first that fits, in this order, so the rows add up to the listing's total by construction:
+
+| Row (`lake_storage_inventory.row_name`) | What falls in it |
+|---|---|
+| DP's own records (`dp_records`) | every object under the table's `dp/`: the recipes, which are never deleted, and the remover's clock markers |
+| table metadata (`table_metadata`) | metadata files, manifest lists, manifests and statistics files reachable from a protected revision, the current one included |
+| current (`current`) | data and delete files the current snapshot names |
+| held by history (`history`) | data and delete files, not current, that a history snapshot reaches |
+| held by keep rules (`keep_held`) | data and delete files that only keep-held snapshots reach |
+| not referenced (`not_referenced`) | every other object: files awaiting removal after the grace, and files a run in flight has written and not yet committed (a listing cannot tell the two apart, so the row is named for what is known) |
+
+**Held by keep rules.** A snapshot is *keep-held* when the current metadata lists it, it is older than the floor this
+cleanup's expiry used, and a `dp-keep-` or `dp-hold-` tag points at it: without the tag this cleanup would have
+expired it. Every other snapshot the walk reaches a file through is a *history* snapshot, including a tagged one the
+window still covers; an earlier protected revision listing a keep-held snapshot does not make it history. So "held by
+keep rules" is what the table would stop holding, once the protection window has passed, if every keep on it ended
+now: a file a keep-held snapshot shares with a history or the current snapshot is counted there, and moves to this row
+only when the keep is the last thing holding it. A table never published has no snapshot and no floor: its three
+snapshot rows are zero, and its committed metadata is still table metadata.
+
+**As old as the last cleanup.** The six rows carry one time, the catalog's clock at the cleanup's listing, and the run
+that measured them; the total is "in the bucket at" that time, never the bucket now. The planner's current size
+([§11 Maintenance runs](#11-maintenance-runs)) is fresher and can differ: two sources, two times, never summed. Each
+cleanup replaces the table's six rows in one transaction ([Metadata DB §4.60](metadata-db.md#460-lake_storage_inventory));
+a refused cleanup and a purge deletion leave them as they were, so a purged table keeps its last breakdown. A table
+with no stored breakdown is "not measured yet", never zero. If the rows ever fail to add up to the listing, nothing is
+stored, the previous rows stay, `lake.inventory.totals_mismatch` logs the two totals
+([Observability §3.4X](observability.md#34x-lake-storage-breakdown-events-964)) and the cleanup records
+`observer: failed`; the cleanup itself is unchanged. The breakdown is figures only: nothing that decides a deletion
+reads it.
+
 ## 11. Profiles
 
 A **profile** is a named set of maintenance and write values (design record §11a call 35; [Metadata DB
@@ -1124,6 +1160,7 @@ and `deprecated` tables with a snapshot (never `archived` or `purged`).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.34 | 964 (#964, dp-lake P6) | **§10 Removal and cleanup** gains *The storage breakdown*: one inventory per cleanup from its own listing and walk, six rows in first-fit order (DP's own records, table metadata, current, held by history, held by keep rules, not referenced), what "held by keep rules" means, one time per inventory (as old as the last cleanup), replaced per cleanup, "not measured yet", and the totals check. |
 | 2026-11-14 | v1.33 | 962 (#962, dp-lake P6) — renumbered at the spec merge after #963's v1.32 | **§10 Removal and cleanup** gains its callers: *What a cleanup does, in order* (mode check, fresh load, keeps first, expiry over the deployment window's floor with Iceberg's deletes handed to the remover, the listing time and the orphan pass, the observer, the release; a never-published table's `not_applicable` floor), *How a cleanup ends* (one row per ending; only a completed pass resets the interval; `lake.maintenance.cleanup_incomplete` with reason `mode` or `delete_failed`; the figures on the run row and in `lake.cleanup.stopped`), *What is never deleted*, and *Purge deletion, and when it is finished* (the part's own re-check, the stamp only on *finished*). Replaces "No production code calls the remover yet". |
 | 2026-11-14 | v1.32 | 963 (#963, dp-lake P6) | **§11 Maintenance runs** gains the manifest rewrite: the part `manifest_rewrite` (second, no scratch, `active` and `deprecated`), due by the manifest count and held only by the compaction pause, the candidate rule (data manifests under half the target, two per spec), due with nothing to fold, the one commit and what it leaves unchanged, the replaced manifests left for the remover, `folded` and the counts on the run row, the lease measurement. The section's opening no longer says no part is registered. |
 | 2026-11-14 | v1.31 | 959 (#959, dp-lake P6) — renumbered at the spec merge after #961's v1.28, #960's v1.29 and #968's v1.30 | **§11 Maintenance runs** gains the planner: the recurring `lake-maintenance-planner` task and its four keys; measuring from the manifests on the planner's own readers (abandoned reads retired before their stamp, their limit, the client built inside the read, one winner per attempt, the stamp fence); stale figures and the measured-first rule; daily usage and growth; the due function, the one run-history statement, the gate shared with the worker, and the ranked enqueue; the figures read method. |
