@@ -30,6 +30,20 @@ class ManifestFoldTest {
     }
 
     @Test
+    fun `an odd target admits the byte below its fractional half without overflowing`() {
+        for (target in listOf(TARGET + 1, Long.MAX_VALUE)) {
+            val belowHalf = target / 2
+            val plan =
+                ManifestFold.plan(
+                    listOf(data("under1", belowHalf), data("under2", belowHalf), data("over", belowHalf + 1)),
+                    target,
+                )
+
+            plan.paths shouldBe setOf("under1", "under2")
+        }
+    }
+
+    @Test
     fun `candidates are grouped by spec and a lone candidate of a spec stays`() {
         val plan =
             ManifestFold.plan(

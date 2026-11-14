@@ -58,7 +58,7 @@ object ManifestFold {
         require(targetBytes > 0) { "a manifest target size is positive: $targetBytes" }
         val folding =
             manifests
-                .filter { it.data && it.length < targetBytes / 2 }
+                .filter { it.data && it.length <= (targetBytes - 1) / 2 }
                 .groupBy { it.specId }
                 .filterValues { it.size >= MIN_GROUP }
         return FoldPlan(

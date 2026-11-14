@@ -64,7 +64,7 @@ internal object LakeTuningSourceGuard {
             Admitted("maintenance/plan/PlanFigures.kt", "GROWTH_BASELINE_DAYS = 7", "growth per WEEK: call 46's definition"),
             Admitted("maintenance/plan/TableMeasurer.kt", "LakeMetadataReads.METADATA_MAX_BYTES", "metadata read cap: a safety bound"),
             Admitted("maintenance/manifests/ManifestFold.kt", "MIN_GROUP = 2", "two manifests are the fewest that fold: grammar"),
-            Admitted("maintenance/manifests/ManifestFold.kt", "targetBytes / 2", "under HALF the target: brief 963 D2a's rule"),
+            Admitted("maintenance/manifests/ManifestFold.kt", "(targetBytes - 1) / 2", "under HALF, including odd targets: 963 D2a"),
             Admitted("maintenance/manifests/ManifestRewritePart.kt", "ORDER = 2", "second in the record's order (call 34)"),
             Admitted("maintenance/manifests/ManifestFold.kt", "PropertyUtil", "reads the manifest target core rolls at (963 D2a)"),
             Admitted("maintenance/manifests/ManifestFold.kt", ".properties()", "the table's manifest target, never a profile value"),
