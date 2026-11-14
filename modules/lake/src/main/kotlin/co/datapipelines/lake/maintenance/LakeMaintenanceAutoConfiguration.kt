@@ -14,6 +14,8 @@ import co.datapipelines.lake.maintenance.cleanup.CleanupReads
 import co.datapipelines.lake.maintenance.cleanup.CleanupRemoval
 import co.datapipelines.lake.maintenance.cleanup.MaintenanceRunStates
 import co.datapipelines.lake.maintenance.cleanup.PurgeDeletionPart
+import co.datapipelines.lake.maintenance.inventory.StorageInventoryObserver
+import co.datapipelines.lake.maintenance.inventory.StorageInventoryRepository
 import co.datapipelines.lake.maintenance.manifests.ManifestRewritePart
 import co.datapipelines.lake.maintenance.plan.MaintenanceDue
 import co.datapipelines.lake.maintenance.plan.MaintenancePlanner
@@ -32,6 +34,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import software.amazon.awssdk.services.s3.S3Client
 import java.time.Clock
 import java.time.Duration
@@ -145,10 +149,18 @@ class LakeMaintenanceAutoConfiguration {
         catalogs: LakeCatalogs,
     ): CleanupReads = CleanupReads(LakeAppendRuntime.statements(dataSource), catalogs::metadataFileIo, properties.name)
 
-    /** #962 D2b: the default observer does nothing; 964's storage breakdown replaces it. */
+    /** #964 D4, D6: the latest storage breakdown per table (`lake_storage_inventory`), written by the observer, read by P8. */
+    @Bean
+    fun lakeStorageInventory(dataSource: DataSource): StorageInventoryRepository =
+        StorageInventoryRepository(
+            LakeAppendRuntime.statements(dataSource),
+            TransactionTemplate(DataSourceTransactionManager(dataSource)),
+        )
+
+    /** #962 D2b, #964: the cleanup's observer is the storage breakdown (one inventory per cleanup); another bean replaces it. */
     @Bean
     @ConditionalOnMissingBean
-    fun lakeCleanupObserver(): CleanupObserver = CleanupObserver.NONE
+    fun lakeCleanupObserver(lakeStorageInventory: StorageInventoryRepository): CleanupObserver = StorageInventoryObserver(lakeStorageInventory)
 
     /**
      * #962 D1: the `cleanup` part. Registering it makes the planner's cleanup due (959 L16). The expiry window is the
