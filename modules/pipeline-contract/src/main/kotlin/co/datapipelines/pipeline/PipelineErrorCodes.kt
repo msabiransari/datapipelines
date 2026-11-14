@@ -2323,6 +2323,16 @@ object PipelineErrorCodes {
          */
         const val MAINTENANCE_CLOCK_SKEW = "lake.maintenance.clock_skew"
 
+        // #962 (dp-lake P6) — the cleanup pass and the purge deletion (§13.25, the cut's §3).
+
+        /**
+         * A cleanup or purge deletion did not finish its removal: the catalog left `normal` mode (`details.reason` =
+         * `mode`), or a delete failed or its outcome is unknown (`delete_failed`). The run ends `failed`; a tag or expiry
+         * commit made before stays, nothing more is deleted, and the next plan finds the work due again. Not retryable by
+         * the caller; recorded on the maintenance run, never returned by a route.
+         */
+        const val MAINTENANCE_CLEANUP_INCOMPLETE = "lake.maintenance.cleanup_incomplete"
+
         // #956 (dp-lake P6) — the maintenance profiles and the table pauses (§13.25, design record §11a calls 35
         // and 38). No route returns them before P8 (HTTP `—`): the services have no handler yet.
 
