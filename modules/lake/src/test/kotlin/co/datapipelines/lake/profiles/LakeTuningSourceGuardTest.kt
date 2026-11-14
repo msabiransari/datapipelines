@@ -9,6 +9,8 @@ import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.MethodSource
 import java.io.File
 
 /**
@@ -16,9 +18,11 @@ import java.io.File
  * interval, a window) from a `LakeProfile` property and nowhere else. Five rules over the main sources, red when:
  * - (a) code under `append/` or `maintenance/` holds a numeric literal other than 0 and 1 that the allowlist does not
  *   name (a constant's declaration is its literal);
- * - (b) that code refers to a numeric constant (a `const val`, or an UPPER-case `val` set from a number, a `Duration` or
- *   a `DataSize`) declared anywhere else in the main sources, `profiles/` included, by `Owner.NAME`,
- *   `Owner.Companion.NAME` or an import: moving a constant to a helper does not pass;
+ * - (b) that code refers to a numeric constant, whatever the case of its name (a `const val`, or a `val` set from a
+ *   number, a `Duration` or a `DataSize`, at top level, in an `object` or in a companion object), declared anywhere
+ *   else in the main sources, `profiles/` included, by `Owner.name`, `Class.Companion.name`, a fully qualified
+ *   `package.name`, an import, or a bare name in the declaring package: moving a constant to a helper does not pass.
+ *   A constructor parameter, an instance property (every `LakeProfile` property) and a local value are not constants;
  * - (c) that code reads an Iceberg table property (`properties()`, `PropertyUtil`, a `TableProperties` name) or a
  *   LakeProperties group the allowlist does not name; the writer SETS its two write properties and reads none back;
  * - (d) anything in `modules/lake`, `modules/web` or `modules/app` main but the start-up seed, its wiring and the boot
@@ -26,10 +30,11 @@ import java.io.File
  * - (e) code under `maintenance/` reads protection days or the orphan grace from anything but LakeProperties.
  *
  * What the scan cannot see, so M8 claims exactly these five rules: a value computed from an admitted constant or
- * from 0 and 1; a number reached by reflection, a resource file or a string parsed at run time; a constant of another
- * shape (a lower-case `val`, a function returning a number) declared outside the two directories; a LakeProperties
- * read through a receiver not named `properties` or `lakeProperties`; a retention value read through a variable typed
- * `Retention` that was filled from elsewhere. Comments and string contents are not scanned, except that (c), (d) and
+ * from 0 and 1 (a `val` initialised by an expression that does not start with a number, a `Duration` or a `DataSize`,
+ * a getter or a function returning a number); a number reached by reflection, a resource file or a string parsed at
+ * run time; a constant reached through an import alias of its owner; a LakeProperties read through a receiver not
+ * named `properties` or `lakeProperties`; a retention value read through a variable typed `Retention` that was
+ * filled from elsewhere. Comments and string contents are not scanned, except that (c), (d) and
  * (e) read string literals for keys.
  *
  * The fixtures each add or replace sources over the real tree and must turn red on their own rule and on no other.
@@ -89,6 +94,49 @@ class LakeTuningSourceGuardTest {
         withClue("the fixture still reads the LakeProfile property in the other writer") { edited shouldContain "profile.targetFileBytes" }
         val found = redOnly('b', mapOf(writerPath to edited, "${LAKE}profiles/ProfileDefaults.kt" to helper))
         found.map { it.what }.single() shouldContain "ProfileDefaults.TARGET_FILE_BYTES"
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("helperShapes")
+    fun `a numeric constant of any name read from a helper is red on rule b`(
+        shape: String,
+        helper: Pair<String, String>,
+        import: String,
+        read: String,
+        expected: String,
+    ) {
+        val replaced = writer.replace("profile.targetFileBytes", read)
+        val edited = if (import.isEmpty()) replaced else replaced.replaceOnce(PROFILE_IMPORT, "$PROFILE_IMPORT\nimport $import")
+        val found = redOnly('b', mapOf(writerPath to edited, LAKE + helper.first to helper.second))
+        withClue(shape) { found.map { it.what }.single() shouldContain "$expected (declared in" }
+    }
+
+    @Test
+    fun `a LakeProfile property with a default, an instance property and a local value add no violation`() {
+        val profilePath = "${LAKE}profiles/LakeProfile.kt"
+        val profile =
+            real
+                .single { it.path == profilePath }
+                .text
+                .replaceOnce("    val targetFileBytes: Long,", "    val targetFileBytes: Long = 67108864L,")
+        val sizes =
+            "package co.datapipelines.lake.profiles\n\nclass WriterSizes {\n    val fileBytes = 67108864L\n\n" +
+                "    fun rowGroup(): Long {\n        val rowGroupBytes = 1048576L\n        return rowGroupBytes\n    }\n}\n"
+        val edited =
+            writer
+                .replaceOnce(
+                    "PlainWriter(table, factory, output, profile.targetFileBytes)",
+                    "PlainWriter(table, factory, output, sizes.fileBytes)",
+                ).replace("profile.rowGroupBytes", "sizes.rowGroup()")
+        withClue("the fixture still reads the LakeProfile property in the other writer") { edited shouldContain "profile.targetFileBytes" }
+        val merged =
+            real.filter { it.path != profilePath && it.path != writerPath } +
+                listOf(
+                    GuardSource(profilePath, profile),
+                    GuardSource(writerPath, edited),
+                    GuardSource("${LAKE}profiles/WriterSizes.kt", sizes),
+                )
+        (LakeTuningSourceGuard.violations(merged) - realViolations.toSet()).shouldBeEmpty()
     }
 
     @Test
@@ -156,6 +204,57 @@ class LakeTuningSourceGuardTest {
         const val PROFILE_IMPORT = "import co.datapipelines.lake.profiles.LakeProfile"
         const val TARGET = "TARGET_FILE_BYTES"
         const val MIN_APPEND_FILES = 10
+
+        private const val TUNING = "co.datapipelines.lake.tuning"
+        private const val PROFILES = "co.datapipelines.lake.profiles"
+
+        /**
+         * One helper outside `append/` per declaration shape rule (b) recognises (lane 956 r2 landing review, R1): shape,
+         * the helper (path under the lake package, text), the import the writer adds (empty for none), the expression that
+         * replaces the writer's `profile.targetFileBytes`, and the constant the violation names.
+         */
+        @JvmStatic
+        fun helperShapes(): List<Array<Any>> =
+            listOf(
+                arrayOf(
+                    "an object val with a lower-case name, read through the object",
+                    "profiles/ProfileDefaults.kt" to "package $PROFILES\n\nobject ProfileDefaults {\n    val fileBytes = 67108864L\n}\n",
+                    "",
+                    "ProfileDefaults.fileBytes",
+                    "ProfileDefaults.fileBytes",
+                ),
+                arrayOf(
+                    "an object const val with a lower-case name, imported and read bare",
+                    "profiles/ProfileDefaults.kt" to
+                        "package $PROFILES\n\nobject ProfileDefaults {\n    const val fileBytes = 67108864L\n}\n",
+                    "$PROFILES.ProfileDefaults.fileBytes",
+                    "fileBytes",
+                    "ProfileDefaults.fileBytes",
+                ),
+                arrayOf(
+                    "a top-level const val read fully qualified, with no import",
+                    "profiles/WriterSizes.kt" to "package $PROFILES\n\nconst val FILE_BYTES = 67108864L\n",
+                    "",
+                    "$PROFILES.FILE_BYTES",
+                    "$PROFILES.FILE_BYTES",
+                ),
+                arrayOf(
+                    "a top-level val with a lower-case name, imported and read bare",
+                    "tuning/WriterSizes.kt" to "package $TUNING\n\nval fileBytes = 67108864L\n",
+                    "$TUNING.fileBytes",
+                    "fileBytes",
+                    "$TUNING.fileBytes",
+                ),
+                arrayOf(
+                    "a companion const val with a lower-case name, read through the class",
+                    "profiles/WriterSizes.kt" to
+                        "package $PROFILES\n\nclass WriterSizes {\n    companion object {\n" +
+                        "        const val fileBytes = 67108864L\n    }\n}\n",
+                    "",
+                    "WriterSizes.fileBytes",
+                    "WriterSizes.fileBytes",
+                ),
+            )
 
         /** The main sources and their verdict, read and scanned once for the class (each test reuses them). */
         val real: List<GuardSource> by lazy { mainSources() }

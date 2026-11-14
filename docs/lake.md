@@ -757,6 +757,10 @@ keys afterwards ([Configuration §3.36](configuration.md#336-managed-lake-dp-lak
 | `reporting.lateness_overdue_factor` | 2 | above 1, at most 100 |
 | `reporting.lateness_min_deliveries` | 5 | 2 – the sample |
 
+The two fractional rules hold for the number as the profile keeps it (a double) as well as for the number written: a
+value nearer to a bound than a double can tell apart from it (`0.99999999999999999` for the ratio, `1e-400`, or
+`1.00000000000000001` for the factor) is the bound itself once kept, and is refused `out_of_range`.
+
 `retention.keep`: `period` is one of `day`, `week`, `month`, `quarter`, `year`, at most one rule per period; `unit` is
 `days`, `months` or `years`, with `n` a whole number in 1–146,100, 1–4,800 or 1–400. Two limits, decided the same on
 any save date and in any zone: `keep_for` is at least one period long (in days at least the period's longest length,
@@ -789,14 +793,19 @@ edit or a reassignment applies at the next append, with no restart.
 
 **The guard** (`LakeTuningSourceGuardTest`, record M8) is a source scan, not a data-flow analysis. It is red when code
 under `append/` or `maintenance/` (a) holds a numeric literal other than 0 and 1 that its allowlist does not name,
-(b) refers to a numeric constant declared anywhere else in the main sources, `profiles/` included, (c) reads an
+(b) refers to a numeric constant declared anywhere else in the main sources, `profiles/` included, whatever the case
+of its name — a `const val`, or a `val` set from a number, a `Duration` or a `DataSize`, at top level, in an `object`
+or in a companion object — read as `Owner.name`, `Class.Companion.name`, a fully qualified `package.name`, through an
+import, or bare in the declaring package (a constructor parameter, an instance property such as every `LakeProfile`
+property, and a local value are not constants), (c) reads an
 Iceberg table property or a `LakeProperties` group its allowlist does not name; when (d) anything in the lake, web or
 app main sources but the seed, its wiring and the boot rule reads the two seed keys; and when (e) code under
 `maintenance/` reads protection days or the orphan grace from anything but `LakeProperties`. Each allowlist entry is
-one line with its reason. What it cannot see: a value computed from an admitted constant or from 0 and 1; a number
-reached by reflection, a resource or a string parsed at run time; a constant of another shape (a lower-case `val`, a
-function returning a number) declared elsewhere; a `LakeProperties` read through a receiver not named `properties` or
-`lakeProperties`. M8 claims exactly these five rules.
+one line with its reason. What it cannot see: a value computed from an admitted constant or from 0 and 1 (a `val`
+whose initialiser does not start with a number, a `Duration` or a `DataSize`, a getter or a function returning a
+number); a number reached by reflection, a resource or a string parsed at run time; a constant reached through an
+import alias of its owner; a `LakeProperties` read through a receiver not named `properties` or `lakeProperties`. M8
+claims exactly these five rules.
 
 ---
 
@@ -805,7 +814,7 @@ function returning a number) declared elsewhere; a `LakeProperties` read through
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-11-14 | v1.25 | 958 (#958) | New §10 **Removal and cleanup**: the remover's two passes (orphans, purge), their fixed order, the reachable set, the candidates and hints, the `dp/` rule and its two marker cases, the clock-skew probe (`lake.maintenance.clock_skew`), the purge answer, what counts as deleted, and the result (inventory and visits). No production caller before 962; no configuration key or migration. |
-| 2026-11-14 | v1.26 | 956 (#956, dp-lake P6) | New **§11 Profiles**: the profile table and its two built-ins, the start-up seed of `production` from the two `maintenance.*` keys, the closed key list with its rules (incl. `retention.keep`'s two limits and the three `reporting.*` keys), what is not in a profile, the service changes and their audit, the two pause keys left on the table, the append writer reading the profile at each append, and the tuning-source guard with its limits. §1 "Not in the body": the table's tuning is its profile; `policy_json` holds only the pause keys. |
+| 2026-11-14 | v1.26 | 956 (#956, dp-lake P6) | New **§11 Profiles**: the profile table and its two built-ins, the start-up seed of `production` from the two `maintenance.*` keys, the closed key list with its rules (incl. `retention.keep`'s two limits and the three `reporting.*` keys), what is not in a profile, the service changes and their audit, the two pause keys left on the table, the append writer reading the profile at each append, and the tuning-source guard with its limits (rule (b) sees a numeric constant whatever the case of its name, and a fully qualified top-level read); a fractional value that rounds onto its bound is refused. §1 "Not in the body": the table's tuning is its profile; `policy_json` holds only the pause keys. |
 | 2026-11-13 | v1.24 | 967 (#967) — renumbered at the spec sync after #935's v1.23 | §1 `partition` row and §7: the append's first scan refuses a value a numeric `truncate[N]` partition cannot hold (`lake.append.partition_value_out_of_range`, counts per partition field, never a value), after a required-null refusal and before any file is written; the definition stays valid. Temporary until apache/iceberg 17027 (decimal) and 13105 (int, long). |
 | 2026-11-13 | v1.23 | 935 (#935) — renumbered at the spec sync after #939's v1.22 | §1: the body's fourth key, `sort_field_ids` (1–4 field ids, required before the first release, refused for `BINARY` and, for now, the approximate `DECIMAL`), fixed by the table's first release ever, also after its discard (`locked`); a legacy keyless table stays unsorted; the order (ascending, nulls first) is written to Iceberg at creation with one `write.metadata.metrics.column.<name>` = `truncate(16)` property per sort column. §2: a release is refused `invalid_body` when its stored draft breaks the sort-column rule. §4: S includes the sort order; changing the sort columns is breaking, a sort order changed outside DP is drift whose exit is to put it back. §7: files stay stamped unsorted on a sorted table (dp-lake record §11a call 36). |
 | 2026-11-13 | v1.22 | 939 (#939) | §8: the protection stamp is `now()` plus `datapipelines.lake.retention.protection-days`, no longer `lake_control.protection_interval`, which the normal-mode sweep keeps equal to the setting (a write only when they differ, `lake.settle.protection_window_aligned`); a stamped deadline is never changed. The budget is checked before each of the protection step's two statements; the 16 s overrun and the 31 s wall clock are unchanged. No migration. |

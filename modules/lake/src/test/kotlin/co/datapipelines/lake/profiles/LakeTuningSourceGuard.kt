@@ -80,8 +80,9 @@ internal object LakeTuningSourceGuard {
     private val NUMBER = Regex("""(?<![\w.])(0[xX][0-9a-fA-F_]+[uUlL]*|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?[uUlLfF]*)(?![\w.])""")
     private val TRIVIAL = setOf("0", "1", "0L", "1L", "0.0", "1.0")
     private val NUMERIC_VAL =
-        Regex("""\b(?:const\s+)?val\s+([A-Z][A-Z0-9_]*)\s*(?::\s*[\w.<>?, ]+?)?\s*=\s*(?:-?\d|(?:java\.time\.)?Duration\.|DataSize\.)""")
-    private val TYPE_DECLARATION = Regex("""\b(?:class|object|interface)\s+([A-Z]\w*)""")
+        Regex("""\b(?:const\s+)?val\s+([A-Za-z_]\w*)\s*(?::\s*[\w.<>?, ]+?)?\s*=\s*(?:-?\d|(?:java\.time\.)?Duration\.|DataSize\.)""")
+    private val TYPE_DECLARATION =
+        Regex("""\b(?:(companion)\s+object(?:\s+([A-Z]\w*))?|(class|object|interface)\s+([A-Z]\w*))""")
     private val DECLARATION_START =
         Regex("""\n\s*(?:(?:private|internal|public|data|enum|sealed|abstract|open)\s+)*(?:class|object|interface|fun|val|var)\b""")
     private val PACKAGE = Regex("""^\s*package\s+([\w.]+)""", RegexOption.MULTILINE)
@@ -117,7 +118,11 @@ internal object LakeTuningSourceGuard {
 
     /**
      * (b) Scoped code referring to a numeric constant declared outside `append/` and `maintenance/`, anywhere in the
-     * given sources (`profiles/` included): `Owner.NAME`, `Owner.Companion.NAME` or an import of it.
+     * given sources (`profiles/` included), whatever the case of its name: a `const val`, or a `val` set from a number,
+     * a `Duration` or a `DataSize`, declared at top level, in an `object` or in a companion object. A reference is
+     * `Owner.name` (`Class.name` or `Class.Companion.name` for a companion), `package.name` for a top-level one, an
+     * import of it, or a bare `name` in the declaring package. A constructor parameter, a class's instance property
+     * (a `LakeProfile` property among them) and a local value are not constants.
      */
     private fun constantReferences(
         sources: List<GuardSource>,
@@ -126,8 +131,9 @@ internal object LakeTuningSourceGuard {
         val declared = sources.filter { !SCOPED.containsMatchIn(it.path) }.flatMap { declaredConstants(it) }
         return scoped.flatMap { source ->
             val code = KotlinText.code(source.text)
+            val pkg = PACKAGE.find(source.text)?.groupValues?.get(1)
             declared
-                .filter { constant -> code.contains(constant.name) && constant.patterns.any { it.containsMatchIn(code) } }
+                .filter { constant -> code.contains(constant.name) && refersTo(constant, code, pkg) }
                 .filter { constant -> !admittedExactly(source.path, constant.qualified) }
                 .map { GuardViolation('b', source.path, "${it.qualified} (declared in ${it.path})") }
         }
@@ -193,32 +199,110 @@ internal object LakeTuningSourceGuard {
         token: String,
     ): Boolean = ALLOWLIST.any { path == LAKE + it.file && token == it.token }
 
+    /** A numeric constant: [patterns] find a reference to it; a top-level one is also read bare in its [topLevelPackage]. */
     private data class DeclaredConstant(
         val path: String,
         val name: String,
         val qualified: String,
         val patterns: List<Regex>,
+        val topLevelPackage: String? = null,
     )
+
+    /** A type with a body: its name (a companion's is its class's), a companion's own name, whether it holds constants. */
+    private data class Owner(
+        val name: String,
+        val companion: String?,
+        val holdsConstants: Boolean,
+        val body: IntRange,
+    )
+
+    private fun refersTo(
+        constant: DeclaredConstant,
+        code: String,
+        pkg: String?,
+    ): Boolean =
+        constant.patterns.any { it.containsMatchIn(code) } ||
+            (constant.topLevelPackage != null && constant.topLevelPackage == pkg && bare(constant.name).containsMatchIn(code))
+
+    private fun bare(name: String): Regex = Regex("""(?<![\w.])${Regex.escape(name)}\b""")
 
     private fun declaredConstants(source: GuardSource): List<DeclaredConstant> {
         val code = KotlinText.code(source.text)
         val pkg = PACKAGE.find(source.text)?.groupValues?.get(1) ?: return emptyList()
-        val owners = TYPE_DECLARATION.findAll(code).map { it.groupValues[1] to body(code, it.range.last + 1) }.toList()
+        val owners = owners(code)
         return NUMERIC_VAL
             .findAll(code)
-            .map { match ->
+            .mapNotNull { match ->
                 val name = match.groupValues[1]
-                val owner =
-                    owners
-                        .filter { (_, body) -> match.range.first in body }
-                        .minByOrNull { (_, body) -> body.last - body.first }
-                        ?.first
+                val block = enclosingBlock(code, match.range.first) ?: return@mapNotNull topLevel(source.path, pkg, name)
+                val owner = owners.firstOrNull { it.body.first == block && it.holdsConstants } ?: return@mapNotNull null
+                val via = Regex.escape(owner.name) + (owner.companion?.let { "(?:\\.${Regex.escape(it)})?" } ?: "")
                 val patterns =
-                    owners.map { (type, _) -> Regex("""\b${Regex.escape(type)}(?:\.Companion)?\.$name\b""") } +
-                        Regex("""\bimport\s+${Regex.escape(pkg)}(?:\.\w+)*\.$name\b""")
-                DeclaredConstant(source.path, name, if (owner == null) name else "$owner.$name", patterns)
+                    listOf(
+                        Regex("""\b$via\.${Regex.escape(name)}\b"""),
+                        Regex("""\bimport\s+${Regex.escape(pkg)}(?:\.\w+)*\.$via\.${Regex.escape(name)}\b"""),
+                    )
+                DeclaredConstant(source.path, name, "${owner.name}.$name", patterns)
             }.distinctBy { it.qualified }
             .toList()
+    }
+
+    private fun topLevel(
+        path: String,
+        pkg: String,
+        name: String,
+    ): DeclaredConstant {
+        val qualified = "$pkg.$name"
+        val patterns =
+            listOf(
+                Regex("""(?<![\w.])${Regex.escape(qualified)}\b"""),
+                Regex("""\bimport\s+${Regex.escape(qualified)}\b"""),
+            )
+        return DeclaredConstant(path, name, qualified, patterns, topLevelPackage = pkg)
+    }
+
+    /**
+     * Every type declaration with a body. A companion object takes its class's name (`Class.name` reads its members);
+     * an `object` and a companion hold constants, a class or interface body holds instance properties.
+     */
+    private fun owners(code: String): List<Owner> {
+        val found = TYPE_DECLARATION.findAll(code).map { it to body(code, it.range.last + 1) }.toList()
+        return found.mapNotNull { (match, body) ->
+            if (body.isEmpty()) return@mapNotNull null
+            if (match.groupValues[1].isEmpty()) {
+                Owner(match.groupValues[4], null, match.groupValues[3] == "object", body)
+            } else {
+                val outer =
+                    found
+                        .filter { (other, range) -> other.groupValues[1].isEmpty() && match.range.first in range }
+                        .minByOrNull { (_, range) -> range.last - range.first }
+                        ?: return@mapNotNull null
+                Owner(outer.first.groupValues[4], match.groupValues[2].ifEmpty { "Companion" }, true, body)
+            }
+        }
+    }
+
+    /**
+     * The `{` of the innermost block around [at], or null at top level. Inside an unclosed `(` the declaration is a
+     * parameter (a constructor property among them), never a constant: -1 is returned so that no owner matches.
+     */
+    private fun enclosingBlock(
+        code: String,
+        at: Int,
+    ): Int? {
+        var braces = 0
+        var parens = 0
+        for (i in at - 1 downTo 0) {
+            val c = code[i]
+            when {
+                c == '}' -> braces++
+                c == '{' -> if (braces == 0) return i else braces--
+                braces > 0 -> Unit
+                c == ')' -> parens++
+                c == '(' -> if (parens == 0) return -1 else parens--
+            }
+        }
+        return null
     }
 
     /**
