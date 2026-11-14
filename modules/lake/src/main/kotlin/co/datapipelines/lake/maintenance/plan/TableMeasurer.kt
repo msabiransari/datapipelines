@@ -1,6 +1,7 @@
 package co.datapipelines.lake.maintenance.plan
 
 import co.datapipelines.lake.maintenance.MaintenanceErrors
+import co.datapipelines.lake.maintenance.compaction.CompactionCandidateRule
 import co.datapipelines.lake.profiles.LakeProfile
 import co.datapipelines.lake.settle.LakeMetadataReads
 import com.fasterxml.jackson.databind.JsonNode
@@ -53,7 +54,7 @@ class TableMeasurer(
                     val spec = specs.getValue(file.specId())
                     count.addData(
                         DataFileFact(
-                            "${file.specId()}/${spec.partitionToPath(file.partition())}",
+                            CompactionCandidateRule.partitionKey(file.specId(), spec.partitionToPath(file.partition())),
                             file.fileSizeInBytes(),
                             file.recordCount(),
                             file.sortOrderId(),

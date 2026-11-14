@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.34 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown)
+**Status:** v1.35 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown; #969, compaction)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -991,9 +991,8 @@ claims exactly these five rules.
 ## 11. Maintenance runs
 
 A maintenance run is the frame every maintenance operation executes in (#957; dp-lake record §11, §11a call 34). This
-section describes the frame, the planner that enqueues runs (#959) and the manifest rewrite (#963); the cleanup and
-the purged table's deletion (#962) are [§10](#10-removal-and-cleanup)'s. Compaction is its own lane, and until it
-lands its part is not registered, the planner finds it never due and a run records nothing for it.
+section describes the frame, the planner that enqueues runs (#959), the manifest rewrite (#963) and compaction
+(#969); the cleanup and the purged table's deletion (#962) are [§10](#10-removal-and-cleanup)'s.
 
 **One task per table.** `lake-maintenance` is a keyed scheduler task whose key is the table id
 ([Scheduler: system jobs](scheduler.md#85-system-jobs)): enqueueing an instance that already exists changes nothing, so a
@@ -1154,12 +1153,67 @@ and `deprecated` tables with a snapshot (never `archived` or `purged`).
   lane's machine (module Postgres and MinIO, files with column metrics, every manifest a candidate): 1,000 or 10,000
   data files in 200 or 1,000 manifests folded to one manifest with the lease held 0.2–0.5 s.
 
+**Compaction** (#969; record §11a call 34 "Progress inside a table", call 36 items 4–5, call 41; the P6 lane cut L18,
+L19). The run's third part, `compaction`, after cleanup and manifest rewrite. It is registered whenever the lake is
+enabled: the web module supplies the run's scratch reservation (the staging factory's `prepareDelivery`, from the
+aggregate deliveries reserve from) and the part's scratch database.
+
+- **What it rewrites.** The candidates of ONE rule, the same function the planner measures with
+  (`CompactionCandidateRule`), so a table the plan calls due is a table the part finds work in. A file is *small* below
+  `maintenance.compact_small_file_ratio × target_file_bytes`; a partition of one partition spec holding at least
+  `compact_min_small_files` small files is a *candidate partition*; on a table with sort columns a file not stamped with
+  the table's sort order is *unsorted* whatever its size (a legacy table has none). A *candidate* is unsorted, or small in
+  a candidate partition. A table holding a delete file is not rewritten: the part fails (DP writes none).
+- **Declared and due.** At admission, from database rows only, the part declares `compaction-scratch-factor` × the
+  smaller of the profile's `max_bytes_rewritten_per_run` and the stored measurement's candidate bytes, never more than
+  `admission.scratch-bytes` less one delivery's reservation; a table not `active`/`deprecated`, never measured or
+  measured under another profile declares zero and is not due. After admission the table is read again (one pinned
+  snapshot): the part is due when it holds a candidate AND the run holds the part's scratch.
+- **The group.** One partition of one spec. A file's *need* is its size when it is unsorted, and its size plus the
+  smallest other candidate of its partition when it is a small file already in order (no other candidate → it waits;
+  it is never rewritten alone). Groups are formed per partition from the eligible files, oldest first (data sequence
+  number, then location), each taking files while their sizes stay within the limit now; the group holding the oldest
+  candidate runs first. Before every group the part reads the clock and plans again with the time left; a group that
+  would cross what is left of the run's cap is not started and not shrunk.
+- **The rewrite.** The group's rows are read by field id and ordered by the table's sort order (ascending, nulls
+  first) in the run's scratch database ([Staging §8.5](staging.md#85-the-duckdb-engine), *The trusted scratch
+  database*), the file locations bound as one array, never spliced into the statement; the Java writer writes the
+  outputs, stamped with the table's sort order, before any lease. The commit is ONE `RewriteFiles` through the run's
+  lease, the catalog fence and the revision trigger (`validateFromSnapshot` the planned snapshot): the inputs are
+  replaced by the outputs and **nothing is deleted** — the old files stay for the remover. One scratch database per run,
+  opened when the first group starts, closed (files deleted, reservation released) in a `finally`.
+- **The limits, and what `capacity` means.** The *whole-run limit* is the smallest of the profile's cap (source `cap`),
+  the most scratch any run can be granted ÷ the factor (`scratch`) and a whole `job-timeout` at
+  `compaction-bytes-per-second` (`time`); the *limit now* is the smallest of that, this run's grant ÷ the factor and the
+  time left at the same rate. A file whose need is above the whole-run limit is **blocked**: left exactly as it is, still
+  a candidate, and the part ends `capacity` with the blocked count, the largest need, the limit and its source. A file
+  within the whole-run limit but above the limit now is **left for a fresh run** (the earlier parts or groups used the
+  time or the grant): not `capacity`; with nothing blocked the part ends `deadline` and the next plan enqueues it again.
+  The scratch database running out mid-sort blocks that group with source `scratch` (the factor was too low for it;
+  the blocked event carries its input bytes and the grant).
+- **The three remedies** for a file blocked by the cap or by scratch: raise the profile's
+  `maintenance.max_bytes_rewritten_per_run`; or give the table a profile with a larger one; or, when `scratch` set the
+  limit, raise the server's `admission.scratch-bytes` (or `compaction-scratch-factor`, when the blocked event shows the
+  sort needed more than the factor allowed). A file blocked by `time` needs a longer `admission.job-timeout` or a higher
+  measured `compaction-bytes-per-second` ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)).
+- **The deadline.** A deadline that passes while rows stream (the stream checks between batches; the scratch database's
+  statement carries the time left as its timeout, decided by the clock, never by the driver's message) abandons the
+  group: nothing written is committed, and the unstarted groups are left for a fresh run. A lease another operation
+  holds ends the part `busy`. Precedence of the outcome: `busy`, `capacity`, `deadline`, `done`, else `nothing_to_do`.
+- **What the run row keeps.** The part's `parts_json` entry ([Metadata DB §4.55](metadata-db.md#455-lake_maintenance_runs))
+  carries, besides the common keys, `committed` (whether any group committed), `left_for_fresh_run` (files), `blocked`
+  (files), and for a blocked result `largest_need_bytes`, `limit_bytes` and `limit_source`; `groups` lists each committed
+  group's `input_files`, `input_bytes`, `output_files`, `output_bytes`, `rows`, `read_write_seconds`, `lease_seconds`
+  and `scratch_peak_bytes`. The planner reads `committed` and `left_for_fresh_run` (step 6 above). Log events
+  [Observability §3.4Y](observability.md#34y-lake-compaction-events-969).
+
 ---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.35 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #963's v1.32, #962's v1.33 and #964's v1.34 | **§11 Maintenance runs** gains *Compaction*: the one candidate rule shared with the planner, the declaration and the due check, the rewrite group (one partition of one spec, the need of a small in-order file, oldest first, re-planned before each group), the rewrite (sorted by field id in the run's trusted scratch database, written before the lease, one `RewriteFiles` commit, nothing deleted), the whole-run limit and the limit now, `capacity` and its three remedies, the deadline, and the run row's compaction keys. The section's opening names compaction among the landed parts. |
 | 2026-11-14 | v1.34 | 964 (#964, dp-lake P6) | **§10 Removal and cleanup** gains *The storage breakdown*: one inventory per cleanup from its own listing and walk, six rows in first-fit order (DP's own records, table metadata, current, held by history, held by keep rules, not referenced), what "held by keep rules" means, one time per inventory (as old as the last cleanup), replaced per cleanup, "not measured yet", and the totals check. |
 | 2026-11-14 | v1.33 | 962 (#962, dp-lake P6) — renumbered at the spec merge after #963's v1.32 | **§10 Removal and cleanup** gains its callers: *What a cleanup does, in order* (mode check, fresh load, keeps first, expiry over the deployment window's floor with Iceberg's deletes handed to the remover, the listing time and the orphan pass, the observer, the release; a never-published table's `not_applicable` floor), *How a cleanup ends* (one row per ending; only a completed pass resets the interval; `lake.maintenance.cleanup_incomplete` with reason `mode` or `delete_failed`; the figures on the run row and in `lake.cleanup.stopped`), *What is never deleted*, and *Purge deletion, and when it is finished* (the part's own re-check, the stamp only on *finished*). Replaces "No production code calls the remover yet". |
 | 2026-11-14 | v1.32 | 963 (#963, dp-lake P6) | **§11 Maintenance runs** gains the manifest rewrite: the part `manifest_rewrite` (second, no scratch, `active` and `deprecated`), due by the manifest count and held only by the compaction pause, the candidate rule (data manifests under half the target, two per spec), due with nothing to fold, the one commit and what it leaves unchanged, the replaced manifests left for the remover, `folded` and the counts on the run row, the lease measurement. The section's opening no longer says no part is registered. |

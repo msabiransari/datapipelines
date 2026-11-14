@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.27 (frozen contract — additive-only changes after this point)
+**Status:** v1.28 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-14
 
 ---
 
@@ -631,6 +631,13 @@ A failure after step 1 closes the root connection, deletes only the files that a
 
 The sweep runs once per factory; files that appear later are not re-read until the next process. A process that never admits a DuckDB execution never sweeps. **Which refusal a caller may retry:** `scratch_exhausted` clears when a running execution releases its reservation; `scratch_blocked` does not — an operator removes the counted files while no instance uses the scratch directory (the WARN lists them) or raises `scratch-bytes`, then restarts.
 
+**The trusted scratch database (#969).** The managed lake's compaction sorts a table's files in a database of this engine, read straight from the lake's object store, so it needs what an author database must never have: external access. `StagingPreparation.openTrusted` opens one from a scratch reservation (a delivery-shaped `prepareDelivery`, the same aggregate) in the **same open sequence** with ONE difference: step 3 leaves `enable_external_access` on, and step 4 reads back the other three settings (the lock, `memory_limit`, `max_temp_directory_size`). Either entry claims a preparation once; the other is then refused. What else differs, and why:
+
+- **It is not a `Staging`.** No lease pool, no author connection, no staged table, no raw-text gate: nothing can lease it and no author SQL can reach it. It hands DP's root connection to one body at a time (`withRoot`) and is closed by the factory's own finalizer, so its files, marker and reservation go exactly as an author database's (**Destruction**, **Leftovers**).
+- **Only DP's own statement runs on it.** The lock still refuses `SET`/`RESET`, but measured on the pinned driver (2026-11-14) a locked database with external access on still accepts `CREATE SECRET`, `LOAD` and a local file read — which is why it must never see author text. Its initializer configures the object store through the lake's own storage setup (the credential reaches it only there, as a temporary `CREATE OR REPLACE SECRET`; persistent secrets stay off) and sets `s3_url_compatibility_mode` so each bound file location is read literally; the compaction statement is built from field ids, a closed type vocabulary and the bound locations, never from a request.
+- **The same bounds.** `memory_limit`, the spill bounded by the reservation, and the file, WAL and spill directory measured after each body: a failure leaving a body is classified as an author database's is (`StagingScratchLimitException` for a spill or a measurement past the reservation, `StagingEngineMemoryLimitException` for another engine out-of-memory, anything else unchanged).
+- **The author database is unchanged:** external access off, configuration locked, both read back; a test opens one beside a trusted one and asserts it.
+
 ---
 
 ## 9. Connection Model
@@ -851,6 +858,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.28 | 969 (#969, dp-lake P6) | §8.5 gains **The trusted scratch database**: `StagingPreparation.openTrusted` runs the same open sequence with external access left on and the other three settings read back; it is not a `Staging` (no lease, no author SQL, no gate), hands DP's root to one body at a time, is closed by the factory's finalizer and classifies failures as an author database does; only DP's own statement may run on it (a locked database with external access on still accepts `CREATE SECRET`, `LOAD` and a local file read, measured). The author database is unchanged. |
 | 2026-11-13 | v1.27 | #803 merge review | §8.5: a dead-owner proof is tied to the stable regular-file identity observed before opening and after locking; owner-file unlink rechecks the same identity. Unknown or changed identity is unprovable. Four regressions include replacement while a real owner remains live across three JVMs. |
 | 2026-11-13 | v1.26 | 806 (#806) | §8.5 **Scratch**: one sentence pointing at the operator signal — the `datapipelines.staging.scratch.*` gauges and the status-only `duckdb_scratch` indicator on the management port ([Observability §4.1, §6.1](observability.md#61-health)). |
 | 2026-11-13 | v1.25 | 803 (#803) | §8.5: a DuckDB factory sweeps its scratch directory once before its first admission — a provably dead owner's databases (owner lock file free) are removed, live ones left alone, and what nobody can vouch for is counted against the aggregate, never deleted, with one WARN (**Leftovers**). Open sequence gains step 0 and the owner lock and marker in step 2; the same-id cleanup and a failed open's cleanup delete only what is provably dead or that attempt's own. Every delete re-reads the marker under the dead owner's lock (a database reclaimed meanwhile is never deleted); a leftover whose size cannot be read fails the admission as `creation_failed`, never counts as zero. §7.2 gains `pipeline.staging.scratch_blocked` (a request that can never fit beside the leftovers); `scratch_exhausted` stays the retryable refusal. §8.4 pointer updated. |

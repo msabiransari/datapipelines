@@ -9,6 +9,7 @@ import org.apache.iceberg.DataFile
 import org.apache.iceberg.FileFormat
 import org.apache.iceberg.NullOrder
 import org.apache.iceberg.PartitionKey
+import org.apache.iceberg.Schema
 import org.apache.iceberg.SortDirection
 import org.apache.iceberg.SortOrder
 import org.apache.iceberg.Table
@@ -89,6 +90,43 @@ class AppendOrder private constructor(
 }
 
 /**
+ * The data-file setup every writer of the lake shares (#969 D6): an append ([ParquetAppendWriter]) and a compaction
+ * rewrite build their writers here, so both write the same format, compression, row-group size and stamp.
+ */
+internal object LakeDataFiles {
+    /** Parquet/zstd at the profile's row-group size, stamped with [stamp]; rows of [schema]. */
+    fun writerFactory(
+        table: Table,
+        schema: Schema,
+        stamp: SortOrder,
+        profile: LakeProfile,
+    ): GenericFileWriterFactory =
+        GenericFileWriterFactory
+            .Builder(table)
+            .dataFileFormat(FileFormat.PARQUET)
+            .dataSchema(schema)
+            .dataSortOrder(stamp)
+            .writerProperties(
+                mapOf(
+                    TableProperties.PARQUET_COMPRESSION to "zstd",
+                    TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES to profile.rowGroupBytes.toString(),
+                ),
+            ).build()
+
+    /** File names carrying [operationId] (and [taskId], so two writers of one operation never collide). */
+    fun outputFiles(
+        table: Table,
+        operationId: UUID,
+        taskId: Long,
+    ): OutputFileFactory =
+        OutputFileFactory
+            .builderFor(table, 0, taskId)
+            .operationId(operationId.toString())
+            .format(FileFormat.PARQUET)
+            .build()
+}
+
+/**
  * Streams a stable staged result into partitioned Parquet/zstd (§8 step 4), after checking every required value.
  * Small row groups bound each open writer's buffering; file rotation bounds footer accumulation. Neither is a promise
  * about total process RSS. Abort/delete is never called.
@@ -120,24 +158,8 @@ class ParquetAppendWriter {
         val plan = AppendColumnCheck().check(input, table.schema(), table.spec(), checkActive)
         if (plan.rowCount == 0L) return WrittenAppend(0, emptyList())
         val order = AppendOrder.of(table.sortOrder(), plan.bindings)
-        val factory =
-            GenericFileWriterFactory
-                .Builder(table)
-                .dataFileFormat(FileFormat.PARQUET)
-                .dataSchema(plan.schema)
-                .dataSortOrder(order.stamp)
-                .writerProperties(
-                    mapOf(
-                        TableProperties.PARQUET_COMPRESSION to "zstd",
-                        TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES to profile.rowGroupBytes.toString(),
-                    ),
-                ).build()
-        val output =
-            OutputFileFactory
-                .builderFor(table, 0, 0L)
-                .operationId(operationId.toString())
-                .format(FileFormat.PARQUET)
-                .build()
+        val factory = LakeDataFiles.writerFactory(table, plan.schema, order.stamp, profile)
+        val output = LakeDataFiles.outputFiles(table, operationId, taskId = 0L)
         var count = 0L
         val task: BaseTaskWriter<Record> =
             if (table.spec().isUnpartitioned) {
@@ -150,7 +172,7 @@ class ParquetAppendWriter {
             input.scan(order.keys) { rows ->
                 while (rows.next()) {
                     checkActive()
-                    plan.bindings.forEachIndexed { index, binding -> row.set(index, AppendValues.read(rows, binding)) }
+                    AppendValues.readRow(rows, plan.bindings, row)
                     writer.write(row)
                     count++
                 }

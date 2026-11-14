@@ -54,8 +54,9 @@ data class PartFigures(
 /**
  * A part's answer: its outcome, the figures of what it did, the instant of a `paused_until`, the part's own [reason]
  * (`nothing to fold`, #963) and its own [details]: further figures written at the top level of its `parts_json` entry
- * (`folded`, `manifests_before`, #963; `committed`, `left_for_fresh_run`, #969). A detail's name is `[a-z_]+` and never
- * one of the entry's own keys ([PartRecord.KEYS]); its value is a boolean, an integer or a string.
+ * (`folded`, `manifests_before`, #963; `committed`, `left_for_fresh_run`, `groups`, #969). A detail's name is `[a-z_]+`
+ * and never one of the entry's own keys ([PartRecord.KEYS]); its value is a boolean, an integer or a string, or a list
+ * of flat objects whose values are booleans, numbers or strings (#969's `groups`, one object per committed group).
  */
 data class PartResult(
     val outcome: MaintenanceOutcome,
@@ -69,14 +70,22 @@ data class PartResult(
         require((outcome == MaintenanceOutcome.PAUSED_UNTIL) == (until != null)) { "only paused_until carries an instant: $this" }
         details.forEach { (key, value) ->
             require(DETAIL_NAME.matches(key) && key !in PartRecord.KEYS) { "a detail is named [a-z_]+ and is not an entry key: $key" }
-            val scalar = value is Boolean || value is Int || value is Long || value is String
-            require(scalar) { "a detail is a boolean, integer or string: $key" }
+            require(scalar(value) || flatObjects(value)) { "a detail is a boolean, integer or string, or a list of flat objects: $key" }
         }
     }
 
     companion object {
         val NOTHING_TO_DO = PartResult(MaintenanceOutcome.NOTHING_TO_DO)
         private val DETAIL_NAME = Regex("[a-z_]+")
+
+        private fun scalar(value: Any): Boolean = value is Boolean || value is Int || value is Long || value is String
+
+        private fun flatObjects(value: Any): Boolean =
+            value is List<*> &&
+                value.all { item ->
+                    item is Map<*, *> &&
+                        item.all { (key, field) -> key is String && (field is Boolean || field is Number || field is String) }
+                }
     }
 }
 

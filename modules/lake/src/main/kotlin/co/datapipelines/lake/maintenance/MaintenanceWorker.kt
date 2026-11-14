@@ -93,8 +93,8 @@ class MaintenanceWorker(
         val reservation = if (demand > 0) scratch.reserve(demand) else null
         try {
             val reserved = if (reservation != null) demand else 0L
-            val perPart =
-                if (reservation != null) declared.filterValues { it.expectsDue }.mapValues { it.value.scratchBytes } else emptyMap()
+            val demanded = declared.filterValues { it.expectsDue }.mapValues { it.value.scratchBytes }
+            val perPart = if (reservation != null) demanded else emptyMap()
             val kind = if (table.purged) MaintenanceRunKind.PURGE else MaintenanceRunKind.MAINTENANCE
             return when (val admission = store.admit(UUID.randomUUID(), table.id, kind, jobTimeout, reserved)) {
                 is Admission.EarlierRunLive -> {
@@ -120,7 +120,7 @@ class MaintenanceWorker(
                             admission.runId,
                         )
                     }
-                    val run = context.open(admission.runId, table, admission.deadline, perPart)
+                    val run = context.open(admission.runId, table, admission.deadline, perPart, reservation, demanded)
                     execute(run, kind, eligible, declared, actorId)
                     SystemJobOutcome.Done
                 }

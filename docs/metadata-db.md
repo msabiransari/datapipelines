@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.68 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.69 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-14
@@ -2140,7 +2140,7 @@ CREATE INDEX idx_lake_maintenance_runs_table_started ON lake_maintenance_runs (t
 
 - **The admitting statement** closes an earlier `running` row of the table whose `deadline_at` has passed as `abandoned` (`error_code = 'outcome_not_confirmed'`) and inserts the new `running` row, both or neither, in one statement; an earlier `running` row not yet past its deadline admits nothing. A race between two instances is decided by the partial unique index: the loser inserts nothing.
 - **Every later write is conditional on `state = 'running'`**: the progress writes (`parts_json`, `settlement_json`, the summed figures) and the close (`finished` or `failed`, `ended_at`, `error_code`, `error_message`). A row its successor marked `abandoned` is never overwritten by its late worker, and nothing is concluded from it.
-- `parts_json` holds each part's `name`, `outcome` ([Enums §54](enums.md#54-maintenanceoutcome--one-maintenance-parts-outcome)), `attempted`, figures, and the gate's `reason`, a `paused_until` instant or a failed part's `error_code`; `files_touched`, `bytes_touched` and `deferred_deletions` are their sums. A part may add its own figures as further top-level keys of its entry (the manifest rewrite's `folded`, `manifests_before`, `manifests_after`, `lease_held_millis` and its `nothing to fold` reason, [Lake §11](lake.md#11-maintenance-runs); the cleanup's and the purge deletion's tag, expiry and removal counts, a count by reason as one `<field>_<reason>` key per reason, [Lake §10](lake.md#10-removal-and-cleanup)). `error_code` is a catalogued code, `interrupted`, `unclassified` or `outcome_not_confirmed`; `error_message` is the failure's class name only, never an exception's text.
+- `parts_json` holds each part's `name`, `outcome` ([Enums §54](enums.md#54-maintenanceoutcome--one-maintenance-parts-outcome)), `attempted`, figures, and the gate's `reason`, a `paused_until` instant or a failed part's `error_code`; `files_touched`, `bytes_touched` and `deferred_deletions` are their sums. A part may add its own figures as further top-level keys of its entry (the manifest rewrite's `folded`, `manifests_before`, `manifests_after`, `lease_held_millis` and its `nothing to fold` reason, [Lake §11](lake.md#11-maintenance-runs); compaction's `committed`, `left_for_fresh_run`, `blocked`, `largest_need_bytes`, `limit_bytes`, `limit_source` and `groups`, a list of one flat object per committed group, [Lake §11](lake.md#11-maintenance-runs); the cleanup's and the purge deletion's tag, expiry and removal counts, a count by reason as one `<field>_<reason>` key per reason, [Lake §10](lake.md#10-removal-and-cleanup)). `error_code` is a catalogued code, `interrupted`, `unclassified` or `outcome_not_confirmed`; `error_message` is the failure's class name only, never an exception's text.
 - `ON DELETE CASCADE`: a managed table's row takes its run history with it; the application deletes no run row. How long rows are kept is #965.
 
 ### 4.56 `lake_profiles`
@@ -2869,6 +2869,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.69 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.67 and #964's v1.68 | **§4.55 `lake_maintenance_runs`**: compaction's own keys in its `parts_json` entry (`committed`, `left_for_fresh_run`, `blocked`, `largest_need_bytes`, `limit_bytes`, `limit_source`, and `groups`, one flat object per committed group). No DDL change, no migration. |
 | 2026-11-14 | v1.68 | V64 (#964, dp-lake P6) | **V64 — the lake storage breakdown.** New **§4.60 `lake_storage_inventory`**: the latest inventory per table, six rows (one per `StorageRow`, V64's CHECK) with their object count, bytes, one time and the run id, replaced by each cleanup in one transaction. §3 ERD, §5 (its primary key) and §5A (derived) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-14 | v1.67 | 962 (#962, dp-lake P6) | **§4.55 `lake_maintenance_runs`**: the cleanup and purge deletion parts add their counts to their `parts_json` entries (scalars; a count by reason as one `<field>_<reason>` key per reason that occurred). No DDL change, no migration. |
 | 2026-11-14 | v1.66 | 963 (#963, dp-lake P6) | **§4.55 `lake_maintenance_runs`**: a part may add its own figures as top-level keys of its `parts_json` entry (the manifest rewrite's `folded`, `manifests_before`, `manifests_after`, `lease_held_millis`, reason `nothing to fold`). No DDL change, no migration. |

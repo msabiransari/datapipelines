@@ -30,12 +30,20 @@ interface StagingPreparation :
     /** Transfers the reservation to the database after trusted setup and the author configuration lock. */
     fun open(initializer: TrustedStagingInitializer = TrustedStagingInitializer.NONE): Staging
 
+    /**
+     * Opens a [TrustedScratchDatabase] instead (#969 D5; staging.md §8.5): the same open sequence and the same claim
+     * as [open] — once, the reservation moving to the database — with external access left on. Either entry claims
+     * the preparation; the other is then refused.
+     */
+    fun openTrusted(initializer: TrustedStagingInitializer): TrustedScratchDatabase
+
     /** Releases unopened admission. An opened database retains its reservation until its own close. */
     override fun close()
 }
 
 internal class ReservedStagingPreparation(
     private val reservation: ScratchReservation,
+    private val trustedOpener: (TrustedStagingInitializer) -> TrustedScratchDatabase,
     private val opener: (TrustedStagingInitializer) -> Staging,
 ) : StagingPreparation {
     private val claimed = AtomicBoolean(false)
@@ -44,11 +52,15 @@ internal class ReservedStagingPreparation(
 
     override fun afterRelease(callback: () -> Unit) = reservation.afterRelease(callback)
 
-    override fun open(initializer: TrustedStagingInitializer): Staging {
+    override fun open(initializer: TrustedStagingInitializer): Staging = claimOnce { opener(initializer) }
+
+    override fun openTrusted(initializer: TrustedStagingInitializer): TrustedScratchDatabase = claimOnce { trustedOpener(initializer) }
+
+    private fun <T> claimOnce(opening: () -> T): T {
         check(claimed.compareAndSet(false, true)) { "Staging admission was already opened or closed." }
         var handedOut = false
         try {
-            return opener(initializer).also { handedOut = true }
+            return opening().also { handedOut = true }
         } finally {
             if (!handedOut) reservation.release()
         }

@@ -63,6 +63,24 @@ internal object LakeTuningSourceGuard {
             Admitted("maintenance/plan/PlanRepository.kt", "USAGE_RETENTION_DAYS = 35", "usage rows kept 35 days: a record rule (cut L8)"),
             Admitted("maintenance/plan/PlanFigures.kt", "GROWTH_BASELINE_DAYS = 7", "growth per WEEK: call 46's definition"),
             Admitted("maintenance/plan/TableMeasurer.kt", "LakeMetadataReads.METADATA_MAX_BYTES", "metadata read cap: a safety bound"),
+            Admitted(
+                "maintenance/compaction/CompactionGroupPlanner.kt",
+                "MIN_FILES_TO_MERGE = 2",
+                "call 34's \"at least two\": a record rule",
+            ),
+            Admitted("maintenance/compaction/CompactionPart.kt", "ORDER = 3", "the record's run order: cleanup, manifests, compaction"),
+            Admitted("maintenance/compaction/CompactionPart.kt", "NANOS_PER_SECOND = 1e9", "a unit conversion"),
+            Admitted("maintenance/compaction/CompactionSettings.kt", "MILLIS_PER_SECOND = 1_000L", "a unit conversion"),
+            Admitted(
+                "maintenance/compaction/CompactionRewriter.kt",
+                "CHECK_EVERY_ROWS = 1_000L",
+                "rows between the stream's deadline checks (D8): a check cadence, no table's tuning",
+            ),
+            Admitted(
+                "maintenance/compaction/CompactionTables.kt",
+                ".properties()",
+                "the pinned handle's location provider, built as Iceberg builds a table's own: where files go, not tuning",
+            ),
             Admitted("maintenance/manifests/ManifestFold.kt", "MIN_GROUP = 2", "two manifests are the fewest that fold: grammar"),
             Admitted("maintenance/manifests/ManifestFold.kt", "(targetBytes - 1) / 2", "under HALF, including odd targets: 963 D2a"),
             Admitted("maintenance/manifests/ManifestRewritePart.kt", "ORDER = 2", "second in the record's order (call 34)"),
@@ -85,7 +103,9 @@ internal object LakeTuningSourceGuard {
     /**
      * #959 D1: the planner's four `maintenance.plan-*` keys, which rules (c) and (d) admit when read as
      * `properties.maintenance.<member>`: they describe the deployment (how often it plans, how much one plan measures),
-     * one value per deployment, never a profile value or the tuning of a table. Any other `maintenance` read stays red.
+     * one value per deployment, never a profile value or the tuning of a table. #969 D4 adds compaction's two
+     * deployment values (the scratch per input byte and the assumed rate): what the deployment's engine needs and
+     * gets through, one value per deployment, never a profile value. Any other `maintenance` read stays red.
      */
     val ADMITTED_PLAN_KEYS: List<Admitted> =
         listOf(
@@ -93,6 +113,8 @@ internal object LakeTuningSourceGuard {
             Admitted("*", "planPageSize", "tables one plan measures: deployment configuration (#959 D1)"),
             Admitted("*", "planTableTimeout", "one measurement's bound: deployment configuration (#959 D1)"),
             Admitted("*", "planMaxAbandonedReads", "abandoned reads one instance tolerates: deployment configuration (#959 D1)"),
+            Admitted("*", "compactionScratchFactor", "scratch per byte of a group's input: deployment configuration (#969 D4)"),
+            Admitted("*", "compactionBytesPerSecond", "a group's assumed rate: deployment configuration (#969 D4)"),
         )
 
     /** The files rule (d) admits: the start-up seed, its wiring and the boot rule. */

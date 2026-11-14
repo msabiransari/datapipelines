@@ -16,11 +16,17 @@ class MaintenanceRunContext(
     private val heartbeats: ScheduledExecutorService,
     private val hooks: MaintenanceRunHooks = MaintenanceRunHooks.NONE,
 ) {
-    /** The run of the admitted row [runId]: its [deadline] is the row's, and [scratch] the bytes reserved per part name. */
+    /**
+     * The run of the admitted row [runId]: its [deadline] is the row's, [scratch] the bytes reserved per part name,
+     * [reservation] the held scratch reservation itself (null when none was granted; the worker still closes it), and
+     * [declared] the bytes each part expecting to be due declared, granted or not (the granted map when not given).
+     */
     fun open(
         runId: UUID,
         table: MaintenanceTable,
         deadline: Instant,
         scratch: Map<String, Long>,
-    ): MaintenanceRun = MaintenanceRun(runId, table, deadline, scratch, leases, catalogs, heartbeats, hooks)
+        reservation: AutoCloseable? = null,
+        declared: Map<String, Long> = scratch,
+    ): MaintenanceRun = MaintenanceRun(runId, table, deadline, scratch, reservation, leases, catalogs, heartbeats, hooks, declared)
 }

@@ -1,5 +1,6 @@
 package co.datapipelines.lake.maintenance.plan
 
+import co.datapipelines.lake.maintenance.compaction.CompactionCandidateRule
 import co.datapipelines.lake.profiles.LakeProfile
 
 /** One live data file of the current snapshot, as a manifest entry describes it (no data file is opened). */
@@ -25,14 +26,16 @@ data class DataFileFact(
  * - [TableFigures.candidateBytes]: the summed size of every candidate file counted ONCE (small in a candidate partition,
  *   or unsorted), files larger than the cap left out;
  * - current bytes: data and delete files; current rows: the data files' record counts (row deletes not subtracted).
+ *
+ * Small, unsorted and candidate partition are [CompactionCandidateRule]'s functions, the ones the compaction part decides
+ * with (brief 969 D2).
  */
 class TableFigureCount(
     profile: LakeProfile,
-    private val tableSortOrderId: Int?,
+    tableSortOrderId: Int?,
 ) {
-    private val smallBelow = profile.compactSmallFileRatio * profile.targetFileBytes
+    private val rule = CompactionCandidateRule(profile, tableSortOrderId)
     private val cap = profile.maxBytesRewrittenPerRun
-    private val minSmall = profile.compactMinSmallFiles
 
     private class Partition {
         var small = 0L
@@ -55,12 +58,12 @@ class TableFigureCount(
         dataFiles++
         bytes += file.sizeBytes
         rows += file.records
-        val isUnsorted = tableSortOrderId != null && file.sortOrderId != tableSortOrderId
+        val isUnsorted = rule.unsorted(file.sortOrderId)
         if (isUnsorted) {
             unsorted++
             if (file.sizeBytes > cap) unsortedOverCap++ else unsortedFittingBytes += file.sizeBytes
         }
-        if (file.sizeBytes < smallBelow) {
+        if (rule.small(file.sizeBytes)) {
             val partition = partitions.getOrPut(file.partition) { Partition() }
             partition.small++
             partition.smallBytes += file.sizeBytes
@@ -77,7 +80,7 @@ class TableFigureCount(
         snapshotId: Long,
         manifests: Long,
     ): TableFigures {
-        val candidates = partitions.values.filter { it.small >= minSmall }
+        val candidates = partitions.values.filter { rule.candidatePartition(it.small) }
         val smallInCandidates = candidates.sumOf { it.small }
         // Each candidate once: the small files of candidate partitions, plus the fitting unsorted files not among them.
         val candidateBytes =

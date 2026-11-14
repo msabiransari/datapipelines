@@ -77,6 +77,8 @@ internal object LakeRules {
     const val PLAN_PAGE_SIZE = "$PREFIX.maintenance.plan-page-size"
     const val PLAN_TABLE_TIMEOUT = "$PREFIX.maintenance.plan-table-timeout"
     const val PLAN_MAX_ABANDONED_READS = "$PREFIX.maintenance.plan-max-abandoned-reads"
+    const val COMPACTION_SCRATCH_FACTOR = "$PREFIX.maintenance.compaction-scratch-factor"
+    const val COMPACTION_BYTES_PER_SECOND = "$PREFIX.maintenance.compaction-bytes-per-second"
     const val PROTECTION_DAYS = "$PREFIX.retention.protection-days"
     const val ORPHAN_GRACE_HOURS = "$PREFIX.retention.orphan-grace-hours"
 
@@ -118,6 +120,8 @@ internal object LakeRules {
             PLAN_PAGE_SIZE,
             PLAN_TABLE_TIMEOUT,
             PLAN_MAX_ABANDONED_READS,
+            COMPACTION_SCRATCH_FACTOR,
+            COMPACTION_BYTES_PER_SECOND,
             PROTECTION_DAYS,
             ORPHAN_GRACE_HOURS,
         )
@@ -288,6 +292,9 @@ internal object LakeRules {
      *
      * #959 D1: the planner's four bounds — `plan-interval` at least one minute, `plan-page-size` 1 – 10,000,
      * `plan-table-timeout` 1 second – 10 minutes, `plan-max-abandoned-reads` 1 – 64 ([planBounds]).
+     *
+     * #969 D4: compaction's two deployment values — `compaction-scratch-factor` a whole number of at least 1,
+     * `compaction-bytes-per-second` a positive size ([compactionBounds]).
      */
     fun checkLakeBounds(
         snapshot: ConfigSnapshot,
@@ -305,6 +312,16 @@ internal object LakeRules {
             violations += "$MAINTENANCE_WINDOW must be HH:MM-HH:MM in UTC (§3.36)."
         }
         planBounds(snapshot, violations)
+        compactionBounds(snapshot, violations)
+    }
+
+    /** #969 D4 — a term of [checkLakeBounds]: the scratch per byte of a group's input and the rate a group is assumed to get. */
+    private fun compactionBounds(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        positiveInt(snapshot, COMPACTION_SCRATCH_FACTOR, violations)
+        dataSize(snapshot, COMPACTION_BYTES_PER_SECOND, violations)
     }
 
     /** #959 D1 — a term of [checkLakeBounds], not a check of its own: each key refused outside its bounds, named. */
