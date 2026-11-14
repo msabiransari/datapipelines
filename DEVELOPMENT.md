@@ -810,8 +810,11 @@ own terms and the recount sees every module's results.
 **Why the recount and not the exit code.** A `--continue` build exits non-zero for a lint task
 while every test passed; a pipe reports the pipe's last stage; a backgrounded `…; echo $?` reports
 the *shell's* last command. `scripts/test-recount.sh` reads the JUnit XML both trees wrote —
-`modules/*/` **and** `tests/*/` — plus `TEST-*.xml` directly at the results root for flat CI
-artifacts — and prints `files/tests/failures/errors/skipped/unreadable`. It exits 0 regardless of
+`modules/*/` **and** `tests/*/` — plus flat `TEST-*.xml`, browser artifact `test-results/` and
+module-only gate artifact `*/build/test-results/` trees — and prints
+`files/tests/failures/errors/skipped/unreadable`. The module-only shape is read only when the
+root has neither `modules/` nor `tests/`, keeping the repository's separate buildSrc guards out.
+It exits 0 regardless of
 the counts, 2 for a root that is not a directory, and 3 when no result XML is found. It is committed
 rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
 total for four consecutive rounds before it existed. A test JVM that HotSpot's own handler kills (the
@@ -843,9 +846,11 @@ The pre-gate also keeps the lines in `stage-<id>.crash-reports.txt` beside the r
 **One recount over a CI run (#669).** The gate and browser results span four artifacts:
 `gate-reports` (every test task of the gate job) and `browser-reports-1` … `browser-reports-3`
 (one per browser shard); integration results are recounted separately. Download each into its
-OWN directory. `gh run download` preserves the artifact's member paths under `-D`: the browser
-upload paths share the module's build directory, so its XML lands under `test-results/test/`.
-The recount reads that prefix as well as module trees and flat XML. Pass every root to one
+OWN directory. `gh run download` preserves the artifact's member paths under `-D`: the gate's
+upload paths share `modules/`, so its XML lands under `app/build/test-results/` and its sibling
+module directories. The browser paths share that module's build directory, so its XML lands
+under `test-results/test/`. The recount reads both artifact shapes, repository trees and flat
+XML. Pass every root to one
 recount, which prints ONE line over all of them:
 
 ```bash

@@ -966,17 +966,25 @@ fe_ran="$(printf '%s\n' $fe_ids | sort -u | wc -l | tr -d ' ')"
 ok "#974: $fe_ran cases — caller wins first, garbage forks falls back once, a short machine falls back loudly, memory admits four forks"
 echo '  fork-decision self-test: PASS'
 
-# #669: upload-artifact roots browser reports at their common build directory.
-# Recount this real layout beside a module artifact, and still refuse overlap.
+# #669: browser reports are rooted at build/, gate reports at modules/.
+# Both artifact layouts work; repository buildSrc and nested snapshots stay separate.
 recount_gate="$T/recount-gate"
+recount_modules="$T/recount-modules"
 recount_browser="$T/recount-browser"
-mkdir -p "$recount_gate/modules/web/build/test-results/test" "$recount_browser/test-results/test"
+mkdir -p "$recount_gate/modules/web/build/test-results/test" "$recount_browser/test-results/test" \
+  "$recount_gate/buildSrc/build/test-results/test" "$recount_modules/web/build/test-results/test" \
+  "$recount_modules/saved/worktree/build/test-results/test"
 echo '<testsuite name="WebTest" tests="2" failures="0" errors="0" skipped="0"/>' > "$recount_gate/modules/web/build/test-results/test/TEST-WebTest.xml"
 echo '<testsuite name="BrowserTest" tests="3" failures="0" errors="0" skipped="0"/>' > "$recount_browser/test-results/test/TEST-BrowserTest.xml"
+echo '<testsuite name="GuardTest" tests="99" failures="0" errors="0" skipped="0"/>' > "$recount_gate/buildSrc/build/test-results/test/TEST-GuardTest.xml"
+echo '<testsuite name="SavedTest" tests="99" failures="0" errors="0" skipped="0"/>' > "$recount_modules/saved/worktree/build/test-results/test/TEST-SavedTest.xml"
+cp "$recount_gate/modules/web/build/test-results/test/TEST-WebTest.xml" "$recount_modules/web/build/test-results/test/TEST-WebTest.xml"
 recount_sum="$(bash "$ROOT/scripts/test-recount.sh" "$recount_gate" "$recount_browser")" || fail '#669: browser artifact layout was not recounted'
 [ "$recount_sum" = 'files=2 tests=5 failures=0 errors=0 skipped=0 unreadable=0' ] || fail '#669: artifact recount lost or duplicated a result'
+recount_module_sum="$(bash "$ROOT/scripts/test-recount.sh" "$recount_modules" "$recount_browser")" || fail '#669: gate artifact layout was not recounted'
+[ "$recount_module_sum" = "$recount_sum" ] || fail '#669: module artifact recount includes a saved tree or loses a module'
 cp "$recount_gate/modules/web/build/test-results/test/TEST-WebTest.xml" "$recount_browser/test-results/test/TEST-WebTest.xml"
 recount_rc=0
-bash "$ROOT/scripts/test-recount.sh" "$recount_gate" "$recount_browser" > "$T/recount-out" 2> "$T/recount-err" || recount_rc=$?
+bash "$ROOT/scripts/test-recount.sh" "$recount_modules" "$recount_browser" > "$T/recount-out" 2> "$T/recount-err" || recount_rc=$?
 [ "$recount_rc" -eq 4 ] && [ ! -s "$T/recount-out" ] && grep -q 'TEST-WebTest.xml' "$T/recount-err" || fail '#669: overlapping artifact roots were accepted'
-ok '#669: browser artifact root recounted and cross-artifact duplicate refused'
+ok '#669: both artifact roots recounted, buildSrc and saved trees excluded, cross-artifact duplicate refused'

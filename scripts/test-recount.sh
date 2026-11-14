@@ -11,6 +11,9 @@
 #     trees, plus TEST-*.xml files directly at the root (flat CI artifacts).
 #     A browser-shard artifact uses its upload paths' common build directory as
 #     its root, so test-results/**/*.xml directly under that root is read too.
+#     The gate artifact is rooted at modules/, so its module/build/test-results
+#     trees are read when the root has neither canonical modules/ nor tests/ trees.
+#     That keeps a repository's separate buildSrc guard results out of this recount.
 #     Never walk recursively from the root: sibling worktrees and saved snapshots
 #     contain duplicate results. #441: the
 #     pre-gate snapshots each stage's XML under .pregate-logs/runs/<run-id>/<stage>/, so
@@ -99,6 +102,8 @@ for root in roots:
            glob.glob("tests/*/build/test-results/**/*.xml", root_dir=root, recursive=True) +
            glob.glob("test-results/**/*.xml", root_dir=root, recursive=True) +
            glob.glob("TEST-*.xml", root_dir=root))
+    if not any(os.path.isdir(os.path.join(root, tree)) for tree in ("modules", "tests")):
+        rel += glob.glob("*/build/test-results/**/*.xml", root_dir=root, recursive=True)
     per_root.append((root, rel))
 # #669: one class's result file under two roots would be counted twice — refuse, count nothing.
 if len(roots) > 1:
@@ -136,7 +141,7 @@ for p, why in unreadable:
 empty = [root for root, rel in per_root if not rel]
 for root in empty:
     print(f"test-recount.sh: no test result XML under '{root}' "
-          "(modules/*/…, tests/*/…, or TEST-*.xml at the root)", file=sys.stderr)
+          "(modules/*/…, tests/*/…, module/build/…, test-results/…, or flat TEST-*.xml)", file=sys.stderr)
 if empty:
     sys.exit(3)
 PY
