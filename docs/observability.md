@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.82 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.83 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-14
@@ -522,6 +522,7 @@ The `lake-maintenance` scheduler task, one instance per managed table ([Lake: ma
 | WARN | `lake.maintenance.deadline_refused` | A commit was not attempted, or its lease was refused, because the run's deadline had passed: the part ends `deadline` | `run_id`, `table_id`, `deadline`, `code` (`lake.maintenance.deadline`) |
 | WARN | `lake.maintenance.close_refused` | The run's close found the row no longer `running` (a successor abandoned it): nothing is overwritten and nothing concluded | `run_id`, `table_id`, `state` (the state the worker would have written) |
 | INFO | `lake.maintenance.finished` | An admitted run ended (also after `close_refused`, with `state=abandoned`) | `run_id`, `table_id`, `state`, `error_code`, `parts` (`name:outcome` per part, comma-separated) |
+| INFO | `lake.maintenance.keep_reconciled` | #960: the keep rules' reconcile was applied to the run's table ([Lake §11 Profiles](lake.md#11-profiles)): one commit when the plan created, re-aged or removed a `dp-keep-` tag, none otherwise. Counts only; never a tag name or a snapshot id | `run_id`, `table_id`, `outcome` (`committed` \| `nothing_to_commit` \| `busy` \| `deadline`), `created`, `re_aged`, `removed`, `standing`, `not_kept` |
 
 #### 3.4V Lake maintenance planner events (#959)
 
@@ -838,7 +839,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-14 | v1.82 | 959 (#959) | **§3.4V** (new): the six `lake.maintenance.*` events of the maintenance planner: planned, plan_reads_exhausted, plan_read_abandoned, plan_read_ended, plan_measure_failed, plan_write_failed. |
+| 2026-11-14 | v1.83 | 959 (#959) — renumbered at the spec merge after #960's v1.82 | **§3.4V** (new): the six `lake.maintenance.*` events of the maintenance planner: planned, plan_reads_exhausted, plan_read_abandoned, plan_read_ended, plan_measure_failed, plan_write_failed. |
+| 2026-11-14 | v1.82 | 960 (#960, dp-lake P6) | **§3.4U**: new INFO `lake.maintenance.keep_reconciled` (`run_id`, `table_id`, `outcome`, `created`, `re_aged`, `removed`, `standing`, `not_kept`) — the keep rules' reconcile applied to a run's table, one commit or none. |
 | 2026-11-14 | v1.81 | 956 (#956, dp-lake P6) — renumbered at the spec merge after #957's v1.80 | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |
 | 2026-11-14 | v1.80 | 957 (#957) — renumbered at the spec merge after #958's v1.79 | **§3.4U** (new; §3.4T at the lane's base, #958's §3.4T landed first): the ten `lake.maintenance.*` events of the per-table maintenance task: refused, skipped, held, waiting, admitted, abandoned, settlement_deferred, deadline_refused, close_refused, finished. |
 | 2026-11-14 | v1.79 | 958 (#958) | New **§3.4T**, the lake remover's six events: WARN `lake.removal.refused`, INFO `lake.removal.ended`, WARN `lake.removal.failed`, `lake.removal.batch_failed`, `lake.removal.marker_left` and `lake.removal.unexpected_dp_key`. Counts, identifiers and one relative unexpected key; never a key list or a credential. |

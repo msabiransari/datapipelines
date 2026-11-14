@@ -1,5 +1,5 @@
 -- =============================================================================
--- V62 — the lake maintenance planner's rows (#959, dp-lake P6; design record §11a call 34, §11b call 46;
+-- V63 — the lake maintenance planner's rows (#959, dp-lake P6; design record §11a call 34, §11b call 46;
 -- lane cut L8, L16)
 --
 -- 1. lake_table_measurements — ONE row per managed table: the planner's latest figures, read from the current
@@ -30,7 +30,7 @@
 --   DROP INDEX idx_lake_maintenance_runs_finished;
 --   ALTER TABLE lake_tables_managed DROP COLUMN purge_deleted_at;
 --   DROP TABLE lake_maintenance_plan; DROP TABLE lake_storage_usage; DROP TABLE lake_table_measurements;
---   DELETE FROM flyway_schema_history WHERE version = '62';
+--   DELETE FROM flyway_schema_history WHERE version = '63';
 -- =============================================================================
 
 CREATE TABLE lake_table_measurements (
