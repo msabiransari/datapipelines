@@ -2,6 +2,8 @@ package co.datapipelines.lake.maintenance.compaction
 
 import co.datapipelines.lake.maintenance.MaintenanceOutcome
 import co.datapipelines.lake.maintenance.PartRecord
+import co.datapipelines.lake.maintenance.PartResult
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -51,6 +53,16 @@ class CompactionTallyTest {
         nothing.details.keys shouldContainAll listOf("committed", "left_for_fresh_run", "blocked", "groups")
         nothing.details["committed"] shouldBe false
         (nothing.details.keys intersect PartRecord.KEYS) shouldBe emptySet()
+    }
+
+    @Test
+    fun `a part's details admit the groups list of flat objects, and refuse a nested object or a top-level fraction`() {
+        val done = CompactionTally().apply { groups += figures }.result()
+        done.details["groups"] shouldBe listOf(figures.wire())
+        val nested = listOf(mapOf("input_files" to mapOf("x" to 1)))
+        shouldThrow<IllegalArgumentException> { PartResult(MaintenanceOutcome.DONE, details = mapOf("groups" to nested)) }
+        shouldThrow<IllegalArgumentException> { PartResult(MaintenanceOutcome.DONE, details = mapOf("ratio" to 0.5)) }
+        shouldThrow<IllegalArgumentException> { PartResult(MaintenanceOutcome.DONE, details = mapOf("outcome" to "done")) }
     }
 
     @Test
