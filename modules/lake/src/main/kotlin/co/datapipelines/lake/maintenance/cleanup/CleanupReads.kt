@@ -142,7 +142,7 @@ class CleanupReads(
             MaintenanceTable.STATUS_PURGED,
         ) == 1
 
-    private fun read(location: String): TableMetadata = TableMetadataParser.read(metadataIo(), location)
+    private fun read(location: String): TableMetadata = metadataIo().use { io -> TableMetadataParser.read(io, location) }
 
     private fun requireNoTransaction() =
         check(!TransactionSynchronizationManager.isActualTransactionActive()) {
