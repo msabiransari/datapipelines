@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.55 (living document — updated as enums evolve)
+**Status:** v1.56 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1088,6 +1088,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `EvaluationCaller`, `ParameterEvaluationStatus`, `QueryAttemptOutcome` | the [parameter-set workspace spec §2](superpowers/specs/2026-10-02-parameter-set-workspace-spec.md) (`parameters` declares them; §39–§41 here are the wire tables) | metadata-db (the V48 CHECKs), the History tab (ui-screens §4.23) |
 | `LakeTableStatus`, `LakeApplyState`, `LakeChangeClass` | [lake.md](lake.md) (`lake` declares them; §46–§48 here are the wire tables) | metadata-db (the V54 CHECKs), the lake surfaces (P8) |
 | `MaintenanceRunKind`, `MaintenanceRunState`, `MaintenanceOutcome` | [lake.md](lake.md#11-maintenance-runs) (`lake` declares them; §52–§54 here are the wire tables) | metadata-db (the V60 CHECKs), the run's audit event (§15) |
+| `IncompleteReason`, `ObserverOutcome`, `ObservedRefType` | [lake.md](lake.md#10-removal-and-cleanup) (`lake` declares them in `maintenance/cleanup`; §58–§60 here are the wire tables) | the run row's `parts_json`, `lake.cleanup.stopped`, the cleanup observer (#964) |
 | `LakeDeliveryState`, `LakeDeliveryFailurePhase`, `LakeDeliveryAttemptOutcome` | metadata-db §4.53–§4.54 (`lake` declares them; §49–§51 here are the wire tables) | delivery landing, publication and settlement (the V55 CHECKs) |
 | `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
 
@@ -1347,10 +1348,51 @@ Returned by the planner's figures read method (`PlanFiguresReader.figures`, for 
 
 ---
 
+## 58. `IncompleteReason` — why a cleanup did not finish its removal (#962)
+
+The `details.reason` of `lake.maintenance.cleanup_incomplete` ([Pipeline Contract §13.25](pipeline-contract.md#1325-managed-lake)) and the `reason` of `lake.cleanup.stopped`; the run ends `failed` and the next plan finds the work due again ([Lake §10](lake.md#10-removal-and-cleanup)).
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `MODE` | `mode` | The catalog is not in `normal` mode: at the part's own check before its first write, at the remover's start, or between two delete batches |
+| `DELETE_FAILED` | `delete_failed` | A key's delete failed, a batch's outcome is unknown (its keys `outcome_unknown`, the rest `not_attempted`), or the pass's own clock marker could not be removed as planned |
+
+---
+
+## 59. `ObserverOutcome` — the cleanup observer's call (#962)
+
+The `observer` field of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `OK` | `ok` | The observer was called once and returned |
+| `FAILED` | `failed` | The observer threw an exception: logged as `lake.cleanup.observer_failed`; the cleanup's outcome is unchanged |
+| `NOT_CALLED` | `not_called` | The remover's pass returned no inventory (refused, or never reached), or the part is a purge deletion |
+
+---
+
+## 60. `ObservedRefType` — a ref's type in a cleanup observation (#962)
+
+A ref of the table's metadata after the expiry, as the cleanup hands it to the observer (`CleanupObservation.refs`, for #964); not stored by #962.
+
+| Enum | Wire value | Meaning |
+|---|---|---|
+| `TAG` | `tag` | An Iceberg tag (a `dp-keep-` keep, or any other tag) |
+| `BRANCH` | `branch` | An Iceberg branch, `main` included |
+
+---
+
+## 61. The cleanup's expiry floor spelling (#962)
+
+The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped` is the instant the expiry used (ISO-8601, UTC), or `not_applicable` for a table with no snapshot, which expires nothing; before the expiry step (a part that ended `busy` or `deadline` first, or stopped earlier) it is `null` in `parts_json` and `none` in `lake.cleanup.stopped`. A purge deletion records no floor.
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.56 | 962 (#962, dp-lake P6) | New **§58 `IncompleteReason`** (`mode`, `delete_failed`: `lake.maintenance.cleanup_incomplete`'s reason), **§59 `ObserverOutcome`** (`ok`, `failed`, `not_called`), **§60 `ObservedRefType`** (`tag`, `branch`) and **§61** the expiry floor's spelling (an instant or `not_applicable`), held to the Kotlin values by `CleanupEnumsSpecDriftTest`. |
 | 2026-11-14 | v1.55 | 959 (#959) — renumbered at the spec merge after #960's §55 and v1.54 | New **§56 `FiguresState`** (current, stale, never measured: the planner figures' read state, D3a) and **§57** the planner's error codes and not-due reasons, held to the Kotlin values by `PlanEnumsSpecDriftTest`. |
 | 2026-11-14 | v1.54 | 960 (#960, dp-lake P6) | New **§55 `KeepNotKeptReason`**: the two reasons a period a keep rule asks for gets no keep (`history_not_available`, `name_taken_by_branch`), held to the Kotlin enum by `KeepEnumsSpecDriftTest`. |
 | 2026-11-14 | v1.53 | 956 (#956) — renumbered at the spec merge after #957's v1.52 | **§15 lake profile audit events:** `lake.profile.created`, `lake.profile.updated`, `lake.profile.assigned` and `lake.table.pause_changed`, each written by the service inside its change's transaction, once per change; held to `LakeProfileAuditEvents` by `LakeProfileAuditEventsSpecDriftTest`. |
