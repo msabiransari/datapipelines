@@ -73,7 +73,7 @@ internal class DeliverySettlementHarness(
             "sub-799",
         )
         val definitions = LakeDefinitionRepository(named)
-        definitions.insertTable(tableId, definitions.namespaceId("settle", actor), "orders", "{}", actor)
+        definitions.insertTable(tableId, definitions.namespaceId("settle", actor), "orders", actor)
     }
 
     fun leases(lockTimeout: Duration = Duration.ofMillis(100)): LakeLeases = LakeLeases(jdbc, lockTimeout = lockTimeout)
@@ -85,7 +85,7 @@ internal class DeliverySettlementHarness(
     fun addTable(name: String): UUID {
         val definitions = LakeDefinitionRepository(named)
         val id = UUID.randomUUID()
-        check(definitions.insertTable(id, definitions.namespaceId("settle", actor), name, "{}", actor))
+        check(definitions.insertTable(id, definitions.namespaceId("settle", actor), name, actor))
         return id
     }
 

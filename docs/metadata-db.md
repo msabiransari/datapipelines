@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.61 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.62 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-14
 
 ---
 
@@ -82,6 +82,8 @@ lake_reference_scans ──1:N── lake_table_references (the version's table 
 lake_namespaces ──1:N── lake_tables_managed (namespace_id — §4.49)
 lake_tables_managed ──1:N── lake_table_definition_versions (table_id, no cascade — §4.50)
 lake_tables_managed ──1:N── lake_column_semantics (the applied version's columns, ON DELETE CASCADE — §4.51)
+lake_profiles ──1:N── lake_tables_managed (profile_id, NOT NULL, no cascade — §4.49, §4.55)
+users ──0:N── lake_profiles (created_by / updated_by; NULL = written by the system — §4.55)
 ```
 
 Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
@@ -1911,11 +1913,25 @@ CREATE TABLE lake_tables_managed (
 );
 ```
 
+V60 (#956, dp-lake P6) adds the table's profile ([§4.55](#455-lake_profiles)); the migration gives every existing row `production` and its own time, then sets the column NOT NULL, and empties every `policy_json`:
+
+```sql
+ALTER TABLE lake_tables_managed ADD COLUMN profile_id UUID NULL REFERENCES lake_profiles(id);
+ALTER TABLE lake_tables_managed ADD COLUMN profile_assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+UPDATE lake_tables_managed
+   SET profile_id = (SELECT id FROM lake_profiles WHERE name = 'production'),
+       profile_assigned_at = NOW(),
+       policy_json = '{}'::jsonb;
+ALTER TABLE lake_tables_managed ALTER COLUMN profile_id SET NOT NULL;
+CREATE INDEX idx_lake_tables_managed_profile ON lake_tables_managed (profile_id);
+```
+
 **Notes:**
 - **`current_definition_version`** is the highest RELEASED definition version ([§4.50](#450-lake_table_definition_versions)); NULL until the first release. **`applied_version_here`** is the version whose intent this environment's Iceberg table holds (stamped with `applied_at`). They differ while an apply is pending, running or failed.
 - **`apply_state`** is [`LakeApplyState`](enums.md#47-lakeapplystate--a-managed-tables-apply-state): NULL before the first release, then `pending` → `applying` → `applied` | `failed` ([lake.md §3](lake.md#3-apply-states)). The CHECKs pin the pairings: no state without a pointer; `applying` names its attempt; `applied` means `applied_version_here = current_definition_version`; `apply_error_json` (`{code, message, details}`) is present exactly when `failed`.
 - **`apply_operation_id`** is the attempt that set `applying`. Every later stamp is `UPDATE … WHERE id = ? AND apply_state = 'applying' AND apply_operation_id = ?`: zero rows means a later attempt took the row over, and the stale attempt writes nothing. The same id is the attempt's lease operation and the `lake_table_revisions.operation_id` of anything it committed, which is how `LakeDefinitionApplier.verifyApplying` decides whether a crashed attempt committed ([§4.47](#447-lake_table_revisions)).
-- **`policy_json`** is the per-environment retention and maintenance policy (record §5.2): written at creation from `datapipelines.lake.retention.*` / `datapipelines.lake.maintenance.*`, never promoted, edited by a super admin (P8). P3 stores it; P6 reads it.
+- **`policy_json`** holds only the table's two optional pause keys since V60 (record call 38): `pause.compaction_until` and `pause.cleanup_until`, each an instant at most 7 days after the catalog's `now()`, set and cleared by `LakeTablePauses` (a `purged` table takes none). A new row writes `{}`. Before V60 it held a copy of four configuration values written once at creation and never read; V60 replaced every row's copy with `{}` ([lake.md Profiles](lake.md#10-profiles)). Never promoted.
+- **`profile_id`** is the profile every maintenance run and every append of this table reads its tuning from ([§4.55](#455-lake_profiles)); NOT NULL, no cascade. A new row takes the default profile in its own `INSERT` by a sub-select (`(SELECT id FROM lake_profiles WHERE is_default)`), so no row is ever without one; a new definition version leaves it unchanged. **`profile_assigned_at`** is when the table was last moved to its profile (the migration's time for a row that existed before V60). `idx_lake_tables_managed_profile` serves "which tables does this profile govern" and the FK.
 - The lifecycle columns (`status`, the stamps, `replacement_id`, `purge_allowed_after`) exist for P8 and the purge flow; P3 writes `active` only.
 - `uq_lake_tables_managed_namespace_name` refuses a second table of the same name in a namespace (`lake.definition.name_taken`); its index prefix also serves the FK on `namespace_id`.
 
@@ -2078,6 +2094,34 @@ V55 also adds `pipeline_versions.writes_managed_lake BOOLEAN NOT NULL DEFAULT FA
 ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DEFAULT FALSE;
 ```
 
+### 4.55 `lake_profiles`
+
+**The deployment's maintenance and write profiles** (V60; #956, record §11a call 35, the P6 lane cut L5). Every managed table names one ([§4.49](#449-lake_tables_managed) `profile_id`); every maintenance run and every append reads its tuning from it, and nothing else does ([lake.md Profiles](lake.md#10-profiles)). Per environment and never promoted: no export, import or promotion code reads it.
+
+```sql
+CREATE TABLE lake_profiles (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name         TEXT        NOT NULL,
+    is_default   BOOLEAN     NOT NULL DEFAULT FALSE,
+    values_json  JSONB       NOT NULL,
+    seed_pending BOOLEAN     NOT NULL DEFAULT FALSE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by   UUID        NULL REFERENCES users(id),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by   UUID        NULL REFERENCES users(id),
+    CONSTRAINT uq_lake_profiles_name UNIQUE (name),
+    CONSTRAINT chk_lake_profiles_name CHECK (name ~ '^[a-z0-9_]{1,63}$'),
+    CONSTRAINT chk_lake_profiles_values CHECK (jsonb_typeof(values_json) = 'object')
+);
+CREATE UNIQUE INDEX uq_lake_profiles_one_default ON lake_profiles (is_default) WHERE is_default;
+```
+
+**Notes:**
+- **`values_json`** is the profile's typed value document — the closed key list of lake.md "Profiles", every key present. Only `LakeProfileDocument` parses it, into `LakeProfile`; a document with an unknown key, a wrong type or a value out of range is refused before anything is written (`lake.profile.invalid`, `details.path` = the key).
+- **`is_default`**: the partial unique index allows at most one default; `LakeProfiles.makeDefault` moves the mark in one transaction and nothing clears it alone. A new managed table takes the default.
+- **`seed_pending`**: V60 inserts `production` (default, `seed_pending = true`) and `development` (window `00:00-00:00`), both with the built-in values. With the lake enabled, the start-up seed runs one statement: it copies `datapipelines.lake.maintenance.window` and `.max-bytes-rewritten-per-run` into `production` and clears the mark, `WHERE seed_pending` — once per database; every service edit clears the mark too, so an edited profile is never overwritten.
+- **`created_by` / `updated_by`**: NULL means written by the system — V60's two inserts (no user exists on a fresh database) and the start-up seed, which moves `updated_at` and leaves `updated_by` NULL (the `workspaces.created_by` precedent). Every service write sets the actor it was given and `updated_at`; a service write with no actor is refused.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -2231,6 +2275,10 @@ ALTER TABLE pipeline_versions ADD COLUMN writes_managed_lake BOOLEAN NOT NULL DE
 | `lake_namespaces` | `uq_lake_namespaces_name` | via UNIQUE | V54: one namespace per name — the create path's `ON CONFLICT (name)` arbiter |
 | `lake_tables_managed` | `lake_tables_managed_pkey` | via PK | Lookup by id — every lifecycle and apply statement ([§4.49](#449-lake_tables_managed)) |
 | `lake_tables_managed` | `uq_lake_tables_managed_namespace_name` | via UNIQUE | V54: one table per (namespace, name) — the `(namespace, table)` lookup and `lake.definition.name_taken`; its prefix serves the FK on `namespace_id` |
+| `lake_tables_managed` | `idx_lake_tables_managed_profile` | explicit | V60: the tables a profile governs (a future delete's in-use refusal, P8's screen); serves the FK on `profile_id` |
+| `lake_profiles` | `lake_profiles_pkey` | via PK | Lookup by id — `forTable`'s join ([§4.55](#455-lake_profiles)) |
+| `lake_profiles` | `uq_lake_profiles_name` | via UNIQUE | V60: one profile per name — every service method addresses a profile by name |
+| `lake_profiles` | `uq_lake_profiles_one_default` | explicit (partial, unique) | V60: at most one default (`WHERE is_default`); also the new table `INSERT`'s sub-select |
 | `lake_table_definition_versions` | `lake_table_definition_versions_pkey` | via PK | `(table_id, version)` fetch ([§4.50](#450-lake_table_definition_versions)) |
 | `lake_table_definition_versions` | `uq_lake_table_definition_versions_one_draft` | explicit (partial, unique) | V54: one DRAFT per table — the physical guard behind copy-on-write |
 | `lake_column_semantics` | `lake_column_semantics_pkey` | via PK | A table's columns by field id; its prefix serves the projection's delete-and-rebuild ([§4.51](#451-lake_column_semantics)) |
@@ -2316,6 +2364,7 @@ table and the test's expected-table list in the same commit.
 | `lake_deliveries` | environment-local | LakeDelivery | — | — | Permanent evidence of deliveries ingested in this environment; never promoted or deleted with execution history |
 | `lake_delivery_attempts` | environment-local | LakeDelivery | — | — | Permanent publication attempt identities joined to this environment's revision log |
 | `lake_column_semantics` | derived | LakeTableDefinition | — | — | Rebuilt from the applied body inside the `applied` transaction; a receiver derives its own when it applies |
+| `lake_profiles` | environment-local | LakeProfile | — | — | This deployment's maintenance and write tuning (record call 35); per environment, never promoted — a receiver keeps its own profiles and its tables keep theirs |
 
 ---
 
@@ -2631,6 +2680,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.62 | V60 (#956, dp-lake P6) | **V60 — lake maintenance profiles.** New **§4.55 `lake_profiles`** (name, the one-default partial unique index, the typed `values_json`, `seed_pending`, audit columns with NULL = written by the system; the built-ins `production` and `development`); **§4.49 `lake_tables_managed` gains `profile_id`** (NOT NULL, FK, no cascade; every existing row gets `production`) **and `profile_assigned_at`**, and its `policy_json` note is rewritten: the column now holds only the two pause keys, and V60 set every row's copy to `{}`. §3 ERD, §5 (four indexes) and §5A (`lake_profiles` environment-local) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-13 | v1.61 | 939 (#939, no migration) | **§4.45** Notes: `lake_control.protection_interval` mirrors `datapipelines.lake.retention.protection-days` — the normal-mode settle sweep keeps it equal and stamps `protected_until` from the setting, not the column; the column's `DEFAULT` is only what a database holds before its first normal-mode tick. No schema change. |
 | 2026-11-12 | v1.60 | #905 review F1 (no migration) — renumbered at final sync after dependency-graph | §4.6: correct the lifecycle note to include the separate result-history UPDATE, which does not change `completed_at`. |
 | 2026-11-11 | v1.59 | #896 docs: ownership and grants as they are since V23 | **No schema change.** Text that still described the V4 `workspace_id` model is corrected to the V23 model: the §3 relationship diagram shows `owner_workspace_id` (ownership; NULL = an instance datasource) and the `datasource_workspaces` grant rows (visibility); the §4.10 note on `workspace_id` becomes the `owner_workspace_id` note — ownership only, the global NAME namespace, visibility by `GRANTED_PREDICATE`, the V4 → V23 history kept as history; §4.11 no longer says datasources "bind by visibility only"; §4.16's backfill note names the `w.is_deleted = FALSE` filter (a soft-deleted workspace got no grant), and its revoke note says a removed grant advances `generation` once while the definition, credential and incarnation stay. |

@@ -184,7 +184,8 @@ class ManagedLakeTableRepositoryIntegrationTest {
         val id = UUID.randomUUID()
         jdbc.update(
             "INSERT INTO lake_tables_managed (id, namespace_id, name, status, deprecated_at, deprecated_by, replacement_id, " +
-                "policy_json, created_by) VALUES (:id, :ns, :name, :status, CAST(:dep AS timestamptz), :depBy, :rep, '{}', :by)",
+                "policy_json, profile_id, created_by) VALUES (:id, :ns, :name, :status, CAST(:dep AS timestamptz), :depBy, :rep, '{}', " +
+                "(SELECT id FROM lake_profiles WHERE is_default), :by)",
             mapOf(
                 "id" to id,
                 "ns" to namespaceId,

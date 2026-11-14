@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.50 (living document — updated as enums evolve)
+**Status:** v1.51 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -529,6 +529,15 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `lake.delivery.failed` | Conditional delivery and attempt stamps recorded a definite failure. The delivery row records its phase and safe failure code. Same details as `lake.delivery.published`. |
 | `lake.delivery.unknown` | Publication has no confirmed verdict and remains eligible for settlement. Same details as `lake.delivery.published`. |
 | `lake.delivery.settled` | A takeover and fresh revision observation, or an ended execution before publication, established a terminal delivery outcome. Written with the outcome's audit event in the same transaction. Same details as `lake.delivery.published`. |
+
+**Lake profile audit events** (same `audit_log` table; emitted by the managed lake's maintenance profiles and table pauses, [Lake "Profiles"](lake.md#10-profiles), #956). Each row is written by the service INSIDE the transaction of the change it records (strict: a refused audit insert rolls the change back), once per change; a save that changes nothing writes no row. `user_id` is the acting person: a service write without one is refused. The start-up seed of the `production` profile and the migration's two built-in profiles write no row (the system wrote them; `updated_by` stays NULL). `details` carries ids, names, key paths and instants; never a credential.
+
+| Value | Trigger |
+|---|---|
+| `lake.profile.created` | A profile was created. `details` carries `profile_id` and `profile` (the name) |
+| `lake.profile.updated` | A profile's values changed, or the default mark moved to it. `details` carries `profile_id`, `profile` and `changed`: the dotted keys whose values changed, or `["default"]` when the mark moved (then also `previous_default`, the profile that lost it) |
+| `lake.profile.assigned` | A managed table was moved to another profile. `details` carries `table_id`, `namespace`, `table`, `profile` and `previous_profile` |
+| `lake.table.pause_changed` | One of a table's two pause keys was set or cleared. `details` carries `table_id`, `namespace`, `table`, `key` (`pause.compaction_until` \| `pause.cleanup_until`), `until` (the new instant, null when cleared) and `previous` |
 
 ---
 
@@ -1253,6 +1262,7 @@ Stored in `lake_delivery_attempts.outcome` ([Metadata DB §4.54](metadata-db.md#
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.51 | 956 (#956) | **§15 lake profile audit events:** `lake.profile.created`, `lake.profile.updated`, `lake.profile.assigned` and `lake.table.pause_changed`, each written by the service inside its change's transaction, once per change; held to `LakeProfileAuditEvents` by `LakeProfileAuditEventsSpecDriftTest`. |
 | 2026-11-13 | v1.50 | 814 (#814) | **§15 lake definition audit events:** `lake.definition.discarded` (`via`, `current_version`) and `lake.definition.draft_purged` (`via`, `table_deleted`), each written inside its write's transaction (dp-lake record §12, erratum 2026-11-12); held to `LakeAuditEvents` by `LakeAuditEventsSpecDriftTest`, which now counts five events. |
 | 2026-11-11 | v1.49 | #894 endpoint-root audit provenance | **§15 `template.version.released`:** under an API root the cascaded row names the API — `cascade_from_api_endpoint_id` + the API's `cascade_from_version`, no `cascade_from_pipeline_id` (the owner's 2026-11-11 exception to the frozen release-dependencies record §11). Pipeline-root rows and every other event unchanged; rows written before #894 are not rewritten (`cascade_root.family` tells them apart). |
 | 2026-11-08 | v1.48 | 860 (#860) | **§31 `RendererKind`:** `chart` (the chart document v1, judged by the schema served at `/schemas/chart/1/`) replaces `plotly`, which is retired and refused as `visualization.validation.renderer_unsupported` with a message naming `chart`. **§32 `AssertionKind`:** `mark_count` replaces `trace_count`; `text_visible` on a chart is proven by the mechanical check or left unjudged, never refused. |

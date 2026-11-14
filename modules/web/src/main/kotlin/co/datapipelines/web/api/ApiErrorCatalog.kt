@@ -567,6 +567,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Lake.DEFINITION_AUTHORING_DISABLED,
             // §13.25 (#811) — an apply outcome, returned in the release's result; no route before P8.
             PipelineErrorCodes.Lake.DEFINITION_APPLY_UNCLASSIFIED,
+            // §13.25 (#956) — the profile and pause services have no route before P8.
+            PipelineErrorCodes.Lake.PROFILE_INVALID,
+            PipelineErrorCodes.Lake.PROFILE_NOT_FOUND,
         )
 
     /**

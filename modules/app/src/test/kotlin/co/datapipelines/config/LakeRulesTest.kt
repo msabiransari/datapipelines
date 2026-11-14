@@ -124,6 +124,16 @@ class LakeRulesTest {
         enabled(LakeRules.STATEMENT_TIMEOUT_SECONDS to "0") shouldHaveSize 1
     }
 
+    /** #956 D4 / P3: the seed copies the cap into `production`, so start-up refuses one under twice its 64 MiB target. */
+    @Test
+    fun `956 - the maintenance cap is refused under 128 MiB with its key named and admitted at 128 MiB`() {
+        enabled(LakeRules.MAX_BYTES_REWRITTEN to "100MB").single() shouldStartWith LakeRules.MAX_BYTES_REWRITTEN
+        enabled(LakeRules.MAX_BYTES_REWRITTEN to "134217727B").single() shouldStartWith LakeRules.MAX_BYTES_REWRITTEN
+        enabled(LakeRules.MAX_BYTES_REWRITTEN to "128MB") shouldContainExactly emptyList()
+        enabled(LakeRules.MAX_BYTES_REWRITTEN to "134217728B") shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.MAX_BYTES_REWRITTEN to "100MB")) shouldContainExactly emptyList()
+    }
+
     /**
      * #804 — the DuckDB staging admission is judged with the lake DISABLED, at every boundary:
      * DuckDB's 1 MiB memory floor (exactly 1 MiB in, one byte below out), the one-reservation rule

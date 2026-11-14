@@ -272,14 +272,24 @@ internal object LakeRules {
         }
     }
 
-    /** The catalog timeouts and the maintenance budget positive; the window `HH:MM-HH:MM` (UTC). */
+    /**
+     * The catalog timeouts and the maintenance budget positive; the window `HH:MM-HH:MM` (UTC).
+     *
+     * #956 D4: the budget is also at least [SEED_CAP_FLOOR_BYTES], because the start-up seed copies it into the
+     * `production` profile, whose save rule wants the cap at least twice its target file size (lake.md Profiles).
+     */
     fun checkLakeBounds(
         snapshot: ConfigSnapshot,
         violations: MutableList<String>,
     ) {
         if (!enabled(snapshot)) return
         positiveLong(snapshot, LOCK_TIMEOUT_SECONDS, violations)
-        dataSize(snapshot, MAX_BYTES_REWRITTEN, violations)
+        val cap = dataSize(snapshot, MAX_BYTES_REWRITTEN, violations)
+        if (cap != null && cap.toBytes() < SEED_CAP_FLOOR_BYTES) {
+            violations +=
+                "$MAX_BYTES_REWRITTEN must be at least 128MB, twice the production profile's built-in target file size " +
+                "(§3.36, lake.md Profiles)."
+        }
         if (!WINDOW.matches(value(snapshot, MAINTENANCE_WINDOW))) {
             violations += "$MAINTENANCE_WINDOW must be HH:MM-HH:MM in UTC (§3.36)."
         }
@@ -416,6 +426,12 @@ internal object LakeRules {
         if (parsed == null) violations += "$key must be a positive duration such as 2h or 90m (§3.36)."
         return parsed
     }
+
+    /**
+     * #956 D4: twice the built-in `maintenance.target_file_bytes` of the `production` profile (64 MiB, V60), the value
+     * the seed's cap must clear; the seed only writes an unedited `production`, so its target is always that one.
+     */
+    private const val SEED_CAP_FLOOR_BYTES = 2L * 64 * 1024 * 1024
 
     /** #845 D1: the proxy may never cut a healthy query before the executor's own longest timeout, plus this slack. */
     private const val EGRESS_MAX_AGE_SLACK_SECONDS = 30L

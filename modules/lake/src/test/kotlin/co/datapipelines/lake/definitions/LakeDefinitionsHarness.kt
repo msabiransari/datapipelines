@@ -83,14 +83,12 @@ internal class LakeDefinitionsHarness(
     val applyLeases = LakeApplyLeases(leases, leaseWait, Duration.ofMillis(POLL_MILLIS))
     val applier = LakeDefinitionApplier(definitions, applies, applyLeases, catalogs, properties.name, tx, audit, hooks)
     private val metadataReads = LakeMetadataReads(named, properties.name, catalogs::metadataFileIo)
-    private val policyJson = LakeTablePolicy.defaultsJson(properties)
     val service =
         LakeDefinitionService(
             definitions = definitions,
             applier = applier,
             leases = leases,
             jobTimeout = properties.admission.jobTimeout,
-            policyJson = policyJson,
             tx = tx,
             audit = audit,
             authoring = AuthoringGuard(authoringEnabled),
@@ -166,7 +164,7 @@ internal class LakeDefinitionsHarness(
         requireNotNull(
             tx.execute {
                 val tableId = UUID.randomUUID()
-                check(definitions.insertTable(tableId, definitions.namespaceId(namespace, actor), table, policyJson, actor))
+                check(definitions.insertTable(tableId, definitions.namespaceId(namespace, actor), table, actor))
                 val canonical = LakeDefinitionBodies.toJson(LakeDefinitionBodies.read(bodyJson))
                 checkNotNull(definitions.insertDraft(tableId, 1, canonical, actor, WriteSurface.SESSION))
                 tableId

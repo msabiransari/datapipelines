@@ -38,8 +38,12 @@ class LakeDefinitionLifecycleIntegrationTest {
         (table.status to table.applyState) shouldBe (LakeTableStatus.ACTIVE to null)
         table.currentDefinitionVersion shouldBe null
         h.jdbc.queryForObject("SELECT created_via FROM lake_table_definition_versions", String::class.java) shouldBe "mcp"
-        h.jdbc.queryForObject("SELECT policy_json->'retention'->>'protection_days' FROM lake_tables_managed", String::class.java) shouldBe
-            "7"
+        // #956: a new table's policy_json is empty (only pauses live there) and it takes the default profile.
+        h.jdbc.queryForObject("SELECT policy_json::text FROM lake_tables_managed", String::class.java) shouldBe "{}"
+        h.jdbc.queryForObject(
+            "SELECT p.name FROM lake_tables_managed t JOIN lake_profiles p ON p.id = t.profile_id",
+            String::class.java,
+        ) shouldBe "production"
         h.service.findTable("sales", "orders")?.id shouldBe draft.tableId
     }
 

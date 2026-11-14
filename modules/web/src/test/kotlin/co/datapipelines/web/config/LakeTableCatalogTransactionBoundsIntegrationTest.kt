@@ -294,8 +294,8 @@ class LakeTableCatalogTransactionBoundsIntegrationTest {
 
     private fun insertLifecycleRow(jdbc: JdbcTemplate) {
         jdbc.update(
-            "INSERT INTO lake_tables_managed (id, namespace_id, name, status, policy_json, created_by) " +
-                "VALUES (?, ?, 'orders', 'active', '{}', ?)",
+            "INSERT INTO lake_tables_managed (id, namespace_id, name, status, policy_json, profile_id, created_by) " +
+                "VALUES (?, ?, 'orders', 'active', '{}', (SELECT id FROM lake_profiles WHERE is_default), ?)",
             UUID.randomUUID(),
             namespaceId,
             userId,

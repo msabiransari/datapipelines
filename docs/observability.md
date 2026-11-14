@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.78 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.79 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-14
 
 ---
 
@@ -437,6 +437,7 @@ When `datapipelines.lake.enabled=true`, `LakeBootCheck` runs once after Flyway (
 | INFO | `lake.boot.ok` | Every check passed: the catalog shape, the four V53 triggers, the control row, the store reachable and honouring `If-None-Match: *` | `bucket`, `prefix` |
 | INFO | `lake.egress_proxy_verified` | #845: before the managed datasource is registered, the configured egress proxy declared the configured max-age at `/dp-egress` and a `HEAD` of the bucket through it reached the store (any store answer counts; only a proxy-generated 502/503/504 does not) | `proxy` (`host:port`), `max_age_seconds`, `reader_end_by_ms` (the bound a reader against a store that trickles on every attempt ends within: `LakeHttpBounds.egressReaderEndByMillis`, (`http_retries` + 1) × max-age + slack, [Lake §9](lake.md#9-reads)), `store` (the bucket URI, no credential), `store_status`, `duration_ms` |
 | WARN | `lake.egress_proxy_absent` | #845: `datapipelines.lake.reads.egress-proxy` is empty, so managed reads reach the store directly with no connection max-age ([Lake §9](lake.md#9-reads)) | — |
+| INFO | `lake.profile.seeded` | #956: the first start with the lake enabled copied `datapipelines.lake.maintenance.window` and `.max-bytes-rewritten-per-run` into the `production` profile and cleared its `seed_pending` mark ([Lake §10](lake.md#10-profiles)); logged once per database, by the instance whose statement changed the row — a later start, a second instance or an edited profile logs nothing | `profile` (`production`), `window`, `max_bytes_rewritten_per_run` |
 
 **The refusals are startup failures, not log events.** Each is an `IllegalStateException` whose message starts with its id, so the operator greps the boot failure for it: `lake.boot.catalog_shape`, `lake.boot.trigger_missing`, `lake.boot.control_row`, `lake.boot.storage_unreachable`, `lake.boot.conditional_put`, `lake.boot.egress_proxy` (#845: the configured egress proxy is malformed, does not answer within its 2 s connect / 5 s read bound, declares another max-age, or answers a 502/503/504 of its own for the store), and `lake.boot.datasource_name_taken` (#818, raised when the managed datasource is registered: another datasource holds `datapipelines.lake.name`) (what each means: Configuration §7). No credential, key, or object body appears in any of them.
 
@@ -791,6 +792,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.79 | 956 (#956, dp-lake P6) | **§3.4Q**: new INFO `lake.profile.seeded` (`profile`, `window`, `max_bytes_rewritten_per_run`) — the start-up seed copied the two `maintenance.*` keys into the `production` lake profile, once per database. |
 | 2026-11-13 | v1.78 | 939 (#939) | **§3.4S**: new INFO `lake.settle.protection_window_aligned` (`days`) — the settle sweep set `lake_control.protection_interval` to this instance's `retention.protection-days`; logged only when the row changed. |
 | 2026-11-13 | v1.77 | 806 merge review (#806) | **§3.4**: catalogue the web module's `staging.scratch.health` transition WARN and recovery INFO already described in §6.1. Every non-`UP` transition retains the usable-byte reading, including an unwritable directory; a failed reading reports `unknown`. |
 | 2026-11-13 | v1.76 | 806 (#806) | **§4.1**: four untagged byte gauges, `datapipelines.staging.scratch.capacity`, `.reserved`, `.leftover` (`NaN` until the leftover sweep has counted) and `.usable` (`NaN` when the reading throws), read at every scrape. **§6.1**: the `diskSpace` bullet's "nothing writes to local disk" reasoning corrected (DuckDB staging, #795), and the DuckDB scratch signal described — the status-only `duckdb_scratch` indicator on the management port's `/actuator/health`, never a `/health` component, its rows, and what its `UP` does and does not establish (owner ruling 2026-11-12 for the surface). §6.4 unchanged: the indicator carries no detail. |

@@ -394,8 +394,10 @@ class ApiErrorCatalogSpecDriftTest {
          * 513 → 514 with #967 (recounted with [STATUS_ROW_REGEX]): §13.25 gains
          * `lake.append.partition_value_out_of_range` (400), the append's refusal of a value a numeric `truncate`
          * partition cannot hold, landed in the SAME commit as its constant and catalog rows.
+         * 514 → 516 with #956: §13.25 gains `lake.profile.invalid` and `lake.profile.not_found` (HTTP `—`, no route
+         * before P8), landed in the SAME commit as their constants and `NEVER_RETURNED_LIVE` entries.
          */
-        const val SECTION_13_ROW_COUNT = 514
+        const val SECTION_13_ROW_COUNT = 516
 
         /**
          * §12's distinct validation codes.

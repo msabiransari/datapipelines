@@ -1,6 +1,7 @@
 package co.datapipelines.lake.append
 
 import co.datapipelines.lake.LakeTestDb
+import co.datapipelines.lake.profiles.LakeProfileFixtures
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -37,7 +38,7 @@ class TruncatePartitionWriterIntegrationTest {
                 "SELECT * FROM (VALUES (1::BIGINT, '$good'::$type), (2::BIGINT, '$edge'::$type), " +
                     "(3::BIGINT, '$good'::$type)) t(id, v)"
             h.withInput(sql) { input ->
-                val failure = shouldThrow<DatapipelinesException> { writer.write(table, input, UUID.randomUUID(), 16) {} }
+                val failure = shouldThrow<DatapipelinesException> { writer.write(table, input, UUID.randomUUID(), 16, PROFILE) {} }
                 failure.code shouldBe PipelineErrorCodes.Lake.APPEND_PARTITION_VALUE_OUT_OF_RANGE
                 failure.details shouldBe mapOf("out_of_range_counts" to mapOf("truncate[$width](v)" to 1L))
                 input.scans shouldBe 1
@@ -52,7 +53,7 @@ class TruncatePartitionWriterIntegrationTest {
         val schema = schema(Types.IntegerType.get())
         h.withTable(schema, PartitionSpec.builderFor(schema).truncate("v", 10).build()) { table ->
             h.withInput("SELECT * FROM (VALUES (NULL::BIGINT, (-2147483648)::INTEGER), (2::BIGINT, 5::INTEGER)) t(id, v)") { input ->
-                val failure = shouldThrow<DatapipelinesException> { writer.write(table, input, UUID.randomUUID(), 16) {} }
+                val failure = shouldThrow<DatapipelinesException> { writer.write(table, input, UUID.randomUUID(), 16, PROFILE) {} }
                 failure.code shouldBe PipelineErrorCodes.Lake.APPEND_NULL_IN_REQUIRED
                 input.scans shouldBe 1
                 h.dataKeys(table) shouldBe emptyList()
@@ -76,6 +77,9 @@ class TruncatePartitionWriterIntegrationTest {
         }
 
     companion object {
+        /** The built-in production profile (#956): these cases are about values, not sizes. */
+        val PROFILE = LakeProfileFixtures.builtIn()
+
         /** SQL type, width, the edge value (probes.out), a good value. */
         @JvmStatic
         fun edges(): List<Array<Any>> =

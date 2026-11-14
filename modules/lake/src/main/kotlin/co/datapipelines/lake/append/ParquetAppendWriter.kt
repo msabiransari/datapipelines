@@ -1,5 +1,6 @@
 package co.datapipelines.lake.append
 
+import co.datapipelines.lake.profiles.LakeProfile
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -27,16 +28,25 @@ data class WrittenAppend(
 
 /**
  * Streams a stable staged result into partitioned Parquet/zstd (§8 step 4), after checking every required value.
- * Small row groups bound each open writer's buffering; file rotation bounds footer accumulation. Neither is an
- * operator key or a promise about total process RSS. No sort order is claimed, and abort/delete is never called.
+ * Small row groups bound each open writer's buffering; file rotation bounds footer accumulation. Neither is a promise
+ * about total process RSS. No sort order is claimed, and abort/delete is never called.
+ *
+ * #956 (record call 35, brief D9): the file size the writer rolls at and the Parquet row group size are the table's
+ * [LakeProfile] values (`maintenance.target_file_bytes`, `write.row_group_bytes`), read by the caller at the start of
+ * each append and passed in; no size is a constant here (`LakeTuningSourceGuardTest`). The pinned writer checks a
+ * file's size every 1,000 rows (`BaseTaskWriter`, Iceberg 1.12.0), so a file can pass its target by those rows.
  */
 class ParquetAppendWriter {
-    /** [checkActive] enforces the caller's fixed deadline, cancellation and lost-lease signal on both scans. */
+    /**
+     * [profile] is the table's profile as read for this append. [checkActive] enforces the caller's fixed deadline,
+     * cancellation and lost-lease signal on both scans; it stays the last parameter (a trailing lambda at every call).
+     */
     fun write(
         table: Table,
         input: LakeAppendInput,
         operationId: UUID,
         maxOpenPartitions: Int,
+        profile: LakeProfile,
         checkActive: () -> Unit,
     ): WrittenAppend {
         require(maxOpenPartitions > 0)
@@ -51,7 +61,7 @@ class ParquetAppendWriter {
                 .writerProperties(
                     mapOf(
                         TableProperties.PARQUET_COMPRESSION to "zstd",
-                        TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES to ROW_GROUP_BYTES.toString(),
+                        TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES to profile.rowGroupBytes.toString(),
                     ),
                 ).build()
         val output =
@@ -63,9 +73,9 @@ class ParquetAppendWriter {
         var count = 0L
         val task: BaseTaskWriter<Record> =
             if (table.spec().isUnpartitioned) {
-                PlainWriter(table, factory, output)
+                PlainWriter(table, factory, output, profile.targetFileBytes)
             } else {
-                BoundedFanout(table, factory, output, maxOpenPartitions)
+                BoundedFanout(table, factory, output, maxOpenPartitions, profile.targetFileBytes)
             }
         task.use { writer ->
             val row = GenericRecord.create(plan.schema)
@@ -88,7 +98,8 @@ class ParquetAppendWriter {
         table: Table,
         factory: GenericFileWriterFactory,
         output: OutputFileFactory,
-    ) : UnpartitionedWriter<Record>(table.spec(), FileFormat.PARQUET, factory, output, table.io(), FILE_BYTES) {
+        targetFileBytes: Long,
+    ) : UnpartitionedWriter<Record>(table.spec(), FileFormat.PARQUET, factory, output, table.io(), targetFileBytes) {
         private var closed = false
 
         override fun close() {
@@ -104,7 +115,8 @@ class ParquetAppendWriter {
         factory: GenericFileWriterFactory,
         output: OutputFileFactory,
         private val maxOpenPartitions: Int,
-    ) : PartitionedFanoutWriter<Record>(table.spec(), FileFormat.PARQUET, factory, output, table.io(), FILE_BYTES) {
+        targetFileBytes: Long,
+    ) : PartitionedFanoutWriter<Record>(table.spec(), FileFormat.PARQUET, factory, output, table.io(), targetFileBytes) {
         private val key = PartitionKey(table.spec(), table.schema())
         private val internalRow = InternalRecordWrapper(table.schema().asStruct())
         private val partitions = HashSet<PartitionKey>()
@@ -131,10 +143,5 @@ class ParquetAppendWriter {
                 closed = true
             }
         }
-    }
-
-    private companion object {
-        const val ROW_GROUP_BYTES = 1024L * 1024
-        const val FILE_BYTES = 64L * 1024 * 1024
     }
 }

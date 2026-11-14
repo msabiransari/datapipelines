@@ -2306,6 +2306,19 @@ object PipelineErrorCodes {
          * the table and reason. Shared by the P4 delivery ledger and the P5 read gate.
          */
         const val TABLE_UNAVAILABLE = "lake.table.unavailable"
+
+        // #956 (dp-lake P6) — the maintenance profiles and the table pauses (§13.25, design record §11a calls 35
+        // and 38). No route returns them before P8 (HTTP `—`): the services have no handler yet.
+
+        /**
+         * A profile document, or a table pause, broke a rule of lake.md "Profiles": an unknown or missing key, a wrong
+         * type, a value outside its range, a pause more than 7 days ahead or on a purged table, a taken profile name.
+         * `details.path` names the key, `details.reason` the rule; nothing was written.
+         */
+        const val PROFILE_INVALID = "lake.profile.invalid"
+
+        /** No lake profile by that name. */
+        const val PROFILE_NOT_FOUND = "lake.profile.not_found"
     }
 }
 
