@@ -3,7 +3,7 @@
 **Status:** v1.18 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-13
 
 ---
 
@@ -579,8 +579,9 @@ Codifies the ad-hoc `.playwright-mcp` dev loop as a re-runnable gate.
 - **Self-contained boot:** `@SpringBootTest(RANDOM_PORT)` + Testcontainers Postgres +
   Redis + local auth with a seeded admin — one command, zero manual setup, no
   dependency on an operator's running stack.
-- **Runs in `build`/`check` (#308):** `build` and `check` run `:tests:browser-tests:test` like
-  every module's `test` (CI's build step lists it; every gate log shows it). The root
+- **Runs in `build`/`check` (#308):** a local `build` and `check` run `:tests:browser-tests:test`
+  like every module's `test`. CI's `browser` job runs it, sharded (#669; DEVELOPMENT.md §9.0);
+  CI's gate job and `scripts/gate.sh` exclude it and still compile its classes. The root
   `browserTest` lifecycle task is the name for running that suite ALONE. The only browser
   surface outside `build`/`check` is `siteShots` — it needs a running demo deployment
   (070 §C), not a browser binary.
@@ -1342,18 +1343,8 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-12 | v1.18 | 756 (#756) | New TEST-ONLY layer-0 module `log-capture` (§3, §3.1, §4.1, §4.2 row and note, §4.3, §5.23): the one shared Logback snapshot capture replaces nine module-local `SnapshotListAppender` copies; the nine capturing modules declare it with `testImplementation` alone, and `verifyModuleDependencies` refuses any non-test edge into it. No production dependency change. |
-| 2026-11-08 | v1.17 | 860 (#860) | §5.20: the `chart` kind v1's schema, save-rule, support-table and column classes; the `RendererConfigValidator` row no longer names a Plotly shape check (the kind is retired). |
-| 2026-11-06 | v1.16 | 818e (#818) | §5.6: the dedicated reader-lease scheduler and its datasource port, without a module dependency change. |
-| 2026-11-05 | v1.15 | 818d (#818) | §5.6: the pool reaper ticks on its own scheduler, `poolReaperTaskScheduler` (one daemon thread, `dp-reaper`), declared in `web`'s `PoolReaperSchedulingConfiguration`; every other `@Scheduled` job stays on `dp-scheduled`. Still exactly one `@EnableScheduling`. No module or dependency change. |
-| 2026-11-06 | v1.14 | #708 | §5.10 `app` gains `micrometer-registry-prometheus` (`runtimeOnly`) — the registry is a deployment concern, so library modules keep `micrometer-core` only; §5.18's selector-pool line names the renamed gauge `datapipelines.parameters.selectors.abandoned` (the un-prefixed name broke observability §4.1's prefix rule). |
-| 2026-11-04 | v1.13 | 827 (#826) | §6's catalog excerpt is SHAPE ONLY — the literal versions are gone (they had staled while reading as authority: the excerpt carried kotlin 1.9.24 / spring-boot 3.3.2 / a then-current duckdb-jdbc line, against the toml's ratified values). `gradle/libs.versions.toml` is the one place a version literal lives; the G2 note and §6.1 say so. No dependency, module or code change. |
-| 2026-11-04 | v1.12 | 798 (#798, dp-lake P3) | `lake` declares `auth` (§4.1 diagram edge, §4.2 note, §5.21; the §4.2 row already allowed it) for `AuditEventSink`; §5.21 gains the table definitions' public API ([Lake](lake.md)). No new module, no new external dependency. |
-| 2026-11-04 | v1.11 | 795 (#795, dp-lake P1) | §5.5 `staging`: external dependency `org.duckdb:duckdb_jdbc` and the DuckDB staging engine's public classes ([Staging §8.5](staging.md#85-the-duckdb-engine)). No new internal edge: `StagingEngine` moved into `typesystem`, which `staging` already depends on. Renumbered at merge after #816’s v1.10. |
-| 2026-11-03 | v1.10 | 816 (#816) | §5.1: `typesystem` gains the package `co.datapipelines.typesystem.jdbc` — the TEMPORARY raw-text author-SQL guard and its JDBC decorator ([Datasources §5.8](datasources.md#58-the-author-sql-guard-on-duckdb-and-lake-leases-temporary-816)), shared by `datasources` and DuckDB `staging`. No dependency edge changes. Additive. |
-| 2026-11-02 | v1.9 | 785 (#785, dp-lake P2) | New module **`lake`** (§3, §3.1, §4.1 layer 4, §4.2 row, new **§5.21**): the managed lake's catalog core. Its §4.2 row is the dp-lake design record's edge set (`typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth`); P2 declares three. `web` gains the edge `lake` for the after-Flyway boot check. The root `allowedInternalDependencies` map moves with the table (`verifyModuleDependencies`). |
-| 2026-10-26 | v1.8 | 721 (#721) | §4.1/§4.2/§5.12: `tests/browser-tests` gains the internal edge `web` (`testImplementation`, a direct edge per the §4.2 rule — not `api` leakage through `app`) so `SiteShotsRailOrderTest` can pin the screenshot driver's rail table against `AppNav.ITEMS`. The root `allowedInternalDependencies` map and the §4.2 row move together (`verifyModuleDependencies`). Test-scope only: no production edge, public API or runtime change. |
 | 2026-10-24 | v1.7 | 442b (#442) | §5.16: `scheduler` gains `thymeleaf-spring6` (BOM-managed, already on `auth`'s and `web`'s class paths — the scheduler's lock gains its four lines) for the notice templates; its public API gains the `NotificationMailer` port and the `ScheduleNotifier` job (B5). `web` implements the port over `auth`'s `MailSender`. No internal dependency edge changes. |
+| 2026-10-24 | #669 the browser suite's CI home | 669 (lands with 669b) | §5.12's design rule: a local `build`/`check` still runs `:tests:browser-tests:test`; CI's gate job (like `scripts/gate.sh`) excludes it and compiles its classes, and CI's `browser` job runs it in three shards (`BrowserShards`, buildSrc). The old "CI's build step lists it; every gate log shows it" stopped being true at the 2026-10-09 gate ruling and at #669. |
 | 2026-10-22 | JavaScript product wiring | 8b (#8) | One availability-aware engine map supplies templates, the pool runner and node support; §3.1/§5.15 name the two engines and their responsibilities. |
 | 2026-10-21 | #8 the JavaScript engine | 8a (#8) | §5.15: the module gains the round-two engine — `JavaScriptEngine` on the same seam, `JavaScriptRuntime` (the one Engine/Context factory: UNTRUSTED policy, spawned isolate, one Engine per JVM), its options, `Availability`, `EngineScope`, the console sink types and `JavaScriptResourcesMain`. External dependencies gain GraalVM polyglot, nativebridge and truffle-api 25.4.4.1.1 (UPL 1.0; with collections, nativeimage, word and jniutils) and the test-runtime-only `js-isolate-community` (MIT + UPL 1.0); no isolate binary in the jar. The internal edge set is unchanged (`scripting` → `typesystem` only). No product surface: a javascript template is still refused until 8b. |
 | 2026-10-21 | #8 lane 8a the image's loader path (owner ruling 2026-10-21) | 8a (#8) | §5.4.1: the image's value is now `LOADER_PATH=/app/lib,/opt/graaljs` in the fence, the prose and the readiness checklist — the drop-in directory, then the JavaScript isolate's (§5.15). One list in one `ENV`, never a `-Dloader.path` beside it: `PropertiesLauncher` reads the system property before the environment, so a `-Dloader.path` for the isolate would silently drop the drop-in (measured in lane 8a). `ImageLoaderPathSpecDriftTest` pins the new value and refuses a `-Dloader.path` in the Dockerfile. |
