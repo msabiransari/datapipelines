@@ -154,6 +154,15 @@ class LakeRulesTest {
             enabled(LakeRules.PLAN_MAX_ABANDONED_READS to it).single() shouldStartWith LakeRules.PLAN_MAX_ABANDONED_READS
         }
         listOf("1", "64").forEach { enabled(LakeRules.PLAN_MAX_ABANDONED_READS to it) shouldContainExactly emptyList() }
+        // #969 D4: compaction's two values.
+        listOf("0", "-1", "x", "2147483648").forEach {
+            enabled(LakeRules.COMPACTION_SCRATCH_FACTOR to it).single() shouldStartWith LakeRules.COMPACTION_SCRATCH_FACTOR
+        }
+        listOf("1", "3").forEach { enabled(LakeRules.COMPACTION_SCRATCH_FACTOR to it) shouldContainExactly emptyList() }
+        listOf("0B", "0", "fast").forEach {
+            enabled(LakeRules.COMPACTION_BYTES_PER_SECOND to it).single() shouldStartWith LakeRules.COMPACTION_BYTES_PER_SECOND
+        }
+        listOf("1B", "4MB", "1GB").forEach { enabled(LakeRules.COMPACTION_BYTES_PER_SECOND to it) shouldContainExactly emptyList() }
         // A disabled lake is never judged on them.
         violations(mapOf(LakeRules.PLAN_PAGE_SIZE to "0", LakeRules.PLAN_INTERVAL to "1s")) shouldContainExactly emptyList()
     }

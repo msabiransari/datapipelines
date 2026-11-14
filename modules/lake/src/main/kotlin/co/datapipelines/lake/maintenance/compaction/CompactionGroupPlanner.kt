@@ -172,7 +172,10 @@ object CompactionGroupPlanner {
     }
 
     /** Call 34: a group sorts at least one unsorted file, or merges at least two files. */
-    fun worthRewriting(group: List<CompactionCandidate>): Boolean = group.size >= 2 || group.any { it.needsSort }
+    fun worthRewriting(group: List<CompactionCandidate>): Boolean = group.size >= MIN_FILES_TO_MERGE || group.any { it.needsSort }
+
+    /** Call 34: a merge is worth a rewrite from two files on (a record rule, not a tuning value). */
+    const val MIN_FILES_TO_MERGE = 2
 
     internal fun saturatingAdd(
         a: Long,

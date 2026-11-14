@@ -114,6 +114,8 @@ class LakeConfigKeysSpecDriftTest {
                 "$PREFIX.catalog.lock-timeout-seconds",
                 "$PREFIX.catalog.statement-timeout-seconds",
                 "$PREFIX.enabled",
+                "$PREFIX.maintenance.compaction-bytes-per-second",
+                "$PREFIX.maintenance.compaction-scratch-factor",
                 "$PREFIX.maintenance.max-bytes-rewritten-per-run",
                 "$PREFIX.maintenance.plan-interval",
                 "$PREFIX.maintenance.plan-max-abandoned-reads",

@@ -705,6 +705,10 @@ datapipelines:
       plan-page-size: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_PAGE_SIZE:200}
       plan-table-timeout: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_TABLE_TIMEOUT:60s}
       plan-max-abandoned-reads: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_MAX_ABANDONED_READS:4}
+      # #969: compaction's two deployment values (configuration.md §3.36): scratch per byte of a group's input, and the
+      # input bytes a group is assumed to get through per second (MB = MiB in Spring's DataSize).
+      compaction-scratch-factor: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_SCRATCH_FACTOR:3}
+      compaction-bytes-per-second: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_BYTES_PER_SECOND:4MB}
     retention:
       protection-days: ${DATAPIPELINES_LAKE_RETENTION_PROTECTION_DAYS:7}
       orphan-grace-hours: ${DATAPIPELINES_LAKE_RETENTION_ORPHAN_GRACE_HOURS:72}
