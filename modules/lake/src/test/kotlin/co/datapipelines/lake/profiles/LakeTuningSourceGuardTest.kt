@@ -239,43 +239,73 @@ class LakeTuningSourceGuardTest {
          */
         @JvmStatic
         fun helperShapes(): List<Array<Any>> =
+            lowerCaseOwnerShapes() +
+                listOf(
+                    arrayOf(
+                        "an object val with a lower-case name, read through the object",
+                        "profiles/ProfileDefaults.kt" to
+                            "package $PROFILES\n\nobject ProfileDefaults {\n    val fileBytes = 67108864L\n}\n",
+                        "",
+                        "ProfileDefaults.fileBytes",
+                        "ProfileDefaults.fileBytes",
+                    ),
+                    arrayOf(
+                        "an object const val with a lower-case name, imported and read bare",
+                        "profiles/ProfileDefaults.kt" to
+                            "package $PROFILES\n\nobject ProfileDefaults {\n    const val fileBytes = 67108864L\n}\n",
+                        "$PROFILES.ProfileDefaults.fileBytes",
+                        "fileBytes",
+                        "ProfileDefaults.fileBytes",
+                    ),
+                    arrayOf(
+                        "a top-level const val read fully qualified, with no import",
+                        "profiles/WriterSizes.kt" to "package $PROFILES\n\nconst val FILE_BYTES = 67108864L\n",
+                        "",
+                        "$PROFILES.FILE_BYTES",
+                        "$PROFILES.FILE_BYTES",
+                    ),
+                    arrayOf(
+                        "a top-level val with a lower-case name, imported and read bare",
+                        "tuning/WriterSizes.kt" to "package $TUNING\n\nval fileBytes = 67108864L\n",
+                        "$TUNING.fileBytes",
+                        "fileBytes",
+                        "$TUNING.fileBytes",
+                    ),
+                    arrayOf(
+                        "a companion const val with a lower-case name, read through the class",
+                        "profiles/WriterSizes.kt" to
+                            "package $PROFILES\n\nclass WriterSizes {\n    companion object {\n" +
+                            "        const val fileBytes = 67108864L\n    }\n}\n",
+                        "",
+                        "WriterSizes.fileBytes",
+                        "WriterSizes.fileBytes",
+                    ),
+                )
+
+        /** Legal owner spellings that must not hide an external tuning constant (#956 review F1). */
+        private fun lowerCaseOwnerShapes(): List<Array<Any>> =
             listOf(
                 arrayOf(
-                    "an object val with a lower-case name, read through the object",
-                    "profiles/ProfileDefaults.kt" to "package $PROFILES\n\nobject ProfileDefaults {\n    val fileBytes = 67108864L\n}\n",
+                    "a lower-case object owner read fully qualified",
+                    "tuning/WriterSizes.kt" to "package $TUNING\n\nobject defaults { const val fileBytes = 67108864L }\n",
                     "",
-                    "ProfileDefaults.fileBytes",
-                    "ProfileDefaults.fileBytes",
+                    "$TUNING.defaults.fileBytes",
+                    "defaults.fileBytes",
                 ),
                 arrayOf(
-                    "an object const val with a lower-case name, imported and read bare",
-                    "profiles/ProfileDefaults.kt" to
-                        "package $PROFILES\n\nobject ProfileDefaults {\n    const val fileBytes = 67108864L\n}\n",
-                    "$PROFILES.ProfileDefaults.fileBytes",
-                    "fileBytes",
-                    "ProfileDefaults.fileBytes",
-                ),
-                arrayOf(
-                    "a top-level const val read fully qualified, with no import",
-                    "profiles/WriterSizes.kt" to "package $PROFILES\n\nconst val FILE_BYTES = 67108864L\n",
+                    "a lower-case class owner with a companion constant",
+                    "tuning/WriterSizes.kt" to
+                        "package $TUNING\n\nclass writerSizes { companion object { const val fileBytes = 67108864L } }\n",
                     "",
-                    "$PROFILES.FILE_BYTES",
-                    "$PROFILES.FILE_BYTES",
+                    "$TUNING.writerSizes.fileBytes",
+                    "writerSizes.fileBytes",
                 ),
                 arrayOf(
-                    "a top-level val with a lower-case name, imported and read bare",
-                    "tuning/WriterSizes.kt" to "package $TUNING\n\nval fileBytes = 67108864L\n",
-                    "$TUNING.fileBytes",
-                    "fileBytes",
-                    "$TUNING.fileBytes",
-                ),
-                arrayOf(
-                    "a companion const val with a lower-case name, read through the class",
-                    "profiles/WriterSizes.kt" to
-                        "package $PROFILES\n\nclass WriterSizes {\n    companion object {\n" +
-                        "        const val fileBytes = 67108864L\n    }\n}\n",
+                    "a lower-case named companion read explicitly",
+                    "tuning/WriterSizes.kt" to
+                        "package $TUNING\n\nclass WriterSizes { companion object defaults { const val fileBytes = 67108864L } }\n",
                     "",
-                    "WriterSizes.fileBytes",
+                    "$TUNING.WriterSizes.defaults.fileBytes",
                     "WriterSizes.fileBytes",
                 ),
             )

@@ -135,7 +135,7 @@ internal object LakeTuningSourceGuard {
     private val NUMERIC_VAL =
         Regex("""\b(?:const\s+)?val\s+([A-Za-z_]\w*)\s*(?::\s*[\w.<>?, ]+?)?\s*=\s*(?:-?\d|(?:java\.time\.)?Duration\.|DataSize\.)""")
     private val TYPE_DECLARATION =
-        Regex("""\b(?:(companion)\s+object(?:\s+([A-Z]\w*))?|(class|object|interface)\s+([A-Z]\w*))""")
+        Regex("""\b(?:(companion)\s+object(?:\s+([A-Za-z_]\w*))?|(class|object|interface)\s+([A-Za-z_]\w*))""")
     private val DECLARATION_START =
         Regex("""\n\s*(?:(?:private|internal|public|data|enum|sealed|abstract|open)\s+)*(?:class|object|interface|fun|val|var)\b""")
     private val PACKAGE = Regex("""^\s*package\s+([\w.]+)""", RegexOption.MULTILINE)
