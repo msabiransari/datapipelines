@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.98 (revised — see Change Log)
+**Status:** v1.99 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-14
 
 ---
 
@@ -1792,6 +1792,7 @@ The `lake.definition.*` rows (#798, dp-lake P3; [lake.md](lake.md)) are the mana
 | `lake.definition.authoring_disabled` | — | This deployment has authoring disabled: definitions are written where authoring is enabled and promoted. |
 | `lake.unavailable` | 503 | The catalog read a new managed reader generation is built from failed, so no generation was built (#818, [Datasources §8C.10](datasources.md#8c10-the-managed-lake-datasource)). A live generation keeps serving until its age bound; a lease with none fails here. `details` carry `datasource` and the bounded `cause`. |
 | `lake.definition.apply_unclassified` | — | A step of the apply failed with an exception that is not one of the catalog's refusals (#811, #822): before the commit the row is `pending` again, and from the commit on, or when the row could not be stamped, it is left for `verifyApplying` to settle from the revision log; it is never recorded as `failed`. A release that reached this outcome has landed, and it returns the outcome. |
+| `lake.maintenance.clock_skew` | — | The remover's clock-skew probe (#958, dp-lake P6; [Lake §10](lake.md#10-removal-and-cleanup)): the interval between the store's `LastModified` of the pass's own marker `dp/clock/<run-id>` and two catalog clock readings around its PUT does not lie within ±3600 s at both ends. The pass is refused before it lists: nothing is deleted but that marker, by exact key, and only after the lease and mode checks both answer yes (otherwise it is left for a later pass). The result carries the interval's two ends; no route returns it (HTTP `—`), the maintenance run (962) records it. |
 
 
 ### 13.26 Dependency trees
@@ -2043,6 +2044,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-14 | v1.99 | 958 (#958) | §13.25 gains `lake.maintenance.clock_skew` (HTTP `—`): the lake remover's clock-skew probe refuses a pass whose skew interval leaves ±3600 s, before it lists. Landed with the constant in `PipelineErrorCodes.Lake` and the `ApiErrorCatalog.NEVER_RETURNED_LIVE` entry (§13 row count 514 → 515). |
 | 2026-11-13 | v1.98 | 967 (#967) — renumbered at the spec sync after #935's v1.97 | §13.25 gains `lake.append.partition_value_out_of_range` (400): the append's first scan refuses a delivery with a value a numeric `truncate` partition cannot hold, before anything is written (owner ruling 2026-11-13, temporary until apache/iceberg 17027 and 13105). Landed with the constant in `PipelineErrorCodes.Lake` and the explicit `ApiErrorCatalog` row (§13 row count 513 → 514, recounted with the drift test's own regex). |
 | 2026-11-13 | v1.97 | 935 (#935) | §13.25 `lake.definition.invalid_body`: a release returns it too, when its stored draft breaks the sort-column rule of lake.md §1 (sort columns fixed by the table's first release); nothing is released and no audit row is written. No code added or removed. |
 | 2026-11-13 | v1.96 | 803 (#803) — renumbered at merge after #822's v1.95 | §13.5 gains `pipeline.staging.scratch_blocked` (500, the `pipeline.staging.` family default — no explicit `ApiErrorCatalog` row): a DuckDB scratch reservation that can never fit beside the leftover files a factory's sweep counted, a type distinct from the retryable `scratch_exhausted` (details `execution_id`, `requested_bytes`, `leftover_bytes`, `capacity_bytes`). Landed with the constants in `StagingErrorCodes` and `PipelineErrorCodes.Staging`. §13 row count 512 → 513. |

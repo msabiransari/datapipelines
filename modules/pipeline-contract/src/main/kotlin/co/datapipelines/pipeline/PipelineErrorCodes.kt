@@ -2306,6 +2306,14 @@ object PipelineErrorCodes {
          * the table and reason. Shared by the P4 delivery ledger and the P5 read gate.
          */
         const val TABLE_UNAVAILABLE = "lake.table.unavailable"
+
+        // #958 (dp-lake P6) — the remover (§13.25, design record §8a (iii); the cut's L7 spells it in snake_case).
+
+        /**
+         * The remover's clock-skew probe found the catalog and the object store more than 3600 s apart: the pass listed
+         * nothing and deleted no candidate. Recorded on the maintenance run, never returned by a route.
+         */
+        const val MAINTENANCE_CLOCK_SKEW = "lake.maintenance.clock_skew"
     }
 }
 
