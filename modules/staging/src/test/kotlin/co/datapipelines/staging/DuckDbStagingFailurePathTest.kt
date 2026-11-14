@@ -8,6 +8,8 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.types.shouldBeInstanceOf
+import io.kotest.matchers.types.shouldBeSameInstanceAs
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -165,5 +167,26 @@ class DuckDbStagingFailurePathTest {
     fun `execute reports affected rows, and zero for DDL where the driver says -1`() {
         runBlocking { staging.execute("CREATE TABLE \"stg_n\" AS SELECT range AS id FROM range(5)") } shouldBe 0L
         runBlocking { staging.execute("INSERT INTO \"stg_n\" SELECT range FROM range(3)") } shouldBe 3L
+    }
+
+    @Test
+    fun `classifyEngineFailure gives a caller outside the lease the lease's own classification`() {
+        // #968 D7: the lake concludes an append scan's failure in its ledger before the failure leaves the lease.
+        val spill =
+            staging
+                .classifyEngineFailure(
+                    SQLException(
+                        "Out of Memory Error: failed to offload data block of size 256.0 KiB (30.3 MiB/30.5 MiB used). This limit was " +
+                            "set by the 'max_temp_directory_size' setting. By default, this setting utilizes the available disk space",
+                    ),
+                ).shouldBeInstanceOf<StagingScratchLimitException>()
+        spill.code shouldBe StagingErrorCodes.SCRATCH_LIMIT_EXCEEDED
+        spill.engineReading shouldBe "30.3 MiB/30.5 MiB"
+        staging
+            .classifyEngineFailure(SQLException("Out of Memory Error: failed to pin block of size 256.0 KiB (61.1 MiB/61.0 MiB used)"))
+            .shouldBeInstanceOf<StagingEngineMemoryLimitException>()
+            .code shouldBe StagingErrorCodes.MEMORY_LIMIT_EXCEEDED
+        val unmatched = SQLException("Parser Error: syntax error at or near \"SELEC\"")
+        staging.classifyEngineFailure(unmatched) shouldBeSameInstanceAs unmatched
     }
 }

@@ -71,6 +71,13 @@ class DuckDbStaging internal constructor(
 
     override suspend fun <T> withConnection(block: suspend (Connection) -> T): T = authorLease(block).also { checkScratch() }
 
+    /**
+     * The classification an engine failure leaving a lease gets ([DuckDbEngineFailures]: the same rules and texts), for
+     * a caller whose failure is routed elsewhere before it leaves the lease (#968 D7: the lake's append scans, whose
+     * failure publication concludes first). An unmatched failure is returned unchanged; nothing is thrown.
+     */
+    fun classifyEngineFailure(e: SQLException): Exception = failures.classify(e)
+
     override suspend fun stage(
         resultSet: ResultSet,
         tableName: String,
