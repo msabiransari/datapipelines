@@ -1,17 +1,21 @@
 package co.datapipelines.lake.maintenance.inventory
 
+import co.datapipelines.lake.maintenance.cleanup.CleanupObservation
 import co.datapipelines.lake.maintenance.cleanup.ExpiryFloor
+import co.datapipelines.lake.maintenance.cleanup.ObservedPass
 import co.datapipelines.lake.maintenance.cleanup.ObservedRef
 import co.datapipelines.lake.maintenance.cleanup.ObservedRefType
 import co.datapipelines.lake.maintenance.cleanup.ObservedSnapshot
 import co.datapipelines.lake.maintenance.remove.FileKind
 import co.datapipelines.lake.maintenance.remove.ListedObject
+import co.datapipelines.lake.maintenance.remove.ReachVisit
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
 import java.util.Random
+import java.util.UUID
 
 /**
  * Brief 964 A (B1–B4, B4a): the six rows built by hand over the classifier's pure input. Snapshot ids: [OLD_KEPT] and
@@ -65,6 +69,37 @@ class StorageClassifierTest {
         placedRow(key("data/k.parquet"), reach(FileKind.DATA, OLD_KEPT)) shouldBe StorageRow.KEEP_HELD
         placedRow(key("data/kh.parquet"), reach(FileKind.DATA, OLD_KEPT, OLD_HELD)) shouldBe StorageRow.KEEP_HELD
         StorageClassifier.keepHeld(input(emptyList())) shouldBe setOf(OLD_KEPT, OLD_HELD)
+    }
+
+    @Test
+    fun `B3 through the observation - a keep-held snapshot reached from the current and an earlier protected revision stays keep-held`() {
+        val keepOnly = "s3://lake-bucket/${PREFIX}data/k.parquet"
+        val shared = "s3a://lake-bucket/${PREFIX}data/s.parquet" // the walker's location may carry another s3 scheme
+        val observation =
+            CleanupObservation(
+                runId = UUID.randomUUID(),
+                tableId = UUID.randomUUID(),
+                location = LOCATION,
+                listingTime = T0,
+                currentSnapshotId = CURRENT,
+                snapshots = input(emptyList()).snapshots,
+                refs = input(emptyList()).refs,
+                floor = ExpiryFloor.Applied(FLOOR),
+                inventory = listOf(ListedObject(key("data/k.parquet"), 11, T0), ListedObject(key("data/s.parquet"), 13, T0)),
+                visits =
+                    listOf("$PREFIX-current.metadata.json", "$PREFIX-earlier.metadata.json").flatMap { revision ->
+                        listOf(
+                            ReachVisit(keepOnly, FileKind.DATA, revision, OLD_KEPT),
+                            ReachVisit(shared, FileKind.DATA, revision, OLD_KEPT),
+                            ReachVisit(shared, FileKind.DATA, revision, OLD_PLAIN),
+                        )
+                    },
+                pass = ObservedPass.Complete,
+            )
+
+        val placed = StorageClassifier.place(ClassifierInput.of(observation)).associate { it.listed.key to it.row }
+
+        placed shouldBe mapOf(key("data/k.parquet") to StorageRow.KEEP_HELD, key("data/s.parquet") to StorageRow.HISTORY)
     }
 
     @Test
