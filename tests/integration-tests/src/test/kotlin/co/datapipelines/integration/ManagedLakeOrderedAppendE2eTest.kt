@@ -169,8 +169,8 @@ class ManagedLakeOrderedAppendE2eTest {
         val failed = events.single { it.first == "node_failed" }.second
         println("case=o9 node_failed=$failed ledger=${ledger(batch)}")
         failed.path("node_id").asText() shouldBe "append"
-        failed.path("error").path("code").asText() shouldBe SCRATCH_LIMIT_EXCEEDED
-        ledger(batch) shouldBe Triple("FAILED", "publish", SCRATCH_LIMIT_EXCEEDED)
+        withClue("the ledger row") { ledger(batch) shouldBe Triple("FAILED", "publish", SCRATCH_LIMIT_EXCEEDED) }
+        withClue("the caller's code") { failed.path("error").path("code").asText() shouldBe SCRATCH_LIMIT_EXCEEDED }
         revisions() shouldBe revisions
         metadataLocation() shouldBe location
     }
@@ -496,12 +496,21 @@ class ManagedLakeOrderedAppendE2eTest {
             try {
                 type(declaring)
                     .methods
-                    .filter { it.name == name && it.parameterCount == arguments.size }
-                    .let { candidates -> candidates.singleOrNull() ?: candidates.first { !it.isBridge } }
-                    .invoke(receiver, *arguments) ?: Unit
+                    .filter { it.name == name && !it.isBridge && accepts(it.parameterTypes, arguments) }
+                    .let { candidates ->
+                        candidates.singleOrNull() ?: error("$declaring.$name: ${candidates.size} overloads accept ${arguments.toList()}")
+                    }.invoke(receiver, *arguments) ?: Unit
             } catch (failure: InvocationTargetException) {
                 throw failure.targetException
             }
+
+        /** An overload accepts the arguments when each one is an instance of its parameter's type (a null: any reference type). */
+        private fun accepts(
+            parameters: Array<Class<*>>,
+            arguments: Array<out Any?>,
+        ): Boolean =
+            parameters.size == arguments.size &&
+                parameters.indices.all { i -> arguments[i]?.let { parameters[i].isInstance(it) } ?: !parameters[i].isPrimitive }
 
         private fun staticCall(
             declaring: String,
