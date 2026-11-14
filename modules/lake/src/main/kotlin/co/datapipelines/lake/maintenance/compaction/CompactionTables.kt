@@ -76,7 +76,12 @@ class CompactionTables(
         val locations = LocationProviders.locationsFor(metadata.location(), metadata.properties())
         val handle = BaseTable(StaticTableOperations(metadata, io, locations), "${table.namespace}.${table.name}")
         val snapshot = handle.currentSnapshot() ?: return null
-        val tasks = handle.newScan().useSnapshot(snapshot.snapshotId()).planFiles().use { it.toList() }
+        val tasks =
+            handle
+                .newScan()
+                .useSnapshot(snapshot.snapshotId())
+                .planFiles()
+                .use { it.toList() }
         return PinnedTable(handle, snapshot.snapshotId(), tasks.map { it.file() }, tasks.count { it.deletes().isNotEmpty() })
     }
 

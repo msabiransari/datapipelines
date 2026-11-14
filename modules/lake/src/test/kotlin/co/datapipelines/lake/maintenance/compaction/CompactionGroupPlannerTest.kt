@@ -37,7 +37,8 @@ class CompactionGroupPlannerTest {
         factor: Int = 1,
         wholeRun: Long = AMPLE,
         now: Long = wholeRun,
-    ) = PlanLimits(cap * MIB, grant * MIB, factor, wholeRun * MIB, now * MIB)
+        ceiling: Long = grant,
+    ) = PlanLimits(cap * MIB, grant * MIB, factor, wholeRun * MIB, now * MIB, ceiling * MIB)
 
     private fun GroupPlan.keys() = groups.map { group -> group.map { it.key } }
 
@@ -120,6 +121,25 @@ class CompactionGroupPlannerTest {
             GroupLimit(40 * MIB, LimitSource.SCRATCH)
         CompactionGroupPlanner.plan(file, limits(cap = 32, grant = 100, factor = 2, wholeRun = 40)).limit shouldBe
             GroupLimit(32 * MIB, LimitSource.CAP)
+    }
+
+    @Test
+    fun `G5 scratch's two cases - beyond what any run can be granted is blocked, beyond this run's grant is left for a fresh run`() {
+        val files = listOf(unsorted("huge", 100, 1), unsorted("fits-a-grant", 60, 2, P2), unsorted("fits-now", 20, 3, P3))
+        val plan = CompactionGroupPlanner.plan(files, limits(cap = 128, grant = 30, ceiling = 80))
+        plan.blocked shouldContainExactly listOf(BlockedFile(unsorted("huge", 100, 1), 100 * MIB))
+        plan.limit shouldBe GroupLimit(80 * MIB, LimitSource.SCRATCH)
+        plan.leftForFreshRun.map { it.key } shouldContainExactly listOf("fits-a-grant")
+        plan.keys() shouldContainExactly listOf(listOf("fits-now"))
+        // A file over the cap beside a grant sized to the other candidates (D4): the cap blocks it, never the grant.
+        val beside =
+            CompactionGroupPlanner.plan(
+                listOf(unsorted("big", 64, 1), unsorted("fits", 20, 2, P2)),
+                limits(cap = 32, grant = 20, ceiling = 1024),
+            )
+        beside.limit shouldBe GroupLimit(32 * MIB, LimitSource.CAP)
+        beside.blocked.map { it.candidate.key } shouldContainExactly listOf("big")
+        beside.keys() shouldContainExactly listOf(listOf("fits"))
     }
 
     @Test
@@ -243,6 +263,7 @@ class CompactionGroupPlannerTest {
         const val AMPLE = 1L shl 30
         const val P1 = "0/p=1"
         const val P2 = "0/p=2"
+        const val P3 = "0/p=3"
 
         /** Target 64 MiB, ratio 0.75 (small below 48 MiB), minimum 5, cap 128 MiB. */
         fun profile(): LakeProfile =

@@ -39,9 +39,17 @@ data class CompactionCandidate(
 }
 
 /**
- * The limits one plan is made under (D3). [capBytes] is the profile's bytes cap; [scratchGrantBytes] the run's granted
- * scratch and [scratchFactor] the scratch needed per byte of a group's input; [wholeRunBytes] what a whole
+ * The limits one plan is made under (D3). [capBytes] is the profile's bytes cap; [scratchFactor] the scratch needed per
+ * byte of a group's input; [scratchCeilingBytes] the most scratch ANY run can be granted (D4's ceiling: `scratch-bytes`
+ * minus one delivery's reservation) and [scratchGrantBytes] what THIS run was granted; [wholeRunBytes] what a whole
  * `job-timeout` writes; [bytesLeftNow] what is left of THIS run writes.
+ *
+ * Scratch has a whole-run and a this-run figure, as time does (L18). D4 sizes a run's grant to the candidates 959
+ * measured (a file over the cap is not among them), so the grant alone would undercut the cap for every file the cap
+ * blocks and name `scratch` where the record's M4 (a) names the cap; and a file that arrived after the measurement
+ * would be reported as no run's work when the next run's declaration takes it. So a file is blocked by scratch only
+ * above what the ceiling allows (M4 (b): "scratch granted for only 64 MiB" under a 128 MiB cap), and a file within
+ * that but above this run's grant is left for a fresh run. The grant is never exceeded: it bounds [now].
  */
 data class PlanLimits(
     val capBytes: Long,
@@ -49,24 +57,27 @@ data class PlanLimits(
     val scratchFactor: Int,
     val wholeRunBytes: Long,
     val bytesLeftNow: Long,
+    val scratchCeilingBytes: Long = scratchGrantBytes,
 ) {
     init {
-        require(capBytes >= 0 && scratchGrantBytes >= 0 && wholeRunBytes >= 0 && bytesLeftNow >= 0) { "limits are never negative: $this" }
+        require(capBytes >= 0 && scratchGrantBytes >= 0 && wholeRunBytes >= 0 && bytesLeftNow >= 0 && scratchCeilingBytes >= 0) {
+            "limits are never negative: $this"
+        }
         require(scratchFactor >= 1) { "the scratch factor is at least 1: $scratchFactor" }
     }
 
-    /** The smallest of the cap, the grant ÷ the factor and a whole run's bytes; on a tie the source in that order. */
+    /** The smallest of the cap, the ceiling ÷ the factor and a whole run's bytes; on a tie the source in that order. */
     val wholeRun: GroupLimit
         get() =
             listOf(
                 GroupLimit(capBytes, LimitSource.CAP),
-                GroupLimit(scratchGrantBytes / scratchFactor, LimitSource.SCRATCH),
+                GroupLimit(scratchCeilingBytes / scratchFactor, LimitSource.SCRATCH),
                 GroupLimit(wholeRunBytes, LimitSource.TIME),
             ).minBy { it.bytes } // minBy keeps the first of equal values: the tie order above
 
-    /** The whole-run limit, and what is left of this run. */
+    /** The whole-run limit, this run's grant ÷ the factor, and what is left of this run. */
     val now: Long
-        get() = minOf(wholeRun.bytes, bytesLeftNow)
+        get() = minOf(wholeRun.bytes, scratchGrantBytes / scratchFactor, bytesLeftNow)
 }
 
 /** A file no run can take (`capacity`): its NEED (its own size, or its smallest merge) is above the whole-run limit. */

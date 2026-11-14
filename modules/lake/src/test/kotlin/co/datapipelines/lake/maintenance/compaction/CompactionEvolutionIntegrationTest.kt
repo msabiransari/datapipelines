@@ -106,7 +106,20 @@ class CompactionEvolutionIntegrationTest {
     private companion object {
         const val ROWS = 50
 
-        val V1: String = body(listOf(field(1, "k", "STRING"), field(2, "i", "INTEGER"), field(3, "n", "DECIMAL", "precision" to 10, "scale" to 2)))
+        val V1: String =
+            body(
+                listOf(
+                    field(1, "k", "STRING"),
+                    field(2, "i", "INTEGER"),
+                    field(
+                        3,
+                        "n",
+                        "DECIMAL",
+                        "precision" to 10,
+                        "scale" to 2,
+                    ),
+                ),
+            )
 
         val V2: String =
             body(
@@ -119,7 +132,10 @@ class CompactionEvolutionIntegrationTest {
             )
 
         val P1: String =
-            body(listOf(field(1, "k", "STRING"), field(2, "region", "STRING"), field(3, "cat", "STRING")), partition = listOf(partition(2, "identity")))
+            body(
+                listOf(field(1, "k", "STRING"), field(2, "region", "STRING"), field(3, "cat", "STRING")),
+                partition = listOf(partition(2, "identity")),
+            )
 
         val P2: String =
             body(

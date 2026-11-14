@@ -19,34 +19,34 @@ import org.apache.iceberg.FileFormat
 import org.apache.iceberg.PartitionKey
 import org.apache.iceberg.Schema
 import org.apache.iceberg.SortOrder
+import org.apache.iceberg.SortOrderComparators
 import org.apache.iceberg.StaticTableOperations
 import org.apache.iceberg.Table
 import org.apache.iceberg.data.GenericFileWriterFactory
 import org.apache.iceberg.data.IcebergGenerics
 import org.apache.iceberg.data.InternalRecordWrapper
 import org.apache.iceberg.data.Record
-import org.apache.iceberg.io.OutputFileFactory
-import org.apache.iceberg.SortOrderComparators
 import org.apache.iceberg.data.parquet.GenericParquetReaders
+import org.apache.iceberg.io.OutputFileFactory
 import org.apache.iceberg.parquet.Parquet
 import org.apache.iceberg.parquet.ParquetValueReader
 import org.apache.parquet.schema.MessageType
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
 import java.math.BigDecimal
-import java.sql.ResultSet
-import java.util.Random
-import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
-import java.util.function.Function
 import java.nio.ByteBuffer
+import java.sql.ResultSet
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.HexFormat
+import java.util.Random
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
+import java.util.function.Function
 
 /**
  * #969 — the compaction part over the module's one Postgres and MinIO (957's [co.datapipelines.lake.maintenance.MaintenanceHarness]
@@ -145,7 +145,15 @@ internal class CompactionHarness {
                 .dataSchema(schema)
                 .dataSortOrder(stamp)
                 .build()
-        val output = OutputFileFactory.builderFor(t, 1, fileCounter.incrementAndGet()).operationId("fixture").format(FileFormat.PARQUET).build()
+        val output =
+            OutputFileFactory
+                .builderFor(
+                    t,
+                    1,
+                    fileCounter.incrementAndGet(),
+                ).operationId("fixture")
+                .format(FileFormat.PARQUET)
+                .build()
         val target = if (partition == null) output.newOutputFile() else output.newOutputFile(spec, partition)
         val writer = factory.newDataWriter(target, spec, partition)
         writer.use { w -> fixture.rows.forEach(w::write) }
@@ -237,14 +245,21 @@ internal class CompactionHarness {
         jobTimeout: Duration = SETTINGS.jobTimeout,
     ): Map<String, JsonNode> {
         failures.clear()
-        m.worker(parts = parts.map(::Witnessed), gate = gate, scratch = scratch, hooks = hooks, jobTimeout = jobTimeout).run(table.id.toString())
+        m
+            .worker(
+                parts = parts.map(::Witnessed),
+                gate = gate,
+                scratch = scratch,
+                hooks = hooks,
+                jobTimeout = jobTimeout,
+            ).run(table.id.toString())
         return lastParts(table)
     }
 
     /** What each part threw in the last [run] (the run row keeps only the class name): a test reads the message. */
     val failures = CopyOnWriteArrayList<Throwable>()
 
-    /** A part as given, whose throw is kept in [failures] (and printed) before it leaves unchanged. */
+    /** A part as given, whose throw is kept in [failures] before it leaves unchanged. */
     private inner class Witnessed(
         private val part: MaintenancePart,
     ) : MaintenancePart by part {
@@ -253,7 +268,6 @@ internal class CompactionHarness {
                 part.run(run)
             } catch (failure: Exception) {
                 failures += failure
-                failure.printStackTrace()
                 throw failure
             }
     }
@@ -330,7 +344,9 @@ internal class CompactionHarness {
                 }
                 try {
                     method.invoke(rows, *(args ?: emptyArray()))
-                } catch (e: InvocationTargetException) {
+                } catch (
+                    @Suppress("SwallowedException") e: InvocationTargetException, // the cursor's own throw is its cause
+                ) {
                     throw requireNotNull(e.cause)
                 }
             } as ResultSet
@@ -340,7 +356,10 @@ internal class CompactionHarness {
         fun record(
             schema: Schema,
             vararg values: Any?,
-        ): Record = org.apache.iceberg.data.GenericRecord.create(schema).also { r -> values.forEachIndexed(r::set) }
+        ): Record =
+            org.apache.iceberg.data.GenericRecord
+                .create(schema)
+                .also { r -> values.forEachIndexed(r::set) }
     }
 }
 

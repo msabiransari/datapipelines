@@ -56,10 +56,13 @@ class CompactionPart(
     override fun declare(table: MaintenanceTable): MaintenanceDeclaration {
         if (table.status !in PlanStatus.REWRITTEN) return MaintenanceDeclaration.NONE
         val row = tables.row(table.id) ?: return MaintenanceDeclaration.NONE
-        val measurement = measurements(table.id) ?: return MaintenanceDeclaration.NONE
-        if (!measurement.current(row.profileId, row.profileUpdatedAt)) return MaintenanceDeclaration.NONE
-        val candidateBytes = measurement.figures?.candidateBytes ?: return MaintenanceDeclaration.NONE
-        if (candidateBytes <= 0) return MaintenanceDeclaration.NONE
+        val candidateBytes =
+            measurements(table.id)
+                ?.takeIf { it.current(row.profileId, row.profileUpdatedAt) }
+                ?.figures
+                ?.candidateBytes
+                ?.takeIf { it > 0 }
+                ?: return MaintenanceDeclaration.NONE
         val demand = settings.scratchFor(minOf(row.profile.maxBytesRewrittenPerRun, candidateBytes))
         return MaintenanceDeclaration(expectsDue = true, scratchBytes = minOf(demand, settings.declarationCeilingBytes))
     }
@@ -93,7 +96,14 @@ class CompactionPart(
         profile: LakeProfile,
     ): List<CompactionCandidate> {
         val specs = pinned.table.specs()
-        val rule = CompactionCandidateRule(profile, pinned.table.sortOrder().takeIf { !it.isUnsorted }?.orderId())
+        val rule =
+            CompactionCandidateRule(
+                profile,
+                pinned.table
+                    .sortOrder()
+                    .takeIf { !it.isUnsorted }
+                    ?.orderId(),
+            )
 
         fun partition(file: DataFile) =
             CompactionCandidateRule.partitionKey(file.specId(), specs.getValue(file.specId()).partitionToPath(file.partition()))
@@ -122,34 +132,40 @@ class CompactionPart(
         private val rewriter = CompactionRewriter(::checkDeadline)
         private var session: CompactionScratchSession? = null
 
+        private var remaining = candidates(pinned, profile)
+        private var ordinal = 0L
+
         fun execute(): PartResult {
-            var remaining = candidates(pinned, profile)
             val first = CompactionGroupPlanner.plan(remaining, limits(timeLeft()))
             first.largestBlockedNeed?.let { tally.block(first.blocked.size, it, first.limit) }
             try {
-                var ordinal = 0L
-                while (true) {
-                    run.checkInterrupt()
-                    val timeLeft = timeLeft()
-                    val plan = CompactionGroupPlanner.plan(remaining, limits(timeLeft))
-                    tally.leftForFreshRun = plan.leftForFreshRun.size.toLong()
-                    val group = plan.groups.firstOrNull() ?: break
-                    if (timeLeft.isNegative || timeLeft.isZero) {
-                        tally.deadlineReached = true
-                        tally.leftForFreshRun += plan.groups.sumOf { it.size }
-                        break
-                    }
-                    // D3's last rule: a group that would cross what is left of the run's cap is not started, not shrunk.
-                    if (!budget.fits(group)) break
-                    if (!rewrite(group, ++ordinal)) break
-                    remaining = remaining.filterNot { it in group }
-                }
+                var goOn = true
+                while (goOn) goOn = nextGroup()
             } finally {
                 session?.close()
             }
             val result = tally.result()
             if (tally.blocked > 0) logBlocked()
             return result
+        }
+
+        /**
+         * Plans again with the time left now and runs the plan's first group (D3's last rule); answers whether the part
+         * goes on. A group that would cross what is left of the run's cap is not started and not shrunk: the part stops,
+         * and those files are neither blocked nor left for a fresh run. At the deadline (before the group or inside it)
+         * every group of this plan is a fresh run's.
+         */
+        private fun nextGroup(): Boolean {
+            run.checkInterrupt()
+            val timeLeft = timeLeft()
+            val plan = CompactionGroupPlanner.plan(remaining, limits(timeLeft))
+            tally.leftForFreshRun = plan.leftForFreshRun.size.toLong()
+            val group = plan.groups.firstOrNull() ?: return false
+            if (timeLeft.isNegative || timeLeft.isZero) tally.deadlineReached = true
+            val committed = !tally.deadlineReached && budget.fits(group) && rewrite(group, ++ordinal)
+            if (committed) remaining = remaining.filterNot { it in group }
+            if (tally.deadlineReached) tally.leftForFreshRun += plan.groups.sumOf { it.size }
+            return committed
         }
 
         /** One group; answers whether the part goes on to the next. */
@@ -177,11 +193,10 @@ class CompactionPart(
                     }
                 when (guarded) {
                     is Guarded.Done -> committed(group, inputBytes, written, readWrite, seconds(leaseStarted, System.nanoTime()))
-                    is Guarded.Refused -> refused(guarded.outcome, group)
+                    is Guarded.Refused -> refused(guarded.outcome)
                 }
             } catch (_: CompactionDeadlinePassed) {
                 tally.deadlineReached = true
-                tally.leftForFreshRun += group.size
                 false
             } catch (_: CompactionScratchExhausted) {
                 // D8: the factor was too low for this group. The blocked line is the evidence: the group's input (its
@@ -228,15 +243,11 @@ class CompactionPart(
             return true
         }
 
-        private fun refused(
-            outcome: MaintenanceOutcome,
-            group: List<CompactionCandidate>,
-        ): Boolean {
+        private fun refused(outcome: MaintenanceOutcome): Boolean {
             if (outcome == MaintenanceOutcome.BUSY) {
                 tally.busy = true
             } else {
                 tally.deadlineReached = true
-                tally.leftForFreshRun += group.size
             }
             return false
         }
@@ -264,6 +275,7 @@ class CompactionPart(
                 scratchFactor = settings.scratchFactor,
                 wholeRunBytes = settings.wholeRunBytes,
                 bytesLeftNow = settings.bytesIn(timeLeft),
+                scratchCeilingBytes = maxOf(grant, settings.declarationCeilingBytes),
             )
 
         private fun timeLeft(): Duration = Duration.between(clock.instant(), deadline)

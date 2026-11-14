@@ -77,7 +77,14 @@ internal class MaintenancePartLoop(
                 throw failure
             }
         records +=
-            PartRecord(part.name, result.outcome, attempted = true, figures = result.figures, until = result.until, details = result.details)
+            PartRecord(
+                part.name,
+                result.outcome,
+                attempted = true,
+                figures = result.figures,
+                until = result.until,
+                details = result.details,
+            )
         return result.outcome.takeIf { it == MaintenanceOutcome.BUSY || it == MaintenanceOutcome.DEADLINE }
     }
 

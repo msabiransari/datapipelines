@@ -116,7 +116,11 @@ class CompactionRewriteIntegrationTest {
         val table = h.table("c6", KEYED)
         val schema = h.load(table).schema()
         val random = Random(6)
-        h.append(table, Fixture(keyedRows(schema, random, BIG_FILE_ROWS), sorted = false), Fixture(keyedRows(schema, random, BIG_FILE_ROWS), sorted = false))
+        h.append(
+            table,
+            Fixture(keyedRows(schema, random, BIG_FILE_ROWS), sorted = false),
+            Fixture(keyedRows(schema, random, BIG_FILE_ROWS), sorted = false),
+        )
         h.measure()
 
         h.run(table, listOf(h.part())).getValue("compaction")["outcome"].asText() shouldBe MaintenanceOutcome.DONE.wire
@@ -164,7 +168,11 @@ class CompactionRewriteIntegrationTest {
         val table = h.table("c8", KEYED)
         val schema = h.load(table).schema()
         val random = Random(8)
-        h.append(table, Fixture(keyedRows(schema, random, SMALL_ROWS), sorted = false), Fixture(keyedRows(schema, random, SMALL_ROWS), sorted = false))
+        h.append(
+            table,
+            Fixture(keyedRows(schema, random, SMALL_ROWS), sorted = false),
+            Fixture(keyedRows(schema, random, SMALL_ROWS), sorted = false),
+        )
         val between = keyedRows(schema, random, SMALL_ROWS)
         val expected = multiset(h.rows(table) + between)
         h.measure()
@@ -189,7 +197,11 @@ class CompactionRewriteIntegrationTest {
         val table = h.table("c9", KEYED)
         val schema = h.load(table).schema()
         val random = Random(9)
-        h.append(table, Fixture(keyedRows(schema, random, SMALL_ROWS), sorted = false), Fixture(keyedRows(schema, random, SMALL_ROWS), sorted = false))
+        h.append(
+            table,
+            Fixture(keyedRows(schema, random, SMALL_ROWS), sorted = false),
+            Fixture(keyedRows(schema, random, SMALL_ROWS), sorted = false),
+        )
         val snapshot = h.load(table).currentSnapshot().snapshotId()
         h.measure()
 
@@ -197,7 +209,10 @@ class CompactionRewriteIntegrationTest {
 
         parts.getValue("compaction")["outcome"].asText() shouldBe MaintenanceOutcome.FAILED.wire
         h.lastRun(table).state shouldBe MaintenanceRunState.FAILED.wire
-        h.failures.single().message.orEmpty() shouldContain "rows where its inputs hold"
+        h.failures
+            .single()
+            .message
+            .orEmpty() shouldContain "rows where its inputs hold"
         h.load(table).currentSnapshot().snapshotId() shouldBe snapshot
     }
 
@@ -224,7 +239,10 @@ class CompactionRewriteIntegrationTest {
 
         parts.getValue("compaction")["outcome"].asText() shouldBe MaintenanceOutcome.FAILED.wire
         h.lastRun(table).state shouldBe MaintenanceRunState.FAILED.wire
-        h.failures.single().message.orEmpty() shouldContain table.id.toString()
+        h.failures
+            .single()
+            .message
+            .orEmpty() shouldContain table.id.toString()
         h.load(table).currentSnapshot().snapshotId() shouldBe snapshot
         h.files(table) shouldHaveSize 1
     }
@@ -297,7 +315,11 @@ class CompactionRewriteIntegrationTest {
                     if (nulls) null else ByteBuffer.wrap(byteArrayOf(0, -1, index.toByte(), Byte.MAX_VALUE)),
                     if (nulls) null else LocalDate.of(1969, 12, 31).plusDays(index * 400L - 1200L),
                     if (nulls) null else LocalTime.of(23, 59, 59, 999_999_000).minusSeconds(index * 3_600L),
-                    if (nulls) null else OffsetDateTime.parse("1969-12-31T23:59:59.999999Z").plusSeconds(index * 86_400L * 700 - 86_400L * 2000),
+                    if (nulls) {
+                        null
+                    } else {
+                        OffsetDateTime.parse("1969-12-31T23:59:59.999999Z").plusSeconds(index * 86_400L * 700 - 86_400L * 2000)
+                    },
                 )
             }
 

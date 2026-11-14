@@ -68,6 +68,19 @@ internal object LakeTuningSourceGuard {
                 "MIN_FILES_TO_MERGE = 2",
                 "call 34's \"at least two\": a record rule",
             ),
+            Admitted("maintenance/compaction/CompactionPart.kt", "ORDER = 3", "the record's run order: cleanup, manifests, compaction"),
+            Admitted("maintenance/compaction/CompactionPart.kt", "NANOS_PER_SECOND = 1e9", "a unit conversion"),
+            Admitted("maintenance/compaction/CompactionSettings.kt", "MILLIS_PER_SECOND = 1_000L", "a unit conversion"),
+            Admitted(
+                "maintenance/compaction/CompactionRewriter.kt",
+                "CHECK_EVERY_ROWS = 1_000L",
+                "rows between the stream's deadline checks (D8): a check cadence, no table's tuning",
+            ),
+            Admitted(
+                "maintenance/compaction/CompactionTables.kt",
+                ".properties()",
+                "the pinned handle's location provider, built as Iceberg builds a table's own: where files go, not tuning",
+            ),
         )
 
     /** The LakeProperties groups scoped code may read (rule c), each with why it is not a profile value. */

@@ -61,6 +61,7 @@ class CompactionStatement private constructor(
          * The closed vocabulary: the Iceberg types a managed column can hold (the append path's, `AppendValues`) to the
          * engine's type names. Any other type is a defect: the definition rules keep it from existing.
          */
+        @Suppress("CyclomaticComplexMethod") // D6: one closed `when`, a branch per Iceberg type the lake admits
         fun duckDbType(type: Type): String =
             when (type.typeId()) {
                 Type.TypeID.BOOLEAN -> "BOOLEAN"

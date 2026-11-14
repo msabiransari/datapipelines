@@ -33,8 +33,7 @@ data class CompactionSettings(
     }
 
     /** The scratch [inputBytes] need: the factor times them, saturating. */
-    fun scratchFor(inputBytes: Long): Long =
-        if (inputBytes > Long.MAX_VALUE / scratchFactor) Long.MAX_VALUE else inputBytes * scratchFactor
+    fun scratchFor(inputBytes: Long): Long = if (inputBytes > Long.MAX_VALUE / scratchFactor) Long.MAX_VALUE else inputBytes * scratchFactor
 
     companion object {
         private const val MILLIS_PER_SECOND = 1_000L
@@ -46,7 +45,13 @@ data class CompactionSettings(
             stagingExpansionFactor: Int,
         ): Long {
             val delivery =
-                if (maxDeliveryBytes > Long.MAX_VALUE / stagingExpansionFactor) Long.MAX_VALUE else maxDeliveryBytes * stagingExpansionFactor
+                if (maxDeliveryBytes >
+                    Long.MAX_VALUE / stagingExpansionFactor
+                ) {
+                    Long.MAX_VALUE
+                } else {
+                    maxDeliveryBytes * stagingExpansionFactor
+                }
             return (scratchBytes - delivery).coerceAtLeast(0)
         }
     }
