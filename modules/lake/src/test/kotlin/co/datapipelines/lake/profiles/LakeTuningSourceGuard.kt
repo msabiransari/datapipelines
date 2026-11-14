@@ -50,6 +50,8 @@ internal object LakeTuningSourceGuard {
             Admitted("append/LakeWritebackRunner.kt", "LakeApplyLeases.APPLY_LEASE_TTL", "the table lease's TTL: lease protocol"),
             Admitted("append/LakeWritebackRunner.kt", "LakeApplyLeases.DEFAULT_POLL_INTERVAL", "the busy lease's poll: lease protocol"),
             Admitted("append/AppendRecipeAssembler.kt", ".properties()[\"dp.definition.version\"]", "the definition identity"),
+            Admitted("maintenance/remove/LakeObjectDeleter.kt", "MAX_BATCH = 1000", "S3 DeleteObjects per-request maximum: protocol"),
+            Admitted("maintenance/remove/ClockSkewProbe.kt", "Duration.ofSeconds(3_600)", "the record's skew bound (call 33): safety"),
         )
 
     /** The LakeProperties groups scoped code may read (rule c), each with why it is not a profile value. */
