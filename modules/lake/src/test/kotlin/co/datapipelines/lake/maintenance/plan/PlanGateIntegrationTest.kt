@@ -48,7 +48,13 @@ class PlanGateIntegrationTest {
     fun close() = h.close()
 
     private fun parts(table: MaintenanceTable): Map<String, JsonNode> =
-        json.readTree(h.m.rows(table).single().partsJson).associateBy { it["name"].asText() }
+        json
+            .readTree(
+                h.m
+                    .rows(table)
+                    .single()
+                    .partsJson,
+            ).associateBy { it["name"].asText() }
 
     private fun pause(
         table: MaintenanceTable,
@@ -73,7 +79,10 @@ class PlanGateIntegrationTest {
         val now = h.m.dbNow()
         val hhmm = DateTimeFormatter.ofPattern("HH:mm")
         val start = LocalTime.ofInstant(now, ZoneOffset.UTC).plusHours(2)
-        h.editProfile("production", LakeProfileFixtures.document("maintenance.window" to "\"${start.format(hhmm)}-${start.plusHours(1).format(hhmm)}\""))
+        h.editProfile(
+            "production",
+            LakeProfileFixtures.document("maintenance.window" to "\"${start.format(hhmm)}-${start.plusHours(1).format(hhmm)}\""),
+        )
         val table = h.m.table("outside")
 
         val recorded = recordedRun(table)
@@ -88,7 +97,11 @@ class PlanGateIntegrationTest {
     fun `N13 - the compaction pause stops compaction only, recorded paused until its instant`() {
         h.editProfile("production", LakeProfileFixtures.document("maintenance.window" to "\"00:00-00:00\""))
         val table = h.m.table("compactionpaused")
-        val until = h.m.dbNow().plus(Duration.ofHours(1)).truncatedTo(ChronoUnit.SECONDS)
+        val until =
+            h.m
+                .dbNow()
+                .plus(Duration.ofHours(1))
+                .truncatedTo(ChronoUnit.SECONDS)
         pause(table, "compaction_until", until)
 
         val recorded = recordedRun(table)
@@ -103,7 +116,11 @@ class PlanGateIntegrationTest {
     fun `N13 - the cleanup pause stops cleanup only, recorded paused until its instant`() {
         h.editProfile("production", LakeProfileFixtures.document("maintenance.window" to "\"00:00-00:00\""))
         val table = h.m.table("cleanuppaused")
-        val until = h.m.dbNow().plus(Duration.ofHours(1)).truncatedTo(ChronoUnit.SECONDS)
+        val until =
+            h.m
+                .dbNow()
+                .plus(Duration.ofHours(1))
+                .truncatedTo(ChronoUnit.SECONDS)
         pause(table, "cleanup_until", until)
 
         val recorded = recordedRun(table)

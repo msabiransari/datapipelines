@@ -298,7 +298,8 @@ class PlanRepository(
                 "m.unsorted_over_cap AS m_unsorted_over_cap, m.candidate_bytes AS m_candidate_bytes, " +
                 "m.figures_profile_id AS m_figures_profile_id, m.figures_profile_updated_at AS m_figures_profile_updated_at, " +
                 "fr.protected_until AS final_protected_until, lc.ended_at AS last_cleanup_at, lr.ended_at AS last_rewrite_at, " +
-                "la.ended_at AS attempt_at, la.outcome AS attempt_outcome, la.committed AS attempt_committed, la.left_count AS attempt_left " +
+                "la.ended_at AS attempt_at, la.outcome AS attempt_outcome, la.committed AS attempt_committed, " +
+                "la.left_count AS attempt_left " +
                 "FROM lake_tables_managed t JOIN lake_namespaces n ON n.id = t.namespace_id " +
                 "JOIN lake_profiles p ON p.id = t.profile_id LEFT JOIN lake_table_measurements m ON m.table_id = t.id " +
                 // The final revision of a purged table: its newest dropped revision whose location is this table's own.

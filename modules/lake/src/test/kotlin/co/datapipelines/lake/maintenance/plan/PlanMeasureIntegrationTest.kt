@@ -102,7 +102,9 @@ class PlanMeasureIntegrationTest {
                 table.namespace,
                 table.name,
             )
-        val io = h.m.defs.catalogs.metadataFileIo()
+        val io =
+            h.m.defs.catalogs
+                .metadataFileIo()
 
         shouldThrowAny { io.deleteFile(location) }
 
@@ -146,12 +148,19 @@ class PlanMeasureIntegrationTest {
         repeat(3) { h.pass(planner) }
         val seeded = h.control.metadataReads.toList()
         seeded.toSet() shouldBe setOf(a.id, b.id, c.id)
-        h.decide()
+        h
+            .decide()
             .getValue(a.id)
             .let { COMPACTION in it.due || COMPACTION in it.held } shouldBe true
         val oldestFirst = seeded // the ordinary order from here: the oldest attempt first
 
-        h.editProfile("development", LakeProfileFixtures.document("maintenance.window" to "\"00:00-00:00\"", "maintenance.cleanup_interval_hours" to "48"))
+        h.editProfile(
+            "development",
+            LakeProfileFixtures.document(
+                "maintenance.window" to "\"00:00-00:00\"",
+                "maintenance.cleanup_interval_hours" to "48",
+            ),
+        )
         h.control.fail(a.id)
         val sequence = mutableListOf<UUID>()
         repeat(4) {

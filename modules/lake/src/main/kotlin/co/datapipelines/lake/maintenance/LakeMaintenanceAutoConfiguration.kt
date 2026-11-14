@@ -94,7 +94,13 @@ class LakeMaintenanceAutoConfiguration {
             // Looked up per plan: the queue is the scheduler's, built after the job beans its tasks wrap.
             queue = { queue.getObject() },
             worker = lakeMaintenanceWorker,
-            registered = { parts.orderedStream().map { it.name }.toList().toSet() },
+            registered = {
+                parts
+                    .orderedStream()
+                    .map { it.name }
+                    .toList()
+                    .toSet()
+            },
             clock = Clock.systemUTC(),
         )
     }

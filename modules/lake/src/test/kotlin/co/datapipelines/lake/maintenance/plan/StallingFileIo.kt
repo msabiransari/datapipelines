@@ -53,7 +53,7 @@ internal class StallControl {
         val table = tableOf(path) ?: return
         if (path.endsWith(".metadata.json") || path.endsWith(".metadata.json.gz")) {
             metadataReads += table
-            if (table in failing) throw IllegalStateException("scripted read failure")
+            if (table in failing) error("scripted read failure")
         }
         if (path.endsWith(".avro")) stalls[table]?.let(::block)
     }
@@ -69,7 +69,12 @@ internal class StallControl {
         }
     }
 
-    private fun tableOf(path: String): UUID? = TABLE.find(path)?.groupValues?.get(1)?.let(UUID::fromString)
+    private fun tableOf(path: String): UUID? =
+        TABLE
+            .find(path)
+            ?.groupValues
+            ?.get(1)
+            ?.let(UUID::fromString)
 
     companion object {
         private val TABLE = Regex("/[a-z0-9_]+/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/")

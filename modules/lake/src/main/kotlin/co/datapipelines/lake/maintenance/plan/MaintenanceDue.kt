@@ -63,12 +63,18 @@ class MaintenanceDue(
 
         cleanupDueSince(input, now)?.let { dueSince[MaintenancePartNames.CLEANUP] = it }
         when (val purge = purgeDue(input, now)) {
-            is Purge.Due -> dueSince[MaintenancePartNames.PURGE_DELETION] = purge.since
+            is Purge.Due -> {
+                dueSince[MaintenancePartNames.PURGE_DELETION] = purge.since
+            }
+
             Purge.Silent -> {
                 silent = true
                 notDue[MaintenancePartNames.PURGE_DELETION] = NotDueReason.RULE_SILENT
             }
-            Purge.NotDue -> Unit
+
+            Purge.NotDue -> {
+                // no purge deletion due: nothing to record
+            }
         }
         val rewrite = rewrites(input, now, stale)
         silent = silent || rewrite.silent
@@ -158,20 +164,26 @@ class MaintenanceDue(
             return Rewrites(emptyList(), notMeasured(NotDueReason.NOT_MEASURED), 0, silent = false)
         }
         if (figures.snapshotId == null) return Rewrites(emptyList(), emptyMap(), 0, silent = false)
-        val manifests = figures.manifests ?: 0
-        val threshold = input.profile.rewriteManifestsMinCount.toLong()
-        val manifestTerm = (manifests - threshold).coerceAtLeast(0)
-        val small = if (stale) 0 else figures.smallFiles ?: 0
-        val fitting = if (stale) 0 else ((figures.unsortedFiles ?: 0) - (figures.unsortedOverCap ?: 0)).coerceAtLeast(0)
-        val score = small + fitting + manifestTerm
+        return decideRewrites(input, figures, now, stale)
+    }
+
+    /** The rewrite decision over a measured table's figures (the guards above answered every other case). */
+    private fun decideRewrites(
+        input: DueInput,
+        figures: TableFigures,
+        now: Instant,
+        stale: Boolean,
+    ): Rewrites {
+        val terms = Terms.of(figures, input.profile.rewriteManifestsMinCount.toLong(), stale)
+        val score = terms.small + terms.fitting + terms.manifestTerm
 
         val due = mutableListOf<String>()
         val notDue = linkedMapOf<String, String>()
-        if (manifests >= threshold) due += MaintenancePartNames.MANIFEST_REWRITE
+        if (terms.manifests >= terms.threshold) due += MaintenancePartNames.MANIFEST_REWRITE
         when {
             stale -> notDue[MaintenancePartNames.COMPACTION] = NotDueReason.PROFILE_CHANGED
-            small > 0 || fitting > 0 -> due += MaintenancePartNames.COMPACTION
-            (figures.unsortedOverCap ?: 0) > 0 -> notDue[MaintenancePartNames.COMPACTION] = NotDueReason.CAPACITY
+            terms.small > 0 || terms.fitting > 0 -> due += MaintenancePartNames.COMPACTION
+            terms.overCap > 0 -> notDue[MaintenancePartNames.COMPACTION] = NotDueReason.CAPACITY
         }
         val wait = capacityWait(input, now)
         if (wait == Wait.WAITING && due.isNotEmpty()) {
@@ -179,6 +191,33 @@ class MaintenanceDue(
             return Rewrites(emptyList(), notDue, score, silent = false)
         }
         return Rewrites(due, notDue, score, silent = wait == Wait.SILENT)
+    }
+
+    /**
+     * The record's score terms from a measured table's figures. A stale table's profile-dependent terms are 0 (D3a); a
+     * file larger than the cap is left out of the score (it fits no run). A NULL figure counts as nothing to do.
+     */
+    private data class Terms(
+        val manifests: Long,
+        val threshold: Long,
+        val small: Long,
+        val fitting: Long,
+        val overCap: Long,
+    ) {
+        val manifestTerm: Long get() = (manifests - threshold).coerceAtLeast(0)
+
+        companion object {
+            fun of(
+                figures: TableFigures,
+                threshold: Long,
+                stale: Boolean,
+            ): Terms {
+                val overCap = figures.unsortedOverCap ?: 0
+                val small = if (stale) 0 else figures.smallFiles ?: 0
+                val fitting = if (stale) 0 else ((figures.unsortedFiles ?: 0) - overCap).coerceAtLeast(0)
+                return Terms(figures.manifests ?: 0, threshold, small, fitting, overCap)
+            }
+        }
     }
 
     private fun notMeasured(reason: String): Map<String, String> = MaintenancePartNames.REWRITES.associateWith { reason }
@@ -190,6 +229,7 @@ class MaintenanceDue(
      * left for a fresh run, the interval has not passed since that run's end, and neither the profile's values nor the
      * assignment changed after it. A `capacity` entry without 969's two fields gets no wait and is reported silent.
      */
+    @Suppress("ReturnCount") // each early return is one condition of D4's wait, in the order the KDoc lists them
     private fun capacityWait(
         input: DueInput,
         now: Instant,

@@ -55,8 +55,7 @@ object MaintenanceHolds {
     private fun paused(
         until: Instant?,
         now: Instant,
-    ): PartHold? =
-        until?.takeIf { now.isBefore(it) }?.let { PartHold(MaintenanceOutcome.PAUSED_UNTIL, pausedReason(it), it) }
+    ): PartHold? = until?.takeIf { now.isBefore(it) }?.let { PartHold(MaintenanceOutcome.PAUSED_UNTIL, pausedReason(it), it) }
 
     private fun outside(
         window: MaintenanceWindow,

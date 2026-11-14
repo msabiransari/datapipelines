@@ -139,7 +139,12 @@ class LakeRulesTest {
     fun `959 - the planner's four keys are refused outside their bounds and admitted at their edges`() {
         listOf("59s", "0", "soon").forEach { enabled(LakeRules.PLAN_INTERVAL to it).single() shouldStartWith LakeRules.PLAN_INTERVAL }
         listOf("1m", "60s", "15m").forEach { enabled(LakeRules.PLAN_INTERVAL to it) shouldContainExactly emptyList() }
-        listOf("0", "10001", "-1", "x").forEach { enabled(LakeRules.PLAN_PAGE_SIZE to it).single() shouldStartWith LakeRules.PLAN_PAGE_SIZE }
+        listOf(
+            "0",
+            "10001",
+            "-1",
+            "x",
+        ).forEach { enabled(LakeRules.PLAN_PAGE_SIZE to it).single() shouldStartWith LakeRules.PLAN_PAGE_SIZE }
         listOf("1", "10000").forEach { enabled(LakeRules.PLAN_PAGE_SIZE to it) shouldContainExactly emptyList() }
         listOf("999ms", "601s", "11m", "0s").forEach {
             enabled(LakeRules.PLAN_TABLE_TIMEOUT to it).single() shouldStartWith LakeRules.PLAN_TABLE_TIMEOUT

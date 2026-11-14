@@ -116,7 +116,10 @@ internal object LakeTuningSourceGuard {
     private val LAKE_GROUP = Regex("""\b(?:lakeProperties|properties)\.([a-z]\w*+)(?!\.(?:$PLAN_MEMBER)\b)""")
     private val PLAN_READ = Regex("""(?:lakeProperties|properties)\.maintenance\.(?:$PLAN_MEMBER)""")
     private val SEED_MEMBER =
-        Regex("""\b(?:lakeProperties|properties)\.maintenance\.(?:$PLAN_MEMBER)\b|\.maintenance\b(?!\s*[:(])|\bmaintenance\.(?:window|maxBytesRewrittenPerRun)\b""")
+        Regex(
+            """\b(?:lakeProperties|properties)\.maintenance\.(?:$PLAN_MEMBER)\b|""" +
+                """\.maintenance\b(?!\s*[:(])|\bmaintenance\.(?:window|maxBytesRewrittenPerRun)\b""",
+        )
     private val SEED_KEY =
         Regex("""(?:lake|PREFIX)\.maintenance\.(?:window|max-bytes-rewritten-per-run)|LAKE_MAINTENANCE_(?:WINDOW|MAX_BYTES)""")
     private val RETENTION_READ = Regex("""([\w.]*)\.(protectionDays|orphanGraceHours)\b""")

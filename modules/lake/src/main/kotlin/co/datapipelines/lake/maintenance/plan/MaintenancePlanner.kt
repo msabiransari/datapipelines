@@ -105,14 +105,14 @@ class MaintenancePlanner(
         var measured = 0
         var notMeasured = 0
         for ((index, target) in page.withIndex()) {
-            if (readers.outstanding() >= bounds.maxAbandonedReads) {
+            // At the abandoned-read limit (D2) or when the pass is interrupted, the rest of the page is not attempted.
+            val exhausted = readers.outstanding() >= bounds.maxAbandonedReads
+            if (exhausted || Thread.currentThread().isInterrupted) {
                 val rest = page.size - index
                 notMeasured += rest
-                LOG.warn("event=lake.maintenance.plan_reads_exhausted not_measured={} abandoned_reads={}", rest, readers.outstanding())
-                break
-            }
-            if (Thread.currentThread().isInterrupted) {
-                notMeasured += page.size - index
+                if (exhausted) {
+                    LOG.warn("event=lake.maintenance.plan_reads_exhausted not_measured={} abandoned_reads={}", rest, readers.outstanding())
+                }
                 break
             }
             if (measureOne(target) == Measured.YES) measured++ else notMeasured++
@@ -133,7 +133,11 @@ class MaintenancePlanner(
             timedOut(target, reader, attempt, future, started)
         } catch (failure: ExecutionException) {
             // The reader won and its database write threw: the attempt keeps whatever the row held.
-            LOG.warn("event=lake.maintenance.plan_write_failed table_id={} cause={}", target.tableId, FailureShape.cause(failure.cause ?: failure))
+            LOG.warn(
+                "event=lake.maintenance.plan_write_failed table_id={} cause={}",
+                target.tableId,
+                FailureShape.cause(failure.cause ?: failure),
+            )
             Measured.NO
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
@@ -156,7 +160,11 @@ class MaintenancePlanner(
             return try {
                 if (future.get()) Measured.YES else Measured.NO
             } catch (failure: ExecutionException) {
-                LOG.warn("event=lake.maintenance.plan_write_failed table_id={} cause={}", target.tableId, FailureShape.cause(failure.cause ?: failure))
+                LOG.warn(
+                    "event=lake.maintenance.plan_write_failed table_id={} cause={}",
+                    target.tableId,
+                    FailureShape.cause(failure.cause ?: failure),
+                )
                 Measured.NO
             }
         }

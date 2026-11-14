@@ -64,8 +64,10 @@ class PlanFiguresReader(
         val state =
             when {
                 measuredAt == null -> FiguresState.NEVER_MEASURED
+
                 rs.getObject("figures_profile_id", UUID::class.java) == rs.getObject("profile_id", UUID::class.java) &&
                     instant("figures_profile_updated_at") == instant("profile_updated_at") -> FiguresState.CURRENT
+
                 else -> FiguresState.STALE
             }
         val bytes = long("current_bytes")

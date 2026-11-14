@@ -164,7 +164,10 @@ class LakeTuningSourceGuardTest {
 
     @Test
     fun `the planner's four deployment keys read under maintenance add no violation`() {
-        val reader = planReader(LakeTuningSourceGuard.ADMITTED_PLAN_KEYS.joinToString("\n") { "    val ${it.token} = properties.maintenance.${it.token}" })
+        val reader =
+            planReader(
+                LakeTuningSourceGuard.ADMITTED_PLAN_KEYS.joinToString("\n") { "    val ${it.token} = properties.maintenance.${it.token}" },
+            )
         val merged = real + GuardSource("${LAKE}maintenance/plan/PlanKeysReader.kt", reader)
         (LakeTuningSourceGuard.violations(merged) - realViolations.toSet()).shouldBeEmpty()
     }
@@ -196,12 +199,12 @@ class LakeTuningSourceGuardTest {
         code shouldContain "+ 2"
     }
 
-    /** The violations [fixture] adds over the real tree; asserts there are some and every one is on [rule]. */
     /** A class under `maintenance/plan` holding [body] over an injected `LakeProperties` named `properties`. */
     private fun planReader(body: String): String =
         "package co.datapipelines.lake.maintenance.plan\n\nimport co.datapipelines.lake.LakeProperties\n\n" +
             "class PlanKeysReader(\n    private val properties: LakeProperties,\n) {\n$body\n}\n"
 
+    /** The violations [fixture] adds over the real tree; asserts there are some and every one is on [rule]. */
     private fun redOnly(
         rule: Char,
         fixture: Map<String, String>,

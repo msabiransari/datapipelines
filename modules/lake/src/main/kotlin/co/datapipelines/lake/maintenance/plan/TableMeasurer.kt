@@ -52,7 +52,12 @@ class TableMeasurer(
                 files.forEach { file ->
                     val spec = specs.getValue(file.specId())
                     count.addData(
-                        DataFileFact("${file.specId()}/${spec.partitionToPath(file.partition())}", file.fileSizeInBytes(), file.recordCount(), file.sortOrderId()),
+                        DataFileFact(
+                            "${file.specId()}/${spec.partitionToPath(file.partition())}",
+                            file.fileSizeInBytes(),
+                            file.recordCount(),
+                            file.sortOrderId(),
+                        ),
                     )
                 }
             }

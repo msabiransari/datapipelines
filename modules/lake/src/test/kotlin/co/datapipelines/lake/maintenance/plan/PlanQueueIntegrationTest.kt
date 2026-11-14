@@ -136,7 +136,12 @@ class PlanQueueIntegrationTest {
             val before = executionTime(key)
             planner.run()
             seen.add(executionTime(key) == before)
-            seen.add(h.repository.lastPlan()!!.second.let { listOf(it.tasksEnqueued, it.tasksMoved) })
+            seen.add(
+                h.repository
+                    .lastPlan()!!
+                    .second
+                    .let { listOf(it.tasksEnqueued, it.tasksMoved) },
+            )
         }
         clock.set(clock.now().plusSeconds(1))
         scheduler.runAnyDueExecutions()
@@ -172,7 +177,7 @@ class PlanQueueIntegrationTest {
                     key: String,
                     at: Instant,
                 ): Boolean {
-                    if (calls.incrementAndGet() == 3) throw IllegalStateException("the planner's instance died")
+                    if (calls.incrementAndGet() == 3) error("the planner's instance died")
                     return queue.enqueueIfAbsent(job, key, at)
                 }
             }
@@ -197,7 +202,9 @@ class PlanQueueIntegrationTest {
         h.table("b")
         val planner = planner()
         h.pass(planner)
-        h.repository.lastPlan()!!.second.tasksStillQueued shouldBe 0
+        h.repository
+            .lastPlan()!!
+            .second.tasksStillQueued shouldBe 0
 
         h.table("c")
         h.pass(planner)
@@ -213,6 +220,7 @@ class PlanQueueIntegrationTest {
     fun `N14 - one planner runs per period across two scheduler instances`() {
         h.table("a")
         val runs = AtomicInteger()
+
         fun counted(planner: MaintenancePlanner): RecurringSystemJob =
             object : RecurringSystemJob by planner {
                 override fun run() {

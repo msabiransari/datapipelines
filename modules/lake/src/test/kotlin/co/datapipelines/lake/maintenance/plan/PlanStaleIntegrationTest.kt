@@ -58,7 +58,9 @@ class PlanStaleIntegrationTest {
         val before = h.control.metadataReads.size
         h.pass(planner)
         h.control.metadataReads.drop(before) shouldBe listOf(filler.id)
-        h.repository.lastPlan()!!.second.tablesStale shouldBe 1
+        h.repository
+            .lastPlan()!!
+            .second.tablesStale shouldBe 1
         answer(filler).stale shouldBe false
         answer(subject).stale shouldBe true
     }

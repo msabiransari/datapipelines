@@ -61,7 +61,11 @@ class PlanReadersIntegrationTest {
         after.attemptedAt.isAfter(good.attemptedAt) shouldBe true
         after.measuredAt shouldBe good.measuredAt
         after.figures shouldBe good.figures
-        h.measurement(healthy).shouldNotBeNull().measuredAt!!.isAfter(healthyBefore.measuredAt) shouldBe true
+        h
+            .measurement(healthy)
+            .shouldNotBeNull()
+            .measuredAt!!
+            .isAfter(healthyBefore.measuredAt) shouldBe true
         h.repository.lastPlan()!!.second.let {
             it.tablesMeasured shouldBe 1
             it.tablesNotMeasured shouldBe 1
