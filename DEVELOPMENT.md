@@ -1450,15 +1450,22 @@ How things are removed:
   it. A reference is matched by what it resolves to, never by how it is spelled. The helper resolves
   it the way the kernel does for that process, from the process's own root and `cwd`: `.`, `..`,
   repeated slashes, symbolic links anywhere in the path, procfs links such as `/proc/<pid>/cwd`, and
-  another mount namespace. It then compares device and inode with every candidate directory and its
-  parents. A command-line argument is text, and where a path inside it starts and ends cannot be
+  another mount namespace. Containment is then judged in the candidate's own filesystem tree, not in
+  the process's view: the object's parents are compared by device and inode with every candidate,
+  and at every mount root on the way (a bind mount of a candidate's descendant, a process root inside
+  a candidate) the mount tables give that root's path inside its filesystem, which is compared with
+  each candidate's path inside the same filesystem. A reference counts as outside every candidate
+  only when that is proved; anything not proved is doubt. A command-line argument is text, and where a path inside it starts and ends cannot be
   known (a space, a newline, `:`, `,`, `;`, `=` and quotes are legal in a name). So every `/` may
   start an absolute path; from a readable `cwd`, every place where one of that directory's names
   appears may start a relative one; and a path may end at every place inside a component.
   `--dir=<base>/x,y` keeps both `x` and `x,y`. Only an exact `..` component is a step out:
   `<root>/live/../other` keeps `other`, not `live`. **Doubt keeps:** a reference that cannot be
-  resolved for certain (a refused lookup, a link loop, a component that vanished while it was read)
-  keeps every candidate directory. Every summary line counts those processes
+  resolved or placed for certain (a refused lookup, a link loop, a component that vanished while it
+  was read, a mount no table names, an object on a filesystem that may keep its data in another
+  tree, such as overlay, a network filesystem or a type the helper does not know) keeps the
+  candidates the object could be in: every candidate on the object's filesystem, or every candidate
+  when that filesystem is unknown. Every summary line counts those processes
   (`processes-in-doubt=`), and one stderr line names at most five of them. A few extra directories
   are kept; none is lost. Any other directory is walked through descriptors (`O_NOFOLLOW`, no
   crossing of a filesystem boundary) and removed once it is empty. Resolving a reference reads
@@ -1479,6 +1486,17 @@ How things are removed:
   directories only, because every file still needs the lease. If it is ever wrong, the program finds
   an empty folder gone and no data is lost. Every summary line counts these processes
   (`unreadable-processes=`), and one stderr line names at most five of them by PID and name.
+- **The FUSE assumption (owner ruling 2026-11-15).** An object on a FUSE filesystem (type `fuse` or
+  `fuse.*` in the kernel's mount table) is judged in that filesystem's own tree, like a filesystem
+  that holds its own data, so a reference to it keeps no directory and is not doubt. Without this,
+  the desktop's always-running FUSE helpers (the document portal, gvfs) would keep everything and
+  nothing would ever be removed. The cost: a FUSE program that takes its source from a configuration
+  file, not its command line, and serves a file from inside a test temp folder would have that
+  folder's closed files swept. A FUSE program's own command line, `cwd` and handles are judged like
+  any process's, so one that names its source keeps it. Every summary line counts these processes
+  (`fuse-processes=`), and one stderr line names at most five of them by PID and name.
+- These two, unreadable processes and FUSE, are the only exceptions to "a reference of a live
+  process keeps"; each is counted on the summary line.
 - A program that has a directory only as a path held in memory is not seen. It uses no `cwd`, no open
   handle and no argument under the base. Only an empty folder can go that way, under the same "no data
   is lost" reasoning.
@@ -1539,7 +1557,7 @@ tools. They are listed here instead of being guessed in:
 A family that any code mounts into a container is never added.
 
 **Self-test.** `scripts/temp-hygiene-test.sh` runs from `./scripts/pregate.sh --self-test`, which is
-the gate's "pregate self-test" stage. It covers cases 1–39 of #983 on fixture directories only and
+the gate's "pregate self-test" stage. It covers cases 1–47 of #983 on fixture directories only and
 prints how many cases it ran. Every fixture run of a copied wrapper, in this self-test and in the two
 existing ones, sets its temp base to a fixture directory. Each self-test fails when a summary line it
 captured names a base outside its fixtures.
