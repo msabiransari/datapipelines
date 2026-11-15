@@ -62,57 +62,84 @@
     var fieldKeys = fields ? measures.map(function (mm, k) {
       return "field:" + k;
     }) : null;
-    var lastC = {}, lastKey = null;
+    var serOfRaw = new Map();
     var n = X.length;
+    // A raw x (a string or a number) is read once per call: its slot holds what the row's x is (a warning code, or its
+    // position and key) and, once a row of it is kept, its x entry. Rows repeating an x (one per series) then cost one
+    // lookup by the raw value; a group is keyed by its x entry's ordinal, never by a position's number.
+    var slots = new Map();
+    var slotOf = function (xv) {
+      if (temporal) {
+        var p = R.time.parse(xv);
+        if (p === null) return { bad: "chart.rule.null-position", at: 0, xk: null, time: false, entry: null };
+        return { bad: null, at: p.at, xk: p.at, time: p.time, entry: null };
+      }
+      if (position) {
+        var num = Number(xv);
+        if (!(num > -Infinity && num < Infinity)) return { bad: "chart.rule.null-position", at: 0, xk: null, time: false, entry: null };
+        if (logX && !(num > 0)) return { bad: "chart.rule.log-nonpositive", at: 0, xk: null, time: false, entry: null };
+        return { bad: null, at: num, xk: num, time: false, entry: null };
+      }
+      return { bad: null, at: null, xk: D.keyOf(xv), time: false, entry: null };
+    };
     for (var i = 0; i < n; i++) {
-      var xv = X[i], at, xk;
+      var xv = X[i];
       if (D.isNull(xv)) {
         warn(position ? "chart.rule.null-position" : "chart.rule.null-category");
         continue;
       }
-      if (temporal) {
-        var p = R.time.parse(xv);
-        if (p === null) {
-          warn("chart.rule.null-position");
-          continue;
-        }
-        if (p.time) anyTime = true;
-        at = p.at;
-        xk = at;
-      } else if (position) {
-        at = Number(xv);
-        if (!(at > -Infinity && at < Infinity)) {
-          warn("chart.rule.null-position");
-          continue;
-        }
-        if (logX && !(at > 0)) {
-          warn("chart.rule.log-nonpositive");
-          continue;
-        }
-        xk = at;
-      } else {
-        at = null;
-        xk = D.keyOf(xv);
+      var memo = typeof xv === "string" || typeof xv === "number", slot = memo ? slots.get(xv) : undefined;
+      if (slot === undefined) {
+        slot = slotOf(xv);
+        if (memo) slots.set(xv, slot);
       }
+      if (slot.bad !== null) {
+        warn(slot.bad);
+        continue;
+      }
+      if (slot.time) anyTime = true;
       var cv = C ? C[i] : null;
       if (C && D.isNull(cv)) {
         warn("chart.rule.null-category");
         continue;
       }
-      if (xsMap.get(xk) === undefined) xsMap.set(xk, { key: xk, raw: xv, at: at, first: xsMap.size, row: i });
-      if (C && cv !== lastC) {
-        lastC = cv;
-        lastKey = D.keyOf(cv);
+      var xe = slot.entry;
+      if (xe === null) {
+        xe = xsMap.get(slot.xk);
+        if (xe === undefined) {
+          xe = { key: slot.xk, raw: xv, at: slot.at, first: xsMap.size, row: i };
+          xsMap.set(slot.xk, xe);
+        }
+        slot.entry = xe;
+      }
+      // The row's series: with a colour, its record is found by the raw colour value (a string or a number: the same
+      // value has the same key); the key text is made only the first time a value is seen.
+      var rowSer = null;
+      if (C) {
+        var cmemo = typeof cv === "string" || typeof cv === "number";
+        rowSer = cmemo ? serOfRaw.get(cv) : undefined;
+        if (rowSer === undefined) {
+          var ck = D.keyOf(cv);
+          rowSer = sers.get(ck);
+          if (rowSer === undefined) {
+            rowSer = { key: ck, raw: cv, first: sers.size, measure: 0, full: String(cv), byX: [] };
+            sers.set(ck, rowSer);
+          }
+          if (cmemo) serOfRaw.set(cv, rowSer);
+        }
       }
       for (var mi = 0; mi < measures.length; mi++) {
-        var sk = C ? lastKey : fields ? fieldKeys[mi] : "";
-        var ser = sers.get(sk);
-        if (ser === undefined) {
-          ser = { key: sk, raw: C ? cv : null, first: sers.size, measure: mi, full: C ? String(cv) : fields ? measures[mi].title : String(y.field || "count"), byX: new Map() };
-          sers.set(sk, ser);
+        var ser = rowSer;
+        if (ser === null) {
+          var sk = fields ? fieldKeys[mi] : "";
+          ser = sers.get(sk);
+          if (ser === undefined) {
+            ser = { key: sk, raw: null, first: sers.size, measure: mi, full: fields ? measures[mi].title : String(y.field || "count"), byX: [] };
+            sers.set(sk, ser);
+          }
         }
-        var v = measures[mi].col ? measures[mi].col[i] : 1, g = ser.byX.get(xk);
-        if (g === undefined) ser.byX.set(xk, { v: v, vals: null, row: i });
+        var v = measures[mi].col ? measures[mi].col[i] : 1, g = ser.byX[xe.first];
+        if (g === undefined) ser.byX[xe.first] = { v: v, vals: null, row: i };
         else if (g.vals === null) g.vals = [g.v, v];
         else g.vals.push(v);
       }
@@ -129,8 +156,8 @@
     } else xs = D.order(xs, x.sort, function () {
       return null;
     }, types[x.field], false);
-    var xIndex = new Map();
-    for (var xi = 0; xi < xs.length; xi++) xIndex.set(xs[xi].key, xi);
+    var xIndex = new Array(xs.length);
+    for (var xi = 0; xi < xs.length; xi++) xIndex[xs[xi].first] = xi;
     var series = Array.from(sers.values());
     if (C) series = D.order(series, color.sort, function () {
       return null;
@@ -144,7 +171,7 @@
     var cells = series.map(function (s) {
       var row = new Array(xs.length), byX = s.byX, field = measures[s.measure].field || "count";
       byX.forEach(function (g, key) {
-        var a = aggregateGroup(g, agg, field), j = xIndex.get(key);
+        var a = aggregateGroup(g, agg, field), j = xIndex[key];
         if (a.num === null) {
           row[j] = null;
           return;
