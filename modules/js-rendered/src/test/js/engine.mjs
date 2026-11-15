@@ -29,8 +29,8 @@ export function concatenation(srcs = sources()) {
 
 /**
  * A fresh engine: the JsRendered namespace of a new context. edit(srcs) may change the sources first (a falsification's
- * copy); after(JsRendered) runs before the type files would observe a change? No: tables are read at render time, so a
- * test changes JsRendered.tables.LOOK[f].value on its own engine.
+ * copy of a file). The tables are read at render time, so a test that changes a table value does it on its own engine
+ * after loading, and no other test sees the change.
  */
 export function engine(edit) {
   const srcs = sources();

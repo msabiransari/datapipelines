@@ -1,0 +1,67 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: labels: none at the full level (no value label: contract §4.5)",
+ "document": {
+  "display_name": "Labels off",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar",
+    "labels": "none"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   },
+   "title": {
+    "text": "No value labels"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Alpha",
+   "Beta",
+   "Gamma"
+  ],
+  "v": [
+   12,
+   30,
+   21
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE"
+ }
+}

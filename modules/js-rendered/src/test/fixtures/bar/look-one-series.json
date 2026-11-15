@@ -1,0 +1,68 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: one series, no colour channel",
+ "document": {
+  "display_name": "One series",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   },
+   "title": {
+    "text": "One series"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Alpha",
+   "Beta",
+   "Gamma",
+   "Delta"
+  ],
+  "v": [
+   12,
+   30,
+   21,
+   7
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE"
+ }
+}

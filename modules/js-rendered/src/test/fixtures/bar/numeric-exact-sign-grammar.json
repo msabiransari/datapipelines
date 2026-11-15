@@ -1,0 +1,69 @@
+{
+ "source": [
+  "modules/web/src/test/resources/chart-parity/numeric/numeric-exact-sign-grammar.json"
+ ],
+ "note": "exact categories outside the decimal grammar (+3) compare by code point, and ECMAScript trim (U+FEFF) is the trim on BOTH sides: +3, 2, U+FEFF 7, 10",
+ "document": {
+  "display_name": "Exact category grammar",
+  "description": "A hand-written numeric case of design record 2026-11-06 section 4.1 (lane 860 A.2b).",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "n",
+      "type": "BIGINTEGER"
+     },
+     {
+      "name": "amount",
+      "type": "INTEGER"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar",
+    "labels": "values"
+   },
+   "encoding": {
+    "x": {
+     "field": "n",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "N"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    }
+   },
+   "title": {
+    "text": "Exact category grammar"
+   }
+  }
+ },
+ "columns": {
+  "n": [
+   "10",
+   "2",
+   "+3",
+   "﻿7"
+  ],
+  "amount": [
+   1,
+   2,
+   3,
+   4
+  ]
+ },
+ "types": {
+  "n": "BIGINTEGER",
+  "amount": "INTEGER"
+ }
+}
