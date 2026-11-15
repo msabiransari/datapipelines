@@ -14,9 +14,23 @@ function JsRenderedInvariants(E) {
   var ASC = E.tables.look("textAscent");
   var DESC = E.tables.look("textDescent");
 
-  /** The width of a text at a size, by the pristine table (Noto Sans, margin 1). */
+  // The width of a text at a size: the checker's OWN sum over the raw advance table (Noto Sans, margin 1), never the
+  // engine's measuring code, so a planted change to the engine's estimate (03-measure.js) cannot move the checker with it
+  // (G2's first plant). The table's numbers themselves are pinned to the font by text.test.mjs (D8). A code point the
+  // table lacks takes the table's mean advance, as the engine's does.
+  var TABLE = E.widthTables["noto-sans-regular"];
+  var MEAN = (function () {
+    var sum = 0, n = 0;
+    for (var k in TABLE) if (Object.prototype.hasOwnProperty.call(TABLE, k)) { sum += TABLE[k]; n++; }
+    return sum / n;
+  })();
   function width(text, size) {
-    return E.measure.measurer(null).fn(text, size, 400);
+    var em = 0;
+    for (const ch of text) {
+      var w = TABLE[ch.codePointAt(0)];
+      em += w === undefined ? MEAN : w;
+    }
+    return (em / 1000) * size;
   }
 
   /** What a text primitive draws: its shown text when cut, else its text. */
