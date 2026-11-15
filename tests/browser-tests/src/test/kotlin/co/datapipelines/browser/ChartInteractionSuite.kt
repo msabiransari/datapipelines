@@ -169,6 +169,28 @@ abstract class ChartInteractionSuite : ChartPageSuite() {
         val columns: Map<String, List<Any?>>,
     )
 
+    /** An engine fixture's emitted input (`<wire>/<name>`, 960 × 540) as a chart the harness mounts. */
+    protected fun engineChart(path: String): Chart {
+        val input = com.google.gson.JsonParser.parseString(emitted("$path/960x540.input.json")).asJsonObject
+        val document = input.getAsJsonObject("document")
+        val gson = com.google.gson.Gson()
+        @Suppress("UNCHECKED_CAST")
+        val columns = gson.fromJson(input.get("columns"), Map::class.java) as Map<String, List<Any?>>
+        @Suppress("UNCHECKED_CAST")
+        val types = gson.fromJson(input.get("types"), Map::class.java) as Map<String, String>
+        return Chart(document.get("display_name").asString, document.get("config").toString(), types, columns)
+    }
+
+    /** [text] with its ONE [anchor] replaced (a plant's anchor occurs exactly once). */
+    protected fun once(
+        text: String,
+        anchor: String,
+        replacement: String,
+    ): String {
+        check(text.split(anchor).size == 2) { "the plant's anchor $anchor must occur exactly once" }
+        return text.replace(anchor, replacement)
+    }
+
     private fun jsonValue(json: String): Any? = com.google.gson.Gson().fromJson(json, Any::class.java)
 
     protected companion object {
@@ -236,6 +258,7 @@ abstract class ChartInteractionSuite : ChartPageSuite() {
                 redraw: function () { var n = outputs; cur.handle.resize(); return new Promise(function (r) { var f = 0; var wait = function () { if (outputs === n && ++f < 120) { requestAnimationFrame(wait); return; } settle().then(function () { r(outputs > n); }); }; requestAnimationFrame(wait); }); },
                 token: function (name, value) { if (value === null) cur.host.style.removeProperty(name); else cur.host.style.setProperty(name, value); return true; },
                 handle: function () { return cur.handle; },
+                datums: function (id) { var ix = cur.handle.index(); var s = ix.series.filter(function (x) { return titled(x.id) === id; })[0]; return s ? s.datum : null; },
                 svg: function () { return cur.svg; },
                 listeners: function () { var svg = cur.svg; return live.filter(function (l) { return l.el === svg; }).length; },
                 dispose: function () {
@@ -288,7 +311,7 @@ abstract class ChartInteractionSuite : ChartPageSuite() {
                       text: g.textContent, active: g.classList.contains('dp-active'), box: rect(g) };
                   });
                   var marks = Array.from(svg.querySelectorAll('g.dp-mark[data-series]')).map(function (g) {
-                    var drawn = Array.from(g.children).filter(function (c) { var b = c.getBBox(); return b.width > 0 || b.height > 0; }).length;
+                    var drawn = Array.from(g.children).filter(function (c) { if (typeof c.getBBox !== 'function') return false; var b = c.getBBox(); return b.width > 0 || b.height > 0; }).length;
                     return { id: titled(g.getAttribute('data-series')), drawn: drawn, active: g.classList.contains('dp-active'), fill: (g.firstElementChild || g).getAttribute('fill'),
                       stroke: (g.firstElementChild || g).getAttribute('stroke'), opacity: getComputedStyle(g).opacity, transition: getComputedStyle(g).transitionDuration };
                   });

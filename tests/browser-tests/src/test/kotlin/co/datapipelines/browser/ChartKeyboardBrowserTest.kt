@@ -482,17 +482,6 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
         return Math.ceil(textW / contentW) + 1 <= k
     }
 
-    private fun engineChart(path: String): Chart {
-        val input = com.google.gson.JsonParser.parseString(emitted("$path/960x540.input.json")).asJsonObject
-        val document = input.getAsJsonObject("document")
-        val gson = com.google.gson.Gson()
-        @Suppress("UNCHECKED_CAST")
-        val columns = gson.fromJson(input.get("columns"), Map::class.java) as Map<String, List<Any?>>
-        @Suppress("UNCHECKED_CAST")
-        val types = gson.fromJson(input.get("types"), Map::class.java) as Map<String, String>
-        return Chart(document.get("display_name").asString, document.get("config").toString(), types, columns)
-    }
-
     private fun hostileChart(): Chart = engineChart("bar/hostile")
 
     private fun cutsOf(page: Page): List<Map<*, *>> {
@@ -508,15 +497,6 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
     }
 
     private fun joined(r: Map<*, *>): String = ((r["card"] as Map<*, *>?)?.get("texts") as List<*>? ?: emptyList<Any>()).joinToString(" ")
-
-    private fun once(
-        text: String,
-        anchor: String,
-        replacement: String,
-    ): String {
-        check(text.split(anchor).size == 2) { "the plant's anchor $anchor must occur exactly once" }
-        return text.replace(anchor, replacement)
-    }
 
     private companion object {
         const val FULL_W = 640
