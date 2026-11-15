@@ -60,15 +60,38 @@ mkroot() { # mkroot <checkout> → prints the root; parent and root 0700, record
   printf '%s\n' "$root"
 }
 
+# A process outside the case whose reference is in doubt keeps every candidate, by design (#983
+# round 3, D2). The self-test runs beside other work on the same machine, so a pass leaves such
+# a process out — named in $T/foreign-doubt and counted on the result line — and case 37 proves
+# that a holder of the case in doubt keeps everything. own_process: a holder of the case or its child.
+own_process() { # own_process <pid>
+  local pid parent
+  parent="$(awk '/^PPid:/ {print $2}' "/proc/$1/status" 2>/dev/null)"
+  for pid in "${CASE_HOLDERS[@]}"; do [ "$1" = "$pid" ] || [ "$parent" = "$pid" ] && return 0; done
+  return 1
+}
+leave_out_foreign_doubt() {
+  eval "$(declare -f th::_proc_refs | sed '1s/th::_proc_refs/th::_proc_refs_read/')"
+  th::_proc_refs() {
+    local rc=0; th::_proc_refs_read "$1" || rc=$?
+    if [ "${TH_P_DOUBT:-0}" -gt 0 ] && ! own_process "$1"; then
+      printf 'case %s pass %s: %s %s\n' "$CASE" "$PASSN" "$1" "$TH_PROC_NAME" >> "$T/foreign-doubt"
+      TH_P_REFS=(); TH_P_DOUBT=0
+    fi
+    return "$rc"
+  }
+}
+
 # One pass of the library in a subshell: pass <label> <root-mode> <shared-mode> [seam code].
 pass() {
   local label="$1" rmode="$2" smode="$3" seams="${4:-}"
   PASSN=$((PASSN + 1))
   OUT="$FX/out.$PASSN"; ERR="$FX/err.$PASSN"; LIST="$FX/list.$PASSN"
   (
-    export TMPDIR="$BASE"
+    export TMPDIR="${PASS_TMPDIR:-$BASE}"
     # shellcheck source=lib/temp-hygiene.sh
     source "$LIB"
+    leave_out_foreign_doubt
     eval "$seams"
     th::run "$CO" "$rmode" "$smode" "$label" "$LIST"
   ) > "$OUT" 2> "$ERR" 9>&- 10>&- 11>&-
@@ -454,8 +477,8 @@ cmdline_has() { # cmdline_has <pid> <argument>: the exact argument, NUL-safe
   while IFS= read -r -d '' argument; do [ "$argument" = "$2" ] && return 0; done < "/proc/$1/cmdline" 2>/dev/null
   return 1
 }
-hold_arg() { # hold_arg <argument>: a sleeping process whose command line carries it
-  ( cd / && exec python3 -c 'import time; time.sleep(600)' "$1" ) < /dev/null > /dev/null 2>&1 9>&- 10>&- 11>&- &
+hold_arg() { # hold_arg <argument> [cwd, default /]: a sleeping process whose command line carries it
+  ( cd "${2:-/}" && exec python3 -c 'import time; time.sleep(600)' "$1" ) < /dev/null > /dev/null 2>&1 9>&- 10>&- 11>&- &
   remember "$!"; wait_for cmdline_has "$!" "$1" || fail "argument holder of $1 did not start"
   HOLDER="$!"
 }
@@ -524,6 +547,186 @@ expect files-kept-lease-untried 2
 for n in 1 2 3 4 5; do exists "$root/kept$n"; done
 finish
 
+# ---- 26-38: a live reference keeps by what it RESOLVES to, never by its spelling (#983 round 3) ----
+# Each holder's ONLY reference to its entry is one command-line argument (its cwd is outside the
+# entry, it holds no handle there). Before the pass, the argument is shown to resolve into the
+# entry (a red is never a setup error); after it, the closed files directly inside and one level
+# below are still there, the holder is alive, and an unused sibling with the same contents went
+# in the same pass. S1-S9 are the round 3 brief's rows; 35-38 are the classes found while working.
+into() { # into <path> <entry> [cwd]: the path, resolved by the kernel from cwd, is the entry or below it
+  local resolved
+  resolved="$(cd "${3:-/}" && realpath -e -- "$1" 2>/dev/null)" || resolved=
+  case "$resolved" in
+    "$2"|"$2"/*) return 0 ;;
+    *) fail "setup: $1 resolves to '$resolved', not into $2"; return 1 ;;
+  esac
+}
+held_whole() { # held_whole <entry>: both closed sentinels survived and the holder lives
+  [ -n "${HOLDER:-}" ] && kill -0 "$HOLDER" 2>/dev/null || fail "the holder of $1 did not stay alive through the pass"
+  exists "$1/closed-file" "the closed file directly inside $1"
+  exists "$1/nested/closed-file" "the closed file one level below $1"
+}
+# resolve_case <entry> <path> [option prefix] [cwd]: a live entry, an unused sibling, one holder.
+resolve_case() {
+  local entry="$1" path="$2" prefix="${3:-}" cwd="${4:-/}"
+  fill_entry "$entry"; fill_entry "$entry-unused"
+  into "$path" "$entry" "$cwd" || return 1
+  hold_arg "$prefix$path" "$cwd"
+  pass "c$CASE" real real
+  held_whole "$entry"
+  gone "$entry-unused" 'the unused sibling with the same contents (the control)'
+}
+
+begin 26 'S1: parent traversal (<root>/hop/../live dir/nested) keeps the entry it resolves to'
+root="$(mkroot "$CO")"; mkdir -p "$root/hop"
+resolve_case "$root/live dir" "$root/hop/../live dir/nested"
+expect dirs-kept-live 1
+gone "$root/hop" 'hop: the path only passes through it (S9 rule)'
+finish
+
+begin 27 'S2: the configured temp base reached through a symlink, plain argument'
+ln -s "$BASE" "$FX/tmp-alias"
+root="$(mkroot "$CO")"; alias_root="$FX/tmp-alias/${root#"$BASE"/}"
+PASS_TMPDIR="$FX/tmp-alias" resolve_case "$root/live" "$alias_root/live/nested"
+expect base "$BASE"; expect dirs-kept-live 1
+finish
+
+begin 28 'S3: S1 and S2 as the value of an option (--dir=<path>)'
+ln -s "$BASE" "$FX/tmp-alias"
+root="$(mkroot "$CO")"; mkdir -p "$root/hop"; alias_root="$FX/tmp-alias/${root#"$BASE"/}"
+fill_entry "$root/opt-dotdot"; fill_entry "$root/opt-alias"; fill_entry "$root/opt-unused"
+into "$root/hop/../opt-dotdot/nested" "$root/opt-dotdot" && into "$alias_root/opt-alias/nested" "$root/opt-alias" || true
+hold_arg "--dir=$root/hop/../opt-dotdot/nested"; first="$HOLDER"
+hold_arg "--dir=$alias_root/opt-alias/nested"
+PASS_TMPDIR="$FX/tmp-alias" pass c28 real real
+held_whole "$root/opt-alias"; HOLDER="$first"; held_whole "$root/opt-dotdot"
+gone "$root/opt-unused" 'the unused sibling (the control)'
+expect dirs-kept-live 2
+finish
+
+begin 29 'S4: "." segments, doubled slashes and a trailing slash'
+root="$(mkroot "$CO")"
+resolve_case "$root/live" "$root//live/./nested/"
+expect dirs-kept-live 1
+finish
+
+begin 30 'S5: a symlink outside the entry, elsewhere in the path, points into it'
+root="$(mkroot "$CO")"; mkdir -p "$root/live"; ln -s "$root/live" "$FX/outside/into-live"
+resolve_case "$root/live" "$FX/outside/into-live/nested"
+expect dirs-kept-live 1
+finish
+
+begin 31 'S6: a reference deeper than three levels below the entry'
+root="$(mkroot "$CO")"; mkdir -p "$root/live/nested/a/b/c/d"
+resolve_case "$root/live" "$root/live/nested/a/b/c/d"
+expect dirs-kept-live 1
+finish
+
+begin 32 'S7: a relative argument that resolves into the entry from the holder'"'"'s cwd (outside it)'
+root="$(mkroot "$CO")"
+resolve_case "$root/live" "${root#"$FX"/}/live/nested" '' "$FX"
+expect dirs-kept-live 1
+finish
+
+begin 33 'S8 (control): the canonical absolute argument'
+root="$(mkroot "$CO")"
+resolve_case "$root/live" "$root/live/nested"
+expect dirs-kept-live 1
+finish
+
+begin 34 'S9: an argument that leaves the entry through ".." keeps only where it lands'
+root="$(mkroot "$CO")"; fill_entry "$root/live"; fill_entry "$root/other"
+into "$root/live/../other" "$root/other" || true
+hold_arg "$root/live/../other"
+pass c34 real real
+held_whole "$root/other"
+gone "$root/live" 'live: the reference only passes through it and leaves by ".."'
+expect dirs-kept-live 1; expect root-removed 1
+finish
+
+begin 35 'another mount namespace: the holder names the entry through its own bind mount'
+root="$(mkroot "$CO")"; fill_entry "$root/live"; fill_entry "$root/live-unused"
+# The bind source travels on a descriptor (bwrap --args), so no process carries the entry's path as text.
+printf -- '--die-with-parent\0--dev-bind\0/\0/\0--tmpfs\0/mnt\0--bind\0%s\0/mnt/view\0--chdir\0/\0' "$root/live" > "$FX/outside/bwrap-args"
+if ! command -v bwrap >/dev/null 2>&1 || ! bwrap --args 3 true 3< "$FX/outside/bwrap-args" 2>/dev/null; then
+  skip 'bwrap is missing or cannot make a mount namespace here: no other way to start one without root'
+else
+  inside="$(bwrap --args 3 stat -c %d:%i /mnt/view/nested 3< "$FX/outside/bwrap-args" 2>/dev/null)"
+  [ "$inside" = "$(stat -c %d:%i "$root/live/nested")" ] || fail "setup: /mnt/view/nested in the namespace is '$inside', not $root/live/nested"
+  ( cd / && exec bwrap --args 3 python3 -c 'import time; time.sleep(600)' /mnt/view/nested 3< "$FX/outside/bwrap-args" ) < /dev/null > /dev/null 2>&1 9>&- 10>&- 11>&- &
+  remember "$!"; launcher="$!"
+  child_with_arg() { local pid; for pid in $(pgrep -P "$launcher" 2>/dev/null); do cmdline_has "$pid" /mnt/view/nested && { HOLDER="$pid"; return 0; }; done; return 1; }
+  HOLDER=; wait_for child_with_arg || fail 'the namespaced holder did not start'
+  [ -z "$HOLDER" ] || remember "$HOLDER"
+  if grep -qaF -- "$root/live" /proc/"$launcher"/cmdline /proc/"$HOLDER"/cmdline 2>/dev/null; then fail 'setup: a holder carries the entry path as text'; fi
+  pass c35 real real
+  held_whole "$root/live"
+  gone "$root/live-unused" 'the unused sibling (the control)'
+  expect dirs-kept-live 1
+fi
+finish
+
+begin 36 'a path through /proc/<pid>/cwd of another process'
+root="$(mkroot "$CO")"; hold_cwd "$root"; through="/proc/$!/cwd"
+resolve_case "$root/live" "$through/live/nested"
+expect dirs-kept-live 1
+finish
+
+begin 37 'doubt keeps: a reference that cannot be resolved for certain keeps every candidate'
+root="$(mkroot "$CO")"; fill_entry "$root/live"; fill_entry "$root/live-unused"
+# (a) A link to the entry inside a directory this uid cannot search: the lookup is refused.
+mkdir -p "$FX/outside/locked"; ln -s "$root/live" "$FX/outside/locked/link"
+[ "$(readlink "$FX/outside/locked/link")" = "$root/live" ] && [ -d "$root/live/nested" ] || fail 'setup: the locked link does not name the entry'
+chmod 000 "$FX/outside/locked"
+hold_arg "$FX/outside/locked/link/nested"
+pass c37a real real
+held_whole "$root/live"
+exists "$root/live-unused/closed-file" 'the unused sibling: doubt keeps every candidate'
+expect processes-in-doubt 1; expect root-removed 0
+grep -q "1 live process(es) have a reference that could not be resolved for certain.*first five: $HOLDER python3" "$ERR" || fail "no doubt stderr line naming the holder: $(cat "$ERR")"
+stop_holders; chmod 700 "$FX/outside/locked"
+# (b) A link loop: more links than the kernel follows in one lookup.
+ln -s loop "$FX/outside/loop"
+hold_arg "$FX/outside/loop/nested"
+pass c37b real real
+exists "$root/live/closed-file" 'the entry under a looping reference'
+exists "$root/live-unused/closed-file" 'the unused sibling under a looping reference'
+expect processes-in-doubt 1
+stop_holders
+# (c) A listed name that a fresh read still lists but cannot be opened: vanished while read.
+mkdir -p "$FX/outside/churn/kept"
+HELPER="$HELPER" C="$root/live" D="$FX/outside/churn" python3 -I -B -c '
+import importlib.util, os, sys, time
+spec = importlib.util.spec_from_file_location("helper", os.environ["HELPER"])
+helper = importlib.util.module_from_spec(spec); spec.loader.exec_module(helper)
+candidates = helper.candidate_map([os.path.dirname(os.environ["C"])])
+class Listed(helper.Resolver):
+    def listing(self, fd):
+        return frozenset(["gone", "kept"])  # every read lists "gone"; no open finds it
+resolver = Listed(candidates, time.time() + 60)
+start = os.open("/", helper.PATH_DIR)
+doubted = resolver.walk(start, os.environ["D"] + "/gone/x", 1, False)
+resolver = helper.Resolver(candidates, time.time() + 60)  # the real reads: "gone" is in neither
+nothing = resolver.walk(start, os.environ["D"] + "/gone/x", 1, False)
+ok = doubted == resolver.everything and resolver.doubts == 0 and not nothing and resolver.everything
+print("vanished: doubt=%s nothing=%s" % (doubted == resolver.everything, not nothing))
+sys.exit(0 if ok else 1)' > "$FX/vanished.out" 2>&1 || fail "the vanished-while-read rule: $(cat "$FX/vanished.out")"
+finish
+
+begin 38 'a name that only starts with dots is not "..": the path may end at the entry before it'
+# Only an exact ".." component leaves (S9). "<root>/live/.absent" and "<root>/dots/..." may be a
+# path that ends at "<root>/live/" or "<root>/dots/" followed by other text: both entries are kept.
+root="$(mkroot "$CO")"; fill_entry "$root/live"; fill_entry "$root/dots"; fill_entry "$root/live-unused"
+[ ! -e "$root/live/.absent" ] && [ ! -e "$root/dots/..." ] || fail 'setup: the dot-led names must not exist'
+into "$root/live/" "$root/live"; into "$root/dots/" "$root/dots"
+hold_arg "$root/live/.absent"; first="$HOLDER"
+hold_arg "$root/dots/..."
+pass c38 real real
+held_whole "$root/dots"; HOLDER="$first"; held_whole "$root/live"
+gone "$root/live-unused" 'the unused sibling with the same contents (the control)'
+expect dirs-kept-live 2; expect root-removed 1
+finish
+
 # ---- every captured summary names a fixture base ---------------------------------------------
 CASE=bases
 lines="$(wc -l < "$T/summaries")"
@@ -531,5 +734,6 @@ lines="$(wc -l < "$T/summaries")"
 outside="$(grep -v "^temp-hygiene: mode=[^ ]* base=$T/" "$T/summaries" || true)"
 [ -z "$outside" ] || fail "a summary line names a base outside the fixtures: $outside"
 
-echo "temp-hygiene self-test: $CASES cases ran ($SKIPS sub-cases skipped with a reason), $PASSN passes, $lines summary lines, $FAILS failures"
+foreign=0; [ ! -s "$T/foreign-doubt" ] || { foreign="$(wc -l < "$T/foreign-doubt")"; sed 's/^/  left out (outside the case, in doubt): /' "$T/foreign-doubt"; }
+echo "temp-hygiene self-test: $CASES cases ran ($SKIPS sub-cases skipped with a reason), $PASSN passes, $lines summary lines, $foreign foreign processes in doubt left out, $FAILS failures"
 [ "$FAILS" -eq 0 ]

@@ -13,7 +13,10 @@
 # A FILE is removed only under a kernel write lease (temp-hygiene-helper.py): never on a
 # name, a command line or a /proc read. A DIRECTORY a readable live process references —
 # as cwd, an open handle or on its command line, itself or by a path below it — is kept
-# whole. A live process that cannot be read keeps no directory (owner ruling 2026-11-14:
+# whole: a command-line path counts by what it RESOLVES to (the kernel's own lookups, through
+# the process's root and cwd, links followed), never by how it is spelled, and a reference
+# that cannot be resolved for certain keeps every candidate (temp-hygiene-helper.py Resolver).
+# A live process that cannot be read keeps no directory (owner ruling 2026-11-14:
 # only EMPTY directories can go on that assumption; every summary line counts it).
 #
 # Modes: VERIFICATION_TMP_SWEEP=real (default in the wrappers): B.1 and the sweep remove.
@@ -166,13 +169,15 @@ th::_entries() {
 # One read of every process (temp-hygiene-helper.py scan), kept as a snapshot; th::_proc_refs
 # answers for one process from it, so the self-test can make a process unreadable, gone or a
 # zombie by replacing that one function. Nothing the scan reads can make a FILE removable.
-th::_snapshot() { # base → TH_SNAP_* ; 0 complete, 1 stopped at the budget, 2 not possible
-  local base="$1" records=() record kind pid="" rc
+th::_snapshot() { # base candidate-dir... → TH_SNAP_* ; 0 complete, 1 stopped at the budget, 2 not possible
+  local base="$1" records=() record kind pid="" rc dir dirs=()
+  shift
+  for dir in "$@"; do dirs+=(--candidates-in "$dir"); done
   unset TH_SNAP_RC TH_SNAP_NAME TH_SNAP_REF_INDEX
   declare -gA TH_SNAP_RC=() TH_SNAP_NAME=() TH_SNAP_REF_INDEX=()
   TH_SNAP_PIDS=(); TH_SNAP_REF_PID=(); TH_SNAP_REF_KIND=(); TH_SNAP_REF_VALUE=()
   [ -r /proc/self/stat ] && command -v python3 >/dev/null 2>&1 || return 2
-  mapfile -d '' records < <(python3 "$TH_LIB_DIR/temp-hygiene-helper.py" scan --base "$base" --deadline "$TH_DEADLINE_REAL" 9>&- 10>&- 11>&-; printf 'rc=%s\0' "$?")
+  mapfile -d '' records < <(python3 "$TH_LIB_DIR/temp-hygiene-helper.py" scan --base "$base" --deadline "$TH_DEADLINE_REAL" "${dirs[@]}" 9>&- 10>&- 11>&-; printf 'rc=%s\0' "$?")
   [ "${records[${#records[@]}-1]:-}" = rc=0 ] || return 2
   for record in "${records[@]:0:${#records[@]}-1}"; do
     case "$record" in
@@ -190,31 +195,36 @@ th::_snapshot() { # base → TH_SNAP_* ; 0 complete, 1 stopped at the budget, 2 
   return 0
 }
 
-# th::_proc_refs <pid>: one process's read. Fills TH_P_REFS (cwd, fd targets under the base)
-# and TH_P_ARGS (command-line arguments naming the base), sets TH_PROC_NAME. Returns 0 read,
+# th::_proc_refs <pid>: one process's read. Fills TH_P_REFS (cwd and fd targets under the base,
+# and every candidate directory a reference of it resolves to or below), sets TH_PROC_NAME and
+# TH_P_DOUBT (how many of its references were in doubt: each named every candidate). Returns 0 read,
 # 2 live but cwd or fd unreadable, 3 gone, 4 zombie, 5 kernel thread. The caller keeps the
 # references of 0 and 2 only: a gone process or a zombie holds nothing.
 th::_proc_refs() {
   local pid="$1" i
   TH_PROC_NAME="${TH_SNAP_NAME[$pid]:-?}"
   for i in ${TH_SNAP_REF_INDEX[$pid]:-}; do
-    if [ "${TH_SNAP_REF_KIND[$i]}" = a ]; then TH_P_ARGS+=("${TH_SNAP_REF_VALUE[$i]}"); else TH_P_REFS+=("${TH_SNAP_REF_VALUE[$i]}"); fi
+    if [ "${TH_SNAP_REF_KIND[$i]}" = d ]; then TH_P_DOUBT="${TH_SNAP_REF_VALUE[$i]}"; else TH_P_REFS+=("${TH_SNAP_REF_VALUE[$i]}"); fi
   done
   return "${TH_SNAP_RC[$pid]:-3}"
 }
 
-# Fills TH_REFS, TH_ARGS, TH_UNREADABLE, TH_UNREADABLE_NAMES. Returns 0 complete,
+# Fills TH_REFS, TH_UNREADABLE(_NAMES), TH_DOUBTFUL(_NAMES). Returns 0 complete,
 # 1 stopped at the budget, 2 not possible (no /proc, no python3).
-th::_scan_processes() { # base
+th::_scan_processes() { # base candidate-dir... (the directories whose entries may be candidates)
   local base="$1" pid rc
-  TH_REFS=(); TH_ARGS=(); TH_UNREADABLE=0; TH_UNREADABLE_NAMES=()
-  rc=0; th::_snapshot "$base" || rc=$?
+  TH_REFS=(); TH_UNREADABLE=0; TH_UNREADABLE_NAMES=(); TH_DOUBTFUL=0; TH_DOUBTFUL_NAMES=()
+  rc=0; th::_snapshot "$@" || rc=$?
   [ "$rc" -eq 0 ] || return "$rc"
   for pid in "${TH_SNAP_PIDS[@]}"; do
     th::_budget_left || return 1
-    TH_PROC_NAME=; TH_P_REFS=(); TH_P_ARGS=()
+    TH_PROC_NAME=; TH_P_REFS=(); TH_P_DOUBT=0
     rc=0; th::_proc_refs "$pid" || rc=$?
-    case "$rc" in 0|2) TH_REFS+=("${TH_P_REFS[@]}"); TH_ARGS+=("${TH_P_ARGS[@]}") ;; esac
+    case "$rc" in 0|2) TH_REFS+=("${TH_P_REFS[@]}") ;; *) TH_P_DOUBT=0 ;; esac
+    if [ "$TH_P_DOUBT" -gt 0 ]; then
+      TH_DOUBTFUL=$((TH_DOUBTFUL + 1))
+      [ "${#TH_DOUBTFUL_NAMES[@]}" -ge 5 ] || TH_DOUBTFUL_NAMES+=("$pid ${TH_PROC_NAME:-?}")
+    fi
     if [ "$rc" -eq 2 ]; then
       TH_UNREADABLE=$((TH_UNREADABLE + 1))
       [ "${#TH_UNREADABLE_NAMES[@]}" -ge 5 ] || TH_UNREADABLE_NAMES+=("$pid ${TH_PROC_NAME:-?}")
@@ -225,20 +235,14 @@ th::_scan_processes() { # base
 }
 
 # A directory is referenced when a read process has it, or a path below it, as cwd or an
-# open handle, or names it on its command line. th::_index_refs turns TH_REFS and TH_ARGS
-# into TH_REF_SET once per pass, so a lookup is one hash probe (the per-candidate walk over
-# ~650 references cost 7 ms per candidate):
-#   * cwd and handles are exact kernel paths: the path and each of its ancestors below the base;
-#   * a command-line argument is text: where a path inside it ends cannot be known (a space,
-#     a newline, ':', ',', ';', '=' and quotes are all legal in a name), so nothing is cut.
-#     After each "<base>/" in the argument, the text is read as '/'-separated segments and,
-#     for each of the first TH_REF_DEPTH segments, every prefix of that segment (up to a
-#     name's length) is indexed below the exact segments before it. A candidate is then kept
-#     when its name is ANY prefix of what the argument holds at its place: "<root>/a b/x"
-#     keeps "a b" (and "a", "a "), "--dir=<base>/x,y" keeps "x" and "x,y". Extra retention
-#     is the safe side; cutting an argument short deleted a live directory (#983 round 1).
-TH_REF_DEPTH=3      # the deepest candidate: <base>/dp-test-tmp-<uid>/<key>/<entry>
-TH_NAME_MAX=255     # a file name's longest length; a longer prefix can name no candidate
+# open handle, or names it on its command line. th::_index_refs turns TH_REFS into TH_REF_SET
+# once per pass, so a lookup is one hash probe. Every entry of TH_REFS is an exact path: a cwd
+# or handle under the base as the kernel prints it (it and each ancestor below the base are
+# indexed), or a candidate directory the helper found by RESOLVING a reference — its arguments
+# read with every possible start and end, each looked up by the kernel through the process's
+# own root and cwd, and matched by device and inode along the end's ".." chain (spelling plays
+# no part: "..", ".", "//", a symlinked base or component, a relative path, any depth, another
+# mount namespace). A reference the helper cannot resolve for certain names every candidate.
 th::_add_ancestors() { # base path
   local base="$1" path="$2"
   while [[ "$path" == "$base"/* ]]; do
@@ -249,32 +253,11 @@ th::_add_ancestors() { # base path
   done
 }
 
-# th::_add_arg_prefixes <base> <text after one "<base>/">: see th::_index_refs above.
-th::_add_arg_prefixes() {
-  local base="$1" rest="$2" context="$1" segment depth=0 i limit
-  while [ "$depth" -lt "$TH_REF_DEPTH" ] && [ -n "$rest" ]; do
-    if [[ "$rest" == */* ]]; then segment="${rest%%/*}"; rest="${rest#*/}"; else segment="$rest"; rest=; fi
-    # "<base>//x" and "<base>/./x" name <base>/x: an empty or "." segment adds no level.
-    if [ -z "$segment" ] || [ "$segment" = . ]; then continue; fi
-    limit="${#segment}"; [ "$limit" -le "$TH_NAME_MAX" ] || limit="$TH_NAME_MAX"
-    for ((i = 1; i <= limit; i++)); do TH_REF_SET["$context/${segment:0:i}"]=1; done
-    context="$context/$segment"; depth=$((depth + 1))
-  done
-}
-
 th::_index_refs() { # base → 0 indexed, 1 stopped at the budget
-  local base="$1" x rest
+  local base="$1" x
   unset TH_REF_SET
   declare -gA TH_REF_SET=()
   for x in "${TH_REFS[@]}"; do th::_budget_left || return 1; th::_add_ancestors "$base" "$x"; done
-  for x in "${TH_ARGS[@]}"; do
-    th::_budget_left || return 1
-    rest="$x"
-    while [[ "$rest" == *"$base/"* ]]; do
-      rest="${rest#*"$base/"}"
-      th::_add_arg_prefixes "$base" "$rest"
-    done
-  done
 }
 
 th::_referenced() { [ -n "${TH_REF_SET[$1]:-}" ]; } # path
@@ -476,7 +459,7 @@ th::run() {
   th::_clock; start="$TH_CLOCK"; TH_DEADLINE=$((start + budget))
   TH_DEADLINE_REAL=$(( $(printf '%(%s)T' -1) + budget ))
   unset TH_REF_SET; declare -gA TH_REF_SET=()
-  TH_STOPPED=0; TH_SCAN=2; TH_UNREADABLE=0; TH_UNREADABLE_NAMES=(); TH_REFS=(); TH_ARGS=(); TH_FILES_REFUSED=0; TH_FILES_UNTRIED=0; TH_DIRS_LIVE=0; TH_UNRECORDED=0; TH_ROOT_STATE=unknown
+  TH_STOPPED=0; TH_SCAN=2; TH_UNREADABLE=0; TH_UNREADABLE_NAMES=(); TH_DOUBTFUL=0; TH_DOUBTFUL_NAMES=(); TH_REFS=(); TH_FILES_REFUSED=0; TH_FILES_UNTRIED=0; TH_DIRS_LIVE=0; TH_UNRECORDED=0; TH_ROOT_STATE=unknown
   unset TH_COUNT TH_DONE
   declare -gA TH_COUNT=() TH_DONE=()
   [ -z "$TH_LIST" ] || : > "$TH_LIST" || TH_LIST=
@@ -487,7 +470,7 @@ th::run() {
     parent="$(th::parent_dir "$base")"
     key="$(th::checkout_key "$checkout")" || key=
     [ -z "$key" ] || root="$parent/$key"
-    scan_rc=0; th::_scan_processes "$base" || scan_rc=$?
+    scan_rc=0; th::_scan_processes "$base" "$base" "$parent" ${root:+"$root"} || scan_rc=$?
     TH_SCAN="$scan_rc"
     if [ "$scan_rc" -eq 1 ]; then
       TH_STOPPED=1
@@ -512,16 +495,21 @@ th::run() {
     named="$(IFS=,; printf '%s' "${TH_UNREADABLE_NAMES[*]}")"
     echo "temp-hygiene: $TH_UNREADABLE live process(es) could not be read and keep no directory (assumed not to sit in an empty test temp directory, owner ruling 2026-11-14); first five: $named" >&2
   fi
+  if [ "$TH_DOUBTFUL" -gt 0 ]; then
+    local doubted
+    doubted="$(IFS=,; printf '%s' "${TH_DOUBTFUL_NAMES[*]}")"
+    echo "temp-hygiene: $TH_DOUBTFUL live process(es) have a reference that could not be resolved for certain; each such reference keeps every candidate directory (doubt keeps); first five: $doubted" >&2
+  fi
   th::_clock; seconds=$((TH_CLOCK - start))
   local verb=removed; [ "$shared_mode" = real ] || verb=would-remove
   local root_verb=removed; [ "$root_mode" = real ] || root_verb=would-remove
-  printf 'temp-hygiene: mode=%s base=%s root=%s root-state=%s root-%s=%s root-bytes=%s shared-%s=%s shared-bytes=%s gone-roots-%s=%s partial=%s files-kept-lease-refused=%s files-kept-lease-untried=%s dirs-kept-live=%s roots-unrecorded=%s unreadable-processes=%s families=%s seconds=%s%s%s\n' \
+  printf 'temp-hygiene: mode=%s base=%s root=%s root-state=%s root-%s=%s root-bytes=%s shared-%s=%s shared-bytes=%s gone-roots-%s=%s partial=%s files-kept-lease-refused=%s files-kept-lease-untried=%s dirs-kept-live=%s roots-unrecorded=%s unreadable-processes=%s processes-in-doubt=%s families=%s seconds=%s%s%s\n' \
     "$label" "${base:-none}" "${root:-none}" "$TH_ROOT_STATE" \
     "$root_verb" "${TH_COUNT[root-removed]:-0}" "${TH_COUNT[root-bytes]:-0}" \
     "$verb" "${TH_COUNT[shared-removed]:-0}" "${TH_COUNT[shared-bytes]:-0}" \
     "$verb" "${TH_COUNT[gone-removed]:-0}" \
     "$(( ${TH_COUNT[root-partial]:-0} + ${TH_COUNT[shared-partial]:-0} + ${TH_COUNT[gone-partial]:-0} ))" \
-    "$TH_FILES_REFUSED" "$TH_FILES_UNTRIED" "$TH_DIRS_LIVE" "$TH_UNRECORDED" "$TH_UNREADABLE" "${#TH_FAMILIES[@]}" "$seconds" \
+    "$TH_FILES_REFUSED" "$TH_FILES_UNTRIED" "$TH_DIRS_LIVE" "$TH_UNRECORDED" "$TH_UNREADABLE" "$TH_DOUBTFUL" "${#TH_FAMILIES[@]}" "$seconds" \
     "$([ "$TH_STOPPED" -eq 0 ] || echo ' stopped at budget')" "$([ -z "$TH_LIST" ] || echo " list=$TH_LIST")"
   return 0
 }

@@ -1447,11 +1447,22 @@ How things are removed:
 - **Directories** are decided before anything below them is touched. One process scan per pass reads
   every process's `cwd`, open handles and command line. A directory that a live process references,
   itself or through any path below it, is kept whole: there is no descent and no lease attempt below
-  it. A command-line argument is text, and where a path inside it ends cannot be known (a space, a
-  newline, `:`, `,`, `;`, `=` and quotes are legal in a name), so nothing is cut from it: a directory
-  is kept when its name is any prefix of what the argument holds at its place. `--dir=<base>/x,y`
-  keeps both `x` and `x,y`. A few extra directories are kept; none is lost. Any other directory is walked through descriptors (`O_NOFOLLOW`, no crossing of a filesystem
-  boundary) and removed once it is empty.
+  it. A reference is matched by what it resolves to, never by how it is spelled. The helper resolves
+  it the way the kernel does for that process, from the process's own root and `cwd`: `.`, `..`,
+  repeated slashes, symbolic links anywhere in the path, procfs links such as `/proc/<pid>/cwd`, and
+  another mount namespace. It then compares device and inode with every candidate directory and its
+  parents. A command-line argument is text, and where a path inside it starts and ends cannot be
+  known (a space, a newline, `:`, `,`, `;`, `=` and quotes are legal in a name). So every `/` may
+  start an absolute path; from a readable `cwd`, every place where one of that directory's names
+  appears may start a relative one; and a path may end at every place inside a component.
+  `--dir=<base>/x,y` keeps both `x` and `x,y`. Only an exact `..` component is a step out:
+  `<root>/live/../other` keeps `other`, not `live`. **Doubt keeps:** a reference that cannot be
+  resolved for certain (a refused lookup, a link loop, a component that vanished while it was read)
+  keeps every candidate directory. Every summary line counts those processes
+  (`processes-in-doubt=`), and one stderr line names at most five of them. A few extra directories
+  are kept; none is lost. Any other directory is walked through descriptors (`O_NOFOLLOW`, no
+  crossing of a filesystem boundary) and removed once it is empty. Resolving a reference reads
+  symbolic links; the removal walk never follows one.
 - **Symbolic links** are removed as links; their targets are never followed.
 - Entries owned by another uid, and sockets, fifos and devices, are kept.
 - The one budget is checked for every entry reached, kept or removed, while listing a directory and
@@ -1528,7 +1539,7 @@ tools. They are listed here instead of being guessed in:
 A family that any code mounts into a container is never added.
 
 **Self-test.** `scripts/temp-hygiene-test.sh` runs from `./scripts/pregate.sh --self-test`, which is
-the gate's "pregate self-test" stage. It covers cases 1–25 of #983 on fixture directories only and
+the gate's "pregate self-test" stage. It covers cases 1–38 of #983 on fixture directories only and
 prints how many cases it ran. Every fixture run of a copied wrapper, in this self-test and in the two
 existing ones, sets its temp base to a fixture directory. Each self-test fails when a summary line it
 captured names a base outside its fixtures.
