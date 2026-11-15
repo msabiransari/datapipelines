@@ -3,6 +3,16 @@ import org.gradle.api.artifacts.dsl.LockMode
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
 import org.jlleitschuh.gradle.ktlint.tasks.BaseKtLintCheckTask
+import com.sun.security.auth.module.UnixSystem
+import java.nio.file.FileAlreadyExistsException
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFileAttributes
+import java.nio.file.attribute.PosixFilePermission
+import java.nio.file.attribute.PosixFilePermissions
+import java.security.MessageDigest
 
 plugins {
     `kotlin-dsl`
@@ -116,6 +126,94 @@ tasks.test {
     // The test JVM itself may be any JDK the daemon picked (26 here), so
     // java.home is NOT a valid substitute.
     systemProperty("probe.jdk21", probeJdk21.get())
+    // #983 (DEVELOPMENT.md §9.7): buildSrc's own test JVM gets its java.io.tmpdir under this
+    // checkout's test temp root, by the rule TestTempRoot (CommonConventionsPlugin.kt) states and
+    // scripts/lib/temp-hygiene.sh follows; repeated here because buildSrc cannot apply its own
+    // plugin. CommonConventionsPluginTest pins this copy to the plugin's. The TestKit probes are
+    // handed the checkout they belong to (DP_TEST_TMP_OWNER_CHECKOUT, TestTempRoot.OWNER_ENV), so a
+    // probe's test JVMs land under this root too and never under one derived from the probe's
+    // own directory. Strings only, resolved at execution: no task input, as for the modules.
+    val testTempCheckout = rootProject.projectDir.parentFile.toPath().toRealPath().toString()
+    val testTempTmpdir = providers.environmentVariable("TMPDIR")
+    environment("DP_TEST_TMP_OWNER_CHECKOUT", testTempCheckout)
+    val testTempDirectory =
+        object : CommandLineArgumentProvider {
+            fun base(): Path {
+                val named = testTempTmpdir.orNull?.takeIf { it.isNotBlank() }?.let { Path.of(it) }
+                val chosen =
+                    if (named != null && named.isAbsolute && Files.isDirectory(named)) named else Path.of("/tmp")
+                return chosen.toRealPath()
+            }
+
+            fun uid(): Long = UnixSystem().uid
+
+            fun parent(): Path = base().resolve("dp-test-tmp-" + uid())
+
+            fun key(): String =
+                MessageDigest.getInstance("SHA-256")
+                    .digest(testTempCheckout.toByteArray(Charsets.UTF_8))
+                    .joinToString("") { "%02x".format(it) }
+                    .take(16)
+
+            fun directory(): Path = parent().resolve(key()).resolve("buildSrc").resolve("test")
+
+            // The plugin's Security check: created 0700, a real directory owned by this uid,
+            // not writable by group or others — else the task fails; never the shared /tmp.
+            fun ensurePrivate(directory: Path) {
+                val private = PosixFilePermissions.asFileAttribute(
+                    PosixFilePermissions.fromString("rwx------"),
+                )
+                try {
+                    Files.createDirectory(directory, private)
+                } catch (_: FileAlreadyExistsException) {
+                    // verified below
+                }
+                val nofollow = LinkOption.NOFOLLOW_LINKS
+                val attributes = Files.readAttributes(
+                    directory,
+                    PosixFileAttributes::class.java,
+                    nofollow,
+                )
+                val owner = (Files.getAttribute(directory, "unix:uid", nofollow) as Number).toLong()
+                val shared = attributes.permissions().any {
+                    it == PosixFilePermission.GROUP_WRITE ||
+                        it == PosixFilePermission.OTHERS_WRITE
+                }
+                if (attributes.isSymbolicLink || !attributes.isDirectory || owner != uid() || shared) {
+                    throw GradleException(
+                        "Refusing the test temp directory $directory: it must be a real directory owned by uid ${uid()} " +
+                            "and not writable by group or others (#983, DEVELOPMENT.md §9.7); remove or repair it by hand.",
+                    )
+                }
+            }
+
+            fun prepare() {
+                ensurePrivate(parent())
+                ensurePrivate(parent().resolve(key()))
+                val record = parent().resolve(key() + ".checkout")
+                val content = testTempCheckout + "\n"
+                val nofollow = LinkOption.NOFOLLOW_LINKS
+                if (!Files.isRegularFile(record, nofollow) || Files.readString(record) != content) {
+                    val staged = Files.createTempFile(parent(), key() + ".checkout.", ".tmp")
+                    try {
+                        Files.writeString(staged, content)
+                        Files.move(
+                            staged,
+                            record,
+                            StandardCopyOption.ATOMIC_MOVE,
+                            StandardCopyOption.REPLACE_EXISTING,
+                        )
+                    } finally {
+                        Files.deleteIfExists(staged)
+                    }
+                }
+                Files.createDirectories(directory())
+            }
+
+            override fun asArguments(): Iterable<String> = listOf("-Djava.io.tmpdir=" + directory())
+        }
+    jvmArgumentProviders.add(testTempDirectory)
+    doFirst { testTempDirectory.prepare() }
 }
 
 // The lint CommonConventionsPlugin applies to every module, mirrored for buildSrc (#724),

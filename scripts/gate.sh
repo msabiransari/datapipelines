@@ -100,6 +100,14 @@ echo " Gate A — $CYCLES cycle(s)   |   $(date '+%Y-%m-%d %H:%M:%S %z')"
 echo " logs: $LOGDIR"
 echo " browser suite: EXCLUDED from the build cycles — CI on next is its only full run (owner ruling 2026-10-09)"
 echo "=============================================================="
+# Test temp files (#983, DEVELOPMENT.md §9.7), AFTER the lock: empty this checkout's test
+# temp root and sweep the shared temp directory (VERIFICATION_TMP_SWEEP: real by default,
+# dry-run lists the shared part only). One summary line; a failure never fails the gate.
+if [ -r "$ROOT/scripts/lib/temp-hygiene.sh" ] && source "$ROOT/scripts/lib/temp-hygiene.sh"; then
+  th::step "$ROOT" "$LOGDIR/temp-hygiene.txt"
+else
+  echo "temp-hygiene: WARNING scripts/lib/temp-hygiene.sh could not be loaded; nothing removed" >&2
+fi
 
 # ---- rule 3: other build actors -------------------------------------------
 foreign=$(pgrep -fl 'GradleWrapperMain|GradleDaemon|KotlinCompileDaemon' 2>/dev/null | grep -vc "^$$ " || true)

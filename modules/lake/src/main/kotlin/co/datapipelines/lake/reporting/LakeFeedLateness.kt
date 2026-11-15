@@ -27,7 +27,9 @@ data class FeedLatenessResult(
  * Lateness per feed of one managed table, read from the delivery ledger (lake.md "Profiles"; record §11b call 46;
  * brief 961 D2–D5). Two reads, in this order: the table's profile through [LakeProfiles.forTable] (the only way this
  * class reaches a profile), then ONE statement that returns the table's status, the catalog's clock, every feed the
- * ledger knows for the table in any state, and each feed's last `reporting.lateness_sample` published deliveries.
+ * ledger knows for the table in any state, and each feed's last `reporting.lateness_sample` published deliveries
+ * ([READ_SQL]: one index probe per feed to find the feeds, one index scan per feed that stops at the sample, never a
+ * scan of the table's whole ledger).
  * Each feed is judged on its own by [FeedLateness]; a `deprecated`, `archived` or `purged` table returns every feed
  * [FeedVerdict.NotJudged].
  *
@@ -90,33 +92,43 @@ class LakeFeedLateness(
 
         /**
          * The one statement (D2 step 2). `t` answers the status and the clock for any existing table, also one with no
-         * delivery; `feeds` is every feed of the table in ANY state (a feed with only FAILED rows, or a PUBLISHED row
-         * with a null `published_at`, is still returned); `samples` is each feed's newest `:sample` published deliveries,
-         * a window over `(feed ORDER BY published_at DESC)` that V62's `idx_lake_deliveries_published` serves in order.
-         * One row per sample, or one row with a null `published_at` for a feed with none, or one row with a null feed
-         * for a table with no delivery.
+         * delivery. `walk` finds every feed of the table in ANY state (a feed with only FAILED rows, or a PUBLISHED row
+         * with a null `published_at`, is still found) one probe of the unique key `uq_lake_deliveries_key` at a time:
+         * the smallest feed, then the smallest feed greater than the last, until none is left. Each feed's samples are
+         * a lateral scan of V62's `idx_lake_deliveries_published` in `published_at DESC` order that stops at `:sample`
+         * entries. So the plan's shape is one probe per feed to find the feeds and one scan per feed that stops at
+         * `:sample` entries, with no scan of the table's whole ledger; the work behind that shape also depends on the
+         * indexes' depth, on visibility and on dead entries. One row per sample, or one row with a null `published_at`
+         * for a feed with none, or one row with a null feed for a table with no delivery; no row for an unknown table.
          */
         internal val READ_SQL =
             """
-            WITH t AS (
+            WITH RECURSIVE t AS (
                 SELECT status, now() AS computed_at FROM lake_tables_managed WHERE id = :table
             ),
-            feeds AS (
-                SELECT DISTINCT feed FROM lake_deliveries WHERE table_id = :table
+            walk AS (
+                (SELECT feed FROM lake_deliveries WHERE table_id = :table ORDER BY feed LIMIT 1)
+                UNION ALL
+                SELECT (
+                    SELECT d.feed FROM lake_deliveries d
+                    WHERE d.table_id = :table AND d.feed > w.feed
+                    ORDER BY d.feed LIMIT 1
+                )
+                FROM walk w
+                WHERE w.feed IS NOT NULL
             ),
-            samples AS (
-                SELECT feed, published_at FROM (
-                    SELECT feed, published_at,
-                           row_number() OVER (PARTITION BY feed ORDER BY published_at DESC) AS n
-                    FROM lake_deliveries
-                    WHERE table_id = :table AND state = 'PUBLISHED' AND published_at IS NOT NULL
-                ) ranked
-                WHERE n <= :sample
+            feeds AS (
+                SELECT feed FROM walk WHERE feed IS NOT NULL
             )
             SELECT t.status, t.computed_at, f.feed, s.published_at
             FROM t
             LEFT JOIN feeds f ON TRUE
-            LEFT JOIN samples s ON s.feed = f.feed
+            LEFT JOIN LATERAL (
+                SELECT d.published_at FROM lake_deliveries d
+                WHERE d.table_id = :table AND d.feed = f.feed AND d.state = 'PUBLISHED' AND d.published_at IS NOT NULL
+                ORDER BY d.published_at DESC
+                LIMIT :sample
+            ) s ON TRUE
             ORDER BY f.feed, s.published_at DESC
             """.trimIndent()
     }

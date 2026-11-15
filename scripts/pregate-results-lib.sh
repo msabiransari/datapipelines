@@ -471,10 +471,17 @@ case "$args" in
       rm -f "$ROOT/.runone"
     fi
     if [[ "$mode" == covered* || "$mode" == cached || "$mode" == helper || "$mode" == missing-xml || "$mode" == missing-line || "$mode" == ambiguous || "$mode" == malformed || "$mode" == skipped || "$mode" == partial || "$mode" == failed-xml ]]; then
-      for c in ScopeMatrixSpecDriftTest PublicPathsTest RoleMatrixTest PermissionResolutionTest; do
-        write_tests "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.$c.xml" "co.datapipelines.auth.$c" 1 0
+      # #995: the auth guards are read from the fixture's own registry, never typed here, so a
+      # class added to GUARDS[":modules:auth"] is one this stage-2 record must cover too.
+      auth_guards="$(source "$ROOT/scripts/pregate-plan-lib.sh" && printf '%s' "${GUARDS[":modules:auth"]-}")"
+      if [ -z "$auth_guards" ]; then
+        echo "stand-in refused: no :modules:auth guards in the registry" >> "$ROOT/pregate-argv.log"
+        exit 65
+      fi
+      for c in $auth_guards; do
+        write_tests "$ROOT/modules/auth/build/test-results/test/TEST-$c.xml" "$c" 1 0
         # Summary-only XML is deliberately insufficient; write real testcase identity.
-        printf '<testsuite name="co.datapipelines.auth.%s" tests="1" failures="0" errors="0"><testcase classname="co.datapipelines.auth.%s" name="guard"/></testsuite>' "$c" "$c" > "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.$c.xml"
+        printf '<testsuite name="%s" tests="1" failures="0" errors="0"><testcase classname="%s" name="guard"/></testsuite>' "$c" "$c" > "$ROOT/modules/auth/build/test-results/test/TEST-$c.xml"
       done
       case "$mode" in
         cached) echo '> Task :modules:auth:test FROM-CACHE' ;;
@@ -600,7 +607,8 @@ pgres::_fixture() {
      "$PGRES_LIB_DIR/pregate-2b-lib.sh" "$PGRES_LIB_DIR/pregate-plan-lib.sh" "$PGRES_LIB_DIR/test-recount.sh" "$F/scripts/"
   mkdir -p "$F/scripts/lib"
   cp "$PGRES_LIB_DIR/lib/verification-lock.sh" "$PGRES_LIB_DIR/lib/gate-stages.sh" \
-     "$PGRES_LIB_DIR/lib/scan-tools.sh" "$F/scripts/lib/"
+     "$PGRES_LIB_DIR/lib/scan-tools.sh" "$PGRES_LIB_DIR/lib/temp-hygiene.sh" \
+     "$PGRES_LIB_DIR/lib/temp-hygiene-helper.py" "$F/scripts/lib/"
   pgres::_write_scan_standin "$F"
   printf 'build/\n.pregate-logs/\npregate-argv.log\npregate-quoted.log\npregate.out\n.scan-mode\nvuln-scan-calls.log\n' > "$F/.gitignore"
   printf '[versions]\nfixture = "1.0.0"\n' > "$F/gradle/libs.versions.toml"
@@ -642,10 +650,24 @@ EOF
 }
 
 # Runs the REAL scripts/pregate.sh inside the fixture (base = HEAD, the working-tree diff
-# is the change under test). Returns pregate's exit code.
+# is the change under test). Returns pregate's exit code. Its temp base is a fixture directory
+# beside the checkout (#983): the copied temp-hygiene step never sees the real /tmp.
 pgres::_run_fixture() {
   local F="$1"
-  ( cd "$F" && XDG_CACHE_HOME="$F/.fixture-cache" bash scripts/pregate.sh HEAD > pregate.out 2>&1 )
+  mkdir -p "$F.fixture-tmp" || return 2
+  ( cd "$F" && TMPDIR="$F.fixture-tmp" XDG_CACHE_HOME="$F/.fixture-cache" bash scripts/pregate.sh HEAD > pregate.out 2>&1 )
+}
+
+# #983: every temp-hygiene summary line captured under <dir> names a base inside <dir>, and
+# there is at least one (a wrapper fixture that never reached the step proves nothing).
+pgres::_check_hygiene_bases() { # dir → 0, or prints the offending lines and returns 1
+  local real lines outside
+  real="$(cd "$1" && pwd -P)" || return 1
+  lines="$(grep -rhs '^temp-hygiene: mode=' "$1" || true)"
+  [ -n "$lines" ] || { echo "no temp-hygiene summary line was captured under $1"; return 1; }
+  outside="$(printf '%s\n' "$lines" | grep -v "^temp-hygiene: mode=[^ ]* base=$real/" || true)"
+  [ -z "$outside" ] || { echo "a temp-hygiene summary line names a base outside the fixtures: $outside"; return 1; }
+  printf '%s\n' "$lines" | wc -l
 }
 
 pgres::self_test() {
@@ -653,6 +675,8 @@ pgres::self_test() {
   T="$(mktemp -d /tmp/pgres-selftest.XXXXXX)"
   trap "rm -rf '$T'" EXIT
   local fails=0
+  # #983: every copied wrapper's temp base is a fixture directory, never the real /tmp.
+  mkdir -p "$T/fixture-tmp" && export TMPDIR="$T/fixture-tmp"
   # Hermetic: the retention cases must see the default unless they set the override.
   unset PREGATE_KEEP_RUNS
 
@@ -701,7 +725,28 @@ pgres::self_test() {
   c2b="$(bash "$F/scripts/test-recount.sh" "$rd/2b" | head -n 1)"
   ck_eq "stage2b-counts" "files=1 tests=4 failures=0 errors=0 skipped=0 unreadable=0" "$c2b"
   c3="$(bash "$F/scripts/test-recount.sh" "$rd/3" | head -n 1)"
-  ck_eq "stage3-counts" "files=2 tests=4 failures=0 errors=0 skipped=0 unreadable=0" "$c3"
+  # #995: stage 3's expected counts are derived, never typed, and never read from "$rd/3" or
+  # from the recount (the oracle is not the thing it checks). Stage 3 runs every module of the
+  # registry the fixture runs with (stage 2 here writes no guard class, so none is covered),
+  # and pgres::snapshot copies EVERY task directory of each module it ran (DEVELOPMENT.md:
+  # "Other task directories copied from those modules retain explicit provenance"). Each part
+  # below counts only if its module is in that registry:
+  #   (a) the two result files the stand-in writes for stage 3 (GuardTest, GuardE2eTest);
+  #   (b) the result files the fixture plants in OTHER task directories of those modules:
+  #       today exactly scripting's breachSuite/TEST-co.x.BreachTest.xml, written by stage 2
+  #       (see stage2-breach-task-dir-present), which stage 3's snapshot carries once
+  #       :modules:scripting holds a guard (DockerfileGraalJsPinTest, inventory 995).
+  local s3_mods s3_part s3_kind s3_mod s3_file s3_n s3_files=0 s3_tests=0
+  s3_mods=" $(source "$F/scripts/pregate-plan-lib.sh" && printf '%s ' "${!GUARDS[@]}")"
+  for s3_part in \
+    "a :modules:auth test/TEST-co.x.GuardTest.xml 2" \
+    "a :tests:integration-tests test/TEST-co.datapipelines.integration.GuardE2eTest.xml 2" \
+    "b :modules:scripting breachSuite/TEST-co.x.BreachTest.xml 1"; do
+    read -r s3_kind s3_mod s3_file s3_n <<< "$s3_part"
+    [[ "$s3_mods" == *" $s3_mod "* ]] || continue
+    s3_files=$((s3_files + 1)); s3_tests=$((s3_tests + s3_n))
+  done
+  ck_eq "stage3-counts" "files=$s3_files tests=$s3_tests failures=0 errors=0 skipped=0 unreadable=0" "$c3"
   ck_ok "verdict-pass" grep -q 'PRE-GATE PASS' "$F/.pregate-logs/0-verdict.log"
   ck_ok "verdict-run-id" grep -q "run=$run_id" "$F/.pregate-logs/0-verdict.log"
   ck_ok "verdict-snap-zero" grep -q 'snap=0' "$F/.pregate-logs/0-verdict.log"
@@ -1000,6 +1045,7 @@ pgres::self_test() {
   else echo "  ok   wiring-bad-refuses-pass"; fi
   ck_ok "wiring-bad-verdict-fail" grep -q 'PRE-GATE FAIL' "$W2/.pregate-logs/0-verdict.log"
   ck_ok "wiring-bad-prune-flag" grep -q 'prune=1' "$W2/.pregate-logs/0-verdict.log"
+  ck_ok "temp-hygiene-bases-in-fixtures" pgres::_check_hygiene_bases "$T"
 
   if [ "$fails" -eq 0 ]; then
     echo "  results self-test: PASS"
