@@ -68,7 +68,8 @@ class JavaScriptProgramSandboxTest {
         Files.writeString(target, "export const value = 42;\n")
         return listOf(
             "host" to
-                "try { var S = Java.type('java.lang.System'); globalThis.__probe = 'ALLOWED java.version=' + S.getProperty('java.version'); } " +
+                "try { var S = Java.type('java.lang.System'); " +
+                "globalThis.__probe = 'ALLOWED java.version=' + S.getProperty('java.version'); } " +
                 "catch (e) { globalThis.__probe = 'DENIED ' + e; }",
             "io" to
                 "globalThis.__probe = 'PENDING (the import never settled)'; import('$target').then(function (m) { " +
@@ -77,7 +78,8 @@ class JavaScriptProgramSandboxTest {
                 "try { var p = new (Java.type('java.lang.ProcessBuilder'))(['true']).start(); p.waitFor(); " +
                 "globalThis.__probe = 'ALLOWED exit=' + p.exitValue(); } catch (e) { globalThis.__probe = 'DENIED ' + e; }",
             "thread" to
-                "try { var t = new (Java.type('java.lang.Thread'))(); t.start(); t.join(); globalThis.__probe = 'ALLOWED thread joined'; } " +
+                "try { var t = new (Java.type('java.lang.Thread'))(); t.start(); t.join(); " +
+                "globalThis.__probe = 'ALLOWED thread joined'; } " +
                 "catch (e) { globalThis.__probe = 'DENIED ' + e; }",
             "env" to
                 "try { var env = Java.type('java.lang.System').getenv(); globalThis.__probe = 'ALLOWED variables=' + env.size(); } " +

@@ -19,13 +19,14 @@ import java.util.UUID
  *    over `TemplateEvaluateService`), or, with no transform, the single input's fixture values through the
  *    same wire-form rules; every bound column must be present in every row's projection, and a present
  *    null passes only when the output column is nullable;
- * 4. **Assertion feasibility** — for a `chart` over its [ChartModel] (design record 2026-11-06 §5.1): `mark_count`
- *    against the model's drawn cells and `no_data` against an empty model, both DISPROVABLE; `text_visible` is
- *    PROVEN by a configuration string or the model's texts and otherwise UNJUDGED — listed on the report, never a
- *    failure (only the browser judges a formatted label). For table and KPI: `no_data` against zero produced rows,
+ * 4. **Assertions** — for a `chart`, judged from the chart engine's CANONICAL render of the case (js-rendered charts
+ *    record §4.12, [ChartJudge]: 640 × 400, the server's width table, nothing hidden): `rendered`, `mark_count`,
+ *    `no_data` and `text_visible` (a shown text). Where the JavaScript runtime is not available the four are listed
+ *    as UNJUDGED on the report, never failures. For table and KPI: `no_data` against zero produced rows,
  *    `text_visible`/`value_visible` strings present in the configuration or the bound values;
- * 5. **Rendered state** — [RenderedStateCheck]; the default records `not_available` and never claims a
- *    browser saw anything (a headless render check is a later lane).
+ * 5. **Rendered state** — [RenderedStateCheck]: a chart case records the engine's `state` (`not_rendered` when the
+ *    engine gave no result or the case's rows already failed); without the runtime every case records
+ *    `not_available`, as table and KPI cases always do (the browser's evidence is theirs).
  *
  * It never runs a live source pipeline, never queries a datasource and never executes agent code. A DRAFT
  * transform pin is valid HERE (this is the authoring path); published dashboard runtime requires RELEASED pins;
@@ -91,8 +92,8 @@ class VisualizationMechanicalCheck(
     }
 
     /**
-     * A chart assertion the server cannot judge (design record §5.1): `text_visible` whose text is in no configuration
-     * string and none of the model's texts — a formatted label. Not a failure: the browser judges it in the session.
+     * A chart assertion the server cannot judge (record §4.12, §6): on a host without the JavaScript runtime, a chart
+     * case's `rendered`, `mark_count`, `no_data` and `text_visible`. Not a failure: the browser judges it in the session.
      */
     data class Unjudged(
         val case: String,
@@ -171,7 +172,7 @@ class VisualizationMechanicalCheck(
         assertions(body, cases, failures, unjudged)
         val caseReports =
             cases.entries.associate { (name, outcome) ->
-                name to Report.CaseReport(outcome.rows, outcome.failures.isEmpty(), rendered.state(workspaceId, body, name))
+                name to Report.CaseReport(outcome.rows, outcome.failures.isEmpty(), renderedState(body, outcome))
             }
         return Report(now, failures.isEmpty(), failures.toList(), caseReports, failures.dropped, unjudged)
     }
@@ -269,8 +270,8 @@ class VisualizationMechanicalCheck(
         var rows: Int = 0,
         var boundValues: List<String> = emptyList(),
         val failures: FailureSink = FailureSink(MAX_FAILURES),
-        /** A chart case's model over its post-transform rows; null for other kinds and for a case without rows. */
-        var chart: ChartModel? = null,
+        /** A chart case's canonical render; null for other kinds and for a case whose rows already failed. */
+        var render: CanonicalRender? = null,
     )
 
     private fun fixtureRun(
@@ -303,7 +304,7 @@ class VisualizationMechanicalCheck(
             outcome.rows = rows.size
             val rowMaps = rows.map(::toRowMap)
             outcome.boundValues = boundValues(body.bindings.values, rowMaps)
-            chartModel(body, output, rowMaps, index, outcome)
+            canonicalRender(body, output, rowMaps, index, outcome)
         } else {
             when (val evaluation = fixtures.evaluate(workspaceId, transform.template, case.fixtures)) {
                 is FixtureEvaluation.Refused -> {
@@ -314,7 +315,7 @@ class VisualizationMechanicalCheck(
                     outcome.rows = evaluation.rows.size
                     outcome.boundValues = boundValues(body.bindings.values, evaluation.rows)
                     projectedRows(body, output, evaluation.rows, index, outcome)
-                    chartModel(body, output, evaluation.rows, index, outcome)
+                    canonicalRender(body, output, evaluation.rows, index, outcome)
                 }
             }
         }
@@ -322,11 +323,12 @@ class VisualizationMechanicalCheck(
     }
 
     /**
-     * A chart case's [ChartModel] over the case's post-transform rows, typed by the contract the save rules read. A
-     * case whose rows already failed the fixture step gets no model: a count over rows outside their contract would
-     * be a second, misleading refusal of the same defect (its `mark_count`/`no_data` are judged on the next run).
+     * A chart case's canonical render over its post-transform rows (record §4.12): the rows become columns over the
+     * bound fields ([ChartInput.ofRows]), typed by the contract the save rules read. A case whose rows already failed
+     * the fixture step is not rendered: a judgement over rows outside their contract would be a second, misleading
+     * refusal of the same defect. An engine that gave no result fails the case once, naming the limit (§6).
      */
-    private fun chartModel(
+    private fun canonicalRender(
         body: VisualizationBody,
         output: Map<String, ScriptContractView.Column>,
         rows: List<Map<String, Any?>>,
@@ -334,17 +336,45 @@ class VisualizationMechanicalCheck(
         outcome: CaseOutcome,
     ) {
         if (body.renderer.kind != RendererKind.CHART || !outcome.failures.isEmpty()) return
-        try {
-            outcome.chart = ChartModel.of(body.config, output.mapValues { it.value.type }, rows)
-        } catch (refused: ChartModel.NotAMeasure) {
+        // An unknown type or an unbound column is the schema or the bindings step's refusal: nothing to render.
+        val type =
+            ChartType.fromWire(
+                body.config
+                    .path("mark")
+                    .path("type")
+                    .asText(),
+            ) ?: return
+        val types =
+            body.bindings.values
+                .distinct()
+                .associateWith { field -> output[field]?.type ?: return }
+        val document = ArtifactJson.mapper.valueToTree<ObjectNode>(body).apply { remove("tests") }
+        val render = rendered.render(ChartInput.ofRows(type, document, rows, types))
+        outcome.render = render
+        if (render is CanonicalRender.Failed) {
+            val limit = render.limit?.let { " (the $it limit)" } ?: ""
             outcome.failures +=
                 Failure(
-                    "fixtures",
+                    "assertions",
                     VisualizationErrorCodes.TEST_CASE_INVALID,
                     "tests.cases[$caseIndex]",
-                    refused.message ?: "A measure value is outside its wire form.",
+                    "The chart engine gave no result$limit: ${render.message}",
                     outcome.name,
                 )
+        }
+    }
+
+    /** The case's rendered state (step 5): the chart's canonical render, else what no render claims. */
+    private fun renderedState(
+        body: VisualizationBody,
+        outcome: CaseOutcome,
+    ): String {
+        val render = outcome.render
+        return when {
+            body.renderer.kind != RendererKind.CHART -> CanonicalRender.NOT_AVAILABLE_STATE
+            render != null -> render.state
+            rendered.available -> CanonicalRender.NOT_RENDERED_STATE
+            else -> CanonicalRender.NOT_AVAILABLE_STATE
         }
     }
 
@@ -419,26 +449,31 @@ class VisualizationMechanicalCheck(
             val outcome = cases[case.name] ?: return@forEachIndexed
             case.assertions.forEachIndexed { assertionIndex, assertion ->
                 val at = "tests.cases[$index].assertions[$assertionIndex]"
+                if (chart && assertion.kind != AssertionKind.NO_CONSOLE_ERRORS) {
+                    judged(chartVerdict(assertion, outcome), assertion, at, case.name, failures, unjudged)
+                    return@forEachIndexed
+                }
                 when (assertion.kind) {
                     AssertionKind.MARK_COUNT -> {
-                        markCount(chart, outcome, assertion, at, case.name, failures)
+                        failures +=
+                            Failure(
+                                "assertions",
+                                VisualizationErrorCodes.TEST_CASE_INVALID,
+                                at,
+                                "mark_count needs a chart document.",
+                                case.name,
+                            )
                     }
 
                     AssertionKind.NO_DATA -> {
-                        noData(chart, outcome, at, case.name, failures)
+                        noData(outcome, at, case.name, failures)
                     }
 
                     AssertionKind.TEXT_VISIBLE, AssertionKind.VALUE_VISIBLE -> {
-                        if (chart) {
-                            val text = assertion.text
-                            val proven = text != null && (configStrings.any { text in it } || outcome.chart?.proves(text) == true)
-                            if (!proven) unjudged += Unjudged(case.name, at, assertion.kind.wire)
-                        } else {
-                            textPresent(configStrings, outcome, assertion, at, case.name, failures)
-                        }
+                        textPresent(configStrings, outcome, assertion, at, case.name, failures)
                     }
 
-                    // Step 5's assertions are a later lane's; the state is RECORDED, never judged here.
+                    // The browser's evidence (the session's record): RECORDED, never judged here.
                     AssertionKind.RENDERED, AssertionKind.NO_CONSOLE_ERRORS -> {
                         recordedNotJudged()
                     }
@@ -447,64 +482,56 @@ class VisualizationMechanicalCheck(
         }
     }
 
-    /**
-     * `mark_count` (design record §5.1): the chart model's drawn cells — distinct band × series pairs with a non-null
-     * aggregate. A case whose rows never reached a model (an evaluator refusal, a measure outside its wire form) already
-     * failed; it is not judged twice.
-     */
-    private fun markCount(
-        chart: Boolean,
+    /** A chart assertion (record §4.12) over the case's canonical render; `no_console_errors` never reaches here. */
+    private fun chartVerdict(
+        assertion: Assertion,
         outcome: CaseOutcome,
+    ): ChartJudge.Verdict =
+        when (assertion.kind) {
+            AssertionKind.RENDERED -> ChartJudge.rendered(outcome.render, outcome.rows)
+            AssertionKind.MARK_COUNT -> ChartJudge.markCount(outcome.render, assertion.equals)
+            AssertionKind.NO_DATA -> ChartJudge.noData(outcome.render)
+            AssertionKind.TEXT_VISIBLE, AssertionKind.VALUE_VISIBLE -> ChartJudge.textVisible(outcome.render, assertion.text)
+            AssertionKind.NO_CONSOLE_ERRORS -> ChartJudge.Verdict.AlreadyFailed
+        }
+
+    private fun judged(
+        verdict: ChartJudge.Verdict,
         assertion: Assertion,
         at: String,
         case: String,
         failures: FailureSink,
+        unjudged: MutableList<Unjudged>,
     ) {
-        if (!chart) {
-            failures += Failure("assertions", VisualizationErrorCodes.TEST_CASE_INVALID, at, "mark_count needs a chart document.", case)
-            return
-        }
-        val marks = outcome.chart?.markCount ?: return
-        if (assertion.equals != null && assertion.equals != marks) {
-            failures +=
-                Failure(
-                    "assertions",
-                    VisualizationErrorCodes.TEST_CASE_INVALID,
-                    at,
-                    "The case's rows draw $marks marks; the case asserts ${assertion.equals}.",
-                    case,
-                )
+        when (verdict) {
+            is ChartJudge.Verdict.Fails -> {
+                failures +=
+                    Failure("assertions", VisualizationErrorCodes.TEST_CASE_INVALID, at, verdict.message, case)
+            }
+
+            ChartJudge.Verdict.Unjudged -> {
+                unjudged += Unjudged(case, at, assertion.kind.wire)
+            }
+
+            ChartJudge.Verdict.Holds, ChartJudge.Verdict.AlreadyFailed -> {
+                Unit
+            }
         }
     }
 
-    /** Step 5's assertions are a later lane's; the rendered state is RECORDED per case, never judged here. */
+    /** `rendered` and `no_console_errors` on table and KPI: the session's record, never judged here. */
     private fun recordedNotJudged() {
-        // deliberately empty: the no-op rendered-state check's answer is recorded, not judged
+        // deliberately empty: the browser's evidence is recorded by the session, not judged by the server
     }
 
-    /**
-     * `no_data`: zero produced rows — for a chart, an empty model (no rows, or every aggregate null; record §5.1); a
-     * chart case without a model already failed and is not judged twice.
-     */
+    /** `no_data` on table and KPI: zero produced rows. */
     private fun noData(
-        chart: Boolean,
         outcome: CaseOutcome,
         at: String,
         case: String,
         failures: FailureSink,
     ) {
-        val model = outcome.chart
-        if (chart && model == null) return
-        if (model != null && !model.noData) {
-            failures +=
-                Failure(
-                    "assertions",
-                    VisualizationErrorCodes.TEST_CASE_INVALID,
-                    at,
-                    "The case expects the empty state; its rows draw ${model.markCount} marks.",
-                    case,
-                )
-        } else if (model == null && outcome.rows != 0) {
+        if (outcome.rows != 0) {
             failures +=
                 Failure(
                     "assertions",
@@ -662,22 +689,4 @@ sealed interface FixtureEvaluation {
         val code: String,
         val message: String,
     ) : FixtureEvaluation
-}
-
-/** The rendered-state port (the spec's §11.3 step 5): what a browser check would report, per case. */
-fun interface RenderedStateCheck {
-    /**
-     * The state string recorded on the case's mechanical report. The default records `not_available` —
-     * never success, never a claim that a renderer ran (the spec's §15: the no-op is pinned by a test).
-     */
-    fun state(
-        workspaceId: UUID,
-        body: VisualizationBody,
-        case: String,
-    ): String
-
-    companion object {
-        /** The production default until a headless render check lands (L6). */
-        val NOT_AVAILABLE: RenderedStateCheck = RenderedStateCheck { _, _, _ -> "not_available" }
-    }
 }

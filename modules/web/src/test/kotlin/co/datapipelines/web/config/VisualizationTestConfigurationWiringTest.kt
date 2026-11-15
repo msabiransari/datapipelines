@@ -1,6 +1,12 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.charts.JsRenderedChartEngine
 import co.datapipelines.application.templates.TemplateEvaluateService
+import co.datapipelines.scripting.Availability
+import co.datapipelines.scripting.JavaScriptRuntime
+import co.datapipelines.scripting.ScriptEvaluationPool
+import co.datapipelines.visualization.ChartEngine
+import co.datapipelines.visualization.EngineRenderedStateCheck
 import co.datapipelines.visualization.ReleaseEvidence
 import co.datapipelines.visualization.RenderedStateCheck
 import co.datapipelines.visualization.TestFixtureEvaluator
@@ -20,7 +26,9 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 
 /**
  * The L4a wiring (#352): `VisualizationTestConfiguration` builds the runs repository, the fixture
- * evaluator, the rendered-state no-op, the mechanical check, the session service and — the production
+ * evaluator, the chart engine and the rendered-state check over it (#986: engine-backed where the runtime is
+ * available — this graph; the no-op where it is not — `VisualizationRenderedStateWiringTest`), the mechanical
+ * check, the session service and — the production
  * release gate — the `ReleaseEvidence` bean the visualization release factory consumes. THE GUARD: the
  * factory's evidence argument is load-bearing; removing it from `VisualizationConfiguration` is a red
  * build here (reflection over the compiled factory method), and the wired evidence is the REAL gate.
@@ -35,11 +43,13 @@ class VisualizationTestConfigurationWiringTest {
             )
 
     @Test
-    fun `the session graph builds - runs repository, evaluator, no-op rendered state, mechanical check, sessions, gate`() {
+    fun `the session graph builds - runs repository, evaluator, engine-backed rendered state, mechanical check, sessions, gate`() {
         context.run { ctx ->
             ctx.getBean(TestRunRepository::class.java).shouldNotBeNull()
             ctx.getBean(TestFixtureEvaluator::class.java).shouldBeInstanceOf<WebVisualizationFixtureEvaluator>()
-            ctx.getBean(RenderedStateCheck::class.java) shouldBe RenderedStateCheck.NOT_AVAILABLE
+            // The runtime answers Available (the collaborator below): the check is the engine's, over the wired engine.
+            val engine = ctx.getBean(ChartEngine::class.java).shouldBeInstanceOf<JsRenderedChartEngine>()
+            ctx.getBean(RenderedStateCheck::class.java).shouldBeInstanceOf<EngineRenderedStateCheck>().engine shouldBe engine
             ctx.getBean(VisualizationMechanicalCheck::class.java).shouldNotBeNull()
             ctx.getBean(VisualizationTestSessionService::class.java).shouldNotBeNull()
             ctx.getBean(ReleaseEvidence::class.java).shouldBeInstanceOf<VisualizationReleaseEvidence>()
@@ -127,5 +137,22 @@ class VisualizationTestConfigurationWiringTest {
 
         @Bean
         fun templateEvaluateService(): TemplateEvaluateService = io.mockk.mockk(relaxed = true)
+
+        /**
+         * #986 — the chart engine's collaborators. The runtime answers Available: this module's tests carry no isolate,
+         * so the available graph's runtime is a stand-in whose only answer read at wiring is `availability()`.
+         */
+        @Bean
+        fun javaScriptRuntime(): JavaScriptRuntime =
+            io.mockk.mockk<JavaScriptRuntime>(relaxed = true).also {
+                io.mockk.every { it.availability() } returns Availability.Available
+            }
+
+        @Bean
+        fun scriptEvaluationPool(): ScriptEvaluationPool =
+            ScriptEvaluationPool(1, 1, java.time.Duration.ofSeconds(1), ScriptEvaluationPool.SYSTEM)
+
+        @Bean
+        fun scriptProperties(): ScriptProperties = ScriptProperties()
     }
 }

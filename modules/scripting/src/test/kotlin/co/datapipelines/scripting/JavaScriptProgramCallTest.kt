@@ -26,7 +26,11 @@ class JavaScriptProgramCallTest {
 
     private val echo = program("var v = JSON.parse(json); return JSON.stringify({ got: v, n: v.n * 2 });")
 
-    private fun clean() = withClue("the call after a limit") { engine.call(echo, "{\"n\":21}", limits()) shouldBe "{\"got\":{\"n\":21},\"n\":42}" }
+    private fun clean() =
+        withClue("the call after a limit") {
+            engine.call(echo, "{\"n\":21}", limits()) shouldBe
+                "{\"got\":{\"n\":21},\"n\":42}"
+        }
 
     private fun kind(
         program: JavaScriptProgram,

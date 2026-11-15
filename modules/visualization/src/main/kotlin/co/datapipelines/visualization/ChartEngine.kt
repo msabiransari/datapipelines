@@ -106,7 +106,13 @@ class ChartOutput(
     val marks: Int get() = json.path("summary").path("marks").asInt()
 
     /** `summary.refusal.code`, or null. */
-    val refusal: String? get() = json.path("summary").path("refusal").path("code").takeIf { it.isTextual }?.asText()
+    val refusal: String? get() =
+        json
+            .path("summary")
+            .path("refusal")
+            .path("code")
+            .takeIf { it.isTextual }
+            ?.asText()
 
     /** The engine's version (record §4.11). */
     val version: String get() = json.path("version").asText()

@@ -211,10 +211,11 @@ class VisualizationReleaseEvidenceIntegrationTest {
                     .add(ArtifactJson.mapper.readTree("""{"kind":"text_visible","text":"Only the browser draws this"}"""))
             }
         val candidate = candidateOf(created.detail)
-        // Non-vacuity: the assertion IS unjudged on the mechanical report the gate reads.
+        // Non-vacuity: the assertion IS unjudged on the mechanical report the gate reads — this harness runs the check
+        // as a host without the JavaScript runtime does, so the case's chart assertions are all listed, never failures.
         h.mechanical.run(TestEvidenceHarness.WORKSPACE, candidate.body).let {
             it.ok shouldBe true
-            it.unjudged.map { u -> u.path } shouldBe listOf("tests.cases[0].assertions[2]")
+            it.unjudged.map { u -> u.path } shouldBe (0..2).map { index -> "tests.cases[0].assertions[$index]" }
         }
         greenRun(candidate)
         evidenceFor(candidate) shouldBe EvidenceVerdict.Pass

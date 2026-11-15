@@ -17,8 +17,13 @@ import java.util.UUID
  * The mechanical visualization test (the spec's §11.3) over FAKED ports — one passing and one refused
  * specimen per check, then every enforcement line FALSIFIED: flipping the one offending fact back to
  * valid removes exactly that refusal, so the test proves the check runs, not merely that the fixture is
- * bad. The real evaluator adapter's wiring is `web`'s (its focused test there); the rendered-state
- * default records `not_available` and is pinned here too.
+ * bad. The real evaluator adapter's wiring is `web`'s (its focused test there).
+ *
+ * This module cannot reach the JavaScript runtime (its dependency map), so the check here runs as on a host
+ * without it ([RenderedStateCheck.NOT_AVAILABLE], js-rendered record §6): a chart case's `rendered`, `mark_count`,
+ * `no_data` and `text_visible` are listed as unjudged, never failures, and every other layer runs. §4.12's table
+ * over the port is [ChartJudgeTest]'s; the chart VALUES these cases assert (mark counts, the empty state, the
+ * texts) are judged by the real engine in `modules/application`'s `ChartJudgeEngineTest`, expectations kept.
  */
 class VisualizationMechanicalCheckTest {
     private object Fakes {
@@ -76,7 +81,12 @@ class VisualizationMechanicalCheckTest {
         report.failures.shouldBeEmpty()
         report.cases["twelve months"]!!.rows shouldBe 2
         report.cases["twelve months"]!!.rendered shouldBe "not_available"
-        report.unjudged.shouldBeEmpty()
+        // Without the runtime the case's two chart assertions are listed, never judged.
+        report.unjudged shouldBe
+            listOf(
+                VisualizationMechanicalCheck.Unjudged("twelve months", "tests.cases[0].assertions[0]", "rendered"),
+                VisualizationMechanicalCheck.Unjudged("twelve months", "tests.cases[0].assertions[1]", "mark_count"),
+            )
         check.run(WORKSPACE, table()).ok shouldBe true
     }
 
@@ -251,14 +261,16 @@ class VisualizationMechanicalCheckTest {
     // ---- step 4: assertion feasibility ----------------------------------------------------------------
 
     @Test
-    fun `mark_count is compared with the chart model's drawn cells - and un-falsifies at the matching count`() {
-        val bad = body { objAssertion(it, 0, """{"kind":"mark_count","equals":7}""") }
-        check.run(WORKSPACE, bad).failures.single { it.step == "assertions" }.let {
-            it.code shouldBe VisualizationErrorCodes.TEST_CASE_INVALID
-            it.message shouldContain "draw 2 marks"
-            it.path shouldBe "tests.cases[0].assertions[2]"
-        }
-        check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"mark_count","equals":2}""") }).ok shouldBe true
+    fun `without the runtime a chart's mark_count is unjudged, never a failure - and a table's mark_count is refused`() {
+        val bad = check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"mark_count","equals":7}""") })
+        bad.ok shouldBe true
+        bad.failures.shouldBeEmpty()
+        bad.unjudged.map { it.path to it.kind } shouldBe
+            listOf(
+                "tests.cases[0].assertions[0]" to "rendered",
+                "tests.cases[0].assertions[1]" to "mark_count",
+                "tests.cases[0].assertions[2]" to "mark_count",
+            )
         // mark_count is a chart's: on a table it is refused.
         check
             .run(WORKSPACE, table { objAssertion(it, 0, """{"kind":"mark_count","equals":2}""") })
@@ -269,21 +281,19 @@ class VisualizationMechanicalCheckTest {
     }
 
     @Test
-    fun `a no_data case with produced rows fails - and passes at zero rows`() {
+    fun `without the runtime a chart's no_data is unjudged at any row count - a table keeps the row rule`() {
         val noData = body { objAssertion(it, 0, """{"kind":"no_data"}""") }
-        check
-            .run(WORKSPACE, noData)
-            .failures
-            .single { it.step == "assertions" }
-            .message shouldContain "draw 2 marks"
-        Fakes.evaluatorReturnsRows.clear()
-        check
-            .run(WORKSPACE, body { it.obj("tests.cases[0].assertions[1]").put("equals", 0) })
-            .ok shouldBe true
-        check
-            .run(WORKSPACE, noData)
-            .failures
-            .map { it.message } shouldBe listOf("The case's rows draw 0 marks; the case asserts 2.")
+        listOf(2, 0).forEach { rows ->
+            withClue("$rows rows") {
+                if (rows == 0) Fakes.evaluatorReturnsRows.clear()
+                val report = check.run(WORKSPACE, noData)
+                report.ok shouldBe true
+                report.unjudged.map { it.kind } shouldBe listOf("rendered", "mark_count", "no_data")
+                report.cases.values
+                    .single()
+                    .rendered shouldBe "not_available"
+            }
+        }
         // A table keeps the row rule.
         Fakes.reset()
         check
@@ -294,7 +304,7 @@ class VisualizationMechanicalCheckTest {
     }
 
     @Test
-    fun `a chart whose every aggregate is null draws nothing - no_data holds and a mark is disproved`() {
+    fun `without the runtime a chart whose every aggregate is null is unjudged - its rows are still checked`() {
         val direct =
             DocumentFixtures.tree(
                 """
@@ -310,29 +320,36 @@ class VisualizationMechanicalCheckTest {
                                     "assertions":[{"kind":"no_data"},{"kind":"mark_count","equals":0}]}]}}
                 """.trimIndent(),
             )
-        check.run(WORKSPACE, ValidatorFakes.visualizationDocument(direct).body).ok shouldBe true
-        // Falsified: one non-null amount draws one mark, and both assertions see it.
-        direct.obj("tests.cases[0].fixtures.revenue[1]").put("amount", 4)
-        check.run(WORKSPACE, ValidatorFakes.visualizationDocument(direct).body).failures.map { it.message } shouldBe
-            listOf("The case expects the empty state; its rows draw 1 marks.", "The case's rows draw 1 marks; the case asserts 0.")
+        listOf(null, 4).forEach { amount ->
+            withClue("amount $amount") {
+                direct.obj("tests.cases[0].fixtures.revenue[1]").put("amount", amount)
+                val report = check.run(WORKSPACE, ValidatorFakes.visualizationDocument(direct).body)
+                report.ok shouldBe true
+                report.unjudged.map { it.kind } shouldBe listOf("no_data", "mark_count")
+            }
+        }
+        // The fixture layer still runs: a string where the DECIMAL column wants a number fails the case.
+        direct.obj("tests.cases[0].fixtures.revenue[1]").put("amount", true)
+        check
+            .run(WORKSPACE, ValidatorFakes.visualizationDocument(direct).body)
+            .failures
+            .single()
+            .step shouldBe "fixtures"
     }
 
     @Test
-    fun `text_visible on a chart is proven by a config string, a category or an aggregate - otherwise unjudged, never refused`() {
-        // "Revenue" is the title; "Feb" a category; "10.5" and "12" the two aggregates' texts (12.0 is the JS number 12).
-        listOf("Revenue", "Feb", "10.5", "12").forEach { text ->
+    fun `without the runtime a chart's text_visible is unjudged whatever the text - a table's is refused`() {
+        listOf("Revenue", "Feb", "NEITHER").forEach { text ->
             withClue(text) {
                 val report = check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"$text"}""") })
                 report.ok shouldBe true
-                report.unjudged.shouldBeEmpty()
+                report.failures.shouldBeEmpty()
+                report.unjudged.last() shouldBe
+                    VisualizationMechanicalCheck.Unjudged("twelve months", "tests.cases[0].assertions[2]", "text_visible")
             }
         }
         val report = check.run(WORKSPACE, body { objAssertion(it, 0, """{"kind":"text_visible","text":"NEITHER"}""") })
-        report.ok shouldBe true
-        report.failures.shouldBeEmpty()
-        report.unjudged shouldBe
-            listOf(VisualizationMechanicalCheck.Unjudged("twelve months", "tests.cases[0].assertions[2]", "text_visible"))
-        report.toJson()["unjudged"].single().let {
+        report.toJson()["unjudged"].last().let {
             it["case"].asText() shouldBe "twelve months"
             it["path"].asText() shouldBe "tests.cases[0].assertions[2]"
             it["kind"].asText() shouldBe "text_visible"
@@ -342,7 +359,7 @@ class VisualizationMechanicalCheckTest {
     }
 
     @Test
-    fun `the record's example - 10 and 20 summed under decimal(2) prove 30 and leave the formatted 30_00 unjudged`() {
+    fun `without the runtime the record's example - 10 and 20 summed under decimal(2) - is unjudged, its texts too`() {
         Fakes.evaluatorReturnsRows.clear()
         Fakes.evaluatorReturnsRows +=
             listOf(mapOf("month_labels" to "Jan", "amounts" to 10), mapOf("month_labels" to "Jan", "amounts" to 20))
@@ -355,12 +372,12 @@ class VisualizationMechanicalCheckTest {
             }
         val report = check.run(WORKSPACE, document)
         report.ok shouldBe true
-        report.unjudged.map { it.path } shouldBe listOf("tests.cases[0].assertions[3]")
+        report.unjudged.map { it.path } shouldBe (0..3).map { "tests.cases[0].assertions[$it]" }
         Fakes.reset()
     }
 
     @Test
-    fun `a series value proves text only through color - and a missing band x series pair is a gap, not a mark`() {
+    fun `without the runtime a colored chart's assertions are unjudged at any asserted count`() {
         val colored =
             DocumentFixtures.tree(
                 """
@@ -379,16 +396,14 @@ class VisualizationMechanicalCheckTest {
                                                   {"kind":"text_visible","text":"Widget"}]}]}}
                 """.trimIndent(),
             )
-        val report = check.run(WORKSPACE, ValidatorFakes.visualizationDocument(colored).body)
-        report.ok shouldBe true
-        report.unjudged.shouldBeEmpty()
-        // Four cells (two series x two bands), two of them gaps: a third mark is disproved.
-        colored.obj("tests.cases[0].assertions[1]").put("equals", 4)
-        check
-            .run(WORKSPACE, ValidatorFakes.visualizationDocument(colored).body)
-            .failures
-            .single()
-            .message shouldBe "The case's rows draw 2 marks; the case asserts 4."
+        listOf(2, 4).forEach { marks ->
+            withClue("$marks marks") {
+                colored.obj("tests.cases[0].assertions[1]").put("equals", marks)
+                val report = check.run(WORKSPACE, ValidatorFakes.visualizationDocument(colored).body)
+                report.ok shouldBe true
+                report.unjudged.map { it.kind } shouldBe listOf("rendered", "mark_count", "text_visible")
+            }
+        }
     }
 
     @Test
@@ -591,7 +606,9 @@ class VisualizationMechanicalCheckTest {
 
     @Test
     fun `the default rendered state records not_available - never success, never a browser claim`() {
-        RenderedStateCheck.NOT_AVAILABLE.state(WORKSPACE, body(), "twelve months") shouldBe "not_available"
+        val input = ChartInput(ChartType.BAR, DocumentFixtures.visualization(), emptyMap(), emptyMap())
+        RenderedStateCheck.NOT_AVAILABLE.render(input) shouldBe CanonicalRender.NotAvailable
+        CanonicalRender.NotAvailable.state shouldBe "not_available"
         val report = check.run(WORKSPACE, body())
         report.cases.values
             .single()

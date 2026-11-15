@@ -35,7 +35,9 @@ class JavaScriptProgram private constructor(
             text: String,
         ): JavaScriptProgram {
             require(name.isNotBlank()) { "a program needs a name" }
-            require(name != JavaScriptEngine.AUTHOR_SOURCE_NAME) { "the name ${JavaScriptEngine.AUTHOR_SOURCE_NAME} is the author source's" }
+            require(
+                name != JavaScriptEngine.AUTHOR_SOURCE_NAME,
+            ) { "the name ${JavaScriptEngine.AUTHOR_SOURCE_NAME} is the author source's" }
             val source =
                 Source
                     .newBuilder(JavaScriptRuntime.LANGUAGE, text, name)
