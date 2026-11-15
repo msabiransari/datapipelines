@@ -77,10 +77,10 @@
     rows: { kind: "row", limit: 20000, basis: "measured", unit: "rows", note: "record §4.9, every type: lane 985 D12 measured bar by S-CAP (re-taken in round 2 on the corrected engine); 20,000 passes aggregating to 60 marks and on the refusal path (every row its own group), which fails at 50,000 (longest drag frame 83.4 ms over 3.5 × D = 58.45 ms); F5 measures the line" },
     series: { kind: "semantic", limit: 8, basis: "fixed", unit: "series", note: "O-15: 8 series on any type with a legend" },
     "bar.marks": { kind: "mark", limit: 1000, basis: "measured", unit: "non-null aggregated cells", note: "lane 977 S-CAP: bar 200 × 5 passed, 1,000 × 5 failed" },
-    "line.points": { kind: "mark", limit: 10000, basis: "provisional", unit: "points per series drawn in full, then thinned", note: "record §4.9: lane 977's number, F5's starting cap until lane 989 measures the smooth line in full" },
-    "line.rows": { kind: "row", limit: 100000, basis: "provisional", unit: "rows", note: "record §4.9: the line family's row cap, provisional until lane 989 measures the thinned line at 2 series" },
-    "area.points": { kind: "mark", limit: 10000, basis: "inherited", unit: "points per series drawn in full, then thinned", note: "record §4.9: inherited from line until lane 989 measures a stacked area at it" },
-    "area.rows": { kind: "row", limit: 100000, basis: "inherited", unit: "rows", note: "record §4.9: the line family's row cap, inherited from line" },
+    "line.points": { kind: "mark", limit: 2000, basis: "measured", unit: "points per series drawn in full, then thinned", note: "record §4.9: lane 989 D9 (d) by S-CAP, the smooth line in full at 2 series, two runs: 2,000 passes (longest drag frame 33.3 and 33.4 ms), 5,000 fails (66.7 ms both runs, over 3.5 × D = 58.45 ms)" },
+    "line.rows": { kind: "row", limit: 20000, basis: "measured", unit: "rows", note: "record §4.9: the line family's row cap, lane 989 D9 (a) by S-CAP, the thinned line at 2 series under line.points, two runs: 20,000 passes (redraw p95 49.2 and 53.7 ms, longest drag frame 50.1 ms both), 50,000 fails (drag 100.0 and 83.4 ms)" },
+    "area.points": { kind: "mark", limit: 2000, basis: "measured", unit: "points per series drawn in full, then thinned", note: "record §4.9: lane 989 D9 (b) by S-CAP, a stacked area of 2 series in full at line's cap, two runs: 2,000 passes (longest drag frame 50.0 ms both runs)" },
+    "area.rows": { kind: "row", limit: 20000, basis: "inherited", unit: "rows", note: "record §4.9: the line family's row cap, inherited from line (lane 989 D9 (a))" },
   };
 
   function look(name) {

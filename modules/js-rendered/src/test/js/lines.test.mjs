@@ -310,14 +310,15 @@ test("A10's line half (G7): over the drawing cap and under the row cap a line is
 
 test("A10 (G7): one row over the line family's row cap is refused before the model is entered", () => {
   for (const wire of ["line", "area"]) {
-    const limit = 50;
-    // The template's model throws when entered (a copy of its file); the row cap is a trial value on this engine.
+    // The template's model throws when entered (a copy of its file); the row cap is the PRODUCT's table value
+    // (brief 989 D9a (4): the shipped caps are proven on the product's table, never on a trial value).
     const E = engine((srcs) => {
       const file = "types/" + wire + ".js", anchor = "function model(doc, columns, types) {";
       assert.equal(srcs[file].split(anchor).length, 2, "the anchor occurs once");
       srcs[file] = srcs[file].replace(anchor, anchor + '\n    throw new Error("model entered");');
     });
-    E.tables.CAPS[wire + ".rows"].limit = limit;
+    const limit = E.tables.cap(wire + ".rows");
+    assert.equal(limit, R.tables.cap(wire + ".rows"), "the product's table");
     const f = fx(wire, "two-series"), rows = f.columns.x.length;
     assert.ok(rows < limit, "two-series has fewer rows than the trial cap: " + rows);
     const grow = (k) => Object.fromEntries(Object.entries(f.columns).map(([c, v]) => [c, Array.from({ length: k }, (_, i) => v[i % v.length])]));
