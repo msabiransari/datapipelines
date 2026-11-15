@@ -63,16 +63,19 @@ internal object DuckDbStagingSql {
         }
     }
 
-    /** Base tables in the staging database — every one, whoever created it (§10); views and temp tables excluded. */
+    /**
+     * Base tables in the staging database — every one, whoever created it (§10); views and temp tables excluded. A
+     * one-row read: no row fails ([StreamedReadGuard.oneRow], #994), never reads as 0.
+     */
     fun countTables(connection: Connection): Int =
         connection.createStatement().use { st ->
-            st.executeQuery(COUNT_TABLES).use { rows -> if (rows.next()) rows.getInt(1) else 0 }
+            st.executeQuery(COUNT_TABLES).use { rows -> StreamedReadGuard.oneRow(rows, "count_tables") { it.getInt(1) } }
         }
 
-    /** The engine's buffer-manager reading: the sum of `duckdb_memory()` (staging.md §8.5). */
+    /** The engine's buffer-manager reading: the sum of `duckdb_memory()` (staging.md §8.5); no row fails (#994), never 0. */
     fun memoryUsedBytes(connection: Connection): Long =
         connection.createStatement().use { st ->
-            st.executeQuery(MEMORY_USED).use { rows -> if (rows.next()) rows.getLong(1) else 0L }
+            st.executeQuery(MEMORY_USED).use { rows -> StreamedReadGuard.oneRow(rows, "memory_used") { it.getLong(1) } }
         }
 
     /** Drops a partially staged table; best effort — false (and logged) when the drop refused. */

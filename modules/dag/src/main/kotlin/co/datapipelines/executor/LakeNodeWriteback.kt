@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.LakeAppendSession
 import co.datapipelines.pipeline.LakeOrderKey
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.staging.DuckDbStaging
+import co.datapipelines.staging.StreamedReadGuard
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
@@ -76,7 +77,14 @@ internal object LakeNodeWriteback {
                     ctx.handle.withStatement(node.id, statement) {
                         op.phase(OperationPhase.WRITING)
                         val input =
-                            StableInput(statement, table, columns, checkActive, StableInput.engineFailures(ctx.staging)) { action ->
+                            StableInput(
+                                statement,
+                                table,
+                                columns,
+                                checkActive,
+                                StableInput.engineFailures(ctx.staging),
+                                guarded = StreamedReadGuard.appliesTo(ctx.staging),
+                            ) { action ->
                                 runBlocking(job) { ctx.handle.whileExecuting(node.id, statement, action) }
                             }
                         session.append(output, input, checkActive)
@@ -95,13 +103,21 @@ internal object LakeNodeWriteback {
      * [SQLException] of the statement or of reading its rows leaves as what [classify] makes of it (staging's own
      * engine-failure classification: a sort that outgrows the scratch reservation becomes
      * `pipeline.staging.scratch_limit_exceeded`; anything unmatched is unchanged); nothing else is caught.
+     *
+     * When [guarded] (a DuckDB staging, TEMPORARY #994 class C1): each scan first counts the relation (`count(*)`, a
+     * one-row result whose failure throws) in the same transaction as the scan, on the same statement, and the cursor
+     * handed to `consume` fails as `pipeline.staging.result_incomplete` when it ends after a different number of rows —
+     * a streamed scan the engine failed mid-way, which the pinned driver ends without an error. Two scans cut short at
+     * the same row would otherwise agree with each other and pass the append's own count check.
      */
+    @Suppress("LongParameterList") // the scan's collaborators; the trailing lambda stays last (rules: trailing lambdas)
     internal class StableInput(
         private val statement: Statement,
         private val table: String,
         override val originalColumns: List<LakeAppendColumn>,
         private val checkActive: () -> Unit,
         private val classify: (SQLException) -> Exception,
+        private val guarded: Boolean = false,
         private val execute: (() -> Unit) -> Unit,
     ) : LakeAppendInput {
         override fun scan(
@@ -112,7 +128,14 @@ internal object LakeNodeWriteback {
             checkActive()
             execute {
                 try {
-                    statement.executeQuery(sql).use(consume)
+                    if (guarded) {
+                        StreamedReadGuard.inOneSnapshot(statement.connection) {
+                            val expected = StreamedReadGuard.expectedRows(statement, StreamedReadGuard.countSqlOf(table), APPEND_SCAN)
+                            StreamedReadGuard.counted(statement.executeQuery(sql), expected, APPEND_SCAN).use(consume)
+                        }
+                    } else {
+                        statement.executeQuery(sql).use(consume)
+                    }
                 } catch (e: SQLException) {
                     throw classify(e)
                 }
@@ -121,6 +144,9 @@ internal object LakeNodeWriteback {
         }
 
         companion object {
+            /** The reader name #994's guard reports for the append's scans. */
+            const val APPEND_SCAN = "append_scan"
+
             /** Staging's own engine-failure classification when the staging is DuckDB; any other engine's failure is unchanged. */
             fun engineFailures(staging: Any?): (SQLException) -> Exception =
                 (staging as? DuckDbStaging)?.let { it::classifyEngineFailure } ?: { it }

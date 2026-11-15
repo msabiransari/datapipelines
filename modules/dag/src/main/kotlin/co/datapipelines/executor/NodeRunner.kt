@@ -15,15 +15,21 @@ import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.staging.DuckDbStaging
+import co.datapipelines.staging.OriginalLabels
 import co.datapipelines.staging.Staging
 import co.datapipelines.staging.StagingMemoryLimitException
+import co.datapipelines.staging.StreamedReadGuard
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.TypeMappingWarning
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.sql.Connection
 import java.sql.ResultSet
+import java.sql.SQLException
 import java.sql.Statement
 import java.time.Instant
 import java.util.UUID
@@ -508,16 +514,142 @@ class NodeRunner(
         // 149: a tempdb READ lease is a source connection (connecting), then the query executes.
         val op = ctx.operations.observerFor(node.id)
         op.phase(OperationPhase.CONNECTING)
+        val duckDb = ctx.staging as? DuckDbStaging
         return ctx.staging.withConnection { connection ->
-            BoundStatements.statementFor(connection, bound).use { statement ->
-                statement.queryTimeout = resolved.seconds
-                ctx.handle.withStatement(node.id, statement) {
-                    op.phase(OperationPhase.EXECUTING)
-                    withQueryTimeoutSource(resolved) {
-                        ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }
-                    }.use { rs -> block(rs) }
+            if (duckDb != null && materializable(node, connection, bound, ctx, resolved)) {
+                guardedTempdbRead(node, connection, bound, ctx, resolved, duckDb, block)
+            } else {
+                BoundStatements.statementFor(connection, bound).use { statement ->
+                    statement.queryTimeout = resolved.seconds
+                    ctx.handle.withStatement(node.id, statement) {
+                        op.phase(OperationPhase.EXECUTING)
+                        withQueryTimeoutSource(resolved) {
+                            ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }
+                        }.use { rs -> block(rs) }
+                    }
                 }
             }
+        }
+    }
+
+    /**
+     * TEMPORARY (#994, class C5): whether the engine's own parse admits the author's statement to the guarded read —
+     * exactly one SELECT-shaped statement that `CREATE TABLE … AS` accepts ([StreamedReadGuard.MATERIALIZABLE_SQL]).
+     * The text is bound as a value; the check carries the node's timeout and is registered as the node's statements are.
+     * The parse reads the POSITIONAL form (`?` placeholders): the engine's parser refuses a `:name` reference, which would
+     * send every statement with a bound value down the unguarded path.
+     */
+    private suspend fun materializable(
+        node: ExecutableNode,
+        connection: Connection,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        resolved: ResolvedQueryTimeout,
+    ): Boolean =
+        connection.prepareStatement(StreamedReadGuard.MATERIALIZABLE_SQL).use { check ->
+            registered(node, ctx, resolved, check) { StreamedReadGuard.materializable(check, bound.sql) }
+        }
+
+    /**
+     * TEMPORARY (#994, class C5; remove with [StreamedReadGuard]): an author's query over a DuckDB tempdb, read so that
+     * a mid-stream engine failure cannot pass as a short result. The result is first written into the staging
+     * database (`CREATE TABLE <guard relation> AS <author sql>`, translated as [tempdbCreateTableAs] translates, on the
+     * gated author lease): that statement throws by itself and keeps the engine's classification. The scratch is then
+     * measured before any row is handed out; the relation is read back as class C1 (counted, one snapshot) with the
+     * original statement's labels and names; and it is dropped on every exit before the lease returns.
+     *
+     * What the caller keeps (#994 decision 2): the same bound values; the columns' positions, labels and names of the
+     * prepared original (a written relation renames a duplicate label) and the engine's own types, precision and scale
+     * (the written relation's, which carry the executed statement's types where the prepared original reports a bound
+     * parameter's as UNKNOWN); and the author's row order — the engine inserts in that order and a single-table read
+     * returns insertion order (DuckDB 1.5 "Order Preservation", `preserve_insertion_order` default true).
+     */
+    @Suppress("LongParameterList") // the dispatch boundary's parameters, plus the DuckDB staging the scratch is measured on
+    private suspend fun <T> guardedTempdbRead(
+        node: ExecutableNode,
+        connection: Connection,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        resolved: ResolvedQueryTimeout,
+        staging: DuckDbStaging,
+        block: suspend (ResultSet) -> T,
+    ): T {
+        val op = ctx.operations.observerFor(node.id)
+        val relation = StreamedReadGuard.newRelation()
+        try {
+            val labels =
+                connection.prepareStatement(bound.sql).use { original ->
+                    SqlBindTranslator.bind(original, bound.bindValues)
+                    registered(node, ctx, resolved, original) { OriginalLabels.of(original.metaData) }
+                }
+            val materialize = SqlBindTranslator.translate(StreamedReadGuard.materializeSql(relation, bound.originalSql), ctx.values)
+            BoundStatements.statementFor(connection, materialize).use { statement ->
+                op.phase(OperationPhase.EXECUTING)
+                registered(node, ctx, resolved, statement) { BoundStatements.update(statement, materialize) }
+            }
+            staging.requireWithinScratch()
+            return StreamedReadGuard.inOneSnapshot(connection) {
+                val expected =
+                    connection.createStatement().use { count ->
+                        registered(node, ctx, resolved, count) {
+                            StreamedReadGuard.expectedRows(count, StreamedReadGuard.countSqlOf(relation), TEMPDB_READER)
+                        }
+                    }
+                connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY).use { read ->
+                    read.queryTimeout = resolved.seconds
+                    ctx.handle.withStatement(node.id, read) {
+                        withQueryTimeoutSource(resolved) {
+                            ctx.handle.whileExecuting(node.id, read) { read.executeQuery(StreamedReadGuard.readSqlOf(relation)) }
+                        }.use { rs -> block(StreamedReadGuard.counted(rs, expected, TEMPDB_READER, labels)) }
+                    }
+                }
+            }
+        } finally {
+            dropGuardRelation(node, connection, relation, ctx, resolved)
+        }
+    }
+
+    /**
+     * Drops the guard's relation on success, failure and cancellation, before the lease returns. Registered as the
+     * node's statements are unless the execution was already aborted (then the registry refuses every statement): the
+     * drop still runs, bounded by the node's timeout. A drop that fails is logged; the staging database's close
+     * deletes its file anyway, and the read's own outcome stands.
+     */
+    private suspend fun dropGuardRelation(
+        node: ExecutableNode,
+        connection: Connection,
+        relation: String,
+        ctx: NodeExecutionContext,
+        resolved: ResolvedQueryTimeout,
+    ) {
+        withContext(NonCancellable) {
+            try {
+                connection.createStatement().use { drop ->
+                    drop.queryTimeout = resolved.seconds
+                    val sql = StreamedReadGuard.dropSqlOf(relation)
+                    try {
+                        ctx.handle.withStatement(node.id, drop) { drop.execute(sql) }
+                    } catch (aborted: ExecutionAbortedException) {
+                        drop.execute(sql)
+                    }
+                }
+            } catch (e: SQLException) {
+                log.warn("event=staging.guard.drop_failed execution_id={} node={} cause={}", ctx.executionId, node.id, e.message)
+            }
+        }
+    }
+
+    /** A statement the guard adds: the node's timeout, registered for the node's cancel, behind the cancel latch. */
+    private suspend fun <T> registered(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        resolved: ResolvedQueryTimeout,
+        statement: Statement,
+        driverCall: () -> T,
+    ): T {
+        statement.queryTimeout = resolved.seconds
+        return ctx.handle.withStatement(node.id, statement) {
+            withQueryTimeoutSource(resolved) { ctx.handle.whileExecuting(node.id, statement, driverCall) }
         }
     }
 
@@ -609,13 +741,17 @@ class NodeRunner(
         return NodeResult.of(node.id, rows, startedAt)
     }
 
-    /** `SELECT COUNT(*)` over a table this class just created — always exactly one row. */
+    /**
+     * `SELECT COUNT(*)` over a table this class just created — exactly one row. No row is a failure
+     * ([StreamedReadGuard.oneRow], #994 class C3), never a count of 0: on a DuckDB tempdb a streamed one-row result can
+     * end empty when the engine fails; on H2 a `COUNT(*)` always has its row, so nothing changes there.
+     */
     private fun countRows(
         statement: Statement,
         quotedTable: String,
     ): Long =
         statement.executeQuery("SELECT COUNT(*) FROM $quotedTable").use { rs ->
-            if (rs.next()) rs.getLong(1) else 0L
+            StreamedReadGuard.oneRow(rs, TEMPDB_COUNT_READER) { it.getLong(1) }
         }
 
     /** DML/DDL against tempdb — same timeout and cancellation reasoning as [tempdbCreateTableAs]. */
@@ -1137,6 +1273,12 @@ class NodeRunner(
     private companion object {
         const val BYTES_PER_KB = 1024L
         const val KB_PER_MB = 1024L
+
+        /** The reader names #994's guard reports for this class's tempdb reads. */
+        const val TEMPDB_READER = "tempdb_cursor"
+        const val TEMPDB_COUNT_READER = "tempdb_count"
+
+        val log: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(NodeRunner::class.java)
     }
 }
 

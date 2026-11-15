@@ -1,0 +1,373 @@
+package co.datapipelines.executor
+
+import co.datapipelines.datasources.ResultRowReader
+import co.datapipelines.pipeline.LakeAppendInput
+import co.datapipelines.pipeline.LakeAppendSession
+import co.datapipelines.pipeline.LakeStatementExecution
+import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.pipeline.WriteMode
+import co.datapipelines.staging.DuckDbStaging
+import co.datapipelines.staging.DuckDbStagingFactory
+import co.datapipelines.staging.DuckDbStagingProperties
+import co.datapipelines.staging.StagingErrorCodes
+import co.datapipelines.staging.StagingResultIncompleteException
+import co.datapipelines.staging.StreamedReadGuard
+import co.datapipelines.typesystem.Dialect
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Path
+import java.sql.Connection
+import java.sql.DriverManager
+import java.time.Instant
+import java.util.UUID
+
+/**
+ * #994 rule G2 on the executor's DuckDB tempdb reads (TEMPORARY, [StreamedReadGuard]): an author's query read through
+ * `tempdbCursor` (class C5, the caller and the non-lake write-back outputs, with and without bound values) and the
+ * managed append's scans (class C1). The failing statement is a REAL engine failure raised after the first streamed
+ * chunk — a view whose expression calls `error()` from row [FAIL_AT] on — which the pinned driver ends silently when it
+ * is streamed (StreamedResultTripwireTest in staging pins that). Every database here is a real DuckDB staging.
+ */
+class StreamedReadGuardDagTest {
+    @TempDir
+    lateinit var scratch: Path
+
+    // ---------------------------------------------------------------- C5: the author's query, written then read
+
+    @Test
+    fun `a tempdb caller over a statement that fails mid-stream fails at the writing statement, and the caller got no row`() {
+        withDuck { duck ->
+            duck.staging.execute(FAILING_VIEW)
+            val sink = RecordingSink()
+            val error = duck.failureOf("SELECT v FROM boom", Fixtures.node("caller"), directSink = sink)
+            error.code shouldBe duck.executeTimeFailureCode()
+            withClue("the caller got no row") { sink.rows.shouldBeEmpty() }
+            duck.guardRelations() shouldBe 0L
+        }
+    }
+
+    @Test
+    fun `a tempdb caller with a bound value over a statement that fails mid-stream fails the same way`() {
+        withDuck { duck ->
+            duck.staging.execute(FAILING_VIEW)
+            val sink = RecordingSink()
+            val error =
+                duck.failureOf("SELECT v FROM boom WHERE v >= :lo", Fixtures.node("caller"), directSink = sink, values = mapOf("lo" to 0))
+            error.code shouldBe duck.executeTimeFailureCode()
+            sink.rows.shouldBeEmpty()
+            duck.guardRelations() shouldBe 0L
+        }
+    }
+
+    @Test
+    fun `a tempdb write-back over a statement that fails mid-stream writes no row to the target, with and without a bound value`() {
+        withDuck { duck ->
+            duck.staging.execute(FAILING_VIEW)
+            listOf("SELECT v FROM boom" to emptyMap(), "SELECT v FROM boom WHERE v >= :lo" to mapOf("lo" to 0)).forEach { (sql, values) ->
+                val target = h2Datasource("tgt", listOf("CREATE TABLE tgt (v BIGINT)"))
+                val node = Fixtures.node("wb", output = NodeOutput.Datasource("tgt", "tgt", WriteMode.APPEND))
+                val registry = FakeDatasourceRegistry(mapOf("tgt" to target))
+                val error = duck.failureOf(sql, node, registry = registry, values = values)
+                withClue(sql) { error.code shouldBe duck.executeTimeFailureCode(node, registry) }
+                withClue("$sql: the target got no row") { countIn(target) shouldBe 0 }
+            }
+            duck.guardRelations() shouldBe 0L
+        }
+    }
+
+    @Test
+    fun `a clean tempdb read keeps the author's ORDER BY over many chunks at four threads, and leaves no relation behind`() {
+        withDuck(threads = 4) { duck ->
+            duck.staging.execute("CREATE TABLE src AS SELECT range AS v, (range * 7919) % 300007 AS k FROM range($ORDERED_ROWS)")
+            val sink = RecordingSink()
+            val result = duck.run("SELECT v FROM src ORDER BY k DESC, v", Fixtures.node("caller"), directSink = sink)
+            val expected = (0 until ORDERED_ROWS).sortedWith(compareByDescending<Long> { (it * 7919) % 300007 }.thenBy { it })
+            result.rowsOut shouldBe ORDERED_ROWS
+            withClue("non-vacuity: the expected order is not the insertion order") { (expected != (0 until ORDERED_ROWS).toList()) shouldBe true }
+            sink.rows.map { it.single() } shouldBe expected
+            duck.guardRelations() shouldBe 0L
+        }
+    }
+
+    @Test
+    fun `a clean tempdb read keeps duplicate labels, an expression label, a decimal and a timestamp as the original reports them`() {
+        withDuck { duck ->
+            duck.staging.execute("CREATE TABLE src AS SELECT range AS v, range * 10 AS k FROM range(3)")
+            val sql =
+                "SELECT v AS a, k AS a, CAST(v AS DECIMAL(9,2)) AS d, TIMESTAMP '2026-01-02 03:04:05' AS ts, v + 1 " +
+                    "FROM src ORDER BY v"
+            val oracle = duck.preparedSchema(sql)
+            val sink = RecordingSink()
+            duck.run(sql, Fixtures.node("caller"), directSink = sink)
+            val schema = sink.schema.shouldNotBeNull()
+            schema shouldBe oracle
+            schema.map { it.name } shouldBe listOf("a", "a", "d", "ts", "(v + 1)")
+            schema[2].precision shouldBe 9
+            schema[2].scale shouldBe 2
+            sink.rows.map { it[0] } shouldBe listOf(0L, 1L, 2L)
+            sink.rows.map { it[1] } shouldBe listOf(0L, 10L, 20L)
+            sink.rows.map { it[4] } shouldBe listOf(1L, 2L, 3L)
+        }
+    }
+
+    @Test
+    fun `a tempdb caller with a bound value delivers only its row through the result store`() {
+        withDuck { duck ->
+            duck.staging.execute("CREATE TABLE seed AS SELECT range AS n FROM range(1, 4)")
+            val store = InMemoryResultStore()
+            val result = duck.run("SELECT n FROM seed WHERE n = :n", Fixtures.node("caller"), resultStore = store, values = mapOf("n" to 2))
+            store.describe(result.callerResultRef.shouldNotBeNull()).shouldNotBeNull().firstPage shouldBe listOf(listOf(2L))
+            duck.guardRelations() shouldBe 0L
+        }
+    }
+
+    @Test
+    fun `a written result over the scratch reservation is refused before the first row`() {
+        withDuck(reservationBytes = SMALL_RESERVATION) { duck ->
+            val sink = RecordingSink()
+            val error = duck.failureOf("SELECT random() AS v FROM range($BIG_ROWS)", Fixtures.node("caller"), directSink = sink)
+            error.code shouldBe StagingErrorCodes.SCRATCH_LIMIT_EXCEEDED
+            sink.rows.shouldBeEmpty()
+        }
+        withDuck { duck ->
+            val sink = RecordingSink()
+            withClue("non-vacuity: the same read fits the default reservation") {
+                duck.run("SELECT random() AS v FROM range($BIG_ROWS)", Fixtures.node("caller"), directSink = sink).rowsOut shouldBe BIG_ROWS
+            }
+        }
+    }
+
+    @Test
+    fun `a cancel during the writing statement aborts the node and leaves no relation behind`() {
+        withDuck { duck ->
+            val sink = RecordingSink()
+            val failure =
+                runBlocking(Dispatchers.IO) {
+                    val running =
+                        async {
+                            runCatching { duck.run(SLOW_SQL, Fixtures.node("caller"), directSink = sink) }.exceptionOrNull()
+                        }
+                    delay(CANCEL_AFTER_MS)
+                    duck.registry.cancel(duck.executionId, AbortReason.CANCELLED)
+                    running.await()
+                }
+            failure.shouldNotBeNull().shouldBeInstanceOf<ExecutionAbortedException>()
+            sink.rows.shouldBeEmpty()
+            runBlocking { duck.guardRelations() } shouldBe 0L
+        }
+    }
+
+    @Test
+    fun `a statement the engine cannot write into a relation still reads, unguarded, as it does today`() {
+        withDuck { duck ->
+            duck.staging.execute("CREATE TABLE src AS SELECT 1 AS v")
+            listOf("DESCRIBE src", "SHOW TABLES").forEach { sql ->
+                val sink = RecordingSink()
+                duck.run(sql, Fixtures.node("caller"), directSink = sink)
+                withClue(sql) { sink.rows.isNotEmpty() shouldBe true }
+            }
+            duck.guardRelations() shouldBe 0L
+        }
+    }
+
+    // ---------------------------------------------------------------- C1: the managed append's scans
+
+    @Test
+    fun `the managed append's scan fails as result_incomplete when the engine fails mid-stream`() {
+        withDuck { duck ->
+            val output = NodeOutput.Datasource("managed", "ns.orders", WriteMode.APPEND)
+            var scanned = 0L
+            val session = PublishingSession { input -> input.scan { rows -> while (rows.next()) scanned++ }.let { scanned } }
+            val failure =
+                shouldThrow<StagingResultIncompleteException> {
+                    LakeNodeWriteback.run(
+                        ExecutableNode.from(Fixtures.node("append", output = output)),
+                        output,
+                        SqlBindTranslator.translate("SELECT range AS v FROM range($ROWS)", emptyMap()),
+                        duck.context(),
+                        ResolvedQueryTimeout(TIMEOUT_SECONDS, QueryTimeoutSource.APPLICATION),
+                        Instant.now(),
+                        session,
+                    ) { duck.swapAppendRelationForFailingView() }
+                }
+            withClue("non-vacuity: the scan was cut short mid-stream, not at execute") { (scanned in 1 until FAIL_AT + 1) shouldBe true }
+            failure.details shouldBe mapOf("rows_read" to scanned, "rows_expected" to ROWS, "reader" to LakeNodeWriteback.StableInput.APPEND_SCAN)
+        }
+    }
+
+    @Test
+    fun `a clean managed append scans every row in arrival order, guarded`() {
+        withDuck { duck ->
+            val output = NodeOutput.Datasource("managed", "ns.orders", WriteMode.APPEND)
+            val values = mutableListOf<Long>()
+            val session = PublishingSession { input -> input.scan { rows -> while (rows.next()) values += rows.getLong(1) }.let { values.size.toLong() } }
+            LakeNodeWriteback.run(
+                ExecutableNode.from(Fixtures.node("append", output = output)),
+                output,
+                SqlBindTranslator.translate("SELECT range AS v FROM range($ORDERED_ROWS)", emptyMap()),
+                duck.context(),
+                ResolvedQueryTimeout(TIMEOUT_SECONDS, QueryTimeoutSource.APPLICATION),
+                Instant.now(),
+                session,
+            ) { }
+            values shouldBe (0 until ORDERED_ROWS).toList()
+        }
+    }
+
+    // ---------------------------------------------------------------- harness
+
+    /** One real DuckDB staging database and the executor's collaborators over it. */
+    private class Duck(
+        val staging: DuckDbStaging,
+        val executionId: UUID,
+    ) {
+        val registry = InMemoryCancellationRegistry()
+        val handle = registry.register(executionId)
+
+        fun context(
+            directSink: DirectResultSink? = null,
+            values: Map<String, Any?> = emptyMap(),
+        ) = NodeExecutionContext(
+            executionId = executionId,
+            staging = staging,
+            handle = handle,
+            values = RunContext.of(values),
+            warnings = WarningSink(),
+            resultTtlSeconds = 300,
+            renderBudgetChars = 100_000,
+            stagingMaxMemoryMb = 64,
+            tempdbDialect = Dialect.DUCKDB,
+            userId = UUID.randomUUID(),
+            rootExecutionId = executionId,
+            directSink = directSink,
+            workspaceId = UUID.randomUUID(),
+        )
+
+        suspend fun run(
+            sql: String,
+            node: co.datapipelines.pipeline.Node,
+            registry: FakeDatasourceRegistry = FakeDatasourceRegistry(emptyMap()),
+            resultStore: ResultStore = InMemoryResultStore(),
+            directSink: DirectResultSink? = null,
+            values: Map<String, Any?> = emptyMap(),
+        ): NodeResult {
+            val (engine, _) = Fixtures.templateEngine(sql)
+            val runner = NodeRunner(engine, registry, JdbcWritebackRunner(registry), resultStore, ExecutorConfig())
+            return runner.run(ExecutableNode.from(node), context(directSink, values))
+        }
+
+        suspend fun failureOf(
+            sql: String,
+            node: co.datapipelines.pipeline.Node,
+            registry: FakeDatasourceRegistry = FakeDatasourceRegistry(emptyMap()),
+            directSink: DirectResultSink? = null,
+            values: Map<String, Any?> = emptyMap(),
+        ): MappedError = shouldThrow<NodeFailedSignal> { run(sql, node, registry, directSink = directSink, values = values) }.error
+
+        /**
+         * The code TODAY's unguarded tempdb read gives an engine failure raised at execution, for [node]'s output: a
+         * SUMMARIZE (which the guard never writes into a relation, so it runs on the unguarded path) whose aggregate
+         * fails. The classification the guarded writing statement must keep.
+         */
+        suspend fun executeTimeFailureCode(
+            node: co.datapipelines.pipeline.Node = Fixtures.node("caller"),
+            registry: FakeDatasourceRegistry = FakeDatasourceRegistry(emptyMap()),
+        ): String =
+            failureOf("SUMMARIZE SELECT error('at-execute') AS v", node, registry, directSink = RecordingSink()).code
+                .also { it shouldNotBe StagingErrorCodes.RESULT_INCOMPLETE }
+
+        /** Relations with the guard's prefix still in the database. */
+        suspend fun guardRelations(): Long =
+            staging.withQuery(
+                "SELECT count(*) FROM duckdb_tables() WHERE starts_with(table_name, '${StreamedReadGuard.RELATION_PREFIX}')",
+            ) { rs -> StreamedReadGuard.oneRow(rs, "test") { it.getLong(1) } }
+
+        /** The prepared original's schema, read as the executor reads a result's — the C5 metadata oracle. */
+        suspend fun preparedSchema(sql: String) =
+            staging.withConnection { c: Connection ->
+                c.prepareStatement(sql).use { ResultRowReader.schemaOf(it.metaData, Dialect.DUCKDB).columns }
+            }
+
+        /** The append's afterMaterialized seam: its relation becomes a view that fails from row [FAIL_AT] on. */
+        suspend fun swapAppendRelationForFailingView() {
+            val name =
+                staging.withQuery("SELECT table_name FROM duckdb_tables() WHERE starts_with(table_name, 'dp_append_')") { rs ->
+                    StreamedReadGuard.oneRow(rs, "test") { it.getString(1) }
+                }
+            staging.execute("DROP TABLE \"$name\"")
+            staging.execute("CREATE VIEW \"$name\" AS $FAILING_SELECT")
+        }
+    }
+
+    private fun withDuck(
+        threads: Int = 2,
+        reservationBytes: Long? = null,
+        block: suspend (Duck) -> Unit,
+    ) {
+        val id = UUID.randomUUID()
+        val factory = DuckDbStagingFactory(DuckDbStagingProperties(scratch, MIB * 64, 4, MIB * 1024, threads = threads))
+        val staging = (reservationBytes?.let { factory.create(id, it) } ?: factory.create(id, factory.properties.defaultReservationBytes))
+        (staging as DuckDbStaging).use { runBlocking { block(Duck(it, id)) } }
+        factory.budget.reservedBytes shouldBe 0L
+    }
+
+    private fun countIn(target: co.datapipelines.datasources.Datasource): Int =
+        DriverManager.getConnection(target.jdbcUrl, "sa", "").use { c ->
+            c.createStatement().use { st -> st.executeQuery("SELECT COUNT(*) FROM tgt").use { rs -> rs.next().let { rs.getInt(1) } } }
+        }
+
+    /** An append session that hands the input to [publish]; nothing is written anywhere. */
+    private class PublishingSession(
+        private val publish: (LakeAppendInput) -> Long,
+    ) : LakeAppendSession {
+        override val datasourceName = "managed"
+        override val deadline: Instant = Instant.now().plusSeconds(TIMEOUT_SECONDS.toLong())
+
+        override fun initialize(
+            connection: Connection,
+            statements: LakeStatementExecution,
+        ) = Unit
+
+        override fun readCompleted() = Unit
+
+        override fun append(
+            target: NodeOutput.Datasource,
+            input: LakeAppendInput,
+            checkActive: () -> Unit,
+        ): Long {
+            checkActive()
+            return publish(input)
+        }
+
+        override fun failed(code: String?) = Unit
+
+        override fun close() = Unit
+    }
+
+    private companion object {
+        const val MIB = 1_048_576L
+        const val ROWS = 400_000L
+        const val FAIL_AT = 300_000L
+        const val ORDERED_ROWS = 300_000L
+        const val BIG_ROWS = 2_000_000L
+        const val SMALL_RESERVATION = 4 * MIB
+        const val TIMEOUT_SECONDS = 60
+        const val CANCEL_AFTER_MS = 700L
+        const val FAILING_SELECT = "SELECT CASE WHEN range < $FAIL_AT THEN range ELSE error('boom') END AS v FROM range($ROWS)"
+        const val FAILING_VIEW = "CREATE VIEW boom AS $FAILING_SELECT"
+
+        /** A writing statement that runs for many seconds and produces one row. */
+        const val SLOW_SQL = "SELECT sum(a.range * b.range) AS v FROM range(300000) a, range(300000) b"
+    }
+}
