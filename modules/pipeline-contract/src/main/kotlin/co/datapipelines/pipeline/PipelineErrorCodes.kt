@@ -669,6 +669,7 @@ object PipelineErrorCodes {
         const val SCRATCH_EXHAUSTED = "pipeline.staging.scratch_exhausted"
         const val SCRATCH_BLOCKED = "pipeline.staging.scratch_blocked"
         const val SCRATCH_LIMIT_EXCEEDED = "pipeline.staging.scratch_limit_exceeded"
+        const val RESULT_INCOMPLETE = "pipeline.staging.result_incomplete"
     }
 
     /** §13.6 — type mapping. Warnings, not errors: they travel in the response `warnings` array. */

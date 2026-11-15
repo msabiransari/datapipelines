@@ -23,7 +23,7 @@ import java.io.File
  * cannot pass by agreeing with itself on an empty set (the plant the gate demands is a deleted
  * row and a new uncatalogued literal — both one-sided, both red).
  *
- * All thirteen currently catalogued namespaces are enforced; uncatalogued namespaces remain
+ * Thirteen namespaces are enforced; the catalogued staging namespace and uncatalogued namespaces remain
  * outside this guard. Extraction reads source text, including comments, not an AST or runtime.
  * A computed event identity in a file that logs an enforced namespace is refused. Only two
  * exact legacy audit-row diagnostics in AuditLogger are exempt, each required exactly once.

@@ -54,6 +54,11 @@ import kotlin.coroutines.coroutineContext
  *    timeout and cancels it with the node), and the driver's cancel does nothing to a statement
  *    that has not yet entered its execute, so a [close] landing in those microseconds misses it.
  *    A zero query timeout disables the timeout bound, including that cancellation window.
+ *  - **A streamed read is counted (TEMPORARY, #994).** The pinned driver ends a streamed cursor without an error when
+ *    the engine fails after the first chunk, so [withQuery] counts its statement in the same snapshot before the read
+ *    and its cursor fails as `result_incomplete` when it ends after a different number of rows ([StreamedReadGuard]);
+ *    this class's own one-row reads fail when the row is missing. Removed with [StreamedReadGuard] when the driver
+ *    reports the error (`StreamedResultTripwireTest` says when).
  */
 class DuckDbStaging internal constructor(
     override val executionId: UUID,
@@ -128,16 +133,31 @@ class DuckDbStaging internal constructor(
         return StageResult(tableName, rowsStaged, columns)
     }
 
+    /**
+     * Hands [block] a cursor over [sql] that is judged when it ends (TEMPORARY, #994, [StreamedReadGuard]): the engine
+     * first counts [sql]'s rows (`count(*)` over it, a one-row result whose failure throws), in the SAME transaction
+     * as the read, and a cursor whose `next()` returns false after a different number of rows fails as
+     * [StagingResultIncompleteException] instead of passing a short result. [sql] is therefore executed twice and must
+     * be a deterministic read — every production caller reads a staged relation by name. Both statements carry the
+     * configured query timeout and are registered for [close]'s cancel; both run on the gated author lease.
+     */
     override suspend fun <T> withQuery(
         sql: String,
         block: suspend (ResultSet) -> T,
     ): T =
         authorLease { connection ->
-            connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY).use { stmt ->
-                stmt.queryTimeout = config.queryTimeoutSeconds
-                stmt.fetchSize = config.resultBatchSize
-                stmt.closeOnCompletion()
-                inFlight(stmt) { block(stmt.executeQuery(sql)) }
+            StreamedReadGuard.inOneSnapshot(connection) {
+                val expected =
+                    connection.createStatement().use { count ->
+                        count.queryTimeout = config.queryTimeoutSeconds
+                        inFlight(count) { StreamedReadGuard.expectedRows(count, StreamedReadGuard.countOf(sql), WITH_QUERY) }
+                    }
+                connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY).use { stmt ->
+                    stmt.queryTimeout = config.queryTimeoutSeconds
+                    stmt.fetchSize = config.resultBatchSize
+                    stmt.closeOnCompletion()
+                    inFlight(stmt) { block(StreamedReadGuard.counted(stmt.executeQuery(sql), expected, WITH_QUERY)) }
+                }
             }
         }
 
@@ -236,6 +256,12 @@ class DuckDbStaging internal constructor(
             log.debug("tempdb statement of execution {} had already closed when close() cancelled it: {}", executionId, e.message)
         }
     }
+
+    /**
+     * The disk bound measured NOW, for a caller that wrote through [withConnection] and must not wait for the lease to
+     * return (#994: a guarded read writes the author's result, then measures, before its first row is handed out).
+     */
+    fun requireWithinScratch() = checkScratch()
 
     /** The disk bound (class KDoc): measured after a write, refused past the reservation. */
     private fun checkScratch() {
@@ -350,6 +376,9 @@ class DuckDbStaging internal constructor(
 
     private companion object {
         val log = LoggerFactory.getLogger(DuckDbStaging::class.java)
+
+        /** The reader name [withQuery]'s guard reports (#994). */
+        const val WITH_QUERY = "withQuery"
 
         /** As H2Staging: how long the partial-table rollback may wait for a lease (§6). */
         const val ROLLBACK_LEASE_TIMEOUT_MS = 30_000L

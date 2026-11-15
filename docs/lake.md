@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.36 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown; #969, compaction)
+**Status:** v1.37 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown; #969, compaction; #994, a streamed scan that ended short)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -385,7 +385,10 @@ the scan. The sort spills into the delivery's existing scratch reservation (`max
 `staging-expansion-factor`) on the staging connection's own memory limit; a sort that does not fit fails the append
 with `pipeline.staging.scratch_limit_exceeded`, the delivery ends `FAILED` in phase `publish` with that code, and
 nothing is committed. A sort that exhausts the staging memory limit instead is reported as `lake.append.failed`, with
-`pipeline.staging.memory_limit_exceeded` in the delivery's failure code. A floating-point column is never a sort column
+`pipeline.staging.memory_limit_exceeded` in the delivery's failure code. A scan of the stable result that ended short of
+the rows the engine counted for it (a mid-stream engine failure the pinned DuckDB driver did not report, TEMPORARY,
+#994; [Staging §8.3](staging.md#83-failure-handling)) is reported the same way: `lake.append.failed`, with
+`pipeline.staging.result_incomplete` in the delivery's failure code. A floating-point column is never a sort column
 (#935, until #971); the writer refuses to order by one.
 
 Before committing, DP conditionally creates
@@ -1218,6 +1221,7 @@ aggregate deliveries reserve from) and the part's scratch database.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.37 | 994 (#994) | §7, *Files are written in the table's order*: one sentence — a managed append whose scan ended short reports `lake.append.failed` with the staging cause `pipeline.staging.result_incomplete` (TEMPORARY, with #994's guard). |
 | 2026-11-14 | v1.36 | #969 merge review F1 | **§11 Compaction:** due work is decided by its positive declaration and current candidates; a refused scratch reservation is `capacity` / `scratch_refused`, with nothing opened or rewritten. |
 | 2026-11-14 | v1.35 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #963's v1.32, #962's v1.33 and #964's v1.34 | **§11 Maintenance runs** gains *Compaction*: the one candidate rule shared with the planner, the declaration and the due check, the rewrite group (one partition of one spec, the need of a small in-order file, oldest first, re-planned before each group), the rewrite (sorted by field id in the run's trusted scratch database, written before the lease, one `RewriteFiles` commit, nothing deleted), the whole-run limit and the limit now, `capacity` and its three remedies, the deadline, and the run row's compaction keys. The section's opening names compaction among the landed parts. |
 | 2026-11-14 | v1.34 | 964 (#964, dp-lake P6) | **§10 Removal and cleanup** gains *The storage breakdown*: one inventory per cleanup from its own listing and walk, six rows in first-fit order (DP's own records, table metadata, current, held by history, held by keep rules, not referenced), what "held by keep rules" means, one time per inventory (as old as the last cleanup), replaced per cleanup, "not measured yet", and the totals check. |

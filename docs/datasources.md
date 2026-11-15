@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.76 (frozen contract — additive-only changes after this point)
+**Status:** v2.77 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-15
 
 ---
 
@@ -577,6 +577,8 @@ The authoritative enumeration is the module's per-dialect refusal sets, pinned b
 | SQLITE | `enable_load_extension`, `limit_attached` |
 | DUCKDB | the session-init-SQL-file option family of the pinned driver (connect-time fetch-and-run SQL); the six embedded-hardening keys of the paragraph below, `lock_configuration` included (#816); `http_proxy`, `http_proxy_username` and `http_proxy_password` (#845: a datasource's outbound path is configuration's, never a caller's — `LAKE` shares this set) |
 | ORACLE | reviewed set of the pinned ojdbc when built with `-Poracle` (class-loading and file-path properties at minimum) |
+
+**A fifth kind, temporary: a correctness switch the pinned driver mishandles (#994).** `jdbc_stream_results` is refused on DUCKDB and LAKE datasources in both carriers. With streamed results the pinned DuckDB driver (1.5.6.0) ends a cursor without an error when the engine fails mid-stream, so a failed read would reach the caller as a complete, shorter result ([Staging §8.5](staging.md#85-the-duckdb-engine), **Streamed reads**). This is a TEMPORARY CORRECTNESS exception, not a security one: it is removed together with staging's guard when a driver throws mid-stream (`StreamedResultTripwireTest`), and §2 principle 8 is unchanged.
 
 **The credential-carrier rule (087), stated once:** a credential travels ONLY in `credential` (§3.4) — never in `jdbc_url`, never in `properties.*`. `credential.secret` is encrypted at rest (§7.1); `jdbc_url` and `properties_json` are stored plaintext and returned to `read`-scope principals (§3.2). There is no third carrier and no exception.
 
@@ -1868,6 +1870,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v2.77 | 994 (#994) | §5.6 gains a fifth kind, TEMPORARY: `jdbc_stream_results` is refused on DUCKDB and LAKE in both carriers (`DialectRefusalSets.DUCKDB`), a correctness exception — the pinned driver ends a streamed cursor silently when the engine fails mid-stream — removed with staging's guard (`StreamedResultTripwireTest`); §2 principle 8 unchanged. |
 | 2026-11-13 | v2.76 | #881 merge review | Narrow the demo seeder timing claim in §8C.10: the grant is installed during startup before the first freshness tick, not atomically with the demo workspace INSERT. Ordinary workspace creation keeps its separate #823 transaction guarantee. Text only. |
 | 2026-11-13 | v2.75 | #941 DuckDB `:memory:` is case-sensitive | §3.3's in-process paragraph: DuckDB's `:memory:` is matched exactly as its driver reads it, case-sensitively (duckdb_jdbc 1.5.5.1, measured in a forked JVM by `DuckDbMemoryFormParityTest`), no longer case-insensitively. A mixed-case variant (`:MEMORY:`, `:Memory:`) is the literal file the driver opens, so it is classified `InProcessFile` and passes the file-roots rule at save and at pool build like any other file form. The super-admin gate is unchanged (both forms are in-process). No wire change. |
 | 2026-11-13 | v2.74 | #881 demo workspace and the managed lake at first boot | **Text only, no behaviour change.** §3.3's Visibility paragraph and §8C.10 state, as observed in `DemoWorkspaceManagedLakeGrantE2eTest`, that the shipped `demo` workspace holds the managed lake's grant before the first freshness tick: the registrar's boot pass runs while the beans are created, before the seeder, and the seeder's instance-datasource grant includes the managed row (system actor, no `datasource.granted` row); a `demo` created while the lake was disabled is granted by the boot that enables it. |
