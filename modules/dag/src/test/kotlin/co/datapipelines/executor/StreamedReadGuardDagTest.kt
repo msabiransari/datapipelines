@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.LakeAppendSession
 import co.datapipelines.pipeline.LakeStatementExecution
 import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.WriteMode
 import co.datapipelines.staging.DuckDbStaging
 import co.datapipelines.staging.DuckDbStagingFactory
@@ -306,7 +307,8 @@ class StreamedReadGuardDagTest {
      * Round 3's security finding: a text that closes a wrapper's parenthesis early smuggles statements into the wrapper,
      * and the driver runs all but the last at prepare (round 2's count wrap dropped `victim`). No wrapper exists now: the
      * written form's gate parses the text alone and refuses it, so it reaches the plain read, which refuses it at parse
-     * exactly as before this lane. On both callers, with and without a bound value; `victim` survives every read.
+     * exactly as before this lane. On both callers, with and without a bound value; `victim` survives every read. Each
+     * caller keeps its own code (`ErrorCodeMapper` maps by phase and is unchanged by this lane).
      */
     @Test
     fun `a text that closes a wrapper early is refused as the plain read refuses it, and its smuggled DROP never runs, on both callers`() {
@@ -332,7 +334,10 @@ class StreamedReadGuardDagTest {
                 withClue("$sql: write-back - ${wbError.code} ${wbError.message}") {
                     wbError.message shouldContain PARSER_REFUSAL
                 }
-                withClue("$sql: both callers refuse it with the same code") { wbError.code shouldBe callerError.code }
+                withClue("$sql: each caller keeps the code its phase gave a parse refusal before this lane") {
+                    callerError.code shouldBe PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED
+                    wbError.code shouldBe PipelineErrorCodes.Node.WRITEBACK_FAILED
+                }
             }
         }
     }
