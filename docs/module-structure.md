@@ -123,8 +123,8 @@ layer 0 — no internal deps
 │  log-capture  │  TEST-ONLY ← testImplementation of persistence, datasources, auth, dag, parameters,
 └───────────────┘               lake, web, app, tests/integration-tests — never a runtime edge (§5.23)
 ┌───────────────┐
-│  js-rendered  │  the chart engine (JavaScript resources) ← application (tests so far: the chart
-└───────────────┘                                            guards, §5.24)
+│  js-rendered  │  the chart engine (JavaScript resources) ← application (the ChartEngine port's
+└───────────────┘                                            implementation and the chart guards, §5.24)
 
 layer 1 — typesystem (auth also persistence)
 ┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
@@ -158,7 +158,7 @@ layer 6
 ┌──────────────┐
 │ application  │  ← typesystem, scripting, pipeline-contract, templates,
 │ (use cases)  │    datasources, dag, auth, parameters, visualization,
-│              │    dependency-contract, js-rendered (tests so far)
+│              │    dependency-contract, js-rendered
 │              │    (allowed ahead: scheduler)
 └──────────────┘
 
@@ -236,7 +236,7 @@ Notes on the shape (explanatory, not additional rules):
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
 - `app` lists `web` for its main sources and `log-capture` for its tests. It contains `main()`, configuration (including the single `metadataTransactionManager`, §8.5), logback config, and the Flyway migrations (§3.1) — no domain code.
 - `log-capture` (#756) is the one **test-only** module: the shared Logback snapshot capture that replaced nine module-local test-source copies. It is listed in the nine rows whose test sources capture logs (`persistence`, `datasources`, `auth`, `dag`, `parameters`, `lake`, `web`, `app`, `tests/integration-tests`), and every one of those edges is a `testImplementation`: `verifyModuleDependencies` fails when any configuration whose name does not start with `test` declares it (its `testOnlyModules` set), so test tooling never reaches a runtime classpath. `persistence`'s row is therefore no longer empty, but its main sources still have no internal dependency. The §4.3 "no `common` module" rule is unchanged: this module holds one fixture and carries its own guard.
-- `js-rendered` (#985) has no internal dependencies: the chart engine is JavaScript resources and one Kotlin object that lists them, and it must sit below every module that draws a chart. It is NOT test-only (unlike `log-capture`): the charts design's later lanes (F2's scripting entry, F3's page adapter) depend on it from main sources. Today `application` declares it from its tests alone — the three chart guards (§5.24) are the one place that sees both `ChartType` and the sandbox — through two `testImplementation` edges: the module itself (the engine files) and its consumable `jsRenderedTestData` configuration (Node's emitted results and the invariant checker).
+- `js-rendered` (#985) has no internal dependencies: the chart engine is JavaScript resources and one Kotlin object that lists them, and it must sit below every module that draws a chart. It is NOT test-only (unlike `log-capture`). `application` declares it from main sources since #986 (F2): `JsRenderedChartEngine`, the `ChartEngine` port's implementation, loads the engine files as the scripting module's trusted-code program (§5.15). Its tests add one `testImplementation` edge to the consumable `jsRenderedTestData` configuration (Node's emitted results and the invariant checker) for the chart guards (§5.24).
 - A module may use `api(project(...))` instead of `implementation(...)` only where its own public API exposes the other module's types (e.g. `pipeline-contract` exposes `ColumnSchema` from `typesystem`). The allowed-set is the same either way.
 
 **Enforcement:** a Gradle verification task compares each subproject's declared project dependencies against this table and fails the build on any extra entry. Adding an edge means editing this table first — that is the review gate.

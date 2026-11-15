@@ -140,7 +140,7 @@ class JavaScriptEngine internal constructor(
         val text =
             try {
                 runtime.withContext(sandboxLimits(limits), out, err) { context ->
-                    run(context, compiled, json, limits, maxResult, err)
+                    run(context, limits, err, { e -> guestLine(e, compiled.bodyLines) }) { enter(it, compiled, json, limits, maxResult) }
                 }
             } finally {
                 limits.console?.let { sink -> JavaScriptConsole.deliver(out.utf8(), sink) }
@@ -155,14 +155,73 @@ class JavaScriptEngine internal constructor(
         return JavaScriptValues.decodeResult(text)
     }
 
+    /**
+     * Calls [program]'s function with the JSON text [input] and returns the JSON text it returns (brief 986 D1): the
+     * entry for TRUSTED product code (the chart engine), through the same path as [evaluate] — the input's and the
+     * result's byte bounds, a fresh Context of [runtime] under [limits] (CPU, heap, statements, stack, output), the
+     * wall-clock watchdog and the pool's cancellation, and the same mapping of what the isolate threw. The program's
+     * statements are counted ([JavaScriptProgram]); no prelude runs: the program parses and writes its own JSON, and
+     * a result that is not a string is refused.
+     */
+    fun call(
+        program: JavaScriptProgram,
+        input: String,
+        limits: EvaluationLimits,
+    ): String {
+        val options = runtime.options
+        val maxInput = minOf(limits.maxInputBytes ?: options.maxInputBytes, options.maxInputBytes)
+        val maxResult = minOf(limits.maxResultBytes ?: options.maxResultBytes, options.maxResultBytes)
+        val inputBytes = utf8Length(input)
+        if (inputBytes > maxInput) {
+            throw ScriptResourceLimitException(
+                ScriptResourceLimitException.Kind.INPUT_BYTES,
+                "the serialized input is $inputBytes bytes, past the budget of $maxInput — refused before the sandbox started",
+            )
+        }
+        val out = OutputSink.capture(options.maxOutputBytes)
+        val err = OutputSink.capture(options.maxOutputBytes)
+        val text =
+            try {
+                runtime.withContext(sandboxLimits(limits), out, err) { context ->
+                    run(context, limits, err, { null }) { callEntry(it, program, input) }
+                }
+            } finally {
+                limits.console?.let { sink -> JavaScriptConsole.deliver(out.utf8(), sink) }
+            }
+        val bytes = utf8Length(text)
+        if (bytes > maxResult) {
+            throw ScriptResourceLimitException(
+                ScriptResourceLimitException.Kind.RESULT_BYTES,
+                "the result is $bytes bytes, past the budget of $maxResult",
+            )
+        }
+        return text
+    }
+
+    /** The program's function over [input]: its result as the string it returned. */
+    private fun callEntry(
+        context: Context,
+        program: JavaScriptProgram,
+        input: String,
+    ): String {
+        val function = context.eval(program.source)
+        if (!function.canExecute()) throw ScriptEvaluationException("the program ${program.name} does not evaluate to a function")
+        val result: Value = function.execute(input)
+        if (!result.isString) throw ScriptEvaluationException("the program ${program.name} returned a non-string result")
+        return result.asString()
+    }
+
+    /**
+     * One guest run under the watchdog and the pool's cancellation, its failures mapped to the seam's refusals;
+     * [enter] does the guest work, [line] maps a failure to the author's own line (null when no author source runs).
+     */
     @Suppress("ThrowsCount") // each failure kind maps to its own refusal of the engine contract
     private fun run(
         context: Context,
-        compiled: JavaScriptCompiledScript,
-        json: String,
         limits: EvaluationLimits,
-        maxResult: Long,
         err: BoundedBuffer,
+        line: (PolyglotException) -> Int?,
+        enter: (Context) -> String,
     ): String {
         val stopped = AtomicBoolean(false)
         val stop =
@@ -172,10 +231,10 @@ class JavaScriptEngine internal constructor(
             }
         try {
             JavaScriptWatchdog.arm(limits.wallClock, stop).use {
-                ScriptCancellation.register(stop).use { return enter(context, compiled, json, limits, maxResult) }
+                ScriptCancellation.register(stop).use { return enter(context) }
             }
         } catch (failure: PolyglotException) {
-            throw JavaScriptErrors.map(failure, stopped.get(), limits.wallClock, { e -> guestLine(e, compiled.bodyLines) }, err.utf8())
+            throw JavaScriptErrors.map(failure, stopped.get(), limits.wallClock, line, err.utf8())
         } catch (failure: IllegalStateException) {
             // A Context closed by the watchdog before the guest entered it.
             if (stopped.get()) throw ScriptTimeoutException(limits.wallClock, "")

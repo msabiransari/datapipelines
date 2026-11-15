@@ -79,12 +79,12 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.postgresql)
 
-    // #985 (js-rendered F1, brief D11): the three chart guards under charts/ load the engine's files (the module's main
-    // resources) and its chart fixtures, Node's emitted results and the invariant checker (its jsRenderedTestData
-    // configuration) into the sandbox through the scripting module's public path; this module is the one that sees
-    // both ChartType and the sandbox. The isolate binary is test runtime only here too (modules/scripting's comment):
-    // without it JavaScript is unavailable and the guards fail, never skip.
-    testImplementation(project(":modules:js-rendered"))
+    // #986 (js-rendered F2, brief D2/D10): charts/JsRenderedChartEngine, the ChartEngine port's implementation, loads
+    // the engine's files (the module's main resources) as ONE program for the scripting module's trusted-code entry.
+    implementation(project(":modules:js-rendered"))
+    // #985 (F1, brief D11): the chart guards under charts/ also read the engine's chart fixtures, Node's emitted results
+    // and the invariant checker (its jsRenderedTestData configuration). The isolate binary is test runtime only here too
+    // (modules/scripting's comment): without it JavaScript is unavailable and the guards fail, never skip.
     testImplementation(project(path = ":modules:js-rendered", configuration = "jsRenderedTestData"))
     testRuntimeOnly(libs.graalvm.js.isolate.community)
 }
