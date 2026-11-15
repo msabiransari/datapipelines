@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import co.datapipelines.web.ui.JsRenderedAssetConfig
 import com.microsoft.playwright.Page
 import java.sql.DriverManager
 
@@ -12,7 +13,8 @@ import java.sql.DriverManager
  * on a policy the app no longer sends.
  *
  * The host page is where the conformance cases run: `DatapipelinesDashboard.init` with the
- * first-party composite adapter, the three vendored renderers, and the bundle the request names.
+ * first-party composite adapter and the three vendored renderers, after the chart engine's files in
+ * the list the product's own templates load (`JsRenderedAssetConfig.scripts`, #987 D2).
  * Everything else — the vendor scripts, the stylesheets, the runtime routes, the parameter engine,
  * the refresh stream — is the REAL application over the browser's own session; nothing here
  * bypasses the product's auth.
@@ -74,9 +76,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
      * The glue the fulfilled page loads as a FILE (the CSP allows no inline script): it boots the
      * runtime with the first-party composite adapter and exposes what the assertions read. The
      * renderers are wrapped at registration time so a case can COUNT renders — the mechanical
-     * count, never an impression. #860: the wrapper keeps every property of the registration
-     * (the chart kind's `libraries`, `judge` and `needsBundle` included) and replaces `create`
-     * only, and init declares `charts` as the product's pages do.
+     * count, never an impression. #860: the wrapper keeps every property of the registration and
+     * replaces `create` only; #987: init passes no `charts`, as the product's pages do.
      */
     protected val hostGlueJs =
         """
@@ -111,7 +112,6 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
               dashboard: { id: params.get('id'), version: 'released' },
               container: container,
               adapter: runtime.adapters(container),
-              charts: window.Plotly ? { library: 'plotly', instance: window.Plotly } : undefined,
               options: {
                 onNotification: function (n) { window.__dp.notifications.push(n); },
               },
@@ -132,14 +132,13 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
 
     /**
      * Serves the host page (+ its glue) at `/test/dashboards/host` under the LIVE CSP of a real
-     * response, with the Plotly bundle the query names. The page loads the same design-system
-     * sheets the app layout loads, so the chart tokens resolve exactly as they do in production.
+     * response. The page loads the same design-system sheets the app layout loads, so the chart
+     * tokens resolve exactly as they do in production, and the chart engine's files from the list
+     * the product's templates load (#987 D2) — never a hand-written run of tags.
      */
-    protected fun installHostPage(
-        bundle: String = "2d",
-        theme: String = "dark",
-    ) {
+    protected fun installHostPage(theme: String = "dark") {
         val cspHeader = fetchLiveCsp()
+        val engineTags = JsRenderedAssetConfig.scripts.joinToString("\n") { "  <script src=\"$it\"></script>" }
         val html =
             """
             <!doctype html>
@@ -151,16 +150,12 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
               <link rel="stylesheet" href="/vendor/design-system/themes/$theme.css">
               <link rel="stylesheet" href="/css/app.css">
               <link rel="stylesheet" href="/css/dashboards.css">
-              <link rel="stylesheet" href="/vendor/plotly/plotly.css">
-              <!-- #456: the host must opt out before the bundle's first style lookup. -->
-              <template id="plotly.js-style-global" class="no-inline-styles"></template>
             </head>
             <body>
               <main id="board"></main>
-              <script src="/vendor/plotly/plotly-$bundle.min.js" data-dp-plotly-bundle="$bundle"></script>
+            $engineTags
               <script src="/js/datapipelines-dashboard.js"></script>
               <script src="/js/datapipelines-dashboard-chart.js"></script>
-              <script src="/js/datapipelines-dashboard-plotly.js"></script>
               <script src="/js/datapipelines-dashboard-table.js"></script>
               <script src="/js/datapipelines-dashboard-kpi.js"></script>
               <script src="/test/dashboards/host-glue.js"></script>
@@ -216,7 +211,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             val scripts =
                 page.evaluate(
                     "() => Array.from(document.scripts).map(function (s) {" +
-                        " return s.src + ' dp=' + (s.getAttribute('data-dp-plotly-bundle') || ''); })",
+                        " return s.src; })",
                 )
             val readyState = page.evaluate("() => document.readyState")
             val body = page.evaluate("() => document.body ? document.body.innerHTML.slice(0, 300) : 'no body'")
@@ -263,8 +258,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         )
         val chart =
             seedVisualization("$root/visualizations/chart", ChartBrowserFixtures.barBody("x", "INTEGER", "y"))
-        // The 2-row slot #386's plot-area floor measures (DashboardGridRowUnitBrowserTest): the figure main's Plotly seed
-        // drew, without axis titles — a chart's default band title is a second line under the ticks (#860 handback).
+        // The 2-row slot DashboardGridRowUnitBrowserTest measures, drawn without axis titles — a chart's default band
+        // title is a second line under the ticks (#860 handback).
         val slowChart =
             seedVisualization("$root/visualizations/slowchart", ChartBrowserFixtures.barBody("x", "INTEGER", "y", axisTitles = false))
         val cells =
