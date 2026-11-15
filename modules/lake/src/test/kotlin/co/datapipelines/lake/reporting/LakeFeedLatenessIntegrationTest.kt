@@ -358,7 +358,12 @@ class LakeFeedLatenessIntegrationTest {
         label: String,
     ): PlanWork {
         h.jdbc.execute("VACUUM ANALYZE lake_deliveries")
-        val feeds = h.jdbc.queryForObject("SELECT count(DISTINCT feed) FROM lake_deliveries WHERE table_id = ?", Long::class.javaObjectType, table)
+        val feeds =
+            h.jdbc.queryForObject(
+                "SELECT count(DISTINCT feed) FROM lake_deliveries WHERE table_id = ?",
+                Long::class.javaObjectType,
+                table,
+            )
         val json =
             h.definitions.named.queryForObject(
                 "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + LakeFeedLateness.READ_SQL,
