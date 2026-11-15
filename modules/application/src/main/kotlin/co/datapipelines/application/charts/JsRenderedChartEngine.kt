@@ -115,7 +115,8 @@ class JsRenderedChartEngine(
         /**
          * The one function the program evaluates to (record §5.3): a request `{input, write}` in, JSON text out —
          * `JsRendered.render(input)` as its canonical JSON when `write` is null, else `{state, svg}` with the picture
-         * written by the engine's one escaping string writer in its `standalone` form (null for a state with no picture).
+         * written by the engine's one escaping string writer in its `standalone` form (null for a state with no picture),
+         * described as the page's picture is (`role="img"`, its `<title>` and `<desc>`, brief 990 D6).
          * The request `{types: true}` answers the engine's registry, `JsRendered.types()`, and draws nothing.
          */
         val ENTRY: String =
@@ -129,7 +130,8 @@ class JsRenderedChartEngine(
                 if (request.write === null) return JSON.stringify(out);
                 if (request.write !== "standalone") throw new Error("entry: unknown write form");
                 var drawn = out.state === "rendered" || out.state === "no-data";
-                return JSON.stringify({ state: out.state, svg: drawn ? R.writeString(out.primitives, "standalone", request.input.theme) : null });
+                var about = drawn ? R.write.describe(out, request.input.document) : null;
+                return JSON.stringify({ state: out.state, svg: drawn ? R.writeString(out.primitives, "standalone", request.input.theme, about) : null });
               };
             })(JsRendered)
             """.trimIndent()
