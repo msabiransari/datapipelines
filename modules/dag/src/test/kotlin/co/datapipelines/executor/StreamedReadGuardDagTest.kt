@@ -197,10 +197,12 @@ class StreamedReadGuardDagTest {
             duck.staging.execute(FAILING_VIEW)
             duck.staging.execute(PIVOT_SMALL)
             val sink = RecordingSink()
-            val error = duck.failureOf(FAILING_PIVOT, Fixtures.node("caller"), directSink = sink)
-            withClue("the caller was handed ${sink.rows.size} of $ROWS rows") {
-                error.code shouldBe StagingErrorCodes.RESULT_INCOMPLETE
-            }
+            val outcome = runCatching { duck.run(FAILING_PIVOT, Fixtures.node("caller"), directSink = sink) }
+            val error =
+                withClue("the caller was handed ${sink.rows.size} of $ROWS rows and ${outcome.exceptionOrNull() ?: "no failure"}") {
+                    outcome.exceptionOrNull().shouldBeInstanceOf<NodeFailedSignal>().error
+                }
+            error.code shouldBe StagingErrorCodes.RESULT_INCOMPLETE
             error.details["rows_expected"] shouldBe ROWS
             error.details["reader"] shouldBe TempdbReadGuard.TEMPDB_COUNTED_READER
             val read = error.details["rows_read"] as Long
