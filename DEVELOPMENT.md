@@ -1308,8 +1308,11 @@ full-`/tmp` native-library extraction failures (#983), but did not retain that c
 logs. Cleanup between M1 and M2 is a confound, so the wall-time
 improvement is not attributed to the fork feature. Observed MemAvailable troughs were 6–8.5 GB
 from starts of 27–34 GB; they do not guarantee 8 GB of headroom at the 24 GB admission floor.
-The long serialized class tracked in #982 limits parallelism; more than four forks were not
-measured. Do not lower the owner-selected floor without re-measuring.
+Since #982 the managed-read suite is four classes; their suite times in one one-fork focused run
+on 2026-11-15 were `ManagedLakeReadsE2eTest` 282.0 s, `ManagedLakeReadsTrickleE2eTest` 207.1 s,
+`ManagedLakeReadsPausedMetadataE2eTest` 141.5 s and `ManagedLakeReadsStuckCloseE2eTest` 111.9 s.
+The four-fork integration wall time after the split is not measured yet; more than four forks
+were not measured. Do not lower the owner-selected floor without re-measuring.
 
 **The pre-gate's build cache (#480).** Only `scripts/pregate.sh` uses it (§9.4). It is Gradle's
 local directory cache, `~/.gradle/caches/build-cache-1` (under `GRADLE_USER_HOME` when that is set),
