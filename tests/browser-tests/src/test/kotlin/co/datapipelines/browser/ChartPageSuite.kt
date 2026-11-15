@@ -153,6 +153,9 @@ abstract class ChartPageSuite : VisualizationBrowserSuite() {
         const val DEFAULT_HEIGHT = 800
         const val PREVIEW_TIMEOUT_MS = 30_000.0
         const val HOSTILE_BARS = 4
+
+        /** The animation frames [REDRAW] waits for the adapter's draw to reach the engine (about two seconds). */
+        const val REDRAW_FRAME_LIMIT = 120
         val REGIONS = listOf("West", "North", "South")
 
         /**
@@ -174,15 +177,18 @@ abstract class ChartPageSuite : VisualizationBrowserSuite() {
          * One redraw of the case's chart through the adapter (`resize`, the next animation frame), the engine's result
          * of that draw captured by wrapping `JsRendered.render` for that one call, then the page settles one frame more.
          * Resolves to `window.__drawn` = the result (`{error}` when the engine threw: the adapter keeps its last picture).
+         * A draw that never reaches `JsRendered.render` within [REDRAW_FRAME_LIMIT] frames (the adapter threw before the
+         * call) resolves to `{error}` too, so the case goes red on its assertion instead of waiting forever.
          */
         const val REDRAW =
             """() => new Promise(function (resolve) {
-              var R = window.JsRendered, original = R.render, last = null;
+              var R = window.JsRendered, original = R.render, last = null, frames = 0;
               R.render = function () {
                 try { var out = original.apply(this, arguments); last = out; return out; } catch (e) { last = { error: String(e), primitives: [] }; throw e; }
               };
               $HANDLE.resize();
               var wait = function () {
+                if (last === null && ++frames > $REDRAW_FRAME_LIMIT) last = { error: 'no draw reached the engine in $REDRAW_FRAME_LIMIT frames', primitives: [] };
                 if (last === null) { requestAnimationFrame(wait); return; }
                 requestAnimationFrame(function () { R.render = original; window.__drawn = last; resolve(true); });
               };
