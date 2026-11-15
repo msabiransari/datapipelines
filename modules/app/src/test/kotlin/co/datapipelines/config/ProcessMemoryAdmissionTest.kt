@@ -10,6 +10,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.shouldBeInstanceOf
+import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.params.ParameterizedTest
@@ -303,6 +304,104 @@ class ProcessMemoryAdmissionTest {
             ContainerMemoryLimit.Unavailable("unparsable:${root.resolve("memory/memory.limit_in_bytes")}")
     }
 
+    @Test
+    fun `cgroup v1 - a finite parent binds an unlimited child - the effective limit is the parent's`(
+        @TempDir root: Path,
+    ) {
+        val (parent, self) = v1Hierarchy(root, parentLimit = "4294967296", childLimit = "9223372036854771712")
+        CgroupMemoryLimitSource(root, self).read() shouldBe
+            ContainerMemoryLimit.Finite(FOUR_GIB, "cgroup_v1:${parent.resolve("memory.limit_in_bytes")}")
+    }
+
+    @Test
+    fun `cgroup v1 - a tighter parent wins over a larger finite child`(
+        @TempDir root: Path,
+    ) {
+        val (parent, self) = v1Hierarchy(root, parentLimit = "4294967296", childLimit = "$SIXTEEN_GIB")
+        CgroupMemoryLimitSource(root, self).read() shouldBe
+            ContainerMemoryLimit.Finite(FOUR_GIB, "cgroup_v1:${parent.resolve("memory.limit_in_bytes")}")
+    }
+
+    @Test
+    fun `cgroup v1 - a tighter child wins, an unlimited hierarchy stays unlimited, and the walk stays in the mount`(
+        @TempDir root: Path,
+    ) {
+        val (_, self) = v1Hierarchy(root, parentLimit = "$SIXTEEN_GIB", childLimit = "$TWO_GIB")
+        val child = root.resolve("memory/parent/child/memory.limit_in_bytes")
+        CgroupMemoryLimitSource(root, self).read() shouldBe ContainerMemoryLimit.Finite(TWO_GIB, "cgroup_v1:$child")
+
+        Files.writeString(root.resolve("memory/parent/memory.limit_in_bytes"), "9223372036854771712\n")
+        Files.writeString(child, "9223372036854771712\n")
+        Files.writeString(root.resolve("memory/memory.limit_in_bytes"), "9223372036854771712\n")
+        CgroupMemoryLimitSource(root, self).read() shouldBe ContainerMemoryLimit.Unlimited("cgroup_v1:$child")
+
+        // An escaping path falls back to the mount root; a limit file beside the mount is never read.
+        Files.writeString(Files.createDirectories(root.resolve("outside")).resolve("memory.limit_in_bytes"), "1\n")
+        val escaping = Files.writeString(root.resolve("self-escaping"), "3:memory:/../outside\n")
+        CgroupMemoryLimitSource(root, escaping).read() shouldBe
+            ContainerMemoryLimit.Unlimited("cgroup_v1:${root.resolve("memory/memory.limit_in_bytes")}")
+    }
+
+    @Test
+    fun `cgroup v2 - a tighter parent wins over a larger finite child`(
+        @TempDir root: Path,
+    ) {
+        Files.writeString(root.resolve("cgroup.controllers"), "memory\n")
+        val child = Files.createDirectories(root.resolve("parent/child"))
+        Files.writeString(root.resolve("parent/memory.max"), "4294967296\n")
+        Files.writeString(child.resolve("memory.max"), "$SIXTEEN_GIB\n")
+        val self = Files.writeString(root.resolve("self-cgroup"), "0::/parent/child\n")
+        CgroupMemoryLimitSource(root, self).read() shouldBe
+            ContainerMemoryLimit.Finite(FOUR_GIB, "cgroup_v2:${root.resolve("parent/memory.max")}")
+    }
+
+    @Test
+    fun `an unreadable ancestor limit is unavailable, never unlimited - v1 and v2`(
+        @TempDir root: Path,
+    ) {
+        val (parent, v1Self) = v1Hierarchy(root.resolve("v1"), parentLimit = "4294967296", childLimit = "9223372036854771712")
+        val v1File = parent.resolve("memory.limit_in_bytes")
+        val v2Root = Files.createDirectories(root.resolve("v2"))
+        Files.writeString(v2Root.resolve("cgroup.controllers"), "memory\n")
+        Files.createDirectories(v2Root.resolve("parent/child"))
+        val v2File = Files.writeString(v2Root.resolve("parent/memory.max"), "4294967296\n")
+        Files.writeString(v2Root.resolve("parent/child/memory.max"), "max\n")
+        val v2Self = Files.writeString(v2Root.resolve("self-cgroup"), "0::/parent/child\n")
+        listOf(v1File, v2File).forEach { Files.setPosixFilePermissions(it, emptySet()) }
+        // As root every file stays readable, and the unreadable case cannot be built.
+        assumeFalse(Files.isReadable(v1File) || Files.isReadable(v2File), "the test user can read a mode-000 file")
+        CgroupMemoryLimitSource(root.resolve("v1"), v1Self).read() shouldBe ContainerMemoryLimit.Unavailable("unreadable:$v1File")
+        CgroupMemoryLimitSource(v2Root, v2Self).read() shouldBe ContainerMemoryLimit.Unavailable("unreadable:$v2File")
+    }
+
+    @Test
+    fun `the admission compares against, and refuses by, the effective 4 GiB limit under a 16 GiB child`(
+        @TempDir root: Path,
+    ) {
+        val (parent, self) = v1Hierarchy(root, parentLimit = "4294967296", childLimit = "$SIXTEEN_GIB")
+        val effective = CgroupMemoryLimitSource(root, self).read()
+        // Lake disabled: 9 GiB total. Below 16 GiB × 0.9 (the child alone admits it); above 4 GiB × 0.9.
+        check(snapshot(limit = finite(SIXTEEN_GIB))).first.shouldBeEmpty()
+        val (violations, notices) = check(snapshot(limit = effective))
+        notices.shouldBeEmpty()
+        violations.single() shouldContain "result=refused"
+        violations.single() shouldContain "limit=${FOUR_GIB}B limit_source=cgroup_v1:${parent.resolve("memory.limit_in_bytes")} "
+    }
+
+    /** A v1 memory mount under [root] with `/parent/child`, the process in the child; returns the parent dir and the self file. */
+    private fun v1Hierarchy(
+        root: Path,
+        parentLimit: String,
+        childLimit: String,
+    ): Pair<Path, Path> {
+        val parent = Files.createDirectories(root.resolve("memory/parent"))
+        val child = Files.createDirectories(parent.resolve("child"))
+        Files.writeString(parent.resolve("memory.use_hierarchy"), "1\n")
+        Files.writeString(parent.resolve("memory.limit_in_bytes"), "$parentLimit\n")
+        Files.writeString(child.resolve("memory.limit_in_bytes"), "$childLimit\n")
+        return parent to Files.writeString(root.resolve("self-cgroup"), "4:cpu,cpuacct:/parent/child\n3:memory:/parent/child\n")
+    }
+
     /** The definition of D10 by brute force: every d ≤ I, m ≤ M with d·D + m ≤ S, standalones fill the rest. */
     private fun exhaustive(
         s: Long,
@@ -324,6 +423,7 @@ class ProcessMemoryAdmissionTest {
     private companion object {
         const val GIB = 1L shl 30
         const val TWO_GIB = 2 * GIB
+        const val FOUR_GIB = 4 * GIB
         const val SIXTEEN_GIB = 16 * GIB
         const val SWEEP = 40L * 9 * 12 * 5 * 5
 

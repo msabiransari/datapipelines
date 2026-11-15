@@ -3,6 +3,7 @@ package co.datapipelines.config
 import org.springframework.util.unit.DataSize
 import java.math.BigDecimal
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 
 /**
@@ -296,14 +297,21 @@ fun interface ContainerMemoryLimitSource {
 }
 
 /**
- * The cgroup limit of this process, from files only (no command, no host RAM, no heap):
+ * The EFFECTIVE cgroup memory limit of this process, from files only (no command, no host RAM, no heap): a limit on any
+ * ancestor binds the process too, so the limit is the smallest finite one over the process's own cgroup and every
+ * ancestor up to the mount root (#819 round 3). The own cgroup is `<mount>/<path>` from `/proc/self/cgroup` when that
+ * directory exists inside the mount, else the mount root (a container sees its cgroup there); the walk never leaves
+ * the mount.
  * - **v2** (the unified hierarchy: `<root>/cgroup.controllers` exists, `/proc/self/cgroup` has a `0::<path>` line):
- *   `memory.max` of the process's cgroup and of each ancestor up to the mount root; the smallest number is the
- *   effective limit, `max` everywhere is unlimited, no `memory.max` at all is unavailable.
- * - **v1** (a `<n>:…memory…:<path>` line): `<root>/memory/<path>/memory.limit_in_bytes`, else the mount's own
- *   `<root>/memory/memory.limit_in_bytes` (a container sees its cgroup at the mount root). A value at or above
- *   [V1_UNLIMITED_FROM] (the kernel's page-rounded `LONG_MAX`) is unlimited.
- * - Anything else, or a read that fails, is unavailable, with the reason in [ContainerMemoryLimit.source].
+ *   each level's `memory.max`; `max` is no limit at that level, and a level without the file (the memory controller
+ *   not enabled there) adds none.
+ * - **v1** (a `<n>:…memory…:<path>` line, mount `<root>/memory`): each level's `memory.limit_in_bytes`; a value at or
+ *   above [V1_UNLIMITED_FROM] (the kernel's page-rounded `LONG_MAX`) is no limit at that level. The parent's limit is
+ *   taken as binding whatever `memory.use_hierarchy` says: an over-counted constraint refuses a boot, an ignored one
+ *   lets the kernel kill the process.
+ * - No finite limit at any level is unlimited. No limit file at any level, a file that exists and cannot be read, a
+ *   value that does not parse, or a read that fails is unavailable — never unlimited — with the reason in
+ *   [ContainerMemoryLimit.source].
  */
 class CgroupMemoryLimitSource(
     private val cgroupRoot: Path = Path.of("/sys/fs/cgroup"),
@@ -329,39 +337,57 @@ class CgroupMemoryLimitSource(
         return ContainerMemoryLimit.Unavailable("no_memory_controller:$selfCgroup")
     }
 
-    private fun v2(relative: String): ContainerMemoryLimit {
-        val root = cgroupRoot.normalize()
-        // The own group first, then each ancestor up to the mount root; only the readable memory.max files.
-        val files =
-            generateSequence(inside(root, relative) ?: root) { dir -> if (dir == root) null else dir.parent }
-                .takeWhile { it.startsWith(root) }
-                .map { it.resolve("memory.max") }
-                .filter { Files.isReadable(it) }
-                .toList()
-        if (files.isEmpty()) return ContainerMemoryLimit.Unavailable("cgroup_v2_no_memory.max:$root")
-        val numbers = files.map { it to Files.readString(it).trim() }.filter { (_, raw) -> raw != "max" }
-        numbers.firstOrNull { (_, raw) -> raw.toLongOrNull() == null }?.let { (file, _) ->
-            return ContainerMemoryLimit.Unavailable("unparsable:$file")
-        }
-        val smallest = numbers.minByOrNull { (_, raw) -> raw.toLong() }
-        return if (smallest == null) {
-            ContainerMemoryLimit.Unlimited("cgroup_v2:${files.first()}")
-        } else {
-            ContainerMemoryLimit.Finite(smallest.second.toLong(), "cgroup_v2:${smallest.first}")
-        }
-    }
+    private fun v2(relative: String): ContainerMemoryLimit =
+        effective(
+            cgroupRoot.normalize(),
+            relative,
+            fileName = "memory.max",
+            label = "cgroup_v2",
+            missing = "cgroup_v2_no_memory.max",
+        ) { raw -> if (raw == "max") Long.MAX_VALUE else raw.toLongOrNull() }
 
-    private fun v1(relative: String): ContainerMemoryLimit {
-        val mount = cgroupRoot.resolve("memory").normalize()
-        val file =
-            listOfNotNull(inside(mount, relative), mount)
-                .map { it.resolve("memory.limit_in_bytes") }
-                .firstOrNull { Files.isReadable(it) } ?: return ContainerMemoryLimit.Unavailable("cgroup_v1_no_limit_file:$mount")
-        val bytes = Files.readString(file).trim().toLongOrNull() ?: return ContainerMemoryLimit.Unavailable("unparsable:$file")
-        return if (bytes >= V1_UNLIMITED_FROM) {
-            ContainerMemoryLimit.Unlimited("cgroup_v1:$file")
-        } else {
-            ContainerMemoryLimit.Finite(bytes, "cgroup_v1:$file")
+    private fun v1(relative: String): ContainerMemoryLimit =
+        effective(
+            cgroupRoot.resolve("memory").normalize(),
+            relative,
+            fileName = "memory.limit_in_bytes",
+            label = "cgroup_v1",
+            missing = "cgroup_v1_no_limit_file",
+        ) { raw -> raw.toLongOrNull()?.let { if (it >= V1_UNLIMITED_FROM) Long.MAX_VALUE else it } }
+
+    /**
+     * The smallest finite [fileName] value over the own cgroup ([relative] under [mount]) and every ancestor up to
+     * [mount] (class KDoc); [label] prefixes the source, [missing] is the reason when no level has the file. [parse]
+     * turns a file's trimmed text into bytes, `Long.MAX_VALUE` for "no limit at this level", or null when it does not
+     * parse.
+     */
+    private fun effective(
+        mount: Path,
+        relative: String,
+        fileName: String,
+        label: String,
+        missing: String,
+        parse: (String) -> Long?,
+    ): ContainerMemoryLimit {
+        val levels =
+            generateSequence(inside(mount, relative) ?: mount) { dir -> if (dir == mount) null else dir.parent }
+                .takeWhile { it.startsWith(mount) }
+                .map { it.resolve(fileName) }
+                .filter { Files.exists(it, LinkOption.NOFOLLOW_LINKS) }
+                .toList()
+        val unreadable = levels.firstOrNull { !Files.isReadable(it) }
+        val parsed = if (unreadable == null) levels.map { it to parse(Files.readString(it).trim()) } else emptyList()
+        val unparsable = parsed.firstOrNull { (_, bytes) -> bytes == null }?.first
+        val smallest =
+            parsed
+                .mapNotNull { (file, bytes) -> bytes?.takeIf { it != Long.MAX_VALUE }?.let { file to it } }
+                .minByOrNull { (_, bytes) -> bytes }
+        return when {
+            levels.isEmpty() -> ContainerMemoryLimit.Unavailable("$missing:$mount")
+            unreadable != null -> ContainerMemoryLimit.Unavailable("unreadable:$unreadable")
+            unparsable != null -> ContainerMemoryLimit.Unavailable("unparsable:$unparsable")
+            smallest == null -> ContainerMemoryLimit.Unlimited("$label:${levels.first()}")
+            else -> ContainerMemoryLimit.Finite(smallest.second, "$label:${smallest.first}")
         }
     }
 
