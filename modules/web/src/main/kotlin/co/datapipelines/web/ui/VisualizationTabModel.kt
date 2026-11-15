@@ -13,7 +13,6 @@ import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.visualization.VisualizationTestSessionService
-import co.datapipelines.web.dashboards.runtime.RuntimeViews
 import co.datapipelines.web.ui.site.ScriptSafeJson
 import co.datapipelines.web.visualizations.PreviewViews
 import com.fasterxml.jackson.databind.JsonNode
@@ -57,7 +56,6 @@ class VisualizationTabModel(
         val cases = previewCases.cases(workspaceId, loaded.body)
         model.addAttribute("visualizationId", id.toString())
         model.addAttribute("version", version)
-        model.addAttribute("bundle", RuntimeViews.rendererBundle(listOf(loaded)))
         model.addAttribute("cases", cases.map { CaseView(it.name, it.assertions.map(PreviewViews::assertionLabel)) })
         model.addAttribute("previewJson", previewJson(loaded, cases))
         return PREVIEW_VIEW
@@ -98,7 +96,6 @@ class VisualizationTabModel(
         model.addAttribute("displayName", body.displayName)
         model.addAttribute("description", body.description)
         model.addAttribute("renderer", "${body.renderer.kind.wire} ${body.renderer.version}")
-        model.addAttribute("bundle", RuntimeViews.rendererBundle(listOf(loaded)))
         model.addAttribute(
             "inputs",
             body.inputs.map { (name, contract) ->

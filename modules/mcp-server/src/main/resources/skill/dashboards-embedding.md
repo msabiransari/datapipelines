@@ -1,7 +1,7 @@
 ---
 area: dashboards
 layer: reference
-purpose: Embedding a released dashboard in a host page outside this app — the dashboard key, the proxy, the client runtime, the stylesheets, the renderer bundles and the lifecycle.
+purpose: Embedding a released dashboard in a host page outside this app — the dashboard key, the proxy, the client runtime, the chart engine's scripts, the stylesheets and the lifecycle.
 ---
 
 # Embed a dashboard in a page you own
@@ -38,25 +38,25 @@ person releases the dashboard and holds the key.
 
 ## The page
 
-- The scripts, from the datapipelines origin (public `/js/**`, `/vendor/**`, `/css/**`): exactly one
-  Plotly bundle, the `2d` — every chart family the `chart` kind ships is a 2D trace, so there is no
-  3D selection rule — declared as
-  `<script src="/vendor/plotly/plotly-2d.min.js" data-dp-plotly-bundle="2d"></script>`;
-  then the runtime `/js/datapipelines-dashboard.js`; then the `chart` kind's adapter
-  `/js/datapipelines-dashboard-chart.js` (registers the kind at script load, before init) and its
-  Plotly converter `/js/datapipelines-dashboard-plotly.js` (registers no kind of its own); then the
-  other kinds' adapters your dashboards use: `datapipelines-dashboard-table.js`,
+- The scripts, from the datapipelines origin (public `/js/**`, `/css/**`), as plain script tags in
+  this order: first the chart engine's files, `/js/js-rendered/<name>` for every name of the engine's
+  load order — the datapipelines client library that draws every chart; the example page
+  `examples/dashboard-embed/index.html` carries the current list, in order, and the server's own pages
+  load the same files; then the runtime `/js/datapipelines-dashboard.js`; then the `chart` kind's
+  adapter `/js/datapipelines-dashboard-chart.js` (registers the kind at script load, before init); then
+  the other kinds' adapters your dashboards use: `datapipelines-dashboard-table.js`,
   `datapipelines-dashboard-kpi.js` (each registers its renderer kind at script load, before init).
-  The runtime refuses a mismatched bundle pair at bootstrap: `renderer.two_bundles` (both bundles
-  declared), `renderer.unsupported` (an unknown bundle), `renderer.version_mismatch` (a pinned
-  visualization needs a different major).
+  The runtime refuses at bootstrap a renderer no loaded script registered (`renderer.unsupported`)
+  and a pinned visualization that needs a different major (`renderer.version_mismatch`).
 - The stylesheets, in this order: `/vendor/design-system/tokens.css`, the theme sheet
   (`/vendor/design-system/themes/light.css` for the default theme), `/vendor/design-system/base.css`,
-  `/vendor/design-system/primitives.css`, `/css/app.css`, then `/css/dashboards.css`, plus
-  `/vendor/plotly/plotly.css`. `dashboards.css` reads dozens of design tokens defined in the
-  design-system sheets, not in itself — an `app.css` + `dashboards.css` pair alone renders
-  half-styled. A host that brings its own stylesheet must define at least `--dashboard-row-unit`
-  (the composite's row unit) and the `--chart-*` set (the chart kind's converters read them).
+  `/vendor/design-system/primitives.css`, `/css/app.css`, then `/css/dashboards.css`.
+  `dashboards.css` reads dozens of design tokens defined in the design-system sheets, not in
+  itself — an `app.css` + `dashboards.css` pair alone renders half-styled. `app.css` sets the
+  `--chart-*` tokens for every theme. A host that brings its own stylesheet must define at least
+  `--dashboard-row-unit` (the composite's row unit); a `--chart-*` token it leaves undeclared draws
+  its default, and a value that token may not hold draws its default with a `chart.token-refused`
+  warning naming it.
 - Two elements: the board container and — when the dashboard has a parameter set — a parameters
   pane. Build the composite adapter and init:
 
@@ -67,16 +67,14 @@ person releases the dashboard and holds the key.
     dashboard: { id: DASHBOARD_ID, version: "released" },
     container: container,
     adapter: adapter,
-    charts: { library: "plotly", instance: window.Plotly },
   });
   await instance.ready;
   ```
 
   `credentials` is `"session"` or `{ proxyBaseUrl }`; in proxy mode the proxy base is the only base
-  used, and `baseUrl` may be omitted. `charts` declares the library you loaded — with the `2d`
-  bundle it is `{ library: "plotly", instance: window.Plotly }`; when no bundle is loaded omit the
-  key, and a pinned chart visualization is refused `chart.library_undeclared` rather than drawn by
-  a guess. `init` refuses `init.version_unsupported` (the version is
+  used, and `baseUrl` may be omitted. There is no `charts` option: `init` given one throws
+  `init.invalid` ("charts is no longer an option: charts are drawn by the datapipelines client
+  library"). `init` refuses `init.version_unsupported` (the version is
   neither `"released"` nor a positive integer) and throws `DashboardAlreadyMounted` when the
   container already hosts an instance — never init twice on one container. `dispose()` on teardown;
   after disposal the same container may host a fresh init.
@@ -97,21 +95,18 @@ person releases the dashboard and holds the key.
   the container element stable between the two, and never re-render the container's children
   yourself.
 - A page with a Content-Security-Policy must allow the scripts and stylesheets from the datapipelines
-  origin, and pre-place the empty opt-out template
-  `<template id="plotly.js-style-global" class="no-inline-styles"></template>` in `<head>` BEFORE any
-  script, then load `/vendor/plotly/plotly.css` as a real stylesheet: Plotly checks for that template
-  before injecting inline styles, and with it placed the chart rules come from `plotly.css`. The
-  runtime itself injects no inline styles.
+  origin; nothing else. The chart engine and the runtime write no inline style and no markup string,
+  so no style allowance is needed.
 
 ## What goes wrong
 
 - `init.version_unsupported` — the version is neither `"released"` nor a positive integer.
 - `DashboardAlreadyMounted` — the container already hosts an instance; dispose first.
-- The bundle refusals above — fix the script declaration, not the code.
-- `chart.library_undeclared` — a pinned chart visualization and no `charts` at init; load the
-  bundle and pass the declaration.
-- `chart.converter_missing` — the chart adapter is loaded but no converter is registered for the
-  declared library and the occurrence's family; load `-plotly.js` with `-chart.js`.
+- `init.invalid` naming `charts` — remove the option; the chart engine's files draw the charts.
+- `renderer.unsupported` / `renderer.version_mismatch` — fix the script tags, not the code: load the
+  kind's adapter before init.
+- A chart card in error, with a browser console line saying the chart engine is not loaded — the
+  chart engine's files are missing or out of order; load every `/js/js-rendered/` file, in the example's order, before the runtime.
 - A rejected `ready` — the rejection is the runtime's one error type: `code` (the stable reason),
   `message`, `retryable` and `details` (possibly empty); it carries no step field. A bootstrap
   failure is ALSO published as a `bootstrap` notification — `{ scope: "bootstrap"`, `severity`,
@@ -128,7 +123,7 @@ person releases the dashboard and holds the key.
 
 | Side | Does |
 | ---- | ---- |
-| The agent | authors and validates the dashboard, runs its visualization tests to GREEN, writes the host page (the two data attributes, the bundle declaration, the scripts) and the proxy's run line with placeholders, and names the folder to bind. |
+| The agent | authors and validates the dashboard, runs its visualization tests to GREEN, writes the host page (the two data attributes, the scripts in order) and the proxy's run line with placeholders, and names the folder to bind. |
 | The person | releases the dashboard, mints and binds the `dashboard` key, deploys the proxy with the key in its environment behind their own authentication. |
 
 The agent never calls its own work live.

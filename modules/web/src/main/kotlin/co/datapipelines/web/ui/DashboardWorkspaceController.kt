@@ -37,14 +37,14 @@ import java.util.UUID
  * the version). No served release, no named version and no admitted draft is NOT an error —
  * it is the choose-a-version state (#409): the `h1` keeps the name and the admitted history
  * is offered with the "no release yet" sentence. The runtime configuration is read ONCE
- * here for the selected version — the ONE Plotly bundle the page declares (`renderer.bundle`,
- * the implementation spec's §10.4) — and
+ * here for the selected version — a board that can run gets the chart engine's script list
+ * ([JsRenderedAssetConfig.scripts]) — and
  * a board that cannot run is the refusal state IN PLACE, the name still in the `h1`.
  *
- * ## Full navigations, deliberately
- * Every version switch and every entry into this page is a FULL navigation (`hx-boost="false"`
- * on every link that names a version or a board): the two Plotly bundles must never travel
- * between documents (dashboards.md §6.4's one-bundle rule; #369 review F1). The tabs
+ * ## Version links
+ * A link that names a version is a prepared main-content navigation (`hx-boost="true"`): the
+ * shell stays, the main content is replaced, and the page's catalog loads each chart script
+ * once per document (`page-assets.mjs`). The tabs
  * themselves are in-page state ([co.datapipelines.web.ui.DashboardWorkspaceModel] resolves the
  * server-side default; `static/js/dashboards/workspace.js` owns the switches) — a tab change
  * swaps no version and cancels no poll.
@@ -121,15 +121,15 @@ class DashboardWorkspaceController(
             },
         )
 
-        // A version selected: the runtime configuration read — the ONE bundle the page
-        // declares, and the release/dependency oracle. A board that cannot run is the
-        // refusal state IN PLACE (never a blank pane, never an error page): the name stays
-        // in the h1, the code and sentence fill the board pane's refusal region, and no
-        // bundle loads (the template renders the script block only with a bundle).
+        // A version selected: the runtime configuration read — the release/dependency oracle.
+        // A board that cannot run is the refusal state IN PLACE (never a blank pane, never an
+        // error page): the name stays in the h1, the code and sentence fill the board pane's
+        // refusal region, and no chart script loads (the template renders the script block
+        // only with the engine's script list).
         if (resolved.hasSelected) {
             try {
-                val config = runtime.config(principal, id, resolved.selectedVersion)
-                model.addAttribute("bundle", config.get("renderer").get("bundle").asText())
+                runtime.config(principal, id, resolved.selectedVersion)
+                model.addAttribute("chartEngineScripts", JsRenderedAssetConfig.scripts)
             } catch (e: DatapipelinesException) {
                 model.addAttribute("refusalCode", e.code)
                 model.addAttribute("refusalMessage", e.message)

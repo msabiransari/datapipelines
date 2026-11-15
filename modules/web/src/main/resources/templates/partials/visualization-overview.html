@@ -1,5 +1,5 @@
 <!-- The workspace's OVERVIEW tab (#399) — the viewed version's definition, READ-ONLY: name, display
-     name, description, the renderer and its bundle, the inputs with their columns, the transform
+     name, description, the renderer, the inputs with their columns, the transform
      pin with its status (RELEASED, or DRAFT with the release hint — the Release dialog's one
      consent can release it with the visualization), the case count and the body hash. There is
      deliberately no authoring control: the browser never authors a visualization (#396).
@@ -20,7 +20,6 @@
         <dt>Renderer</dt>
         <dd>
           <span class="u-mono" th:text="${renderer}">chart 1</span>
-          <span class="ds-badge ds-badge-default" th:text="'bundle ' + ${bundle}">bundle 2d</span>
         </dd>
         <dt>Inputs</dt>
         <dd>

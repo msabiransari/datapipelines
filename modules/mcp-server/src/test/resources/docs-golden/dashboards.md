@@ -64,9 +64,8 @@ Build in this order — each step's refusal names the path to fix.
 
 ## Charts — one document for every host
 
-A chart is ONE library-neutral document. The runtime converts it into the configuration of whichever charting
-library the host page draws with (the product's own pages draw with Plotly), so you never write a library's
-configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
+A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
+same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
 `/schemas/chart/1/bar.schema.json` (it includes `/schemas/chart/1/skeleton.schema.json`): check your document
 against it before you write. Where this page and the schema disagree, the schema wins.
 

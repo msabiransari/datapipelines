@@ -182,7 +182,6 @@ class VisualizationPartialControllerTest {
 
         model["name"] shouldBe VisualizationUiFixtures.NAME
         model["bodyHash"] shouldBe "hash-1"
-        model["bundle"] shouldBe "2d"
         model["transform"] shouldBe null
         model["caseCount"] shouldBe 0
     }

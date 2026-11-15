@@ -60,5 +60,5 @@ test('unsafe destinations and dependency paths refuse schemes, traversal and for
   for(const href of ['https://elsewhere/pipelines/id','//elsewhere/pipelines/id','/templates/id','/pipelines/../admin','/pipelines/%2e%2e/admin','/pipelines/.%2e/admin','/pipelines/%invalid','/pipelines/%2fadmin','/pipelines/id?data=1','/pipelines/id#x'])assert.equal(safeHref(href,'pipelines'),false);
   assert.equal(safeHref('/pipelines/id','pipelines'),true);
   for(const path of ['https://elsewhere/js/code.js','/js/../secret.js','/api/v1/x.js','/js/code.js?url=secret'])assert.throws(()=>assetPath(path));
-  assert.equal(assetPath('/vendor/plotly/plotly-3d.min.js'),'/vendor/plotly/plotly-3d.min.js');
+  assert.equal(assetPath('/vendor/alpinejs/alpine.min.js'),'/vendor/alpinejs/alpine.min.js');
 });

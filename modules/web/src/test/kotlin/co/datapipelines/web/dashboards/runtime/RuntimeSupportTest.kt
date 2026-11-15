@@ -83,38 +83,6 @@ class RuntimeSupportTest {
     }
 
     @Test
-    fun `the bundle is 2d for every pinned kind since the plotly kind retired - a 3D trace name in a chart changes nothing`() {
-        fun pinned(
-            kind: RendererKind,
-            config: String,
-        ): ArtifactVersion<VisualizationBody> {
-            val at = Instant.parse("2026-09-29T00:00:00Z")
-            val user = UUID.randomUUID()
-            val id = UUID.randomUUID()
-            return ArtifactVersion(
-                ArtifactRecord(id, UUID.randomUUID(), "dbr/viz", "v", "", 1, at, at, user),
-                ArtifactVersionDetail(id, 1, PipelineVersionStatus.RELEASED, "h", at, user),
-                VisualizationBody(
-                    displayName = "v",
-                    renderer = RendererSpec(kind, "1"),
-                    inputs = emptyMap(),
-                    config = ArtifactJson.mapper.readTree(config) as ObjectNode,
-                ),
-            )
-        }
-
-        // Every v1 chart family is a 2D trace (design record 2026-11-06 §5.1): a chart, a table, a KPI and none at all.
-        RuntimeViews.rendererBundle(emptyList()) shouldBe "2d"
-        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.CHART, """{"mark":{"type":"bar"}}"""))) shouldBe "2d"
-        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.TABLE, """{"columns":[]}"""))) shouldBe "2d"
-        RuntimeViews.rendererBundle(listOf(pinned(RendererKind.KPI, """{}"""))) shouldBe "2d"
-        // The retired kind's 3D trace types, spelled into a config, no longer select the heavy bundle.
-        listOf("scatter3d", "surface", "mesh3d").forEach { trace ->
-            RuntimeViews.rendererBundle(listOf(pinned(RendererKind.CHART, """{"data":[{"type":"$trace"}]}"""))) shouldBe "2d"
-        }
-    }
-
-    @Test
     fun `the runtime config carries each pinned visualization's display name and description for the card headings - 473`() {
         val at = Instant.parse("2026-10-06T00:00:00Z")
         val user = UUID.randomUUID()
@@ -165,6 +133,23 @@ class RuntimeSupportTest {
             )
 
         val config = RuntimeViews.config(resolved, DashboardRuntimeConfig(), emptyMap())
+        // The configuration's members, whole and in order (#987 D5, O-13: the page learns nothing about a chart
+        // library from the wire).
+        config.fieldNames().asSequence().toList() shouldBe
+            listOf(
+                "configuration_id",
+                "dashboard",
+                "layout",
+                "parameter_set",
+                "visualizations",
+                "groups",
+                "actions",
+                "action_controls",
+                "parameter_scopes",
+                "parameter_state",
+                "timeouts",
+                "budgets",
+            )
         val visualization = config["visualizations"][0]
 
         visualization["name"].asText() shouldBe "rev"

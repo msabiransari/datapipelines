@@ -308,6 +308,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         // #868 G1 — the release wiring assembles the production family registry, the GraphLimits object and the
         // ReleasePlanningDeadline seam (web/release/ReleaseConfiguration).
         ":modules:dependency-contract",
+        // #987 (js-rendered F3) — the page loads the chart engine's files from the engine module (ui/JsRenderedAssetConfig).
+        ":modules:js-rendered",
         // #756 — test-only: the shared log capture (module-structure §5.23).
         ":modules:log-capture",
     ),

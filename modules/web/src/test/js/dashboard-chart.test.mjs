@@ -1,97 +1,21 @@
-// The chart kind (design record 2026-11-06 §5.2): the library-neutral core, the converter registry and mount
-// judgement, the chart adapter's handle, and the Plotly converter's text, layout and host-side rules — on Node's
-// built-in runner with a minimal fake DOM. The runtime's side (options.charts, warnings, the zero-row empty state)
-// is in dashboard-runtime.test.mjs; the browser draws are BarChartBrowserTest's.
+// The chart kind (design record 2026-11-14 §5.2): ONE adapter over the js-rendered engine. Its states, its resolver
+// (look contract §3.7), its measure, its local redraws and its dispose, on Node's built-in runner with the engine loaded
+// from the engine module's resources and a small fake browser (support/js-rendered.mjs). The runtime's side (init
+// without `charts`, the refusal's sentence on the card, the warnings) is in dashboard-runtime.test.mjs; the browser's
+// own CSS grammar and the page are the browser suite's (LA4, A4).
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { loadEngine, fakeBrowser, descendants, supports, STATIC_JS } from "./support/js-rendered.mjs";
 
 const require = createRequire(import.meta.url);
-const here = path.dirname(fileURLToPath(import.meta.url));
-const resolveStatic = (name) => path.resolve(here, "../../main/resources/static/js/" + name);
-
-const chart = require(resolveStatic("datapipelines-dashboard-chart.js"));
-const plotly = require(resolveStatic("datapipelines-dashboard-plotly.js"));
-plotly.register(chart);
-const { convert, labelWidth, MARGIN_RIGHT, LABEL_PAD_PX } = plotly._internal;
-const TOKENS = chart._internal.DEFAULT_TOKENS;
-
-// ---------------------------------------------------------------------------------------------- fake DOM
-
-function fakeElement(tag) {
-  const attrs = {};
-  const children = [];
-  const listeners = {};
-  const el = {
-    tagName: (tag || "div").toUpperCase(),
-    attrs,
-    children,
-    style: {},
-    parentNode: null,
-    set innerHTML(v) {
-      throw new Error("innerHTML written: " + v);
-    },
-    setAttribute(k, v) {
-      attrs[k] = String(v);
-    },
-    getAttribute(k) {
-      return k in attrs ? attrs[k] : null;
-    },
-    appendChild(child) {
-      child.parentNode = el;
-      children.push(child);
-      return child;
-    },
-    removeChild(child) {
-      const index = children.indexOf(child);
-      if (index !== -1) children.splice(index, 1);
-      child.parentNode = null;
-      return child;
-    },
-    addEventListener(type, fn) {
-      (listeners[type] ||= []).push(fn);
-    },
-    fire(type) {
-      (listeners[type] || []).splice(0).forEach((fn) => fn({}));
-    },
-  };
-  return el;
-}
-
-/** A document whose cascade answers [declared] custom properties; every other property is unset (""). */
-function installDom(declared, lang) {
-  const created = [];
-  const doc = {
-    body: fakeElement("body"),
-    documentElement: { getAttribute: (k) => (k === "lang" ? lang || null : null) },
-    createElement: (tag) => {
-      const el = fakeElement(tag);
-      created.push(el);
-      return el;
-    },
-  };
-  const resolve = (value) => {
-    const match = /^var\((--[a-z0-9-]+)\)$/.exec(value || "");
-    return match ? declared[match[1]] : undefined;
-  };
-  globalThis.document = doc;
-  globalThis.window = {
-    document: doc,
-    getComputedStyle: (el) =>
-      el.tagName === "SPAN"
-        ? { color: resolve(el.style.color), fontFamily: resolve(el.style.fontFamily) }
-        : { getPropertyValue: (property) => declared[property] || "" },
-  };
-  return { doc, created };
-}
-
-function uninstallDom() {
-  delete globalThis.document;
-  delete globalThis.window;
-}
+const R = loadEngine();
+globalThis.JsRendered = R;
+globalThis.CSS = { supports };
+const chart = require(path.join(STATIC_JS, "datapipelines-dashboard-chart.js"));
+const { resolveTheme, parseColour, warningsOf, WARNING_TEXT } = chart._internal;
 
 // ---------------------------------------------------------------------------------------------- fixtures
 
@@ -99,62 +23,179 @@ const BAR = {
   mark: { type: "bar" },
   encoding: { x: { field: "region", type: "nominal", sort: null }, y: { field: "amount", type: "quantitative", aggregate: "sum" } },
 };
-const HORIZONTAL_LABELLED = {
-  mark: { type: "bar", labels: "values" },
-  encoding: { y: { field: "region", type: "nominal", sort: null }, x: { field: "amount", type: "quantitative", aggregate: "sum" } },
-};
 const COLUMNS = { region: "STRING", amount: "DECIMAL" };
-const spec = (config, columns) => ({ display_name: "Sales", description: null, config, columns: columns || COLUMNS });
+const ROWS = { region: ["North", "South"], amount: [3, 5] };
 
-/** Every string anywhere in [value], with its path. */
-function strings(value, at, out) {
-  out = out || [];
-  if (typeof value === "string") out.push([at, value]);
-  else if (Array.isArray(value)) value.forEach((v, i) => strings(v, at + "[" + i + "]", out));
-  else if (value && typeof value === "object") Object.keys(value).forEach((k) => strings(value[k], at + "." + k, out));
-  return out;
+/** The chart kind's create, as the runtime calls it after register(). */
+function create(context) {
+  const runtime = { registerRenderer: (spec) => (runtime.spec = spec) };
+  chart.register(runtime);
+  return runtime.spec.create(context);
 }
 
-const valueArrays = (option) => option.data.map((trace) => (trace.orientation === "h" ? trace.x : trace.y));
+function mount(options = {}) {
+  const browser = fakeBrowser(options);
+  const occurrence = Object.assign({ name: "sales", display_name: "Sales", description: null, config: BAR, columns: COLUMNS }, options.occurrence || {});
+  const handle = create({ host: browser.host, occurrence });
+  const svg = browser.host.childNodes.find((c) => c.tagName === "svg");
+  return { browser, handle, svg };
+}
 
-// ------------------------------------------------------------------------------------------------- tests
+const marks = (svg) => descendants(svg).filter((e) => /(^| )dp-mark( |$)/.test(e.getAttribute("class") || ""));
+const texts = (svg) => descendants(svg).filter((e) => e.tagName === "text").map((e) => e.textContent);
 
-test("the core orders by the column's type and keeps exact values exact: BIGINTEGER 2 before 10, two values float64 cannot tell apart, the mean HALF-EVEN at scale + 6", () => {
-  const byType = (type, values) =>
-    chart.core.model(
-      spec({ mark: { type: "bar" }, encoding: { x: { field: "n", type: "nominal", sort: "ascending" }, y: { type: "quantitative", aggregate: "count" } } }, { n: type }),
-      { n: values },
-      TOKENS,
-    ).categories.map((k) => k.full);
-  assert.deepEqual(byType("BIGINTEGER", ["10", "2"]), ["2", "10"], "an exact column orders by value");
-  assert.deepEqual(byType("STRING", ["10", "2"]), ["10", "2"], "a text column orders by code point");
-  assert.deepEqual(byType("BIGINTEGER", ["9007199254740993", "9007199254740992"]), ["9007199254740992", "9007199254740993"]);
-  const mean = chart.core.model(
-    spec({ mark: { type: "bar" }, encoding: { x: { field: "b", type: "nominal", sort: null }, y: { field: "v", type: "quantitative", aggregate: "mean" } } }, { b: "STRING", v: "BIGDECIMAL" }),
-    { b: ["all", "all", "all"], v: ["1", "1", "0"] },
-    TOKENS,
-  );
-  assert.equal(mean.cells[0][0].aggregate, "0.666667", "rounded, not truncated past scale + 6");
-  const tie = chart.core.model(
-    spec({ mark: { type: "bar" }, encoding: { x: { field: "b", type: "nominal", sort: null }, y: { field: "v", type: "quantitative", aggregate: "mean" } } }, { b: "STRING", v: "BIGDECIMAL" }),
-    { b: Array(128).fill("all"), v: ["1"].concat(Array(127).fill("0")) },
-    TOKENS,
-  );
-  assert.equal(tie.cells[0][0].aggregate, "0.007812", "1/128 = 0.0078125 is a tie: HALF-EVEN keeps the even digit");
+/** The engine's own answer for a bar config over [columns] at 600 × 400 (the oracle of the core cases below). */
+function render(config, columns, types) {
+  return R.render({ type: "bar", document: { display_name: "Sales", config }, columns, types, frame: { w: 600, h: 400 }, theme: "light", measure: null, hidden: [] });
+}
+const tickTexts = (out) => out.primitives.filter((p) => p.role === "tick" && p.k === "text").map((p) => p.text);
+
+// ------------------------------------------------------------------------------------------- registration
+
+test("the kind registers as chart, major 1, with create only: no judge, no bundle, no library list", () => {
+  const runtime = { registerRenderer: (spec) => (runtime.spec = spec) };
+  chart.register(runtime);
+  assert.deepEqual(Object.keys(runtime.spec).sort(), ["create", "kind", "version"]);
+  assert.equal(runtime.spec.kind, "chart");
+  assert.equal(runtime.spec.version, "1");
+  assert.doesNotThrow(() => chart.register(null), "no runtime on the page: nothing to register");
 });
 
-test("no-data (c): empty columns convert to the no-marks option - no drawn value, the no-data warning - and so does a chart whose every measure is null", () => {
-  const empty = convert(spec(BAR), {}, TOKENS);
-  assert.ok(valueArrays(empty.option).every((values) => values.every((v) => v === null)), JSON.stringify(empty.option.data));
-  assert.ok(empty.warnings.some((w) => w.field === "rule.no-data"), JSON.stringify(empty.warnings));
-  const nulls = convert(spec(BAR), { region: ["North", "South"], amount: [null, null] }, TOKENS);
-  assert.ok(valueArrays(nulls.option).every((values) => values.every((v) => v === null)));
-  assert.ok(nulls.warnings.some((w) => w.field === "rule.no-data"), "no marks is no data, as the server's mark_count says");
-  const drawn = convert(spec(BAR), { region: ["North"], amount: [1] }, TOKENS);
-  assert.ok(!drawn.warnings.some((w) => w.field === "rule.no-data"));
+// ------------------------------------------------------------------------------------------------- states
+
+test("rendered: the engine's picture through writeDom, the runtime's acknowledgement with no warning", async () => {
+  const { handle, svg } = mount();
+  const ack = await handle.renderData({ name: "sales" }, 2, ROWS);
+  assert.deepEqual(ack, { outcome: "rendered", warnings: [] });
+  assert.equal(marks(svg).length > 0, true, "marks drawn");
+  assert.equal(svg.getAttribute("viewBox"), "0 0 600 400", "the host's frame");
+  assert.ok(texts(svg).includes("North") && texts(svg).includes("South"), JSON.stringify(texts(svg)));
+  assert.ok(handle.index().series.length === 1, "the data index of the draw is kept for the interaction layer");
 });
 
-test("every Plotly sink is entity-escaped: names, tick text, hover text, titles, subtitles, legend titles and bar text", () => {
+test("no-data (c): renderEmpty draws the engine's empty state and the previous marks are gone; every measure null is no-data too", async () => {
+  const { handle, svg } = mount();
+  await handle.renderData({ name: "sales" }, 2, ROWS);
+  assert.ok(marks(svg).length > 0);
+  assert.deepEqual(await handle.renderEmpty(), { outcome: "no-data", warnings: [] });
+  assert.equal(marks(svg).length, 0, "no mark after the empty state");
+  assert.ok(descendants(svg).length > 0, "the empty state is drawn, not a blank svg");
+  assert.deepEqual(await handle.renderData({ name: "sales" }, 2, { region: ["North", "South"], amount: [null, null] }), { outcome: "no-data", warnings: [] });
+  assert.equal(marks(svg).length, 0);
+  assert.equal((await handle.renderData({ name: "sales" }, 1, { region: ["North"], amount: [1] })).outcome, "rendered");
+});
+
+test("refused: the draw rejects with the code's fixed sentence (error.refusal) and nothing of the chart stays drawn", async () => {
+  const config = { mark: { type: "bar" }, encoding: Object.assign({}, BAR.encoding, { color: { field: "c", type: "nominal" } }) };
+  const { handle, svg } = mount({ occurrence: { config, columns: { region: "STRING", c: "STRING", amount: "DECIMAL" } } });
+  await handle.renderData({ name: "sales" }, 2, ROWS.region.length ? { region: ["a"], c: ["1"], amount: [1] } : {});
+  assert.ok(marks(svg).length > 0);
+  const nine = { region: Array(9).fill("a"), c: ["1", "2", "3", "4", "5", "6", "7", "8", "9"], amount: Array(9).fill(1) };
+  const sentence = "Too many series to draw (9, the limit is 8). Group the smaller ones in the query.";
+  await assert.rejects(
+    () => handle.renderData({ name: "sales" }, 9, nine),
+    (error) => error.message === sentence && error.refusal.code === "chart.too_many_series" && error.refusal.sentence === sentence,
+  );
+  assert.equal(descendants(svg).length, 0, "the previous picture is gone");
+});
+
+test("too-small: nothing is drawn and the draw resolves with chart.frame-too-small", async () => {
+  const { handle, svg } = mount({ width: 10, height: 10 });
+  const ack = await handle.renderData({ name: "sales" }, 2, ROWS);
+  assert.deepEqual(ack, { outcome: "rendered", warnings: [{ code: "chart.frame-too-small", message: WARNING_TEXT["chart.frame-too-small"] }] });
+  assert.equal(descendants(svg).length, 0);
+});
+
+test("a measure outside its wire form rejects the draw (the runtime reports render.failed), the value never echoed", async () => {
+  const { handle } = mount();
+  await assert.rejects(
+    () => handle.renderData({ name: "sales" }, 1, { region: ["North"], amount: [{ secret: "x" }] }),
+    (error) => /amount/.test(error.message) && !/secret|object/.test(error.message) && error.refusal === undefined,
+  );
+});
+
+// --------------------------------------------------------------------------------------- the host contract
+
+test("the host: one svg for the mount's life, the description as the image's name; dispose removes it and drops the columns", async () => {
+  const { browser, handle, svg } = mount({ occurrence: { description: "Sales by region" } });
+  assert.equal(browser.host.getAttribute("role"), "img");
+  assert.equal(browser.host.getAttribute("aria-label"), "Sales by region", "the description, set through setAttribute");
+  assert.equal(svg.getAttribute("class"), "dp-chart");
+  await handle.renderData({ name: "sales" }, 2, ROWS);
+  assert.equal(browser.host.childNodes.length, 1, "one svg, never a second");
+  handle.dispose();
+  assert.equal(browser.host.childNodes.length, 0, "the picture is gone");
+  assert.equal(handle.index(), null);
+  assert.ok(browser.observers.resize.every((o) => !o.connected) && browser.observers.mutation.every((o) => !o.connected));
+  assert.ok(browser.observers.media.every((m) => m.listeners.length === 0));
+  handle.resize();
+  assert.equal(browser.frames.length, 0, "a disposed chart schedules nothing");
+  const quiet = mount();
+  assert.equal(quiet.browser.host.getAttribute("role"), null, "no description: no image name");
+});
+
+test("redraws are local, from the kept columns, one per animation frame: resize, the ResizeObserver, a theme change and the fonts", async () => {
+  const { browser, handle, svg } = mount();
+  await handle.renderData({ name: "sales" }, 2, ROWS);
+  const before = svg.getAttribute("viewBox");
+  browser.host.clientWidth = 320;
+  handle.resize();
+  handle.resize();
+  assert.equal(browser.frames.length, 1, "two resizes in one frame are one redraw");
+  browser.flushFrames();
+  assert.equal(svg.getAttribute("viewBox"), "0 0 320 400", "redrawn at the new frame from the kept columns (was " + before + ")");
+  assert.ok(marks(svg).length > 0);
+  // The ResizeObserver on the host.
+  const [resizeObserver] = browser.observers.resize;
+  assert.equal(resizeObserver.target, browser.host);
+  browser.host.clientWidth = 480;
+  resizeObserver.fn();
+  browser.flushFrames();
+  assert.equal(svg.getAttribute("viewBox"), "0 0 480 400");
+  // A theme change: an attribute of the document element, or the colour-scheme query.
+  const [themeObserver] = browser.observers.mutation;
+  assert.equal(themeObserver.target, browser.doc.documentElement);
+  assert.deepEqual(themeObserver.options, { attributes: true });
+  themeObserver.fn();
+  assert.equal(browser.frames.length, 1);
+  browser.flushFrames();
+  const [scheme] = browser.observers.media;
+  assert.equal(scheme.query, "(prefers-color-scheme: dark)");
+  scheme.listeners[0]();
+  assert.equal(browser.frames.length, 1);
+  browser.flushFrames();
+  // The fonts: once ready, every width is measured again and the chart redrawn.
+  const measured = browser.fonts.length;
+  browser.fontsReady();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(browser.frames.length, 1, "one redraw when the fonts are ready");
+  browser.flushFrames();
+  assert.ok(browser.fonts.length > measured, "the cache was dropped: texts measured again");
+});
+
+test("measure: one canvas context over the resolved font list and weight, each (text, size, weight) measured once", async () => {
+  const { browser, handle } = mount({ declared: { "--font-sans": "Inter, sans-serif" } });
+  await handle.renderData({ name: "sales" }, 2, ROWS);
+  assert.ok(browser.fonts.length > 0, "the engine measured through the page's measure");
+  assert.ok(browser.fonts.every((f) => /^\d{3} \d+(\.\d+)?px Inter, sans-serif$/.test(f)), JSON.stringify([...new Set(browser.fonts)]));
+  const first = browser.fonts.length;
+  handle.resize();
+  browser.flushFrames();
+  assert.equal(browser.fonts.length, first, "the redraw measured nothing new: every width came from the cache");
+});
+
+test("#473: a chart title that only repeats the card heading (the display name) is not drawn; one that says more stays", async () => {
+  const config = Object.assign({}, BAR, { title: { text: " Sales " } });
+  const repeated = mount({ occurrence: { display_name: "Sales", config } });
+  await repeated.handle.renderData({ name: "s" }, 1, { region: ["North"], amount: [1] });
+  assert.ok(!texts(repeated.svg).some((t) => t.trim() === "Sales"), JSON.stringify(texts(repeated.svg)));
+  const more = mount({ occurrence: { display_name: "Sales by region", config } });
+  await more.handle.renderData({ name: "s" }, 1, { region: ["North"], amount: [1] });
+  assert.ok(texts(more.svg).some((t) => t.trim() === "Sales"), "the title says more than the heading");
+  assert.equal(JSON.stringify(config), JSON.stringify(Object.assign({}, BAR, { title: { text: " Sales " } })), "the occurrence's config is not changed");
+});
+
+test("hostile text is text: every string reaches the DOM as a text node, never markup, an element or an attribute name", async () => {
   const trio = ['<img src=x onerror="alert(1)">', '<a href="javascript:alert(1)">click</a>', "<b>bold</b> & 'q'"];
   const config = {
     mark: { type: "bar", labels: "values" },
@@ -165,392 +206,190 @@ test("every Plotly sink is entity-escaped: names, tick text, hover text, titles,
       color: { field: "segment", type: "nominal", sort: null, title: trio[1] },
     },
   };
-  const out = convert(spec(config, { region: "STRING", segment: "STRING", amount: "DECIMAL" }), { region: trio, segment: trio, amount: [1, 2, 3] }, TOKENS);
-  const all = strings(out.option, "option");
-  assert.ok(all.length > 20, "the walk saw the option's strings: " + all.length);
-  for (const [at, text] of all) {
-    assert.ok(!/[<>"]/.test(text) || at === "option.layout.font.family", at + " carries raw markup: " + text);
-    assert.ok(!/&(?!amp;|lt;|gt;|quot;|#39;)/.test(text), at + " carries a raw ampersand: " + text);
-  }
-  // The texts are still THERE, as text: the sinks are escaped, not emptied.
-  assert.ok(all.some(([, text]) => text.includes("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;")));
-  assert.equal(out.option.layout.title.text, "&lt;a href=&quot;javascript:alert(1)&quot;&gt;click&lt;/a&gt;");
-  // Categories are positional ids, never a parsed value.
-  assert.deepEqual(out.option.data[0].x, ["c0", "c1", "c2"]);
+  const { handle, svg } = mount({ occurrence: { config, columns: { region: "STRING", segment: "STRING", amount: "DECIMAL" } } });
+  await handle.renderData({ name: "s" }, 3, { region: trio, segment: trio, amount: [1, 2, 3] });
+  const all = descendants(svg);
+  assert.ok(all.length > 20, "the walk saw the picture: " + all.length);
+  const tags = new Set(all.map((e) => e.tagName));
+  for (const tag of tags) assert.ok(["g", "rect", "path", "line", "text", "circle"].includes(tag), "an element the writer makes: " + tag);
+  for (const e of all) for (const name of Object.keys(e.attrs)) assert.ok(/^[a-z][a-z0-9-]*$/.test(name) && !/^on|^href$|^style$/.test(name), "attribute " + name);
+  const shown = texts(svg).join("\n");
+  assert.ok(trio.some((t) => shown.includes(t.slice(0, 8))), "the hostile texts are THERE, as text: " + shown.slice(0, 200));
 });
 
-test("Q-L4: a horizontal bar's outside value labels widen the right margin to the widest label; a vertical, stacked or unlabelled bar keeps the reference margin", () => {
-  const bindings = { region: ["North", "South"], amount: [1234567.891, 12] };
-  const horizontal = convert(spec(HORIZONTAL_LABELLED), bindings, TOKENS);
-  const texts = horizontal.option.data[0].text;
-  const widest = Math.max(...texts.map((t) => labelWidth(t)));
-  assert.equal(horizontal.option.layout.margin.r, widest + LABEL_PAD_PX, JSON.stringify(texts));
-  assert.ok(horizontal.option.layout.margin.r > MARGIN_RIGHT, "the label needs more than the reference margin");
-  assert.equal(horizontal.option.data[0].cliponaxis, false, "the label may leave the plotting rectangle");
-  assert.equal(horizontal.option.data[0].textposition, "outside");
-  // Only the value axis's range and the margin move: the rest of the layout is the reference's.
-  const vertical = convert(spec(Object.assign({}, BAR, { mark: { type: "bar", labels: "values" } })), bindings, TOKENS);
-  assert.equal(vertical.option.layout.margin.r, MARGIN_RIGHT);
-  const unlabelled = convert(spec(Object.assign({}, HORIZONTAL_LABELLED, { mark: { type: "bar" } })), bindings, TOKENS);
-  assert.equal(unlabelled.option.layout.margin.r, MARGIN_RIGHT);
-  const stacked = convert(
-    spec(
-      {
-        mark: { type: "bar", labels: "values" },
-        encoding: {
-          y: { field: "region", type: "nominal", sort: null },
-          x: { field: "amount", type: "quantitative", aggregate: "sum", stack: "zero" },
-          color: { field: "segment", type: "nominal", sort: null },
-        },
-      },
-      { region: "STRING", segment: "STRING", amount: "DECIMAL" },
-    ),
-    { region: ["North", "North"], segment: ["a", "b"], amount: [1234567.891, 2] },
-    TOKENS,
-  );
-  assert.equal(stacked.option.layout.margin.r, MARGIN_RIGHT, "a stacked label sits inside its bar");
-  // The estimate grows with the text and never undercounts a wide glyph against a narrow one.
-  assert.ok(labelWidth("1,234,567.89") > labelWidth("12"));
-  assert.ok(labelWidth("MMM") > labelWidth("iii"));
+// ----------------------------------------------------------------------------------- the resolver (§3.7)
+
+test("the resolver: a declared valid value is taken; an empty one is not declared; a refused one takes its default and is named once", () => {
+  const { browser, svg } = mount({
+    declared: {
+      "--chart-grid": "#010203",
+      "--chart-canvas": "rgb(255 255 255 / 0.5)",
+      "--chart-series-2": "color(srgb 0.5 0.5 0.5)",
+      "--chart-text": "0.75rem",
+      "--chart-title": "18",
+      "--chart-bar-radius": "1em",
+      "--chart-ease": "0.12s",
+      "--chart-dim": "1.4",
+      "--chart-title-weight": "bold",
+      "--chart-axis": "12px",
+      "--chart-series-1": "rgb(59 91 219 / 0.8)",
+      "--chart-on-fill-light": "rgba(255, 255, 255, 0)",
+      "--chart-gap": "50%",
+      "--chart-point": "-4",
+      "--chart-ink": "   ",
+      "--font-sans": "Inter, \"Noto Sans\", sans-serif",
+    },
+  });
+  const { theme, refused } = resolveTheme(svg);
+  assert.equal(theme.base, "light", "the page's default is the Light column (contract §3.7)");
+  assert.deepEqual(theme.tokens["--chart-grid"], [1, 2, 3]);
+  assert.deepEqual(theme.tokens["--chart-canvas"], [255, 255, 255, 0.5], "a surface may be translucent");
+  assert.deepEqual(theme.tokens["--chart-series-2"], [128, 128, 128], "127.5 rounds up");
+  assert.equal(theme.tokens["--chart-text"], 12);
+  assert.equal(theme.tokens["--chart-title"], 18, "a bare number is CSS pixels");
+  assert.equal(theme.tokens["--chart-bar-radius"], 14, "1em at a 14 px element");
+  assert.equal(theme.tokens["--chart-ease"], 120);
+  assert.equal(theme.tokens["--font-sans"], "Inter, \"Noto Sans\", sans-serif");
+  assert.deepEqual(refused.sort(), ["--chart-axis", "--chart-dim", "--chart-gap", "--chart-on-fill-light", "--chart-point", "--chart-series-1", "--chart-title-weight"].sort());
+  for (const name of refused) assert.equal(name in theme.tokens, false, name + " takes its default: not handed to the engine");
+  assert.equal("--chart-ink" in theme.tokens, false, "white space only is empty: not declared, not refused");
+  assert.equal(svg.childNodes.length, 0, "the probe is removed");
+  // The engine accepts what the resolver hands it.
+  assert.doesNotThrow(() => R.theme.resolve(theme));
+  // The two stylesheet-only tokens are never read.
+  assert.ok(!browser.reads.includes("--chart-pad") && !browser.reads.includes("--chart-tip-shadow"), "never read");
+  assert.equal(browser.reads.length, Object.keys(R.theme.TOKENS).length, "every engine token read once");
 });
 
-test("the size frame (#386): draw lays the option over 8 px sides, t 36 titled plus a subtitle line, and keeps room for outside labels - the Q-L4 right margin, one label line on top - without changing the converted option", () => {
-  const { sizeFrame, COMPACT_MARGIN, TITLED_TOP, SUBTITLE_LINE_PX, LABEL_LINE_PX } = plotly._internal;
-  const bindings = { region: ["North", "South"], amount: [1234567.891, 12] };
-  const frame = (config) => {
-    const option = convert(spec(config), bindings, TOKENS).option;
-    const before = JSON.stringify(option);
-    const layout = sizeFrame(option);
-    assert.equal(JSON.stringify(option), before, "the converted option is not changed");
-    return { option, layout };
+test("the resolver's ranges and kinds, from the contract's example table: refused values never clamp", () => {
+  const judge = (name, value) => {
+    const { svg } = mount({ declared: { [name]: value } });
+    const out = resolveTheme(svg);
+    return out.refused.includes(name) ? "refused" : out.theme.tokens[name];
   };
-  const plain = frame(BAR);
-  assert.deepEqual(plain.layout.margin, COMPACT_MARGIN);
-  assert.equal(plain.layout.xaxis.automargin, true, "the band axis grows the frame by its ticks");
-  assert.equal(plain.layout.yaxis.automargin, true, "the value axis grows the frame by its ticks");
-  assert.equal(frame(Object.assign({}, BAR, { title: { text: "Sales" } })).layout.margin.t, TITLED_TOP);
-  const subtitled = frame(Object.assign({}, BAR, { title: { text: "Sales", subtitle: "By region" } }));
-  assert.equal(subtitled.layout.margin.t, TITLED_TOP + SUBTITLE_LINE_PX);
-  const horizontal = frame(HORIZONTAL_LABELLED);
-  assert.equal(horizontal.layout.margin.r, horizontal.option.layout.margin.r, "Q-L4's right margin is kept");
-  assert.ok(horizontal.layout.margin.r > COMPACT_MARGIN.r);
-  assert.equal(horizontal.layout.margin.t, COMPACT_MARGIN.t);
-  const vertical = frame(Object.assign({}, BAR, { mark: { type: "bar", labels: "values" } }));
-  assert.equal(vertical.layout.margin.t, COMPACT_MARGIN.t + LABEL_LINE_PX, "a label line above the tallest bar");
-  assert.equal(vertical.layout.margin.r, COMPACT_MARGIN.r);
-  const stacked = convert(
-    spec(
-      {
-        mark: { type: "bar", labels: "values" },
-        encoding: {
-          x: { field: "region", type: "nominal", sort: null },
-          y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "zero" },
-          color: { field: "segment", type: "nominal", sort: null },
-        },
-      },
-      { region: "STRING", segment: "STRING", amount: "DECIMAL" },
-    ),
-    { region: ["North", "North"], segment: ["a", "b"], amount: [3, 2] },
-    TOKENS,
-  ).option;
-  assert.deepEqual(sizeFrame(stacked).margin, COMPACT_MARGIN, "a stacked label sits inside its bar");
-  // An axis titled null: the option keeps the reference's `{text: ""}`; the drawn axis has no title, because Plotly's
-  // automargin reserves a title line for any text but its own placeholder, the empty string included.
-  assert.deepEqual(plain.option.layout.xaxis.title, { text: "region" }, "an absent title is the field name");
-  assert.deepEqual(plain.layout.xaxis.title, { text: "region" }, "a drawn title is kept");
-  const untitled = frame({
-    mark: { type: "bar" },
-    encoding: {
-      x: { field: "region", type: "nominal", sort: null, title: null },
-      y: { field: "amount", type: "quantitative", aggregate: "sum", title: null },
-    },
-  });
-  assert.deepEqual(untitled.option.layout.xaxis.title, { text: "" });
-  assert.deepEqual(untitled.option.layout.yaxis.title, { text: "" });
-  assert.equal("title" in untitled.layout.xaxis, false, "no empty band title line is reserved");
-  assert.equal("title" in untitled.layout.yaxis, false, "no empty value title line is reserved");
-  assert.equal(untitled.layout.xaxis.automargin, true, "the rest of the axis is the converter's");
-  assert.deepEqual(untitled.layout.yaxis.tickvals, untitled.option.layout.yaxis.tickvals);
+  for (const v of ["12", "12px", "0.75rem", "calc(10px + 2px)"]) assert.equal(judge("--chart-text", v), 12, v);
+  assert.equal(judge("--chart-text", "1em"), 14);
+  for (const v of ["50%", "large", "twelve", "-4", "4", "120"]) assert.equal(judge("--chart-text", v), "refused", v);
+  assert.equal(judge("--chart-gap", "0"), 0);
+  for (const v of ["1.4", "25%"]) assert.equal(judge("--chart-dim", v), "refused", v);
+  for (const v of ["0.12s", "120ms", "120"]) assert.equal(judge("--chart-ease", v), 120, v);
+  assert.equal(judge("--chart-title-weight", "400"), 400);
+  assert.equal(judge("--chart-title-weight", "bold"), "refused");
+  for (const v of ["12px", "url(x.png)"]) assert.equal(judge("--chart-grid", v), "refused", v);
+  assert.deepEqual(judge("--chart-plot", "transparent"), [0, 0, 0, 0], "a surface may be transparent");
+  for (const v of ["rgb(59 91 219 / 0.8)", "transparent"]) assert.equal(judge("--chart-series-1", v), "refused", v);
+  assert.equal(judge("--chart-seq-3", "rgb(0 0 0 / 0.5)"), "refused");
+  assert.equal(judge("--chart-on-fill-light", "rgb(255 255 255 / 0)"), "refused");
 });
 
-test("tokens: each declared property through a FRESH probe in the host's cascade, color(srgb) normalised, unset properties keep the built-in defaults, the locale from the document's lang", () => {
-  const { doc, created } = installDom(
-    { "--chart-canvas": "color(srgb 0 0 0)", "--chart-series-2": "rgb(1, 2, 3)", "--font-sans": "Inter, sans-serif" },
-    "de-DE",
+test("the colours as the engine takes them: whole channels half up and cut, alpha only below 1, an unread form is null", () => {
+  assert.deepEqual(parseColour("color(srgb 1 0.5 0 / 0.5)"), [255, 128, 0, 0.5]);
+  assert.deepEqual(parseColour("color(srgb 1.2 -0.1 0.5)"), [255, 0, 128], "a channel outside the range is cut");
+  assert.deepEqual(parseColour("rgb(1, 2, 3)"), [1, 2, 3]);
+  assert.deepEqual(parseColour("rgba(1, 2, 3, 1)"), [1, 2, 3], "alpha 1 is opaque");
+  assert.deepEqual(parseColour("rgb(10% 20% 30%)"), [26, 51, 77]);
+  assert.deepEqual(parseColour("#ff000080"), [255, 0, 0, 128 / 255]);
+  assert.equal(parseColour("hsl(1 2 3)"), null, "a form this function does not read is never passed on");
+  assert.equal(parseColour("oklch(0.5 0.1 200)"), null);
+});
+
+test("warnings: codes and fixed sentences, one per code, and one chart.token-refused per refused token naming it", () => {
+  const warnings = warningsOf(
+    { warnings: [{ code: "chart.rule.null-category" }, { code: "chart.rule.null-category" }, { code: "chart.rule.non-finite" }, { code: "chart.text.width-missing" }] },
+    ["--chart-grid", "--chart-dim"],
   );
-  try {
-    const host = fakeElement("div");
-    doc.body.appendChild(host);
-    const tokens = chart._internal.resolveTokens(host);
-    assert.equal(tokens.canvas, "rgb(0, 0, 0)");
-    assert.equal(tokens.series[1], "rgb(1, 2, 3)");
-    assert.equal(tokens.font, "Inter, sans-serif");
-    assert.equal(tokens.locale, "de-DE");
-    // Unset: the defaults, never the inherited text colour.
-    assert.equal(tokens.plot, TOKENS.plot);
-    assert.equal(tokens.series[0], TOKENS.series[0]);
-    assert.equal(tokens.ink, TOKENS.ink);
-    assert.equal(created.length, 3, "one fresh probe per DECLARED property, none for the unset ones");
-    assert.equal(host.children.length, 0, "every probe is removed");
-    assert.ok(created.every((el) => el.tagName === "SPAN" && el.attrs["aria-hidden"] === "true"));
-  } finally {
-    uninstallDom();
-  }
-  // A lang that is not a language tag is ignored; without a DOM the defaults stand.
-  installDom({}, "en_US<script>");
-  try {
-    assert.equal(chart._internal.resolveTokens(fakeElement("div")).locale, "en-US");
-  } finally {
-    uninstallDom();
-  }
-  assert.deepEqual(chart._internal.resolveTokens(null), Object.assign({}, TOKENS, { series: TOKENS.series.slice() }));
-  assert.equal(chart._internal.normaliseColor("color(srgb 1 0.5 0 / 0.5)"), "rgba(255, 128, 0, 0.5)");
-  assert.equal(chart._internal.normaliseColor("hsl(1 2 3)"), null, "an unknown form is never passed to the library");
+  assert.deepEqual(warnings.map((w) => w.code), ["chart.rule.null-category", "chart.rule.non-finite", "chart.text.width-missing", "chart.token-refused", "chart.token-refused"]);
+  assert.equal(warnings[0].message, "rows with a null category or series were not drawn");
+  assert.deepEqual(warnings.slice(3).map((w) => w.token), ["--chart-grid", "--chart-dim"]);
+  assert.ok(warnings.slice(3).every((w, i) => w.message.includes(["--chart-grid", "--chart-dim"][i])));
+  assert.ok(warnings.every((w) => typeof w.message === "string" && !/\d/.test(w.message)), "no count, no document text");
 });
 
-test("the registry and the mount judgement: an unknown library is refused, undeclared is chart.library_undeclared, a missing library or family is chart.converter_missing", () => {
-  assert.throws(() => chart.registerConverter({ library: "d3", families: { bar: () => {} }, draw: () => {} }), /library identities/);
-  assert.throws(() => chart.registerConverter({ library: "echarts", families: { bar: () => {} } }), /draw/);
-  const occurrence = { name: "sales", config: BAR };
-  assert.deepEqual(chart._internal.judge(occurrence, { charts: null }), {
-    code: "chart.library_undeclared",
-    message: "the page declared no chart library: init needs charts { library, instance } to draw a chart",
-    details: { name: "sales" },
-  });
-  assert.equal(chart._internal.judge(occurrence, { charts: { library: "chartjs", instance: {} } }).code, "chart.converter_missing");
-  assert.deepEqual(chart._internal.judge({ name: "x", config: { mark: { type: "line" } } }, { charts: { library: "plotly", instance: {} } }).details, {
-    library: "plotly",
-    family: "line",
-    name: "x",
-  });
-  assert.equal(chart._internal.judge(occurrence, { charts: { library: "plotly", instance: {} } }), null);
-  assert.deepEqual(chart.LIBRARIES, ["plotly", "echarts", "chartjs", "apexcharts", "vegalite", "highcharts", "amcharts5", "recharts"]);
-  // Warnings become codes and fixed sentences: no count, no document text, one per code.
-  const warnings = chart._internal.renderWarnings([
-    { field: "rule.null-category", class: "data", message: "2 row(s) with a null category were not drawn." },
-    { field: "rule.null-category", class: "data", message: "1 row(s) with a null series were not drawn." },
-    { field: "legend.orient", class: "degraded", message: "anything" },
-  ]);
-  assert.deepEqual(warnings, [
-    { code: "chart.rule.null-category", message: "rows with a null category or series were not drawn" },
-    { code: "chart.degraded.legend.orient", message: "the chart library draws a field of this chart approximately" },
-  ]);
+test("a refused token reaches the draw's acknowledgement: the chart draws with the default, the warning names the token", async () => {
+  const { handle, svg } = mount({ declared: { "--chart-grid": "12px" } });
+  const ack = await handle.renderData({ name: "sales" }, 2, ROWS);
+  assert.equal(ack.outcome, "rendered");
+  assert.deepEqual(ack.warnings.map((w) => [w.code, w.token]), [["chart.token-refused", "--chart-grid"]]);
+  const grid = descendants(svg)
+    .filter((e) => /(^| )dp-grid( |$)/.test(e.getAttribute("class") || ""))
+    .flatMap((e) => [e].concat(descendants(e)))
+    .filter((e) => e.getAttribute("stroke") !== null);
+  assert.ok(grid.length > 0, "grid lines drawn");
+  const defaultGrid = "#" + R.theme.TOKENS["--chart-grid"][1].map((c) => c.toString(16).padStart(2, "0")).join("");
+  for (const line of grid) assert.equal(line.getAttribute("stroke"), defaultGrid, "the default grid colour, a literal");
 });
 
-test("#473: a chart title that only repeats the card heading (the display name) is not drawn; one that says more, or carries a subtitle, stays", async () => {
-  const { withoutDuplicateTitle } = chart._internal;
-  const titled = (title) => Object.assign({}, BAR, { title });
-  const config = titled({ text: " Sales " });
-  const before = JSON.stringify(config);
-  assert.equal("title" in withoutDuplicateTitle(config, "Sales"), false, "the same words, trimmed, are dropped");
-  assert.equal(JSON.stringify(config), before, "the occurrence's config is not changed");
-  assert.deepEqual(withoutDuplicateTitle(config, "Sales").encoding, BAR.encoding, "the rest of the config is kept");
-  assert.deepEqual(withoutDuplicateTitle(titled({ text: "Sales" }), "Sales by region").title, { text: "Sales" }, "a different title stays");
-  assert.deepEqual(withoutDuplicateTitle(titled({ text: "Sales", subtitle: "2026" }), "Sales").title, { text: "Sales", subtitle: "2026" }, "a subtitle keeps its title");
-  assert.deepEqual(withoutDuplicateTitle(titled({ text: "sales" }), "Sales").title, { text: "sales" }, "the match is exact, case included");
-  assert.deepEqual(withoutDuplicateTitle(titled({ text: "Sales" }), "  ").title, { text: "Sales" }, "a blank heading drops nothing");
-  assert.equal(withoutDuplicateTitle(BAR, "Sales"), BAR, "an untitled config is returned as is");
-  // Through the kind's create: the drawn layout has no title when the title repeats the display name.
-  const layouts = [];
-  const instance = { react: (host, data, layout) => (layouts.push(layout), Promise.resolve()), Plots: { resize() {} }, purge() {} };
-  installDom({});
-  try {
-    const runtime = { registerRenderer: (spec) => (runtime.spec = spec) };
-    chart.register(runtime);
-    for (const display_name of ["Sales", "Sales by region"]) {
-      const handle = runtime.spec.create({ host: fakeElement("div"), occurrence: { name: "s", display_name, config: config, columns: COLUMNS }, charts: { library: "plotly", instance } });
-      await handle.renderData({ name: "s" }, 1, { region: ["North"], amount: [1] });
-    }
-    assert.equal(layouts[0].title, undefined, "the heading already says it");
-    assert.deepEqual(layouts[1].title, { text: " Sales " }, "the title says more than the heading");
-  } finally {
-    uninstallDom();
+// --------------------------------------------- the old neutral core's cases, on the engine (D7 treatment 1)
+
+test("the engine orders by the column's type and keeps exact values exact: BIGINTEGER 2 before 10, two values float64 cannot tell apart, the mean HALF-EVEN at scale + 6", () => {
+  const byType = (type, values) =>
+    render({ mark: { type: "bar" }, encoding: { x: { field: "n", type: "nominal", sort: "ascending" }, y: { type: "quantitative", aggregate: "count" } } }, { n: values }, { n: type })
+      .index.series[0].tip.map((lines) => lines[0]);
+  assert.deepEqual(byType("BIGINTEGER", ["10", "2"]), ["2", "10"], "an exact column orders by value");
+  assert.deepEqual(byType("STRING", ["10", "2"]), ["10", "2"], "a text column orders by code point");
+  assert.deepEqual(byType("BIGINTEGER", ["9007199254740993", "9007199254740992"]), ["9007199254740992", "9007199254740993"], "2^53 and 2^53 + 1 stay two categories, in value order");
+  assert.equal(R.data.aggregate(["1", "1", "0"], "mean", "v").exact, "0.666667", "rounded, not truncated past scale + 6");
+  assert.equal(R.data.aggregate(["1"].concat(Array(127).fill("0")), "mean", "v").exact, "0.007812", "1/128 = 0.0078125 is a tie: HALF-EVEN keeps the even digit");
+});
+
+test("ticks stay finite on the ranges float64 can barely carry, and an ordinary range keeps its ticks", () => {
+  for (const [lo, hi] of [[0, 1.7e308], [0, Number.MAX_VALUE], [-1.7e308, 1.7e308], [0, 5e-324], [0, 1e-310]]) {
+    const out = render(BAR, { region: ["a", "b"], amount: [lo, hi] }, COLUMNS);
+    assert.equal(out.state, "rendered", lo + ".." + hi);
+    const ticks = out.primitives.filter((p) => p.role === "tick");
+    assert.ok(ticks.length > 0 && ticks.every((p) => Object.values(p).every((v) => typeof v !== "number" || Number.isFinite(v))), lo + ".." + hi);
   }
-});
-
-test("the Plotly host side touches the declared instance ONLY through react, Plots.resize and purge, and draw settles on react or plotly_afterplot", async () => {
-  const touched = new Set();
-  const calls = [];
-  const target = {
-    react: (host, data, layout, config) => {
-      calls.push(["react", data.length, config.displayModeBar, layout.margin]);
-      return new Promise(() => {}); // never settles: the afterplot event must
-    },
-    Plots: { resize: (host) => calls.push(["resize", host.tagName]) },
-    purge: (host) => calls.push(["purge", host.tagName]),
-  };
-  const instance = new Proxy(target, {
-    get(object, key) {
-      touched.add(String(key));
-      return object[key];
-    },
-  });
-  installDom({});
-  try {
-    const host = fakeElement("div");
-    const handle = chart._internal.converters().plotly
-      ? (function () {
-          const runtime = { registerRenderer: (spec) => (runtime.spec = spec) };
-          chart.register(runtime);
-          return runtime.spec.create({ host, occurrence: { name: "sales", description: "Sales by region", config: BAR, columns: COLUMNS }, charts: { library: "plotly", instance } });
-        })()
-      : null;
-    assert.ok(handle, "the Plotly converter is installed");
-    assert.equal(host.attrs.role, "img");
-    assert.equal(host.attrs["aria-label"], "Sales by region", "the description, set through setAttribute");
-    const drawn = handle.renderData({ name: "sales" }, 1, { region: ["North"], amount: [1] });
-    setTimeout(() => host.fire("plotly_afterplot"), 5);
-    assert.deepEqual(await drawn, { outcome: "rendered", warnings: [] });
-    handle.resize();
-    handle.dispose();
-    assert.deepEqual(calls, [["react", 1, false, plotly._internal.COMPACT_MARGIN], ["resize", "DIV"], ["purge", "DIV"]], "react draws over the size frame");
-    assert.deepEqual([...touched].sort(), ["Plots", "purge", "react"], "nothing else of the instance is read");
-    // A measure outside its wire form rejects the draw (the runtime reports render.failed); its text is not echoed.
-    const bad = chart._internal.converters().plotly;
-    await assert.rejects(
-      () => handle.renderData({ name: "sales" }, 1, { region: ["North"], amount: [{}] }),
-      (error) => /amount/.test(error.message) && !/object/.test(error.message),
-    );
-    assert.ok(bad, "the converter stays installed");
-    // An instance without react cannot draw.
-    const runtime = { registerRenderer: (spec) => (runtime.spec = spec) };
-    chart.register(runtime);
-    const broken = runtime.spec.create({ host: fakeElement("div"), occurrence: { name: "x", config: BAR, columns: COLUMNS }, charts: { library: "plotly", instance: {} } });
-    await assert.rejects(() => broken.renderData({ name: "x" }, 1, { region: ["a"], amount: [1] }), /react/);
-    // A create without a declaration throws the judgement's code.
-    assert.throws(
-      () => runtime.spec.create({ host: fakeElement("div"), occurrence: { name: "x", config: BAR }, charts: null }),
-      (error) => error.code === "chart.library_undeclared",
-    );
-  } finally {
-    uninstallDom();
-  }
-});
-
-// #860 R1 — tick generation is finite and bounded. The first two domains are the ones the OLD generator
-// hung on (the padded top endpoint overflowed to Infinity, the loop never terminated); the negative and
-// subnormal ranges return real stepped ticks; an ordinary range is byte-for-byte the reference's.
-
-test("niceTicks terminates on the ranges float64 can barely carry and keeps ordinary ticks exact", () => {
-  const huge = chart.core.niceTicks(0, 1.7e308, 5);
-  assert.equal(huge.lo, 0);
-  assert.equal(huge.hi, 1.7e308);
-  assert.deepEqual(huge.ticks, [0, 1.7e308], "the bounded fallback: the range's two endpoints");
-  const max = chart.core.niceTicks(0, Number.MAX_VALUE, 5);
-  assert.deepEqual(max.ticks, [0, Number.MAX_VALUE]);
-  for (const t of max.ticks) assert.ok(Number.isFinite(t), "every tick is finite: " + t);
-  const span = chart.core.niceTicks(-1.7e308, 1.7e308, 5);
-  assert.ok(Number.isFinite(span.lo) && Number.isFinite(span.hi), "a finite range in, a finite range out");
-  assert.ok(Number.isFinite(span.step) && span.step > 0, "the fallback step must remain finite and positive");
-  assert.ok(span.ticks.length > 0 && span.ticks.every((t) => Number.isFinite(t)), JSON.stringify(span.ticks));
-  const tiny = chart.core.niceTicks(0, 5e-324, 5);
-  assert.ok(tiny.ticks.length > 0 && tiny.ticks.every((t) => Number.isFinite(t)), JSON.stringify(tiny.ticks));
-  const small = chart.core.niceTicks(0, 1e-310, 5);
-  assert.ok(small.ticks.length > 0 && small.ticks.every((t) => Number.isFinite(t)), JSON.stringify(small.ticks));
-  assert.deepEqual(chart.core.niceTicks(0, 10, 5).ticks, [0, 2, 4, 6, 8, 10], "ordinary range, unchanged");
+  assert.deepEqual(tickTexts(render(BAR, { region: ["a", "b"], amount: [0, 10] }, COLUMNS)).filter((t) => /^\d+$/.test(t)), ["0", "2", "4", "6", "8", "10", "12"]);
 });
 
 test("a stacked cell beyond float64 draws as a gap with the rule.non-finite warning, never a zero, and the axis stays finite", () => {
-  const model = chart.core.model(
-    spec({
-      mark: { type: "bar" },
-      encoding: {
-        x: { field: "region", type: "nominal", sort: null },
-        y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "zero" },
-        color: { field: "channel", type: "nominal", sort: null },
-      },
-    }),
+  const out = render(
+    { mark: { type: "bar" }, encoding: { x: { field: "region", type: "nominal", sort: null }, y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "zero" }, color: { field: "channel", type: "nominal", sort: null } } },
     { region: ["North", "North", "North", "South", "South"], channel: ["Online", "Online", "Retail", "Online", "Retail"], amount: [1e308, 1e308, 500, 400, 300] },
-    TOKENS,
+    { region: "STRING", channel: "STRING", amount: "DOUBLE" },
   );
-  assert.equal(model.categories.map((c) => c.full).join("|"), "North|South");
-  assert.equal(model.series.map((s) => s.full).join("|"), "Online|Retail");
-  assert.equal(model.cells[0][0].num, null, "1e308 + 1e308 past float64: a gap");
-  assert.equal(model.cells[0][0].aggregate, null);
-  assert.equal(model.cells[0][1].num, 400);
-  assert.equal(model.cells[1][0].num, 500);
-  assert.equal(model.cells[1][1].num, 300);
-  assert.equal(model.markCount, 3);
-  assert.ok(model.warnings.some((w) => w.field === "rule.non-finite" && w.class === "data"), JSON.stringify(model.warnings));
-  assert.ok(!model.warnings.some((w) => w.field === "rule.no-data"), "three marks draw: not no-data");
-  assert.ok(Number.isFinite(model.axis.lo) && Number.isFinite(model.axis.hi) && Number.isFinite(model.axis.step), JSON.stringify(model.axis));
-  assert.ok(model.axis.ticks.every((t) => Number.isFinite(t)) && model.axis.ticks.length <= 8, JSON.stringify(model.axis.ticks));
-  // A normalized stack skips the uncarriable cell when it shares the category out.
-  const normalized = chart.core.model(
-    spec({
-      mark: { type: "bar" },
-      encoding: {
-        x: { field: "region", type: "nominal", sort: null },
-        y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "normalize" },
-        color: { field: "channel", type: "nominal", sort: null },
-      },
-    }),
-    { region: ["North", "North", "North"], channel: ["Online", "Online", "Retail"], amount: [1e308, 1e308, 500] },
-    TOKENS,
-  );
-  assert.equal(normalized.cells[0][0].num, null, "the uncarriable cell still gaps under normalize");
-  assert.equal(normalized.cells[1][0].num, 1, "the drawn cell shares the finite total alone");
+  assert.equal(out.state, "rendered");
+  assert.equal(out.summary.marks, 3, "1e308 + 1e308 past float64: a gap, three marks drawn");
+  assert.deepEqual(out.summary.warnings.map((w) => w.code), ["chart.rule.non-finite"]);
+  assert.deepEqual(out.index.series.map((s) => s.tip.map((t) => t[1])), [["Online: 400"], ["Retail: 500", "Retail: 300"]]);
+  assert.ok(out.primitives.every((p) => Object.values(p).every((v) => typeof v !== "number" || Number.isFinite(v))), "every number finite");
 });
 
 test("a NUL category keeps its (category, series) pair distinct: no flat-key collision, all four cells drawn", () => {
-  const model = chart.core.model(
-    spec({
-      mark: { type: "bar" },
-      encoding: {
-        x: { field: "region", type: "nominal", sort: null },
-        y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "zero" },
-        color: { field: "channel", type: "nominal", sort: null },
-      },
-    }),
-    // The components' own keys are prefixed ("string:a" etc.), so the flat join is ambiguous only
-    // when the separator appears inside a component's TEXT: ("a", "b\0string:c") and ("a\0string:b", "c")
-    // both flat-join to string:a\0string:b\0string:c — exactly the pairs that must stay distinct.
+  const out = render(
+    { mark: { type: "bar" }, encoding: { x: { field: "region", type: "nominal", sort: null }, y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "zero" }, color: { field: "channel", type: "nominal", sort: null } } },
     { region: ["a", "a\u0000string:b", "a", "a\u0000string:b"], channel: ["b\u0000string:c", "c", "c", "b\u0000string:c"], amount: [10, 20, 30, 40] },
-    TOKENS,
+    { region: "STRING", channel: "STRING", amount: "DOUBLE" },
   );
-  assert.deepEqual(model.categories.map((c) => c.full), ["a", "a\u0000string:b"]);
-  assert.deepEqual(model.series.map((s) => s.full), ["b\u0000string:c", "c"]);
-  assert.deepEqual(model.cells.map((row) => row.map((c) => c.num)), [[10, 40], [30, 20]], "each pair its own cell (cells[series][category]); the flat key merged 10 and 20 into 30");
-  assert.equal(model.markCount, 4);
+  assert.equal(out.summary.marks, 4);
+  assert.deepEqual(out.index.series.map((s) => s.tip.map((t) => t[1])), [["b\u0000string:c: 10", "b\u0000string:c: 40"], ["c: 30", "c: 20"]], "each pair its own cell; a flat key would merge 10 and 20 into 30");
 });
 
-test("an authored domain at float64's edge converts: the range is the authored endpoints, every tick finite", () => {
-  const option = convert(
-    spec({
-      mark: { type: "bar" },
-      encoding: {
-        x: { field: "region", type: "nominal", sort: null },
-        y: { field: "amount", type: "quantitative", aggregate: "sum", scale: { domain: [0, 1.7e308] } },
-      },
-    }),
+test("an authored domain at float64's edge draws: every tick finite", () => {
+  const out = render(
+    { mark: { type: "bar" }, encoding: { x: { field: "region", type: "nominal", sort: null }, y: { field: "amount", type: "quantitative", aggregate: "sum", scale: { domain: [0, 1.7e308] } } } },
     { region: ["North", "South"], amount: [1, 2] },
-    TOKENS,
-  ).option;
-  assert.deepEqual(option.layout.yaxis.range, [0, 1.7e308]);
-  assert.ok(option.layout.yaxis.tickvals.every((t) => Number.isFinite(t)), JSON.stringify(option.layout.yaxis.tickvals));
+    COLUMNS,
+  );
+  assert.equal(out.state, "rendered");
+  const ticks = out.primitives.filter((p) => p.role === "tick" && p.k === "text");
+  assert.ok(ticks.length >= 2 && ticks.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)), JSON.stringify(ticks.map((p) => p.text)));
 });
 
-test("normalization preserves finite shares when their unscaled absolute total overflows", () => {
-  const normalized = spec({
+test("normalization keeps finite shares when their unscaled absolute total overflows", () => {
+  const config = {
     mark: { type: "bar", labels: "values" },
-    encoding: {
-      x: { field: "region", type: "nominal", sort: null },
-      y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "normalize", format: "percent" },
-      color: { field: "channel", type: "nominal", sort: null },
-    },
-  });
+    encoding: { x: { field: "region", type: "nominal", sort: null }, y: { field: "amount", type: "quantitative", aggregate: "sum", stack: "normalize", format: "percent" }, color: { field: "channel", type: "nominal", sort: null } },
+  };
   for (const [values, expected] of [
-    [[1e308, 1e308], [0.5, 0.5]],
-    [[Number.MAX_VALUE, Number.MAX_VALUE], [0.5, 0.5]],
-    [[-1e308, 1e308], [-0.5, 0.5]],
-    [[0, 0], [0, 0]],
-    [[-Number.MIN_VALUE, Number.MAX_VALUE], [0, 1]],
+    [[1e308, 1e308], ["50%", "50%"]],
+    [[Number.MAX_VALUE, Number.MAX_VALUE], ["50%", "50%"]],
+    [[-1e308, 1e308], ["−50%", "50%"]],
+    [[0, 0], ["0%", "0%"]],
+    [[-Number.MIN_VALUE, Number.MAX_VALUE], ["0%", "100%"]],
   ]) {
-    const bindings = { region: ["A", "A"], channel: ["one", "two"], amount: values };
-    const model = chart.core.model(normalized, bindings, TOKENS);
-    assert.deepEqual(model.cells.map((row) => row[0].num), expected, String(values));
-    assert.equal(model.warnings.length, 0);
-    const option = convert(normalized, bindings, TOKENS).option;
-    assert.deepEqual(option.data.map((trace) => trace.y[0]), expected, "the converter uses the independent expected shares");
+    const out = render(config, { region: ["A", "A"], channel: ["one", "two"], amount: values }, { region: "STRING", channel: "STRING", amount: "DOUBLE" });
+    assert.deepEqual(out.summary.warnings, [], String(values));
+    assert.deepEqual(out.index.series.map((s) => s.tip[0][1].split(": ")[1]), expected, String(values));
   }
 });

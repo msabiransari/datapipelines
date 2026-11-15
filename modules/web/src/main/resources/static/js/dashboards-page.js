@@ -98,14 +98,10 @@
   // The board's own region: every element lookup below is scoped to the main this mount owns.
   var scope = main && main.querySelector ? main : document;
 
-  // The snapshot must never carry a mounted container OR Plotly's scratch: dispose BEFORE
-  // htmx saves history, and strip the tester svg. The tester (#js-plotly-tester) is a BODY
-  // child OUTSIDE the boosted swap region, so it survives every swap and would ride the
-  // snapshot; htmx's restore settle then re-applies its style ATTRIBUTE — a style-src-attr
-  // refusal (the pages' suite measured it; the conformance host has no htmx and could not).
-  // Plotly recreates the tester on its next render; a runtime that ever cleans up after
-  // itself retires this line. One listener per document; a failing dispose must not break
-  // the save. #473: it also runs the live mount's teardown (its document/window listeners).
+  // The snapshot must never carry a mounted container: dispose BEFORE htmx saves history (each
+  // chart's dispose removes its picture and drops its columns). One listener per document; a
+  // failing dispose must not break the save. #473: it also runs the live mount's teardown (its
+  // document/window listeners).
   if (!window.__dpBoardHistoryCleanup) {
   window.__dpBoardHistoryCleanup = true;
   document.body.addEventListener("htmx:beforeHistorySave", function () {
@@ -118,8 +114,6 @@
       window.__dpPage.instance = null;
     }
     if (typeof window.__dpPage.teardown === "function") window.__dpPage.teardown();
-    var tester = document.getElementById("js-plotly-tester");
-    if (tester && tester.parentElement) tester.parentElement.removeChild(tester);
   });
 
   }
@@ -548,9 +542,6 @@
         // the drawer's content at narrow widths.
         parametersContainer: filtersPanel,
       }),
-      // Record 2026-11-06 §5.2: the page declares the chart library it loaded. Without the vendored bundle the
-      // declaration is absent, so a board with a chart fails chart.library_undeclared and a board without one mounts.
-      charts: window.Plotly ? { library: "plotly", instance: window.Plotly } : undefined,
       options: {
         onNotification: function (n) {
           pageState.notifications.push(n);

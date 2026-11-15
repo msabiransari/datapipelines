@@ -36,30 +36,77 @@
   --edge-done: var(--accent-success);
 }
 
-/* #10 L3a — CHART tokens (dashboards): what the chart adapter resolves at each render (D25, the
- * record's theme contract). Every one bridges the THEME's own tokens — no literal colour,
- * the same rule the 080 block above follows — so all nine themes and both modes carry a coherent
- * chart surface without the adapter knowing a hex. The four categorical series hues are the theme's
- * four accents in the design system's own order (info, success, warning, danger); the two blended
- * series are color-mix steps between accent pairs so a six-trace chart stays inside the theme's
- * range. The adapter resolves these through a probe element (a `color-mix()` token stream reads
- * back verbatim otherwise) and the library's converter maps them onto its own surface (#860: Plotly's
- * paper/plot/grid/font/colorway) — see datapipelines-dashboard-chart.js and dashboards.md §6.3. */
+/* #987 (js-rendered F3, D6) — the CHART tokens: the look contract's §5.1 (its call C7), set ONCE here for all nine
+ * themes; no theme file sets one. The chart adapter reads each from the chart's own cascade at every draw (look
+ * contract §3.7; js-rendered record §4.10, §5.2) and hands the engine resolved values; the engine's own defaults are
+ * the same tables (LA1), so a host page that sets none of these draws the same chart.
+ *  - The seven that follow the theme are each a var() of the design-system token §5.1 names, never a literal: in
+ *    the light and the dark theme those tokens hold exactly §3's Light and Dark values.
+ *  - Every other token carries the contract's §3 value in every theme: its Light value where the theme's colour
+ *    scheme is light, its Dark value where it is dark (light-dark() follows each theme file's own color-scheme,
+ *    auto included). Sizes, shares and the duration are the same in both columns, so they are written once.
+ *  - --chart-pad is the stylesheet's alone (the chart card's padding; the engine never reads it), written with its
+ *    unit. --chart-tip-shadow is a `filter` value (owner ruling L7), not a colour, so light-dark() cannot carry it:
+ *    it follows the colour scheme by the theme's name below; the rule that uses it comes with the tooltip (#990).
+ *  - --font-sans is the design system's own token and is not set again.
+ * On forest's card the series slots 3 and 4 measure 2.94 and 2.89 : 1 (under the 3 : 1 elsewhere): accepted and
+ * listed by the contract (its O-2), not fixed here. */
 :root {
   --chart-canvas: var(--surface-default);
-  --chart-plot: var(--surface-page);
-  --chart-grid: color-mix(in srgb, var(--border-subtle) 55%, var(--surface-page));
   --chart-ink: var(--text-primary);
+  --chart-ink-2: var(--text-secondary);
   --chart-muted: var(--text-muted);
-  --chart-series-1: var(--accent-info);
-  --chart-series-2: var(--accent-success);
-  --chart-series-3: var(--accent-warning);
-  --chart-series-4: var(--accent-danger);
-  --chart-series-5: color-mix(in srgb, var(--accent-info) 55%, var(--accent-success));
-  --chart-series-6: color-mix(in srgb, var(--accent-warning) 55%, var(--accent-danger));
+  --chart-axis: var(--border-subtle);
+  --chart-tip-surface: var(--surface-raised);
+  --chart-tip-ink: var(--text-primary);
+  --chart-plot: transparent;
+  --chart-grid: light-dark(#e6e9ee, #262c35);
+  --chart-on-fill-light: #ffffff;
+  --chart-on-fill-dark: #111418;
+  --chart-series-1: light-dark(#3b5bdb, #5c7cfa);
+  --chart-series-2: #e8590c;
+  --chart-series-3: light-dark(#0ca678, #0fa678);
+  --chart-series-4: light-dark(#c98500, #b88a00);
+  --chart-series-5: light-dark(#d6336c, #e64980);
+  --chart-series-6: light-dark(#1098ad, #1299ac);
+  --chart-series-7: light-dark(#7048e8, #9775fa);
+  --chart-series-8: light-dark(#5c940d, #66a80f);
+  --chart-seq-1: light-dark(#ebeffb, #222b44);
+  --chart-seq-2: light-dark(#cbd2ea, #323e63);
+  --chart-seq-3: light-dark(#aab4d9, #425081);
+  --chart-seq-4: light-dark(#8a97c8, #5363a0);
+  --chart-seq-5: light-dark(#6979b7, #6376be);
+  --chart-seq-6: light-dark(#495ca6, #7388dd);
+  --chart-seq-7: light-dark(#283e95, #839bfb);
+  --chart-tip-border: light-dark(#e3e6ea, #2b313a);
+  --chart-text: 12;
+  --chart-text-small: 11;
+  --chart-title: 14;
+  --chart-title-weight: 600;
+  --chart-bar-radius: 4;
+  --chart-gap: 2;
+  --chart-line: 2;
+  --chart-stroke: 1;
+  --chart-point: 4;
+  --chart-cell-radius: 2.5;
+  --chart-tip-radius: 10;
+  --chart-area-top: 0.38;
+  --chart-area-bottom: 0.02;
+  --chart-dim: 0.25;
+  --chart-ease: 120;
+  --chart-pad: 16px;
+  --chart-tip-shadow: drop-shadow(0 6px 12px rgba(15,23,42,.14)) drop-shadow(0 1px 1.5px rgba(15,23,42,.10));
   /* #371 — the dashboard grid's ROW UNIT: the height of one grid row, which a slot's `h` spans
      (dashboards.css `.dp-dashboard`). A size, not a colour, so no dark-theme twin. */
   --dashboard-row-unit: var(--space-20);
+}
+:root[data-theme="dark"] {
+  --chart-tip-shadow: drop-shadow(0 8px 14px rgba(0,0,0,.5)) drop-shadow(0 1px 1.5px rgba(0,0,0,.4));
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] {
+    --chart-tip-shadow: drop-shadow(0 8px 14px rgba(0,0,0,.5)) drop-shadow(0 1px 1.5px rgba(0,0,0,.4));
+  }
 }
 
 /* 188 (#188) — the type-coloured element declares its TYPE, not its colour: `data-type`
@@ -4107,10 +4154,13 @@ pre.tf-pane-input {
    prefers-reduced-motion has nothing to stop. */
 :root {
   --overview-chart-h: calc(var(--space-12) * 4); /* 192px: the activity plot, and a bars chart's floor */
-  --overview-draft: var(--chart-series-3);
-  --overview-released: var(--chart-series-2);
-  --overview-mixed: var(--chart-series-1);
-  --overview-discarded: var(--chart-muted);
+  /* #987: the Overview's own colours, the theme's accents (the values it borrowed from the chart tokens before the
+     chart tokens took the look contract's tables); --overview-track is the old chart grid's mix. */
+  --overview-draft: var(--accent-warning);
+  --overview-released: var(--accent-success);
+  --overview-mixed: var(--accent-info);
+  --overview-discarded: var(--text-muted);
+  --overview-track: color-mix(in srgb, var(--border-subtle) 55%, var(--surface-page));
   --overview-success: var(--accent-success);
   --overview-warning: var(--accent-warning);
   --overview-danger: var(--accent-danger);
@@ -4147,7 +4197,7 @@ pre.tf-pane-input {
 .app-overview-badge {
   padding: 0 var(--space-1);
   border-radius: var(--app-radius-badge);
-  background: var(--chart-grid);
+  background: var(--overview-track);
   color: var(--text-secondary);
   font-size: var(--app-text-badge);
   font-variant-numeric: tabular-nums;
@@ -4347,7 +4397,7 @@ pre.tf-pane-input {
   width: 100%;
   height: var(--space-2);
   border-radius: var(--radius-full);
-  background: var(--chart-grid);
+  background: var(--overview-track);
 }
 .app-overview-bar-v { font-variant-numeric: tabular-nums; font-weight: var(--weight-semibold); text-align: end; }
 .app-overview-bar.is-zero { color: var(--text-muted); }

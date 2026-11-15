@@ -1,6 +1,6 @@
 # Module Structure Specification
 
-**Status:** v1.22 (frozen contract — additive-only changes after this point)
+**Status:** v1.23 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
 **Last updated:** 2026-11-15
@@ -124,7 +124,8 @@ layer 0 — no internal deps
 └───────────────┘               lake, web, app, tests/integration-tests — never a runtime edge (§5.23)
 ┌───────────────┐
 │  js-rendered  │  the chart engine (JavaScript resources) ← application (the ChartEngine port's
-└───────────────┘                                            implementation and the chart guards, §5.24)
+└───────────────┘                                            implementation and the chart guards, §5.24),
+                                                             web (the page loads the engine's files)
 
 layer 1 — typesystem (auth also persistence)
 ┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
@@ -172,8 +173,8 @@ layer 8
 ┌──────────────┐
 │     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
 │              │    datasources, staging, dag, auth, application, mcp-server, scheduler,
-│              │    parameters, persistence, visualization, lake, dependency-contract
-│              │    (declared explicitly, not transitively)
+│              │    parameters, persistence, visualization, lake, dependency-contract,
+│              │    js-rendered (declared explicitly, not transitively)
 └──────────────┘
 
 layer 9
@@ -215,7 +216,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `lake` | `typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth`, `log-capture` |
 | `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization`, `dependency-contract`, `scheduler`, `js-rendered` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters`, `visualization` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake`, `dependency-contract`, `log-capture` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake`, `dependency-contract`, `js-rendered`, `log-capture` |
 | `app` | `web`, `log-capture` |
 | `tests/integration-tests` | `app`, `log-capture` |
 | `tests/browser-tests` | `app`, `web` |
@@ -236,7 +237,7 @@ Notes on the shape (explanatory, not additional rules):
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
 - `app` lists `web` for its main sources and `log-capture` for its tests. It contains `main()`, configuration (including the single `metadataTransactionManager`, §8.5), logback config, and the Flyway migrations (§3.1) — no domain code.
 - `log-capture` (#756) is the one **test-only** module: the shared Logback snapshot capture that replaced nine module-local test-source copies. It is listed in the nine rows whose test sources capture logs (`persistence`, `datasources`, `auth`, `dag`, `parameters`, `lake`, `web`, `app`, `tests/integration-tests`), and every one of those edges is a `testImplementation`: `verifyModuleDependencies` fails when any configuration whose name does not start with `test` declares it (its `testOnlyModules` set), so test tooling never reaches a runtime classpath. `persistence`'s row is therefore no longer empty, but its main sources still have no internal dependency. The §4.3 "no `common` module" rule is unchanged: this module holds one fixture and carries its own guard.
-- `js-rendered` (#985) has no internal dependencies: the chart engine is JavaScript resources and one Kotlin object that lists them, and it must sit below every module that draws a chart. It is NOT test-only (unlike `log-capture`). `application` declares it from main sources since #986 (F2): `JsRenderedChartEngine`, the `ChartEngine` port's implementation, loads the engine files as the scripting module's trusted-code program (§5.15). Its tests add one `testImplementation` edge to the consumable `jsRenderedTestData` configuration (Node's emitted results and the invariant checker) for the chart guards (§5.24).
+- `js-rendered` (#985) has no internal dependencies: the chart engine is JavaScript resources and one Kotlin object that lists them, and it must sit below every module that draws a chart. It is NOT test-only (unlike `log-capture`). `application` declares it from main sources since #986 (F2): `JsRenderedChartEngine`, the `ChartEngine` port's implementation, loads the engine files as the scripting module's trusted-code program (§5.15). Its tests add one `testImplementation` edge to the consumable `jsRenderedTestData` configuration (Node's emitted results and the invariant checker) for the chart guards (§5.24). `web` declares it from main sources since #987 (F3): `ui/JsRenderedAssetConfig` serves the engine's files to the page from this module's resources, in the order `JsRenderedEngineFiles` gives, so the page and the server run the same files.
 - A module may use `api(project(...))` instead of `implementation(...)` only where its own public API exposes the other module's types (e.g. `pipeline-contract` exposes `ColumnSchema` from `typesystem`). The allowed-set is the same either way.
 
 **Enforcement:** a Gradle verification task compares each subproject's declared project dependencies against this table and fails the build on any extra entry. Adding an edge means editing this table first — that is the review gate.
@@ -1371,6 +1372,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.23 | 987 (#987, js-rendered F3) | `web` declares `js-rendered` from main sources (§4.1 box and diagram, §4.2 row and the note under it): `ui/JsRenderedAssetConfig` serves the chart engine's files to the page, the same files the server draws with. No new module or external dependency. |
 | 2026-11-15 | v1.22 | 986 (#986, js-rendered F2) | `application` declares `js-rendered` from main sources (§4.1 box and diagram, the note under §4.2): `JsRenderedChartEngine`, the `ChartEngine` port's implementation. **§5.15:** `JavaScriptProgram` and `JavaScriptEngine.call`, the entry for trusted product code. **§5.20:** the save has two layers (the library support table and its warnings are gone, O-13); the `ChartEngine` port, the chart judge behind the `RenderedStateCheck` seam, and `ChartType` / `ChartPositions` driving the save rules, the columns, the bindings and the schema files. **§5.24:** the engine files are loaded by the chart entry; F1's guards read the product's entry. No new module, edge in the map or external dependency. |
 | 2026-11-15 | v1.21 | 985 (#985, js-rendered F1) | New layer-0 module `js-rendered`, the chart engine (§3 list and matrix row, §4.1 box, §4.2 row *(none)* and note, new §5.24); `application`'s row and diagram gain `js-rendered`, declared from its tests only so far (the three chart guards, through the module and its `jsRenderedTestData` configuration). |
 | 2026-11-14 | v1.20 | 957 (#957, dp-lake P6) | `lake` declares `scheduler` (§4.1 diagram edge, §4.2 note, §5.21; the §4.2 row already allowed it) for the system-job seam; db-scheduler stays the scheduler's `implementation` dependency. §5.21 gains the maintenance runs' public API. No new module, no new external dependency. |

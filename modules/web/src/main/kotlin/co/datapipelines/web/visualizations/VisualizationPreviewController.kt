@@ -13,6 +13,7 @@ import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.visualization.VisualizationTestCapabilities
 import co.datapipelines.web.dashboards.runtime.RuntimeViews
+import co.datapipelines.web.ui.JsRenderedAssetConfig
 import co.datapipelines.web.ui.UiProperties
 import co.datapipelines.web.ui.site.ScriptSafeJson
 import com.fasterxml.jackson.databind.JsonNode
@@ -42,7 +43,7 @@ import java.util.UUID
  * ## What it serves
  * The run's EXACT version, case by case: the fixtures as saved, evaluated the way the mechanical test evaluates them
  * (no pipeline, no datasource), handed to the SAME vendored runtime the dashboards use in its fixture mode — one
- * instance per case, the composite adapter, the one Plotly bundle the server chose. The data reaches the page as one
+ * instance per case, the composite adapter, the chart engine's files ([JsRenderedAssetConfig.scripts]). The data reaches the page as one
  * JSON block through [ScriptSafeJson] (never inline script over a value); case names and titles render through
  * `th:text`. The page never echoes the capability.
  */
@@ -79,7 +80,7 @@ class VisualizationPreviewController(
         model.addAttribute("version", visualization.detail.version)
         model.addAttribute("expiresAt", preview.expiresAt.toString())
         model.addAttribute("cases", preview.cases.map { PreviewCaseView(it.name, it.assertions.map(PreviewViews::assertionLabel)) })
-        model.addAttribute("bundle", RuntimeViews.rendererBundle(listOf(visualization)))
+        model.addAttribute("chartEngineScripts", JsRenderedAssetConfig.scripts)
         val columns = visualizations.chartColumns(visualization.record.workspaceId, visualization.body)
         model.addAttribute(
             "previewJson",
@@ -217,7 +218,6 @@ internal object PreviewViews {
     ): ObjectNode =
         nodes.objectNode().also { out ->
             out.put("configuration_id", configurationId)
-            out.putObject("renderer").put("bundle", RuntimeViews.rendererBundle(listOf(visualization)))
             out.putObject("dashboard").also {
                 it.put("id", visualization.record.id.toString())
                 it.put("name", visualization.record.name)

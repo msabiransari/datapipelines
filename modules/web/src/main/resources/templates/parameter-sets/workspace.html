@@ -17,8 +17,8 @@
           once per document whichever page asks first ("on-mount": fetched while a navigation prepares, executed once
           this page is in place). Its last entry, runtime.js, is the mount that activates the `.ps-root` — on a cached
           history restore too, where nothing in the snapshot replays. The renderer is the SAME
-          datapipelines-dashboard.js the board uses (one renderer, one copy of the attempt logic); Plotly and the
-          visualization adapters are not part of this page. Nothing in here may carry an inline script body
+          datapipelines-dashboard.js the board uses (one renderer, one copy of the attempt logic); the chart engine and
+          the visualization adapters are not part of this page. Nothing in here may carry an inline script body
           (InlineScriptAuditTest). */-->
   <template id="ps-runtime-scripts" data-page-assets="on-mount">
     <script th:src="@{/vendor/dagre/dagre.min.js}"></script>

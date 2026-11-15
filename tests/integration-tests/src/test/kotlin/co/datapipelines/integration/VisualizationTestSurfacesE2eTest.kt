@@ -136,7 +136,18 @@ class VisualizationTestSurfacesE2eTest {
             .asText() shouldBe "2026-01-01"
         // The runtime the page mounts names no server: fixture mode.
         html shouldContain "/js/visualization-preview.js"
-        html shouldContain """data-dp-plotly-bundle="2d""""
+        // The chart engine's files, listed from the server's load order (#987 D2), answer from the session-less page's
+        // own origin as JavaScript: the first is the namespace, the last a chart type's template.
+        val engine = Regex("""<script src="(/js/js-rendered/[^"]+)"""").findAll(html).map { it.groupValues[1] }.toList()
+        engine.first() shouldBe "/js/js-rendered/00-namespace.js"
+        engine.last() shouldStartWith "/js/js-rendered/types/"
+        engine.forEach { path ->
+            val served = anonymousGet(path)
+            withClue(path) {
+                served.statusCode shouldBe 200
+                served.contentType() shouldStartWith "text/javascript"
+            }
+        }
     }
 
     @Test

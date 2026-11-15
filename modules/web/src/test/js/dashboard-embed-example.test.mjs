@@ -10,9 +10,9 @@
  * - embed.js mounts every [data-dp-embed] container AUTOMATICALLY at load — there is no
  *   window.dpEmbedBoot global (856b correction 2) — through `window.dpEmbed.ready` with
  *   `version: "released"` and proxy credentials only;
- * - the `chart` kind (the retired `plotly` kind's successor, #869) bootstraps with
- *   `charts: { library: "plotly", instance: window.Plotly }` at init and the real chart
- *   adapter + a Plotly converter registered;
+ * - the `chart` kind (#869) bootstraps with no chart library declared at init, the real
+ *   chart adapter registered over the js-rendered engine, and index.html loads the
+ *   engine's files in the engine's own load order (#987);
  * - the runtime's requests reach the STUB only through the proxy: the proxy attached the
  *   dashboard key server-side (the client never carries it), and no cookie or CSRF header
  *   travels;
@@ -33,6 +33,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
+import { engineFiles, loadEngine } from "./support/js-rendered.mjs";
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -82,14 +83,18 @@ function fakeElement(tag) {
       el.firstChild = children[0] || null;
       return child;
     },
+    removeChild(child) {
+      const i = children.indexOf(child);
+      if (i !== -1) children.splice(i, 1);
+      child.parentNode = null;
+      el.firstChild = children[0] || null;
+      return child;
+    },
   };
   return el;
 }
 
 function installDom() {
-  // The one bundle declaration the runtime reads (the index.html script tag, faked).
-  const bundleScript = fakeElement("script");
-  bundleScript.setAttribute("data-dp-plotly-bundle", "2d");
   // The host containers embed.js's automatic mount scans for, in document order.
   const embedHosts = [];
   const doc = {
@@ -99,20 +104,21 @@ function installDom() {
   };
   doc.getElementById = () => null;
   doc.querySelectorAll = (selector) => {
-    if (selector === "script[data-dp-plotly-bundle]") return [bundleScript];
     if (selector === "[data-dp-embed]") return embedHosts.slice();
     return [];
   };
-  doc.createElement = (tag) => fakeElement(tag);
+  // The chart adapter reaches its document through the host (host.ownerDocument) and
+  // creates its svg there; the example's refresh declares no targets, so nothing is drawn.
+  doc.createElement = (tag) => Object.assign(fakeElement(tag), { ownerDocument: doc });
+  doc.createElementNS = (ns, tag) => Object.assign(fakeElement(tag), { ownerDocument: doc, namespaceURI: ns });
   doc.createTextNode = (text) => ({ text: String(text), nodeType: 3 });
   globalThis.document = doc;
   globalThis.window = {
     document: doc,
-    // The library entry value embed.js declares at init (charts.instance).
-    Plotly: {},
     addEventListener: () => {},
     getComputedStyle: () => ({ color: "rgb(10, 20, 30)" }),
   };
+  doc.defaultView = globalThis.window;
   globalThis.location = { reload: () => {} };
   doc.__embedHosts = embedHosts;
   return doc;
@@ -132,13 +138,12 @@ const seen = [];
 
 const CONFIG = () => ({
   configuration_id: "cfg-1",
-  renderer: { bundle: "2d" },
   dashboard: { id: "d1", name: "acme/finance/board", version: 1, status: "RELEASED" },
   layout: { columns: 12, grid: [] },
    parameter_set: null,
    visualizations: [
-     // The chart kind (the plotly kind's successor, #869): a pinned bar chart whose
-     // family the judge reads from config.mark.type.
+     // The chart kind (#869): a pinned bar chart whose family the engine reads from
+     // config.mark.type.
      { name: "chart", renderer: { kind: "chart", version: "1" }, config: { mark: { type: "bar" } }, bindings: {}, presentation: null, timeout_seconds: 120 },
      { name: "cells", renderer: { kind: "table", version: "1" }, config: {}, bindings: {}, presentation: null, timeout_seconds: 120 },
    ],
@@ -243,6 +248,8 @@ before(async (t) => {
   t.diagnostic(`dashboard-embed test ports: upstream ${upstream.address().port}, proxy ${port}`);
   await waitReady(PROXY_BASE, "the proxy");
   installDom();
+  // The engine's files, run as index.html runs them before the adapter.
+  loadEngine();
   const runtime = require(runtimePath);
   // The chart kind's REAL adapter: loaded like index.html loads it (after the runtime),
   // which auto-registers the kind through the fake window. Registered again explicitly
@@ -250,14 +257,6 @@ before(async (t) => {
   const chartApi = require(chartAdapterPath);
   chartApi.register(runtime);
   if (!runtime._internal.renderers().chart) throw new Error("the chart adapter did not register the chart kind");
-  // The Plotly converter the chart adapter draws through, as a stand-in with the REAL
-  // registration contract ({ library, families, draw }); the example's refresh declares
-  // no targets, so the converter's draw itself is never invoked here.
-  chartApi.registerConverter({
-    library: "plotly",
-    families: { bar: () => ({}) },
-    draw: () => {},
-  });
   // The browser gets its table and KPI renderers from the adapter files' load-time
   // registration; the tests register stand-ins for the same kinds and majors
   // (dashboard-runtime.test.mjs).
@@ -329,8 +328,9 @@ test("every Datapipelines asset in index.html resolves to the one Datapipelines 
   const dpAssets = urls
     .map((u) => new URL(u, HOST_ORIGIN))
     .filter((u) => /^\/(vendor|css|js)\//.test(u.pathname));
-  // Non-vacuity: the example loads 13 Datapipelines assets (7 stylesheets + 6 scripts).
-  assert.equal(dpAssets.length, 13, `non-vacuity: expected 13 Datapipelines assets, found ${dpAssets.length}`);
+  // Non-vacuity: the example loads 6 stylesheets + 4 scripts + the engine's files.
+  const expected = 10 + engineFiles().length;
+  assert.equal(dpAssets.length, expected, `non-vacuity: expected ${expected} Datapipelines assets, found ${dpAssets.length}`);
   for (const asset of dpAssets) {
     assert.equal(
       asset.origin,
@@ -341,6 +341,26 @@ test("every Datapipelines asset in index.html resolves to the one Datapipelines 
   // ONE origin placeholder value across the whole file.
   const origins = [...new Set(dpAssets.map((a) => a.origin))];
   assert.deepEqual(origins, [DP_ORIGIN], "the example writes exactly ONE Datapipelines origin value");
+  // The engine's files: every one of them, in the engine's load order, before the runtime
+  // and the chart adapter (#987 D11).
+  const paths = dpAssets.map((a) => a.pathname);
+  const engine = paths.filter((p) => p.startsWith("/js/js-rendered/"));
+  assert.deepEqual(engine, engineFiles().map((n) => "/js/js-rendered/" + n), "index.html loads the engine's files in load order");
+  const lastEngine = paths.indexOf(engine[engine.length - 1]);
+  assert.ok(lastEngine < paths.indexOf("/js/datapipelines-dashboard.js"), "the engine loads before the runtime");
+  assert.ok(lastEngine < paths.indexOf("/js/datapipelines-dashboard-chart.js"), "the engine loads before the chart adapter");
+  // The page's whole script list is the engine, the runtime, the three adapters and the
+  // glue: absence proved by what IS there (#987 A.4). embed.js declares no charts option.
+  const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => new URL(m[1], HOST_ORIGIN).pathname);
+  assert.deepEqual(scripts, [
+    ...engineFiles().map((n) => "/js/js-rendered/" + n),
+    "/js/datapipelines-dashboard.js",
+    "/js/datapipelines-dashboard-chart.js",
+    "/js/datapipelines-dashboard-table.js",
+    "/js/datapipelines-dashboard-kpi.js",
+    "/embed.js",
+  ]);
+  assert.equal(/\bcharts\s*:/.test(fs.readFileSync(embedPath, "utf8")), false, "embed.js declares no charts option");
   // The README tells the reader to replace it — stated once.
   const readme = fs.readFileSync(readmePath, "utf8");
   assert.equal(readme.split(DP_ORIGIN).length - 1, 1, "the README names the origin placeholder exactly once");

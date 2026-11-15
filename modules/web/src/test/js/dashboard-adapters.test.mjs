@@ -138,7 +138,7 @@ async function actionBoard({ adapter, config: overrides = {}, wrap } = {}) {
   const container = fakeElement("div");
   const panel = fakeElement("aside");
   const config = Object.assign({
-    configuration_id: "actions-config", renderer: { bundle: "2d" },
+    configuration_id: "actions-config",
     layout: { columns: 12, grid: [] }, visualizations: [], parameter_set: null,
     actions: [{ name: "refresh_all", type: "refresh", scope: "all", initial: false }],
     action_controls: [{ name: "apply", label: "Apply", action: "refresh_all" }],
@@ -626,8 +626,7 @@ for (const variant of ["recorded", "absent", "throwing"]) {
 
 // --------------------------------------------------------------------------------------------------- tests
 
-// The plotly kind retired (design record 2026-11-06 §5.1): its substitution, escaping, theme and #386 size tests went
-// with it. The chart kind's equivalents — every Plotly sink escaped, the tokens, Q-L4, rendered/no-data — are in
+// The chart kind's own tests (its states, hostile text as text, the resolver, rendered/no-data) are in
 // dashboard-chart.test.mjs.
 
 test("the table renderer builds text-only cells, formats, caps at page_size, and answers no-data", async () => {
