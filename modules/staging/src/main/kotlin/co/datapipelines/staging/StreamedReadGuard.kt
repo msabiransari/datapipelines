@@ -15,9 +15,10 @@ import java.util.UUID
  * finished, shorter one. The driver offers no public signal that tells the two apart (#994 A1). The report for the
  * owner to file is the store's notes/evidence/994-duckdb-streamed-short-result/upstream-report.md.
  *
- * The guard (rule G2 of #994): every production read of a staging cursor is compared with a count that is not a
- * streamed drain — a one-row aggregate from the engine, whose own failure throws — taken in the same snapshot as the
- * read, and a read that ends with a different number of rows fails as `pipeline.staging.result_incomplete`.
+ * The guard (rule G2 of #994): stored-relation reads are compared with a count that is not a streamed drain — a
+ * one-row aggregate from the engine, whose own failure throws — taken in the same snapshot as the read. A guarded
+ * read that ends with a different number of rows fails as `pipeline.staging.result_incomplete`; a one-row read
+ * requires its row. The plain tempdb reads described below remain unguarded under the owner's round 4 rulings.
  *
  * An author's tempdb read (C5) takes one of two forms, decided by the engine's own parse: WRITTEN (the parse admits it,
  * alone, to `CREATE TABLE … AS`: written, then read back counted), else PLAIN (the SHOW kinds, a PIVOT without an IN
