@@ -113,11 +113,9 @@
     }
     if (frac.length < minFrac) frac += zeros(minFrac - frac.length);
     if (intPart.length > 3) {
-      var g = "", n = intPart.length;
-      for (var i = 0; i < n; i++) {
-        if (i > 0 && (n - i) % 3 === 0) g += ",";
-        g += intPart.charAt(i);
-      }
+      // A "," before every third digit from the right: the first group holds n mod 3 digits (3 when that is 0).
+      var n = intPart.length, head = n % 3 === 0 ? 3 : n % 3, g = intPart.slice(0, head);
+      for (var i = head; i < n; i += 3) g += "," + intPart.slice(i, i + 3);
       intPart = g;
     }
     return (x.neg && x.d !== "0" ? MINUS : "") + intPart + (frac ? "." + frac : "");
@@ -245,8 +243,20 @@
   var STAMP = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.[0-9]+)?)?Z$/;
   var STAMP_FULL = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.([0-9]{1,9}))?)?Z$/;
 
+  /** Whether s is exactly YYYY-MM-DD in ASCII digits (what DATE matches), read by its character codes. */
+  function isDateText(s) {
+    if (s.length !== 10 || s.charCodeAt(4) !== 45 || s.charCodeAt(7) !== 45) return false;
+    for (var i = 0; i < 10; i++) {
+      if (i === 4 || i === 7) continue;
+      var c = s.charCodeAt(i);
+      if (c < 48 || c > 57) return false;
+    }
+    return true;
+  }
+
   function temporalParts(raw) {
     var s = String(raw);
+    if (isDateText(s)) return { y: s.slice(0, 4), m: s.slice(5, 7), d: s.slice(8, 10), time: null };
     var d = DATE.exec(s);
     if (d) return { y: d[1], m: d[2], d: d[3], time: null };
     var t = STAMP.exec(s);
@@ -307,6 +317,7 @@
     ticks: ticks,
     readLabel: readLabel,
     temporalKey: temporalKey,
+    isDateText: isDateText,
     temporalFull: temporalFull,
     temporalAxis: temporalAxis,
   };

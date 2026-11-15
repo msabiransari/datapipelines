@@ -34,6 +34,13 @@
     return { y: yoe + era * 400 + (m <= 2 ? 1 : 0), m: m, d: d };
   }
 
+  /** The whole number of the ASCII digits s[from, to) (the caller has checked they are digits). */
+  function intAt(s, from, to) {
+    var v = 0;
+    for (var i = from; i < to; i++) v = v * 10 + (s.charCodeAt(i) - 48);
+    return v;
+  }
+
   function int(s) {
     var v = 0;
     for (var i = 0; i < s.length; i++) v = v * 10 + (s.charCodeAt(i) - 48);
@@ -47,6 +54,12 @@
    */
   function parse(raw) {
     if (typeof raw !== "string") return null;
+    if (R.text.isDateText(raw)) {
+      // A plain date (what WIRE matches with no time part), read by its character codes.
+      var y0 = intAt(raw, 0, 4), m0 = intAt(raw, 5, 7), d0 = intAt(raw, 8, 10);
+      if (m0 < 1 || m0 > 12 || d0 < 1 || d0 > (m0 === 2 && leap(y0) ? 29 : MONTH_DAYS[m0 - 1])) return null;
+      return { at: days(y0, m0, d0) * DAY, time: false };
+    }
     var w = WIRE.exec(raw);
     if (!w) return null;
     var y = int(w[1]), m = int(w[2]), d = int(w[3]);
