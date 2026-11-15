@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.28 (frozen contract — additive-only changes after this point)
+**Status:** v1.29 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-15
 
 ---
 
@@ -521,6 +521,7 @@ Staging error codes are cataloged centrally in [Pipeline Contract §13.5](pipeli
 | `pipeline.staging.scratch_exhausted` | A DuckDB staging database's scratch reservation does not fit in the aggregate now — running reservations hold the rest; refused before any file exists, retryable once one releases (§8.5) |
 | `pipeline.staging.scratch_blocked` | A DuckDB staging database's scratch reservation can never fit: it exceeds the aggregate less the leftover files in the scratch directory nobody can vouch for (or, with none, the aggregate itself); refused before any file exists, not retryable until an operator clears the directory or raises `scratch-bytes` (§8.5) |
 | `pipeline.staging.scratch_limit_exceeded` | A DuckDB staging database outgrew its own reservation — the engine refused a spill, or the measured file, WAL and spill directory passed it (§8.5) |
+| `pipeline.staging.result_incomplete` | TEMPORARY (#994): a DuckDB staging read ended after a different number of rows than the engine counted for it in the same snapshot — the pinned driver ended a streamed cursor without the engine's error (§8.3, §8.5) |
 | `pipeline.staging.cleanup_failed` | table cleanup (enumerate + `DROP TABLE`, §3.4), connection close, or the deletion of a DuckDB database's files failed; logged, never masks a node failure |
 
 There is no `pipeline.staging.h2_creation_failed` — the engine-neutral `creation_failed` is the canonical code.
@@ -564,6 +565,8 @@ On memory-limit failure:
 2. The executor catches it, wraps as `NodeExecutionException`, fails the node ([DAG Executor §8.2](dag-executor.md#82-error-code-mapping)).
 3. The execution fails fast; `pipeline_failed` SSE event sent.
 4. Cleanup runs in `finally` (§3.4); the staging DB is dropped and closed; memory freed.
+
+**A streamed read that ended early (TEMPORARY, #994).** On DuckDB, an engine failure while a result is streamed can end the cursor without an error on the pinned driver, so every staging read is judged against a count (§8.5 **Streamed reads**). A read that ends after a different number of rows throws `StagingResultIncompleteException` (`pipeline.staging.result_incomplete`; details `rows_read`, `rows_expected` and `reader`, never SQL text or a row value), which fails the node as steps 2–4 above. On a managed append the staging code is the delivery ledger's; the caller's public code is `lake.append.failed`, as for every staging failure other than `scratch_limit_exceeded` (`LakeWritebackRunner`).
 
 ### 8.4 JVM-level safety net
 
@@ -637,6 +640,16 @@ The sweep runs once per factory; files that appear later are not re-read until t
 - **Only DP's own statement runs on it.** The lock still refuses `SET`/`RESET`, but measured on the pinned driver (2026-11-14) a locked database with external access on still accepts `CREATE SECRET`, `LOAD` and a local file read — which is why it must never see author text. Its initializer configures the object store through the lake's own storage setup (the credential reaches it only there, as a temporary `CREATE OR REPLACE SECRET`; persistent secrets stay off) and sets `s3_url_compatibility_mode` so each bound file location is read literally; the compaction statement is built from field ids, a closed type vocabulary and the bound locations, never from a request.
 - **The same bounds.** `memory_limit`, the spill bounded by the reservation, and the file, WAL and spill directory measured after each body: a failure leaving a body is classified as an author database's is (`StagingScratchLimitException` for a spill or a measurement past the reservation, `StagingEngineMemoryLimitException` for another engine out-of-memory, anything else unchanged).
 - **The author database is unchanged:** external access off, configuration locked, both read back; a test opens one beside a trusted one and asserts it.
+
+**Streamed reads (TEMPORARY, #994; removed with the driver fix).** A database is opened with streamed results, and on the pinned driver (1.5.6.0) an engine error raised after the first streamed chunk ends the cursor: `next()` returns false and nothing is thrown, so a failed read looks like a shorter one. The driver offers no public signal that tells the two apart. The report for upstream is the orchestration store's `notes/evidence/994-duckdb-streamed-short-result/upstream-report.md`. Until a driver throws mid-stream — `StreamedResultTripwireTest` goes red on that driver and names what to remove — every read of a staging cursor is compared with a count that is not a streamed drain (a one-row aggregate, whose own failure throws), taken in the same transaction as the read so another connection's write in between raises no false alarm (`StreamedReadGuard`):
+
+- **`withQuery`** counts `count(*)` over its SQL first, so that SQL runs twice and must be a deterministic read (every production caller reads a staged relation by name). A `LIMIT n` read is judged against `min(n, count)`; a reader that stops before the end is not judged.
+- **One-row reads** (`stats`, the executor's row counts) fail on a missing row instead of reading it as 0.
+- **The managed append** counts its materialised relation before each scan, in the scan's transaction.
+- **An author's tempdb read** (a caller or a non-lake write-back output) is first written into a relation `dp_guard_<uuid>` by `CREATE TABLE … AS` on the gated lease, with the same bound values; that statement throws by itself. The scratch is measured before the first row, and the relation is read back counted, with the original statement's labels and names, in insertion order — the author's order (DuckDB 1.5 "Order Preservation": `preserve_insertion_order`, default true and never set by staging, governs a `CREATE TABLE … AS SELECT`). It is dropped on success, failure and cancel before the lease returns. A statement the engine cannot write into a relation (several statements, `SHOW`/`DESCRIBE`/`SUMMARIZE`, `PRAGMA`, `EXPLAIN`, `PIVOT`) is read unguarded, as before.
+- **Compaction's trusted scratch database** is unchanged.
+
+A read that ends after a different number of rows fails as `pipeline.staging.result_incomplete` (§8.3). For the same reason the datasource key `jdbc_stream_results` is refused on DUCKDB and LAKE datasources ([Datasources §5.6](datasources.md#56-refused-property-keys-normative-security-exception-to-passthrough)).
 
 ---
 
@@ -858,6 +871,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.29 | 994 (#994) | TEMPORARY until the pinned DuckDB driver throws mid-stream. §7.2 gains `pipeline.staging.result_incomplete`; §8.3 gains **A streamed read that ended early**; §8.5 gains **Streamed reads**: every staging cursor is compared with a `count(*)` in the same snapshot (`withQuery`, the one-row reads, the managed append's scans, an author's tempdb read written into a `dp_guard_` relation and read back), compaction unchanged; the tripwire `StreamedResultTripwireTest` names the removal. |
 | 2026-11-14 | v1.28 | 969 (#969, dp-lake P6) | §8.5 gains **The trusted scratch database**: `StagingPreparation.openTrusted` runs the same open sequence with external access left on and the other three settings read back; it is not a `Staging` (no lease, no author SQL, no gate), hands DP's root to one body at a time, is closed by the factory's finalizer and classifies failures as an author database does; only DP's own statement may run on it (a locked database with external access on still accepts `CREATE SECRET`, `LOAD` and a local file read, measured). The author database is unchanged. |
 | 2026-11-13 | v1.27 | #803 merge review | §8.5: a dead-owner proof is tied to the stable regular-file identity observed before opening and after locking; owner-file unlink rechecks the same identity. Unknown or changed identity is unprovable. Four regressions include replacement while a real owner remains live across three JVMs. |
 | 2026-11-13 | v1.26 | 806 (#806) | §8.5 **Scratch**: one sentence pointing at the operator signal — the `datapipelines.staging.scratch.*` gauges and the status-only `duckdb_scratch` indicator on the management port ([Observability §4.1, §6.1](observability.md#61-health)). |

@@ -1,6 +1,8 @@
 package co.datapipelines.datasources
 
+import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.maps.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -72,6 +74,28 @@ class DatasourcePropertiesTest {
 
         errors.map { it.code }.distinct() shouldContainExactly listOf(DatasourceErrorCodes.PROPERTIES_INVALID)
         errors.size shouldBe 2
+    }
+
+    @Test
+    fun `994 - properties_jdbc jdbc_stream_results is refused on a DUCKDB datasource`() {
+        streamResultsErrors(Dialect.DUCKDB) shouldContain DatasourceErrorCodes.PROPERTIES_INVALID
+    }
+
+    @Test
+    fun `994 - properties_jdbc jdbc_stream_results is refused on a LAKE datasource`() {
+        streamResultsErrors(Dialect.LAKE) shouldContain DatasourceErrorCodes.PROPERTIES_INVALID
+    }
+
+    /**
+     * #994, TEMPORARY CORRECTNESS exception (datasources.md §5.6): the pinned DuckDB driver ends a streamed cursor
+     * silently when the engine fails mid-stream, so the key is refused in the properties carrier (any case).
+     */
+    private fun streamResultsErrors(dialect: Dialect): List<String> {
+        val parsed = DatasourceProperties.fromRaw(mapOf("jdbc" to mapOf("JDBC_Stream_Results" to "true")))
+        return DatasourceValidator(driverAvailable = { true })
+            .validate(Fixtures.forDialect(dialect, properties = parsed), isCreate = true)
+            .errors
+            .map { it.code }
     }
 
     @Test

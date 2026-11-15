@@ -28,6 +28,30 @@ class JdbcUrlGuardTest {
     private val sqliteKeys = RefusedPropertyKeys.forDialect(Dialect.SQLITE)
     private val oracleKeys = RefusedPropertyKeys.forDialect(Dialect.ORACLE)
 
+    // ------------------------------------------------------------ #994: a temporary correctness refusal
+
+    @Test
+    fun `994 - jdbc_stream_results in a DUCKDB URL is refused`() {
+        streamResultsUrl(Dialect.DUCKDB, "jdbc:duckdb:/tmp/a.db;jdbc_stream_results=true")
+    }
+
+    @Test
+    fun `994 - jdbc_stream_results in a LAKE URL is refused`() {
+        streamResultsUrl(Dialect.LAKE, "jdbc:duckdb:;JDBC_STREAM_RESULTS=true")
+    }
+
+    /** #994, TEMPORARY CORRECTNESS exception (datasources.md §5.6): the URL carrier refuses what the properties carrier does. */
+    private fun streamResultsUrl(
+        dialect: Dialect,
+        url: String,
+    ) {
+        val result = DialectAdapters.forDialect(dialect).validateJdbcUrl(url)
+        withClue("$url must be refused for $dialect") {
+            result.valid shouldBe false
+            result.errors.single().code shouldBe DatasourceErrorCodes.JDBC_URL_MALFORMED
+        }
+    }
+
     // ------------------------------------------------------------ scheme and shape
 
     @Test

@@ -113,6 +113,8 @@ class DialectRefusalSetsTest {
                 "http_proxy",
                 "http_proxy_username",
                 "http_proxy_password",
+                // #994: TEMPORARY CORRECTNESS exception, removed with staging's StreamedReadGuard.
+                "jdbc_stream_results",
             )
     }
 
