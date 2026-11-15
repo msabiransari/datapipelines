@@ -51,6 +51,13 @@
     var s = h.text, a = h.ascent(s), d = h.descent(s), gap = h.em("labelGap"), tg = h.em("tickGap");
     var labels = o.labels, n = labels.length, x0 = o.bounds.x0, x1 = o.bounds.x1;
     var res = { texts: [], drawn: [], height: 0, rotated: false, corner: "clear", need: 0 };
+    // The corner rule keeps the look's clearance around the lowest tick label's box (a browser draws a font's ascent
+    // and descent rounded to whole pixels, so two boxes that only touch in the table's layout overlap when drawn).
+    var cz = null;
+    if (o.corner !== null) {
+      var clear = h.em("cornerClear");
+      cz = { x0: o.corner.x0 - clear, y0: o.corner.y0 - clear, x1: o.corner.x1 + clear, y1: o.corner.y1 + clear };
+    }
     if (n === 0) return res;
     var widths = [], widest = 0, step = o.plot.w, anyUnder = false;
     for (var i = 0; i < n; i++) {
@@ -70,9 +77,9 @@
       k = 1;
       while (k * step * sin < perp && k < n) k++;
       var maxLen = look("rotateMaxEm") * s;
-      if (o.corner !== null && o.corner.y1 > top) {
-        res.need = o.corner.y1 - top;
-        top = o.corner.y1;
+      if (cz !== null && cz.y1 > top) {
+        res.need = cz.y1 - top;
+        top = cz.y1;
         res.corner = "moved";
       }
       var longest = 0;
@@ -103,15 +110,15 @@
       placed.push({ i: j, x: x, shown: sh, w: h.width(sh, s), room: roomJ, under: under });
     }
     var dy = 0;
-    if (o.corner !== null && placed.length > 0) {
+    if (cz !== null && placed.length > 0) {
       var f = placed[0], box = { x0: f.x - f.w / 2, y0: top, x1: f.x + f.w / 2, y1: top + h.boxH(s) };
-      if (overlaps(box, o.corner)) {
-        res.need = o.corner.y1 - top;
+      if (overlaps(box, cz)) {
+        res.need = cz.y1 - top;
         if (res.need <= o.room || o.cornerIsFirst) {
           dy = res.need;
           res.corner = "moved";
         } else {
-          var cutRoom = Math.min(f.room, 2 * (f.x - o.corner.x1));
+          var cutRoom = Math.min(f.room, 2 * (f.x - cz.x1));
           var cut = cutRoom > 0 ? h.fit(labels[f.i].text, s, 400, cutRoom) : "";
           res.corner = "cut";
           if (cut === "") placed.shift();

@@ -49,6 +49,7 @@
     titleGap: f(0.5, "render", "em: below the title block"),
     tickGap: f(0.5, "render", "em: between a tick label and the plot"),
     labelGap: f(0.67, "render", "em: the least room between two neighbouring category labels"),
+    cornerClear: f(0.08, "render", "em: the corner rule's room around the lowest value tick label (#981); a browser rounds a font's ascent and descent to whole pixels (D9)"),
     axisTitleGap: f(0.33, "render", "em: between an axis title and its tick labels"),
     legendKey: f(0.83, "render", "em: a legend key's side"),
     legendKeyGap: f(0.42, "render", "em: between a legend key and its name"),

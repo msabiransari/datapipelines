@@ -16,7 +16,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 /** LA5: every non-token value of the contract's §3.8 that bar and the shared layout use, by field (closed list). */
 const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stackShare", "radiusMaxShare", "roundOuterOnly", "legendKeyBar", "labelsDefault", "stackTotalFormat",
   "levelFull", "levelCompact", "levelMinimal", "tickSpacing", "tickSpacingCompact", "rotateAngle", "rotateHiddenShare", "labelMinEm", "rotateMaxEm", "bandLabelMaxEm", "legendSideMaxEm",
-  "textAscent", "textDescent", "edge", "lineHeight", "titleGap", "tickGap", "labelGap", "axisTitleGap", "legendKey", "legendKeyGap", "legendEntryGap", "legendGap", "valueLabelGap",
+  "textAscent", "textDescent", "edge", "lineHeight", "titleGap", "tickGap", "labelGap", "cornerClear", "axisTitleGap", "legendKey", "legendKeyGap", "legendEntryGap", "legendGap", "valueLabelGap",
   "emptyText", "morePrefix"];
 
 test("LA5: the look table is closed and holds exactly the fixed values bar and the shared layout use", () => {
