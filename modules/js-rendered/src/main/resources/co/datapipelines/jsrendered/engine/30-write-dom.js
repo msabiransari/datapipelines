@@ -2,8 +2,10 @@
 // a tree of {tag, attrs: [[name, value]], text, kids}: the ONE mapping both writers share, so the browser's DOM and the
 // server's string are the same picture. Every attribute NAME is a constant of this file, never a value from a
 // document; no href, no style attribute and no event attribute is ever written. writeDom builds the tree with
-// createElementNS, setAttribute and textContent only. Translated from lane 977's 30-writers.js (adapted: the named
-// fields, the two forms, the frame read from the canvas rectangle, no markup in this file).
+// createElementNS, setAttribute and textContent only, and sets what it is handed (look contract §9): the colours the
+// primitives carry and the font of the theme it is given, never a var() (the engine never reads a stylesheet, record
+// §5.2; the page's adapter resolves the tokens and redraws on a theme change, §4.8). Translated from lane 977's
+// 30-writers.js (adapted: the named fields, the two forms, the frame read from the canvas rectangle, no markup here).
 (function (R) {
   "use strict";
   var NS = "http://www.w3.org/2000/svg";
@@ -113,12 +115,14 @@
     }
   }
 
-  /** The page form's fallback font: the built-in default of --font-sans (the host's custom property wins). */
-  var FONT = R.theme.TOKENS["--font-sans"][1];
-
-  /** writeDom(primitives, svg): the picture into an svg element of the page, its old children removed (page form). */
-  function writeDom(primitives, svg) {
-    var root = plan(primitives, "page", FONT);
+  /**
+   * writeDom(primitives, svg, theme): the picture into an svg element of the page, its old children removed. Every
+   * value is a literal: each colour the one its primitive carries, the font the given theme's (a name or {base, tokens},
+   * as render takes it; absent → the engine's default font). The plan's literal form, the one the standalone string
+   * writes; no attribute value names a custom property.
+   */
+  function writeDom(primitives, svg, theme) {
+    var root = plan(primitives, "standalone", R.theme.resolve(theme).font);
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     svg.setAttribute("viewBox", "0 0 " + num(root.w) + " " + num(root.h));
     svg.setAttribute("width", num(root.w));
