@@ -269,7 +269,7 @@ class ManagedLakeEgressProxyE2eTest {
     )
 
     /**
-     * The #839 timeline (`ManagedLakeReadsE2eTest.verifyTrickle`'s shape): prepare, arm, start the read, wait for the
+     * The #839 timeline (`ManagedLakeReadsTrickleE2eTest.verifyTrickle`'s shape): prepare, arm, start the read, wait for the
      * trickling GET, retire the generation and start its close, then watch for [observeSeconds] from the first GET.
      * Whatever happened, the trickle is released at the end so nothing outlives the test.
      */
@@ -685,7 +685,7 @@ class ManagedLakeEgressProxyE2eTest {
                 "datapipelines.lake.storage.path-style" to "true",
                 "datapipelines.lake.storage.access-key" to WRITER_ACCESS,
                 "datapipelines.lake.storage.secret-key" to WRITER_SECRET,
-                // The trickle's generation is replaced only by the test's own retire (ManagedLakeReadsE2eTest's E1 values).
+                // The trickle's generation is replaced only by the test's own retire (ManagedLakeReadsTrickleE2eTest's E1 values).
                 "datapipelines.lake.reads.max-generation-age-seconds" to "900",
                 "datapipelines.lake.reads.freshness-tick-seconds" to "600",
                 "datapipelines.datasources.retire-ceiling-seconds" to "1",
