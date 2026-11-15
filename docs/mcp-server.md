@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.82 (frozen contract — additive-only changes after this point)
+**Status:** v1.83 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-11-15
@@ -2025,7 +2025,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "renderer": {
         "type": "object",
-        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (plotly is retired; html and svg are reserved; all three are refused); version is the renderer major the host must provide, as a string."
+        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (html and svg are reserved and refused); version is the renderer major the host must provide, as a string."
       },
       "inputs": {
         "type": "object",
@@ -2105,7 +2105,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "renderer": {
         "type": "object",
-        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (plotly is retired; html and svg are reserved; all three are refused); version is the renderer major the host must provide, as a string."
+        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (html and svg are reserved and refused); version is the renderer major the host must provide, as a string."
       },
       "inputs": {
         "type": "object",
@@ -3124,7 +3124,8 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-15 | v1.82 | 989 (#989, js-rendered F5) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the three chart families (bar, line, area) and the schema address per family; the `tests` description's `mark_count` names a line's or an area's data points beside a bar's bars. Input schemas, permission rows and the tool count unchanged. |
+| 2026-11-15 | v1.83 | 989 (#989, js-rendered F5) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the three chart families (bar, line, area) and the schema address per family; the `tests` description's `mark_count` names a line's or an area's data points beside a bar's bars. Input schemas, permission rows and the tool count unchanged. |
+| 2026-11-15 | v1.82 | 988 (#988, js-rendered F4) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update`:** the `renderer` description no longer names the kind retired by #860; it reads "html and svg are reserved and refused". Text only: the input schema, the accepted kinds and every refusal are unchanged. |
 | 2026-11-15 | v1.81 | 986 (#986, js-rendered F2) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` — deliberate break, decided by the js-rendered charts record O-13:** the answer is `{id, name, version, status, body_hash}`; the `warnings` array and the descriptions' sentence about it are gone with the server's chart library layer. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-11 | v1.80 | #877 G7 (importer arm, ruling A.0 option 1) | **§6.2.32 `templates_purge_draft`: the guard gains its FOURTH arm** — a template version (any status; a DISCARDED one while its template keeps a live version) whose `imports` pin any version of the draft refuses `template.in_use` with `details.referencing_templates`, narrowed by the caller's view with `pins_hidden` exactly as the other three arms (#300). A guard CORRECTION, not a dependency feature (record §22, Draft 9 erratum): before it a library draft could be purged out from under a draft importer. The tool's description names the arm; schema, permission row and tool count (61) unchanged; `templates_used_by` unchanged. |
 | 2026-11-11 | v1.79 | #896 docs: datasource grants | **Text only, no surface change.** The resource listing's "Role filtering" paragraph names the datasources GRANTED to the key's pinned workspace (`DatasourceRepository.findAllVisible`, the grant predicate) instead of "its bound datasources plus global ones"; §6.2.29's permission note says mutating an INSTANCE datasource's registry (owned by no workspace) needs super admin, not "a GLOBAL datasource … admin". |

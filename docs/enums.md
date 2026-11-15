@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.60 (living document — updated as enums evolve)
+**Status:** v1.61 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -882,7 +882,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `html` | RESERVED — authored HTML (D13, D46); refused in round one |
 | `svg` | RESERVED — authored SVG (D13, D46); refused in round one |
 
-**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`. The `plotly` kind is **retired** (#860): a body naming it is refused the same way, as any unknown kind (`details.reason` `unknown_kind`; the message lists the allowed kinds).
+**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`; an unknown value carries `details.reason` `unknown_kind` and the message lists the allowed kinds. A kind retired earlier (#860) is refused the same way, as any unknown kind.
 
 ---
 
@@ -1424,7 +1424,8 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-15 | v1.60 | 989 (#989, js-rendered F5) | **§63 `ChartType`:** rows `line` and `area`, each with its enum entry, schema file, template and fixtures; their `x` is a band or a position (a temporal `x` has the one form `position`). |
+| 2026-11-15 | v1.61 | 989 (#989, js-rendered F5) | **§63 `ChartType`:** rows `line` and `area`, each with its enum entry, schema file, template and fixtures; their `x` is a band or a position (a temporal `x` has the one form `position`). |
+| 2026-11-15 | v1.60 | 988 (#988, js-rendered F4) | **§31 `RendererKind`:** the closing paragraph no longer names the kind retired by #860; it is refused as any unknown kind, as before. Text only: the closed set and its refusal are unchanged. |
 | 2026-11-15 | v1.59 | 986 (#986, js-rendered F2) | **§31 `RendererKind`:** the retired `plotly` is refused as any unknown kind (`details.reason` `unknown_kind`, the message listing the allowed kinds). **§32 `AssertionKind`:** on a chart, `rendered`, `mark_count` and `text_visible` are judged by the mechanical check from the chart engine's canonical render at 640 × 400 (`text_visible`: a text the chart shows), unjudged only on a host without the JavaScript runtime. No value added or removed. |
 | 2026-11-14 | v1.58 | 985 (#985, js-rendered F1) | New **§63 `ChartType`**: the chart types the engine draws, `bar` alone in this lane, each entry carrying its channel descriptor; held to the Kotlin enum by `ChartTypeTest` and, with the schema files, the engine's templates and its registered names, by `ChartTypeRegistryTest`. |
 | 2026-11-14 | v1.57 | 964 (#964, dp-lake P6) | New **§62 `StorageRow`**: the six rows of a table's storage breakdown in their first-fit order (`dp_records`, `table_metadata`, `current`, `history`, `keep_held`, `not_referenced`; V64's CHECK), held to the Kotlin enum by `InventoryGuardsTest`. |

@@ -191,17 +191,6 @@
   ],
   "bars": 6,
   "data_warnings": 0,
-  "degraded": {
-   "plotly": [],
-   "echarts": [
-    "color.title"
-   ],
-   "chartjs": [],
-   "apexcharts": [
-    "color.title"
-   ],
-   "vegalite": []
-  },
   "hover": [
    {
     "si": 0,

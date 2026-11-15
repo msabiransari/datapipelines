@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 
 /**
  * The worked documents: the dashboard implementation spec's §3.2 dashboard VERBATIM, and its §3.1 visualization as
- * the worked `chart` document v1 (design record 2026-11-06 §5.1, the 860 brief: the `plotly` kind retired) — the
+ * the worked `chart` document v1 (design record 2026-11-06 §5.1, the 860 brief: the earlier kind retired) — the
  * 854 example `bar-vertical.json`'s encoding over the spec's own input, transform and test case, so every dependent
  * (the dashboard's `revenue` input, the validator fakes' `revenue_bars@2` contract) still reads it unchanged. The
  * `bindings` are the DERIVED map (each encoded field to itself); `presentation` is gone (refused on a chart, O-5).

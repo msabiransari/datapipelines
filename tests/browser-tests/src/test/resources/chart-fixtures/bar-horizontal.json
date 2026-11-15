@@ -430,15 +430,6 @@
   ],
   "bars": 3,
   "data_warnings": 0,
-  "degraded": {
-   "plotly": [],
-   "echarts": [],
-   "chartjs": [
-    "mark.labels"
-   ],
-   "apexcharts": [],
-   "vegalite": []
-  },
   "hover": [],
   "label_texts": []
  }
