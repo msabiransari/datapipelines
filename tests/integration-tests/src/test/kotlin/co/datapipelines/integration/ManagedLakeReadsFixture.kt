@@ -81,7 +81,7 @@ class ManagedLakeReadsFixture(
     private val scratchDatabase = lazy { SharedE2e.scratchDatabase(databaseName) }
     private val database by scratchDatabase
 
-    /** Its own MinIO (see the class KDoc), seeded with the Iceberg fixture under `dp-lake-it` on first touch. */
+    /** Retained before startup so [close] can stop it even when starting or seeding fails. */
     private val minioContainer: Lazy<GenericContainer<*>> =
         lazy {
             GenericContainer(DockerImageName.parse(SharedE2e.MINIO_IMAGE))
@@ -90,12 +90,15 @@ class ManagedLakeReadsFixture(
                 .withCommand("server", "/data")
                 .withExposedPorts(MINIO_PORT)
                 .waitingFor(Wait.forHttp("/minio/health/ready").forPort(MINIO_PORT))
-                .also { container ->
-                    container.start()
-                    seedBucket(container)
-                }
         }
-    internal val minio by minioContainer
+
+    /** Its own MinIO (see the class KDoc), seeded with the Iceberg fixture under `dp-lake-it` on first touch. */
+    internal val minio by lazy {
+        minioContainer.value.also { container ->
+            container.start()
+            seedBucket(container)
+        }
+    }
 
     private val endpoint get() = "http://localhost:${minio.getMappedPort(MINIO_PORT)}"
 
@@ -297,7 +300,7 @@ class ManagedLakeReadsFixture(
     fun start() {
         val started = System.nanoTime()
         scratchDatabase.value
-        minioContainer.value
+        minio
         oidcStub.value
         setup = boot(maxAgeSeconds = A_MAX_AGE_SECONDS, tickSeconds = A_TICK_SECONDS)
         ensureReaderFixture()
@@ -317,7 +320,7 @@ class ManagedLakeReadsFixture(
         booted.reversed().filter { it !== setup && it.isActive }.forEach { context -> attempt { context.close() } }
         setup?.let { context -> attempt { context.close() } }
         if (oidcStub.isInitialized()) attempt { oidc.close() }
-        if (minioContainer.isInitialized()) attempt { minio.stop() }
+        if (minioContainer.isInitialized()) attempt { minioContainer.value.stop() }
         println("FAMILY_TEARDOWN class=${owner.simpleName} seconds=${secondsSince(started)}")
         failures.firstOrNull()?.let { first ->
             failures.drop(1).forEach(first::addSuppressed)
