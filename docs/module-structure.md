@@ -184,7 +184,7 @@ layer 9
 
 layer 10 — the test suites
 ┌─────────────────────────┐ ┌─────────────────────┐
-│ tests/integration-tests │ │ tests/browser-tests │  ← app (browser-tests: + web)
+│ tests/integration-tests │ │ tests/browser-tests │  ← app (browser-tests: + web, js-rendered)
 └─────────────────────────┘ └─────────────────────┘
 ```
 
@@ -219,7 +219,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake`, `dependency-contract`, `js-rendered`, `log-capture` |
 | `app` | `web`, `log-capture` |
 | `tests/integration-tests` | `app`, `log-capture` |
-| `tests/browser-tests` | `app`, `web` |
+| `tests/browser-tests` | `app`, `web`, `js-rendered` |
 
 Notes on the shape (explanatory, not additional rules):
 
@@ -569,7 +569,7 @@ was vendored like the rest (`VendoredHtmxAuditTest` pins the bytes and the licen
 
 ### 5.12 `tests/browser-tests`
 
-**Dependencies (internal):** `:modules:app` (full app context, same allowance as §5.11) and `:modules:web` (`testImplementation`, #721: `SiteShotsRailOrderTest` reads `AppNav.ITEMS`; `app` carries `web` as `implementation`, so the edge is declared, not leaked).
+**Dependencies (internal):** `:modules:app` (full app context, same allowance as §5.11) and `:modules:web` (`testImplementation`, #721: `SiteShotsRailOrderTest` reads `AppNav.ITEMS`; `app` carries `web` as `implementation`, so the edge is declared, not leaked), and `:modules:js-rendered` (`testImplementation`, #987: the page's chart-engine files are compared with `JsRenderedEngineFiles`' bytes, and the module's `jsRenderedTestData` configuration supplies Node's emitted inputs and results that the page's own draw must equal; test scope only).
 
 **Dependencies (external):**
 - `com.microsoft.playwright:playwright` — pinned in the catalog; the pin covers the
@@ -1372,7 +1372,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-15 | v1.23 | 987 (#987, js-rendered F3) | `web` declares `js-rendered` from main sources (§4.1 box and diagram, §4.2 row and the note under it): `ui/JsRenderedAssetConfig` serves the chart engine's files to the page, the same files the server draws with. No new module or external dependency. |
+| 2026-11-15 | v1.23 | 987 (#987, js-rendered F3) | `web` declares `js-rendered` from main sources (§4.1 box and diagram, §4.2 row and the note under it): `ui/JsRenderedAssetConfig` serves the chart engine's files to the page, the same files the server draws with. `tests/browser-tests` declares `js-rendered` from its tests only (§4.1 diagram, §4.2 row, §5.12): the page's engine files against the module's bytes, and Node's emitted results against the page's draw (`jsRenderedTestData`). No new module or external dependency. |
 | 2026-11-15 | v1.22 | 986 (#986, js-rendered F2) | `application` declares `js-rendered` from main sources (§4.1 box and diagram, the note under §4.2): `JsRenderedChartEngine`, the `ChartEngine` port's implementation. **§5.15:** `JavaScriptProgram` and `JavaScriptEngine.call`, the entry for trusted product code. **§5.20:** the save has two layers (the library support table and its warnings are gone, O-13); the `ChartEngine` port, the chart judge behind the `RenderedStateCheck` seam, and `ChartType` / `ChartPositions` driving the save rules, the columns, the bindings and the schema files. **§5.24:** the engine files are loaded by the chart entry; F1's guards read the product's entry. No new module, edge in the map or external dependency. |
 | 2026-11-15 | v1.21 | 985 (#985, js-rendered F1) | New layer-0 module `js-rendered`, the chart engine (§3 list and matrix row, §4.1 box, §4.2 row *(none)* and note, new §5.24); `application`'s row and diagram gain `js-rendered`, declared from its tests only so far (the three chart guards, through the module and its `jsRenderedTestData` configuration). |
 | 2026-11-14 | v1.20 | 957 (#957, dp-lake P6) | `lake` declares `scheduler` (§4.1 diagram edge, §4.2 note, §5.21; the §4.2 row already allowed it) for the system-job seam; db-scheduler stays the scheduler's `implementation` dependency. §5.21 gains the maintenance runs' public API. No new module, no new external dependency. |

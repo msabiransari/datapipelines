@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import co.datapipelines.web.ui.JsRenderedAssetConfig
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.RequestOptions
 import com.microsoft.playwright.options.WaitForSelectorState
@@ -22,8 +23,8 @@ import java.nio.file.Paths
  * tab renders the version's test-case FIXTURES one case at a time with no data request; the tab strip swaps panes in
  * page and carries `?tab=`; Evidence shows a run's screenshot only once one was stored; the Release dialog lists its
  * refusals before the button and its POST releases through the service; a viewer's and a promoter's pages issue no
- * lifecycle request; the shell's one bundle; every tab ZERO-CSP in both themes (the suite's after-each), at three
- * widths. #860: the fixture is the bar chart of `ChartBrowserFixtures.workspaceDocument`, its marks read off the DOM.
+ * lifecycle request; the chart engine's files; every tab ZERO-CSP in both themes (the suite's after-each), at three
+ * widths. #860: the fixture is the bar chart of `ChartBrowserFixtures.workspaceDocument`, its marks read off the DOM (#987: the engine's drawing).
  *
  * #426 — the strip's tab switches ride the shared history helper (workspace/history.js, family `visualizations`):
  * Back/Forward re-select in page, a restored root wires once, and another family's entry runs none of this glue.
@@ -41,17 +42,16 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         page.onRequest { requested += it.method() + " " + it.url() }
 
         page.navigate("$baseUrl/visualizations/$id")
-        // ONE Plotly bundle, the server's choice for the viewed version's traces.
-        page.waitForSelector("script[data-dp-plotly-bundle]", Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED))
-        page.locator("script[data-dp-plotly-bundle]").count() shouldBe 1
-        page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
+        // #987: the chart engine's files, in the engine's load order, each once: the page's only chart scripts.
+        page.waitForSelector("#viz-tab-preview")
+        engineScripts() shouldBe JsRenderedAssetConfig.scripts
         page.locator("#viz-tab-preview").innerText() shouldContain "test fixtures"
         page.waitForSelector("#viz-pane-preview section[data-viz-case-index='0'][data-dp-ready='true']")
         val bars =
             page.evaluate(
                 "() => Array.from(document.querySelectorAll(" +
-                    "\"#viz-pane-preview section[data-viz-case-index='0'] .barlayer .point path\"))" +
-                    ".filter(p => { const d = p.getAttribute('d'); return !!d && d !== 'M0,0Z'; }).length",
+                    "\"#viz-pane-preview section[data-viz-case-index='0'] svg.dp-chart g.dp-mark[data-series] > .dp-mark\"))" +
+                    ".filter(m => { const b = m.getBBox(); return b.width > 0 && b.height > 0; }).length",
             ) as Number
         withClue("case 'three months' draws its three bars") { bars.toInt() shouldBe ChartBrowserFixtures.WORKSPACE_BARS }
         // One case at a time: the second is hidden and NOT mounted until it is selected.
@@ -479,8 +479,9 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
               const o = window.__v444, b = document.querySelector('#viz-preview-data');
               if (!s || s.hidden || s.closest('[data-dp-pane]').hidden || !o.mounts.some(m => m.block === b && m.index === Number(i) && m.ready)) return false;
               if (i === '1') return s.querySelector('.dp-dashboard-status')?.getAttribute('data-dp-state') === 'no-data';
-              const bars = Array.from(s.querySelectorAll('.barlayer .point path')).filter(p => p.getAttribute('d') && p.getAttribute('d') !== 'M0,0Z');
-              const ticks = Array.from(s.querySelectorAll('.xtick text')).map(t => t.textContent);
+              const bars = Array.from(s.querySelectorAll('svg.dp-chart g.dp-mark[data-series] > .dp-mark'))
+                .filter(m => { const b = m.getBBox(); return b.width > 0 && b.height > 0; });
+              const ticks = Array.from(s.querySelectorAll('svg.dp-chart text.dp-tick[text-anchor="middle"]')).map(t => t.textContent);
               return bars.length === 3 && JSON.stringify(ticks) === '["Jan","Feb","Mar"]';
             }""",
             index,

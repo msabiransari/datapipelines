@@ -316,7 +316,9 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // #756 — test-only `log-capture` on both (module-structure §5.23).
     ":modules:app" to setOf(":modules:web", ":modules:log-capture"),
     ":tests:integration-tests" to setOf(":modules:app", ":modules:log-capture"),
-    ":tests:browser-tests" to setOf(":modules:app", ":modules:web"),
+    // #987 — test-only `js-rendered` (module-structure §5.12): the page's engine files compared with the module's own bytes,
+    // and Node's emitted results for the identity guard on the page (its `jsRenderedTestData` configuration).
+    ":tests:browser-tests" to setOf(":modules:app", ":modules:web", ":modules:js-rendered"),
 )
 
 // Kover wires a per-module SELF-edge through its `kover` aggregation bucket —

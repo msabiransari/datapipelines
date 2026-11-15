@@ -2,6 +2,7 @@ package co.datapipelines.browser
 
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
@@ -18,11 +19,11 @@ import java.util.UUID
  * transport, the REAL CSP, the REAL vendored bytes and the page a person would see.
  *
  * ## The CSP measurement is POSITIVE
- * The live policy is copied off a real response (see the suite); Plotly's rules must APPLY through
- * the vendored `plotly.css` (a computed style only that sheet provides) and the console must carry
- * no violation but the empty-element hash Playwright's own screenshot path already produces — with
- * the exemption NOT relied on for anything this suite asserts: the computed-style checks cannot be
- * fooled by it. The falsification (plotly.css removed → the computed-style assertions red) is
+ * The live policy is copied off a real response (see the suite); the chart's rules must APPLY (#987:
+ * the chart card's padding, a computed style only `dashboards.css`'s chart-card rule provides, and the
+ * engine's resolved colours, set as attributes the policy does not govern) and the console must carry
+ * no violation — the computed-style checks cannot be fooled by the collector's one set-aside. The
+ * falsification (dashboards.css removed → the computed-style assertion red) is
  * `the positive CSP measurement is red when the stylesheet is removed`.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
@@ -42,16 +43,16 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
     fun `bootstrap mounts the board and the initial action renders chart, table and kpi`() {
         val root = ready("dpboot")
         installHostPage()
-        val board = seedBoard(root)
+        val board = seedBoardWithGrid(root)
         openHost(board)
 
         // The placeholders are the composite's; the renders came through the real stream.
         page.waitForFunction("() => window.__dp.renders.length >= 3")
-        page.locator("#board .plotly .main-svg").first().waitFor()
-        // #860: the bar card draws one bar per category of its four rows, read off the drawn paths.
+        page.locator("#board svg.dp-chart").first().waitFor()
+        // #860: the bar card draws one bar per category of its four rows, read off the engine's drawn marks (#987).
         page.waitForFunction(
-            "() => Array.from(document.querySelectorAll('#board [data-dp-viz=revenue] .barlayer .point path'))" +
-                ".filter(function (p) { var d = p.getAttribute('d'); return !!d && d !== 'M0,0Z'; }).length === 4",
+            "() => Array.from(document.querySelectorAll('#board [data-dp-viz=revenue] svg.dp-chart g.dp-mark[data-series] > .dp-mark'))" +
+                ".filter(function (m) { var b = m.getBBox(); return b.width > 0 && b.height > 0; }).length === 4",
         )
         page.locator("#board .dp-dashboard-table tbody tr").first().waitFor()
         page.locator("#board .dp-dashboard-kpi-number").first().waitFor()
@@ -64,44 +65,28 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(2)
-    fun `the positive CSP measurement holds - plotly css applies, no violation but the empty element`() {
+    fun `the positive CSP measurement holds - the chart's rules apply, no violation`() {
         val root = ready("dpcsp")
         installHostPage()
-        val board = seedBoard(root)
+        val board = seedBoardWithGrid(root)
         openHost(board)
-        page.waitForFunction("() => window.__dp.renders.length >= 1")
-
-        // POSITIVE: Plotly's own stylesheet governs the chart root — the "Open Sans" font stack is a
-        // rule ONLY plotly.css (or the injection the design-around skipped) could supply; the CSS
-        // initial value of font-family is theme-dependent and never this.
-        // The measurement syncs on the FACT it asserts — the chart ROOT's presence (#366 red 1):
-        // the render counter counts every renderer's render, so `renders.length >= 1` has been true
-        // while no plotly root existed yet (a table or KPI drew first) and the evaluate below read
-        // `getComputedStyle(null)` — the CI red's face. ATTACHED, not visible: the container div is
-        // a real, styled element the moment it is attached (computed style needs no box).
-        page.waitForSelector(
-            "#board .js-plotly-plot .plotly",
-            com.microsoft.playwright.Page
-                .WaitForSelectorOptions()
-                .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
-        )
-        page.waitForFunction("() => window.__dp.renders.length >= 1")
-        val fontFamily =
-            page.evaluate(
-                "() => getComputedStyle(document.querySelector('.js-plotly-plot .plotly')).fontFamily",
-            ) as String
-        (fontFamily.contains("Open Sans")) shouldBe true
-        // The design-around is in force: the element Plotly checks exists and is marked, so the
-        // bundle injected nothing (the sheet element stays EMPTY — the rules come from the file).
-        val sheetText =
-            page.evaluate(
-                "() => { const s = document.getElementById('plotly.js-style-global'); return s ? s.textContent : null; }",
-            ) as String?
-        (sheetText ?: "") shouldBe ""
-
-        // The console carried no CSP refusal at all. #456: the suite's collector sets aside only a
-        // refusal with no application source (Playwright's screenshot insert), so an empty-hash
-        // refusal from the bundle or the page's scripts is counted here like any other.
+        // The measurement syncs on the FACT it asserts — the drawn chart (#366 red 1: the render counter counts every
+        // renderer's render, so a table or KPI drawn first is not the chart).
+        page.locator("#board svg.dp-chart g.dp-mark").first().waitFor()
+        val read = page.evaluate(CHART_RULES, "#board") as Map<*, *>
+        // POSITIVE: the chart card's padding is the contract's 16 px (`var(--chart-pad, 16px)`), a rule ONLY dashboards.css's
+        // chart-card selector supplies (every other card pads by `--gap-sm`); and the bar's computed fill is the resolved
+        // colour the engine set as an attribute — no `var()`, no inline style, nothing the policy refuses.
+        withClue("the chart's rules apply under the live policy: $read") {
+            read["padding"] shouldBe "16px"
+            read["otherPadding"] shouldNotBe "16px"
+            (read["fill"] as String).isNotEmpty() shouldBe true
+            (read["fill"] as String).contains("var(") shouldBe false
+            read["computedFill"] shouldNotBe "none"
+            read["styled"] shouldBe 0
+        }
+        // The console carried no CSP refusal at all. #456: the suite's collector sets aside only a refusal with no
+        // application source (Playwright's screenshot insert), so a refusal from the page's scripts is counted here.
         drainCspViolations() shouldBe emptyList()
     }
 
@@ -109,18 +94,16 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
     @Order(3)
     fun `the positive CSP measurement is red when the stylesheet is removed - the falsification`() {
         val root = ready("dpcspneg")
-        // The same host page, but the plotly.css link is stripped from the served HTML: the design
-        // around is gone, Plotly injects nothing (no-inline-styles), so its rules are ABSENT.
-        installHostPageWithoutPlotlyCss()
-        val board = seedBoard(root)
+        // The same host page, but without dashboards.css: the chart card's rule is gone, so the padding is not the
+        // contract's 16 px — the positive case's measurement can go red.
+        installHostPage(stylesheets = HOST_STYLESHEETS_WITHOUT_DASHBOARDS)
+        val board = seedBoardWithGrid(root)
         openHost(board)
-        page.waitForFunction("() => window.__dp.renders.length >= 1")
-        val fontFamily =
-            page.evaluate(
-                "() => { const el = document.querySelector('.js-plotly-plot .plotly');" +
-                    " return el ? getComputedStyle(el).fontFamily : null; }",
-            ) as String?
-        (fontFamily != null && fontFamily.contains("Open Sans")) shouldBe false
+        page.locator("#board svg.dp-chart g.dp-mark").first().waitFor()
+        val read = page.evaluate(CHART_RULES, "#board") as Map<*, *>
+        withClue("without dashboards.css the chart card's padding is not the contract's: $read") {
+            read["padding"] shouldNotBe "16px"
+        }
     }
 
     @Test
@@ -343,7 +326,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
     fun `connection loss retains the content and offers retry`() {
         val root = ready("dploss")
         installHostPage()
-        val board = seedBoard(root)
+        val board = seedBoardWithGrid(root)
         openHost(board)
         page.waitForFunction("() => window.__dp.renders.length >= 3")
         val rendersBefore = page.evaluate("() => window.__dp.renders.length") as Number
@@ -354,7 +337,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => window.__dp.notifications.some(function (n) { return n.code === 'transport.network'; })")
         // The content stayed: the earlier renders are still in the DOM, nothing was cleared.
         (page.evaluate("() => window.__dp.renders.length") as Number).toInt() shouldBe rendersBefore.toInt()
-        page.locator("#board .plotly .main-svg").first().waitFor()
+        page.locator("#board svg.dp-chart").first().waitFor()
         // And the outcome was published with the Retry intent.
         page.waitForFunction("() => window.__dp.notifications.some(function (n) { return n.recover === 'retry'; })")
     }
@@ -444,7 +427,6 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                 dashboard: { id: '$board', version: 'released' },
                 container: second,
                 adapter: window.DatapipelinesDashboard.adapters(second),
-                charts: { library: 'plotly', instance: window.Plotly },
               });
               window.__dp2.instance = instance;
               instance.ready.then(function () { window.__dp2.ready = true; }, function () {});
@@ -458,7 +440,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction(
             """
             () => {
-              const chips = document.querySelectorAll('#board .plotly, #board-2 .plotly');
+              const chips = document.querySelectorAll('#board svg.dp-chart, #board-2 svg.dp-chart');
               return chips.length >= 2;
             }
             """.trimIndent(),
@@ -466,7 +448,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         // Disposing the first leaves the second working.
         page.evaluate("() => window.__dp.instance.dispose()")
         page.evaluate("() => window.__dp2.instance.refresh({ scope: 'all' })")
-        page.waitForFunction("() => document.querySelectorAll('#board-2 .plotly .main-svg').length > 0")
+        page.waitForFunction("() => document.querySelectorAll('#board-2 svg.dp-chart').length > 0")
     }
 
     @Test
@@ -474,10 +456,10 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
     fun `light and dark - the handback screenshots of the conformance board`() {
         val root = ready("dpshots")
         installHostPage(theme = "light")
-        val board = seedBoard(root)
+        val board = seedBoardWithGrid(root)
         openHost(board)
         page.waitForFunction("() => window.__dp.renders.length >= 3")
-        page.waitForTimeout(500.0) // Plotly's own draw settle before the shutter
+        page.waitForTimeout(500.0) // the drawing's settle before the shutter
         page.screenshot(
             com.microsoft.playwright.Page
                 .ScreenshotOptions()
@@ -507,6 +489,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         val root = ready("dpparam")
         installHostPage()
         val board = seedParameterisedBoard(root)
+        pinGrid(board, PARAMETERISED_GRID)
         // Pass-through interception: the request BODIES are read for the assertions while the real
         // routes flow untouched (the transport is the oracle, never a callback count).
         val evaluateBodies = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -558,11 +541,11 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
             ) as Map<*, *>
         refresh["selections"] shouldBe """{"country":"CAN"}"""
         (refresh["revision"] as Number).toInt() shouldBe 1
-        // The pipeline EXECUTED with the selection: the chart's band axis draws CAN's category (read off the DOM; #860's
-        // converter writes positional category ids, so the drawn tick is the evidence, not the option).
+        // The pipeline EXECUTED with the selection: the chart's band axis draws CAN's category (read off the engine's
+        // drawing, #987: the band axis's level labels are the middle-anchored ticks of a vertical bar).
         page.waitForFunction(
             """() => {
-              const tick = document.querySelector('#board .js-plotly-plot .xtick text');
+              const tick = document.querySelector('#board svg.dp-chart text.dp-tick[text-anchor="middle"]');
               return !!tick && tick.textContent === 'CAN';
             }""",
         )
@@ -579,9 +562,10 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         val root = ready("dpparamshot")
         installHostPage(theme = "light")
         val board = seedParameterisedBoard(root)
+        pinGrid(board, PARAMETERISED_GRID)
         openHost(board)
         page.waitForFunction("() => window.__dp.renders.length >= 1")
-        page.waitForTimeout(500.0) // Plotly's draw settle
+        page.waitForTimeout(500.0) // the drawing's settle
         page.screenshot(
             com.microsoft.playwright.Page
                 .ScreenshotOptions()
@@ -739,7 +723,6 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                 dashboard: { id: '$board', version: 'released' },
                 container: second,
                 adapter: window.DatapipelinesDashboard.adapters(second),
-                charts: { library: 'plotly', instance: window.Plotly },
               });
               window.__dp2.instance = instance;
               instance.ready.then(function () { window.__dp2.ready = true; }, function () {});
@@ -756,7 +739,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         val board = seedControlsBoard(root)
         openHost(board)
         page.waitForFunction("() => window.__dp.renders.length >= 1")
-        page.waitForTimeout(500.0) // Plotly's own draw settle before the shutter
+        page.waitForTimeout(500.0) // the drawing's settle before the shutter
         page.screenshot(
             com.microsoft.playwright.Page
                 .ScreenshotOptions()
@@ -779,52 +762,30 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         )
     }
 
-    /** The falsification host: the same page WITHOUT the plotly.css link. */
-    private fun installHostPageWithoutPlotlyCss() {
-        val cspHeader = fetchLiveCsp()
-        val html =
-            """
-            <!doctype html>
-            <html lang="en" data-theme="dark">
-            <head>
-              <meta charset="utf-8">
-              <link rel="stylesheet" href="/vendor/design-system/tokens.css">
-              <link rel="stylesheet" href="/vendor/design-system/themes/dark.css">
-              <link rel="stylesheet" href="/css/app.css">
-              <!-- #456: removing the sheet must not re-enable Plotly's inline injection. -->
-              <template id="plotly.js-style-global" class="no-inline-styles"></template>
-            </head>
-            <body>
-              <main id="board"></main>
-              <script src="/vendor/plotly/plotly-2d.min.js" data-dp-plotly-bundle="2d"></script>
-              <script src="/js/datapipelines-dashboard.js"></script>
-              <script src="/js/datapipelines-dashboard-chart.js"></script>
-              <script src="/js/datapipelines-dashboard-plotly.js"></script>
-              <script src="/js/datapipelines-dashboard-table.js"></script>
-              <script src="/js/datapipelines-dashboard-kpi.js"></script>
-              <script src="/test/dashboards/host-glue.js"></script>
-            </body>
-            </html>
-            """.trimIndent()
-        page.route("**/test/dashboards/host*") { route ->
-            route.fulfill(
-                com.microsoft.playwright.Route
-                    .FulfillOptions()
-                    .setStatus(200)
-                    .setContentType("text/html; charset=utf-8")
-                    .setHeaders(mapOf("Content-Security-Policy" to cspHeader))
-                    .setBody(html),
-            )
-        }
-        page.route("**/test/dashboards/host-glue*") { route ->
-            route.fulfill(
-                com.microsoft.playwright.Route
-                    .FulfillOptions()
-                    .setStatus(200)
-                    .setContentType("application/javascript; charset=utf-8")
-                    .setHeaders(mapOf("Content-Security-Policy" to cspHeader))
-                    .setBody(hostGlueJs),
-            )
-        }
+    private companion object {
+        /**
+         * The parameterised board's chart pinned to half the board, four rows: unpinned, the composite auto-places it
+         * into a twelfth-width cell, which the engine reads as `too-small` and draws nothing (record §4.3).
+         */
+        const val PARAMETERISED_GRID = """[{"name":"countrychart","x":0,"y":0,"w":6,"h":4}]"""
+
+        /** The host page's sheets less dashboards.css: the falsification host of the positive measurement. */
+        val HOST_STYLESHEETS_WITHOUT_DASHBOARDS = HOST_STYLESHEETS.filterNot { it == "/css/dashboards.css" }
+
+        /**
+         * The chart card's padding and a non-chart card's, one bar's fill attribute and computed fill, and the count of
+         * elements in the chart's picture with an inline style or a style element (the composite's grid placement is
+         * CSSOM on the slots, outside the picture, and is not the engine's).
+         */
+        const val CHART_RULES =
+            """scope => {
+              const svg = document.querySelector(scope + ' svg.dp-chart');
+              const card = svg.closest('.dp-dashboard-card');
+              const other = Array.from(document.querySelectorAll(scope + ' .dp-dashboard-card')).find(c => !c.querySelector('svg.dp-chart'));
+              const bar = svg.querySelector('g.dp-mark[data-series] > .dp-mark');
+              return { padding: getComputedStyle(card).paddingTop, otherPadding: other ? getComputedStyle(other).paddingTop : null,
+                fill: bar.getAttribute('fill') || '', computedFill: getComputedStyle(bar).fill,
+                styled: (svg.hasAttribute('style') ? 1 : 0) + svg.querySelectorAll('[style], style').length };
+            }"""
     }
 }

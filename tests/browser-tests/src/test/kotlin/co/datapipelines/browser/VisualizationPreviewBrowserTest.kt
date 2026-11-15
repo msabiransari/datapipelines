@@ -22,8 +22,8 @@ import java.security.MessageDigest
  * What this does NOT claim: that the server rendered anything — the screenshots are REVIEW evidence (the issue's
  * sentence; the server-side headless check is L6). The CSP measurement is the suite's collector (zero violations
  * across every page every context of this test opened, asserted in `closePage`). #860: the document is a `table` — the
- * preview's surface is the same for every kind, and the chart family's proofs (marks, ticks, hover, the Plotly host
- * marker) moved to `BarChartBrowserTest` with the Plotly figures they read.
+ * preview's surface is the same for every kind, and the chart family's proofs (marks, ticks, tooltip lines) are
+ * `BarChartBrowserTest`'s, read off the chart engine's drawing (#987; the library's host marker retired with it).
  */
 class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
     @Test
@@ -167,7 +167,7 @@ class VisualizationPreviewBrowserTest : DashboardBrowserSuite() {
     /**
      * A table over one input, two cases: three months (three rows) and an empty one (`no_data`). The preview's surface —
      * the capability, the agent's cookie-less context, the upload and the release — is the same for every kind; the chart
-     * family's proofs (marks, ticks, hover, the Plotly host marker) are `BarChartBrowserTest`'s.
+     * family's proofs (marks, ticks, tooltip lines) are `BarChartBrowserTest`'s.
      */
     private fun document(name: String): String =
         """

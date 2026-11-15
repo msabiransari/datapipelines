@@ -154,13 +154,13 @@ class ReleaseDialogStaleHashBrowserTest : VisualizationBrowserSuite() {
             preview.page.navigate("$baseUrl/visualizations/$previewPath")
             preview.page.locator("section[data-dp-case='one month'][data-dp-ready='true']").waitFor()
             preview.page
-                .locator("section[data-dp-case='one month'] .plotly .main-svg")
+                .locator("section[data-dp-case='one month'] svg.dp-chart")
                 .first()
                 .waitFor()
-            // #860: the one month's bar, read off the drawn paths.
+            // #860: the one month's bar, read off the engine's drawn marks (#987: a mark with an area).
             preview.page.evaluate(
-                "() => Array.from(document.querySelectorAll(\"section[data-dp-case='one month'] .barlayer .point path\"))" +
-                    ".filter(p => p.getAttribute('d') && p.getAttribute('d') !== 'M0,0Z').length",
+                "() => Array.from(document.querySelectorAll(\"section[data-dp-case='one month'] svg.dp-chart g.dp-mark[data-series] > .dp-mark\"))" +
+                    ".filter(m => { const b = m.getBBox(); return b.width > 0 && b.height > 0; }).length",
             ) shouldBe 1
         } finally {
             preview.close()

@@ -1,4 +1,4 @@
-// module-structure.md §5.12 — allowed internal deps: app (full context, end-to-end).
+// module-structure.md §5.12 — allowed internal deps: app (full context, end-to-end), web, js-rendered (test data).
 // Its `test` runs in `build`/`check` like every module's (the root `browserTest` runs it alone);
 // only `siteShots` below stays outside build/check (#297).
 plugins { id("datapipelines.common-conventions") }
@@ -7,6 +7,10 @@ dependencies {
     testImplementation(project(":modules:app"))
     // #721: SiteShotsRailOrderTest pins the screenshot driver's rail table against AppNav.ITEMS.
     testImplementation(project(":modules:web"))
+    // #987 (js-rendered F3, A4/A6): the engine's files the page must receive byte for byte (JsRenderedEngineFiles), and
+    // Node's emitted inputs and results the page's own draw must equal (the jsRenderedTestData configuration).
+    testImplementation(project(":modules:js-rendered"))
+    testImplementation(project(path = ":modules:js-rendered", configuration = "jsRenderedTestData"))
 
     // Seeding the local admin needs a real Argon2id hash of the known password —
     // same declared-exception rationale as tests/integration-tests (§5.11's note).

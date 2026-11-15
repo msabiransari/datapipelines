@@ -207,7 +207,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
             page.click("#dp-tab-board")
             page.waitForSelector("#dp-pane-board:not([hidden])")
             page.waitForFunction(
-                "() => { const s = document.querySelector('#dp-board .plotly .main-svg');" +
+                "() => { const s = document.querySelector('#dp-board svg.dp-chart');" +
                     " return s && s.getBoundingClientRect().width > 100; }",
             )
             page.locator("#dp-tab-board").getAttribute("aria-selected") shouldBe "true"
@@ -296,9 +296,9 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         page.locator(".dp-versions a[aria-current='true']").innerText() shouldBe "v1"
         page.locator("#dp-board-refusal:not([hidden])").count() shouldBe 0
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
         page.waitForFunction(
-            "() => { const s = document.querySelector('#dp-board .plotly .main-svg'); return s && s.getBoundingClientRect().width > 100; }",
+            "() => { const s = document.querySelector('#dp-board svg.dp-chart'); return s && s.getBoundingClientRect().width > 100; }",
         )
         (page.evaluate("() => document.getElementById('dp-board').getAttribute('data-dp-dashboard-version')") as String?) shouldBe "1"
         page.url() shouldBe "$baseUrl/dashboards/$board"
@@ -468,7 +468,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         page.navigate("$baseUrl/dashboards/$draftOnly")
         page.waitForSelector("[data-dp-viewed-label]")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
         ensureTheme("dark")
         page.waitForTimeout(300.0)
         page.screenshot(
@@ -497,7 +497,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
         page.click("#dp-tab-board")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
         page.waitForFunction(
-            "() => { const s = document.querySelector('#dp-board .plotly .main-svg'); return s && s.getBoundingClientRect().width > 100; }",
+            "() => { const s = document.querySelector('#dp-board svg.dp-chart'); return s && s.getBoundingClientRect().width > 100; }",
         )
         page.waitForTimeout(500.0)
         page.screenshot(

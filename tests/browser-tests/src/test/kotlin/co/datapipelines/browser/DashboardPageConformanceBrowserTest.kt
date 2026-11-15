@@ -17,9 +17,9 @@ import org.junit.jupiter.api.TestMethodOrder
  * Scenarios (the record's numbering, as §10.5 maps them): 1 bootstrap order; 3 freshness across
  * overlapping refreshes (bounded here — the frame-level gate is the node tests'); 4 the
  * parameter lock and its deadline; 10–14 notifications, abort, connection loss, disposal, two
- * instances; 17–18 the bundles and the screens (17's bundle pair is judged by the render test's
- * one-tag assertion and the runtime's bootstrap judgement; 18's screens are
- * [DashboardPagesBrowserTest]'s handback shots).
+ * instances; 17–18 the scripts and the screens (17: since #987 the page loads the chart engine's
+ * files, judged by the workspace controller test's script list and the runtime's bootstrap
+ * judgement; 18's screens are [DashboardPagesBrowserTest]'s handback shots).
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
@@ -104,7 +104,7 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
         val board = seedBoard(root)
         openBoard(board)
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
         page.locator("#dp-board .dp-dashboard-table tbody tr").first().waitFor()
         page.locator("#dp-board .dp-dashboard-kpi-number").first().waitFor()
         page.locator("#dp-board .dp-dashboard-kpi-number").first().textContent() shouldBe "42"
@@ -139,7 +139,7 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
                 "() => window.__dpPage.notifications.filter(function (n) { return n.severity === 'error'; }).length",
             ) as Number
         errorCount.toInt() shouldBe 0
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
     }
 
     @Test
@@ -244,7 +244,7 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
         page.evaluate("() => window.__dpPage.instance.refresh({ scope: 'all' })")
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'transport.network'; })")
         // The page's sink showed it (the refusal region is the notification region).
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.recover === 'retry'; })")
     }
 
@@ -318,7 +318,6 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
                 dashboard: { id: '$board', version: 'released' },
                 container: second,
                 adapter: window.DatapipelinesDashboard.adapters(second),
-                charts: { library: 'plotly', instance: window.Plotly },
               });
               window.__dpPage2.instance = instance;
               instance.ready.then(function () { window.__dpPage2.ready = true; }, function () {});
@@ -328,10 +327,10 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => window.__dpPage2 && window.__dpPage2.ready === true")
         page.evaluate("() => window.__dpPage.instance.refresh({ scope: 'targets', targets: ['revenue'] })")
         page.evaluate("() => window.__dpPage2.instance.refresh({ scope: 'targets', targets: ['revenue'] })")
-        page.waitForFunction("() => document.querySelectorAll('#dp-board .plotly, #dp-board-2 .plotly').length >= 2")
+        page.waitForFunction("() => document.querySelectorAll('#dp-board svg.dp-chart, #dp-board-2 svg.dp-chart').length >= 2")
         page.evaluate("() => window.__dpPage.instance.dispose()")
         page.evaluate("() => window.__dpPage2.instance.refresh({ scope: 'all' })")
-        page.waitForFunction("() => document.querySelectorAll('#dp-board-2 .plotly .main-svg').length > 0")
+        page.waitForFunction("() => document.querySelectorAll('#dp-board-2 svg.dp-chart').length > 0")
     }
 
     @Test

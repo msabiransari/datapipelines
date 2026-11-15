@@ -118,8 +118,8 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
 
     /**
      * Q-L4 with the two `quirks.md:64` fixtures at the corpus's 900 px render and a 480 px phone column: the longest bar's
-     * value label is inside the chart box. The library-era control (the reference converter's layout planted by Plotly's
-     * `relayout`) left with the library; the control is now the probe's own: the same label moved past the box's right
+     * value label is inside the chart box. The control of the library era (the reference converter's layout planted
+     * through the old library's own relayout call) left with it; the control is now the probe's own: the same label moved past the box's right
      * edge must read as outside, so the product's "inside" is a measurement.
      */
     @Test

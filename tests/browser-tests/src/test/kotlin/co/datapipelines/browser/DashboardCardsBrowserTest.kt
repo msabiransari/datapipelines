@@ -46,7 +46,7 @@ class DashboardCardsBrowserTest : DashboardBrowserSuite() {
         val board = seedBoard(root)
         openBoard(board)
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
         page.locator("#dp-board .dp-dashboard-table tbody tr").first().waitFor()
         page.locator("#dp-board .dp-dashboard-kpi-number").first().waitFor()
 

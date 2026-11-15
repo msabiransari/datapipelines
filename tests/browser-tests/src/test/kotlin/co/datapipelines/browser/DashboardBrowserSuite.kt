@@ -136,9 +136,13 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
      * tokens resolve exactly as they do in production, and the chart engine's files from the list
      * the product's templates load (#987 D2) — never a hand-written run of tags.
      */
-    protected fun installHostPage(theme: String = "dark") {
+    protected fun installHostPage(
+        theme: String = "dark",
+        stylesheets: List<String> = HOST_STYLESHEETS,
+    ) {
         val cspHeader = fetchLiveCsp()
         val engineTags = JsRenderedAssetConfig.scripts.joinToString("\n") { "  <script src=\"$it\"></script>" }
+        val sheets = stylesheets.joinToString("\n") { "  <link rel=\"stylesheet\" href=\"${it.replace("{theme}", theme)}\">" }
         val html =
             """
             <!doctype html>
@@ -146,10 +150,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             <head>
               <meta charset="utf-8">
               <title>dashboard host</title>
-              <link rel="stylesheet" href="/vendor/design-system/tokens.css">
-              <link rel="stylesheet" href="/vendor/design-system/themes/$theme.css">
-              <link rel="stylesheet" href="/css/app.css">
-              <link rel="stylesheet" href="/css/dashboards.css">
+            $sheets
             </head>
             <body>
               <main id="board"></main>
@@ -185,6 +186,17 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             )
         }
     }
+
+    /**
+     * The chart engine's scripts on [target] (#987 D2): the path of every script under [JsRenderedAssetConfig.PREFIX], in
+     * document order. A page that draws charts loads exactly [JsRenderedAssetConfig.scripts], each once.
+     */
+    @Suppress("UNCHECKED_CAST")
+    protected fun engineScripts(target: Page = page): List<String> =
+        target.evaluate(
+            "p => Array.from(document.scripts).filter(s => s.src).map(s => new URL(s.src).pathname).filter(n => n.startsWith(p))",
+            JsRenderedAssetConfig.PREFIX,
+        ) as List<String>
 
     /**
      * The LIVE policy, copied off a real HTML response — the one way a browser-tests module can
@@ -319,6 +331,18 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             }
         sql("UPDATE dashboard_versions SET body_json = $layout WHERE dashboard_id = '$board'::uuid")
         return board
+    }
+
+    /**
+     * Pins [grid] (the layout's grid entries, JSON) on every version of [board] (#987): a chart the composite
+     * auto-places into a twelfth-width cell is `too-small` for the engine (record §4.3) and draws nothing, so a case
+     * that reads a drawn chart pins its slot.
+     */
+    protected fun pinGrid(
+        board: String,
+        grid: String,
+    ) {
+        sql("UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb) WHERE dashboard_id = '$board'::uuid")
     }
 
     /**
@@ -1033,6 +1057,14 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     }
 
     protected companion object {
+        /** The host page's sheets, in order (`{theme}` is the page's theme). */
+        val HOST_STYLESHEETS =
+            listOf(
+                "/vendor/design-system/tokens.css",
+                "/vendor/design-system/themes/{theme}.css",
+                "/css/app.css",
+                "/css/dashboards.css",
+            )
         const val DESKTOP_BOARD_WIDTH = 1440
 
         // Independent scenario inputs: expanded menu, this desktop band's padding, and a
