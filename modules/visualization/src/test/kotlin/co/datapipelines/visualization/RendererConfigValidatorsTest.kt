@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 
 /**
  * The module's renderer schemas, pinned (Dashboards §2.1.2): the `table` and `kpi` schemas this module defines; a
- * `chart` is judged as a whole document elsewhere. (The Plotly trace lists left with the library layer, #986.)
+ * `chart` is judged as a whole document elsewhere.
  */
 class RendererConfigValidatorsTest {
     private val validator = RendererConfigValidators.default()

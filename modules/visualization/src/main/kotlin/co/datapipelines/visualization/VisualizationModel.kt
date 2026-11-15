@@ -68,8 +68,8 @@ data class RendererSpec(
 )
 
 /**
- * The renderer kinds (enums.md §31). `chart` is the neutral chart document v1 (design record 2026-11-06); the
- * `plotly` kind is RETIRED with it — a body naming `plotly` is an unknown kind (the reader's `renderer_unsupported`).
+ * The renderer kinds (enums.md §31). `chart` is the neutral chart document v1 (design record 2026-11-06); the kind
+ * it replaced is RETIRED with it — a body naming that kind is an unknown kind (the reader's `renderer_unsupported`).
  * `html` and `svg` are RESERVED (D13, D46): a body naming them binds, and the validator refuses it
  * `visualization.validation.renderer_unsupported` in round one.
  */

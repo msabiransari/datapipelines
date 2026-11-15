@@ -1,5 +1,6 @@
 # Dashboards — implementation specification (round one)
 
+**Superseded by** [Dashboards](../../dashboards.md) and the js-rendered charts design (#849, 2026-11-14) for every chart and rendering rule: the product draws its charts with its own engine and vendors no chart library (#988). The text below stays as history.
 **Status:** implementation specification for review; freezes the contracts the design record left
 open. Written 2026-09-28 against `main` at `e4cd69e2`; every existing name, table, number and file
 cited below was read from that tree, not recalled.

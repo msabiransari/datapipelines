@@ -608,17 +608,6 @@
   ],
   "bars": 5,
   "data_warnings": 1,
-  "degraded": {
-   "plotly": [],
-   "echarts": [
-    "color.title"
-   ],
-   "chartjs": [],
-   "apexcharts": [
-    "color.title"
-   ],
-   "vegalite": []
-  },
   "hover": [],
   "label_texts": []
  }
