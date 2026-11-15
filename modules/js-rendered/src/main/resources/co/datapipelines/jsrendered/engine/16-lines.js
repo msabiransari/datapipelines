@@ -1,11 +1,12 @@
 // 16-lines.js : the line family's shared model and marks (record §4.5 rows line and area, §4.4 G1, G4, G6, G7, G8,
 // §4.9 Thinning; look contract §2 line, weight, points, area; §4.5 labels: last; brief 989 D1, D5, D6, D8). The two
 // templates (types/line.js, types/area.js) register their descriptors and call these with their options; they never
-// write an axis, a legend or a title. Rows sharing x and series are aggregated (one pass, one Map entry per group: the
-// work is bounded by the row cap); a null measure is a gap; x is a band (nominal, ordinal: evenly spaced, in the band's
+// write an axis, a legend or a title. Rows sharing x and series are aggregated (one pass, one entry per group: the
+// work is bounded by the row cap; nothing is kept between calls); a null measure is a gap; x is a band (nominal, ordinal: evenly spaced, in the band's
 // order) or a position (temporal: a continuous UTC axis; quantitative: a number axis, linear or log). The series come
 // from the colour column, from `value.fields` (G1: the fields ARE the series, in the list's order), or are the one
-// measure. No object is ever keyed by a data value: groups live in Maps.
+// measure. No object is ever keyed by a data value: a raw value's slot, a series and an x entry live in Maps, and a
+// series' groups in a list indexed by the x entry's ordinal.
 (function (R) {
   "use strict";
   var P = R.prim, D = R.data, T = R.text, S = R.scales, look = R.tables.look, cap = R.tables.cap;
@@ -54,10 +55,9 @@
     var measures = fields ? fields.map(function (f) {
       return { field: f.field, col: D.column(columns, f.field), title: f.title === undefined ? f.field : f.title, unit: f.unit };
     }) : [{ field: y.field || null, col: y.field ? D.column(columns, y.field) : null, title: null, unit: y.unit }];
-    // One pass over the rows. Each series record holds its own groups (a Map from the x key to the group), so a row
-    // costs one series lookup and one group lookup; a group keeps its first value and makes a list only when a second
-    // row joins it (most groups of a line are one row). The series key of a row is reused while the colour value
-    // repeats (the same value gives the same key), so no key text is made per row.
+    // One pass over the rows. Each series record holds its own groups (a list indexed by the x entry's ordinal), so a
+    // row costs one x lookup, one series lookup and one group read; a group keeps its first value and makes a list only
+    // when a second row joins it (most groups of a line are one row). Every memo below lives for this call only.
     var xsMap = new Map(), sers = new Map(), anyTime = false;
     var fieldKeys = fields ? measures.map(function (mm, k) {
       return "field:" + k;
