@@ -18,6 +18,15 @@
  * next animation frame), a theme change (an attribute of the document element, or the colour-scheme media query), and
  * once when the page's fonts are ready.
  *
+ * ## The interaction layer (brief 990 D1, D4)
+ * `datapipelines-chart-interactions.js` (`DatapipelinesChartInteractions`) is loaded directly before this file and is
+ * required: a draw without it is refused with a sentence naming the file, the path a missing engine takes. Each draw
+ * hands the layer the draw whole (`{output, theme, measure, frame}`: the output and the very inputs of that `render`
+ * call). The legend switch's LIST of switched-off series ids lives here, with the mounted chart: the layer asks for a
+ * series to be switched, this file changes the list and draws again at once from the kept columns. A data refresh
+ * never changes the list; `dispose` drops it and detaches the layer. The picture carries its own description
+ * (`role="img"`, `<title>`, `<desc>`, record §4.8), so the host element carries no role of its own.
+ *
  * ## The rendering rule
  * Data reaches the page only through `JsRendered.writeDom` (createElementNS, setAttribute, textContent). This file
  * writes no markup string, no `style` attribute, no `href` and no event attribute; its one probe is a childless SVG
@@ -43,6 +52,19 @@
     "chart.frame-too-small": "the chart's frame is too small to draw it",
     "chart.text.width-missing": "a text was measured with an average width",
   };
+
+  /** The interaction layer's file: named by the refusal when its global is missing (D1). */
+  var LAYER_FILE = "datapipelines-chart-interactions.js";
+
+  /** The interaction layer the page loaded (`DatapipelinesChartInteractions`), read at call time (brief 990 D1). */
+  function interactions() {
+    var root = typeof globalThis !== "undefined" ? globalThis : typeof window !== "undefined" ? window : {};
+    var L = root.DatapipelinesChartInteractions;
+    if (!L || typeof L.attach !== "function") {
+      throw new Error("the chart interaction layer is not loaded: the page loads " + LAYER_FILE + " before this renderer");
+    }
+    return L;
+  }
 
   /** The engine namespace the page loaded (a classic script's `var JsRendered`), read at call time. */
   function engine() {
@@ -267,15 +289,11 @@
     var svg = doc.createElementNS(NS, "svg");
     svg.setAttribute("class", "dp-chart");
     host.appendChild(svg);
-    // The accessible description (record §4.8 host contract): the picture is one image named by its description.
-    if (typeof occurrence.description === "string" && occurrence.description !== "") {
-      host.setAttribute("role", "img");
-      host.setAttribute("aria-label", occurrence.description);
-    }
     var measure = measurer(doc);
     var kept = null; // the columns while mounted (record §5.2)
-    var hidden = []; // the legend switch's list (record §4.3); lane F6 changes it
+    var hidden = []; // the legend switch's list (record §4.3, §4.8; brief 990 D4): only a click, Enter or Space changes it
     var index = null;
+    var attached = null; // the interaction layer's attachment, made by the first draw
     var pending = false;
     var disposed = false;
     var observers = [];
@@ -283,28 +301,51 @@
     /** One draw from [columns]; returns the runtime's acknowledgement, or throws the refusal / the engine's error. */
     function draw(columns) {
       var R = engine();
+      var L = interactions();
       var resolved = resolveTheme(svg);
+      var frame = frameOf(host);
+      var width = measure.get(R.theme.resolve(resolved.theme).font);
       var out = R.render({
         type: type,
         document: document_,
         columns: columns,
         types: types,
-        frame: frameOf(host),
+        frame: frame,
         theme: resolved.theme,
-        measure: measure.get(R.theme.resolve(resolved.theme).font),
+        measure: width,
         hidden: hidden.slice(),
       });
+      var drawn = out.state === "rendered" || out.state === "no-data";
+      R.writeDom(drawn ? out.primitives : [], svg, resolved.theme, drawn ? R.write.describe(out, document_) : undefined);
+      index = drawn ? out.index : null;
+      decorate(L, { output: drawn ? out : { type: out.type, state: out.state, primitives: [], index: null, summary: out.summary }, theme: resolved.theme, measure: width, frame: frame });
       if (out.state === "refused") {
-        R.writeDom([], svg, resolved.theme);
-        index = null;
         var sentence = R.sentence(out.summary.refusal);
         var error = new Error(sentence);
         error.refusal = { code: out.summary.refusal.code, sentence: sentence };
         throw error;
       }
-      R.writeDom(out.state === "too-small" ? [] : out.primitives, svg, resolved.theme);
-      index = out.index;
       return { outcome: out.state === "no-data" ? "no-data" : "rendered", warnings: warningsOf(out.summary, resolved.refused) };
+    }
+
+    /** The layer over the new picture: attached by the first draw, updated by every later one (D1). */
+    function decorate(L, drawn) {
+      if (attached === null) attached = L.attach(svg, drawn, { toggle: toggle });
+      else attached.update(drawn);
+    }
+
+    /** The legend switch (D4): the series id in or out of the list, and the same picture drawn again at once. */
+    function toggle(id) {
+      if (disposed || typeof id !== "string") return;
+      var at = hidden.indexOf(id);
+      if (at >= 0) hidden.splice(at, 1);
+      else hidden.push(id);
+      if (kept === null) return;
+      try {
+        draw(kept);
+      } catch (e) {
+        /* the refresh's acknowledgement already reported this chart; a redraw changes nothing it published */
+      }
     }
 
     function render(columns) {
@@ -377,14 +418,21 @@
         disposed = true;
         kept = null;
         index = null;
+        hidden = [];
+        if (attached !== null) attached.detach();
+        attached = null;
         observers.splice(0).forEach(function (stop) {
           stop();
         });
         if (svg.parentNode) svg.parentNode.removeChild(svg);
       },
-      /** The data index of the last draw (record §4.3), for the interaction layer (lane F6). */
+      /** The data index of the last draw (record §4.3). */
       index: function () {
         return index;
+      },
+      /** The legend switch's list as it stands (a copy), for the tests (D4). */
+      hidden: function () {
+        return hidden.slice();
       },
     };
   }
@@ -403,6 +451,7 @@
       warningsOf: warningsOf,
       WARNING_TEXT: WARNING_TEXT,
       MAX_SIDE: MAX_SIDE,
+      LAYER_FILE: LAYER_FILE,
     },
   };
 

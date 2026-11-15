@@ -2187,6 +2187,7 @@ test("#497: reset's restore render drops a rejected INPUT text on the composite"
 // empty state — driven through the REAL chart adapter over the REAL engine (loaded from the engine module's resources)
 // in support/js-rendered.mjs's fake browser. Each draw is counted at the engine's DOM writer.
 const chartPath = path.resolve(here, "../../main/resources/static/js/datapipelines-dashboard-chart.js");
+const interactionsPath = path.resolve(here, "../../main/resources/static/js/datapipelines-chart-interactions.js");
 
 const BAR = {
   name: "chart",
@@ -2208,6 +2209,7 @@ function chartKind() {
   const engine = loadEngine();
   globalThis.JsRendered = engine;
   globalThis.CSS = { supports };
+  globalThis.DatapipelinesChartInteractions = require(interactionsPath); // loaded before the adapter (brief 990 D1)
   const runtime = require(runtimePath);
   const chart = require(chartPath);
   chart.register(runtime);
@@ -2218,9 +2220,9 @@ function chartKind() {
 function countDraws(engine) {
   const draws = [];
   const writeDom = engine.writeDom;
-  engine.writeDom = (primitives, svg, theme) => {
+  engine.writeDom = (primitives, svg, theme, about) => {
     draws.push(primitives.filter((p) => p.role === "mark").length);
-    return writeDom(primitives, svg, theme);
+    return writeDom(primitives, svg, theme, about);
   };
   return draws;
 }
