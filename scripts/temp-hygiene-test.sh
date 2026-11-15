@@ -750,6 +750,165 @@ expect dirs-kept-live 3; expect root-removed 1; expect processes-in-doubt 0
 stop_holders; chmod 700 "$FX/blind"
 finish
 
+# ---- 40-46: the mount topology: absence is proved in the candidate's own filesystem tree (#983 round 4) ----
+# T1-T5 of the round 4 brief, beside case 35 (T6, the candidate itself bound) and in its style: a
+# holder in its own mount namespace (bwrap, unprivileged) whose ONLY reference reaches the entry
+# through a mount of one of the entry's DESCENDANTS (or a root inside it). Before the pass: the
+# holder is started and readable, the reference names the intended directory (device and inode,
+# through /proc/<holder>/root), and neither the holder nor its launcher has the entry's path in
+# its argv or a cwd or handle inside the entry other than the reference under test. After it:
+# closed files directly inside, one level below and two levels below are there, the holder lives,
+# the unused sibling with the same contents went in the same pass, and the holder was FOUND (no
+# doubt). 45 is T7 and T8: a namespaced holder keeps only what it reaches, another whose mounts
+# and references are all outside keeps nothing. 46: a stacked filesystem (overlay) over a
+# directory inside the entry is doubt, and doubt keeps.
+fill_deep() { # fill_deep <dir>: closed files directly inside, one and two levels below
+  mkdir -p "$1/nested/deeper"; payload "$1/closed-file"; payload "$1/nested/closed-file"; payload "$1/nested/deeper/closed-file"
+}
+held_deep() { # held_deep <entry>
+  [ -n "${HOLDER:-}" ] && kill -0 "$HOLDER" 2>/dev/null || fail "the holder of $1 did not stay alive through the pass"
+  exists "$1/closed-file" "the closed file directly inside $1"
+  exists "$1/nested/closed-file" "the closed file one level below $1"
+  exists "$1/nested/deeper/closed-file" "the closed file two levels below $1"
+}
+ns_args() { # ns_args <bwrap argument...>: the NUL-separated argument file (no process carries a path of it as text)
+  printf '%s\0' "$@" > "$FX/outside/bwrap-args"
+}
+ns_ready_code='import os, sys, time
+for path in os.environ.get("HOLD_FILE", "").split(":"):
+    if path: held = open(path, "rb")
+if os.environ.get("HOLD_DIR"): held_dir = os.open(os.environ["HOLD_DIR"], os.O_RDONLY | os.O_DIRECTORY)
+open(os.environ["READY"], "w").write(str(os.getpid()))
+time.sleep(600)'
+ns_hold() { # ns_hold <ready path inside the namespace> [argument]: python3 in the namespace of $FX/outside/bwrap-args
+  local ready="$FX/outside/ready"
+  rm -f "$ready"
+  ( cd / && READY="$1" exec bwrap --args 3 python3 -c "$ns_ready_code" ${2+"$2"} 3< "$FX/outside/bwrap-args" ) \
+    < /dev/null > /dev/null 2> "$FX/outside/bwrap.err" 9>&- 10>&- 11>&- &
+  LAUNCHER="$!"; remember "$LAUNCHER"
+  HOLDER=; wait_for test -s "$ready" && HOLDER="$(cat "$ready")"
+  [ -n "$HOLDER" ] || { fail "setup: the namespaced holder did not start: $(cat "$FX/outside/bwrap.err")"; return 1; }
+  remember "$HOLDER"
+  [ -r "/proc/$HOLDER/cwd" ] && readlink "/proc/$HOLDER/cwd" > /dev/null && ls "/proc/$HOLDER/fd" > /dev/null \
+    || { fail "setup: the holder $HOLDER is not readable"; return 1; }
+}
+ns_names() { # ns_names <inside path> <host dir>: the holder's path names the host directory (device and inode)
+  local inside
+  inside="$(stat -c %d:%i "/proc/$HOLDER/root$1" 2>/dev/null)"
+  [ "$inside" = "$(stat -c %d:%i "$2")" ] || { fail "setup: $1 in the holder's namespace is '$inside', not $2"; return 1; }
+}
+ns_alone() { # ns_alone <entry> [allowed identity]: no argv text, cwd or handle of holder or launcher in the entry but the allowed one
+  local pid link id ids
+  ids="$(find "$1" -printf '%D:%i\n')"
+  for pid in "$LAUNCHER" "$HOLDER"; do
+    if grep -qaF -- "$1" "/proc/$pid/cmdline"; then fail "setup: process $pid carries the entry path as text"; fi
+    for link in "/proc/$pid/cwd" "/proc/$pid"/fd/*; do
+      id="$(stat -L -c %d:%i "$link" 2>/dev/null)" || continue
+      [ -n "${2:-}" ] && [ "$id" = "$2" ] && [ "$pid" = "$HOLDER" ] && continue
+      if printf '%s\n' "$ids" | grep -qxF -- "$id"; then fail "setup: $link of process $pid is inside the entry"; fi
+    done
+  done
+}
+ns_kept() { # ns_kept <entry>: the pass ran; the entry is kept whole by a FOUND reference, the sibling went
+  pass "c$CASE" real real
+  held_deep "$1"
+  gone "$1-unused" 'the unused sibling with the same contents (the control)'
+  expect dirs-kept-live 1; expect processes-in-doubt 0
+}
+ns_possible() { command -v bwrap >/dev/null 2>&1 && bwrap --dev-bind / / true 2>/dev/null; }
+NS_SKIP='bwrap is missing or cannot make a mount namespace here: no other way to start one without root'
+
+begin 40 'T1: a bind of a DESCENDANT of the entry; the only reference is an argument through it'
+root="$(mkroot "$CO")"; entry="$root/live"; fill_deep "$entry"; fill_deep "$entry-unused"
+if ! ns_possible; then skip "$NS_SKIP"; else
+  ns_args --die-with-parent --dev-bind / / --tmpfs /mnt --bind "$entry/nested" /mnt/view --chdir /
+  ns_hold "$FX/outside/ready" /mnt/view/deeper && ns_names /mnt/view/deeper "$entry/nested/deeper" && ns_alone "$entry" && ns_kept "$entry"
+fi
+finish
+
+begin 41 'T2: the same bind; the only reference is the holder'"'"'s cwd through it'
+root="$(mkroot "$CO")"; entry="$root/live"; fill_deep "$entry"; fill_deep "$entry-unused"
+if ! ns_possible; then skip "$NS_SKIP"; else
+  ns_args --die-with-parent --dev-bind / / --tmpfs /mnt --bind "$entry/nested" /mnt/view --chdir /mnt/view/deeper
+  ns_hold "$FX/outside/ready" && ns_names /mnt/view/deeper "$entry/nested/deeper" \
+    && [ "$(stat -L -c %d:%i "/proc/$HOLDER/cwd")" = "$(stat -c %d:%i "$entry/nested/deeper")" ] \
+    && ns_alone "$entry" "$(stat -c %d:%i "$entry/nested/deeper")" && ns_kept "$entry"
+fi
+finish
+
+begin 42 'T3: the same bind; the only reference is an open handle through it (a file, then a directory)'
+root="$(mkroot "$CO")"; entry="$root/live"; fill_deep "$entry"; fill_deep "$entry-unused"; payload "$entry/nested/deeper/held-file"
+if ! ns_possible; then skip "$NS_SKIP"; else
+  ns_args --die-with-parent --dev-bind / / --tmpfs /mnt --bind "$entry/nested" /mnt/view --chdir /
+  HOLD_FILE=/mnt/view/deeper/held-file ns_hold "$FX/outside/ready" && ns_names /mnt/view/deeper/held-file "$entry/nested/deeper/held-file" \
+    && ns_alone "$entry" "$(stat -c %d:%i "$entry/nested/deeper/held-file")" && ns_kept "$entry"
+  exists "$entry/nested/deeper/held-file" 'the held file (its lease is refused)'
+  stop_holders; fill_deep "$entry-unused"
+  HOLD_DIR=/mnt/view/deeper ns_hold "$FX/outside/ready" && ns_names /mnt/view/deeper "$entry/nested/deeper" \
+    && ns_alone "$entry" "$(stat -c %d:%i "$entry/nested/deeper")" && ns_kept "$entry"
+fi
+finish
+
+begin 43 'T4: the bind reached through a second step inside the namespace (a symlink into the mount)'
+root="$(mkroot "$CO")"; entry="$root/live"; fill_deep "$entry"; fill_deep "$entry-unused"
+if ! ns_possible; then skip "$NS_SKIP"; else
+  ns_args --die-with-parent --dev-bind / / --tmpfs /mnt --bind "$entry/nested" /mnt/view --symlink /mnt/view/deeper /mnt/link --chdir /
+  ns_hold "$FX/outside/ready" /mnt/link && ns_names /mnt/view/deeper "$entry/nested/deeper" \
+    && { [ "$(readlink "/proc/$HOLDER/root/mnt/link")" = /mnt/view/deeper ] || fail 'setup: /mnt/link does not point into the mount'; } \
+    && ns_alone "$entry" && ns_kept "$entry"
+fi
+finish
+
+begin 44 'T5: the holder'"'"'s ROOT is a descendant of the entry; the argument is a path from that root'
+root="$(mkroot "$CO")"; entry="$root/live"; fill_deep "$entry"; fill_deep "$entry-unused"
+if ! ns_possible; then skip "$NS_SKIP"; else
+  # Its cwd is /usr (outside), and its ready file sits on a bind of the case's outside directory.
+  ns_args --die-with-parent --bind "$entry/nested" / --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
+    --symlink usr/bin /bin --proc /proc --dev /dev --bind "$FX/outside" /outside --chdir /usr
+  if ! bwrap --args 3 python3 -c 'pass' 3< "$FX/outside/bwrap-args" 2>/dev/null; then
+    skip 'bwrap cannot start python3 in a root inside the entry here (no /usr/lib64 layout?)'
+  else
+    ns_hold /outside/ready /deeper && ns_names /deeper "$entry/nested/deeper" \
+      && [ "$(stat -L -c %d:%i "/proc/$HOLDER/root")" = "$(stat -c %d:%i "$entry/nested")" ] \
+      && ns_alone "$entry" && ns_kept "$entry"
+  fi
+fi
+finish
+
+begin 45 'T7 and T8: a namespace keeps only what it reaches; one whose mounts and references are all outside keeps nothing'
+root="$(mkroot "$CO")"; fill_deep "$root/a"; fill_deep "$root/b"; mkdir -p "$FX/outside/work/x"
+if ! ns_possible; then skip "$NS_SKIP"; else
+  ns_args --die-with-parent --dev-bind / / --tmpfs /mnt --bind "$root/a/nested" /mnt/view --chdir /
+  ns_hold "$FX/outside/ready" /mnt/view/deeper && ns_names /mnt/view/deeper "$root/a/nested/deeper" && ns_alone "$root/a"
+  held_a="$HOLDER"
+  # T8: every mount of its namespace is outside every candidate (/usr, a fresh /proc and /dev, the case's outside dir).
+  ns_args --die-with-parent --ro-bind /usr /usr --symlink usr/lib /lib --symlink usr/lib64 /lib64 --symlink usr/bin /bin \
+    --proc /proc --dev /dev --bind "$FX/outside" /outside --chdir /outside/work
+  ns_hold /outside/ready /outside/work/x && ns_names /outside/work/x "$FX/outside/work/x" && ns_alone "$root/b"
+  # A mount root is a path inside its filesystem: the base's tail below the fixture directory names it.
+  if grep -qF -- "${BASE#"$T"}" "/proc/$HOLDER/mountinfo"; then fail 'setup: a T8 mount is inside the temp base'; fi
+  pass c45 real real
+  HOLDER="$held_a"; held_deep "$root/a"
+  gone "$root/b" 'b: nothing references it, and the outside namespace keeps nothing (T7, T8)'
+  expect dirs-kept-live 1; expect root-removed 1; expect processes-in-doubt 0
+fi
+finish
+
+begin 46 'a stacked filesystem over a directory inside the entry (overlay, lower dir inside): doubt, and doubt keeps'
+root="$(mkroot "$CO")"; entry="$root/live"; fill_deep "$entry"; fill_deep "$entry-unused"
+if ! ns_possible || ! bwrap --dev-bind / / --tmpfs /mnt --overlay-src "$entry/nested" --tmp-overlay /mnt/ov true 2>/dev/null; then
+  skip 'bwrap cannot make an overlay here (bubblewrap before 0.10, or no unprivileged overlay)'
+else
+  ns_args --die-with-parent --dev-bind / / --tmpfs /mnt --overlay-src "$entry/nested" --tmp-overlay /mnt/ov --chdir /
+  ns_hold "$FX/outside/ready" /mnt/ov/deeper && ns_alone "$entry"
+  [ "$(cat "/proc/$HOLDER/root/mnt/ov/deeper/closed-file" | wc -c)" -eq 4096 ] || fail 'setup: the overlay does not show the lower dir'
+  pass c46 real real
+  held_deep "$entry"
+  exists "$entry-unused/closed-file" 'the unused sibling: an overlay object is doubt, which keeps every candidate'
+  expect processes-in-doubt 1; expect root-removed 0
+fi
+finish
+
 # ---- every captured summary names a fixture base ---------------------------------------------
 CASE=bases
 lines="$(wc -l < "$T/summaries")"
