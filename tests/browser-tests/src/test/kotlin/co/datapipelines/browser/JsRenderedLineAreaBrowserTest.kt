@@ -325,16 +325,18 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
 
         /**
          * The drawn svg against the captured result's primitives (`window.__drawn`) in document order, an area's
-         * gradient elements set aside: tag per kind, the class `dp-<role>`, a text's shown text, a group's descendant
-         * count (gradients not counted); each faded path's `fill` names a gradient of the picture whose two stops carry
-         * the path's colour as the literal its primitive carries (writeDom writes the standalone form and never a var(),
-         * look contract §9) and its two opacities. Then what makes the picture non-blank.
+         * gradient elements and the picture's own `title` and `desc` (#990 D6) set aside: tag per kind, the class
+         * `dp-<role>`, a text's shown text, a group's descendant count (gradients not counted); each faded path's
+         * `fill` names a gradient of the picture whose two stops carry the path's colour as the literal its primitive
+         * carries (writeDom writes the standalone form and never a var(), look contract §9) and its two opacities. Then
+         * what makes the picture non-blank.
          */
         const val DOM_EQUALS_PRIMITIVES =
             """(sel) => {
               var svg = document.querySelector(sel + ' svg.dp-chart'), out = window.__drawn;
               var tags = { rect: 'rect', line: 'line', path: 'path', circle: 'circle', text: 'text', group: 'g' };
-              var fadeEl = function (e) { return e.tagName === 'linearGradient' || e.tagName === 'stop'; };
+              // The gradients' elements, and the picture's own description (#990 D6: a title and a desc), are no primitives.
+              var fadeEl = function (e) { return e.tagName === 'linearGradient' || e.tagName === 'stop' || (e.parentNode === svg && (e.tagName === 'title' || e.tagName === 'desc')); };
               var all = Array.from(svg.querySelectorAll('*'));
               var els = all.filter(function (e) { return !fadeEl(e); }), prims = out.primitives, bad = [], badFades = [], fades = 0;
               for (var i = 0; i < Math.max(els.length, prims.length); i++) {

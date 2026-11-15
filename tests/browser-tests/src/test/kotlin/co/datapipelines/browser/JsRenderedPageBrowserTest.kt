@@ -313,12 +313,15 @@ class JsRenderedPageBrowserTest : ChartPageSuite() {
         /**
          * The drawn svg against the captured result's primitives (`window.__drawn`), in document order: tag per kind,
          * the class `dp-<role>`, a text's shown text, a group's descendant count; and what makes the picture non-blank.
+         * The picture's `title` and `desc` (#990 D6) are its description, not primitives, and are left out of the walk.
          */
         const val DOM_EQUALS_PRIMITIVES =
             """(sel) => {
               var svg = document.querySelector(sel + ' svg.dp-chart'), out = window.__drawn;
               var tags = { rect: 'rect', line: 'line', path: 'path', circle: 'circle', text: 'text', group: 'g' };
-              var els = Array.from(svg.querySelectorAll('*')), prims = out.primitives, bad = [], kinds = {};
+              // The picture's own description (#990 D6: its first children, a title and a desc) is no primitive.
+              var about = function (e) { return e.parentNode === svg && (e.tagName === 'title' || e.tagName === 'desc'); };
+              var els = Array.from(svg.querySelectorAll('*')).filter(function (e) { return !about(e); }), prims = out.primitives, bad = [], kinds = {};
               for (var i = 0; i < Math.max(els.length, prims.length); i++) {
                 var e = els[i], p = prims[i];
                 if (p) kinds[p.k] = (kinds[p.k] || 0) + 1;
