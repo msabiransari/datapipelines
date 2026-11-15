@@ -456,9 +456,7 @@ class DashboardWorkspaceBrowserTest : DashboardBrowserSuite() {
             page.navigate("$baseUrl/dashboards/$board?tab=$tab")
             page.waitForSelector("#dp-pane-" + tab + ":not([hidden])")
             page.waitForTimeout(300.0)
-            drainCspViolations()
-                .filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") }
-                .shouldBeEmpty()
+            drainCspViolations().shouldBeEmpty()
         }
 
         assertVersionsAtPhoneAndDesktop(board)

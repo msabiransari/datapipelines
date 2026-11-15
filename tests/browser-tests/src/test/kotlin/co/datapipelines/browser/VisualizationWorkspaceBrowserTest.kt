@@ -343,12 +343,7 @@ class VisualizationWorkspaceBrowserTest : VisualizationBrowserSuite() {
         val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
         val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
         page.onConsoleMessage {
-            val text = it.text()
-            // BrowserSuite sets aside this exact empty CSSOM style hash too; all real refusals still fail.
-            val emptyStyle =
-                text.startsWith("Applying inline style") &&
-                    text.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='")
-            if (it.type() == "error" && !emptyStyle) errors += text
+            if (it.type() == "error") errors += it.text()
         }
         page.onPageError { errors += it }
         page.onRequest { requested += it.method() + " " + it.url() }

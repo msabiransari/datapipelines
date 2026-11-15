@@ -32,7 +32,8 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
     fun `the catalog lists rows - not folders - and a row navigates un-boosted into the workspace`() {
         startTrace()
         val root = ready("dpageto")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
         openCatalog()
 
         // #400: the catalog is a FLAT list of the dashboards the caller may read — folders
@@ -95,7 +96,8 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
     fun `the board page boots, the events pane shows the completed refresh with its execution link, and no CSP violation`() {
         startTrace()
         val root = ready("dpboard")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
         page.navigate("$baseUrl/dashboards/$board")
 
         // The glue boots the vendored runtime on the real page; the initial action renders.
@@ -113,10 +115,8 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         pane shouldContain "COMPLETED"
         page.locator(".dp-refreshes-executions a[href*='/executions/']").first().waitFor()
 
-        // Zero CSP refusals across the tree page, the board page and the reload — but the
-        // empty-element hash Playwright's own screenshot path produces.
-        val refusals = drainCspViolations()
-        refusals.filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") }.shouldBeEmpty()
+        // Zero CSP refusals across the tree page, the board page and the reload.
+        drainCspViolations().shouldBeEmpty()
     }
 
     @Test
@@ -167,7 +167,8 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
     fun `a viewer executes the board - a promoter without a promotion target sees no boards at all`() {
         startTrace()
         val root = ready("dproles")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
 
         // --- viewer: holds dashboard.read (D50: every reader an executor) and the board runs.
         val viewerEmail = uniqueEmail("dproles-v-" + generatedPassword("u").take(8))

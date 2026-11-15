@@ -770,23 +770,6 @@ abstract class BrowserSuite {
         /** The CSP violations seen since the last drain — see [closePage]. Static: one per test JVM. */
         private val cspViolations = java.util.concurrent.CopyOnWriteArrayList<String>()
 
-        /**
-         * SHA-256 of the EMPTY string, as CSP prints it. Playwright's own screenshot path
-         * appends an empty `<style>` element to the page and fills it through `insertRule`
-         * (CSSOM, which no policy governs) to hide the caret, and Chromium reports the empty
-         * element as a refused inline style with this hash. #456: Plotly produces the SAME
-         * hash, so only harness provenance may be set aside; app scripts must still fail.
-         *
-         * The same screenshot path (Playwright 1.62) also writes `caret-color` inline on every
-         * input and textarea from its isolated world and clears it afterwards, leaving `style=""`.
-         * htmx's default settle step copied that attribute across the next swap with setAttribute,
-         * so the refusal carried htmx.min.js as its source; the layouts' htmx-config no longer
-         * settles "style" (#456 merge follow-up, guarded by HtmxConfigAuditTest).
-         */
-        private const val EMPTY_INLINE_STYLE_HASH = "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
-
-        private val harnessCspMessages = java.util.concurrent.CopyOnWriteArrayList<String>()
-
         /** Every page this context opens reports a CSP refusal into [cspViolations]. */
         private fun BrowserContext.watchingCsp(): BrowserContext =
             apply {
@@ -798,7 +781,6 @@ abstract class BrowserSuite {
                         val location = message.location()
                         // Java Playwright formats location as url:line:column (the URL may contain colons).
                         val sourceUrl = location.substringBeforeLast(':').substringBeforeLast(':')
-                        val appOrigin = java.net.URI(page.url()).let { "${it.scheme}://${it.rawAuthority}/" }
                         // Preview URLs carry capabilities: preserve the console, never the page's query.
                         val safeLocation = sourceUrl.substringBefore('?') + location.removePrefix(sourceUrl)
                         val event = "${page.url().substringBefore('?')} — ${message.type()} location=$safeLocation — $text"
@@ -809,32 +791,15 @@ abstract class BrowserSuite {
                             StandardOpenOption.APPEND,
                         )
                         if (!text.contains("Content Security Policy")) return@onConsoleMessage
-                        // #456: screenshot insertion has no app URL. Never exempt vendor/js emissions,
-                        // even with the empty hash; an app-origin document is also an application source.
-                        val harnessSource =
-                            !sourceUrl.startsWith(appOrigin) && !sourceUrl.contains("/vendor/") && !sourceUrl.contains("/js/")
-                        val emptyInlineStyle = text.startsWith("Applying inline style") && text.contains(EMPTY_INLINE_STYLE_HASH)
-                        if (emptyInlineStyle && harnessSource) {
-                            harnessCspMessages += event
-                            println("CSP harness-only: $event")
-                            return@onConsoleMessage
-                        }
                         cspViolations += event
                     }
                 }
             }
 
-        /** Recorded exemptions, including their source locations, for browser evidence. */
-        @JvmStatic
-        protected fun drainHarnessCspMessages(): List<String> = harnessCspMessages.toList().also { harnessCspMessages.clear() }
-
         /** Returns what was collected and clears it — the per-test read in [closePage]. */
         @JvmStatic
         protected fun drainCspViolations(): List<String> =
-            cspViolations.toList().also {
-                cspViolations.clear()
-                println("CSP harness-only set aside: ${drainHarnessCspMessages().size}")
-            }
+            cspViolations.toList().also { cspViolations.clear() }
 
         private val browser: Browser
             get() {

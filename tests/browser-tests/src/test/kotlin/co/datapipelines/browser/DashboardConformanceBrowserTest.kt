@@ -229,7 +229,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                 page.unroute(abortUrl)
             }
         }
-        drainCspViolations().filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") } shouldBe emptyList()
+        drainCspViolations() shouldBe emptyList()
     }
 
     @Test
@@ -276,7 +276,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                 "() => document.querySelector('[data-dp-viz=\\'revenue\\'] .dp-dashboard-status').getAttribute('data-dp-state')",
             ) as String
         (revenueState == "ready" || revenueState == "success") shouldBe true
-        drainCspViolations().filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") } shouldBe emptyList()
+        drainCspViolations() shouldBe emptyList()
     }
 
     @Test
@@ -313,7 +313,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         )
         val row = readRow(board, refreshId)
         (row["finished"] as String) shouldBe "true"
-        drainCspViolations().filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") } shouldBe emptyList()
+        drainCspViolations() shouldBe emptyList()
 
         // Cleanup: every holder aborted, so no place outlives this case for the others.
         val remaining = holders.drop(1)
