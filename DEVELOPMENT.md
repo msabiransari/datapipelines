@@ -1539,7 +1539,7 @@ tools. They are listed here instead of being guessed in:
 A family that any code mounts into a container is never added.
 
 **Self-test.** `scripts/temp-hygiene-test.sh` runs from `./scripts/pregate.sh --self-test`, which is
-the gate's "pregate self-test" stage. It covers cases 1–38 of #983 on fixture directories only and
+the gate's "pregate self-test" stage. It covers cases 1–39 of #983 on fixture directories only and
 prints how many cases it ran. Every fixture run of a copied wrapper, in this self-test and in the two
 existing ones, sets its temp base to a fixture directory. Each self-test fails when a summary line it
 captured names a base outside its fixtures.
