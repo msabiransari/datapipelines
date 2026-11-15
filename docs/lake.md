@@ -927,7 +927,10 @@ adds no interval and is never the "last delivery"; a feed with only such deliver
 deliveries to say. A
 `deprecated`, `archived` or `purged` table is never flagged: every feed is **not judged**. `LakeFeedLateness.forTable`
 reads the profile through `LakeProfiles.forTable` and then the ledger in one statement whose `now()` is the
-catalog's clock and the answer's computed-at time; the ledger read is served by `idx_lake_deliveries_published`
+catalog's clock and the answer's computed-at time. That statement finds the feeds with one probe per feed of the
+unique key `uq_lake_deliveries_key` and takes each feed's sample with one scan of `idx_lake_deliveries_published` that
+stops at `reporting.lateness_sample` entries, never a scan of the table's whole ledger; the work behind that shape also
+depends on the indexes' depth, on visibility and on dead entries
 ([Metadata DB §4.53](metadata-db.md#453-lake_deliveries)). A reassignment or an edit applies at the next read. No
 route, tool or screen calls it yet (P8 shows it, and decides how a feed stopped on purpose is cleared). Nobody types
 an expected schedule.
