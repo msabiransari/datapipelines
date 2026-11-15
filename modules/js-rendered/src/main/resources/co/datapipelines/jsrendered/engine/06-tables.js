@@ -36,6 +36,10 @@
     tickSpacingCompact: f(72, "render", "record §4.6: fewer ticks at the compact level: at most one per this many px"),
     rotateAngle: f(45, "render", "record §4.6: the angle of a rotated category label, degrees"),
     rotateHiddenShare: f(0.5, "render", "record §4.6: rotate only when thinning would hide more than this share of the labels"),
+    labelMinEm: f(6, "render", "em: thinning keeps every k-th label so each has at least min(its width, this many em) of room (lane 977's rule)"),
+    rotateMaxEm: f(10, "render", "em: a rotated category label is cut to this length"),
+    bandLabelMaxEm: f(12, "render", "em: a horizontal bar's category names are cut to this width"),
+    legendSideMaxEm: f(10, "render", "em: a legend at the left or right is at most this wide"),
     // the font's vertical box (read from the vendored Noto Sans, lane 985 evidence d8): where a text's box lies
     textAscent: f(1.069, "render", "a text's box rises this many × its size above its baseline"),
     textDescent: f(0.293, "render", "a text's box falls this many × its size below its baseline"),
