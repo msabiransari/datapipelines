@@ -725,7 +725,28 @@ pgres::self_test() {
   c2b="$(bash "$F/scripts/test-recount.sh" "$rd/2b" | head -n 1)"
   ck_eq "stage2b-counts" "files=1 tests=4 failures=0 errors=0 skipped=0 unreadable=0" "$c2b"
   c3="$(bash "$F/scripts/test-recount.sh" "$rd/3" | head -n 1)"
-  ck_eq "stage3-counts" "files=2 tests=4 failures=0 errors=0 skipped=0 unreadable=0" "$c3"
+  # #995: stage 3's expected counts are derived, never typed, and never read from "$rd/3" or
+  # from the recount (the oracle is not the thing it checks). Stage 3 runs every module of the
+  # registry the fixture runs with (stage 2 here writes no guard class, so none is covered),
+  # and pgres::snapshot copies EVERY task directory of each module it ran (DEVELOPMENT.md:
+  # "Other task directories copied from those modules retain explicit provenance"). Each part
+  # below counts only if its module is in that registry:
+  #   (a) the two result files the stand-in writes for stage 3 (GuardTest, GuardE2eTest);
+  #   (b) the result files the fixture plants in OTHER task directories of those modules:
+  #       today exactly scripting's breachSuite/TEST-co.x.BreachTest.xml, written by stage 2
+  #       (see stage2-breach-task-dir-present), which stage 3's snapshot carries once
+  #       :modules:scripting holds a guard (DockerfileGraalJsPinTest, inventory 995).
+  local s3_mods s3_part s3_kind s3_mod s3_file s3_n s3_files=0 s3_tests=0
+  s3_mods=" $(source "$F/scripts/pregate-plan-lib.sh" && printf '%s ' "${!GUARDS[@]}")"
+  for s3_part in \
+    "a :modules:auth test/TEST-co.x.GuardTest.xml 2" \
+    "a :tests:integration-tests test/TEST-co.datapipelines.integration.GuardE2eTest.xml 2" \
+    "b :modules:scripting breachSuite/TEST-co.x.BreachTest.xml 1"; do
+    read -r s3_kind s3_mod s3_file s3_n <<< "$s3_part"
+    [[ "$s3_mods" == *" $s3_mod "* ]] || continue
+    s3_files=$((s3_files + 1)); s3_tests=$((s3_tests + s3_n))
+  done
+  ck_eq "stage3-counts" "files=$s3_files tests=$s3_tests failures=0 errors=0 skipped=0 unreadable=0" "$c3"
   ck_ok "verdict-pass" grep -q 'PRE-GATE PASS' "$F/.pregate-logs/0-verdict.log"
   ck_ok "verdict-run-id" grep -q "run=$run_id" "$F/.pregate-logs/0-verdict.log"
   ck_ok "verdict-snap-zero" grep -q 'snap=0' "$F/.pregate-logs/0-verdict.log"
