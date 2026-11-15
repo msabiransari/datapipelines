@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.102 (revised — see Change Log)
+**Status:** v1.103 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-15
 
 ---
 
@@ -1161,6 +1161,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.staging.scratch_exhausted` | 500 | A DuckDB staging database's scratch reservation does not fit in the aggregate (`datapipelines.lake.admission.scratch-bytes`); refused before any file exists, retryable once a running execution releases its reservation ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
 | `pipeline.staging.scratch_blocked` | 500 | A DuckDB staging database's scratch reservation can never fit: it exceeds the aggregate (`datapipelines.lake.admission.scratch-bytes`) less the leftover files in the scratch directory nobody can vouch for, or with none the aggregate itself; refused before any file exists, not retryable until an operator clears the scratch directory while no instance uses it or raises the aggregate ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
 | `pipeline.staging.scratch_limit_exceeded` | 500 | A DuckDB staging database outgrew its own scratch reservation: the engine refused a spill past `max_temp_directory_size`, or the database file, WAL and spill directory measured more than the reservation after a write ([Staging §8.5](staging.md#85-the-duckdb-engine)) |
+| `pipeline.staging.result_incomplete` | 500 | TEMPORARY (#994): a DuckDB staging read ended after a different number of rows than the engine counted for it in the same snapshot — the pinned driver ended a streamed cursor without the engine's error; details `rows_read`, `rows_expected`, `reader`, never SQL text or a row value ([Staging §8.3, §8.5](staging.md#85-the-duckdb-engine)) |
 
 ### 13.6 Type mapping
 
@@ -2048,6 +2049,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.103 | 994 (#994) | §13.5 gains `pipeline.staging.result_incomplete` (500, the `pipeline.staging.` family default — no explicit `ApiErrorCatalog` row), TEMPORARY until the pinned DuckDB driver throws mid-stream: a staging read that ended after a different number of rows than the engine counted for it in the same snapshot (details `rows_read`, `rows_expected`, `reader`). Landed with the constants in `StagingErrorCodes` and `PipelineErrorCodes.Staging`. §13 row count 519 → 520. |
 | 2026-11-14 | v1.102 | 962 (#962) | §13.25 gains `lake.maintenance.cleanup_incomplete` (HTTP `—`): a cleanup or purge deletion that did not finish its removal (`details.reason` `mode` or `delete_failed`), the maintenance run's error, never a route's. Landed with the constant in `PipelineErrorCodes.Lake` and its `ApiErrorCatalog.NEVER_RETURNED_LIVE` entry (§13 row count 518 → 519). |
 | 2026-11-14 | v1.101 | 956 (#956) — renumbered at the spec merge after #957's v1.100 | §13.25 gains `lake.profile.invalid` and `lake.profile.not_found` (HTTP `—`: the profile and pause services have no route before P8). Landed with their constants in `PipelineErrorCodes.Lake` and their `ApiErrorCatalog.NEVER_RETURNED_LIVE` entries (§13 row count 514 → 516). |
 | 2026-11-14 | v1.100 | 957 (#957) — renumbered at the spec merge after #958's v1.99 | §13.25 gains `lake.maintenance.deadline` (HTTP —): a maintenance run's lease refused at or past the run's deadline. Landed with the constant in `PipelineErrorCodes.Lake` and in `ApiErrorCatalog.NEVER_RETURNED_LIVE` (§13 row count 515 → 516 on top of #958's row, recounted with the drift test's own regex). |

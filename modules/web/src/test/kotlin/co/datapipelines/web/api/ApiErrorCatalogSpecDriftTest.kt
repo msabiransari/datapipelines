@@ -406,8 +406,10 @@ class ApiErrorCatalogSpecDriftTest {
          * 518 → 519 with #962: §13.25 gains `lake.maintenance.cleanup_incomplete` (HTTP `—`), a cleanup or purge
          * deletion that did not finish its removal, landed in the SAME commit as its constant and its
          * `NEVER_RETURNED_LIVE` entry.
+         * 519 → 520 with #994: §13.5 gains `pipeline.staging.result_incomplete` (500, the staging family default; no
+         * `ApiErrorCatalog` row), TEMPORARY, landed in the SAME commit as its constants.
          */
-        const val SECTION_13_ROW_COUNT = 519
+        const val SECTION_13_ROW_COUNT = 520
 
         /**
          * §12's distinct validation codes.

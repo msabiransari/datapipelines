@@ -300,6 +300,11 @@ internal object DialectRefusalSets {
             "http_proxy",
             "http_proxy_username",
             "http_proxy_password",
+            // #994, TEMPORARY CORRECTNESS exception (datasources.md §5.6, the fifth kind): with streamed results the
+            // pinned driver (1.5.6.0) ends a cursor silently when the engine fails mid-stream, so a failed read looks
+            // like a shorter one. Remove together with staging's StreamedReadGuard when StreamedResultTripwireTest
+            // goes red on a driver that throws.
+            "jdbc_stream_results",
         )
 
     /**
