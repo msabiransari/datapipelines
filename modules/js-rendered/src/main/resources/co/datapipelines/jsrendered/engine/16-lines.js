@@ -54,7 +54,15 @@
     var measures = fields ? fields.map(function (f) {
       return { field: f.field, col: D.column(columns, f.field), title: f.title === undefined ? f.field : f.title, unit: f.unit };
     }) : [{ field: y.field || null, col: y.field ? D.column(columns, y.field) : null, title: null, unit: y.unit }];
-    var xsMap = new Map(), sers = new Map(), groups = new Map(), anyTime = false;
+    // One pass over the rows. Each series record holds its own groups (a Map from the x key to the group), so a row
+    // costs one series lookup and one group lookup; a group keeps its first value and makes a list only when a second
+    // row joins it (most groups of a line are one row). The series key of a row is reused while the colour value
+    // repeats (the same value gives the same key), so no key text is made per row.
+    var xsMap = new Map(), sers = new Map(), anyTime = false;
+    var fieldKeys = fields ? measures.map(function (mm, k) {
+      return "field:" + k;
+    }) : null;
+    var lastC = {}, lastKey = null;
     var n = X.length;
     for (var i = 0; i < n; i++) {
       var xv = X[i], at, xk;
@@ -86,20 +94,27 @@
         at = null;
         xk = D.keyOf(xv);
       }
-      if (C && D.isNull(C[i])) {
+      var cv = C ? C[i] : null;
+      if (C && D.isNull(cv)) {
         warn("chart.rule.null-category");
         continue;
       }
-      if (!xsMap.has(xk)) xsMap.set(xk, { key: xk, raw: xv, at: at, first: xsMap.size, row: i });
+      if (xsMap.get(xk) === undefined) xsMap.set(xk, { key: xk, raw: xv, at: at, first: xsMap.size, row: i });
+      if (C && cv !== lastC) {
+        lastC = cv;
+        lastKey = D.keyOf(cv);
+      }
       for (var mi = 0; mi < measures.length; mi++) {
-        var sk = C ? D.keyOf(C[i]) : fields ? "field:" + mi : "";
-        if (!sers.has(sk)) {
-          sers.set(sk, { key: sk, raw: C ? C[i] : null, first: sers.size, measure: mi, full: C ? String(C[i]) : fields ? measures[mi].title : String(y.field || "count") });
+        var sk = C ? lastKey : fields ? fieldKeys[mi] : "";
+        var ser = sers.get(sk);
+        if (ser === undefined) {
+          ser = { key: sk, raw: C ? cv : null, first: sers.size, measure: mi, full: C ? String(cv) : fields ? measures[mi].title : String(y.field || "count"), byX: new Map() };
+          sers.set(sk, ser);
         }
-        if (!groups.has(sk)) groups.set(sk, new Map());
-        var byX = groups.get(sk);
-        if (!byX.has(xk)) byX.set(xk, { vals: [], row: i });
-        byX.get(xk).vals.push(measures[mi].col ? measures[mi].col[i] : 1);
+        var v = measures[mi].col ? measures[mi].col[i] : 1, g = ser.byX.get(xk);
+        if (g === undefined) ser.byX.set(xk, { v: v, vals: null, row: i });
+        else if (g.vals === null) g.vals = [g.v, v];
+        else g.vals.push(v);
       }
     }
     // The series cap before any work that grows with series × x (the cells): the refusal is the one render gives after
@@ -127,9 +142,9 @@
     var undrawn = false, nonPositive = false;
     // cells[s][xi] = undefined (no row at that x) | null (a null measure: a gap) | {num, exact, text, row}.
     var cells = series.map(function (s) {
-      var row = new Array(xs.length), byX = groups.get(s.key);
+      var row = new Array(xs.length), byX = s.byX, field = measures[s.measure].field || "count";
       byX.forEach(function (g, key) {
-        var a = D.aggregate(g.vals, agg, measures[s.measure].field || "count"), j = xIndex.get(key);
+        var a = aggregateGroup(g, agg, field), j = xIndex.get(key);
         if (a.num === null) {
           row[j] = null;
           return;
@@ -238,6 +253,19 @@
       },
     };
     return m;
+  }
+
+  /**
+   * One group's aggregate, as D.aggregate gives it. A group of one number is answered here (count: 1; sum and mean:
+   * 0 + v, as D.aggregate adds from 0; min and max: v); every other group, and a lone value that is not a number, goes
+   * to D.aggregate unchanged.
+   */
+  function aggregateGroup(g, agg, field) {
+    if (g.vals !== null) return D.aggregate(g.vals, agg, field);
+    var v = g.v;
+    if (agg === "count") return { num: 1, exact: null };
+    if (typeof v === "number") return { num: agg === "sum" || agg === "mean" ? 0 + v : v, exact: null };
+    return D.aggregate([v], agg, field);
   }
 
   /** The value extent of the visible series: [lo, hi] (with zero when asked), or [smallest positive, largest] for log. */
