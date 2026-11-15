@@ -12,20 +12,22 @@ import java.util.UUID
 
 /**
  * Complete mechanical reports pin renderer typing and the transform output's presence/nullability contract — a table's
- * and KPI's path bindings, and a chart's field-keyed measure (judged by its model, record §5.1).
+ * and KPI's path bindings, and a chart's field-keyed measure. This module runs the check without the JavaScript runtime
+ * (js-rendered record §6): a chart case's rows are checked here, its chart assertions are listed as unjudged, and what
+ * the engine draws from those rows is application's `ChartJudgeEngineTest`.
  */
 class VisualizationBindingContractTest {
     private val workspace = UUID.randomUUID()
 
     @Test
-    fun `table STRING values pass while a chart's STRING measure is refused by its model`() {
+    fun `table STRING values pass while a chart's STRING measure is left to the engine`() {
         val table = run(RendererKind.TABLE, "columns[0].values", LogicalType.STRING, row = mapOf("amount" to "Jan"))
         assertPassing(table)
-        // The save rules refuse a STRING measure (chart.measure.not_numeric); a run over rows that reached the check
-        // anyway is refused by the model itself, naming the field and never the value.
+        // The save rules refuse a STRING measure (chart.measure.not_numeric); rows that reached the check anyway are
+        // valid in their wire form, and what the engine makes of them is its own state (unjudged without the runtime).
         val chart = run(RendererKind.CHART, "amount", LogicalType.STRING, row = mapOf("amount" to "Jan"))
-        assertFailure(chart, "fixtures", VisualizationErrorCodes.TEST_CASE_INVALID, "tests.cases[0]")
-        chart.failures.single().message shouldBe "A value of 'amount' is not a number in its column's wire form."
+        assertPassing(chart)
+        chart.unjudged.map { it.kind } shouldBe listOf("rendered")
     }
 
     @Test
@@ -52,8 +54,8 @@ class VisualizationBindingContractTest {
         listOf(LogicalType.BIGINTEGER, LogicalType.BIGDECIMAL).forEach { type ->
             withClue(type) { assertPassing(run(RendererKind.CHART, "amount", type, row = mapOf("amount" to "10"), marks = 1)) }
         }
-        // A boolean is no measure in any wire form.
-        run(RendererKind.CHART, "amount", LogicalType.BOOLEAN, row = mapOf("amount" to true)).failures.single().step shouldBe "fixtures"
+        // A boolean measure's rows are valid in their wire form: the engine's state judges them (unjudged here).
+        assertPassing(run(RendererKind.CHART, "amount", LogicalType.BOOLEAN, row = mapOf("amount" to true)))
         listOf("value", "comparison.value").forEach { path ->
             listOf(LogicalType.BIGINTEGER, LogicalType.BIGDECIMAL).forEach { type ->
                 assertPassing(run(RendererKind.KPI, path, type, row = mapOf("amount" to "10.50")))
@@ -84,10 +86,10 @@ class VisualizationBindingContractTest {
             run(RendererKind.TABLE, "columns[0].values", LogicalType.DECIMAL, nullable = true, row = mapOf("amount" to null), text = "null")
         assertFailure(table, "assertions", VisualizationErrorCodes.TEST_CASE_INVALID, "tests.cases[0].assertions[1]")
         table.cases.getValue("rows").ok shouldBe true
-        // On a chart the text is not proven by the gap either: it stays for the browser to judge.
+        // On a chart the text is the engine's to judge (application's ChartJudgeEngineTest): unjudged without the runtime.
         val chart = run(RendererKind.CHART, "amount", LogicalType.DECIMAL, nullable = true, row = mapOf("amount" to null), text = "null")
         assertPassing(chart)
-        chart.unjudged.map { it.path } shouldBe listOf("tests.cases[0].assertions[1]")
+        chart.unjudged.map { it.path } shouldBe listOf("tests.cases[0].assertions[0]", "tests.cases[0].assertions[1]")
     }
 
     @Test

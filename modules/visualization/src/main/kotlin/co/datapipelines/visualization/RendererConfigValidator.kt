@@ -26,18 +26,6 @@ data class ConfigProblem(
 
 /** The module's renderer schemas — the production [RendererConfigValidator]. */
 object RendererConfigValidators {
-    /**
-     * The trace types the vendored Plotly 2D bundle is BUILT with (the spec's §10.4, D63 — confirmed 2026-09-28).
-     * They describe the library bundles the dashboard runtime loads for the chart kind's Plotly converter, not a
-     * document vocabulary: `VendoredPlotlyAuditTest` pins the manifest's lists to these.
-     */
-    val PLOTLY_2D_TRACES: List<String> = listOf("scatter", "bar", "pie", "histogram", "box", "heatmap")
-
-    /** The 3D bundle's additions (the vendored `plotly-3d` build). */
-    val PLOTLY_3D_TRACES: List<String> = listOf("scatter3d", "surface", "mesh3d")
-
-    /** Every trace type the vendored bundles carry. */
-    val PLOTLY_TRACES: List<String> = PLOTLY_2D_TRACES + PLOTLY_3D_TRACES
     val TABLE_KEYS: Set<String> = setOf("columns", "page_size")
     val TABLE_COLUMN_KEYS: Set<String> = setOf("label", "values", "format", "align")
     val TABLE_FORMATS: List<String> = listOf("text", "number", "integer", "percent", "date", "datetime")

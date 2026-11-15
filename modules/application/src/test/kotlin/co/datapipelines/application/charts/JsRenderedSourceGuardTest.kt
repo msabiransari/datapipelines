@@ -17,6 +17,10 @@ import org.junit.jupiter.api.Test
  * told from a division by the last code character) and the same pattern rule (a pattern that starts or ends with a
  * name character cannot match inside a longer name: `Date` is not `update`, `eval` is not `evaluate`; an opening
  * parenthesis allows space before it). Its control is kept too: every pattern fires in code and none inside comments.
+ *
+ * The product runs what this guard scans (brief 986 D10): the chart entry's program, [JsRenderedChartEngine.PROGRAM], is
+ * these files in load order, read from the source tree, then the entry's own function — which holds no banned pattern
+ * and no markup either — and its Source is counted (not internal: the record's §5.3, G2).
  */
 class JsRenderedSourceGuardTest {
     private val engineDir = ChartGuardFiles.repoFile("${ChartGuardFiles.MODULE}/src/main/resources/${JsRenderedEngineFiles.ROOT}")
@@ -35,6 +39,16 @@ class JsRenderedSourceGuardTest {
         files.keys shouldBe JsRenderedEngineFiles.names.toSet()
         files.size shouldBeGreaterThanOrEqual FILE_FLOOR
         (STRING_WRITER in files) shouldBe true
+    }
+
+    @Test
+    fun `the product's chart program is exactly these files in load order and the entry, counted, its entry clean`() {
+        val fromTree = JsRenderedEngineFiles.names.joinToString(separator = "") { files.getValue(it) + "\n" }
+        JsRenderedChartEngine.TEXT shouldBe fromTree + JsRenderedChartEngine.ENTRY + "\n"
+        JsRenderedChartEngine.PROGRAM.name shouldBe JsRenderedChartEngine.SOURCE_NAME
+        JsRenderedChartEngine.PROGRAM.counted shouldBe true
+        scan(JsRenderedChartEngine.ENTRY) shouldBe emptyList()
+        markupStrings(JsRenderedChartEngine.ENTRY) shouldBe emptyList()
     }
 
     @Test

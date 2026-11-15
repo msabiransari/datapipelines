@@ -9,7 +9,8 @@ package co.datapipelines.visualization
  * The registry guard (R-REG, `modules/application` test `ChartTypeRegistryTest`) holds six sets equal — these wire
  * values, the schema files' `mark.type` constants, the skeleton's `familyConfig` branches, the template files, the
  * names `JsRendered.types()` returns in the sandbox and this section of enums.md — and compares [channels] node for
- * node with the descriptor the template registers. Nothing in the save path reads this enum yet (lane F2).
+ * node with the descriptor the template registers. The save rules, the served columns, the derived bindings and
+ * [ChartSchemas.FILES] read it through [ChartPositions] (lane F2, #986).
  */
 enum class ChartType(
     val wire: String,

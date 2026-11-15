@@ -265,8 +265,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         // #868 G1 (record §3.1 [R31; F7]) — the schedule family's provider adapter (G2/#786) reads the scheduler's
         // model; acyclic because `scheduler` depends only on typesystem and pipeline-contract. Allowed ahead, undeclared.
         ":modules:scheduler",
-        // #985 (js-rendered record §5.5, D11) — test-only so far: the JVM guards (registry, identity, source guard)
-        // load the engine files through the sandbox; F2 makes it a main edge with the server entry.
+        // #985/#986 (js-rendered record §5.1, §5.3) — the ChartEngine port's implementation loads the engine files as
+        // the scripting entry's program (F2, a main edge); the JVM guards run through the same entry.
         ":modules:js-rendered",
     ),
     ":modules:mcp-server" to setOf(

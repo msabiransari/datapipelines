@@ -26,8 +26,8 @@ object ChartSchemas {
     /** The bar family — `allOf` the skeleton, narrowing `config`; v1's only family and so the document's entry schema. */
     const val BAR = "bar.schema.json"
 
-    /** Every served file, in a stable order. */
-    val FILES: List<String> = listOf(SKELETON, BAR)
+    /** Every served file, in a stable order: the skeleton, then one schema per [ChartType] (its name derived, §4.2). */
+    val FILES: List<String> = listOf(SKELETON) + ChartType.entries.map { it.schemaFile }
 
     /** The file's bytes from this module's classpath; a missing resource is a packaging defect, never a 404 to explain. */
     fun bytes(file: String): ByteArray {

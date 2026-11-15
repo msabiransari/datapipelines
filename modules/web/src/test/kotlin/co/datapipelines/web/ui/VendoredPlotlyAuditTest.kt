@@ -1,8 +1,6 @@
 package co.datapipelines.web.ui
 
-import co.datapipelines.visualization.RendererConfigValidators
 import io.kotest.assertions.withClue
-import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
@@ -23,9 +21,8 @@ import java.util.zip.GZIPOutputStream
  *  1. **The bytes are the ones recorded.** The manifest's sha256 per file is the built
  *     bundle's; a rebuild that changed one byte goes red here, and so does an edit of a
  *     committed bundle that does not move the manifest.
- *  2. **The trace lists are the spec's** (the implementation spec's §10.4, D63) — the same
- *     lists [RendererConfigValidators] validates configurations against, read from THAT
- *     module's constants so the manifest cannot drift from the validator.
+ *  2. *(Retired with the server's trace lists, #986: no server code reads a Plotly trace type
+ *     since the library layer left — js-rendered record §5.4; the manifest's lists are F4's.)*
  *  3. **The stylesheet is the release build's own strict-CSP sheet**, the one the host loads
  *     so Plotly's runtime injection can be skipped (`.no-inline-styles`): it must carry the
  *     rules the runtime would otherwise inject, or the charts would render unstyled while
@@ -134,23 +131,6 @@ class VendoredPlotlyAuditTest {
     }
 
     @Test
-    fun `the manifest's trace lists are the spec's - the same lists the config validator holds`() {
-        val traces = Regex("\"traces\"\\s*:\\s*\\{.*?\\n    \\}", RegexOption.DOT_MATCHES_ALL).find(block("plotly"))?.value
-        withClue("the plotly block declares its per-bundle trace lists") { traces shouldNotBe null }
-
-        val twoD = Regex("\"plotly-2d.min.js\"\\s*:\\s*\\[[^]]*\\]").find(traces!!)?.groupValues?.get(0)
-        val threeD = Regex("\"plotly-3d.min.js\"\\s*:\\s*\\[[^]]*\\]").find(traces)?.groupValues?.get(0)
-        withClue("both bundles name their traces") {
-            (twoD != null) shouldBe true
-            (threeD != null) shouldBe true
-        }
-        val declared2D = QUOTED_WORDS.findAll(twoD!!).map { it.groupValues[1] }.toList()
-        val declared3D = QUOTED_WORDS.findAll(threeD!!).map { it.groupValues[1] }.toList()
-        declared2D shouldContainExactlyInAnyOrder RendererConfigValidators.PLOTLY_2D_TRACES
-        declared3D shouldContainExactlyInAnyOrder RendererConfigValidators.PLOTLY_TRACES
-    }
-
-    @Test
     fun `the vendored stylesheet is the release build's strict-CSP sheet - the rules the runtime would inject`() {
         // The runtime's injected rules are exactly this sheet (the build compiles both from
         // src/css at the same tag); the host page loads it as a real stylesheet so the
@@ -203,6 +183,5 @@ class VendoredPlotlyAuditTest {
                 "js/datapipelines-dashboard-table.js",
                 "js/datapipelines-dashboard-kpi.js",
             )
-        val QUOTED_WORDS = Regex("\"([a-z0-9]+)\"")
     }
 }

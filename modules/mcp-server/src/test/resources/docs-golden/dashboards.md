@@ -127,21 +127,19 @@ failure's `path` names the field. Its `details.reason` says what to fix:
 | `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | drop `scale.domain` on a normalized stack; else make it increasing and include zero |
 | `chart.format.normalize_percent` / `chart.format.currency_unknown` | format a normalized value `percent`; use a known currency code |
 | `chart.bindings.mismatch` | delete `bindings` — the save derives them |
-| `chart.unsupported.<field>` | the library cannot draw that field: drop it |
-
-A write answers `warnings` beside the version — `[]` when clean, else `{code: "chart.degraded.<field>", path,
-library}` for a field the library draws only approximately. A warning does not refuse the save; read it, and
-check that field in the preview.
 
 ## Proving a visualization — the test loop
 
 A visualization's `tests.cases` are its proof: fixture rows for every input and the assertions a
 reader checks (`rendered`, `mark_count` — a chart's bars, `no_console_errors`, `text_visible`, `no_data`,
-`value_visible`). The server's mechanical feasibility check scans configuration strings and bound
-strings or INTEGER/DECIMAL scalar numeric text (for example, `42` and `10.5`) by substring, without
-numeric normalization. Locale, currency, percent and rounded display text still need your visual
-check in the preview; the mechanical rendered state is `not_available`. Run the cases against the
-real renderer before you hand the work over:
+`value_visible`). For a `chart` the server draws each case with the same chart engine the browser
+runs, at 640 × 400, and judges `rendered`, `mark_count`, `no_data` and `text_visible` from that
+drawing: a `text_visible` string must be in a text the chart shows. A server without the JavaScript
+runtime lists those four as `unjudged` instead. For a `table` or `kpi` the mechanical feasibility
+check scans configuration strings and bound strings or INTEGER/DECIMAL scalar numeric text (for
+example, `42` and `10.5`) by substring, without numeric normalization. Locale, currency, percent and
+rounded display text still need your visual check in the preview. Run the cases against the real
+renderer before you hand the work over:
 
 1. **Start** with `visualizations_test_start` (`id`). It tests the WORKING version (the draft) and
    answers `preview_url`, the case names and `expires_at`. Any edit afterwards voids the session —

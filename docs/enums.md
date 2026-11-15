@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.58 (living document — updated as enums evolve)
+**Status:** v1.59 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -882,7 +882,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `html` | RESERVED — authored HTML (D13, D46); refused in round one |
 | `svg` | RESERVED — authored SVG (D13, D46); refused in round one |
 
-**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`. The `plotly` kind is **retired** (#860): a body naming it is refused the same way, with a message that names `chart`.
+**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`. The `plotly` kind is **retired** (#860): a body naming it is refused the same way, as any unknown kind (`details.reason` `unknown_kind`; the message lists the allowed kinds).
 
 ---
 
@@ -893,10 +893,10 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 
 | Value | Argument | Meaning |
 |---|---|---|
-| `rendered` | — | The renderer reported completion |
-| `mark_count` | `equals` (≥ 0) | A chart's drawn marks — the distinct category × series cells with a non-null value; the mechanical check judges it over the case's rows |
+| `rendered` | — | The renderer reported completion; on a chart the mechanical check judges it from the chart engine's canonical render (`state` `rendered` with at least one mark, or `no-data` over zero rows) |
+| `mark_count` | `equals` (≥ 0) | A chart's drawn marks — for a bar, the distinct category × series cells with a non-null value; the mechanical check judges it from the chart engine's canonical render of the case's rows at 640 × 400 (a `refused` or `too-small` render fails it) |
 | `no_console_errors` | — | No console error while rendering |
-| `text_visible` | `text` | A title, legend or cell string is visible; on a chart the mechanical check proves it from the document and the model or leaves it unjudged for the browser, never refusing it |
+| `text_visible` | `text` | A title, legend or cell string is visible; on a chart the mechanical check judges it against the texts the canonical render SHOWS (a cut label shows its cut text) and fails it when none contains the string — unjudged only on a host without the JavaScript runtime |
 | `no_data` | — | The case expects the empty state (a chart: no mark to draw) |
 | `value_visible` | `text` | A KPI value is visible |
 
@@ -1422,6 +1422,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.59 | 986 (#986, js-rendered F2) | **§31 `RendererKind`:** the retired `plotly` is refused as any unknown kind (`details.reason` `unknown_kind`, the message listing the allowed kinds). **§32 `AssertionKind`:** on a chart, `rendered`, `mark_count` and `text_visible` are judged by the mechanical check from the chart engine's canonical render at 640 × 400 (`text_visible`: a text the chart shows), unjudged only on a host without the JavaScript runtime. No value added or removed. |
 | 2026-11-14 | v1.58 | 985 (#985, js-rendered F1) | New **§63 `ChartType`**: the chart types the engine draws, `bar` alone in this lane, each entry carrying its channel descriptor; held to the Kotlin enum by `ChartTypeTest` and, with the schema files, the engine's templates and its registered names, by `ChartTypeRegistryTest`. |
 | 2026-11-14 | v1.57 | 964 (#964, dp-lake P6) | New **§62 `StorageRow`**: the six rows of a table's storage breakdown in their first-fit order (`dp_records`, `table_metadata`, `current`, `history`, `keep_held`, `not_referenced`; V64's CHECK), held to the Kotlin enum by `InventoryGuardsTest`. |
 | 2026-11-14 | v1.56 | 962 (#962, dp-lake P6) | New **§58 `IncompleteReason`** (`mode`, `delete_failed`: `lake.maintenance.cleanup_incomplete`'s reason), **§59 `ObserverOutcome`** (`ok`, `failed`, `not_called`), **§60 `ObservedRefType`** (`tag`, `branch`) and **§61** the expiry floor's spelling (an instant or `not_applicable`), held to the Kotlin values by `CleanupEnumsSpecDriftTest`. |
