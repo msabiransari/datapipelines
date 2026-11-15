@@ -985,6 +985,13 @@ else
   pass c47c real real "$FAKE_SEAM"
   exists "$root/unrelated/closed-file" 'unrelated: a reference on an unknown filesystem type is doubt, which keeps'
   expect processes-in-doubt 1; expect fuse-processes 0
+  # (d) FUSE processes are counted even when the temp base has no candidate directories.
+  # The existing holder still has the FUSE cwd; this fresh base has no checkout root or parent.
+  fake_type fuse.x
+  mkdir -p "$FX/empty-tmp"
+  PASS_TMPDIR="$FX/empty-tmp" pass c47d real real "$FAKE_SEAM"
+  kill -0 "$HOLDER" 2>/dev/null || fail 'the FUSE holder did not stay alive through the empty-base pass'
+  expect fuse-processes 1; expect processes-in-doubt 0; expect root-state absent
 fi
 finish
 

@@ -798,8 +798,7 @@ class Resolver:
 
     def process(self, proc: str, arguments: list[bytes]) -> frozenset[str]:
         """Everything one process's references resolve to: its arguments, its cwd and its open handles."""
-        if not self.candidates:
-            return frozenset()
+        # D8 counts FUSE processes even when there are no candidate directories to keep.
         self.extra = frozenset()
         self.unreadable = False
         self.fuse = 0
@@ -917,7 +916,7 @@ def scan_process(pid: str, base: bytes, resolver: Resolver) -> tuple[int, bytes,
     resolver.pid, before = pid, resolver.doubts
     for kept in sorted(resolver.process(proc, arguments)):
         refs.append((b"k", os.fsencode(kept)))
-    if resolver.doubts > before:
+    if resolver.candidates and resolver.doubts > before:
         refs.append((b"d", str(resolver.doubts - before).encode()))
     if resolver.fuse:
         refs.append((b"u", str(resolver.fuse).encode()))
