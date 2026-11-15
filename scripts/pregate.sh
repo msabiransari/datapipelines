@@ -39,7 +39,8 @@ if [ "$selftest" -eq 1 ]; then
   (pg2b::self_test); s_sel=$?
   (pgres::self_test); s_res=$?
   bash "$ROOT/scripts/pregate-safety-test.sh"; s_safe=$?
-  [ "$s_sel" -eq 0 ] && [ "$s_res" -eq 0 ] && [ "$s_safe" -eq 0 ]; exit $?
+  bash "$ROOT/scripts/temp-hygiene-test.sh"; s_hyg=$?
+  [ "$s_sel" -eq 0 ] && [ "$s_res" -eq 0 ] && [ "$s_safe" -eq 0 ] && [ "$s_hyg" -eq 0 ]; exit $?
 fi
 [ "$preview" -eq 0 ] || [ "$diagnostic" -eq 0 ] || { usage >&2; exit 2; }
 # Lanes are cut from the LOCAL main, which runs ahead of origin/main while a landed batch
@@ -80,6 +81,14 @@ done
 [ "$snap" -eq 0 ] && [ "$prune" -eq 0 ] || { failed=1; stopped_by=bookkeeping; }
 echo "Pre-gate base=$BASE ($PG_BASE_SOURCE) merge-base=$PG_MB head=$PG_HEAD evidence=$RUN_DIR"
 pgplan::print
+# Test temp files (#983, DEVELOPMENT.md §9.7), AFTER the lock: empty this checkout's test
+# temp root and sweep the shared temp directory (VERIFICATION_TMP_SWEEP: real by default,
+# dry-run lists the shared part only). One summary line; a failure never fails the run.
+if [ -r "$ROOT/scripts/lib/temp-hygiene.sh" ] && source "$ROOT/scripts/lib/temp-hygiene.sh"; then
+  th::step "$ROOT" "$RUN_DIR/temp-hygiene.txt"
+else
+  echo "temp-hygiene: WARNING scripts/lib/temp-hygiene.sh could not be loaded; nothing removed" >&2
+fi
 # Numeric 125 preserves the exit-field grammar while meaning NOT RUN, never success.
 declare -A exits=([0]=125 [1]=125 [2]=125 [2b]=125 [3]=125 [4]=125)
 declare -A logs=([0]=0-deps-scan.log [1]=1-lint.log [2]=2-touched-modules.log [2b]=2b-tests-modules.log [3]=3-guards.log [4]=4-compile-all-tests.log)

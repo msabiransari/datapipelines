@@ -600,7 +600,8 @@ pgres::_fixture() {
      "$PGRES_LIB_DIR/pregate-2b-lib.sh" "$PGRES_LIB_DIR/pregate-plan-lib.sh" "$PGRES_LIB_DIR/test-recount.sh" "$F/scripts/"
   mkdir -p "$F/scripts/lib"
   cp "$PGRES_LIB_DIR/lib/verification-lock.sh" "$PGRES_LIB_DIR/lib/gate-stages.sh" \
-     "$PGRES_LIB_DIR/lib/scan-tools.sh" "$F/scripts/lib/"
+     "$PGRES_LIB_DIR/lib/scan-tools.sh" "$PGRES_LIB_DIR/lib/temp-hygiene.sh" \
+     "$PGRES_LIB_DIR/lib/temp-hygiene-helper.py" "$F/scripts/lib/"
   pgres::_write_scan_standin "$F"
   printf 'build/\n.pregate-logs/\npregate-argv.log\npregate-quoted.log\npregate.out\n.scan-mode\nvuln-scan-calls.log\n' > "$F/.gitignore"
   printf '[versions]\nfixture = "1.0.0"\n' > "$F/gradle/libs.versions.toml"
@@ -642,10 +643,24 @@ EOF
 }
 
 # Runs the REAL scripts/pregate.sh inside the fixture (base = HEAD, the working-tree diff
-# is the change under test). Returns pregate's exit code.
+# is the change under test). Returns pregate's exit code. Its temp base is a fixture directory
+# beside the checkout (#983): the copied temp-hygiene step never sees the real /tmp.
 pgres::_run_fixture() {
   local F="$1"
-  ( cd "$F" && XDG_CACHE_HOME="$F/.fixture-cache" bash scripts/pregate.sh HEAD > pregate.out 2>&1 )
+  mkdir -p "$F.fixture-tmp" || return 2
+  ( cd "$F" && TMPDIR="$F.fixture-tmp" XDG_CACHE_HOME="$F/.fixture-cache" bash scripts/pregate.sh HEAD > pregate.out 2>&1 )
+}
+
+# #983: every temp-hygiene summary line captured under <dir> names a base inside <dir>, and
+# there is at least one (a wrapper fixture that never reached the step proves nothing).
+pgres::_check_hygiene_bases() { # dir → 0, or prints the offending lines and returns 1
+  local real lines outside
+  real="$(cd "$1" && pwd -P)" || return 1
+  lines="$(grep -rhs '^temp-hygiene: mode=' "$1" || true)"
+  [ -n "$lines" ] || { echo "no temp-hygiene summary line was captured under $1"; return 1; }
+  outside="$(printf '%s\n' "$lines" | grep -v "^temp-hygiene: mode=[^ ]* base=$real/" || true)"
+  [ -z "$outside" ] || { echo "a temp-hygiene summary line names a base outside the fixtures: $outside"; return 1; }
+  printf '%s\n' "$lines" | wc -l
 }
 
 pgres::self_test() {
@@ -653,6 +668,8 @@ pgres::self_test() {
   T="$(mktemp -d /tmp/pgres-selftest.XXXXXX)"
   trap "rm -rf '$T'" EXIT
   local fails=0
+  # #983: every copied wrapper's temp base is a fixture directory, never the real /tmp.
+  mkdir -p "$T/fixture-tmp" && export TMPDIR="$T/fixture-tmp"
   # Hermetic: the retention cases must see the default unless they set the override.
   unset PREGATE_KEEP_RUNS
 
@@ -1000,6 +1017,7 @@ pgres::self_test() {
   else echo "  ok   wiring-bad-refuses-pass"; fi
   ck_ok "wiring-bad-verdict-fail" grep -q 'PRE-GATE FAIL' "$W2/.pregate-logs/0-verdict.log"
   ck_ok "wiring-bad-prune-flag" grep -q 'prune=1' "$W2/.pregate-logs/0-verdict.log"
+  ck_ok "temp-hygiene-bases-in-fixtures" pgres::_check_hygiene_bases "$T"
 
   if [ "$fails" -eq 0 ]; then
     echo "  results self-test: PASS"

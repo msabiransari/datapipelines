@@ -6,7 +6,11 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * Configuration-time proofs for the coverage-floor guard in
@@ -63,6 +67,18 @@ import java.util.UUID
  * glibc's thread-stack cache off, and a tunable the build's environment already carries survives
  * while a conflicting stack-cache value is replaced.
  *
+ * Cases (m) to (q) prove the test temp root (#983, DEVELOPMENT.md §9.7; `TestTempRoot`): (m) a
+ * probe's test JVM gets `java.io.tmpdir` under the root of the checkout buildSrc's test task hands
+ * it, `testkit/modules/web/test`, created before the JVM starts, and the task stays UP-TO-DATE;
+ * (n) another handed checkout gives another root, and with none handed the probe's own checkout
+ * owns it; (o) buildSrc's own test JVM runs under `<root>/buildSrc/test`; (p)
+ * `scripts/lib/temp-hygiene.sh --print-root` prints the root this object derives; (q) a parent
+ * `dp-test-tmp-<uid>` that is a symlink, or writable by group, fails the probe's test task with
+ * the reason and nothing is created through it (a parent owned by another uid needs root to
+ * create: the check is the same `privateDirectoryProblems` line, and the case prints so).
+ * Every probe here sets its own `TMPDIR` below [baseDir], outside the probe checkout as `/tmp` is
+ * outside the repo, so no root lands in the shared temp directory.
+ *
  * The probe projects reuse the repo's real version catalog — the plugin
  * resolves catalog aliases at apply time. Tests (a) and (b) stop at
  * configuration ("help"), but test (c) writes real sources and runs
@@ -85,6 +101,10 @@ import java.util.UUID
 class CommonConventionsPluginTest {
     @TempDir
     lateinit var probeDir: File
+
+    /** Temp bases for the #983 cases, OUTSIDE the probe checkout as `/tmp` is outside the repo (#718's tree input). */
+    @TempDir
+    lateinit var baseDir: File
 
     private val catalogPath: String
         get() =
@@ -641,6 +661,146 @@ class CommonConventionsPluginTest {
             "glibc.malloc.tcache_count=0:glibc.pthread.stack_cache_size=0",
             probeLineSeen("glibc-tunables="),
             "the environment's other tunable must survive and its stack-cache value must be replaced",
+        )
+    }
+
+    /** A probe test that records its JVM's temp directory and whether it existed at start. */
+    private fun writeTmpdirProbe() {
+        probeDir.resolve("modules/web/src/test/kotlin/ProbeTest.kt").apply { parentFile.mkdirs() }.writeText(
+            """
+            import org.junit.jupiter.api.Test
+            class ProbeTest {
+                @Test fun recordsTheTempDirectory() {
+                    val tmp = System.getProperty("java.io.tmpdir")
+                    println("tmpdir=" + tmp)
+                    println("tmpdir-exists=" + java.io.File(tmp).isDirectory)
+                }
+            }
+            """.trimIndent(),
+        )
+    }
+
+    /** The checkout buildSrc's test task hands every probe (TestTempRoot.OWNER_ENV). */
+    private val ownerCheckout: Path
+        get() =
+            Path.of(
+                System.getenv(TestTempRoot.OWNER_ENV)
+                    ?: error("${TestTempRoot.OWNER_ENV} not set — run via buildSrc's test task"),
+            )
+
+    /** A temp base of its own, so no probe root lands in the shared temp directory. */
+    private fun probeBase(name: String = "base"): Path = Files.createDirectories(baseDir.toPath().resolve(name)).toRealPath()
+
+    private fun probeEnvironment(
+        base: Path,
+        owner: String?,
+    ): Map<String, String> {
+        val env = System.getenv().toMutableMap()
+        env["TMPDIR"] = base.toString()
+        if (owner == null) env.remove(TestTempRoot.OWNER_ENV) else env[TestTempRoot.OWNER_ENV] = owner
+        return env
+    }
+
+    @Test
+    fun `a probe test JVM's temp directory is under the handed checkout's root and the task stays up to date`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeTmpdirProbe()
+        val base = probeBase()
+        val env = probeEnvironment(base, ownerCheckout.toString())
+        val test = ":modules:web:test"
+
+        val first = runner(test).withEnvironment(env).build()
+        assertEquals(TaskOutcome.SUCCESS, first.task(test)?.outcome, first.output)
+        val expected = TestTempRoot.root(base, TestTempRoot.uid(), ownerCheckout).resolve("testkit/modules/web/test")
+        assertEquals(expected.toString(), probeLineSeen("tmpdir="))
+        assertEquals("true", probeLineSeen("tmpdir-exists="), "the directory must exist before the JVM starts")
+        val parent = TestTempRoot.parent(base, TestTempRoot.uid())
+        assertEquals(emptyList<String>(), TestTempRoot.privateDirectoryProblems(parent, TestTempRoot.uid()))
+        assertEquals(
+            "rwx------",
+            PosixFilePermissions.toString(Files.getPosixFilePermissions(expected.parent.parent.parent.parent)),
+            "the root is created mode 0700",
+        )
+        val record = parent.resolve(TestTempRoot.key(ownerCheckout) + TestTempRoot.RECORD_SUFFIX)
+        assertEquals(ownerCheckout.toRealPath().toString() + "\n", Files.readString(record), "the record names the checkout")
+
+        // The path is no task input: the second run is UP-TO-DATE.
+        val second = runner(test, "--info").withEnvironment(env).build()
+        assertEquals(TaskOutcome.UP_TO_DATE, second.task(test)?.outcome, second.output)
+    }
+
+    @Test
+    fun `another handed checkout gives another root and with none handed the probe's own checkout owns it`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeTmpdirProbe()
+        val base = probeBase()
+        val other = Files.createDirectories(probeDir.toPath().resolve("other-checkout"))
+        val test = ":modules:web:test"
+
+        runner(test, "--rerun-tasks").withEnvironment(probeEnvironment(base, other.toString())).build()
+        val otherRoot = TestTempRoot.root(base, TestTempRoot.uid(), other)
+        assertEquals(otherRoot.resolve("testkit/modules/web/test").toString(), probeLineSeen("tmpdir="))
+        assertTrue(otherRoot != TestTempRoot.root(base, TestTempRoot.uid(), ownerCheckout), "two checkouts share a root")
+
+        runner(test, "--rerun-tasks").withEnvironment(probeEnvironment(base, null)).build()
+        val ownRoot = TestTempRoot.root(base, TestTempRoot.uid(), probeDir.toPath())
+        assertEquals(ownRoot.resolve("modules/web/test").toString(), probeLineSeen("tmpdir="))
+    }
+
+    @Test
+    fun `buildSrc's own test JVM runs under the checkout root's buildSrc directory`() {
+        val base = TestTempRoot.base(System.getenv("TMPDIR"))
+        val expected = TestTempRoot.root(base, TestTempRoot.uid(), ownerCheckout).resolve("buildSrc/test")
+        assertEquals(expected.toString(), System.getProperty("java.io.tmpdir"))
+        assertTrue(probeDir.toPath().toRealPath().startsWith(expected), "@TempDir must sit below the root: $probeDir")
+    }
+
+    @Test
+    fun `temp-hygiene print-root prints the root the plugin derives`() {
+        val script = ownerCheckout.resolve("scripts/lib/temp-hygiene.sh")
+        for (tmpdir in listOf(probeBase().toString(), null)) {
+            val command = ProcessBuilder("bash", script.toString(), "--print-root")
+            if (tmpdir == null) command.environment().remove("TMPDIR") else command.environment()["TMPDIR"] = tmpdir
+            val process = command.redirectErrorStream(true).start()
+            assertTrue(process.waitFor(60, TimeUnit.SECONDS), "temp-hygiene.sh --print-root did not finish")
+            val printed =
+                process.inputStream
+                    .bufferedReader()
+                    .readText()
+                    .trim()
+            assertEquals(0, process.exitValue(), printed)
+            val expected = TestTempRoot.root(TestTempRoot.base(tmpdir), TestTempRoot.uid(), ownerCheckout)
+            assertEquals(expected.toString(), printed, "TMPDIR=$tmpdir")
+        }
+    }
+
+    @Test
+    fun `a parent that is a symlink or writable by group fails the test task and nothing is created through it`() {
+        writeSettings(":modules:web")
+        writeBuild("modules/web/build.gradle.kts")
+        writeTmpdirProbe()
+        val test = ":modules:web:test"
+        val uid = TestTempRoot.uid()
+
+        val linked = probeBase("linked-base")
+        val sentinel = Files.createDirectories(baseDir.toPath().resolve("sentinel"))
+        Files.writeString(sentinel.resolve("keep"), "keep\n")
+        Files.createSymbolicLink(TestTempRoot.parent(linked, uid), sentinel)
+        val viaLink = runner(test, "--rerun-tasks").withEnvironment(probeEnvironment(linked, ownerCheckout.toString())).buildAndFail()
+        assertTrue("Refusing the test temp parent" in viaLink.output && "is a symbolic link" in viaLink.output, viaLink.output)
+        assertEquals(listOf("keep"), sentinel.toFile().list()?.toList(), "something was created through the link")
+
+        val open = probeBase("open-base")
+        val parent = Files.createDirectory(TestTempRoot.parent(open, uid))
+        Files.setPosixFilePermissions(parent, PosixFilePermissions.fromString("rwxrwx---"))
+        val viaOpen = runner(test, "--rerun-tasks").withEnvironment(probeEnvironment(open, ownerCheckout.toString())).buildAndFail()
+        assertTrue("Refusing the test temp parent" in viaOpen.output && "is writable by group or others" in viaOpen.output, viaOpen.output)
+        assertEquals(emptyList<String>(), parent.toFile().list()?.toList(), "something was created below the open parent")
+        println(
+            "case (q): a parent owned by another uid is not created here (needs root); " +
+                "it fails the same privateDirectoryProblems check",
         )
     }
 
