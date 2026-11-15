@@ -21,18 +21,9 @@ class ChartInteractionsLoadOrderTest {
         val loaders = mutableListOf<String>()
         val wrong = mutableListOf<String>()
         for (path in trackedPaths(root)) {
-            val file = File(root, path)
-            if (!file.isFile || file.length() > MAX_BYTES) continue
-            val text = file.readText()
-            if (!text.contains(ADAPTER)) continue
-            val tags = SCRIPT_TAG.findAll(text).map { it.groupValues[1] }.toList()
-            val adapterAt = tags.indices.filter { tags[it].endsWith(ADAPTER) }
-            if (adapterAt.isEmpty()) continue
+            val misplaced = misplacedLayers(path, File(root, path)) ?: continue
             loaders += path
-            adapterAt.forEach { i ->
-                val before = tags.getOrNull(i - 1)
-                if (before == null || !before.endsWith(LAYER)) wrong += "$path: the script before the adapter is ${before ?: "none"}"
-            }
+            wrong += misplaced
         }
         println("ChartInteractionsLoadOrderTest: ${loaders.size} tracked files load the chart adapter as a script: $loaders")
         if (loaders.size < FLOOR) fail("only ${loaders.size} files load the adapter (floor $FLOOR): the scan is not reading the tree")
@@ -42,11 +33,32 @@ class ChartInteractionsLoadOrderTest {
     @Test
     fun `the matcher reads both spellings of a script tag and refuses a page without the layer`() {
         val good = """<script th:src="@{/js/$LAYER}"></script>${"\n"}<script th:src="@{/js/$ADAPTER}"></script>"""
-        val bad = """<script src="https://dp.example.co/js/datapipelines-dashboard.js"></script><script src="https://dp.example.co/js/$ADAPTER"></script>"""
+        val bad =
+            """<script src="https://dp.example.co/js/datapipelines-dashboard.js"></script>""" +
+                """<script src="https://dp.example.co/js/$ADAPTER"></script>"""
         val goodTags = SCRIPT_TAG.findAll(good).map { it.groupValues[1] }.toList()
         val badTags = SCRIPT_TAG.findAll(bad).map { it.groupValues[1] }.toList()
         if (goodTags.size != 2 || !goodTags[0].endsWith(LAYER) || !goodTags[1].endsWith(ADAPTER)) fail("th:src not read: $goodTags")
         if (badTags.size != 2 || badTags[0].endsWith(LAYER)) fail("src not read: $badTags")
+    }
+
+    /**
+     * For a file that loads the adapter as a script, one line per adapter tag NOT directly preceded by the layer's tag
+     * (empty when every one is); null for a file that does not load the adapter at all.
+     */
+    private fun misplacedLayers(
+        path: String,
+        file: File,
+    ): List<String>? {
+        val text = if (file.isFile && file.length() <= MAX_BYTES) file.readText() else ""
+        if (!text.contains(ADAPTER)) return null
+        val tags = SCRIPT_TAG.findAll(text).map { it.groupValues[1] }.toList()
+        val adapterAt = tags.indices.filter { tags[it].endsWith(ADAPTER) }
+        if (adapterAt.isEmpty()) return null
+        return adapterAt.mapNotNull { i ->
+            val before = tags.getOrNull(i - 1)
+            if (before != null && before.endsWith(LAYER)) null else "$path: the script before the adapter is ${before ?: "none"}"
+        }
     }
 
     /** The index's paths, NUL-separated so no file name is quoted or split; a git failure fails the suite. */

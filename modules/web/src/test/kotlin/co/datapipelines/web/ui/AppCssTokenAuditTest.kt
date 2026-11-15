@@ -97,7 +97,8 @@ class AppCssTokenAuditTest {
         appCss.lines().count { it.trim().startsWith(TIP_SHADOW_READ) } shouldBe 1
         // The fallback IS the light declaration's value (the first --chart-tip-shadow declared, in :root).
         val light = Regex("""--chart-tip-shadow:\s*([^;]+);""").find(appCss)?.groupValues?.get(1)
-        val fallback = appCss.lines().first { it.trim().startsWith(TIP_SHADOW_READ) }.trim().removePrefix(TIP_SHADOW_READ).removeSuffix(");")
+        val read = appCss.lines().map { it.trim() }.first { it.startsWith(TIP_SHADOW_READ) }
+        val fallback = read.removePrefix(TIP_SHADOW_READ).removeSuffix(");")
         fallback shouldBe light
     }
 

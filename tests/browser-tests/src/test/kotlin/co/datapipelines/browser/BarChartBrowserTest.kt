@@ -256,36 +256,50 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         val agent = newYorkContext()
         var read = 0
         try {
-            for (name in ChartBrowserFixtures.NAMES) {
-                val fixture = ChartBrowserFixtures.fixture(name)
-                val hovers = fixture.expect.getAsJsonArray("hover").map { it.asJsonObject }
-                if (hovers.isEmpty()) continue
-                val preview = open(agent, "$root/charts/pointer_${name.replace('-', '_')}", fixture)
-                try {
-                    hovers.forEach { e ->
-                        val (si, ci) = e.get("si").asInt to e.get("ci").asInt
-                        val at =
-                            requireNotNull(preview.evaluate(BAR_CENTRE, mapOf("sel" to CASE, "si" to si, "ci" to ci)) as Map<*, *>?) {
-                                "${fixture.name}: series $si, category $ci has no drawn bar"
-                            }
-                        preview.mouse().move((at["x"] as Number).toDouble(), (at["y"] as Number).toDouble())
-                        preview.waitForFunction("sel => !!document.querySelector(sel + ' svg.dp-chart g.dp-tooltip')", CASE)
-                        val shown = preview.evaluate(SHOWN_CARD, CASE) as String
-                        println("${fixture.name}: series $si, category $ci: the shown card reads $shown")
-                        e.getAsJsonArray("contains").map { it.asString }.forEach { part ->
-                            withClue("${fixture.name}: the card shown over series $si, category $ci: $shown") { shown shouldContain part }
-                        }
-                        read++
-                        preview.mouse().move(0.0, 0.0)
-                    }
-                } finally {
-                    preview.close()
-                }
-            }
+            for (name in ChartBrowserFixtures.NAMES) read += readHovers(agent, root, name)
         } finally {
             agent.close()
         }
         withClue("the five hover expectations were read from the shown card (non-vacuity floor)") { read shouldBe HOVER_EXPECTATIONS }
+    }
+
+    /** Opens fixture [name]'s preview when it carries `expect.hover` entries and reads each one; returns how many were read. */
+    private fun readHovers(
+        agent: BrowserContext,
+        root: String,
+        name: String,
+    ): Int {
+        val fixture = ChartBrowserFixtures.fixture(name)
+        val hovers = fixture.expect.getAsJsonArray("hover").map { it.asJsonObject }
+        if (hovers.isEmpty()) return 0
+        val preview = open(agent, "$root/charts/pointer_${name.replace('-', '_')}", fixture)
+        try {
+            return hovers.sumOf { e -> hoverAndRead(preview, fixture.name, e) }
+        } finally {
+            preview.close()
+        }
+    }
+
+    /** Moves the pointer onto the bar of one `expect.hover` entry and asserts the shown card holds each expected part; returns 1. */
+    private fun hoverAndRead(
+        preview: Page,
+        fixture: String,
+        e: JsonObject,
+    ): Int {
+        val (si, ci) = e.get("si").asInt to e.get("ci").asInt
+        val at =
+            requireNotNull(preview.evaluate(BAR_CENTRE, mapOf("sel" to CASE, "si" to si, "ci" to ci)) as Map<*, *>?) {
+                "$fixture: series $si, category $ci has no drawn bar"
+            }
+        preview.mouse().move((at["x"] as Number).toDouble(), (at["y"] as Number).toDouble())
+        preview.waitForFunction("sel => !!document.querySelector(sel + ' svg.dp-chart g.dp-tooltip')", CASE)
+        val shown = preview.evaluate(SHOWN_CARD, CASE) as String
+        println("$fixture: series $si, category $ci: the shown card reads $shown")
+        e.getAsJsonArray("contains").map { it.asString }.forEach { part ->
+            withClue("$fixture: the card shown over series $si, category $ci: $shown") { shown shouldContain part }
+        }
+        preview.mouse().move(0.0, 0.0)
+        return 1
     }
 
     private fun overflowFixture(): ChartBrowserFixtures.Fixture {

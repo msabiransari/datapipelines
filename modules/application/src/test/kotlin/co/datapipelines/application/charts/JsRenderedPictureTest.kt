@@ -62,7 +62,13 @@ class JsRenderedPictureTest {
 
     @Test
     fun `the standalone picture is described as the page's is - role img, its title and its desc first, as text (990 D6)`() {
-        val root = parse(ChartEngines.engine.picture(hostile, ChartFrame.of(960, 540), ChartTheme.LIGHT).svg.shouldNotBeNull())
+        val root =
+            parse(
+                ChartEngines.engine
+                    .picture(hostile, ChartFrame.of(960, 540), ChartTheme.LIGHT)
+                    .svg
+                    .shouldNotBeNull(),
+            )
         root.getAttribute("role") shouldBe "img"
         val children = (0 until root.childNodes.length).map { root.childNodes.item(it) }.filterIsInstance<Element>()
         children[0].localName shouldBe "title"

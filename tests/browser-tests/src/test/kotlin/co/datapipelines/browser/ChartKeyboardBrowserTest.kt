@@ -51,7 +51,10 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
                 step(page, log, "$label K1 arrow").also { it["card"] shouldNotBe null }
                 press(page, "End")
                 press(page, "ArrowRight")
-                withClue("$label K1: Right on the series' last mark reaches its legend entry") { ringOn(step(page, log, "$label K1 End Right")) shouldBe ids[0] }
+                withClue("$label K1: Right on the series' last mark reaches its legend entry") {
+                    ringOn(step(page, log, "$label K1 End Right")) shouldBe
+                        ids[0]
+                }
                 ids.forEachIndexed { i, id ->
                     if (i > 0) press(page, "ArrowRight")
                     press(page, "Enter")
@@ -189,7 +192,7 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
     }
 
     @Test
-    fun `LA13 - at 80 x 24 the card carries each series' name and WHOLE value, by keys, by keys after a parked pointer, and by the pointer`() {
+    fun `LA13 - at 80 x 24 each series' name and WHOLE value, by keys, by keys after a parked pointer, and by the pointer`() {
         startTrace()
         val (context, page) = harnessPage("la13")
         val log = mutableListOf<String>()
@@ -198,41 +201,64 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
             // Two series share one point: A and B are both 5 at the second month.
             val shared = line(mapOf("A" to listOf(1, 5, 9), "B" to listOf(3, 5, 7), "C" to listOf(8, 2, 6)), title = "Shared")
             val bar3 = bar(mapOf("A" to listOf(3, 6, 9), "B" to listOf(5, 2, 7), "C" to listOf(8, 4, 1)), title = "Three")
-            for ((label, chart, parked) in listOf(Triple("line", shared, false), Triple("line parked", shared, true), Triple("bar", bar3, false))) {
-                mount(page, chart, SMALL_W, SMALL_H)["ok"] shouldBe true
-                if (parked) hover(page, pointOf(page, "C", 2))
-                tabIn(page)
-                press(page, "ArrowRight")
-                for (x in 0 until 3) {
-                    if (x > 0) press(page, "ArrowRight")
-                    for ((i, id) in listOf("A", "B", "C").withIndex()) {
-                        if (i > 0) press(page, "ArrowDown")
-                        val r = step(page, log, "$label keys $id@$x")
-                        assertRow(r, label, id, chart.valueAt(id, x))
-                        read++
-                    }
-                    press(page, "ArrowUp")
-                    press(page, "ArrowUp")
-                }
-            }
+            read += readByKeys(page, log, "line", shared, parked = false)
+            read += readByKeys(page, log, "line parked", shared, parked = true)
+            read += readByKeys(page, log, "bar", bar3, parked = false)
             // By the pointer: every point that shares its place with no other (the line's A and B at month 2 do).
-            for ((label, chart) in listOf("line" to shared, "bar" to bar3)) {
-                mount(page, chart, SMALL_W, SMALL_H)["ok"] shouldBe true
-                for (x in 0 until 3) {
-                    for (id in listOf("A", "B", "C")) {
-                        if (label == "line" && x == 1 && id != "C") continue
-                        hover(page, pointOf(page, id, x))
-                        assertRow(step(page, log, "$label pointer $id@$x", keys = false), label, id, chart.valueAt(id, x))
-                        read++
-                    }
-                }
-                page.mouse().move(1.0, 1.0)
-            }
+            read += readByPointer(page, log, "line", shared) { id, x -> x == 1 && id != "C" }
+            read += readByPointer(page, log, "bar", bar3) { _, _ -> false }
         } finally {
             context.close()
             report("la13.txt", log + "values read=$read")
         }
         withClue("values read at 80 x 24 (non-vacuity floor $LA13_FLOOR)") { read shouldBeGreaterThanOrEqual LA13_FLOOR }
+    }
+
+    /** LA13 by keys: every series at every month, Down within a month and Right between months; returns the rows read. */
+    private fun readByKeys(
+        page: Page,
+        log: MutableList<String>,
+        label: String,
+        chart: Chart,
+        parked: Boolean,
+    ): Int {
+        var read = 0
+        mount(page, chart, SMALL_W, SMALL_H)["ok"] shouldBe true
+        if (parked) hover(page, pointOf(page, "C", 2))
+        tabIn(page)
+        press(page, "ArrowRight")
+        for (x in 0 until 3) {
+            if (x > 0) press(page, "ArrowRight")
+            for ((i, id) in listOf("A", "B", "C").withIndex()) {
+                if (i > 0) press(page, "ArrowDown")
+                assertRow(step(page, log, "$label keys $id@$x"), label, id, chart.valueAt(id, x))
+                read++
+            }
+            press(page, "ArrowUp")
+            press(page, "ArrowUp")
+        }
+        return read
+    }
+
+    /** LA13 by the pointer: every point not [shared] with another; returns the rows read. */
+    private fun readByPointer(
+        page: Page,
+        log: MutableList<String>,
+        label: String,
+        chart: Chart,
+        shared: (String, Int) -> Boolean,
+    ): Int {
+        var read = 0
+        mount(page, chart, SMALL_W, SMALL_H)["ok"] shouldBe true
+        for (x in 0 until 3) {
+            for (id in listOf("A", "B", "C").filterNot { shared(it, x) }) {
+                hover(page, pointOf(page, id, x))
+                assertRow(step(page, log, "$label pointer $id@$x", keys = false), label, id, chart.valueAt(id, x))
+                read++
+            }
+        }
+        page.mouse().move(1.0, 1.0)
+        return read
     }
 
     @Test
@@ -242,68 +268,11 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
         val log = mutableListOf<String>()
         var executions = 0
         try {
-            // (1) Five lines A to E.
-            val five = line(("ABCDE".map { it.toString() }).associateWith { id -> listOf(1, 2, 3).map { it * (id[0] - '@') } })
-            mount(page, five, FULL_W, FULL_H)["ok"] shouldBe true
-            val first = expectLegend(page, log, "1 start", "top", emptyList(), 5)
-            for ((n, id) in listOf("E", "D", "C", "B", "A").withIndex()) {
-                click(page, id)
-                expectLegend(page, log, "1 hide $id", "top", listOf("E", "D", "C", "B", "A").take(n + 1), 5)
-            }
-            for ((n, id) in listOf("A", "B", "C", "D", "E").withIndex()) {
-                click(page, id)
-                expectLegend(page, log, "1 show $id", "top", listOf("B", "C", "D", "E").drop(n), 5)
-            }
-            withClue("(1) the same node from the first step to the last") { first["same"] shouldBe true }
-            executions++
-
-            // (2) Three lines A to C.
             val three = line(mapOf("A" to listOf(10, 30, 20), "B" to listOf(25, 15, 35), "C" to listOf(5, 45, 10)))
-            mount(page, three, FULL_W, FULL_H)["ok"] shouldBe true
-            expectLegend(page, log, "2 start", "lines", emptyList(), 3)
-            click(page, "B")
-            expectLegend(page, log, "2 hide B", "top", listOf("B"), 3)
-            click(page, "A")
-            click(page, "C")
-            expectLegend(page, log, "2 hide A C", "top", listOf("B", "A", "C"), 3)["drawnMarks"] shouldBe 0
-            click(page, "A")
-            click(page, "B")
-            expectLegend(page, log, "2 show A B", "top", listOf("C"), 3)
-            click(page, "C")
-            expectLegend(page, log, "2 show C", "lines", emptyList(), 3)
-            executions++
-
-            // (3) Two series A and B, as bars and as lines.
-            for ((label, chart) in listOf("bar" to bar2, "line" to line2)) {
-                mount(page, chart, FULL_W, FULL_H)["ok"] shouldBe true
-                click(page, "B")
-                expectLegend(page, log, "3 $label hide B", "top", listOf("B"), 2)
-                refresh(page, only(chart, "B"))["ok"] shouldBe true
-                expectLegend(page, log, "3 $label refresh B alone", "top", listOf("B"), 1)["drawnMarks"] shouldBe 0
-                click(page, "B")
-                val shown = expectLegend(page, log, "3 $label show B", "none", emptyList(), 0)
-                withClue("(3) $label: B is drawn and the node is the same") {
-                    drawnOf(shown, "B") shouldBeGreaterThan 0
-                    shown["same"] shouldBe true
-                }
-                executions++
-            }
-
-            // (4) Three lines A to C.
-            mount(page, three, FULL_W, FULL_H)["ok"] shouldBe true
-            click(page, "B")
-            expectLegend(page, log, "4 hide B", "top", listOf("B"), 3)
-            refresh(page, only(three, "A", "C"))["ok"] shouldBe true
-            val two = expectLegend(page, log, "4 refresh A C", "lines", emptyList(), 2)
-            withClue("(4) B's id does nothing and stays on the list: $two") {
-                two["hidden"] shouldBe listOf("B")
-                drawnOf(two, "A") shouldBeGreaterThan 0
-                drawnOf(two, "C") shouldBeGreaterThan 0
-            }
-            refresh(page, three.columns)["ok"] shouldBe true
-            val again = expectLegend(page, log, "4 refresh A B C", "top", listOf("B"), 3)
-            withClue("(4) the node is the same throughout") { again["same"] shouldBe true }
-            executions++
+            executions += sequence1(page, log)
+            executions += sequence2(page, log, three)
+            for ((label, chart) in listOf("bar" to bar2, "line" to line2)) executions += sequence3(page, log, label, chart)
+            executions += sequence4(page, log, three)
         } finally {
             context.close()
             report("la10.txt", log + "executions=$executions")
@@ -311,8 +280,91 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
         withClue("LA10's five executions (1, 2, 3 bar, 3 line, 4)") { executions shouldBe LA10_EXECUTIONS }
     }
 
+    /** LA10 (1): five lines A to E, hidden E to A and shown A to E, the legend at the top throughout; returns 1. */
+    private fun sequence1(
+        page: Page,
+        log: MutableList<String>,
+    ): Int {
+        val five = line(("ABCDE".map { it.toString() }).associateWith { id -> listOf(1, 2, 3).map { it * (id[0] - '@') } })
+        mount(page, five, FULL_W, FULL_H)["ok"] shouldBe true
+        expectLegend(page, log, "1 start", "top", emptyList(), 5)
+        for ((n, id) in listOf("E", "D", "C", "B", "A").withIndex()) {
+            click(page, id)
+            expectLegend(page, log, "1 hide $id", "top", listOf("E", "D", "C", "B", "A").take(n + 1), 5)
+        }
+        for ((n, id) in listOf("A", "B", "C", "D", "E").withIndex()) {
+            click(page, id)
+            expectLegend(page, log, "1 show $id", "top", listOf("B", "C", "D", "E").drop(n), 5)
+        }
+        return 1
+    }
+
+    /** LA10 (2): three lines, names on the lines, to the top while any is hidden, and back; returns 1. */
+    private fun sequence2(
+        page: Page,
+        log: MutableList<String>,
+        three: Chart,
+    ): Int {
+        mount(page, three, FULL_W, FULL_H)["ok"] shouldBe true
+        expectLegend(page, log, "2 start", "lines", emptyList(), 3)
+        click(page, "B")
+        expectLegend(page, log, "2 hide B", "top", listOf("B"), 3)
+        click(page, "A")
+        click(page, "C")
+        expectLegend(page, log, "2 hide A C", "top", listOf("B", "A", "C"), 3)["drawnMarks"] shouldBe 0
+        click(page, "A")
+        click(page, "B")
+        expectLegend(page, log, "2 show A B", "top", listOf("C"), 3)
+        click(page, "C")
+        expectLegend(page, log, "2 show C", "lines", emptyList(), 3)
+        return 1
+    }
+
+    /** LA10 (3): two series, B hidden, a refresh to B alone, the click that draws B; returns 1. */
+    private fun sequence3(
+        page: Page,
+        log: MutableList<String>,
+        label: String,
+        chart: Chart,
+    ): Int {
+        mount(page, chart, FULL_W, FULL_H)["ok"] shouldBe true
+        click(page, "B")
+        expectLegend(page, log, "3 $label hide B", "top", listOf("B"), 2)
+        refresh(page, only(chart, "B"))["ok"] shouldBe true
+        expectLegend(page, log, "3 $label refresh B alone", "top", listOf("B"), 1)["drawnMarks"] shouldBe 0
+        click(page, "B")
+        val shown = expectLegend(page, log, "3 $label show B", "none", emptyList(), 0)
+        withClue("(3) $label: B is drawn and the node is the same") {
+            drawnOf(shown, "B") shouldBeGreaterThan 0
+            shown["same"] shouldBe true
+        }
+        return 1
+    }
+
+    /** LA10 (4): three lines, B hidden, a refresh without B keeps it listed, a refresh with B brings it back struck; returns 1. */
+    private fun sequence4(
+        page: Page,
+        log: MutableList<String>,
+        three: Chart,
+    ): Int {
+        mount(page, three, FULL_W, FULL_H)["ok"] shouldBe true
+        click(page, "B")
+        expectLegend(page, log, "4 hide B", "top", listOf("B"), 3)
+        refresh(page, only(three, "A", "C"))["ok"] shouldBe true
+        val two = expectLegend(page, log, "4 refresh A C", "lines", emptyList(), 2)
+        withClue("(4) B's id does nothing and stays on the list: $two") {
+            two["hidden"] shouldBe listOf("B")
+            drawnOf(two, "A") shouldBeGreaterThan 0
+            drawnOf(two, "C") shouldBeGreaterThan 0
+        }
+        refresh(page, three.columns)["ok"] shouldBe true
+        val again = expectLegend(page, log, "4 refresh A B C", "top", listOf("B"), 3)
+        withClue("(4) the node is the same throughout") { again["same"] shouldBe true }
+        return 1
+    }
+
     @Test
-    fun `D3a - a cut subtitle and a cut category label show their full text by pointer and by keys, a text not cut shows nothing, the hostile title is text`() {
+    fun `D3a - a cut subtitle and label show the full text by pointer and keys, an uncut text shows nothing, the hostile title is text`() {
         startTrace()
         val (context, page) = harnessPage("cut")
         val log = mutableListOf<String>()
@@ -340,35 +392,50 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
             withClue("D3a: the keys reach the first cut text, its card the FULL text: $byKeys") { joined(byKeys) shouldBe full }
             revealed++
             withClue("the primitive keeps the full text, the DOM the shown one") { (sub["dom"] == full) shouldBe false }
-
-            val labels = engineChart("bar/look-long-labels")
-            mount(page, labels, LABEL_W, LABEL_H)["ok"] shouldBe true
-            val label = cutsOf(page).first { it["role"] == "tick" }
-            val category = label["text"] as String
-            hover(page, centre(label))
-            withClue("D3a: the pointer on the cut label shows the whole category") { joined(step(page, log, "label pointer", keys = false)) shouldBe category }
-            revealed++
-            val at = page.evaluate("t => window.__h.datum(t)", category) as Map<*, *>
-            hover(page, pointOf(page, at["id"] as String, (at["datum"] as Number).toInt()))
-            withClue("on its bar, the mark's card carries the whole category as its heading") {
-                ((step(page, log, "label bar", keys = false)["card"] as Map<*, *>)["texts"] as List<*>).first() shouldBe category
-            }
-
+            revealed += revealLabel(page, log)
             page.mouse().move(1.0, 1.0)
-            mount(page, hostileChart(), HOSTILE_W, HOSTILE_H)["ok"] shouldBe true
-            val title = cutsOf(page).firstOrNull { it["role"] == "title" } ?: error("the hostile title is not cut at $HOSTILE_W x $HOSTILE_H")
-            hover(page, centre(title))
-            val hostile = step(page, log, "hostile title", keys = false)
-            withClue("the hostile 200-character title is shown whole, as text: $hostile") {
-                joined(hostile) shouldBe title["text"]
-                hostile["scripts"] shouldBe 0
-            }
-            revealed++
+            revealed += revealHostile(page, log)
         } finally {
             context.close()
             report("cut.txt", log + "revealed=$revealed")
         }
         withClue("cut texts revealed (non-vacuity floor 3)") { revealed shouldBeGreaterThanOrEqual CUT_FLOOR }
+    }
+
+    /** D3a on a cut category label: the pointer shows the whole category, and its bar's card heads with it; returns 1. */
+    private fun revealLabel(
+        page: Page,
+        log: MutableList<String>,
+    ): Int {
+        mount(page, engineChart("bar/look-long-labels"), LABEL_W, LABEL_H)["ok"] shouldBe true
+        val label = cutsOf(page).first { it["role"] == "tick" }
+        val category = label["text"] as String
+        hover(page, centre(label))
+        withClue("D3a: the pointer on the cut label shows the whole category") {
+            joined(step(page, log, "label pointer", keys = false)) shouldBe category
+        }
+        val at = page.evaluate("t => window.__h.datum(t)", category) as Map<*, *>
+        hover(page, pointOf(page, at["id"] as String, (at["datum"] as Number).toInt()))
+        withClue("on its bar, the mark's card carries the whole category as its heading") {
+            ((step(page, log, "label bar", keys = false)["card"] as Map<*, *>)["texts"] as List<*>).first() shouldBe category
+        }
+        return 1
+    }
+
+    /** D3a on the hostile fixture: its cut 200-character title is shown whole, as text, with no script; returns 1. */
+    private fun revealHostile(
+        page: Page,
+        log: MutableList<String>,
+    ): Int {
+        mount(page, hostileChart(), HOSTILE_W, HOSTILE_H)["ok"] shouldBe true
+        val title = cutsOf(page).firstOrNull { it["role"] == "title" } ?: error("the hostile title is not cut at $HOSTILE_W x $HOSTILE_H")
+        hover(page, centre(title))
+        val hostile = step(page, log, "hostile title", keys = false)
+        withClue("the hostile 200-character title is shown whole, as text: $hostile") {
+            joined(hostile) shouldBe title["text"]
+            hostile["scripts"] shouldBe 0
+        }
+        return 1
     }
 
     @Test
@@ -408,8 +475,15 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
         keys: Boolean = true,
     ): Map<*, *> {
         val r = read(page)
-        log += "$label: focused=${r["focused"]} tabindex=${r["tabindex"]} ringOn=${r["ringOn"]} card=${(r["card"] as Map<*, *>?)?.get("texts")}" +
-            " entries=${entries(r).map { "${it["id"]}${if (it["off"] == true) "(off)" else ""}" }} place=${r["place"]} marks=${r["drawnMarks"]} hidden=${r["hidden"]}"
+        log +=
+            "$label: focused=${r["focused"]} tabindex=${r["tabindex"]} ringOn=${r["ringOn"]} card=${(r["card"] as Map<*, *>?)?.get(
+                "texts",
+            )}" +
+            " entries=${entries(
+                r,
+            ).map {
+                "${it["id"]}${if (it["off"] == true) "(off)" else ""}"
+            }} place=${r["place"]} marks=${r["drawnMarks"]} hidden=${r["hidden"]}"
         withClue("$label: the chart holds ONE tabindex${if (keys) " and the picture holds focus" else ""}: $r") {
             r["tabindex"] shouldBe 1
             if (keys) r["focused"] shouldBe true
@@ -517,7 +591,8 @@ class ChartKeyboardBrowserTest : ChartInteractionSuite() {
 
         /** The card's measures' inputs, read by field name from the page's look table and the default text size. */
         const val MEASURES =
-            """() => { var L = window.JsRendered.tables.look; return { s: 12, tipPad: L('tipPad'), tipLine: L('tipLine'), tipMax: L('tipMax') }; }"""
+            """() => { var L = window.JsRendered.tables.look; """ +
+                """return { s: 12, tipPad: L('tipPad'), tipLine: L('tipLine'), tipMax: L('tipMax') }; }"""
     }
 }
 

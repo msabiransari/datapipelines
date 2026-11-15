@@ -38,67 +38,10 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
         try {
             for ((kind, chart, tallest) in listOf(Triple("Bar", bar2, "B"), Triple("Line", line2, "A"), Triple("Area", area2, "A"))) {
                 mount(page, chart, FULL_W, FULL_H)["ok"] shouldBe true
-                val first = read(page)
-                withClue("$kind D6: the picture is one image named by the chart's title, its description the summary: $first") {
-                    first["role"] shouldBe "img"
-                    first["title"] shouldBe chart.name
-                    (first["desc"] as String) shouldStartWith "$kind chart; series: A, B;"
-                }
                 val other = if (tallest == "A") "B" else "A"
                 val at = datums(page, other)[1]
-                hover(page, pointOf(page, other, at))
-                val hovered = read(page)
-                log += "$kind hover $other@1: ${hovered["card"]} guides=${hovered["guides"]}"
-                withClue("$kind D2: hovering $other's mark shows ONE card with its name and value, the series dimmed but $other: $hovered") {
-                    hovered["cards"] shouldBe 1
-                    names(hovered) shouldContain other
-                    values(hovered) shouldContain chart.valueAt(other, 1).toString()
-                    hovered["dimmed"] shouldBe true
-                    activeMarks(hovered) shouldBe listOf(other)
-                    inside(hovered) shouldBe true
-                }
-                if (kind != "Bar") {
-                    withClue("$kind D2: the crosshair, one guide line and a dot on each series at that x, one card: ${hovered["guides"]}") {
-                        val guides = hovered["guides"] as Map<*, *>
-                        guides["lines"] shouldBe 1
-                        (guides["dots"] as List<*>).size shouldBe 2
-                    }
-                }
-                page.mouse().move(1.0, 1.0)
-                page.evaluate(FRAME)
-                withClue("$kind: leaving the picture closes the card and the dimming") { read(page).let { it["cards"] shouldBe 0; it["dimmed"] shouldBe false } }
-                tabIn(page)
-                press(page, "ArrowRight")
-                val focused = read(page)
-                log += "$kind focus: ${focused["card"]} ring=${focused["ring"]}"
-                withClue("$kind D5: on keyboard focus the target's card and the ring: $focused") {
-                    focused["focused"] shouldBe true
-                    focused["cards"] shouldBe 1
-                    focused["ring"] shouldNotBe null
-                    names(focused).isNotEmpty() shouldBe true
-                }
-                press(page, "Escape")
-
-                val before = read(page)
-                click(page, entry(before, tallest))
-                val after = read(page)
-                log += "$kind hide $tallest: values ${before["values"]} -> ${after["values"]}"
-                withClue("$kind D4: hiding the tallest series $tallest refits the value axis, recolours nothing (I7): $after") {
-                    after["values"] shouldNotBe before["values"]
-                    after["hidden"] shouldBe listOf(tallest)
-                    entry(after, tallest)["off"] shouldBe true
-                    drawnOf(after, tallest) shouldBe 0
-                    paint(after, other) shouldBe paint(before, other)
-                    after["same"] shouldBe true
-                }
-                refresh(page, chart.columns)["ok"] shouldBe true
-                val refreshed = read(page)
-                withClue("$kind D4: a data refresh keeps the list, the entry struck and the refit axis: $refreshed") {
-                    refreshed["hidden"] shouldBe listOf(tallest)
-                    entry(refreshed, tallest)["off"] shouldBe true
-                    refreshed["values"] shouldBe after["values"]
-                }
-
+                a5Card(page, log, kind, chart, other, at)
+                a5Legend(page, log, kind, chart, tallest, other)
                 hover(page, pointOf(page, other, at))
                 withClue("$kind D7: the picture carries listeners while mounted") { listeners(page) shouldBeGreaterThan 0 }
                 val gone = page.evaluate("() => window.__h.dispose()") as Map<*, *>
@@ -116,8 +59,91 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
         }
     }
 
+    /** A5's description (D6), the card on hover with the dimming and the crosshair (D2), leaving, and the card on focus (D5). */
+    private fun a5Card(
+        page: Page,
+        log: MutableList<String>,
+        kind: String,
+        chart: Chart,
+        other: String,
+        at: Int,
+    ) {
+        val first = read(page)
+        withClue("$kind D6: the picture is one image named by the chart's title, its description the summary: $first") {
+            first["role"] shouldBe "img"
+            first["title"] shouldBe chart.name
+            (first["desc"] as String) shouldStartWith "$kind chart; series: A, B;"
+        }
+        hover(page, pointOf(page, other, at))
+        val hovered = read(page)
+        log += "$kind hover $other@1: ${hovered["card"]} guides=${hovered["guides"]}"
+        withClue("$kind D2: hovering $other's mark shows ONE card with its name and value, the series dimmed but $other: $hovered") {
+            hovered["cards"] shouldBe 1
+            names(hovered) shouldContain other
+            values(hovered) shouldContain chart.valueAt(other, 1).toString()
+            hovered["dimmed"] shouldBe true
+            activeMarks(hovered) shouldBe listOf(other)
+            inside(hovered) shouldBe true
+        }
+        if (kind != "Bar") {
+            withClue("$kind D2: the crosshair, one guide line and a dot on each series at that x, one card: ${hovered["guides"]}") {
+                val guides = hovered["guides"] as Map<*, *>
+                guides["lines"] shouldBe 1
+                (guides["dots"] as List<*>).size shouldBe 2
+            }
+        }
+        page.mouse().move(1.0, 1.0)
+        page.evaluate(FRAME)
+        val left = read(page)
+        withClue("$kind: leaving the picture closes the card and the dimming: $left") {
+            left["cards"] shouldBe 0
+            left["dimmed"] shouldBe false
+        }
+        tabIn(page)
+        press(page, "ArrowRight")
+        val focused = read(page)
+        log += "$kind focus: ${focused["card"]} ring=${focused["ring"]}"
+        withClue("$kind D5: on keyboard focus the target's card and the ring: $focused") {
+            focused["focused"] shouldBe true
+            focused["cards"] shouldBe 1
+            focused["ring"] shouldNotBe null
+            names(focused).isNotEmpty() shouldBe true
+        }
+        press(page, "Escape")
+    }
+
+    /** A5's legend switch (D4): the tallest series hidden refits the axis, recolours nothing (I7), and survives a refresh. */
+    private fun a5Legend(
+        page: Page,
+        log: MutableList<String>,
+        kind: String,
+        chart: Chart,
+        tallest: String,
+        other: String,
+    ) {
+        val before = read(page)
+        click(page, entry(before, tallest))
+        val after = read(page)
+        log += "$kind hide $tallest: values ${before["values"]} -> ${after["values"]}"
+        withClue("$kind D4: hiding the tallest series $tallest refits the value axis, recolours nothing (I7): $after") {
+            after["values"] shouldNotBe before["values"]
+            after["hidden"] shouldBe listOf(tallest)
+            entry(after, tallest)["off"] shouldBe true
+            drawnOf(after, tallest) shouldBe 0
+            paint(after, other) shouldBe paint(before, other)
+            after["same"] shouldBe true
+        }
+        refresh(page, chart.columns)["ok"] shouldBe true
+        val refreshed = read(page)
+        withClue("$kind D4: a data refresh keeps the list, the entry struck and the refit axis: $refreshed") {
+            refreshed["hidden"] shouldBe listOf(tallest)
+            entry(refreshed, tallest)["off"] shouldBe true
+            refreshed["values"] shouldBe after["values"]
+        }
+    }
+
     @Test
-    fun `D2 - a further 1 px move with the card over the pointer leaves the mark and the card, and a tap shows the card that a tap elsewhere closes`() {
+    fun `D2 - a 1 px move with the card over the pointer keeps the mark and the card, a tap shows the card, a tap elsewhere closes it`() {
         startTrace()
         val root = ready("move")
         val (context, page) = openHarness(root, "move", VIEW_W, VIEW_H)
@@ -126,24 +152,11 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
             mount(page, bar2, MOVE_W, MOVE_H)["ok"] shouldBe true
             var over = 0
             for (id in listOf("A", "B")) {
-                for (at in datums(page, id)) {
-                    val (x, y) = pointOf(page, id, at)
-                    hover(page, x to y)
-                    val r = read(page)
-                    val box = (r["card"] as Map<*, *>?)?.get("box") as Map<*, *>? ?: continue
-                    if (!within(box, x, y)) continue
-                    over++
-                    hover(page, (x + 1) to y)
-                    val moved = read(page)
-                    log += "$id@$at at ($x, $y): ${r["card"]} -> ${moved["card"]}"
-                    withClue("D2: the card is over the pointer at $id's mark $at; a 1 px move keeps the mark and the card: $moved") {
-                        activeMarks(moved) shouldBe activeMarks(r)
-                        (moved["card"] as Map<*, *>?)?.get("texts") shouldBe (r["card"] as Map<*, *>)["texts"]
-                        moved["cards"] shouldBe 1
-                    }
-                }
+                for (at in datums(page, id)) over += moveOnePixel(page, log, id, at)
             }
-            withClue("the precondition held at least once: the card over the pointer at $MOVE_W x $MOVE_H") { over shouldBeGreaterThanOrEqual 1 }
+            withClue("the precondition held at least once: the card over the pointer at $MOVE_W x $MOVE_H") {
+                over shouldBeGreaterThanOrEqual 1
+            }
         } finally {
             context.close()
         }
@@ -170,6 +183,32 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
         }
     }
 
+    /**
+     * D2 at one mark: hovers it; when the card then lies over the pointer (the precondition), a further 1 px move must
+     * keep the hovered mark and the card. Returns 1 when the precondition held (and was asserted), 0 when it did not.
+     */
+    private fun moveOnePixel(
+        page: Page,
+        log: MutableList<String>,
+        id: String,
+        at: Int,
+    ): Int {
+        val (x, y) = pointOf(page, id, at)
+        hover(page, x to y)
+        val r = read(page)
+        val box = (r["card"] as Map<*, *>?)?.get("box") as Map<*, *>?
+        if (box == null || !within(box, x, y)) return 0
+        hover(page, (x + 1) to y)
+        val moved = read(page)
+        log += "$id@$at at ($x, $y): ${r["card"]} -> ${moved["card"]}"
+        withClue("D2: the card is over the pointer at $id's mark $at; a 1 px move keeps the mark and the card: $moved") {
+            activeMarks(moved) shouldBe activeMarks(r)
+            (moved["card"] as Map<*, *>?)?.get("texts") shouldBe (r["card"] as Map<*, *>)["texts"]
+            moved["cards"] shouldBe 1
+        }
+        return 1
+    }
+
     @Test
     fun `LA2 and LA4 - the dimming, the ease, reduced motion, the five tip tokens and the card's filter are what the page sets`() {
         startTrace()
@@ -179,67 +218,84 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
             mount(page, bar2, FULL_W, FULL_H)["ok"] shouldBe true
             val at = pointOf(page, "B", datums(page, "B")[1])
             hover(page, at)
-            settled(page)
-            val dim = read(page)
-            log += "default: A opacity ${paintOf(dim, "A")["opacity"]} transition ${paintOf(dim, "A")["transition"]}"
-            withClue("LA2 defaults: the other series at --chart-dim 0.25, easing over --chart-ease 120 ms: $dim") {
-                paintOf(dim, "A")["opacity"] shouldBe "0.25"
-                paintOf(dim, "A")["transition"] shouldBe "0.12s"
-            }
-            token(page, "--chart-dim", "0.5")
-            token(page, "--chart-ease", "300")
-            settled(page)
-            val second = read(page)
-            log += "second: A opacity ${paintOf(second, "A")["opacity"]} transition ${paintOf(second, "A")["transition"]}"
-            withClue("LA2: a second --chart-dim and --chart-ease are what the browser reads back: $second") {
-                paintOf(second, "A")["opacity"] shouldBe "0.5"
-                paintOf(second, "A")["transition"] shouldBe "0.3s"
-            }
-            page.emulateMedia(Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.REDUCE))
-            val still = read(page)
-            withClue("D8: under reduced motion there is no transition, the dimming stays: $still") {
-                paintOf(still, "A")["transition"] shouldBe "0s"
-                still["dimmed"] shouldBe true
-            }
-            page.emulateMedia(Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.NO_PREFERENCE))
-
-            val plain = read(page)
-            withClue("LA4: with nothing set the card group's filter is the page's declared --chart-tip-shadow: ${filterOf(plain)}") {
-                filterOf(plain) shouldBe probeFilter(page, "var(--chart-tip-shadow)")
-                filterOf(plain) shouldNotBe "none"
-            }
-            for ((name, value) in TIP_TOKENS) token(page, name, value)
-            val ack = refresh(page, bar2.columns)
-            hover(page, at.first + 1 to at.second)
-            val tipped = read(page)
-            val expected = page.evaluate(EXPECTED_TIP) as Map<*, *>
-            log += "tip tokens: ${tipped["card"]} expected $expected ack $ack"
-            withClue("LA2: the tip surface, ink, border and radius set in the page are the card as drawn: $tipped; expected $expected") {
-                ((ack["ack"] as Map<*, *>)["warnings"] as List<*>).shouldBeEmpty()
-                val card = tipped["card"] as Map<*, *>
-                card["fill"] shouldBe expected["surface"]
-                card["stroke"] shouldBe expected["border"]
-                card["rx"] shouldBe TIP_RADIUS
-                cardLines(tipped).filter { it["anchor"] == "start" && it["text"] != cardLines(tipped).first()["text"] }.forEach { it["fill"] shouldBe expected["ink"] }
-            }
-            token(page, "--chart-tip-shadow", SECOND_SHADOW)
-            val shadowed = read(page)
-            withClue("LA2: a second --chart-tip-shadow is the card group's computed filter: ${filterOf(shadowed)}") {
-                filterOf(shadowed) shouldBe probeFilter(page, SECOND_SHADOW)
-                filterOf(shadowed) shouldNotBe filterOf(plain)
-            }
-            token(page, "--chart-tip-shadow", "red")
-            val refused = refresh(page, bar2.columns)
-            hover(page, at)
-            val red = read(page)
-            log += "shadow: plain ${filterOf(plain)} second ${filterOf(shadowed)} red ${filterOf(red)}"
-            withClue("LA4: --chart-tip-shadow: red gives no shadow and adds no warning: $red $refused") {
-                filterOf(red) shouldBe "none"
-                ((refused["ack"] as Map<*, *>)["warnings"] as List<*>).shouldBeEmpty()
-            }
+            la2Motion(page, log)
+            la4Card(page, log, at)
         } finally {
             context.close()
             report("la2.txt", log)
+        }
+    }
+
+    /** LA2 for --chart-dim and --chart-ease (defaults, then a second value set in the page), and D8 under reduced motion. */
+    private fun la2Motion(
+        page: Page,
+        log: MutableList<String>,
+    ) {
+        settled(page)
+        val dim = read(page)
+        log += "default: A opacity ${paintOf(dim, "A")["opacity"]} transition ${paintOf(dim, "A")["transition"]}"
+        withClue("LA2 defaults: the other series at --chart-dim 0.25, easing over --chart-ease 120 ms: $dim") {
+            paintOf(dim, "A")["opacity"] shouldBe "0.25"
+            paintOf(dim, "A")["transition"] shouldBe "0.12s"
+        }
+        token(page, "--chart-dim", "0.5")
+        token(page, "--chart-ease", "300")
+        settled(page)
+        val second = read(page)
+        log += "second: A opacity ${paintOf(second, "A")["opacity"]} transition ${paintOf(second, "A")["transition"]}"
+        withClue("LA2: a second --chart-dim and --chart-ease are what the browser reads back: $second") {
+            paintOf(second, "A")["opacity"] shouldBe "0.5"
+            paintOf(second, "A")["transition"] shouldBe "0.3s"
+        }
+        page.emulateMedia(Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.REDUCE))
+        val still = read(page)
+        withClue("D8: under reduced motion there is no transition, the dimming stays: $still") {
+            paintOf(still, "A")["transition"] shouldBe "0s"
+            still["dimmed"] shouldBe true
+        }
+        page.emulateMedia(Page.EmulateMediaOptions().setReducedMotion(ReducedMotion.NO_PREFERENCE))
+    }
+
+    /** LA2 for the five tip tokens as drawn, and LA4's clause on the card group's filter (default, a second value, red). */
+    private fun la4Card(
+        page: Page,
+        log: MutableList<String>,
+        at: Pair<Double, Double>,
+    ) {
+        val plain = read(page)
+        withClue("LA4: with nothing set the card group's filter is the page's declared --chart-tip-shadow: ${filterOf(plain)}") {
+            filterOf(plain) shouldBe probeFilter(page, "var(--chart-tip-shadow)")
+            filterOf(plain) shouldNotBe "none"
+        }
+        for ((name, value) in TIP_TOKENS) token(page, name, value)
+        val ack = refresh(page, bar2.columns)
+        hover(page, at.first + 1 to at.second)
+        val tipped = read(page)
+        val expected = page.evaluate(EXPECTED_TIP) as Map<*, *>
+        log += "tip tokens: ${tipped["card"]} expected $expected ack $ack"
+        withClue("LA2: the tip surface, ink, border and radius set in the page are the card as drawn: $tipped; expected $expected") {
+            ((ack["ack"] as Map<*, *>)["warnings"] as List<*>).shouldBeEmpty()
+            val card = tipped["card"] as Map<*, *>
+            card["fill"] shouldBe expected["surface"]
+            card["stroke"] shouldBe expected["border"]
+            card["rx"] shouldBe TIP_RADIUS
+            val heading = cardLines(tipped).first()["text"]
+            cardLines(tipped).filter { it["anchor"] == "start" && it["text"] != heading }.forEach { it["fill"] shouldBe expected["ink"] }
+        }
+        token(page, "--chart-tip-shadow", SECOND_SHADOW)
+        val shadowed = read(page)
+        withClue("LA2: a second --chart-tip-shadow is the card group's computed filter: ${filterOf(shadowed)}") {
+            filterOf(shadowed) shouldBe probeFilter(page, SECOND_SHADOW)
+            filterOf(shadowed) shouldNotBe filterOf(plain)
+        }
+        token(page, "--chart-tip-shadow", "red")
+        val refused = refresh(page, bar2.columns)
+        hover(page, at)
+        val red = read(page)
+        log += "shadow: plain ${filterOf(plain)} second ${filterOf(shadowed)} red ${filterOf(red)}"
+        withClue("LA4: --chart-tip-shadow: red gives no shadow and adds no warning: $red $refused") {
+            filterOf(red) shouldBe "none"
+            ((refused["ack"] as Map<*, *>)["warnings"] as List<*>).shouldBeEmpty()
         }
     }
 
@@ -252,7 +308,11 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
         log += "default: $base"
         var changed = 0
         for ((field, value) in FIELD_VALUES) {
-            plantCopies = mapOf(TABLES to { text: String -> once(text, "$field: f(${plain(FIELD_DEFAULTS.getValue(field))},", "$field: f(${plain(value)},") })
+            plantCopies =
+                mapOf(
+                    TABLES to
+                        { text: String -> once(text, "$field: f(${plain(FIELD_DEFAULTS.getValue(field))},", "$field: f(${plain(value)},") },
+                )
             val got = measuresIn(root, field.lowercase(), emptyMap())
             plantCopies = emptyMap()
             log += "$field=$value: $got"
@@ -262,23 +322,41 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
                         got.d("distance") shouldBe (value plusOrMinus TOLERANCE)
                         base.d("distance") shouldBe (FIELD_DEFAULTS.getValue(field) plusOrMinus TOLERANCE)
                     }
-                    "tipLine" -> got.d("h") - base.d("h") shouldBe ((value - 1.3) * TEXT * base.d("lines") plusOrMinus TOLERANCE)
+
+                    "tipLine" -> {
+                        got.d("h") - base.d("h") shouldBe ((value - 1.3) * TEXT * base.d("lines") plusOrMinus TOLERANCE)
+                    }
+
                     "tipPad" -> {
                         got.d("w") - base.d("w") shouldBe (2 * (value - 0.33) * TEXT plusOrMinus TOLERANCE)
                         got.d("h") - base.d("h") shouldBe (2 * (value - 0.33) * TEXT plusOrMinus TOLERANCE)
                     }
-                    "tipKey", "tipGap" -> (got.d("w") > base.d("w") + 1) shouldBe true
+
+                    "tipKey", "tipGap" -> {
+                        (got.d("w") > base.d("w") + 1) shouldBe true
+                    }
+
                     "tipMax" -> {
                         base["long"] shouldBe LONG
                         (got["long"] as String) shouldEndWith "…"
                     }
+
                     "tipValueWeight" -> {
                         got.d("valueWeight") shouldBe value
                         base.d("valueWeight") shouldBe 600.0
                     }
-                    "crosshairDot" -> got.d("dot") - base.d("dot") shouldBe ((value - 0.5) plusOrMinus TOLERANCE)
-                    "focusGap" -> got.d("ringW") - base.d("ringW") shouldBe (2 * (value - 0.25) * TEXT plusOrMinus TOLERANCE)
-                    else -> error("no check for $field")
+
+                    "crosshairDot" -> {
+                        got.d("dot") - base.d("dot") shouldBe ((value - 0.5) plusOrMinus TOLERANCE)
+                    }
+
+                    "focusGap" -> {
+                        got.d("ringW") - base.d("ringW") shouldBe (2 * (value - 0.25) * TEXT plusOrMinus TOLERANCE)
+                    }
+
+                    else -> {
+                        error("no check for $field")
+                    }
                 }
             }
             changed++
@@ -288,48 +366,14 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
     }
 
     @Test
-    fun `D2a - an 8-series chart with six tooltip fields shows the heading, the hovered row first and +n more, and text 32 at 80 x 24 shows no card`() {
+    fun `D2a - 8 series with six tooltip fields show the heading, the hovered row first and +n more, text 32 at 80 x 24 shows no card`() {
         startTrace()
         val (context, page) = harnessPage("more", VIEW_W, VIEW_H)
         val log = mutableListOf<String>()
         try {
-            val ids = (1..EIGHT).map { "S$it" }
-            val fields = (1..SIX).associate { "f$it" to listOf("a$it") }
-            val chart = line(ids.mapIndexed { i, id -> id to listOf(10 * i, 10 * i + 5, 10 * i + 2) }.toMap(LinkedHashMap()), title = "Eight", tooltip = fields)
-            mount(page, chart, FULL_W, MORE_H)["ok"] shouldBe true
-            val hoveredId = "S5"
-            hover(page, pointOf(page, hoveredId, datums(page, hoveredId)[1]))
-            val r = read(page)
-            val m = page.evaluate(LOOK) as Map<*, *>
-            val s = TEXT
-            val h = m.d("tipLine") * s
-            val p = m.d("tipPad") * s
-            val k = Math.floor((MORE_H - 2 * p) / h).toInt()
-            val full = 1 + EIGHT + SIX
-            val n = full - (k - 1)
-            log += "k=$k full=$full n=$n card=${r["card"]}"
-            withClue("D2a: k $k below the full card's $full lines: the heading, $hoveredId's row first, then +$n more, inside the picture: $r") {
-                (k < full) shouldBe true
-                val texts = (r["card"] as Map<*, *>)["texts"] as List<*>
-                texts.first() shouldBe "2024-02"
-                names(r).drop(1).first() shouldBe hoveredId
-                texts.last() shouldBe "+$n more"
-                inside(r) shouldBe true
-            }
-
+            moreRows(page, log)
             page.mouse().move(1.0, 1.0)
-            // A name wider than the content area w but not than the box's greatest width W (= the frame's width here):
-            // it is cut to w, and the card with its texts stays inside the picture (G4: the content width is W − 2p).
-            mount(page, line(linkedMapOf(LONG to listOf(20, 40, 30), "B" to listOf(10, 15, 12)), title = "Cut"), CUT_W, CUT_H)["ok"] shouldBe true
-            tabIn(page)
-            press(page, "ArrowRight")
-            val cut = read(page)
-            log += "cut name at ${CUT_W}x$CUT_H: ${cut["card"]}"
-            withClue("D2a: at $CUT_W x $CUT_H the long name is cut and the card with its texts lies inside the picture: $cut") {
-                names(cut).first { it.startsWith(LONG.take(LONG_PREFIX)) } shouldEndWith "…"
-                inside(cut) shouldBe true
-            }
-
+            cutName(page, log)
             page.mouse().move(1.0, 1.0)
             val big = mount(page, line2, SMALL_W, SMALL_H, tokens = mapOf("--chart-text" to "32"))
             tabIn(page)
@@ -346,6 +390,56 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
         } finally {
             context.close()
             report("more.txt", log)
+        }
+    }
+
+    /** D2a: eight series with six tooltip fields at a height whose k (computed here) is below the full card's lines. */
+    private fun moreRows(
+        page: Page,
+        log: MutableList<String>,
+    ) {
+        val ids = (1..EIGHT).map { "S$it" }
+        val fields = (1..SIX).associate { "f$it" to listOf("a$it") }
+        val values = LinkedHashMap<String, List<Int?>>()
+        ids.forEachIndexed { i, id -> values[id] = listOf(10 * i, 10 * i + 5, 10 * i + 2) }
+        mount(page, line(values, title = "Eight", tooltip = fields), FULL_W, MORE_H)["ok"] shouldBe true
+        val hoveredId = "S5"
+        hover(page, pointOf(page, hoveredId, datums(page, hoveredId)[1]))
+        val r = read(page)
+        val m = page.evaluate(LOOK) as Map<*, *>
+        val h = m.d("tipLine") * TEXT
+        val p = m.d("tipPad") * TEXT
+        val k = Math.floor((MORE_H - 2 * p) / h).toInt()
+        val full = 1 + EIGHT + SIX
+        val n = full - (k - 1)
+        log += "k=$k full=$full n=$n card=${r["card"]}"
+        withClue("D2a: k $k below the full card's $full lines: the heading, $hoveredId's row first, then +$n more, inside: $r") {
+            (k < full) shouldBe true
+            val texts = (r["card"] as Map<*, *>)["texts"] as List<*>
+            texts.first() shouldBe "2024-02"
+            names(r).drop(1).first() shouldBe hoveredId
+            texts.last() shouldBe "+$n more"
+            inside(r) shouldBe true
+        }
+    }
+
+    /**
+     * D2a: a name wider than the content area w but not than the box's greatest width W (= the frame's width here) is
+     * cut to w, and the card with its texts stays inside the picture (G4: the content width is W − 2p).
+     */
+    private fun cutName(
+        page: Page,
+        log: MutableList<String>,
+    ) {
+        val chart = line(linkedMapOf(LONG to listOf(20, 40, 30), "B" to listOf(10, 15, 12)), title = "Cut")
+        mount(page, chart, CUT_W, CUT_H)["ok"] shouldBe true
+        tabIn(page)
+        press(page, "ArrowRight")
+        val cut = read(page)
+        log += "cut name at ${CUT_W}x$CUT_H: ${cut["card"]}"
+        withClue("D2a: at $CUT_W x $CUT_H the long name is cut and the card with its texts lies inside the picture: $cut") {
+            names(cut).first { it.startsWith(LONG.take(LONG_PREFIX)) } shouldEndWith "…"
+            inside(cut) shouldBe true
         }
     }
 
@@ -370,7 +464,7 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
     }
 
     @Test
-    fun `A8 - the hostile chart with the layer active - every mark by the pointer and by the keys shows text, no script, no CSP violation`() {
+    fun `A8 - the hostile chart with the layer active - every mark by pointer and keys shows text, no script, no CSP violation`() {
         startTrace()
         val (context, page) = harnessPage("hostile", VIEW_W, VIEW_H)
         val log = mutableListOf<String>()
@@ -485,7 +579,13 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
         page.evaluate("() => new Promise(r => setTimeout(() => r(true), $SETTLE_MS))")
     }
 
-    private fun activeMarks(r: Map<*, *>): List<Any?> = (r["marks"] as List<*>).map { it as Map<*, *> }.filter { it["active"] == true }.map { it["id"] }.distinct()
+    private fun activeMarks(r: Map<*, *>): List<Any?> =
+        (r["marks"] as List<*>)
+            .map {
+                it as Map<*, *>
+            }.filter { it["active"] == true }
+            .map { it["id"] }
+            .distinct()
 
     private fun paintOf(
         r: Map<*, *>,

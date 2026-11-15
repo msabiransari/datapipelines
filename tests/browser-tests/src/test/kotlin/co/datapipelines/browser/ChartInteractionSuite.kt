@@ -74,7 +74,9 @@ abstract class ChartInteractionSuite : ChartPageSuite() {
     ): Pair<BrowserContext, Page> {
         val context =
             if (touch) {
-                listening(newBrowserContext(Browser.NewContextOptions().setViewportSize(width, height).setHasTouch(true))).also(::servingCopies)
+                listening(
+                    newBrowserContext(Browser.NewContextOptions().setViewportSize(width, height).setHasTouch(true)),
+                ).also(::servingCopies)
             } else {
                 listening(chartContext(width, height))
             }
@@ -171,11 +173,16 @@ abstract class ChartInteractionSuite : ChartPageSuite() {
 
     /** An engine fixture's emitted input (`<wire>/<name>`, 960 × 540) as a chart the harness mounts. */
     protected fun engineChart(path: String): Chart {
-        val input = com.google.gson.JsonParser.parseString(emitted("$path/960x540.input.json")).asJsonObject
+        val input =
+            com.google.gson.JsonParser
+                .parseString(emitted("$path/960x540.input.json"))
+                .asJsonObject
         val document = input.getAsJsonObject("document")
         val gson = com.google.gson.Gson()
+
         @Suppress("UNCHECKED_CAST")
         val columns = gson.fromJson(input.get("columns"), Map::class.java) as Map<String, List<Any?>>
+
         @Suppress("UNCHECKED_CAST")
         val types = gson.fromJson(input.get("types"), Map::class.java) as Map<String, String>
         return Chart(document.get("display_name").asString, document.get("config").toString(), types, columns)
@@ -191,7 +198,10 @@ abstract class ChartInteractionSuite : ChartPageSuite() {
         return text.replace(anchor, replacement)
     }
 
-    private fun jsonValue(json: String): Any? = com.google.gson.Gson().fromJson(json, Any::class.java)
+    private fun jsonValue(json: String): Any? =
+        com.google.gson
+            .Gson()
+            .fromJson(json, Any::class.java)
 
     protected companion object {
         val REPORTS = Paths.get("build", "reports", "js-rendered-interactions")
