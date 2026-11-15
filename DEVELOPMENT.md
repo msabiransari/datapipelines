@@ -1306,8 +1306,9 @@ start at 22 GB demonstrated the two-fork fallback header; no final verdict for t
 preserved. Another run started at 25 GB with four forks and failed its cycle; the lane reports
 full-`/tmp` native-library extraction failures (#983), but did not retain that cycle's detailed
 logs. Since #983, test JVMs extract into their checkout's own temp root, which the gate and
-pregate empty after the lock, and the shared `/tmp` leftovers are swept (§9.7). Cleanup between M1 and M2 is a confound, so the wall-time
-improvement is not attributed to the fork feature. Observed MemAvailable troughs were 6–8.5 GB
+pregate empty after the lock, and the shared `/tmp` leftovers are swept (§9.7).
+Cleanup between M1 and M2 is a confound, so the wall-time improvement is not attributed to
+the fork feature. Observed MemAvailable troughs were 6–8.5 GB
 from starts of 27–34 GB; they do not guarantee 8 GB of headroom at the 24 GB admission floor.
 Since #982 the managed-read suite is four classes; their suite times in one one-fork focused run
 on 2026-11-15 were `ManagedLakeReadsE2eTest` 282.0 s, `ManagedLakeReadsTrickleE2eTest` 207.1 s,
