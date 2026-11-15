@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * One pooled connection source for a single **user** datasource. Distinct from the metadata-DB
@@ -473,9 +474,11 @@ sealed interface StaleRetirement {
  *
  * The freshness tick retires only while R < K ([retireStaleGeneration]); every other retirement — the age bound on
  * the lease path and the reaper, a lost pin, a save, a delete, an invalidation, the managed re-sync — happens at any
- * R (RULING 4 unchanged). Before a build above the cap, [settleIdleRetired] hands off the idle retired generations
- * and waits, bounded, for their closes, so an idle generation's close in flight does not refuse a lease. Every other
- * pool counts R = 0 and is never capped.
+ * R (RULING 4 unchanged). Above the cap, [admitBuild] — under the bin lock, so after any retirement that preceded it
+ * — sends the lease to [settleIdleRetired] instead of refusing while an idle retired generation can still be handed
+ * off or its close waited for (bounded, once per lease); the settlement hands them off and waits, and the lease
+ * decides again under the lock. So an idle generation never refuses a lease, wherever its retirement fell. Every
+ * other pool counts R = 0 and is never capped.
  *
  * [poolFactory] is injectable so tests can substitute a counting or fake pool; production uses
  * the default, which builds a real Hikari pool through the dialect adapter.
@@ -620,12 +623,20 @@ class ConnectionPoolManager(
 
     fun poolFor(datasource: Datasource): ConnectionPool {
         val name = datasource.name
+        val settlement = Settlement()
         while (true) {
-            if (!pools.containsKey(name)) settleIdleRetired(name)
+            // #819 D7 (round 3): the choice between building, settling first and refusing is made only here, inside
+            // the mapping, under the bin lock every retirement of [name] takes; no read before this step decides it.
+            // A mapping that throws records nothing: on SettleFirst, settle outside the lock, then decide again.
             val live =
-                pools.computeIfAbsent(name) {
-                    admitBuild(name)
-                    buildProtected(datasource)
+                try {
+                    pools.computeIfAbsent(name) {
+                        if (!admitBuild(name, settlement)) throw SettleFirst()
+                        buildProtected(datasource)
+                    }
+                } catch (expected: SettleFirst) {
+                    settleIdleRetired(name, settlement)
+                    continue
                 }
             val age = expiredAge(live) ?: return live.pool
             retireExpired(name, live, age, TRIGGER_LEASE)
@@ -633,16 +644,31 @@ class ConnectionPoolManager(
     }
 
     /**
-     * #819 D5 — the build check, run INSIDE [poolFor]'s `computeIfAbsent` mapping, so it and the build are one step
+     * #819 D5/D7 — the build check, run INSIDE [poolFor]'s `computeIfAbsent` mapping, so it and the build are one step
      * under [name]'s bin lock: two racing leases cannot both build, and no retirement of [name] can interleave (a
-     * retirement takes the same lock, [takeOut]). Refuses with `lake.unavailable` while more than K retired managed
-     * generations of [name] still hold their engine. A name with no retired managed generation counts 0, so every
-     * pool that is not the managed lake's is never refused here (ruling 2).
+     * retirement takes the same lock, [takeOut]; while it is held R can only fall). True: build. With more than K
+     * retired managed generations of [name] still holding their engine: false — settle first ([settleIdleRetired],
+     * outside the lock) — while one of them is idle and not yet handed to the closer, or was handed off idle and
+     * [settlement] may still wait for its close; otherwise refused with `lake.unavailable`. A name with no retired
+     * managed generation counts 0, so every pool that is not the managed lake's is never refused here (ruling 2).
+     *
+     * Each false is followed by a settlement that hands every idle generation off (once per generation, ever) and
+     * waits for idle closes until the one [Settlement] deadline, so the decide–settle loop ends: a later false needs
+     * a generation that turned idle or was retired since, and after the deadline only a hand-off, never a wait.
      */
-    private fun admitBuild(name: String) {
-        val cap = maxRetiredGenerations ?: return
+    private fun admitBuild(
+        name: String,
+        settlement: Settlement,
+    ): Boolean {
+        val cap = maxRetiredGenerations ?: return true
+        val counted = retainedHolding(name)
+        if (counted.size <= cap) return true
+        val idle = { entry: RetiringPool -> entry.handOff.get() == HandOff.NONE && entry.pool.activeConnections == 0 }
+        if (counted.any { idle(it) || settlement.mayWaitFor(it) }) return false
+        // A close may have returned between the count and the reads above (its entry then reads as neither idle nor
+        // waitable): count again before refusing; under this lock the count can only have fallen.
         val holding = retainedHolding(name).size
-        if (holding <= cap) return
+        if (holding <= cap) return true
         val cause = "$MAX_RETIRED_GENERATIONS_KEY=$cap; retired generations still holding their engine: $holding"
         throw DatapipelinesException(
             ManagedLakeErrorCodes.UNAVAILABLE,
@@ -653,33 +679,53 @@ class ConnectionPoolManager(
     }
 
     /**
-     * #819 D7 — healthy operation is never refused: before a build, while [name] is above the cap, hand every IDLE
-     * retired managed generation of [name] (still on [retiring], no connection out) to [closer] now, as the reaper's
-     * next pass would, then wait for the closes of the generations that were idle when handed off, at most the
-     * longest `connectionTimeout` among them: the wait a lease already admits for a connection. No lock is held and
-     * nothing polls; a close that does not return in that bound leaves its generation counted, and [admitBuild]
-     * refuses. A generation with a reader still running is never waited for: it is the cap's incident case.
+     * #819 D7 — healthy operation is never refused: run only when [admitBuild], under the bin lock, chose to settle
+     * first. Hands every IDLE retired managed generation of [name] (not yet handed off, no connection out) to
+     * [closer] now, as the reaper's next pass would, then waits for the closes of the generations handed off idle,
+     * until [settlement]'s one deadline: the longest `connectionTimeout` among the closes pending at its first wait,
+     * the wait a lease already admits for a connection. No lock is held and nothing polls. It decides nothing: the
+     * caller goes back to [admitBuild], which judges what this left. A generation with a reader still running is
+     * never waited for: it is the cap's incident case.
      */
-    private fun settleIdleRetired(name: String) {
-        val cap = maxRetiredGenerations ?: return
+    private fun settleIdleRetired(
+        name: String,
+        settlement: Settlement,
+    ) {
         val holding = retainedHolding(name)
-        if (holding.size <= cap) return
         holding
-            .filter { !it.handedOff.get() && it.pool.activeConnections == 0 }
+            .filter { it.handOff.get() == HandOff.NONE && it.pool.activeConnections == 0 }
             .forEach { entry ->
                 retiring.remove(entry)
                 handOff(entry, drained = true)
             }
-        val pending = holding.filter { it.drainedAtHandOff && !it.closeReturned.isDone }
+        val pending = holding.filter { it.handOff.get() == HandOff.DRAINED && !it.closeReturned.isDone }
         if (pending.isEmpty()) return
-        // One shared deadline over every pending close. The bound passing with a close still running leaves its
-        // generation counted, and admitBuild decides.
-        val deadline = System.nanoTime() + pending.maxOf { it.pool.connectionTimeout }.toNanos()
+        val deadline = settlement.deadline(pending)
         for (entry in pending) {
             val left = deadline - System.nanoTime()
             if (left <= 0) break
             runCatching { entry.closeReturned.get(left, TimeUnit.NANOSECONDS) }
                 .onFailure { if (it !is TimeoutException) throw it }
+        }
+    }
+
+    /**
+     * #819 D7 — one [poolFor] call's bound on waiting for idle closes: fixed at the call's first wait, never moved, so
+     * the total wait of one lease is at most one `connectionTimeout` however often it decides again. Confined to the
+     * calling thread.
+     */
+    private class Settlement {
+        private var deadline: Long? = null
+
+        /** The call's deadline (a `System.nanoTime` instant), fixed from [pending] at the first wait. */
+        fun deadline(pending: List<RetiringPool>): Long =
+            deadline ?: (System.nanoTime() + pending.maxOf { it.pool.connectionTimeout }.toNanos()).also { deadline = it }
+
+        /** Whether [entry]'s close is one this call may still wait for: handed off idle, not returned, bound not spent. */
+        fun mayWaitFor(entry: RetiringPool): Boolean {
+            if (entry.handOff.get() != HandOff.DRAINED || entry.closeReturned.isDone) return false
+            val fixed = deadline ?: return true
+            return fixed - System.nanoTime() > 0
         }
     }
 
@@ -874,8 +920,7 @@ class ConnectionPoolManager(
         entry: RetiringPool,
         drained: Boolean,
     ): Boolean {
-        if (!entry.handedOff.compareAndSet(false, true)) return false
-        entry.drainedAtHandOff = drained
+        if (!entry.handOff.compareAndSet(HandOff.NONE, if (drained) HandOff.DRAINED else HandOff.HARD)) return false
         if (entry !in retained) {
             closer.close(entry.pool)
             return true
@@ -970,6 +1015,15 @@ class ConnectionPoolManager(
         pins.close()
     }
 
+    /**
+     * #819 D7 — thrown by [poolFor]'s mapping when [admitBuild] chose to settle first, so the map records nothing and
+     * the bin lock is released before the settlement waits. Never leaves [poolFor]; no stack trace is filled.
+     */
+    private class SettleFirst : RuntimeException("settle idle retired generations first", null, false, false)
+
+    /** Where a retired pool stands with the closer ([RetiringPool.handOff]). */
+    private enum class HandOff { NONE, DRAINED, HARD }
+
     /** A live pool with the instant it was built: the age bound's input (#818). */
     private class LivePool(
         val builtAt: Instant,
@@ -986,12 +1040,12 @@ class ConnectionPoolManager(
         val deadline: Instant,
         val ceiling: Duration,
     ) {
-        /** Won by the ONE caller that hands this pool to the closer ([handOff]). */
-        val handedOff = AtomicBoolean(false)
-
-        /** Whether it had no connection out when handed off: only such a close is waited for ([settleIdleRetired]). */
-        @Volatile
-        var drainedAtHandOff = false
+        /**
+         * Won by the ONE caller that hands this pool to the closer ([handOff]), and whether it had no connection out
+         * then ([HandOff.DRAINED]: only such a close is waited for, [settleIdleRetired]). One atomic, so no reader can
+         * see "handed off" without "how" (#819 round 3).
+         */
+        val handOff = AtomicReference(HandOff.NONE)
 
         /** Completed when the close handed off for a [retained] entry has returned ([handOff]). */
         val closeReturned = CompletableFuture<Unit>()

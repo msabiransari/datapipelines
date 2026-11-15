@@ -20,6 +20,7 @@ import java.sql.Connection
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -426,6 +427,89 @@ class ConnectionPoolManagerRetiredCapTest {
     }
 
     @Test
+    fun `D7 round 3 - idle live generation retired before the lease's atomic step refuses nothing, closed on the lease thread`() {
+        idleRetiredBetweenReadAndStep(PoolCloser.SYNCHRONOUS)
+    }
+
+    @Test
+    fun `D7 round 3 - idle live generation retired before the lease's atomic step refuses nothing, closed asynchronously`() {
+        idleRetiredBetweenReadAndStep(asyncCloser)
+    }
+
+    /**
+     * The lander's interleaving (round 2 refusal R1), forced with latches: R = K with a reader running on the retired
+     * generation, the live generation idle. The lease is parked at the entry of its atomic step (`computeIfAbsent` on
+     * the live map, before the bin lock), after every read it made before it; then the live generation is retired, as
+     * D4 allows at any R, so R = K + 1 and one of the two is idle. The lease must not be refused: the idle one is
+     * closed and the lease builds; the one with a reader is never closed under it.
+     */
+    private fun idleRetiredBetweenReadAndStep(closer: PoolCloser) {
+        val manager = manager(cap = 1, closer = closer)
+        val busy = holdOneRetired(manager)
+        val idle = lease(manager)!!
+        val paused = AtStepPausingMap.installIn(manager, LEASE_THREAD)
+        var outcome: Result<ConnectionPool>? = null
+        val leaser = thread(name = LEASE_THREAD) { outcome = runCatching { manager.poolFor(LAKE) } }
+        try {
+            withClue("the lease reached its atomic step") { paused.atStep.await(GATE_SECONDS, TimeUnit.SECONDS) shouldBe true }
+            manager.retire(LAKE.name) shouldBe true
+            manager.retiredGenerationsHolding(LAKE.name) shouldBe 2
+        } finally {
+            paused.resume.countDown()
+        }
+        leaser.join(TimeUnit.SECONDS.toMillis(GATE_SECONDS))
+        leaser.isAlive shouldBe false
+        assertSoftly {
+            withClue("the lease was not refused: ${outcome?.exceptionOrNull()}") { outcome?.isSuccess shouldBe true }
+            withClue("the lease built a third generation") { (outcome?.getOrNull() as? CapPool)?.serial shouldBe 3 }
+            withClue("the idle retired generation was closed") { idle.holdsPhysicalHandles shouldBe false }
+            withClue("the generation with a reader was never closed under it") { busy.holdsPhysicalHandles shouldBe true }
+            manager.retiredGenerationsHolding(LAKE.name) shouldBe 1
+        }
+        sample(1)
+    }
+
+    /**
+     * The manager's live map, replaced by reflection with a copy that parks the thread named [leaseThread] once, at
+     * the ENTRY of `computeIfAbsent` (before the real call takes the bin lock), until [resume]. Every result and every
+     * other operation is the real map's; only the timing of one call is chosen.
+     */
+    private class AtStepPausingMap(
+        private val leaseThread: String,
+    ) : ConcurrentHashMap<String, Any>() {
+        val atStep = CountDownLatch(1)
+        val resume = CountDownLatch(1)
+        private val once = AtomicBoolean(false)
+
+        override fun computeIfAbsent(
+            key: String,
+            mappingFunction: java.util.function.Function<in String, out Any>,
+        ): Any {
+            if (Thread.currentThread().name == leaseThread && once.compareAndSet(false, true)) {
+                atStep.countDown()
+                check(resume.await(GATE_SECONDS, TimeUnit.SECONDS)) { "the test never resumed the lease" }
+            }
+            return super.computeIfAbsent(key, mappingFunction)
+        }
+
+        companion object {
+            fun installIn(
+                manager: ConnectionPoolManager,
+                leaseThread: String,
+            ): AtStepPausingMap {
+                val field = ConnectionPoolManager::class.java.getDeclaredField("pools").apply { isAccessible = true }
+
+                @Suppress("UNCHECKED_CAST")
+                val original = field.get(manager) as ConcurrentHashMap<String, Any>
+                return AtStepPausingMap(leaseThread).also {
+                    it.putAll(original)
+                    field.set(manager, it)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `two leases racing with no live generation and R = K build exactly once`() {
         val manager = manager(cap = 1)
         holdOneRetired(manager)
@@ -499,6 +583,7 @@ class ConnectionPoolManagerRetiredCapTest {
         const val GATE_SECONDS = 30L
         const val TABLE_CHANGES = 40
         const val UNMANAGED_ROUNDS = 10
+        const val LEASE_THREAD = "test-lease-819-r3"
         val LAKE = Fixtures.h2(name = "lake")
     }
 }
