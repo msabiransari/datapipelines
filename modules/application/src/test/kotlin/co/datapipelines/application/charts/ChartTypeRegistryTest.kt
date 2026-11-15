@@ -49,7 +49,11 @@ class ChartTypeRegistryTest {
                 "JsRendered.types() in the sandbox" to registered.map { it["name"] as String }.toSet(),
                 "enums.md §63" to enumsSection(),
             )
-        sets.filterValues { it != enums }.mapValues { (_, v) -> "enum $enums vs $v" }.entries.toList() shouldBe emptyList()
+        sets
+            .filterValues { it != enums }
+            .mapValues { (_, v) -> "enum $enums vs $v" }
+            .entries
+            .toList() shouldBe emptyList()
     }
 
     @Test

@@ -74,7 +74,9 @@ class ChartTypeTest {
     fun `a choice whose alternatives share a type value is refused, naming it`() {
         val error =
             shouldThrow<IllegalArgumentException> {
-                ChannelNode.OneOf(listOf(ShapeAlternative("band", listOf("nominal", "temporal")), ShapeAlternative("position", listOf("temporal"))))
+                ChannelNode.OneOf(
+                    listOf(ShapeAlternative("band", listOf("nominal", "temporal")), ShapeAlternative("position", listOf("temporal"))),
+                )
             }
         error.message shouldContain "share a type value"
         shouldThrow<IllegalArgumentException> { ChannelNode.OneOf(listOf(ShapeAlternative("band", listOf("nominal")))) }

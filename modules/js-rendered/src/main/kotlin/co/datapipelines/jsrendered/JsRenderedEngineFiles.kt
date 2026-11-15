@@ -26,7 +26,8 @@ object JsRenderedEngineFiles {
     /** The text to compile: every file in load order, each followed by a newline. */
     val concatenation: String by lazy { names.joinToString(separator = "") { sources.getValue(it) + "\n" } }
 
-    private fun read(name: String): String {
+    /** One engine file's text by its name relative to [ROOT]; a name the classpath lacks fails, naming the path. */
+    internal fun read(name: String): String {
         val path = "$ROOT/$name"
         val stream =
             checkNotNull(JsRenderedEngineFiles::class.java.classLoader.getResourceAsStream(path)) {

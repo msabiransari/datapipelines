@@ -1,5 +1,6 @@
 package co.datapipelines.jsrendered
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
@@ -54,6 +55,12 @@ class JsRenderedEngineFilesTest {
         JsRenderedEngineFiles.concatenation shouldBe expected
         JsRenderedEngineFiles.concatenation shouldStartWith JsRenderedEngineFiles.sources.getValue(lines.first())
         JsRenderedEngineFiles.concatenation shouldEndWith JsRenderedEngineFiles.sources.getValue(lines.last()) + "\n"
+    }
+
+    @Test
+    fun `a file the classpath lacks fails, naming its path`() {
+        val error = shouldThrow<IllegalStateException> { JsRenderedEngineFiles.read("types/absent.js") }
+        error.message shouldBe "js-rendered engine file missing from the classpath: ${JsRenderedEngineFiles.ROOT}/types/absent.js"
     }
 
     private fun moduleDir(): File {

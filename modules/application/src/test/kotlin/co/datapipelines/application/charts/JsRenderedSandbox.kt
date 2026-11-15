@@ -26,7 +26,9 @@ internal class JsRenderedSandbox : AutoCloseable {
 
     init {
         val availability = runtime.availability()
-        check(availability is Availability.Available) { "the JavaScript isolate is unavailable, the chart guards cannot run: $availability" }
+        check(
+            availability is Availability.Available,
+        ) { "the JavaScript isolate is unavailable, the chart guards cannot run: $availability" }
     }
 
     /** Evaluates the engine (plus the checker when [withInvariants]) followed by [tail] on [input]. */
@@ -46,16 +48,13 @@ internal class JsRenderedSandbox : AutoCloseable {
         /** `ScriptProperties.evaluateTimeoutSeconds` and `ScriptProperties.maxDepth`, the product's defaults. */
         val LIMITS = EvaluationLimits(wallClock = Duration.ofSeconds(10), maxDepth = 100)
 
-        /** The invariant checker the Node suites run (`src/test/js/geometry.js`), from the engine module's test fixtures. */
+        /** The invariant checker the Node suites run (`src/test/js/geometry.js`), from the engine module's test data. */
         const val GEOMETRY = "co/datapipelines/jsrendered/test/geometry.js"
     }
 }
 
-/** Where the chart guards read: the engine module's test-fixture resources and the repository tree. */
+/** Where the chart guards read: the engine module's test data on the classpath, and the repository tree. */
 internal object ChartGuardFiles {
-    /** Chart fixtures as classpath resources: `<wire>/<name>.json`. */
-    const val FIXTURES = "co/datapipelines/jsrendered/fixtures"
-
     /** Node's emitted inputs and results (`jsRenderedEmit`): `<wire>/<name>/<w>x<h>.{input,output}.json`, `index.txt`, `on-fill.json`. */
     const val EMITTED = "co/datapipelines/jsrendered/emitted"
 
@@ -65,7 +64,7 @@ internal object ChartGuardFiles {
     fun resource(path: String): String {
         val stream =
             checkNotNull(ChartGuardFiles::class.java.classLoader.getResourceAsStream(path)) {
-                "missing from the test classpath: $path (the js-rendered module's test fixtures)"
+                "missing from the test classpath: $path (the js-rendered module's jsRenderedTestData)"
             }
         return stream.use { it.readBytes().toString(Charsets.UTF_8) }
     }

@@ -87,7 +87,12 @@ class JsRenderedIdentityTest {
         val frame = pictures.getValue(fixture).first()
 
         @Suppress("UNCHECKED_CAST")
-        val r = sandbox.evaluate(DRAW, mapOf("inputs" to listOf(ChartGuardFiles.resource("${ChartGuardFiles.EMITTED}/$fixture/$frame.input.json"))), withInvariants = true) as List<Map<String, Any?>>
+        val r =
+            sandbox.evaluate(
+                DRAW,
+                mapOf("inputs" to listOf(ChartGuardFiles.resource("${ChartGuardFiles.EMITTED}/$fixture/$frame.input.json"))),
+                withInvariants = true,
+            ) as List<Map<String, Any?>>
         (r.single()["texts"] as Number).toInt() shouldBeGreaterThan 0
         (r.single()["marks"] as Number).toInt() shouldBeGreaterThan 0
     }

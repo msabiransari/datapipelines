@@ -13,12 +13,11 @@
 //     has no other test of its geometry.
 //   jsRenderedEmit — Node's render result for every chart fixture at the fixed frames, one file per fixture, under
 //     build/. The JVM identity guard (modules/application JsRenderedIdentityTest) compares the sandbox's result with
-//     these files byte for byte (I6/A3), reading them, with the fixtures, from this module's test fixtures.
+//     these files byte for byte (I6/A3), reading them from this module's jsRenderedTestData configuration.
 import java.util.concurrent.TimeUnit
 
 plugins {
     id("datapipelines.common-conventions")
-    `java-test-fixtures`
 }
 
 /** The node on PATH, or null. */
@@ -137,13 +136,16 @@ val jsRenderedEmit =
         }
     }
 
-// The JVM guards read the chart fixtures and the emitted results as classpath resources of this module's test
-// fixtures, under co/datapipelines/jsrendered/{fixtures,emitted}/ (application: testImplementation(testFixtures(…))).
+// The JVM guards (modules/application) read Node's emitted inputs and results and the invariant checker as classpath
+// resources under co/datapipelines/jsrendered/{emitted,test}/ (each emitted input embeds its chart fixture whole). They reach them through ONE consumable
+// configuration, jsRenderedTestData, whose artifact is the synced directory built from jsRenderedEmit:
+// application declares testImplementation(project(":modules:js-rendered", configuration = "jsRenderedTestData")), an
+// edge its root-map row already holds. Not the java-test-fixtures plugin: its self-edge (testFixtures on main) is a
+// project dependency of this module on itself, which verifyModuleDependencies refuses against this row's empty set.
 val fixtureResources = layout.buildDirectory.dir("js-rendered-fixture-resources")
 val jsRenderedFixtureResources =
     tasks.register<Sync>("jsRenderedFixtureResources") {
         into(fixtureResources)
-        from(jsFixtures) { into("co/datapipelines/jsrendered/fixtures") }
         from(jsRenderedEmit) { into("co/datapipelines/jsrendered/emitted") }
         // The invariant checker the Node suites run, loaded by the sandbox guard too (one checker, two runtimes).
         from(jsTests) {
@@ -151,7 +153,16 @@ val jsRenderedFixtureResources =
             into("co/datapipelines/jsrendered/test")
         }
     }
-sourceSets["testFixtures"].resources.srcDir(jsRenderedFixtureResources)
+val jsRenderedTestData =
+    configurations.create("jsRenderedTestData") {
+        isCanBeConsumed = true
+        isCanBeResolved = false
+        description = "Node's emitted inputs and results and the invariant checker, for the JVM chart guards."
+    }
+artifacts.add(jsRenderedTestData.name, fixtureResources.get().asFile) {
+    type = "directory"
+    builtBy(jsRenderedFixtureResources)
+}
 
 tasks.named("check") {
     dependsOn("jsRenderedTest")

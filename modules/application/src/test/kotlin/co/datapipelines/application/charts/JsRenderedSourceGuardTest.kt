@@ -64,7 +64,16 @@ class JsRenderedSourceGuardTest {
     }
 
     /** A call-shaped occurrence of a pattern for the control. */
-    private fun sample(pattern: String): String = if (pattern.endsWith("(")) "${pattern}1)" else if (pattern == "**") "2 ** 3" else "$pattern(1)"
+    private fun sample(pattern: String): String =
+        if (pattern.endsWith("(")) {
+            "${pattern}1)"
+        } else if (pattern ==
+            "**"
+        ) {
+            "2 ** 3"
+        } else {
+            "$pattern(1)"
+        }
 
     private data class Hit(
         val line: Int,
@@ -94,9 +103,29 @@ class JsRenderedSourceGuardTest {
         /** Record §4.3 R-BAN: lane 977's banned list (`results/banned.json`), in its order. */
         val BANNED =
             listOf(
-                "Math.log10", "Math.log(", "Math.LN10", "Math.pow", "**", "Math.exp", "Math.sin", "Math.cos", "Math.atan2",
-                "Date", "Intl", "toLocaleString", "toLocaleDateString", "toLocaleTimeString", "localeCompare", "Math.random",
-                "performance", "eval", "Function(", "innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
+                "Math.log10",
+                "Math.log(",
+                "Math.LN10",
+                "Math.pow",
+                "**",
+                "Math.exp",
+                "Math.sin",
+                "Math.cos",
+                "Math.atan2",
+                "Date",
+                "Intl",
+                "toLocaleString",
+                "toLocaleDateString",
+                "toLocaleTimeString",
+                "localeCompare",
+                "Math.random",
+                "performance",
+                "eval",
+                "Function(",
+                "innerHTML",
+                "outerHTML",
+                "insertAdjacentHTML",
+                "document.write",
             )
 
         val MARKUP = Regex("<[A-Za-z/!]")
@@ -115,82 +144,104 @@ class JsRenderedSourceGuardTest {
         /** banned-guard.py's `strip_comments`: every comment replaced by spaces, line breaks kept. */
         fun stripComments(src: String): String = lex(src).code
 
-        /** The code with comments blanked, and its string and template literals (quotes included) in order. */
-        class Lexed(
-            val code: String,
-            val strings: List<String>,
-        )
+        fun lex(src: String): Lexed = JsLexer(src).run()
+    }
+}
 
-        fun lex(src: String): Lexed {
-            val out = StringBuilder(src.length)
-            val strings = mutableListOf<String>()
-            var i = 0
-            var prev = ' '
-            var hasPrev = false
-            val n = src.length
-            while (i < n) {
-                val c = src[i]
-                val next = if (i + 1 < n) src[i + 1] else '\u0000'
-                when {
-                    c == '/' && next == '/' -> {
-                        val j = src.indexOf('\n', i).let { if (it < 0) n else it }
-                        repeat(j - i) { out.append(' ') }
-                        i = j
-                    }
-                    c == '/' && next == '*' -> {
-                        val j = src.indexOf("*/", i + 2).let { if (it < 0) n else it + 2 }
-                        for (k in i until j) out.append(if (src[k] == '\n') '\n' else ' ')
-                        i = j
-                    }
-                    c == '\'' || c == '"' || c == '`' -> {
-                        val j = closing(src, i, c)
-                        out.append(src, i, minOf(j + 1, n))
-                        strings += src.substring(i, minOf(j + 1, n))
-                        i = j + 1
-                        prev = c
-                        hasPrev = true
-                    }
-                    c == '/' && (!hasPrev || prev in REGEX_AFTER) -> {
-                        var j = i + 1
-                        var klass = false
-                        while (j < n && src[j] != '\n') {
-                            val d = src[j]
-                            if (d == '\\') {
-                                j += 2
-                                continue
-                            }
-                            if (d == '[') klass = true else if (d == ']') klass = false else if (d == '/' && !klass) break
-                            j++
-                        }
-                        out.append(src, i, minOf(j + 1, n))
-                        i = j + 1
-                        prev = '/'
-                        hasPrev = true
-                    }
-                    else -> {
-                        out.append(c)
-                        if (!c.isWhitespace()) {
-                            prev = c
-                            hasPrev = true
-                        }
-                        i++
-                    }
-                }
+/** The code with comments blanked, and its string and template literals (quotes included) in order. */
+private class Lexed(
+    val code: String,
+    val strings: List<String>,
+)
+
+/**
+ * banned-guard.py's `strip_comments` as a small lexer: every comment replaced by spaces with its line breaks kept (so
+ * line numbers hold); string, template and regular-expression literals kept as code; the string and template literals
+ * collected. A `/` opens a regular expression when the last code character is one of [REGEX_AFTER] or there is none.
+ */
+private class JsLexer(
+    private val src: String,
+) {
+    private val out = StringBuilder(src.length)
+    private val strings = mutableListOf<String>()
+    private var i = 0
+    private var prev = NONE
+
+    fun run(): Lexed {
+        while (i < src.length) step()
+        return Lexed(out.toString(), strings)
+    }
+
+    private fun step() {
+        val c = src[i]
+        val next = src.getOrElse(i + 1) { NONE }
+        when {
+            c == '/' && next == '/' -> {
+                blank(src.indexOf('\n', i).let { if (it < 0) src.length else it })
             }
-            return Lexed(out.toString(), strings)
-        }
 
-        private const val REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^"
+            c == '/' && next == '*' -> {
+                blank(src.indexOf("*/", i + 2).let { if (it < 0) src.length else it + 2 })
+            }
 
-        /** The index of the quote that closes the literal opened at [start] (or the end), escapes skipped. */
-        private fun closing(
-            src: String,
-            start: Int,
-            quote: Char,
-        ): Int {
-            var j = start + 1
-            while (j < src.length && src[j] != quote) j += if (src[j] == '\\') 2 else 1
-            return j
+            c in QUOTES -> {
+                literal(c)
+            }
+
+            c == '/' && prev in REGEX_AFTER -> {
+                regex()
+            }
+
+            else -> {
+                out.append(c)
+                if (!c.isWhitespace()) prev = c
+                i++
+            }
         }
+    }
+
+    /** Blanks the source from i to [end], keeping line breaks. */
+    private fun blank(end: Int) {
+        for (k in i until end) out.append(if (src[k] == '\n') '\n' else ' ')
+        i = end
+    }
+
+    private fun literal(quote: Char) {
+        var j = i + 1
+        while (j < src.length && src[j] != quote) j += if (src[j] == '\\') 2 else 1
+        val end = minOf(j + 1, src.length)
+        out.append(src, i, end)
+        strings += src.substring(i, end)
+        i = end
+        prev = quote
+    }
+
+    private fun regex() {
+        var j = i + 1
+        var klass = false
+        while (j < src.length && !endsRegex(j, klass)) {
+            when (src[j]) {
+                '\\' -> j++
+                '[' -> klass = true
+                ']' -> klass = false
+            }
+            j++
+        }
+        val end = minOf(j + 1, src.length)
+        out.append(src, i, end)
+        i = end
+        prev = '/'
+    }
+
+    /** A line break, or a slash outside a character class, ends a regular expression literal. */
+    private fun endsRegex(
+        j: Int,
+        inClass: Boolean,
+    ): Boolean = src[j] == '\n' || (src[j] == '/' && !inClass)
+
+    private companion object {
+        const val NONE = '\u0000'
+        const val QUOTES = "'\"`"
+        const val REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^\u0000"
     }
 }
