@@ -143,6 +143,10 @@
           "properties": {
             "type": {
               "$ref": "skeleton.schema.json#/$defs/seriesType"
+            },
+            "sort": {
+              "description": "The x order, required: ascending, descending, null (input order) or an explicit list. A line has no by-total order.",
+              "$ref": "skeleton.schema.json#/$defs/orderSort"
             }
           }
         },

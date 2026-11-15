@@ -282,6 +282,20 @@
    "path": "/config/encoding/x",
    "note": "record §4.2: a temporal x has ONE form on the line family"
   },
+  "invalid/line-band-sort-by-total.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/x",
+   "note": "a line's band x sorts by orderSort only: no by-total order"
+  },
+  "invalid/area-band-sort-object.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/x",
+   "note": "an area's band x sort is orderSort: an object is refused"
+  },
   "invalid/line-stacked.json": {
    "valid": false,
    "layer": "schema",
