@@ -18,6 +18,12 @@
 # that cannot be resolved for certain keeps every candidate (temp-hygiene-helper.py Resolver).
 # A live process that cannot be read keeps no directory (owner ruling 2026-11-14:
 # only EMPTY directories can go on that assumption; every summary line counts it).
+# A reference that resolves onto FUSE (type "fuse" or "fuse.*" in the kernel's mount table) is
+# judged in that filesystem's own tree, so it keeps no candidate and is not doubt (owner ruling
+# 2026-11-15; every summary line counts such processes as fuse-processes=). Its cost: a FUSE
+# program that takes its source from a configuration file, not its command line, and serves a
+# file from inside a test temp directory would have that directory's closed files swept. These
+# are the only two exceptions to "a reference of a live process keeps".
 #
 # Modes: VERIFICATION_TMP_SWEEP=real (default in the wrappers): B.1 and the sweep remove.
 #        VERIFICATION_TMP_SWEEP=dry-run: B.1 removes, the sweep only lists. Anything else is
@@ -31,8 +37,10 @@
 #
 # Seams for the self-test (scripts/temp-hygiene-test.sh) are shell functions it replaces
 # after sourcing: th::_now (the pass's age clock), th::_clock (the budget clock),
-# th::_proc_refs (one process's read), th::_lease_mode, th::_remover_extra_args. No
-# environment variable can switch off or redirect the lease test or the process scan.
+# th::_proc_refs (one process's read), th::_lease_mode, th::_remover_extra_args; case 47 also
+# sets TH_LIB_DIR in the pass's subshell (the real helper behind a wrapper). TH_LIB_DIR is
+# assigned when this file is sourced, so no environment variable can switch off or redirect
+# the lease test or the process scan.
 
 TH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TH_AGE_DEFAULT_S=3600
@@ -197,33 +205,42 @@ th::_snapshot() { # base candidate-dir... → TH_SNAP_* ; 0 complete, 1 stopped 
 
 # th::_proc_refs <pid>: one process's read. Fills TH_P_REFS (cwd and fd targets under the base,
 # and every candidate directory a reference of it resolves to or below), sets TH_PROC_NAME and
-# TH_P_DOUBT (how many of its references were in doubt: each named every candidate). Returns 0 read,
+# TH_P_DOUBT (how many of its references were in doubt: each named every candidate) and TH_P_FUSE
+# (how many resolved onto FUSE: judged in that filesystem's own tree, kept nothing). Returns 0 read,
 # 2 live but cwd or fd unreadable, 3 gone, 4 zombie, 5 kernel thread. The caller keeps the
 # references of 0 and 2 only: a gone process or a zombie holds nothing.
 th::_proc_refs() {
   local pid="$1" i
   TH_PROC_NAME="${TH_SNAP_NAME[$pid]:-?}"
   for i in ${TH_SNAP_REF_INDEX[$pid]:-}; do
-    if [ "${TH_SNAP_REF_KIND[$i]}" = d ]; then TH_P_DOUBT="${TH_SNAP_REF_VALUE[$i]}"; else TH_P_REFS+=("${TH_SNAP_REF_VALUE[$i]}"); fi
+    case "${TH_SNAP_REF_KIND[$i]}" in
+      d) TH_P_DOUBT="${TH_SNAP_REF_VALUE[$i]}" ;;
+      u) TH_P_FUSE="${TH_SNAP_REF_VALUE[$i]}" ;;
+      *) TH_P_REFS+=("${TH_SNAP_REF_VALUE[$i]}") ;;
+    esac
   done
   return "${TH_SNAP_RC[$pid]:-3}"
 }
 
-# Fills TH_REFS, TH_UNREADABLE(_NAMES), TH_DOUBTFUL(_NAMES). Returns 0 complete,
+# Fills TH_REFS, TH_UNREADABLE(_NAMES), TH_DOUBTFUL(_NAMES), TH_FUSE(_NAMES). Returns 0 complete,
 # 1 stopped at the budget, 2 not possible (no /proc, no python3).
 th::_scan_processes() { # base candidate-dir... (the directories whose entries may be candidates)
   local base="$1" pid rc
-  TH_REFS=(); TH_UNREADABLE=0; TH_UNREADABLE_NAMES=(); TH_DOUBTFUL=0; TH_DOUBTFUL_NAMES=()
+  TH_REFS=(); TH_UNREADABLE=0; TH_UNREADABLE_NAMES=(); TH_DOUBTFUL=0; TH_DOUBTFUL_NAMES=(); TH_FUSE=0; TH_FUSE_NAMES=()
   rc=0; th::_snapshot "$@" || rc=$?
   [ "$rc" -eq 0 ] || return "$rc"
   for pid in "${TH_SNAP_PIDS[@]}"; do
     th::_budget_left || return 1
-    TH_PROC_NAME=; TH_P_REFS=(); TH_P_DOUBT=0
+    TH_PROC_NAME=; TH_P_REFS=(); TH_P_DOUBT=0; TH_P_FUSE=0
     rc=0; th::_proc_refs "$pid" || rc=$?
-    case "$rc" in 0|2) TH_REFS+=("${TH_P_REFS[@]}") ;; *) TH_P_DOUBT=0 ;; esac
+    case "$rc" in 0|2) TH_REFS+=("${TH_P_REFS[@]}") ;; *) TH_P_DOUBT=0; TH_P_FUSE=0 ;; esac
     if [ "$TH_P_DOUBT" -gt 0 ]; then
       TH_DOUBTFUL=$((TH_DOUBTFUL + 1))
       [ "${#TH_DOUBTFUL_NAMES[@]}" -ge 5 ] || TH_DOUBTFUL_NAMES+=("$pid ${TH_PROC_NAME:-?}")
+    fi
+    if [ "$TH_P_FUSE" -gt 0 ]; then
+      TH_FUSE=$((TH_FUSE + 1))
+      [ "${#TH_FUSE_NAMES[@]}" -ge 5 ] || TH_FUSE_NAMES+=("$pid ${TH_PROC_NAME:-?}")
     fi
     if [ "$rc" -eq 2 ]; then
       TH_UNREADABLE=$((TH_UNREADABLE + 1))
@@ -459,7 +476,7 @@ th::run() {
   th::_clock; start="$TH_CLOCK"; TH_DEADLINE=$((start + budget))
   TH_DEADLINE_REAL=$(( $(printf '%(%s)T' -1) + budget ))
   unset TH_REF_SET; declare -gA TH_REF_SET=()
-  TH_STOPPED=0; TH_SCAN=2; TH_UNREADABLE=0; TH_UNREADABLE_NAMES=(); TH_DOUBTFUL=0; TH_DOUBTFUL_NAMES=(); TH_REFS=(); TH_FILES_REFUSED=0; TH_FILES_UNTRIED=0; TH_DIRS_LIVE=0; TH_UNRECORDED=0; TH_ROOT_STATE=unknown
+  TH_STOPPED=0; TH_SCAN=2; TH_UNREADABLE=0; TH_UNREADABLE_NAMES=(); TH_DOUBTFUL=0; TH_DOUBTFUL_NAMES=(); TH_FUSE=0; TH_FUSE_NAMES=(); TH_REFS=(); TH_FILES_REFUSED=0; TH_FILES_UNTRIED=0; TH_DIRS_LIVE=0; TH_UNRECORDED=0; TH_ROOT_STATE=unknown
   unset TH_COUNT TH_DONE
   declare -gA TH_COUNT=() TH_DONE=()
   [ -z "$TH_LIST" ] || : > "$TH_LIST" || TH_LIST=
@@ -500,16 +517,21 @@ th::run() {
     doubted="$(IFS=,; printf '%s' "${TH_DOUBTFUL_NAMES[*]}")"
     echo "temp-hygiene: $TH_DOUBTFUL live process(es) have a reference that could not be resolved for certain; each such reference keeps every candidate directory (doubt keeps); first five: $doubted" >&2
   fi
+  if [ "$TH_FUSE" -gt 0 ]; then
+    local fused
+    fused="$(IFS=,; printf '%s' "${TH_FUSE_NAMES[*]}")"
+    echo "temp-hygiene: $TH_FUSE live process(es) have a reference on a FUSE filesystem; each is judged in that filesystem's own tree and keeps no directory by it (owner ruling 2026-11-15); first five: $fused" >&2
+  fi
   th::_clock; seconds=$((TH_CLOCK - start))
   local verb=removed; [ "$shared_mode" = real ] || verb=would-remove
   local root_verb=removed; [ "$root_mode" = real ] || root_verb=would-remove
-  printf 'temp-hygiene: mode=%s base=%s root=%s root-state=%s root-%s=%s root-bytes=%s shared-%s=%s shared-bytes=%s gone-roots-%s=%s partial=%s files-kept-lease-refused=%s files-kept-lease-untried=%s dirs-kept-live=%s roots-unrecorded=%s unreadable-processes=%s processes-in-doubt=%s families=%s seconds=%s%s%s\n' \
+  printf 'temp-hygiene: mode=%s base=%s root=%s root-state=%s root-%s=%s root-bytes=%s shared-%s=%s shared-bytes=%s gone-roots-%s=%s partial=%s files-kept-lease-refused=%s files-kept-lease-untried=%s dirs-kept-live=%s roots-unrecorded=%s unreadable-processes=%s processes-in-doubt=%s fuse-processes=%s families=%s seconds=%s%s%s\n' \
     "$label" "${base:-none}" "${root:-none}" "$TH_ROOT_STATE" \
     "$root_verb" "${TH_COUNT[root-removed]:-0}" "${TH_COUNT[root-bytes]:-0}" \
     "$verb" "${TH_COUNT[shared-removed]:-0}" "${TH_COUNT[shared-bytes]:-0}" \
     "$verb" "${TH_COUNT[gone-removed]:-0}" \
     "$(( ${TH_COUNT[root-partial]:-0} + ${TH_COUNT[shared-partial]:-0} + ${TH_COUNT[gone-partial]:-0} ))" \
-    "$TH_FILES_REFUSED" "$TH_FILES_UNTRIED" "$TH_DIRS_LIVE" "$TH_UNRECORDED" "$TH_UNREADABLE" "$TH_DOUBTFUL" "${#TH_FAMILIES[@]}" "$seconds" \
+    "$TH_FILES_REFUSED" "$TH_FILES_UNTRIED" "$TH_DIRS_LIVE" "$TH_UNRECORDED" "$TH_UNREADABLE" "$TH_DOUBTFUL" "$TH_FUSE" "${#TH_FAMILIES[@]}" "$seconds" \
     "$([ "$TH_STOPPED" -eq 0 ] || echo ' stopped at budget')" "$([ -z "$TH_LIST" ] || echo " list=$TH_LIST")"
   return 0
 }

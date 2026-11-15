@@ -7,7 +7,9 @@ scan   --base B --deadline T [--candidates-in DIR ...]
     3 gone, 4 zombie, 5 kernel thread), followed by its references: "R\tc\t<cwd>" and
     "R\tf\t<fd target>" when the kernel's path is under B, "R\tk\t<candidate>" for each
     directory of a --candidates-in DIR that a reference RESOLVES to or below (Resolver), and
-    "R\td\t<n>" when n of its references were in doubt (each of those named every candidate).
+    "R\td\t<n>" when n of its references were in doubt (each of those named every candidate), and
+    "R\tu\t<n>" when n of its references resolved onto FUSE (judged in that filesystem's own tree
+    by the owner's ruling of 2026-11-15, D8: they keep no candidate and are not doubt; counted).
     A final "#budget" record means the deadline ended the scan: the caller removes nothing.
     The scan can only KEEP a directory; nothing it reads can make a file removable.
 
@@ -128,6 +130,12 @@ NO_DIRECTORY = -2  # a socket, pipe or other kernel-internal object: in no direc
 # Filesystems that hold their own data (a block or image device, memory, a kernel view): an object
 # on one lies in that filesystem's tree only. Any other type (overlay, FUSE, network, 9p, an unknown
 # name) may keep its data in a directory of another filesystem, so an object on it is doubt.
+# One ruled exception (D8, owner ruling 2026-11-15): FUSE ("fuse", "fuse.<subtype>": the kernel's
+# own type name, set by the FUSE driver, never by a path) is judged in its own tree as if it held
+# its own data, and every reference onto it is counted (fuse-processes= on the summary line). The
+# accepted cost: a FUSE program that takes its source from a configuration file (not its command
+# line) and serves a file from inside a test temp directory would have that directory's closed
+# files swept. A FUSE daemon's own command line, cwd and handles are judged like any process's.
 OWN_DATA = frozenset((
     "ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs", "jfs", "vfat", "msdos", "exfat", "ntfs3",
     "hfsplus", "iso9660", "udf", "squashfs", "erofs", "tmpfs", "ramfs", "devtmpfs", "proc", "sysfs",
@@ -142,6 +150,13 @@ OWN_DATA_MAGIC = frozenset((
     0x444D4142, 0x09041934, 0x534F434B, 0x50495045, 0x6E736673, 0xCAFE4A11, 0x958458F6, 0x64626720,
     0x74726163, 0x73636673, 0x454D444D, 0x5345434D,
 ))
+
+
+def is_fuse(fstype: str) -> bool:
+    """A FUSE filesystem by the mount table's type field: "fuse" or "fuse.<subtype>" (not fusectl, not fuseblk)."""
+    return fstype == "fuse" or fstype.startswith("fuse.")
+
+
 OCTAL_ESCAPE = re.compile(rb"\\([0-7]{3})")
 
 
@@ -272,11 +287,12 @@ class Resolver:
         self.doubts = 0
         self.extra: frozenset[str] = frozenset()  # keeps found beside a judgement (file_parent): only adds
         self.unreadable = False  # a handle of the process refused us (D3): its rc becomes 2
+        self.fuse = 0  # references of the process that resolved onto FUSE (D8): counted, keep nothing
         # Mount tables: the sweeper's own (fresh at the start), every other namespace's on demand.
         self.own_mounts = self.read_table("/proc/self/mountinfo")[0]
         self.tables_read = 0
         self.namespaces: set[str] = set()
-        self.superblocks: dict[tuple[int, int], tuple[bool, str]] = {}
+        self.superblocks: dict[tuple[int, int], tuple[bool, str, bool]] = {}
         self.swept: Optional[dict[int, Mount]] = None
         self.by_dev: dict[str, frozenset[str]] = {}
         self.unscoped: frozenset[str] = frozenset()
@@ -368,13 +384,14 @@ class Resolver:
             mount = self.swept.get(mount_id)
         return mount
 
-    def superblock(self, fd: int) -> tuple[bool, str]:
-        """(holds its own data, device) of the filesystem a descriptor is on (OWN_DATA, OWN_DATA_MAGIC).
+    def superblock(self, fd: int) -> tuple[bool, str, bool]:
+        """(holds its own data, device, FUSE) of the filesystem a descriptor is on (OWN_DATA, OWN_DATA_MAGIC, D8).
 
         From the table that names its mount, when that line agrees with the descriptor's st_dev
         (btrfs reports a subvolume's own st_dev, so its line is taken as it is). A mount no table
         names, or a line that disagrees (a reused mount id), is judged by statfs magic and st_dev.
         Cached by (mount id, st_dev): another mount with the same id and st_dev is the same filesystem.
+        FUSE is known from a table line only (its type field); a mount no table names is never FUSE.
         """
         mount_id = self.mount_of(fd)
         st_dev = kernel(os.fstat, fd).st_dev
@@ -382,9 +399,10 @@ class Resolver:
         if key not in self.superblocks:
             mount = self.find_mount(mount_id)
             if mount is not None and (mount.dev == device(st_dev) or mount.fstype == "btrfs"):
-                self.superblocks[key] = (mount.fstype in OWN_DATA, mount.dev)
+                fuse = is_fuse(mount.fstype)
+                self.superblocks[key] = (mount.fstype in OWN_DATA or fuse, mount.dev, fuse)
             else:
-                self.superblocks[key] = (self.statx.magic(fd) in OWN_DATA_MAGIC, device(st_dev))
+                self.superblocks[key] = (self.statx.magic(fd) in OWN_DATA_MAGIC, device(st_dev), False)
         return self.superblocks[key]
 
     def check(self) -> None:
@@ -426,9 +444,11 @@ class Resolver:
         return self.counted(self.judge_directory(fd, parent))
 
     def judge_directory(self, fd: int, parent: int = -1) -> tuple[frozenset[str], bool]:
-        own_data, _ = self.superblock(fd)
+        own_data, _, fuse = self.superblock(fd)
         if not own_data:
             return self.doubt(None)  # its data may live in a directory of another filesystem
+        if fuse:
+            self.fuse += 1  # D8: judged in its own tree, counted
         return self.chain(fd, parent)
 
     def chain(self, fd: int, parent: int) -> tuple[frozenset[str], bool]:
@@ -534,9 +554,11 @@ class Resolver:
         found, doubted = self.judge_directory(parent) if parent >= 0 else (frozenset(), False)
         if st.st_nlink == 0:
             return self.counted((found, doubted))  # no name: in no directory (memfd, an unlinked file)
-        own_data, dev = self.superblock(fd)
+        own_data, dev, fuse = self.superblock(fd)
         if not own_data:
             return self.counted((found | self.scope(None), True))
+        if fuse:
+            self.fuse += 1  # D8: judged in its own tree, counted
         mount_id, is_root = self.statx.mount(fd)
         if is_root:
             more, more_doubt = self.file_root(fd, mount_id)
@@ -780,6 +802,7 @@ class Resolver:
             return frozenset()
         self.extra = frozenset()
         self.unreadable = False
+        self.fuse = 0
         try:
             cwd = os.open(proc + "/cwd", PATH_DIR)
         except OSError:
@@ -896,6 +919,8 @@ def scan_process(pid: str, base: bytes, resolver: Resolver) -> tuple[int, bytes,
         refs.append((b"k", os.fsencode(kept)))
     if resolver.doubts > before:
         refs.append((b"d", str(resolver.doubts - before).encode()))
+    if resolver.fuse:
+        refs.append((b"u", str(resolver.fuse).encode()))
     if not os.path.isdir(proc):
         return 3, name, []
     return (2 if unreadable or resolver.unreadable else 0), name, refs

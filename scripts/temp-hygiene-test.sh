@@ -5,8 +5,10 @@
 # Fixture temp directories only: every pass of the library gets TMPDIR = a fixture directory
 # (the temp base), so nothing outside $T is ever a candidate. The self-test fails when any
 # summary line it captured names a base outside its fixtures, and it prints the number of
-# cases it ran. Seams are the library's own shell functions, replaced inside the pass's
-# subshell after sourcing; no environment variable switches the lease or the scan off.
+# cases it ran. Seams are the library's own shell functions (and, in case 47 only, its
+# TH_LIB_DIR shell variable, so the real helper runs through a wrapper that reports one mount's
+# type), replaced inside the pass's subshell after sourcing; no environment variable switches
+# the lease or the scan off.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$ROOT/scripts/lib/temp-hygiene.sh"
@@ -63,7 +65,9 @@ mkroot() { # mkroot <checkout> → prints the root; parent and root 0700, record
 # A process outside the case whose reference is in doubt keeps every candidate, by design (#983
 # round 3, D2). The self-test runs beside other work on the same machine, so a pass leaves such
 # a process out — named in $T/foreign-doubt and counted on the result line — and case 37 proves
-# that a holder of the case in doubt keeps everything. own_process: a holder of the case or its child.
+# that a holder of the case in doubt keeps everything. A process outside the case with a reference
+# on FUSE (owner ruling 2026-11-15) is left out of fuse-processes= the same way, named in
+# $T/foreign-fuse, so case 47 can count its own holder. own_process: a holder of the case or its child.
 own_process() { # own_process <pid>
   local pid parent
   parent="$(awk '/^PPid:/ {print $2}' "/proc/$1/status" 2>/dev/null)"
@@ -77,6 +81,10 @@ leave_out_foreign_doubt() {
     if [ "${TH_P_DOUBT:-0}" -gt 0 ] && ! own_process "$1"; then
       printf 'case %s pass %s: %s %s\n' "$CASE" "$PASSN" "$1" "$TH_PROC_NAME" >> "$T/foreign-doubt"
       TH_P_REFS=(); TH_P_DOUBT=0
+    fi
+    if [ "${TH_P_FUSE:-0}" -gt 0 ] && ! own_process "$1"; then
+      printf 'case %s pass %s: %s %s\n' "$CASE" "$PASSN" "$1" "$TH_PROC_NAME" >> "$T/foreign-fuse"
+      TH_P_FUSE=0
     fi
     return "$rc"
   }
@@ -909,6 +917,76 @@ else
 fi
 finish
 
+begin 47 'FUSE (owner ruling 2026-11-15): a reference onto FUSE keeps nothing and is counted; the same process'"'"'s other references keep; an unknown type stays doubt'
+# No FUSE daemon is installed here, so the helper runs through a wrapper that reports one other
+# mount (/dev/shm's) with the given type in every mount table it parses: the D8 condition in the
+# helper reads that type exactly as it reads a real line. The candidates' own mount is unchanged.
+root="$(mkroot "$CO")"; fill_entry "$root/live"; fill_entry "$root/unrelated"
+fake_type() { # fake_type <type>: $FX/outside/fake-lib runs the real helper with /dev/shm's mount reported as <type>
+  mkdir -p "$FX/outside/fake-lib"
+  printf '%s\n%s\n%s\n' "$HELPER" /dev/shm "$1" > "$FX/outside/fake-lib/fake.conf"
+  cat > "$FX/outside/fake-lib/temp-hygiene-helper.py" <<'PY'
+import dataclasses, importlib.util, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+real, fake_at, fake_type = open(os.path.join(here, "fake.conf")).read().split("\n")[:3]
+spec = importlib.util.spec_from_file_location("helper", real)
+helper = importlib.util.module_from_spec(spec)
+sys.modules["helper"] = helper
+spec.loader.exec_module(helper)
+fd = os.open(fake_at, helper.PATH_DIR)
+ident = helper.Statx().mount(fd)[0]
+os.close(fd)
+parse = helper.parse_mountinfo
+def faked(data):
+    mounts, complete = parse(data)
+    if ident in mounts:
+        mounts[ident] = dataclasses.replace(mounts[ident], fstype=fake_type)
+    return mounts, complete
+helper.parse_mountinfo = faked
+sys.exit(helper.main())
+PY
+}
+FAKE_SEAM='TH_LIB_DIR="$FX/outside/fake-lib"'
+classes="$(HELPER="$HELPER" python3 -I -B -c '
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("helper", os.environ["HELPER"])
+helper = importlib.util.module_from_spec(spec); sys.modules["helper"] = helper; spec.loader.exec_module(helper)
+print(" ".join("%s=%s" % (t, helper.is_fuse(t)) for t in ("fuse", "fuse.x", "fuse.portal", "fusectl", "fuseblk", "xfuse.y", "overlay")))')"
+[ "$classes" = 'fuse=True fuse.x=True fuse.portal=True fusectl=False fuseblk=False xfuse.y=False overlay=False' ] \
+  || fail "the FUSE type rule: $classes"
+if [ ! -d /dev/shm ] || [ "$(stat -c %d /dev/shm)" = "$(stat -c %d "$BASE")" ]; then
+  skip '/dev/shm is missing or on the temp base'"'"'s own filesystem: no second mount to report as FUSE'
+else
+  shm_holder() { # a process whose only reference outside the system is its cwd, /dev/shm
+    ( cd /dev/shm && exec sleep 600 ) < /dev/null > /dev/null 2>&1 9>&- 10>&- 11>&- &
+    remember "$!"; HOLDER="$!"; wait_for cwd_is "$HOLDER" /dev/shm || fail 'setup: the /dev/shm holder did not start'
+  }
+  # (a) The cwd resolves onto FUSE: no keep, no doubt, counted with a stderr line naming it.
+  fake_type fuse.x; shm_holder
+  pass c47a real real "$FAKE_SEAM"
+  kill -0 "$HOLDER" 2>/dev/null || fail 'the FUSE holder did not stay alive through the pass'
+  gone "$root/unrelated" 'unrelated: the only live reference is on FUSE, judged in its own tree'
+  expect fuse-processes 1; expect processes-in-doubt 0; expect dirs-kept-live 0
+  grep -q "1 live process(es) have a reference on a FUSE filesystem.*owner ruling 2026-11-15.*first five: $HOLDER sleep" "$ERR" \
+    || fail "no FUSE stderr line naming the holder: $(cat "$ERR")"
+  stop_holders
+  # (b) Control: the same kind of holder ALSO names the entry on the candidates' own filesystem: kept whole.
+  fill_entry "$root/live"; fill_entry "$root/unrelated"
+  hold_arg "$root/live" /dev/shm
+  pass c47b real real "$FAKE_SEAM"
+  held_whole "$root/live"
+  gone "$root/unrelated" 'unrelated: nothing but the FUSE cwd could reach it'
+  expect fuse-processes 1; expect processes-in-doubt 0; expect dirs-kept-live 1
+  stop_holders
+  # (c) A type the code does not know is still doubt, and doubt keeps every candidate (overlay: case 46).
+  fill_entry "$root/unrelated"
+  fake_type unknownfs; shm_holder
+  pass c47c real real "$FAKE_SEAM"
+  exists "$root/unrelated/closed-file" 'unrelated: a reference on an unknown filesystem type is doubt, which keeps'
+  expect processes-in-doubt 1; expect fuse-processes 0
+fi
+finish
+
 # ---- every captured summary names a fixture base ---------------------------------------------
 CASE=bases
 lines="$(wc -l < "$T/summaries")"
@@ -917,5 +995,6 @@ outside="$(grep -v "^temp-hygiene: mode=[^ ]* base=$T/" "$T/summaries" || true)"
 [ -z "$outside" ] || fail "a summary line names a base outside the fixtures: $outside"
 
 foreign=0; [ ! -s "$T/foreign-doubt" ] || { foreign="$(wc -l < "$T/foreign-doubt")"; sed 's/^/  left out (outside the case, in doubt): /' "$T/foreign-doubt"; }
-echo "temp-hygiene self-test: $CASES cases ran ($SKIPS sub-cases skipped with a reason), $PASSN passes, $lines summary lines, $foreign foreign processes in doubt left out, $FAILS failures"
+fused=0; [ ! -s "$T/foreign-fuse" ] || fused="$(wc -l < "$T/foreign-fuse")"
+echo "temp-hygiene self-test: $CASES cases ran ($SKIPS sub-cases skipped with a reason), $PASSN passes, $lines summary lines, $foreign foreign processes in doubt left out, $fused foreign process-passes on FUSE left out, $FAILS failures"
 [ "$FAILS" -eq 0 ]
