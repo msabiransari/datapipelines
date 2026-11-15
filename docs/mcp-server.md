@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.80 (frozen contract — additive-only changes after this point)
+**Status:** v1.81 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-11-12
@@ -3124,6 +3124,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.81 | 986 (#986, js-rendered F2) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` — deliberate break, decided by the js-rendered charts record O-13:** the answer is `{id, name, version, status, body_hash}`; the `warnings` array and the descriptions' sentence about it are gone with the server's chart library layer. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-11 | v1.80 | #877 G7 (importer arm, ruling A.0 option 1) | **§6.2.32 `templates_purge_draft`: the guard gains its FOURTH arm** — a template version (any status; a DISCARDED one while its template keeps a live version) whose `imports` pin any version of the draft refuses `template.in_use` with `details.referencing_templates`, narrowed by the caller's view with `pins_hidden` exactly as the other three arms (#300). A guard CORRECTION, not a dependency feature (record §22, Draft 9 erratum): before it a library draft could be purged out from under a draft importer. The tool's description names the arm; schema, permission row and tool count (61) unchanged; `templates_used_by` unchanged. |
 | 2026-11-11 | v1.79 | #896 docs: datasource grants | **Text only, no surface change.** The resource listing's "Role filtering" paragraph names the datasources GRANTED to the key's pinned workspace (`DatasourceRepository.findAllVisible`, the grant predicate) instead of "its bound datasources plus global ones"; §6.2.29's permission note says mutating an INSTANCE datasource's registry (owned by no workspace) needs super admin, not "a GLOBAL datasource … admin". |
 | 2026-11-10 | v1.78 | #786 U1 (API versions, exact pins) | **§6.2.23 `endpoints_create`: `pipeline_version` is a REQUIRED input** (owner ruling 2026-11-08: the pin is authored input on every surface, MCP included — a named exception to the additive-only rule). The tool creates the API's version 1 as a DRAFT pinned to that exact version; the pin must be eligible under the posture (`endpoint.pipeline_version.not_eligible`) and creation is refused on an authoring-disabled deployment (`endpoint.authoring_disabled`). No tool releases an API. The response shape, `endpoints_list` and `endpoints_get` are unchanged; **§6.2.26 `endpoints_delete` is the guarded entity deletion** (#786 R1): an API holding a RELEASED or DISCARDED version is refused `endpoint.version.last_release` and nothing is removed, a draft-only API or a legacy row is deleted as before — its description says so, its input is unchanged; `pipeline` in every response is the CURRENT version's pinned name. No tool added, removed or renamed; no permission change. |

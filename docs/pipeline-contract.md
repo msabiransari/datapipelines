@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.102 (revised — see Change Log)
+**Status:** v1.103 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-11-14
@@ -2048,6 +2048,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.103 | 986 (#986, js-rendered F2) | §13.22 `visualization.validation.config_schema_invalid`: for a `chart` the v1 schema, then the chart save rules — the declared library's support table (`chart.unsupported.<field>`) is gone (js-rendered record O-13). No code added or removed (§13 row count unchanged). |
 | 2026-11-14 | v1.102 | 962 (#962) | §13.25 gains `lake.maintenance.cleanup_incomplete` (HTTP `—`): a cleanup or purge deletion that did not finish its removal (`details.reason` `mode` or `delete_failed`), the maintenance run's error, never a route's. Landed with the constant in `PipelineErrorCodes.Lake` and its `ApiErrorCatalog.NEVER_RETURNED_LIVE` entry (§13 row count 518 → 519). |
 | 2026-11-14 | v1.101 | 956 (#956) — renumbered at the spec merge after #957's v1.100 | §13.25 gains `lake.profile.invalid` and `lake.profile.not_found` (HTTP `—`: the profile and pause services have no route before P8). Landed with their constants in `PipelineErrorCodes.Lake` and their `ApiErrorCatalog.NEVER_RETURNED_LIVE` entries (§13 row count 514 → 516). |
 | 2026-11-14 | v1.100 | 957 (#957) — renumbered at the spec merge after #958's v1.99 | §13.25 gains `lake.maintenance.deadline` (HTTP —): a maintenance run's lease refused at or past the run's deadline. Landed with the constant in `PipelineErrorCodes.Lake` and in `ApiErrorCatalog.NEVER_RETURNED_LIVE` (§13 row count 515 → 516 on top of #958's row, recounted with the drift test's own regex). |

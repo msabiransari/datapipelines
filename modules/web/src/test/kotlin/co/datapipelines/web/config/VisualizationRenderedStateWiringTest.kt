@@ -62,7 +62,7 @@ class VisualizationRenderedStateWiringTest {
     }
 
     private companion object {
-        /** A direct-input bar chart: no transform, so no template is consulted; bindings absent, derived at save. */
+        /** A bar chart over its one input directly: no template is consulted; bindings absent, derived at save. */
         val CHART =
             """
             {"name": "acme/charts/no_runtime", "display_name": "Sales", "renderer": {"kind": "chart", "version": "1"},
