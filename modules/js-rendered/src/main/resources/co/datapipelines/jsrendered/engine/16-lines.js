@@ -67,7 +67,7 @@
     // A raw x (a string or a number) is read once per call: its slot holds what the row's x is (a warning code, or its
     // position and key) and, once a row of it is kept, its x entry. Rows repeating an x (one per series) then cost one
     // lookup by the raw value; a group is keyed by its x entry's ordinal, never by a position's number.
-    var slots = new Map();
+    var slots = new Map(), lastX = null, lastSlot = undefined;
     var slotOf = function (xv) {
       if (temporal) {
         var p = R.time.parse(xv);
@@ -88,10 +88,15 @@
         warn(position ? "chart.rule.null-position" : "chart.rule.null-category");
         continue;
       }
-      var memo = typeof xv === "string" || typeof xv === "number", slot = memo ? slots.get(xv) : undefined;
+      // The previous row's x first (rows ordered by x repeat it once per series), then the call's map of raw values.
+      var memo = typeof xv === "string" || typeof xv === "number", slot = memo && xv === lastX ? lastSlot : memo ? slots.get(xv) : undefined;
       if (slot === undefined) {
         slot = slotOf(xv);
         if (memo) slots.set(xv, slot);
+      }
+      if (memo) {
+        lastX = xv;
+        lastSlot = slot;
       }
       if (slot.bad !== null) {
         warn(slot.bad);
@@ -441,7 +446,8 @@
           continue;
         }
         cur.push({ x: xpx[jj], y: ys(clampTo(valueOf(jj), lo, hi)) });
-        curLow.push({ x: xpx[jj], y: m.stacked ? ys(clampTo(bottoms[k][jj], lo, hi)) : base });
+        // The lower edge is an area's only (a line draws its upper edge alone).
+        if (m.area) curLow.push({ x: xpx[jj], y: m.stacked ? ys(clampTo(bottoms[k][jj], lo, hi)) : base });
       }
       if (cur.length > 0) {
         runs.push(cur);
