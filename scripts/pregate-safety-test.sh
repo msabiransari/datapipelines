@@ -6,6 +6,8 @@ source "$ROOT/scripts/pregate-2b-lib.sh"
 source "$ROOT/scripts/pregate-results-lib.sh"
 T="$(mktemp -d /tmp/pregate-safety.XXXXXX)"
 trap 'rm -rf "$T"' EXIT
+# #983: every copied wrapper's temp base is a fixture directory, never the real /tmp.
+mkdir -p "$T/fixture-tmp"; export TMPDIR="$T/fixture-tmp"
 
 fail() { echo "  FAIL $*" >&2; exit 1; }
 ok() { echo "  ok   $*"; }
@@ -141,7 +143,7 @@ ok 'gate.sh, CI workflows and gradle.properties never enable the build cache (#4
 G="$T/other-checkout"
 mkdir -p "$G/scripts/lib" "$G/.gate-logs"
 cp "$ROOT/scripts/gate.sh" "$G/scripts/"
-cp "$ROOT/scripts/lib/verification-lock.sh" "$G/scripts/lib/"
+cp "$ROOT/scripts/lib/verification-lock.sh" "$ROOT/scripts/lib/temp-hygiene.sh" "$ROOT/scripts/lib/temp-hygiene-helper.py" "$G/scripts/lib/"
 printf 'prior gate evidence\n' > "$G/.gate-logs/sentinel"
 export XDG_CACHE_HOME="$F/.fixture-cache"
 CACHE="$XDG_CACHE_HOME/datapipelines"
@@ -988,3 +990,7 @@ recount_rc=0
 bash "$ROOT/scripts/test-recount.sh" "$recount_modules" "$recount_browser" > "$T/recount-out" 2> "$T/recount-err" || recount_rc=$?
 [ "$recount_rc" -eq 4 ] && [ ! -s "$T/recount-out" ] && grep -q 'TEST-WebTest.xml' "$T/recount-err" || fail '#669: overlapping artifact roots were accepted'
 ok '#669: both artifact roots recounted, buildSrc and saved trees excluded, cross-artifact duplicate refused'
+
+# #983: every temp-hygiene summary line this test captured names a fixture base.
+hygiene_lines="$(pgres::_check_hygiene_bases "$T")" || fail "#983: $hygiene_lines"
+ok "#983: $hygiene_lines temp-hygiene summary line(s) captured, every one names a fixture base"

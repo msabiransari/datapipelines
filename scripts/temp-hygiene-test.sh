@@ -48,7 +48,7 @@ gone() { if [ -e "$1" ] || [ -L "$1" ]; then fail "${2:-$1} is still there"; fi;
 field() { sed -n "s/^temp-hygiene:.* $1=\([^ ]*\).*/\1/p" "$OUT"; }
 expect() { # expect <field> <value>
   local got; got="$(field "$1")"
-  [ "$got" = "$2" ] || fail "summary $1=$got, expected $2: $(cat "$OUT")"
+  [ "$got" = "$2" ] || fail "summary $1=$got, expected $2: $(grep '^temp-hygiene: mode=' "$OUT")"
 }
 mkroot() { # mkroot <checkout> → prints the root; parent and root 0700, record beside it
   local root parent
@@ -397,6 +397,51 @@ pass c19b real real
 exists "$root/f" 'a file below a group-writable parent'; expect root-state refused
 grep -q 'is writable by group or others' "$ERR" || fail "no refusal line: $(cat "$ERR")"
 skip 'a parent owned by another uid: this box cannot create one without root (same check, th::_private_dir_problem; the Gradle side is CommonConventionsPluginTest)'
+finish
+
+# ---- 20: through the copied wrappers -----------------------------------------------------------
+begin 20 'through the copied pregate.sh and gate.sh: dry-run empties the root and lists; the default removes'
+# shellcheck source=pregate-results-lib.sh
+source "$ROOT/scripts/pregate-results-lib.sh"
+PF="$FX/pregate-checkout"
+pgres::_fixture "$PF" happy > "$FX/pregate-fixture.log" 2>&1 || fail "pregate fixture: $(cat "$FX/pregate-fixture.log")"
+# The gate fixture: the real gate.sh and the libraries it sources; stand-ins for Gradle, the
+# nested pregate self-test, the scans and the docs audit (no JVM, no network, no recursion).
+GF="$FX/gate-checkout"
+mkdir -p "$GF/scripts/lib"
+cp "$ROOT/scripts/gate.sh" "$GF/scripts/"
+cp "$ROOT/scripts/lib/verification-lock.sh" "$ROOT/scripts/lib/gate-stages.sh" \
+   "$ROOT/scripts/lib/temp-hygiene.sh" "$ROOT/scripts/lib/temp-hygiene-helper.py" "$GF/scripts/lib/"
+printf 'SCAN_EXIT_OFFLINE=200\nscan_tools_classify_network() { echo offline; }\n' > "$GF/scripts/lib/scan-tools.sh"
+for stub in gradlew scripts/pregate.sh scripts/vuln-scan.sh scripts/docs-audit.sh; do
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$GF/$stub"; chmod +x "$GF/$stub"
+done
+wrapper() { # wrapper <checkout> <script> [args]: the copied wrapper, its own lock cache, this case's temp base
+  local co="$1"; shift
+  PASSN=$((PASSN + 1)); OUT="$FX/out.$PASSN"
+  ( cd "$co" && TMPDIR="$BASE" XDG_CACHE_HOME="$co/.fixture-cache" DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB=0 \
+      timeout 300 bash "$@" ) > "$OUT" 2>&1 9>&- 10>&- 11>&-
+  grep '^temp-hygiene: mode=' "$OUT" >> "$T/summaries"
+  [ "$(grep -c '^temp-hygiene: mode=' "$OUT")" -eq 1 ] || fail "$* printed no single summary line: $(tail -n 20 "$OUT")"
+}
+for which in pregate gate; do
+  if [ "$which" = pregate ]; then co="$PF"; n=1; run=(scripts/pregate.sh HEAD); else co="$GF"; n=2; run=(scripts/gate.sh); fi
+  root="$(mkroot "$co")"
+  payload "$root/leftover1"; mkdir -p "$root/modules/x/test"; payload "$root/modules/x/test/f"
+  payload "$BASE/libduckdb_java20${n}1.so"; old "$BASE/libduckdb_java20${n}1.so"
+  VERIFICATION_TMP_SWEEP=dry-run wrapper "$co" "${run[@]}"
+  gone "$root/leftover1" "$which dry-run: the root leftover"; gone "$root/modules" "$which dry-run: the root folder"
+  exists "$BASE/libduckdb_java20${n}1.so" "$which dry-run: the listed old shared candidate"
+  expect mode dry-run; expect shared-would-remove 1
+  payload "$root/leftover2"
+  payload "$BASE/libduckdb_java20${n}2.so"; old "$BASE/libduckdb_java20${n}2.so"
+  ( unset VERIFICATION_TMP_SWEEP; wrapper "$co" "${run[@]}"; echo "$OUT" > "$FX/last-out" )
+  OUT="$(cat "$FX/last-out")"
+  gone "$root/leftover2" "$which default: the root leftover"
+  gone "$BASE/libduckdb_java20${n}1.so" "$which default: shared candidate 1"
+  gone "$BASE/libduckdb_java20${n}2.so" "$which default: shared candidate 2"
+  expect mode real; expect shared-removed 2
+done
 finish
 
 # ---- every captured summary names a fixture base ---------------------------------------------
