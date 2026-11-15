@@ -1,0 +1,434 @@
+// 16-lines.js : the line family's shared model and marks (record §4.5 rows line and area, §4.4 G1, G4, G6, G7, G8,
+// §4.9 Thinning; look contract §2 line, weight, points, area; §4.5 labels: last; brief 989 D1, D5, D6, D8). The two
+// templates (types/line.js, types/area.js) register their descriptors and call these with their options; they never
+// write an axis, a legend or a title. Rows sharing x and series are aggregated (one pass, one Map entry per group: the
+// work is bounded by the row cap); a null measure is a gap; x is a band (nominal, ordinal: evenly spaced, in the band's
+// order) or a position (temporal: a continuous UTC axis; quantitative: a number axis, linear or log). The series come
+// from the colour column, from `value.fields` (G1: the fields ARE the series, in the list's order), or are the one
+// measure. No object is ever keyed by a data value: groups live in Maps.
+(function (R) {
+  "use strict";
+  var P = R.prim, D = R.data, T = R.text, S = R.scales, look = R.tables.look, cap = R.tables.cap;
+
+  function titleOf(enc, dflt) {
+    return enc.title === null ? null : enc.title === undefined ? dflt : enc.title;
+  }
+
+  /** "3.7K" and its unit after one space (G6: a unit follows the number in tooltips and value labels, never a tick). */
+  function withUnit(text, unit) {
+    return typeof unit === "string" && unit !== "" && text !== "" ? text + " " + unit : text;
+  }
+
+  /** A tooltip line of a `detail` entry (G7): "title: value", the value written by its column's kind. */
+  function detailLine(d, v, types) {
+    var t = types[d.field], text;
+    if (D.isNull(v)) text = "";
+    else if (t === "DATE" || t === "TIMESTAMP" || t === "TIMESTAMP_TZ" || t === "TIME") text = T.temporalFull(v, d.format);
+    else if (typeof v === "number" || (typeof v === "string" && D.EXACT_TYPES[t] === true)) text = T.value(v, d.format);
+    else text = String(v);
+    return (d.title === undefined || d.title === null ? d.field : d.title) + ": " + withUnit(text, d.unit);
+  }
+
+  /**
+   * The model. opts = {area: boolean}. Returns what render reads (series with id, title, colour; markCount = the
+   * non-null points of the data; warnings; legend; direct; legendKey; lasts; layout) and what marks reads (xs, cells).
+   */
+  function model(doc, columns, types, opts) {
+    var cfg = doc.config, e = cfg.encoding, x = e.x, y = e.y, color = e.color || null, fields = Array.isArray(y.fields) ? y.fields : null;
+    types = types && typeof types === "object" ? types : {};
+    var warnings = [], warned = {};
+    var warn = function (code) {
+      if (warned[code] === true) return;
+      warned[code] = true;
+      warnings.push({ code: code });
+    };
+    var temporal = x.type === "temporal", position = temporal || x.type === "quantitative";
+    var scaleY = y.scale || {}, scaleX = (position && x.scale) || {};
+    var logY = scaleY.type === "log" && opts.area !== true, logX = !temporal && position && scaleX.type === "log";
+    var X = D.column(columns, x.field), C = color ? D.column(columns, color.field) : null;
+    var tips = Array.isArray(e.tooltip) ? e.tooltip : [];
+    var tipCols = tips.map(function (d) {
+      return D.column(columns, d.field);
+    });
+    // The value columns: one per entry of `fields`, or the one field (none for count).
+    var measures = fields ? fields.map(function (f) {
+      return { field: f.field, col: D.column(columns, f.field), title: f.title === undefined ? f.field : f.title, unit: f.unit };
+    }) : [{ field: y.field || null, col: y.field ? D.column(columns, y.field) : null, title: null, unit: y.unit }];
+    var xsMap = new Map(), sers = new Map(), groups = new Map(), anyTime = false;
+    var n = X.length;
+    for (var i = 0; i < n; i++) {
+      var xv = X[i], at, xk;
+      if (D.isNull(xv)) {
+        warn(position ? "chart.rule.null-position" : "chart.rule.null-category");
+        continue;
+      }
+      if (temporal) {
+        var p = R.time.parse(xv);
+        if (p === null) {
+          warn("chart.rule.null-position");
+          continue;
+        }
+        if (p.time) anyTime = true;
+        at = p.at;
+        xk = at;
+      } else if (position) {
+        at = Number(xv);
+        if (!(at > -Infinity && at < Infinity)) {
+          warn("chart.rule.null-position");
+          continue;
+        }
+        if (logX && !(at > 0)) {
+          warn("chart.rule.log-nonpositive");
+          continue;
+        }
+        xk = at;
+      } else {
+        at = null;
+        xk = D.keyOf(xv);
+      }
+      if (C && D.isNull(C[i])) {
+        warn("chart.rule.null-category");
+        continue;
+      }
+      if (!xsMap.has(xk)) xsMap.set(xk, { key: xk, raw: xv, at: at, first: xsMap.size, row: i });
+      for (var mi = 0; mi < measures.length; mi++) {
+        var sk = C ? D.keyOf(C[i]) : fields ? "field:" + mi : "";
+        if (!sers.has(sk)) {
+          sers.set(sk, { key: sk, raw: C ? C[i] : null, first: sers.size, measure: mi, full: C ? String(C[i]) : fields ? measures[mi].title : String(y.field || "count") });
+        }
+        if (!groups.has(sk)) groups.set(sk, new Map());
+        var byX = groups.get(sk);
+        if (!byX.has(xk)) byX.set(xk, { vals: [], row: i });
+        byX.get(xk).vals.push(measures[mi].col ? measures[mi].col[i] : 1);
+      }
+    }
+    // The x order: a band in its sort; a position ascending by its number (the line family sorts points, §4.9).
+    var xs = Array.from(xsMap.values());
+    if (position) {
+      xs.sort(function (a, b) {
+        return a.at - b.at || a.first - b.first;
+      });
+    } else xs = D.order(xs, x.sort, function () {
+      return null;
+    }, types[x.field], false);
+    var xIndex = new Map();
+    for (var xi = 0; xi < xs.length; xi++) xIndex.set(xs[xi].key, xi);
+    var series = Array.from(sers.values());
+    if (C) series = D.order(series, color.sort, function () {
+      return null;
+    }, types[color.field], false);
+    var agg = y.aggregate, stack = opts.area === true && (C || fields) ? (y.stack === undefined ? null : y.stack) : null;
+    var normalize = stack === "normalize", stacked = stack === "zero" || normalize;
+    var format = normalize ? y.format || "percent" : y.format;
+    var gran = temporal ? R.time.granularity(x.format, anyTime) : null;
+    var undrawn = false, nonPositive = false;
+    // cells[s][xi] = undefined (no row at that x) | null (a null measure: a gap) | {num, exact, text, row}.
+    var cells = series.map(function (s) {
+      var row = new Array(xs.length), byX = groups.get(s.key);
+      byX.forEach(function (g, key) {
+        var a = D.aggregate(g.vals, agg, measures[s.measure].field || "count"), j = xIndex.get(key);
+        if (a.num === null) {
+          row[j] = null;
+          return;
+        }
+        if (!isFinite(a.num)) {
+          undrawn = true;
+          row[j] = null;
+          return;
+        }
+        if (logY && !(a.num > 0)) {
+          nonPositive = true;
+          row[j] = null;
+          return;
+        }
+        row[j] = { num: a.num, exact: a.exact, text: "", row: g.row };
+      });
+      return row;
+    });
+    if (undrawn) warn("chart.rule.non-finite");
+    if (nonPositive) warn("chart.rule.log-nonpositive");
+    if (normalize) {
+      for (var nx = 0; nx < xs.length; nx++) {
+        var total = 0;
+        for (var a1 = 0; a1 < cells.length; a1++) if (cells[a1][nx]) total += Math.abs(cells[a1][nx].num);
+        for (var a2 = 0; a2 < cells.length; a2++) {
+          var c0 = cells[a2][nx];
+          if (!c0) continue;
+          var share = total ? c0.num / total : 0;
+          cells[a2][nx] = { num: share === 0 ? 0 : share, exact: null, text: "", row: c0.row, value: c0.exact !== null ? c0.exact : c0.num };
+        }
+      }
+    }
+    var markCount = 0;
+    for (var s1 = 0; s1 < cells.length; s1++) {
+      var unit = measures[series[s1].measure].unit;
+      for (var x1 = 0; x1 < xs.length; x1++) {
+        var c1 = cells[s1][x1];
+        if (!c1) continue;
+        markCount++;
+        c1.text = withUnit(T.value(c1.exact !== null ? c1.exact : c1.num, format), unit);
+      }
+    }
+    for (var q = 0; q < series.length; q++) {
+      series[q].id = C ? series[q].key : fields ? "field:" + fields[series[q].measure].field : "measure";
+      series[q].title = series[q].full;
+      series[q].colour = R.theme.SERIES[q] || null;
+    }
+    // `labels: last` (line only, contract §4.5): each series' last value, in its format or the short form, with its unit.
+    var labelsOpt = opts.area === true ? "none" : cfg.mark.labels === undefined ? look("lineLabelsDefault") : cfg.mark.labels;
+    var lasts = series.map(function (s, si) {
+      var last = null;
+      for (var k = xs.length - 1; k >= 0 && last === null; k--) if (cells[si][k]) last = cells[si][k];
+      var text = labelsOpt === "last" && last !== null ? withUnit(T.value(last.exact !== null ? last.exact : last.num, format || look("lastLabelFormat")), measures[s.measure].unit) : null;
+      return { id: s.id, value: text };
+    });
+    var xFull = function (xe) {
+      return temporal ? T.temporalFull(xe.raw, gran) : position ? T.value(xe.at, x.format) : String(xe.raw);
+    };
+    var minAt = xs.length > 0 && position ? xs[0].at : 0, maxAt = xs.length > 0 && position ? xs[xs.length - 1].at : 0;
+    var vt = fields ? null : titleOf(y, y.field ? y.aggregate.charAt(0).toUpperCase() + y.aggregate.slice(1) + " of " + y.field : "Count");
+    if (fields && y.title !== undefined) vt = y.title;
+    if (vt !== null && !fields && typeof y.unit === "string" && y.unit !== "") vt = vt + " (" + y.unit + ")";
+    var curveOpt = cfg.mark.curve === undefined ? look("curveDefault") : cfg.mark.curve;
+    var pointsOpt = opts.area === true ? look("pointsDefault") : cfg.mark.points === undefined ? look("pointsDefault") : cfg.mark.points;
+    var zero = opts.area === true || scaleY.zero === true;
+    var m = {
+      area: opts.area === true,
+      stack: stack,
+      stacked: stacked,
+      curve: curveOpt,
+      points: pointsOpt,
+      xs: xs,
+      xFull: xFull,
+      series: series,
+      cells: cells,
+      tips: tips,
+      tipCols: tipCols,
+      types: types,
+      markCount: markCount,
+      warnings: warnings,
+      legend: color ? color.legend : undefined,
+      direct: true,
+      legendKey: opts.area === true ? "legendKeyArea" : "legendKeyLine",
+      lasts: lasts,
+      format: format,
+      layout: {
+        vertical: true,
+        bands: position ? [] : xs.map(function (xe) {
+          return { text: xFull(xe), under: null };
+        }),
+        x: position ? { kind: temporal ? "time" : logX ? "log" : "linear", lo: temporal ? R.time.domain(minAt, maxAt, gran)[0] : minAt, hi: temporal ? R.time.domain(minAt, maxAt, gran)[1] : maxAt, gran: gran, format: x.format, domain: scaleX.domain || null, zero: scaleX.zero === true } : null,
+        log: logY,
+        bandTitle: titleOf(x, x.field),
+        valueTitle: vt,
+        bandGrid: x.axis ? x.axis.grid : undefined,
+        valueGrid: y.axis ? y.axis.grid : undefined,
+        format: format,
+        domain: scaleY.domain || null,
+        endLabels: null,
+        reach: function (h) {
+          return pointsOpt === "none" ? h.theme.n("--chart-line") / 2 : h.theme.n("--chart-point") + h.theme.n("--chart-gap") / 2;
+        },
+        extent: function (visible) {
+          return extent(m, visible, logY, zero);
+        },
+      },
+    };
+    return m;
+  }
+
+  /** The value extent of the visible series: [lo, hi] (with zero when asked), or [smallest positive, largest] for log. */
+  function extent(m, visible, logY, zero) {
+    var lo = null, hi = null;
+    var take = function (v) {
+      if (lo === null || v < lo) lo = v;
+      if (hi === null || v > hi) hi = v;
+    };
+    for (var xi = 0; xi < m.xs.length; xi++) {
+      var pos = 0, neg = 0, any = false;
+      for (var s = 0; s < m.series.length; s++) {
+        var c = m.cells[s][xi];
+        if (!c || visible[m.series[s].id] !== true) continue;
+        if (m.stacked) {
+          any = true;
+          if (c.num >= 0) pos += c.num;
+          else neg += c.num;
+        } else take(c.num);
+      }
+      if (m.stacked && any) {
+        take(neg);
+        take(pos);
+      }
+    }
+    if (logY) return [lo, hi];
+    if (lo === null) return [0, 0];
+    return zero ? [Math.min(0, lo), Math.max(0, hi)] : [lo, hi];
+  }
+
+  function clampTo(v, lo, hi) {
+    return v < lo ? lo : v > hi ? hi : v;
+  }
+
+  /** The tooltip lines of one point (G7; carried on the point for the interaction layer, F6). */
+  function tipOf(m, si, xi, c) {
+    var s = m.series[si], lines = [m.xFull(m.xs[xi]), (m.series.length > 1 || s.id !== "measure" ? s.title + ": " : "") + c.text];
+    for (var d = 0; d < m.tips.length; d++) lines.push(detailLine(m.tips[d], m.tipCols[d][c.row], m.types));
+    return lines;
+  }
+
+  /**
+   * The marks of the visible series: per series one group (role mark) holding, for an area, its faded fill under its
+   * line; the line (a stroke of --chart-line, round joins and ends); and its dots (the end dot by default: --chart-point
+   * with a --chart-gap ring in the canvas colour). Over the drawing cap a series is thinned (§4.9) before its curve is
+   * fitted; a stack keeps one set of x positions for all its series. Returns {primitives, points, ends}.
+   */
+  function marks(m, plot, hp) {
+    var theme = hp.theme, out = [], points = [], ends = [], vis = [];
+    for (var s = 0; s < m.series.length; s++) if (plot.visible[m.series[s].id] === true) vis.push(s);
+    var val = plot.value, lo = val.lo, hi = val.hi, ys = val.scale;
+    var xpx = m.xs.map(function (xe, j) {
+      return plot.x ? plot.x.scale(clampTo(xe.at, plot.x.lo, plot.x.hi)) : plot.band.start + plot.band.step * (j + 0.5);
+    });
+    var base = ys(clampTo(0, lo, hi));
+    var limit = cap((m.area ? "area" : "line") + ".points");
+    // Stacked tops (and bottoms) per visible series over the shared x positions: a null or missing value adds nothing
+    // to the stack and is a gap in its own series.
+    var tops = [], bottoms = [];
+    if (m.stacked) {
+      var posAcc = m.xs.map(function () {
+        return 0;
+      }), negAcc = posAcc.slice();
+      for (var a = 0; a < vis.length; a++) {
+        var t = [], b = [];
+        for (var j = 0; j < m.xs.length; j++) {
+          var c = m.cells[vis[a]][j];
+          if (!c) {
+            t.push(null);
+            b.push(null);
+            continue;
+          }
+          var from = c.num >= 0 ? posAcc[j] : negAcc[j], to = from + c.num;
+          if (c.num >= 0) posAcc[j] = to;
+          else negAcc[j] = to;
+          b.push(from);
+          t.push(to);
+        }
+        tops.push(t);
+        bottoms.push(b);
+      }
+    }
+    // Which x indices each series draws: every present point, or the thinned ones.
+    var keepAll = null;
+    if (m.stacked) {
+      var over = false;
+      for (var o = 0; o < vis.length; o++) if (countOf(m.cells[vis[o]]) > limit) over = true;
+      if (over) {
+        var lists = tops.map(function (t2) {
+          return t2.map(function (v) {
+            return v === null ? null : -ys(clampTo(v, lo, hi));
+          });
+        });
+        keepAll = R.thin.union(xpx, lists);
+      }
+    }
+    for (var k = 0; k < vis.length; k++) {
+      var si = vis[k], ser = m.series[si], row = m.cells[si], kids = [];
+      var colour = { token: ser.colour, css: theme.css(ser.colour) };
+      // The series' present points in x order: [x index], a null splitting its runs.
+      var idx = [];
+      for (var j2 = 0; j2 < m.xs.length; j2++) {
+        if (row[j2] === undefined) continue;
+        if (m.stacked && row[j2] === null) {
+          idx.push(-1);
+          continue;
+        }
+        idx.push(row[j2] === null ? -1 : j2);
+      }
+      var valueOf = function (j3) {
+        return m.stacked ? tops[k][j3] : row[j3].num;
+      };
+      var drawn = idx;
+      if (keepAll !== null) {
+        var kept = {};
+        for (var q = 0; q < keepAll.length; q++) kept[keepAll[q]] = true;
+        drawn = idx.filter(function (j4) {
+          return j4 < 0 || kept[j4] === true;
+        });
+      } else if (!m.stacked && countOf(row) > limit) {
+        var px = [], vy = [];
+        for (var u = 0; u < idx.length; u++) {
+          px.push(idx[u] < 0 ? (u > 0 ? px[u - 1] : 0) : xpx[idx[u]]);
+          vy.push(idx[u] < 0 ? null : -ys(clampTo(valueOf(idx[u]), lo, hi)));
+        }
+        var keep = R.thin.series(px, vy, []);
+        drawn = idx.filter(function (j5, u2) {
+          return j5 < 0 || keep[u2] === true;
+        });
+      }
+      var runs = [], cur = [], lowerRuns = [], curLow = [];
+      for (var r = 0; r < drawn.length; r++) {
+        var jj = drawn[r];
+        if (jj < 0) {
+          if (cur.length > 0) {
+            runs.push(cur);
+            lowerRuns.push(curLow);
+          }
+          cur = [];
+          curLow = [];
+          continue;
+        }
+        cur.push({ x: xpx[jj], y: ys(clampTo(valueOf(jj), lo, hi)) });
+        curLow.push({ x: xpx[jj], y: m.stacked ? ys(clampTo(bottoms[k][jj], lo, hi)) : base });
+      }
+      if (cur.length > 0) {
+        runs.push(cur);
+        lowerRuns.push(curLow);
+      }
+      var lineD = [];
+      for (var g = 0; g < runs.length; g++) {
+        var segs = R.curve.segments(runs[g], m.curve);
+        if (m.area && runs[g].length > 1) {
+          var areaD = R.curve.forward(runs[g], segs, []);
+          var low = lowerRuns[g], lowSegs = m.stacked ? R.curve.segments(low, m.curve) : R.curve.segments(low, "linear");
+          areaD.push("L", low[low.length - 1].x, low[low.length - 1].y);
+          R.curve.append(R.curve.reversed(low, lowSegs), areaD);
+          areaD.push("Z");
+          var fade = look("areaFade") === true;
+          kids.push(P.path({ role: "mark", d: areaD, fill: colour.token, color: colour.css, opacity: fade ? 1 : theme.n("--chart-area-top"), series: ser.id, fade: fade ? [theme.n("--chart-area-top"), theme.n("--chart-area-bottom"), plot.plot.y, base] : null }));
+        }
+        if (runs[g].length > 1) R.curve.forward(runs[g], segs, lineD);
+      }
+      if (lineD.length > 0) {
+        kids.push(P.path({ role: "mark", d: lineD, stroke: colour.token, strokeColor: colour.css, strokeWidth: theme.n("--chart-line"), round: look("lineRound") === true, series: ser.id }));
+      }
+      var dots = [], lastPt = null;
+      for (var r2 = 0; r2 < runs.length; r2++) {
+        for (var w = 0; w < runs[r2].length; w++) {
+          lastPt = runs[r2][w];
+          if (m.points === "markers") dots.push(lastPt);
+        }
+      }
+      if (m.points === "end" && lastPt !== null) dots.push(lastPt);
+      for (var dd = 0; dd < dots.length; dd++) {
+        kids.push(P.circle({ role: "mark", cx: dots[dd].x, cy: dots[dd].y, r: theme.n("--chart-point"), fill: colour.token, color: colour.css, stroke: "--chart-canvas", strokeColor: theme.css("--chart-canvas"), strokeWidth: theme.n("--chart-gap"), series: ser.id }));
+      }
+      if (lastPt !== null) ends.push({ id: ser.id, y: lastPt.y });
+      P.group(out, { role: "mark", series: ser.id, label: ser.title }, kids);
+      // The index holds every point, thinned or not (§4.9).
+      for (var z = 0; z < m.xs.length; z++) {
+        var cz = row[z];
+        if (!cz) continue;
+        points.push({ series: ser.id, at: R.scales.r2(xpx[z]), datum: z, tip: tipOf(m, si, z, cz) });
+      }
+    }
+    return { primitives: out, points: points, ends: ends };
+  }
+
+  function countOf(row) {
+    var n = 0;
+    for (var i = 0; i < row.length; i++) if (row[i]) n++;
+    return n;
+  }
+
+  R.lines = { model: model, marks: marks, extent: extent, withUnit: withUnit, detailLine: detailLine };
+})(JsRendered);

@@ -57,6 +57,18 @@
     legendGap: f(0.67, "render", "em: between the legend and the plot"),
     valueLabelGap: f(0.25, "render", "em of --chart-text-small: between a bar's end and its value label"),
     // words
+    // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
+    curveDefault: f("smooth", "render", "§2 line and the record's §4.5: a line's curve is a monotone cubic unless the author wrote another"),
+    pointsDefault: f("end", "render", "§2 points and the record's §4.5: one dot on each series' last point unless the author wrote another"),
+    lineLabelsDefault: f("none", "render", "§4.3: a line carries no value label unless the author wrote labels: last"),
+    lastLabelFormat: f("compact", "render", "§4.5: a last value without a format of its own is written in the short form (\"Revenue 3.7K\")"),
+    lineRound: f(true, "render", "§2 weight: a line's joins and ends are round"),
+    areaFade: f(true, "render", "§2 area: the fill fades from --chart-area-top at the plot's top to --chart-area-bottom at the baseline (false: one flat opacity, the top's)"),
+    legendKeyLine: f("line", "render", "§4.2: a line's legend key is a short line"),
+    legendKeyArea: f("square", "render", "§4.2: an area's legend key is a square"),
+    directMin: f(2, "render", "§4.2 line 4 (L5): the names are on the lines from this many series in the data"),
+    directMax: f(4, "render", "§4.2 line 4 (L5): the names are on the lines up to this many series in the data"),
+    directGap: f(0.5, "render", "em: between the plot's right edge and a name or a last value written after the lines"),
     emptyText: f("No data", "render", "record §4.3: the empty state's one text, until the look lane words it"),
     morePrefix: f("+", "render", "record §4.6: the compact legend's '+n' entry"),
   };
@@ -65,6 +77,10 @@
     rows: { kind: "row", limit: 20000, basis: "measured", unit: "rows", note: "record §4.9, every type: lane 985 D12 measured bar by S-CAP (re-taken in round 2 on the corrected engine); 20,000 passes aggregating to 60 marks and on the refusal path (every row its own group), which fails at 50,000 (longest drag frame 83.4 ms over 3.5 × D = 58.45 ms); F5 measures the line" },
     series: { kind: "semantic", limit: 8, basis: "fixed", unit: "series", note: "O-15: 8 series on any type with a legend" },
     "bar.marks": { kind: "mark", limit: 1000, basis: "measured", unit: "non-null aggregated cells", note: "lane 977 S-CAP: bar 200 × 5 passed, 1,000 × 5 failed" },
+    "line.points": { kind: "mark", limit: 10000, basis: "provisional", unit: "points per series drawn in full, then thinned", note: "record §4.9: lane 977's number, F5's starting cap until lane 989 measures the smooth line in full" },
+    "line.rows": { kind: "row", limit: 100000, basis: "provisional", unit: "rows", note: "record §4.9: the line family's row cap, provisional until lane 989 measures the thinned line at 2 series" },
+    "area.points": { kind: "mark", limit: 10000, basis: "inherited", unit: "points per series drawn in full, then thinned", note: "record §4.9: inherited from line until lane 989 measures a stacked area at it" },
+    "area.rows": { kind: "row", limit: 100000, basis: "inherited", unit: "rows", note: "record §4.9: the line family's row cap, inherited from line" },
   };
 
   function look(name) {

@@ -6,6 +6,11 @@
 // A model's layout part: {vertical, bands: [{text, under}], bandTitle, valueTitle, bandGrid, valueGrid, format,
 // domain, extent(visible) → [lo, hi], endLabels: null | [texts of the value labels]}; bandGrid/valueGrid are the
 // author's axis.grid (undefined = the look's default); endLabels makes the value axis keep a label's room at a data end.
+// The line family adds (brief 989 D4, D5, D6; all optional, absent on bar but `log`): `log` (a log value axis: then
+// extent gives [smallest positive, largest] or [null, null]); `x` (a continuous x axis in place of the bands: {kind:
+// "time" | "linear" | "log", lo, hi (seconds for time; for log the smallest positive and the largest), gran (time),
+// format, domain (linear, log), zero (linear)}); `right` (px kept right of the plot for the end labels); `reach` (px a
+// mark reaches beyond its point: the end dot and its ring), kept inside the frame.
 (function (R) {
   "use strict";
   var P = R.prim, S = R.scales, C = R.chrome, A = R.axes, look = R.tables.look, r2 = S.r2;
@@ -36,6 +41,55 @@
     return labels;
   }
 
+  /** The value axis of a layout part over `length` px: a log axis (G4) or the linear one. */
+  function valueAxisOf(lvl, L, ext, length, room) {
+    return L.log === true ? A.logAxis(lvl, ext, L.domain, length, L.format) : A.valueAxis(lvl, ext, L.domain, length, L.format, room);
+  }
+
+  /**
+   * A continuous x axis (brief 989 D5) over `length` px: {lo, hi, ticks: [{at, text, under}], log}. Time: the data's
+   * extent and the time ticks (13-time.js), labelled by G9. Linear: the nice range of the extent (with zero when the
+   * author asked for it) or the author's domain, written as the value axis writes ticks. Log: as a log value axis.
+   */
+  function positionAxis(lvl, X, length) {
+    var out = [], i;
+    if (X.kind === "time") {
+      var t = R.time.ticks(X.lo, X.hi, length, X.gran, lvl);
+      for (i = 0; i < t.length; i++) out.push({ at: t[i].at, text: t[i].text, under: t[i].under });
+      return { lo: X.lo, hi: X.hi, ticks: out, log: false };
+    }
+    if (X.kind === "log") {
+      var g = A.logAxis(lvl, [X.lo, X.hi], X.domain, length, X.format);
+      for (i = 0; i < g.ticks.length; i++) out.push({ at: g.ticks[i], text: g.texts[i], under: null });
+      return { lo: g.lo, hi: g.hi, ticks: out, log: true };
+    }
+    var lo = X.zero === true ? Math.min(0, X.lo) : X.lo, hi = X.zero === true ? Math.max(0, X.hi) : X.hi;
+    var v = A.valueAxis(lvl, [lo, hi], X.domain, length, X.format, 0);
+    for (i = 0; i < v.ticks.length; i++) out.push({ at: v.ticks[i], text: v.texts[i], under: null });
+    return { lo: v.lo, hi: v.hi, ticks: out, log: false };
+  }
+
+  /** The x labels of a layout part at a plot: the bands' centres, or a position axis's ticks at their places. */
+  function xLabels(lvl, L, plot) {
+    if (!L.x) {
+      var labels = bandLabels(L), step = plot.w / Math.max(1, L.bands.length);
+      for (var j = 0; j < labels.length; j++) labels[j].x = plot.x + step * (j + 0.5);
+      return { labels: labels, axis: null, step: step };
+    }
+    var ax = positionAxis(lvl, L.x, plot.w), sc = A.scaleOf(ax, plot.x, plot.x + plot.w), out = [];
+    for (var i = 0; i < ax.ticks.length; i++) out.push({ text: ax.ticks[i].text, under: ax.ticks[i].under, x: sc(ax.ticks[i].at) });
+    return { labels: out, axis: { lo: ax.lo, hi: ax.hi, log: ax.log, scale: sc }, step: plot.w / Math.max(1, L.bands.length) };
+  }
+
+  /**
+   * How far the marks reach past their points (a line's dot and its ring, half a line's width): the model's
+   * `reach(h)`, a function of the theme's lengths, or 0 (a bar stays inside its plot).
+   */
+  function reachOf(L, h) {
+    var r = typeof L.reach === "function" ? L.reach(h) : 0;
+    return typeof r === "number" && r > 0 ? r : 0;
+  }
+
   /**
    * The least height the axes need under a legend at the top or bottom (#985 R1), from the model's layout part alone
    * (never the visibility, so the legend's layout can decide it): vertical, the top tick label's upper half, the value
@@ -44,8 +98,13 @@
    */
   function axesNeed(h, lvl, L) {
     var s = h.text, full = lvl === "full", titleH = h.em("axisTitleGap") + h.boxH(s);
-    if (L.vertical) return h.boxH(s) / 2 + valueNeed(h) + A.rowReserve(h, bandLabels(L), false) + cornerMove(h) + (full && L.bandTitle !== null ? titleH : 0);
+    if (L.vertical) return h.boxH(s) / 2 + valueNeed(h) + A.rowReserve(h, L.x ? positionGuess(lvl, L) : bandLabels(L), false) + cornerMove(h) + (full && L.bandTitle !== null ? titleH : 0);
     return h.boxH(s) + h.em("tickGap") + h.boxH(s) + cornerMove(h) + (full && L.valueTitle !== null ? titleH : 0);
+  }
+
+  /** A position axis's labels for a reserve made before the plot is known: its ticks over a typical length. */
+  function positionGuess(lvl, L) {
+    return xLabels(lvl, L, { x: 0, y: 0, w: look("levelFull")[0], h: 1 }).labels;
   }
 
   /** The height a legend at `place` may take in a box `room` px high: a column all of it, rows what the axes leave. */
@@ -56,23 +115,23 @@
 
   /** Places the legend; returns the box left for the axes {left, right, top, bottom} and pushes its primitives. */
   function placeLegend(h, lvl, L, box, lg, out) {
-    if (lg === null || lg.place === null) return box;
+    if (lg === null || lg.place === null || lg.place === "direct") return box;
     var gap = h.em("legendGap"), place = lg.place;
     var lay = C.legendLayout(h, lg.series, place, box.right - box.left, legendRoom(h, lvl, L, place, box.bottom - box.top));
     lg.drawn = lay.drawn;
     if (lay.items.length === 0 && lay.more === null) return box;
     var b = { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
     if (place === "top") {
-      C.legendPrims(h, lay, box.left, box.top, lg.hiddenOf, lg.colourOf, out);
+      C.legendPrims(h, lay, box.left, box.top, lg.hiddenOf, lg.colourOf, out, lg.key);
       b.top += lay.h + gap;
     } else if (place === "bottom" || place === "compact") {
-      C.legendPrims(h, lay, box.left, box.bottom - lay.h, lg.hiddenOf, lg.colourOf, out);
+      C.legendPrims(h, lay, box.left, box.bottom - lay.h, lg.hiddenOf, lg.colourOf, out, lg.key);
       b.bottom -= lay.h + gap;
     } else if (place === "left") {
-      C.legendPrims(h, lay, box.left, box.top, lg.hiddenOf, lg.colourOf, out);
+      C.legendPrims(h, lay, box.left, box.top, lg.hiddenOf, lg.colourOf, out, lg.key);
       b.left += lay.w + gap;
     } else {
-      C.legendPrims(h, lay, box.right - lay.w, box.top, lg.hiddenOf, lg.colourOf, out);
+      C.legendPrims(h, lay, box.right - lay.w, box.top, lg.hiddenOf, lg.colourOf, out, lg.key);
       b.right -= lay.w + gap;
     }
     return b;
@@ -82,7 +141,7 @@
     if (look("frame") === true) {
       over.push(P.rect({ role: "axis", x: plot.x, y: plot.y, w: plot.w, h: plot.h, stroke: "--chart-axis", strokeColor: h.theme.css("--chart-axis"), strokeWidth: h.theme.n("--chart-stroke") }));
     }
-    if (look("zeroLine") === true && value.lo < 0 && value.hi > 0) {
+    if (look("zeroLine") === true && value.log !== true && value.lo < 0 && value.hi > 0) {
       var z = value.scale(0);
       over.push(vertical ? h.rule("axis", "--chart-axis", plot.x, z, plot.x + plot.w, z) : h.rule("axis", "--chart-axis", z, plot.y, z, plot.y + plot.h));
     }
@@ -92,8 +151,9 @@
     var s = h.text, tg = h.em("tickGap"), hh = h.boxH(s) / 2, full = lvl === "full";
     var titleCol = full && L.valueTitle !== null ? h.boxH(s) + h.em("axisTitleGap") : 0;
     var bandTitleH = full && L.bandTitle !== null ? h.em("axisTitleGap") + h.boxH(s) : 0;
-    var n = L.bands.length, plotTop = b.top + hh, labels = bandLabels(L);
-    var reserve = A.rowReserve(h, labels, false), extra = 0, rotate = "allow", ext = L.extent(visible);
+    var reach = reachOf(L, h), right = Math.max(typeof L.right === "number" ? L.right : 0, reach);
+    var n = L.bands.length, plotTop = b.top + Math.max(hh, reach), labels = L.x ? positionGuess(lvl, L) : bandLabels(L);
+    var reserve = A.rowReserve(h, labels, false), extra = 0, rotate = L.x ? "never" : "allow", ext = L.extent(visible), xs = null;
     // The plot keeps the value axis's need (#985 R1): a rotated label is cut shorter, or the corner cuts the first
     // label, before the plot is made lower than two tick labels.
     var avail = b.bottom - bandTitleH - plotTop, need = valueNeed(h), cs = A.angle(), maxLen = null;
@@ -101,15 +161,16 @@
     for (var pass = 0; pass < 2; pass++) {
       var plotBottom = b.bottom - bandTitleH - reserve - extra;
       var plotH = Math.max(1, plotBottom - plotTop);
-      ax = A.valueAxis(lvl, ext, L.domain, plotH, L.format, L.endLabels === null ? 0 : h.boxH(h.small) + look("valueLabelGap") * h.small);
+      ax = valueAxisOf(lvl, L, ext, plotH, L.endLabels === null ? 0 : h.boxH(h.small) + look("valueLabelGap") * h.small);
       var plotX = b.left + titleCol + widestOf(h, ax.texts, s) + tg;
-      plot = { x: r2(plotX), y: r2(plotTop), w: r2(Math.max(1, b.right - plotX)), h: r2(plotH) };
-      scale = S.linear(ax.lo, ax.hi, plot.y + plot.h, plot.y);
-      step = plot.w / Math.max(1, n);
-      for (var j = 0; j < n; j++) labels[j].x = plot.x + step * (j + 0.5);
+      plot = { x: r2(plotX), y: r2(plotTop), w: r2(Math.max(1, b.right - right - plotX)), h: r2(plotH) };
+      scale = A.scaleOf(ax, plot.y + plot.h, plot.y);
+      xs = xLabels(lvl, L, plot);
+      labels = xs.labels;
+      step = xs.step;
       var ly = scale(ax.ticks[0]), lw = h.width(ax.texts[0], s);
       var corner = { x0: plot.x - tg - lw, y0: ly - hh, x1: plot.x - tg, y1: ly + hh };
-      row = A.labelRow(h, { labels: labels, bounds: { x0: b.left, x1: b.right }, plot: plot, corner: corner, cornerIsFirst: false, rotate: rotate, room: extra, maxLen: maxLen });
+      row = A.labelRow(h, { labels: labels, bounds: { x0: b.left, x1: b.right }, plot: plot, corner: corner, cornerIsFirst: false, rotate: rotate, room: extra, maxLen: maxLen, whole: !!L.x });
       if (pass > 0) break;
       if (row.rotated) {
         var len = (avail - need - row.need - tg - cs[0] * h.boxH(s)) / cs[1];
@@ -123,7 +184,7 @@
         rotate = "never";
       } else break;
     }
-    var value = { lo: ax.lo, hi: ax.hi, ticks: ax.ticks, scale: scale };
+    var value = { lo: ax.lo, hi: ax.hi, ticks: ax.ticks, scale: scale, log: ax.log === true };
     if (on(L.valueGrid, "gridValue")) for (var t = 0; t < ax.ticks.length; t++) g.grid.push(h.rule("grid", "--chart-grid", plot.x, scale(ax.ticks[t]), plot.x + plot.w, scale(ax.ticks[t])));
     if (on(L.bandGrid, "gridCategory")) for (var d = 0; d < row.drawn.length; d++) g.grid.push(h.rule("grid", "--chart-grid", labels[row.drawn[d]].x, plot.y, labels[row.drawn[d]].x, plot.y + plot.h));
     // Value tick labels are thinned (record §4.6) from the lowest, which is always drawn (the corner rule): a label
@@ -145,7 +206,7 @@
       var bt = h.fit(L.bandTitle, s, 400, plot.w);
       if (bt !== "") g.titles.push(h.label({ role: "axis", x: plot.x + plot.w / 2, y: plot.y + plot.h + row.height + h.em("axisTitleGap") + h.ascent(s), text: L.bandTitle, shown: bt, anchor: "middle", size: s, ink: "--chart-muted" }));
     }
-    return { plot: plot, value: value, band: { start: plot.x, step: step, n: n }, corner: row.corner, rotated: row.rotated };
+    return { plot: plot, value: value, band: { start: plot.x, step: step, n: n }, x: xs.axis, corner: row.corner, rotated: row.rotated, labelTop: plot.y + plot.h + tg, boxTop: b.top };
   }
 
   function horizontal(h, W, H, lvl, b, L, visible, g) {
@@ -164,13 +225,13 @@
       var plotH = Math.max(1, room - topPad);
       for (var it = 0; it < 3; it++) {
         var plotW0 = Math.max(1, b.right - rightPad - plotX);
-        ax = A.valueAxis(lvl, ext, L.domain, plotW0, L.format, L.endLabels === null ? 0 : widestOf(h, L.endLabels, h.small) + look("valueLabelGap") * h.small);
+        ax = valueAxisOf(lvl, L, ext, plotW0, L.endLabels === null ? 0 : widestOf(h, L.endLabels, h.small) + look("valueLabelGap") * h.small);
         var pad = h.width(ax.texts[ax.texts.length - 1], s) / 2;
         if (pad <= rightPad) break;
         rightPad = pad;
       }
       plot = { x: r2(plotX), y: r2(b.top + topPad), w: r2(Math.max(1, b.right - rightPad - plotX)), h: r2(plotH) };
-      scale = S.linear(ax.lo, ax.hi, plot.x, plot.x + plot.w);
+      scale = A.scaleOf(ax, plot.x, plot.x + plot.w);
       step = plot.h / Math.max(1, n);
       var k = 1;
       while (k * step < look("lineHeight") * s && k < n) k++;
@@ -191,7 +252,7 @@
       if (pass > 0 || row.corner === "clear") break;
       extra = row.need;
     }
-    var value = { lo: ax.lo, hi: ax.hi, ticks: ax.ticks, scale: scale };
+    var value = { lo: ax.lo, hi: ax.hi, ticks: ax.ticks, scale: scale, log: ax.log === true };
     if (on(L.valueGrid, "gridValue")) for (var q = 0; q < row.drawn.length; q++) {
       var gx = scale(ax.ticks[row.drawn[q]]);
       g.grid.push(h.rule("grid", "--chart-grid", gx, plot.y, gx, plot.y + plot.h));
@@ -215,12 +276,14 @@
 
   /** The minimal level (record §4.6, contract §4.5): marks only, the plot the whole frame inside its edge. */
   function minimal(h, W, H, e, L, visible) {
-    var plot = { x: r2(e), y: r2(e), w: r2(Math.max(1, W - 2 * e)), h: r2(Math.max(1, H - 2 * e)) };
+    var inset = Math.max(e, reachOf(L, h));
+    var plot = { x: r2(inset), y: r2(inset), w: r2(Math.max(1, W - 2 * inset)), h: r2(Math.max(1, H - 2 * inset)) };
     var n = L.bands.length, len = L.vertical ? plot.h : plot.w;
-    var ax = A.valueAxis("minimal", L.extent(visible), L.domain, len, L.format);
-    var scale = L.vertical ? S.linear(ax.lo, ax.hi, plot.y + plot.h, plot.y) : S.linear(ax.lo, ax.hi, plot.x, plot.x + plot.w);
+    var ax = valueAxisOf("minimal", L, L.extent(visible), len, 0);
+    var scale = L.vertical ? A.scaleOf(ax, plot.y + plot.h, plot.y) : A.scaleOf(ax, plot.x, plot.x + plot.w);
     var step = (L.vertical ? plot.w : plot.h) / Math.max(1, n);
-    return { plot: plot, value: { lo: ax.lo, hi: ax.hi, ticks: ax.ticks, scale: scale }, band: { start: L.vertical ? plot.x : plot.y, step: step, n: n }, under: [], over: [], axes: [], corner: "clear", rotated: false };
+    var xs = L.x ? xLabels("minimal", L, plot).axis : null;
+    return { plot: plot, value: { lo: ax.lo, hi: ax.hi, ticks: ax.ticks, scale: scale, log: ax.log === true }, band: { start: L.vertical ? plot.x : plot.y, step: step, n: n }, x: xs, under: [], over: [], axes: [], corner: "clear", rotated: false, labelTop: plot.y + plot.h, boxTop: plot.y };
   }
 
   /**
@@ -246,5 +309,5 @@
     return geo;
   }
 
-  R.cartesian = { cartesian: cartesian, legendRoom: legendRoom };
+  R.cartesian = { cartesian: cartesian, legendRoom: legendRoom, positionAxis: positionAxis };
 })(JsRendered);

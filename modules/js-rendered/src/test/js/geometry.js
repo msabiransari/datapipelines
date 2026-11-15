@@ -83,8 +83,13 @@ function JsRenderedInvariants(E) {
     if (p.k === "line") return [Math.min(p.x1, p.x2), Math.min(p.y1, p.y2), Math.max(p.x1, p.x2), Math.max(p.y1, p.y2)];
     const xs = [], ys = [];
     for (let i = 0; i < p.d.length; i++) {
-      const c = p.d[i], n = c === "M" || c === "L" ? 2 : c === "A" ? 3 : 0;
+      const c = p.d[i], n = c === "M" || c === "L" ? 2 : c === "A" ? 3 : c === "C" ? 6 : 0;
       if (n === 0) continue;
+      // A cubic segment lies inside the hull of its end points and its two control points, so all three bound it.
+      if (c === "C") for (let q = 1; q < 5; q += 2) {
+        xs.push(p.d[i + q]);
+        ys.push(p.d[i + q + 1]);
+      }
       xs.push(p.d[i + n - 1]);
       ys.push(p.d[i + n]);
       i += n;

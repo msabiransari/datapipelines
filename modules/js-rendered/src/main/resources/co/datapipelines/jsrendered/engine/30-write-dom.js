@@ -30,6 +30,9 @@
       } else if (c === "A") {
         out.push("A" + num(d[i + 1]) + " " + num(d[i + 1]) + " 0 0 1 " + num(d[i + 2]) + " " + num(d[i + 3]));
         i += 3;
+      } else if (c === "C") {
+        out.push("C" + num(d[i + 1]) + " " + num(d[i + 2]) + " " + num(d[i + 3]) + " " + num(d[i + 4]) + " " + num(d[i + 5]) + " " + num(d[i + 6]));
+        i += 6;
       } else out.push("Z");
     }
     return out.join(" ");
@@ -59,7 +62,15 @@
     }
     if (p.k === "path") {
       a.push(["d", pathText(p.d)]);
-      return { tag: "path", attrs: common(p, form, a), text: null, kids: [] };
+      var attrs = common(p, form, a);
+      if (p.round) attrs.push(["stroke-linejoin", "round"], ["stroke-linecap", "round"]);
+      if (p.fade === null) return { tag: "path", attrs: attrs, text: null, kids: [] };
+      // A faded fill (look contract §2 "area"): the path's fill names a vertical gradient written just before it. The
+      // gradient's id is made from everything it draws (colour, opacities, the two ys), so two charts on one page that
+      // write the same id write the same gradient, and no counter or state is kept between calls.
+      var id = fadeId(p, form);
+      for (var f = 0; f < attrs.length; f++) if (attrs[f][0] === "fill") attrs[f][1] = "url(#" + id + ")";
+      return { tag: "path", attrs: attrs, text: null, kids: [], before: fadeNode(p, form, id) };
     }
     if (p.k === "circle") {
       a.push(["cx", num(p.cx)], ["cy", num(p.cy)], ["r", num(p.r)]);
@@ -85,6 +96,35 @@
     throw new Error("write: unknown primitive kind " + p.k);
   }
 
+  /** An id's characters from a free text: letters and digits kept, every other character as _<code>_ (one to one). */
+  function idText(s) {
+    var out = "";
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charAt(i);
+      out += /[A-Za-z0-9]/.test(c) ? c : "_" + s.charCodeAt(i) + "_";
+    }
+    return out;
+  }
+
+  function fadeId(p, form) {
+    var f = p.fade;
+    return "dp-fade-" + idText([form, p.fill, p.color, f[0], f[1], f[2], f[3]].join(" "));
+  }
+
+  /** The gradient element of a faded path: userSpaceOnUse from (0, y0) to (0, y1), two stops of the fill colour. */
+  function fadeNode(p, form, id) {
+    var f = p.fade, colour = paint(form, p.fill, p.color);
+    var stop = function (offset, opacity) {
+      return { tag: "stop", attrs: [["offset", offset], ["stop-color", colour], ["stop-opacity", num(opacity)]], text: null, kids: [] };
+    };
+    return {
+      tag: "linearGradient",
+      attrs: [["id", id], ["gradientUnits", "userSpaceOnUse"], ["x1", "0"], ["y1", num(f[2])], ["x2", "0"], ["y2", num(f[3])]],
+      text: null,
+      kids: [stop("0", f[0]), stop("1", f[1])],
+    };
+  }
+
   /**
    * The element tree of a picture: {w, h, kids}. The frame is the first primitive, the canvas rectangle at 0, 0 every
    * drawn state begins with; an empty list (too-small, refused) is a 0 × 0 picture.
@@ -96,6 +136,10 @@
     var stack = [{ kids: root.kids, left: Infinity }];
     for (var i = 0; i < primitives.length; i++) {
       var p = primitives[i], el = node(p, form, font);
+      if (el.before !== undefined) {
+        stack[stack.length - 1].kids.push(el.before);
+        delete el.before;
+      }
       stack[stack.length - 1].kids.push(el);
       for (var s = 1; s < stack.length; s++) stack[s].left--;
       if (p.k === "group" && p.n > 0) stack.push({ kids: el.kids, left: p.n });
