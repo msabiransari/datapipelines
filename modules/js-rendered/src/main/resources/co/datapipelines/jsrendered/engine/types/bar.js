@@ -79,6 +79,9 @@
       put(bk, sk, V ? V[i] : 1, i);
     }
     if (droppedCat || droppedSer) warnings.push({ code: "chart.rule.null-category" });
+    // The series cap before any work that grows with series × categories (the cells, the band totals): the refusal is
+    // the one render gives after the model, so the result is the same and the work stays linear in the rows.
+    if (sers.size > R.tables.cap("series")) return { rule: { code: "chart.too_many_series", details: { series: sers.size, limit: R.tables.cap("series") } } };
     var agg = value.aggregate;
     var stack = color ? (value.stack === undefined ? null : value.stack) : undefined;
     var raw = new Map();

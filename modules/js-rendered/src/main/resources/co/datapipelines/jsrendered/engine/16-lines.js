@@ -102,6 +102,9 @@
         byX.get(xk).vals.push(measures[mi].col ? measures[mi].col[i] : 1);
       }
     }
+    // The series cap before any work that grows with series × x (the cells): the refusal is the one render gives after
+    // the model, so the result is the same and the work stays linear in the rows.
+    if (sers.size > R.tables.cap("series")) return { rule: { code: "chart.too_many_series", details: { series: sers.size, limit: R.tables.cap("series") } } };
     // The x order: a band in its sort; a position ascending by its number (the line family sorts points, §4.9).
     var xs = Array.from(xsMap.values());
     if (position) {

@@ -127,8 +127,12 @@
    * log10 v for a finite v > 0, without a logarithm function: v = m × 10^k by the decade search, m halved (exactly)
    * into [1, 2) j times, so log10 v = k + (j ln 2 + ln m) / ln 10. A power of ten gives its exponent exactly. Every
    * step is an IEEE operation with one correctly rounded result, so Node, a browser and GraalJS agree to the bit (I6).
+   * Total, so its loops always end: 0, a negative or NaN gives -Infinity, Infinity gives Infinity (never on a log axis:
+   * the model leaves such values out and logNice refuses such a domain).
    */
   function log10(v) {
+    if (!(v > 0)) return -Infinity;
+    if (v === Infinity) return Infinity;
     var k = decade(v), m = v / pow10(k), j = 0;
     while (m >= 2) {
       m /= 2;
@@ -153,11 +157,13 @@
    * author's domain[0], else the largest power of ten at or below the smallest positive value; the upper bound the
    * author's domain[1], else the smallest tick of the chosen set at or above the largest value, so the axis range is
    * the ticks' range (record §4.6) with G4's lower bound. min/max: the smallest and largest positive values (null when
-   * none: the axis is 1 to 10). Returns {lo, hi, ticks, log: true}.
+   * none: the axis is 1 to 10). A domain that is not 0 < lo < hi < Infinity (the save refuses it,
+   * `chart.scale.domain_log`; a number past a double's range reads as Infinity) is not used: the data's range is.
+   * Returns {lo, hi, ticks, log: true}.
    */
   function logNice(min, max, intervals, domain) {
     var limit = (intervals < 1 ? 1 : intervals) + 1;
-    if (domain) return logWithin(domain[0], domain[1], limit);
+    if (domain && domain[0] > 0 && domain[0] < domain[1] && domain[1] < Infinity) return logWithin(domain[0], domain[1], limit);
     if (min === null || !(min > 0)) {
       min = 1;
       max = 10;
