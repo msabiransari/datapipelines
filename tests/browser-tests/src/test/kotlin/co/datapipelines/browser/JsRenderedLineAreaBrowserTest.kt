@@ -254,15 +254,28 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
     private companion object {
         val REPORTS: Path = Paths.get("build", "reports", "js-rendered-line-area")
 
-        /** The engine module's fixtures (the suite runs from the repository root). */
-        val FIXTURE_DIR: Path = Paths.get("modules", "js-rendered", "src", "test", "fixtures")
+        /**
+         * The engine module's fixtures. The test task runs from this module's directory (only `siteShots` moves to the
+         * repository root), so the root is found by walking up to the directory that holds the engine module.
+         */
+        val FIXTURE_DIR: Path =
+            generateSequence(Paths.get("").toAbsolutePath()) { it.parent }
+                .firstOrNull { Files.isDirectory(it.resolve("modules/js-rendered/src/test/fixtures")) }
+                ?.resolve("modules/js-rendered/src/test/fixtures")
+                ?: error("no directory above ${Paths.get("").toAbsolutePath()} holds modules/js-rendered/src/test/fixtures")
         val WIRES = listOf("line", "area")
         val BAND_TYPES = setOf("nominal", "ordinal")
 
         /** Nulls are written: a chart's `sort: null` is a value. */
         val GSON = GsonBuilder().serializeNulls().create()
 
-        /** Every form the two templates draw: curves, points, end labels, log, fields, time, gaps, stacks, the thinning four. */
+        /**
+         * Every form the two templates draw that a saved case can carry: curves, points, end labels, log, fields, time,
+         * gaps, stacks. A thinned picture cannot be one: thinning starts above the drawing cap (2,000 points per series),
+         * and a case holds at most 1,000 rows (`datapipelines.visualization.max-fixture-rows-per-case`; the save refuses
+         * more, so a thinned fixture here goes red on its save, never silently). The thinned fixtures' pictures are
+         * compared with Node's byte for byte in the page by A4-3.
+         */
         val DOM_FIXTURES =
             listOf(
                 "line" to "two-series",
@@ -277,7 +290,6 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
                 "line" to "nominal-x",
                 "line" to "quantitative-x",
                 "line" to "temporal-datetime",
-                "line" to "thin-extremes-one-column",
                 "line" to "production-monthly--x_three_years",
                 "area" to "two-series",
                 "area" to "stacked",
@@ -286,7 +298,6 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
                 "area" to "stacked-gap",
                 "area" to "fields",
                 "area" to "negative",
-                "area" to "thin-stacked",
             )
         val FONT_FIXTURES =
             listOf("line" to "two-series", "line" to "long-labels", "line" to "labels-last", "area" to "stacked", "area" to "long-labels")
@@ -301,7 +312,8 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
          * The drawn svg against the captured result's primitives (`window.__drawn`) in document order, an area's
          * gradient elements set aside: tag per kind, the class `dp-<role>`, a text's shown text, a group's descendant
          * count (gradients not counted); each faded path's `fill` names a gradient of the picture whose two stops carry
-         * the path's colour in the page's form (`var(<token>, <resolved>)`) and its two opacities. Then what makes the picture non-blank.
+         * the path's colour as the literal its primitive carries (writeDom writes the standalone form and never a var(),
+         * look contract §9) and its two opacities. Then what makes the picture non-blank.
          */
         const val DOM_EQUALS_PRIMITIVES =
             """(sel) => {
@@ -323,12 +335,13 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
                   fades++;
                   var m = /^url\(#([^)]+)\)$/.exec(e.getAttribute('fill') || ''), g = m ? document.getElementById(m[1]) : null;
                   var stops = g ? Array.from(g.querySelectorAll('stop')) : [];
-                  var colour = p.fill === null ? 'none' : 'var(' + p.fill + ', ' + p.color + ')';
+                  var colour = p.fill === null ? 'none' : p.color;
                   var fine = g !== null && g.tagName === 'linearGradient' && stops.length === 2
                     && stops[0].getAttribute('stop-color') === colour && stops[1].getAttribute('stop-color') === colour
                     && Number(stops[0].getAttribute('stop-opacity')) === p.fade[0]
                     && Number(stops[1].getAttribute('stop-opacity')) === p.fade[1];
-                  if (!fine) badFades.push(i + ': fill ' + e.getAttribute('fill'));
+                  if (!fine) badFades.push(i + ': fill ' + e.getAttribute('fill') + ' stops ' + stops.map(function (s) {
+                    return s.getAttribute('stop-color') + '@' + s.getAttribute('stop-opacity'); }).join(' ') + ' meant ' + colour + '@' + p.fade[0] + ',' + p.fade[1]);
                 }
               }
               var marks = Array.from(svg.querySelectorAll('g.dp-mark[data-series] > .dp-mark'))
