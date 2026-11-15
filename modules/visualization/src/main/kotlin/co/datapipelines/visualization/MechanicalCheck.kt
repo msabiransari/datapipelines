@@ -514,7 +514,7 @@ class VisualizationMechanicalCheck(
             }
 
             ChartJudge.Verdict.Holds, ChartJudge.Verdict.AlreadyFailed -> {
-                Unit
+                // a holding assertion records nothing; an already-failed case carries its one failure already
             }
         }
     }
