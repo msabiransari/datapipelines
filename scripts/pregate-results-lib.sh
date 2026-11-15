@@ -471,10 +471,17 @@ case "$args" in
       rm -f "$ROOT/.runone"
     fi
     if [[ "$mode" == covered* || "$mode" == cached || "$mode" == helper || "$mode" == missing-xml || "$mode" == missing-line || "$mode" == ambiguous || "$mode" == malformed || "$mode" == skipped || "$mode" == partial || "$mode" == failed-xml ]]; then
-      for c in ScopeMatrixSpecDriftTest PublicPathsTest RoleMatrixTest PermissionResolutionTest; do
-        write_tests "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.$c.xml" "co.datapipelines.auth.$c" 1 0
+      # #995: the auth guards are read from the fixture's own registry, never typed here, so a
+      # class added to GUARDS[":modules:auth"] is one this stage-2 record must cover too.
+      auth_guards="$(source "$ROOT/scripts/pregate-plan-lib.sh" && printf '%s' "${GUARDS[":modules:auth"]-}")"
+      if [ -z "$auth_guards" ]; then
+        echo "stand-in refused: no :modules:auth guards in the registry" >> "$ROOT/pregate-argv.log"
+        exit 65
+      fi
+      for c in $auth_guards; do
+        write_tests "$ROOT/modules/auth/build/test-results/test/TEST-$c.xml" "$c" 1 0
         # Summary-only XML is deliberately insufficient; write real testcase identity.
-        printf '<testsuite name="co.datapipelines.auth.%s" tests="1" failures="0" errors="0"><testcase classname="co.datapipelines.auth.%s" name="guard"/></testsuite>' "$c" "$c" > "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.$c.xml"
+        printf '<testsuite name="%s" tests="1" failures="0" errors="0"><testcase classname="%s" name="guard"/></testsuite>' "$c" "$c" > "$ROOT/modules/auth/build/test-results/test/TEST-$c.xml"
       done
       case "$mode" in
         cached) echo '> Task :modules:auth:test FROM-CACHE' ;;
@@ -718,7 +725,28 @@ pgres::self_test() {
   c2b="$(bash "$F/scripts/test-recount.sh" "$rd/2b" | head -n 1)"
   ck_eq "stage2b-counts" "files=1 tests=4 failures=0 errors=0 skipped=0 unreadable=0" "$c2b"
   c3="$(bash "$F/scripts/test-recount.sh" "$rd/3" | head -n 1)"
-  ck_eq "stage3-counts" "files=2 tests=4 failures=0 errors=0 skipped=0 unreadable=0" "$c3"
+  # #995: stage 3's expected counts are derived, never typed, and never read from "$rd/3" or
+  # from the recount (the oracle is not the thing it checks). Stage 3 runs every module of the
+  # registry the fixture runs with (stage 2 here writes no guard class, so none is covered),
+  # and pgres::snapshot copies EVERY task directory of each module it ran (DEVELOPMENT.md:
+  # "Other task directories copied from those modules retain explicit provenance"). Each part
+  # below counts only if its module is in that registry:
+  #   (a) the two result files the stand-in writes for stage 3 (GuardTest, GuardE2eTest);
+  #   (b) the result files the fixture plants in OTHER task directories of those modules:
+  #       today exactly scripting's breachSuite/TEST-co.x.BreachTest.xml, written by stage 2
+  #       (see stage2-breach-task-dir-present), which stage 3's snapshot carries once
+  #       :modules:scripting holds a guard (DockerfileGraalJsPinTest, inventory 995).
+  local s3_mods s3_part s3_kind s3_mod s3_file s3_n s3_files=0 s3_tests=0
+  s3_mods=" $(source "$F/scripts/pregate-plan-lib.sh" && printf '%s ' "${!GUARDS[@]}")"
+  for s3_part in \
+    "a :modules:auth test/TEST-co.x.GuardTest.xml 2" \
+    "a :tests:integration-tests test/TEST-co.datapipelines.integration.GuardE2eTest.xml 2" \
+    "b :modules:scripting breachSuite/TEST-co.x.BreachTest.xml 1"; do
+    read -r s3_kind s3_mod s3_file s3_n <<< "$s3_part"
+    [[ "$s3_mods" == *" $s3_mod "* ]] || continue
+    s3_files=$((s3_files + 1)); s3_tests=$((s3_tests + s3_n))
+  done
+  ck_eq "stage3-counts" "files=$s3_files tests=$s3_tests failures=0 errors=0 skipped=0 unreadable=0" "$c3"
   ck_ok "verdict-pass" grep -q 'PRE-GATE PASS' "$F/.pregate-logs/0-verdict.log"
   ck_ok "verdict-run-id" grep -q "run=$run_id" "$F/.pregate-logs/0-verdict.log"
   ck_ok "verdict-snap-zero" grep -q 'snap=0' "$F/.pregate-logs/0-verdict.log"
