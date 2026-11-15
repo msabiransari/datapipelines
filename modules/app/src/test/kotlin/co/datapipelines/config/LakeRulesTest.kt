@@ -333,6 +333,19 @@ class LakeRulesTest {
     }
 
     @Test
+    fun `819 - the retired generation cap is a whole number from 1, refused by its key name outside it`() {
+        val key = LakeRules.MAX_RETIRED_GENERATIONS
+        key shouldBe "datapipelines.lake.reads.max-retired-generations"
+        shipped[key] shouldBe "1"
+        listOf("0", "-1", "abc", "", "1.5", "2147483648").forEach { bad ->
+            enabled(key to bad).single() shouldStartWith key
+        }
+        listOf("1", "2", " 3 ", "2147483647").forEach { good -> enabled(key to good) shouldContainExactly emptyList() }
+        // Disabled, nothing reads K: no violation, as for every reads key.
+        violations(mapOf(key to "0")) shouldContainExactly emptyList()
+    }
+
+    @Test
     fun `age bound plus twice the reaper delay plus the managed ceiling plus tick fits an hour of every protected day`() {
         // Record §10 third amendment (#818e), #824. One protected day = 3600 s. Reaper delay 7;
         // shipped managed ceiling = node timeout MAXIMUM 900 + 30 = 930; tick 60. Reader termination is not a safety term.

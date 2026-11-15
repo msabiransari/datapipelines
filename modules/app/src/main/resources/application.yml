@@ -693,6 +693,9 @@ datapipelines:
       max-generation-age-seconds: ${DATAPIPELINES_LAKE_READS_MAX_GENERATION_AGE_SECONDS:900}
       freshness-tick-seconds: ${DATAPIPELINES_LAKE_READS_FRESHNESS_TICK_SECONDS:60}
       memory-limit: ${DATAPIPELINES_LAKE_READS_MEMORY_LIMIT:512MB}
+      # #819: K, the retired reader generations still holding an engine above which no replacement is built (a whole
+      # number from 1); the freshness tick waits at K, and a lease is refused lake.unavailable above it (§3.36).
+      max-retired-generations: ${DATAPIPELINES_LAKE_READS_MAX_RETIRED_GENERATIONS:1}
       # #845: the egress proxy (host:port) the managed datasource's object-store traffic leaves through; empty = none.
       # Compose and Helm ship one ON; its max-age is declared at /dp-egress and checked at boot (lake.boot.egress_proxy).
       egress-proxy: ${DATAPIPELINES_LAKE_READS_EGRESS_PROXY:}

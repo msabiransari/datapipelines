@@ -23,8 +23,11 @@ import java.time.Instant
 import java.util.Collections
 import java.util.UUID
 import java.util.WeakHashMap
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -363,6 +366,13 @@ interface PoolLifecycleMetrics {
      */
     fun reaperPassSlow() = Unit
 
+    /**
+     * #819 — `datapipelines.lake.freshness_tick_capped{datasource_name}`: the freshness tick found a managed generation
+     * stale and did NOT retire it, because the retired generations still holding their engine were at
+     * `reads.max-retired-generations` ([ConnectionPoolManager.retireStaleGeneration]). Defaulted like the two above.
+     */
+    fun freshnessTickCapped(datasourceName: String) = Unit
+
     companion object {
         val NONE =
             object : PoolLifecycleMetrics {
@@ -397,6 +407,26 @@ data class ReapOutcome(
 }
 
 /**
+ * #819 — what the freshness tick's retirement did ([ConnectionPoolManager.retireStaleGeneration]).
+ */
+sealed interface StaleRetirement {
+    /** The compared generation left the live map; the next lease builds from the catalog. */
+    data object Retired : StaleRetirement
+
+    /** Another caller already replaced or retired the compared generation; nothing was done. */
+    data object NotLive : StaleRetirement
+
+    /**
+     * The retired generations still holding their engine were at the cap: the live generation was NOT retired and
+     * serves until its age bound (owner ruling 2026-11-15).
+     */
+    data class Capped(
+        val retiredHolding: Int,
+        val maxRetiredGenerations: Int,
+    ) : StaleRetirement
+}
+
+/**
  * Owns the per-datasource HikariCP pools for **user** datasources (datasources.md §5.2).
  *
  * ## Concurrency (§5.2)
@@ -428,6 +458,25 @@ data class ReapOutcome(
  * The ordering rule the old code stated still holds and is now stronger: a pool is never
  * `close()`-d while it is still reachable from the map.
  *
+ * ## The retired-generation cap (#819, owner ruling 2026-11-15)
+ *
+ * With [maxRetiredGenerations] = K set, for each datasource name R is the number of retired MANAGED generations whose
+ * pool still holds a physical handle ([ConnectionPool.holdsPhysicalHandles]: draining, or handed to the closer and
+ * its close not returned). The invariant is: **at every instant, live-or-building + R ≤ 1 + K for the name.** It
+ * holds by construction, not by timing:
+ *
+ * 1. A generation is built only inside `computeIfAbsent`, so at most one is live or building per name, and the build
+ *    runs only after [admitBuild] read R ≤ K under the same bin lock (more than K → `lake.unavailable`).
+ * 2. R grows only by [takeOut], which removes the live entry and counts it in one remapping under that bin lock, so
+ *    R + 1 can never be observed beside a live or building generation; every other change to R is a decrease.
+ * 3. So while a generation is live or building R ≤ K, and once it is retired nothing is live and R ≤ K + 1.
+ *
+ * The freshness tick retires only while R < K ([retireStaleGeneration]); every other retirement — the age bound on
+ * the lease path and the reaper, a lost pin, a save, a delete, an invalidation, the managed re-sync — happens at any
+ * R (RULING 4 unchanged). Before a build above the cap, [settleIdleRetired] hands off the idle retired generations
+ * and waits, bounded, for their closes, so an idle generation's close in flight does not refuse a lease. Every other
+ * pool counts R = 0 and is never capped.
+ *
  * [poolFactory] is injectable so tests can substitute a counting or fake pool; production uses
  * the default, which builds a real Hikari pool through the dialect adapter.
  */
@@ -454,6 +503,13 @@ class ConnectionPoolManager(
      */
     private val maxGenerationAge: Duration? = null,
     /**
+     * #819 (owner ruling 2026-11-15, design record §6 amendment) — `datapipelines.lake.reads.max-retired-generations`,
+     * written K: the most retired MANAGED generations of one datasource name that may still hold a physical handle
+     * while a replacement is built. Null (no lake configured, every test that is not about it) caps nothing. See
+     * "The retired-generation cap" in the class KDoc.
+     */
+    private val maxRetiredGenerations: Int? = null,
+    /**
      * #818d (record §10 RULING 4 amended, item 6) — who runs the closes [reapRetiring] decides on. The pass hands
      * each one here and never waits for it. [PoolCloser.SYNCHRONOUS] (the default: library callers, this module's
      * tests) closes on the caller's thread; the assembling layer injects the `dp-pool-close` closer. NOT last: a
@@ -478,6 +534,19 @@ class ConnectionPoolManager(
      * two pools retiring at once, and a name-keyed map would drop the first one un-closed.
      */
     private val retiring = ConcurrentLinkedQueue<RetiringPool>()
+
+    /**
+     * #819 — every retired MANAGED generation taken out of [pools] while [maxRetiredGenerations] is set, until its
+     * pool no longer holds a physical handle ([ConnectionPool.holdsPhysicalHandles]). An entry is NOT removed when
+     * it leaves [retiring] or is handed to the closer: only when its close has returned and released the engine.
+     * Added under the live entry's bin lock ([takeOut]), so the removal from the live map and the count's growth are
+     * one step for every other caller that takes that lock.
+     */
+    private val retained = ConcurrentLinkedQueue<RetiringPool>()
+
+    init {
+        maxRetiredGenerations?.let { require(it >= 1) { "$MAX_RETIRED_GENERATIONS_KEY must be at least 1, was $it" } }
+    }
 
     /** Pin after view construction, before computeIfAbsent publishes the pool. */
     @Suppress("TooGenericExceptionCaught")
@@ -550,12 +619,81 @@ class ConnectionPoolManager(
      */
 
     fun poolFor(datasource: Datasource): ConnectionPool {
+        val name = datasource.name
         while (true) {
-            val live = pools.computeIfAbsent(datasource.name) { buildProtected(datasource) }
+            if (!pools.containsKey(name)) settleIdleRetired(name)
+            val live =
+                pools.computeIfAbsent(name) {
+                    admitBuild(name)
+                    buildProtected(datasource)
+                }
             val age = expiredAge(live) ?: return live.pool
-            retireExpired(datasource.name, live, age, TRIGGER_LEASE)
+            retireExpired(name, live, age, TRIGGER_LEASE)
         }
     }
+
+    /**
+     * #819 D5 — the build check, run INSIDE [poolFor]'s `computeIfAbsent` mapping, so it and the build are one step
+     * under [name]'s bin lock: two racing leases cannot both build, and no retirement of [name] can interleave (a
+     * retirement takes the same lock, [takeOut]). Refuses with `lake.unavailable` while more than K retired managed
+     * generations of [name] still hold their engine. A name with no retired managed generation counts 0, so every
+     * pool that is not the managed lake's is never refused here (ruling 2).
+     */
+    private fun admitBuild(name: String) {
+        val cap = maxRetiredGenerations ?: return
+        val holding = retainedHolding(name).size
+        if (holding <= cap) return
+        val cause = "$MAX_RETIRED_GENERATIONS_KEY=$cap; retired generations still holding their engine: $holding"
+        throw DatapipelinesException(
+            ManagedLakeErrorCodes.UNAVAILABLE,
+            "The managed lake '$name' is unavailable: no new reader generation is built while the retired ones " +
+                "still hold their engines — $cause",
+            mapOf("datasource" to name, "cause" to cause),
+        )
+    }
+
+    /**
+     * #819 D7 — healthy operation is never refused: before a build, while [name] is above the cap, hand every IDLE
+     * retired managed generation of [name] (still on [retiring], no connection out) to [closer] now, as the reaper's
+     * next pass would, then wait for the closes of the generations that were idle when handed off, at most the
+     * longest `connectionTimeout` among them: the wait a lease already admits for a connection. No lock is held and
+     * nothing polls; a close that does not return in that bound leaves its generation counted, and [admitBuild]
+     * refuses. A generation with a reader still running is never waited for: it is the cap's incident case.
+     */
+    private fun settleIdleRetired(name: String) {
+        val cap = maxRetiredGenerations ?: return
+        val holding = retainedHolding(name)
+        if (holding.size <= cap) return
+        holding
+            .filter { !it.handedOff.get() && it.pool.activeConnections == 0 }
+            .forEach { entry ->
+                retiring.remove(entry)
+                handOff(entry, drained = true)
+            }
+        val pending = holding.filter { it.drainedAtHandOff && !it.closeReturned.isDone }
+        if (pending.isEmpty()) return
+        val bound = pending.maxOf { it.pool.connectionTimeout }
+        val closes = CompletableFuture.allOf(*pending.map { it.closeReturned }.toTypedArray())
+        // The bound passing with a close still running leaves its generation counted, and admitBuild decides.
+        runCatching { closes.get(bound.toMillis(), TimeUnit.MILLISECONDS) }
+            .onFailure { if (it !is TimeoutException) throw it }
+    }
+
+    /**
+     * #819 D2 — the retired managed generations of [name] whose pool still holds a physical handle: draining on
+     * [retiring], or handed to the closer and its close has not returned. Entries whose engine is released are
+     * dropped here (and on the reaper's pass); that is the only way an entry leaves the count.
+     */
+    private fun retainedHolding(name: String): List<RetiringPool> {
+        retained.removeIf { !it.pool.holdsPhysicalHandles }
+        return retained.filter { it.name == name }
+    }
+
+    /**
+     * #819 — how many retired managed generations of [name] still hold their engine (R in the class KDoc); 0 when
+     * no cap is configured. Observability and the cap's proofs.
+     */
+    fun retiredGenerationsHolding(name: String): Int = if (maxRetiredGenerations == null) 0 else retainedHolding(name).size
 
     /**
      * #818c (record §10 RULING 4 amended 2026-11-05, item 3) — the reaper's half of the age bound: retires every
@@ -598,8 +736,7 @@ class ConnectionPoolManager(
         age: Duration,
         trigger: String,
     ): Boolean {
-        if (!pools.remove(name, live)) return false
-        enqueueRetired(name, live.pool)
+        if (takeOut(name) { it === live } == null) return false
         LOG.info(
             "event=lake.generation_expired datasource={} trigger={} age_seconds={} max_age_seconds={} " +
                 "message=\"managed lake generation retired at its age bound; the next lease builds from the catalog\"",
@@ -619,11 +756,45 @@ class ConnectionPoolManager(
     fun retireGeneration(
         name: String,
         expected: ConnectionPool,
-    ): Boolean {
-        val live = pools[name] ?: return false
-        if (live.pool !== expected || !pools.remove(name, live)) return false
-        enqueueRetired(name, live.pool)
-        return true
+    ): Boolean = takeOut(name) { it.pool === expected } != null
+
+    /**
+     * #819 D3 (owner ruling 2026-11-15) — the freshness tick's retirement: as [retireGeneration], except that while
+     * K or more retired managed generations of [name] still hold their engine the live generation is NOT retired and
+     * serves until its age bound ([StaleRetirement.Capped]: one WARN `lake.freshness_tick_capped` naming the key, K,
+     * the count and [staleTables], and one `freshness_tick_capped` increment). The judgement and the removal are one
+     * step under [name]'s bin lock. Every other retirement path ignores the cap (D4).
+     */
+    fun retireStaleGeneration(
+        name: String,
+        expected: ConnectionPool,
+        staleTables: Int,
+    ): StaleRetirement {
+        var capped: StaleRetirement.Capped? = null
+        val taken =
+            takeOut(name) { live ->
+                if (live.pool !== expected) return@takeOut false
+                val cap = maxRetiredGenerations ?: return@takeOut true
+                val holding = retainedHolding(name).size
+                if (holding < cap) return@takeOut true
+                capped = StaleRetirement.Capped(holding, cap)
+                false
+            }
+        capped?.let {
+            LOG.warn(
+                "event=lake.freshness_tick_capped datasource={} tables_stale={} retired_generations={} " +
+                    "max_retired_generations={} key={} " +
+                    "message=\"freshness tick skipped; the live generation serves until its age bound\"",
+                name,
+                staleTables,
+                it.retiredHolding,
+                it.maxRetiredGenerations,
+                MAX_RETIRED_GENERATIONS_KEY,
+            )
+            metrics.freshnessTickCapped(name)
+            return it
+        }
+        return if (taken != null) StaleRetirement.Retired else StaleRetirement.NotLive
     }
 
     /** #818 — every live managed lake generation, by datasource name: what the freshness tick compares. */
@@ -659,21 +830,65 @@ class ConnectionPoolManager(
      *   whether a `datasource.pool_rebuild` audit event is warranted (§7.4 audits decryption,
      *   and retiring nothing decrypted nothing).
      */
-    fun retire(name: String): Boolean {
-        val retired = pools.remove(name) ?: return false
-        enqueueRetired(name, retired.pool)
-        return true
+    fun retire(name: String): Boolean = takeOut(name) { true } != null
+
+    /**
+     * Retirement step 1, shared by every path that takes a pool out of the map: removes [name]'s live entry when
+     * [judge] accepts it and queues it on [retiring] (and, for a managed generation under a cap, on [retained])
+     * INSIDE the map's remapping, so no caller holding [name]'s bin lock ever sees the entry gone from the map and
+     * not yet counted (#819 D6). The soft evict and the metric run after, outside the lock, still after the
+     * removal. Returns the entry taken out, or null when none was live or [judge] refused it.
+     */
+    private fun takeOut(
+        name: String,
+        judge: (LivePool) -> Boolean,
+    ): LivePool? {
+        var taken: LivePool? = null
+        pools.computeIfPresent(name) { _, current ->
+            if (!judge(current)) return@computeIfPresent current
+            taken = current
+            val pool = current.pool
+            val ceiling = if (pool.managedGeneration != null) managedRetireCeiling else retireCeiling
+            val entry = RetiringPool(name, pool, deadline = clock().plus(ceiling), ceiling = ceiling)
+            if (maxRetiredGenerations != null && pool.managedGeneration != null) retained += entry
+            retiring += entry
+            null
+        }
+        taken?.let {
+            it.pool.softEvict()
+            metrics.poolRetired(name)
+        }
+        return taken
     }
 
-    /** Retirement step 1's tail, shared by every path that took a pool out of the map. */
-    private fun enqueueRetired(
-        name: String,
-        retired: ConnectionPool,
-    ) {
-        val ceiling = if (retired.managedGeneration != null) managedRetireCeiling else retireCeiling
-        retiring += RetiringPool(retired, deadline = clock().plus(ceiling), ceiling = ceiling)
-        retired.softEvict()
-        metrics.poolRetired(name)
+    /**
+     * Hands [entry] to [closer] exactly once, whoever asks first (the reaper's pass or [settleIdleRetired]). A
+     * [retained] entry is handed off behind a delegate whose close completes [RetiringPool.closeReturned] when the
+     * real close returns, whatever it threw; every other pool is handed off as itself, as before #819.
+     */
+    private fun handOff(
+        entry: RetiringPool,
+        drained: Boolean,
+    ): Boolean {
+        if (!entry.handedOff.compareAndSet(false, true)) return false
+        entry.drainedAtHandOff = drained
+        if (entry !in retained) {
+            closer.close(entry.pool)
+            return true
+        }
+        val pool = entry.pool
+        closer.close(
+            object : ConnectionPool by pool {
+                override fun close() {
+                    try {
+                        pool.close()
+                    } finally {
+                        entry.closeReturned.complete(Unit)
+                    }
+                }
+            },
+        )
+        return true
     }
 
     /**
@@ -693,6 +908,7 @@ class ConnectionPoolManager(
      */
     fun reapRetiring(): ReapOutcome {
         val expired = retireExpiredGenerations()
+        if (maxRetiredGenerations != null) retained.removeIf { !it.pool.holdsPhysicalHandles }
         if (retiring.isEmpty()) return ReapOutcome(drained = 0, hardClosed = 0, expired = expired)
         val now = clock()
         var drained = 0
@@ -704,12 +920,12 @@ class ConnectionPoolManager(
             when {
                 active == 0 -> {
                     entries.remove()
-                    closer.close(entry.pool)
-                    drained++
+                    if (handOff(entry, drained = true)) drained++
                 }
 
                 now >= entry.deadline -> {
                     entries.remove()
+                    if (!handOff(entry, drained = false)) continue
                     LOG.warn(
                         "event=datasource.pool_hard_closed datasource={} active_connections={} ceiling_seconds={} " +
                             "message=\"retired pool still had connections out at its ceiling; closing it anyway\"",
@@ -717,7 +933,6 @@ class ConnectionPoolManager(
                         active,
                         entry.ceiling.seconds,
                     )
-                    closer.close(entry.pool)
                     metrics.poolHardClosed(entry.pool.name, active)
                     hardClosed++
                 }
@@ -747,6 +962,7 @@ class ConnectionPoolManager(
     override fun close() {
         pools.keys.toList().forEach { name -> pools.remove(name)?.pool?.close() }
         generateSequence { retiring.poll() }.forEach { it.pool.close() }
+        retained.clear()
         pins.close()
     }
 
@@ -760,11 +976,22 @@ class ConnectionPoolManager(
      * A pool out of the map, draining, with the instant after which it is closed regardless and the [ceiling] that
      * instant was stamped from (#824: the managed one for a managed generation), which the hard-close line reports.
      */
-    private data class RetiringPool(
+    private class RetiringPool(
+        val name: String,
         val pool: ConnectionPool,
         val deadline: Instant,
         val ceiling: Duration,
-    )
+    ) {
+        /** Won by the ONE caller that hands this pool to the closer ([handOff]). */
+        val handedOff = AtomicBoolean(false)
+
+        /** Whether it had no connection out when handed off: only such a close is waited for ([settleIdleRetired]). */
+        @Volatile
+        var drainedAtHandOff = false
+
+        /** Completed when the close handed off for a [retained] entry has returned ([handOff]). */
+        val closeReturned = CompletableFuture<Unit>()
+    }
 
     companion object {
         private val LOG = LoggerFactory.getLogger(ConnectionPoolManager::class.java)
@@ -774,6 +1001,9 @@ class ConnectionPoolManager(
 
         /** `lake.generation_expired`'s `trigger`: the reaper's pass judged it with no borrower ([retireExpiredGenerations]). */
         const val TRIGGER_REAPER = "reaper"
+
+        /** #819 — the key K is bound from, named in the cap's refusal and its boot violation. */
+        const val MAX_RETIRED_GENERATIONS_KEY = "datapipelines.lake.reads.max-retired-generations"
 
         /**
          * The library default ceiling: the executor's own default `node-query-timeout-seconds`

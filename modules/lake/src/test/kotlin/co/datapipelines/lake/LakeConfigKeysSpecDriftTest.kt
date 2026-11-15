@@ -128,6 +128,7 @@ class LakeConfigKeysSpecDriftTest {
                 "$PREFIX.reads.egress-proxy",
                 "$PREFIX.reads.freshness-tick-seconds",
                 "$PREFIX.reads.max-generation-age-seconds",
+                "$PREFIX.reads.max-retired-generations",
                 "$PREFIX.reads.memory-limit",
                 "$PREFIX.retention.orphan-grace-hours",
                 "$PREFIX.retention.protection-days",

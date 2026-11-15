@@ -113,6 +113,13 @@ class LakeProperties(
         val memoryLimit: DataSize = DataSize.ofMegabytes(DEFAULT_READS_MEMORY_LIMIT_MB),
         val egressProxy: String = "",
         val egressMaxAgeSeconds: Long = DEFAULT_EGRESS_MAX_AGE_SECONDS,
+        /**
+         * #819 (owner ruling 2026-11-15, record §6 amendment) — K: the most retired managed generations that may still
+         * hold their engine while a replacement is built. At K the freshness tick waits; above it a lease that needs
+         * a new generation is refused `lake.unavailable`. An integer ≥ 1; the process-memory admission charges
+         * `(1 + K) × memory-limit`.
+         */
+        val maxRetiredGenerations: Int = DEFAULT_MAX_RETIRED_GENERATIONS,
     ) {
         init {
             require(maxGenerationAgeSeconds > 0) { "$PREFIX.reads.max-generation-age-seconds must be > 0" }
@@ -124,11 +131,13 @@ class LakeProperties(
             }
             require(memoryLimit.toBytes() > 0) { "$PREFIX.reads.memory-limit must be a positive size" }
             require(egressMaxAgeSeconds > 0) { "$PREFIX.reads.egress-max-age-seconds must be > 0" }
+            require(maxRetiredGenerations >= 1) { "$PREFIX.reads.max-retired-generations must be at least 1" }
         }
 
         override fun toString(): String =
             "Reads(maxGenerationAgeSeconds=$maxGenerationAgeSeconds, freshnessTickSeconds=$freshnessTickSeconds, " +
-                "memoryLimit=$memoryLimit, egressProxy=$egressProxy, egressMaxAgeSeconds=$egressMaxAgeSeconds)"
+                "memoryLimit=$memoryLimit, egressProxy=$egressProxy, egressMaxAgeSeconds=$egressMaxAgeSeconds, " +
+                "maxRetiredGenerations=$maxRetiredGenerations)"
     }
 
     /**
@@ -189,6 +198,7 @@ class LakeProperties(
         const val DEFAULT_MAX_GENERATION_AGE_SECONDS = 900L
         const val DEFAULT_FRESHNESS_TICK_SECONDS = 60L
         const val DEFAULT_READS_MEMORY_LIMIT_MB = 512L
+        const val DEFAULT_MAX_RETIRED_GENERATIONS = 1
 
         /** #845 D1: `node-query-timeout-max-seconds` (900) + 60 — a healthy query is never cut before its own timeout. */
         const val DEFAULT_EGRESS_MAX_AGE_SECONDS = 960L

@@ -377,6 +377,7 @@ services:
       DATAPIPELINES_LAKE_READS_MAX_GENERATION_AGE_SECONDS: ${DATAPIPELINES_LAKE_READS_MAX_GENERATION_AGE_SECONDS:-900}
       DATAPIPELINES_LAKE_READS_FRESHNESS_TICK_SECONDS: ${DATAPIPELINES_LAKE_READS_FRESHNESS_TICK_SECONDS:-60}
       DATAPIPELINES_LAKE_READS_MEMORY_LIMIT: ${DATAPIPELINES_LAKE_READS_MEMORY_LIMIT:-512MB}
+      DATAPIPELINES_LAKE_READS_MAX_RETIRED_GENERATIONS: ${DATAPIPELINES_LAKE_READS_MAX_RETIRED_GENERATIONS:-1}
       # #845 — the managed reads leave through the egress-proxy service below (its compose-internal name, the Redis
       # host's precedent: compose-env-audit.sh DECLARED_OVERRIDES). Its max-age is ONE value: this pass-through
       # feeds the app, and the egress-proxy config below renders from the same variable and default.
