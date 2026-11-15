@@ -19,10 +19,10 @@ import java.util.UUID
  * streamed drain — a one-row aggregate from the engine, whose own failure throws — taken in the same snapshot as the
  * read, and a read that ends with a different number of rows fails as `pipeline.staging.result_incomplete`.
  *
- * An author's tempdb read (C5) takes the first of three forms the engine admits it to: WRITTEN (the parse admits it to
- * `CREATE TABLE … AS`: written, then read back counted), COUNTED (the parse refuses it but `count(*)` over it prepares:
- * counted, then read as written by the author, in one snapshot), else UNGUARDED (`PRAGMA`, `EXPLAIN`, several
- * statements: read as before and logged as `event=staging.guard.unguarded_read`).
+ * An author's tempdb read (C5) takes one of two forms, decided by the engine's own parse: WRITTEN (the parse admits it,
+ * alone, to `CREATE TABLE … AS`: written, then read back counted), else PLAIN (the SHOW kinds, a PIVOT without an IN
+ * list, `PRAGMA`, `EXPLAIN`, several statements: read exactly as before, nothing wrapped around the author's text, and
+ * logged as `event=staging.guard.unguarded_read`).
  *
  * REMOVE when the driver throws mid-stream: StreamedResultTripwireTest goes red on that driver and names this file.
  */
@@ -113,18 +113,10 @@ object StreamedReadGuard {
 
     /**
      * The count beside a reader's own [sql]: `count(*)` over it, with [sql] on lines of its own so a trailing line
-     * comment cannot swallow the closing parenthesis. C1–C4 pass DP's own statement; C5's counted form passes the
-     * author's statement as [countableText] gives it, translated and bound as the read is, never concatenated with
-     * anything else.
+     * comment cannot swallow the closing parenthesis. Only DP's own statements are passed (C1–C4); an author's statement
+     * is never wrapped (#994 round 4, D4).
      */
     fun countOf(sql: String): String = "SELECT count(*) FROM (\n$sql\n) AS dp_guard_count"
-
-    /**
-     * [authorSql] without one trailing statement terminator (`;` as its last non-blank character), so that the count of
-     * C5's counted form can wrap a statement an author ended with `;`. Nothing else is changed. A `;` that is the last
-     * character of a line comment is dropped with the same effect: the comment's text is not SQL.
-     */
-    fun countableText(authorSql: String): String = authorSql.trimEnd().removeSuffix(";")
 
     /** The statement kind [statementKind] reports for a text holding several statements (#994 D3). */
     const val MULTI_KIND = "MULTI"
@@ -132,16 +124,24 @@ object StreamedReadGuard {
     /** The statement kind [statementKind] reports when the text does not start with a word. */
     const val OTHER_KIND = "OTHER"
 
+    /** The statement kind [statementKind] reports for a statement holding a PIVOT, alone or nested (#994 D1). */
+    const val PIVOT_KIND = "PIVOT"
+
     /**
      * The KIND of [authorSql] for the unguarded-read log line (#994 D4) — a label, never the decision of which form
      * reads it (that is the engine's): [MULTI_KIND] when a `;` outside quotes and comments is followed by more SQL;
-     * otherwise the statement's first word, upper-cased (`PRAGMA`, `EXPLAIN`, …), or [OTHER_KIND]. Only that one word
-     * leaves this function: never other SQL text and never a value.
+     * else [PIVOT_KIND] when the word PIVOT stands outside quotes and comments (a nested PIVOT starts with `SELECT`);
+     * otherwise the statement's first word, upper-cased (`SHOW`, `DESCRIBE`, `PRAGMA`, …), or [OTHER_KIND]. Only that
+     * one word leaves this function: never other SQL text and never a value.
      */
     fun statementKind(authorSql: String): String {
         val tokens = TopLevelTokens(authorSql)
         val first = tokens.firstWord() ?: return OTHER_KIND
-        return if (tokens.hasSecondStatement()) MULTI_KIND else first.uppercase()
+        return when {
+            tokens.hasSecondStatement() -> MULTI_KIND
+            tokens.hasWord(PIVOT_KIND) -> PIVOT_KIND
+            else -> first.uppercase()
+        }
     }
 
     /** A minimal lexical walk over SQL: quotes (`'…'`, `"…"`, `$tag$…$tag$`) and comments (`--`, block) are skipped. */
@@ -179,7 +179,26 @@ object StreamedReadGuard {
             return false
         }
 
+        /** True when [word] stands outside quotes and comments, not as part of a longer word (`UNPIVOT`, `pivot_1`). */
+        fun hasWord(word: String): Boolean {
+            var i = 0
+            while (i < sql.length) {
+                val next = skipQuotedOrComment(i)
+                if (next != i) {
+                    i = next
+                    continue
+                }
+                val end = i + word.length
+                val bounded = (i == 0 || !isNameChar(sql[i - 1])) && (end >= sql.length || !isNameChar(sql[end]))
+                if (bounded && sql.regionMatches(i, word, 0, word.length, ignoreCase = true)) return true
+                i++
+            }
+            return false
+        }
+
         private fun isWordChar(c: Char): Boolean = c.isLetter() || c == '_'
+
+        private fun isNameChar(c: Char): Boolean = c.isLetterOrDigit() || c == '_'
 
         private fun skipBlank(from: Int): Int {
             var i = from
@@ -305,7 +324,9 @@ object StreamedReadGuard {
     /**
      * The engine's own parse of an author's statement, bound as a value (never concatenated): true when it is exactly
      * one SELECT-shaped statement that is not a SHOW/DESCRIBE/SUMMARIZE — the statements `CREATE TABLE … AS` accepts and
-     * whose preparation runs nothing. Anything else (several statements, PRAGMA, EXPLAIN, PIVOT, SHOW…) → false.
+     * whose preparation runs nothing (a PIVOT WITH an IN list included). Anything else (several statements, PRAGMA,
+     * EXPLAIN, a PIVOT without an IN list, SHOW…) → false. A text that does not parse alone is false, so a text that
+     * would close a wrapper early never reaches one.
      */
     const val MATERIALIZABLE_SQL =
         "SELECT coalesce(json_extract_string(j, '$.error') = 'false' " +

@@ -234,7 +234,7 @@ class StreamedReadGuardTest {
     }
 
     @Test
-    fun `the unguarded-read kind is the first word, or MULTI for a second statement, and carries nothing else`() {
+    fun `the unguarded-read kind is the first word, MULTI for a second statement, PIVOT for a PIVOT anywhere, and carries nothing else`() {
         val cases =
             mapOf(
                 "PRAGMA table_info('secret_table')" to "PRAGMA",
@@ -247,18 +247,19 @@ class StreamedReadGuardTest {
                 "SELECT 'it''s; fine'" to "SELECT",
                 "SELECT 1;" to "SELECT",
                 "SELECT 1; -- trailing note\n ;" to "SELECT",
+                "SHOW TABLES" to "SHOW",
+                "describe t" to "DESCRIBE",
+                "SUMMARIZE (SELECT * FROM t WHERE v >= ?)" to "SUMMARIZE",
+                "PIVOT t ON g USING count(*)" to StreamedReadGuard.PIVOT_KIND,
+                "SELECT b.i, p.* FROM b CROSS JOIN (pivot t ON g USING count(*)) p" to StreamedReadGuard.PIVOT_KIND,
+                "WITH x AS (FROM t)\nSELECT * FROM (PIVOT x ON g USING sum(v));" to StreamedReadGuard.PIVOT_KIND,
+                "SELECT 1; PIVOT t ON g USING count(*)" to StreamedReadGuard.MULTI_KIND,
+                "UNPIVOT t ON a, b INTO NAME k VALUE v" to "UNPIVOT",
+                "SELECT pivot_1, 'PIVOT', \"pivot\" FROM t -- PIVOT" to "SELECT",
                 "(SELECT 1)" to StreamedReadGuard.OTHER_KIND,
                 "" to StreamedReadGuard.OTHER_KIND,
             )
         cases.forEach { (sql, kind) -> withClue(sql) { StreamedReadGuard.statementKind(sql) shouldBe kind } }
-    }
-
-    @Test
-    fun `the counted form's text drops one trailing terminator and nothing else`() {
-        StreamedReadGuard.countableText("SUMMARIZE t;  \n") shouldBe "SUMMARIZE t"
-        StreamedReadGuard.countableText("SUMMARIZE t") shouldBe "SUMMARIZE t"
-        StreamedReadGuard.countableText("SELECT ';'") shouldBe "SELECT ';'"
-        StreamedReadGuard.countOf("SUMMARIZE t -- note") shouldBe "SELECT count(*) FROM (\nSUMMARIZE t -- note\n) AS dp_guard_count"
     }
 
     /**
