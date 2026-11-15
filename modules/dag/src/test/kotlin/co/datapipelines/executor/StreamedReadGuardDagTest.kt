@@ -322,7 +322,7 @@ class StreamedReadGuardDagTest {
                 val callerError = duck.failureOf(sql, Fixtures.node("caller"), directSink = RecordingSink(), values = values)
                 withClue("$sql: caller - victim still exists") { duck.victims() shouldBe 1L }
                 withClue("$sql: caller - ${callerError.code} ${callerError.message}") {
-                    callerError.exception.toString() shouldContain PARSER_REFUSAL
+                    callerError.message shouldContain PARSER_REFUSAL
                 }
 
                 val target = h2Datasource("tgt", listOf("CREATE TABLE tgt (a BIGINT)"))
@@ -330,8 +330,7 @@ class StreamedReadGuardDagTest {
                 val wbError = duck.failureOf(sql, node, registry = FakeDatasourceRegistry(mapOf("tgt" to target)), values = values)
                 withClue("$sql: write-back - victim still exists") { duck.victims() shouldBe 1L }
                 withClue("$sql: write-back - ${wbError.code} ${wbError.message}") {
-                    wbError.exception.toString() shouldContain
-                        PARSER_REFUSAL
+                    wbError.message shouldContain PARSER_REFUSAL
                 }
                 withClue("$sql: both callers refuse it with the same code") { wbError.code shouldBe callerError.code }
             }
