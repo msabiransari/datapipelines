@@ -49,12 +49,16 @@ object ChartSaveRules {
             return ChartSaveVerdict(refusals, emptyMap())
         }
         val byName = columns.associateBy { it.name }
-        val ch = BarChannels.of(body.path("config"))
-        field(Role.BAND, ch.band, byName, refusals)
-        field(Role.VALUE, ch.value, byName, refusals)
-        ch.color?.let { field(Role.COLOR, it, byName, refusals) }
-        valueRules(ch.value, refusals)
-        val derived = listOfNotNull(ch.band.field, ch.value.field, ch.color?.field).toSortedSet().associateWith { it }
+        val shapes = ChartPositions.shapes(body.path("config"))
+        // The positions' column rules first, then each shape's own rules (record §4.2): one walk, every type.
+        shapes.flatMap { it.positions }.forEach { field(it, byName, refusals) }
+        shapes.filter { it.shape == VALUE }.forEach { valueRules(it, refusals) }
+        val derived =
+            shapes
+                .flatMap { it.positions }
+                .map { it.field }
+                .toSortedSet()
+                .associateWith { it }
         val authored = body.get("bindings")
         if (authored != null && !sameBindings(authored, derived)) {
             refusals +=
@@ -67,19 +71,22 @@ object ChartSaveRules {
         return ChartSaveVerdict(refusals, derived)
     }
 
-    private enum class Role { BAND, VALUE, COLOR }
+    /** The §4.4 shapes whose column rules this object knows; any other shape takes the rules every position takes. */
+    private const val BAND = "band"
+    private const val VALUE = "value"
+    private const val SERIES = "series"
 
-    // One refusal per field, first rule wins: a branch per save rule in the reference's order (record §4.4).
-    @Suppress("ReturnCount", "CyclomaticComplexMethod")
+    // One refusal per position, first rule wins: a branch per save rule in the reference's order (record §4.4), each at
+    // the pointer of its position (§4.2).
+    @Suppress("CyclomaticComplexMethod")
     private fun field(
-        role: Role,
-        channel: BarChannels.Channel,
+        position: ChartPosition,
         columns: Map<String, InputColumn>,
         refusals: MutableList<ChartRefusal>,
     ) {
-        val name = channel.field ?: return
-        val path = "${channel.pointer}/field"
-        val column = columns[name]
+        val path = position.pointer
+        val shape = position.holder.shape
+        val column = columns[position.field]
         val refusal =
             when {
                 column == null -> {
@@ -94,7 +101,7 @@ object ChartSaveRules {
                     ChartRefusal("chart.field.null_type", path, "A column of type NULL cannot be encoded.")
                 }
 
-                role == Role.VALUE && column.type !in ChartTypes.QUANTITATIVE -> {
+                shape == VALUE && column.type !in ChartTypes.QUANTITATIVE -> {
                     ChartRefusal(
                         "chart.measure.not_numeric",
                         path,
@@ -102,19 +109,21 @@ object ChartSaveRules {
                     )
                 }
 
-                role == Role.BAND && channel.encoding.path("type").asText() == "temporal" && column.type !in ChartTypes.TEMPORAL -> {
+                shape == BAND && position.holder.node
+                    .path("type")
+                    .asText() == "temporal" && column.type !in ChartTypes.TEMPORAL -> {
                     ChartRefusal(
                         "chart.category.type_mismatch",
-                        "${channel.pointer}/type",
+                        "${position.holder.pointer}/type",
                         "A temporal category must be a DATE or TIMESTAMP column.",
                     )
                 }
 
-                role == Role.BAND && column.nullable -> {
+                shape == BAND && column.nullable -> {
                     ChartRefusal("chart.category.nullable", path, "A category column must not be nullable.")
                 }
 
-                role == Role.COLOR && column.nullable -> {
+                shape == SERIES && column.nullable -> {
                     ChartRefusal("chart.color.nullable", path, "A series column must not be nullable.")
                 }
 
@@ -126,10 +135,10 @@ object ChartSaveRules {
     }
 
     private fun valueRules(
-        value: BarChannels.Channel,
+        value: ChartShapeNode,
         refusals: MutableList<ChartRefusal>,
     ) {
-        val v = value.encoding
+        val v = value.node
         val vp = value.pointer
         val normalize = v.path("stack").asText() == "normalize"
         val domain = v.path("scale").get("domain")?.takeIf { it.isArray && it.size() == 2 }
