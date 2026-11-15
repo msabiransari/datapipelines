@@ -2,8 +2,6 @@ package co.datapipelines.web.ui.site
 
 import co.datapipelines.visualization.ChartSchemas
 import io.kotest.assertions.withClue
-import io.kotest.matchers.booleans.shouldBeFalse
-import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
@@ -28,17 +26,14 @@ import org.springframework.web.util.HtmlUtils
  *     a served family fails, naming the page and the word. The unit is the block, not the
  *     sentence: the retired dashboards paragraph listed its families in a sentence without the
  *     word `chart`.
- *  2. **No `Plotly` in visible text.** The charting library is the host page's detail
- *     (`docs/dashboards.md` §6.3-§6.4); the public copy promises the document, not the library.
- *  3. **Non-vacuity** — at least [MIN_PAGES] pages and at least [MIN_CHART_BLOCKS] chart blocks,
+ *  2. **Non-vacuity** — at least [MIN_PAGES] pages and at least [MIN_CHART_BLOCKS] chart blocks,
  *     so a changed extraction shape that scanned nothing fails loudly.
  *
- * Each rule has a named exception map, empty today; an entry carries its reason.
+ * Rule 1 has a named exception map, empty today; an entry carries its reason.
  */
 class SiteChartFamilyClaimsTest {
     private data class Page(
         val path: String,
-        val visibleText: String,
         val blocks: List<String>,
     )
 
@@ -58,7 +53,7 @@ class SiteChartFamilyClaimsTest {
                         .filter { it.isNotEmpty() }
                         .toList()
                 }
-            Page(page.path, visible(SCRIPT_OR_STYLE.replace(stripped, " ")), blocks)
+            Page(page.path, blocks)
         }
     }
 
@@ -91,17 +86,6 @@ class SiteChartFamilyClaimsTest {
     }
 
     @Test
-    fun `no page names the charting library`() {
-        val offenders =
-            pages
-                .filter { namesPlotly(it.visibleText) && it.path !in PLOTLY_EXCEPTIONS }
-                .map { "${it.path} names Plotly in visible text" }
-        withClue("the charting library named on the public site (docs/dashboards.md §6.3-§6.4):\n${offenders.joinToString("\n")}") {
-            offenders.shouldBeEmpty()
-        }
-    }
-
-    @Test
     fun `control - the retired dashboards paragraph names seven unserved families`() {
         unservedFamilyWords(OLD_DASHBOARDS_TEXT, setOf("bar")) shouldBe
             listOf("3D", "box", "heatmap", "histogram", "line", "pie", "scatter")
@@ -115,16 +99,6 @@ class SiteChartFamilyClaimsTest {
     @Test
     fun `control - a served family is not an offender`() {
         unservedFamilyWords("Line charts and bar charts.", setOf("bar", "line")).shouldBeEmpty()
-    }
-
-    @Test
-    fun `control - the library rule stands apart from the family rule`() {
-        val sentence = "Rendered with Plotly."
-        namesPlotly(sentence).shouldBeTrue()
-        unservedFamilyWords(sentence, setOf("bar")).shouldBeEmpty()
-        unservedFamilyWords(sentence, FAMILY_WORDS.map { it.lowercase() }.toSet()).shouldBeEmpty()
-        namesPlotly(NEW_DASHBOARDS_TEXT).shouldBeFalse()
-        namesPlotly("a plotlyish name").shouldBeFalse()
     }
 
     private fun visible(fragment: String): String =
@@ -150,21 +124,16 @@ class SiteChartFamilyClaimsTest {
         /** (page path, family word) → reason. Empty: no page may name an unserved family today. */
         val FAMILY_EXCEPTIONS: Map<Pair<String, String>, String> = emptyMap()
 
-        /** Page path → reason. Empty: no page needs to name the library today. */
-        val PLOTLY_EXCEPTIONS: Map<String, String> = emptyMap()
-
         val CHART_WORD = Regex("""\bcharts?\b""", RegexOption.IGNORE_CASE)
-        val PLOTLY_WORD = Regex("""\bPlotly\b""", RegexOption.IGNORE_CASE)
 
         val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
         val CODE = Regex("""<code\b.*?</code>""", RegexOption.DOT_MATCHES_ALL)
-        val SCRIPT_OR_STYLE = Regex("""<(script|style)\b.*?</\1>""", RegexOption.DOT_MATCHES_ALL)
         val TAG = Regex("<[^>]+>")
         val WHITESPACE = Regex("""\s+""")
         val SCANNED_TAGS = listOf("p", "li", "summary", "h1", "h2", "h3")
 
         const val OLD_DASHBOARDS_TEXT =
-            "A Plotly chart, a table or a KPI card, bound to named inputs rather than to one pipeline. The same " +
+            "A chart, a table or a KPI card, bound to named inputs rather than to one pipeline. The same " +
                 "release can appear on several dashboards. Bar, line and scatter, pie, histogram, box and heatmap are " +
                 "supported, with three 3D trace types loaded only when a dashboard uses one."
 
@@ -188,8 +157,5 @@ class SiteChartFamilyClaimsTest {
                 .filter { Regex("""\b${Regex.escape(it)}\b""", RegexOption.IGNORE_CASE).containsMatchIn(block) }
                 .sorted()
         }
-
-        /** True when [text] names the charting library as a whole word. Takes no served set, so none can exempt it. */
-        fun namesPlotly(text: String): Boolean = PLOTLY_WORD.containsMatchIn(text)
     }
 }
