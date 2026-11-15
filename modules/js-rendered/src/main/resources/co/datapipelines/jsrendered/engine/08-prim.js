@@ -9,7 +9,9 @@
 (function (R) {
   "use strict";
   var r2 = R.scales.r2;
-  var ROLES = { mark: 1, axis: 1, grid: 1, tick: 1, legend: 1, title: 1, guide: 1, empty: 1 };
+  // `tooltip` and `focus` are the interaction layer's (record §4.8, brief 990 D2, D5): its card and its focus ring,
+  // drawn by the page over a picture; render never makes one.
+  var ROLES = { mark: 1, axis: 1, grid: 1, tick: 1, legend: 1, title: 1, guide: 1, empty: 1, tooltip: 1, focus: 1 };
   var COORD = 1, NUM = 2, STR = 3, ANY = 4, BOOL = 5, OPT_STR = 6, LIST = 7, INT = 8;
 
   /** kind → [[field, type, required, default]], in output order. */

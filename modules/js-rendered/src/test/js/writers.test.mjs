@@ -13,14 +13,16 @@ const hostile = FIXTURES.find((f) => f.wire === "bar" && f.name === "hostile");
 const HOSTILES = FIXTURES.filter((f) => f.name === "hostile");
 const bar = (name) => FIXTURES.find((x) => x.wire === "bar" && x.name === name);
 /** The elements a picture may hold; the line family adds the dot and an area's fade (a gradient and its two stops). */
-const TAGS = new Set(["g", "line", "path", "rect", "svg", "text", "circle", "linearGradient", "stop"]);
+const TAGS = new Set(["g", "line", "path", "rect", "svg", "text", "circle", "linearGradient", "stop", "title", "desc"]);
 const FADE = new Set(["linearGradient", "stop"]);
 
 /** Every attribute name either writer may write. */
 const NAMES = new Set(["xmlns", "width", "height", "viewBox", "class", "x", "y", "rx", "x1", "y1", "x2", "y2", "d", "cx", "cy", "r", "fill", "stroke", "stroke-width", "opacity",
   "text-anchor", "font-size", "font-family", "font-weight", "transform", "text-decoration", "data-series", "data-legend", "aria-label",
   // Lane 989: a line's round joins and ends, and an area's fade (the gradient's id is made by the writer, never a document value).
-  "stroke-linejoin", "stroke-linecap", "id", "gradientUnits", "offset", "stop-color", "stop-opacity"]);
+  "stroke-linejoin", "stroke-linecap", "id", "gradientUnits", "offset", "stop-color", "stop-opacity",
+  // Lane 990 (D4, D6): the picture is one image; a legend entry is a button, pressed while its series is shown.
+  "role", "aria-pressed"]);
 
 /** A fake document that records every call the DOM writer makes; any other member is undefined, so its use throws. */
 function fakeDocument() {
@@ -219,7 +221,7 @@ test("the two forms: page writes var(--token, value) and classes; standalone wri
   assert.ok(page.includes('font-family="var(--font-sans, '), "page form names the font token");
   assert.ok(!alone.includes("var("), "standalone form names no token");
   assert.ok(alone.includes('class="dp-mark"'), "classes in both forms");
-  assert.ok(alone.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 480 360" class="dp-chart">'), alone.slice(0, 120));
+  assert.ok(alone.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 480 360" class="dp-chart" role="img">'), alone.slice(0, 120));
   assert.throws(() => R.writeString(prims, "inline", "light"), /form is page or standalone/);
 });
 
@@ -248,4 +250,61 @@ test("the text a writer draws is the shown text, the full text in the primitive 
   assert.ok(cut.length > 0, "something is cut at 360 × 240");
   const svg = R.writeString(r.primitives, "standalone", "light");
   for (const t of cut) assert.ok(svg.includes(">" + R.escape(t.shown) + "<"), t.shown);
+});
+
+// ---------------------------------------------------------------- lane 990: D4 (the legend button), D6 (the description)
+
+test("D4: every legend entry is written as a button, pressed while its series is shown, in both writers", () => {
+  const f = bar("look-hidden-series");
+  const out = R.render(inputOf(f.fixture, 960, 540));
+  const entries = out.primitives.filter((p) => p.k === "group" && p.legend !== null);
+  assert.ok(entries.length >= 2 && entries.some((e) => !e.on), "a struck entry is among them: " + entries.length);
+  const svg = R.writeString(out.primitives, "standalone", "light");
+  const buttons = [...svg.matchAll(/<g class="dp-legend( dp-off)?"[^>]*role="button" aria-pressed="(true|false)"/g)];
+  assert.equal(buttons.length, entries.length, "one button per entry");
+  for (const b of buttons) assert.equal(b[2], b[1] ? "false" : "true", "pressed = shown: " + b[0]);
+  const { svg: dom } = fakeDocument();
+  R.writeDom(out.primitives, dom);
+  const pressed = [];
+  walk(dom, (el) => {
+    const a = Object.fromEntries(el.attrs);
+    if (a.role === "button") pressed.push(a["aria-pressed"]);
+  });
+  assert.deepEqual(pressed, Array.from(entries, (e) => (e.on ? "true" : "false")));
+});
+
+test("D6: describe names the type, the series, the mark count and the description; both writers write it as text, first", () => {
+  const f = FIXTURES.find((x) => x.wire === "line" && x.name === "two-series");
+  const out = R.render(inputOf(f.fixture, 960, 540));
+  const about = R.write.describe(out, { display_name: "Revenue <b>", description: "Monthly & yearly" });
+  const names = out.summary.series.map((s) => s.title).join(", ");
+  assert.equal(about.title, "Revenue <b>");
+  assert.equal(about.desc, "Line chart; series: " + names + "; " + R.text.value(out.summary.marks, "integer") + " marks. Monthly & yearly");
+  assert.equal(R.write.describe({ type: "bar", state: "no-data", summary: { series: [], marks: 0 } }, {}).desc, "Bar chart; no data.");
+  const svg = R.writeString(out.primitives, "standalone", "light", about);
+  assert.ok(svg.includes('role="img"><title>Revenue &lt;b&gt;</title><desc>Line chart; series: '), svg.slice(0, 300));
+  assert.ok(svg.includes("Monthly &amp; yearly</desc>"));
+  assert.ok(!R.writeString(out.primitives, "standalone", "light").includes("<title>"), "no about: no title");
+  const { svg: dom } = fakeDocument();
+  R.writeDom(out.primitives, dom, "light", about);
+  assert.equal(Object.fromEntries(dom.attrs).role, "img");
+  assert.deepEqual(dom.children.slice(0, 2).map((c) => [c.tag, c.text]), [["title", about.title], ["desc", about.desc]]);
+  assert.throws(() => R.writeDom(out.primitives, dom, "light", { title: 1 }), /about is \{title, desc\}/);
+});
+
+test("append writes primitives after a picture's children, removes nothing, and returns exactly what it made", () => {
+  const { svg, calls } = fakeDocument();
+  const out = R.render(inputOf(bar("look-one-series").fixture, 480, 360));
+  R.writeDom(out.primitives, svg);
+  const before = svg.children.length;
+  const tip = [];
+  R.prim.group(tip, { role: "tooltip" }, [R.prim.rect({ role: "tooltip", x: 1, y: 2, w: 30, h: 20, fill: "--chart-tip-surface", color: "#ffffff" }), R.prim.text({ role: "tooltip", x: 4, y: 14, text: "<b>x</b>", size: 12, fill: "--chart-tip-ink", color: "#0f172a" })]);
+  const removed = calls.filter((c) => c === "removeChild").length;
+  const made = R.write.append(tip, svg, "light");
+  assert.equal(calls.filter((c) => c === "removeChild").length, removed, "nothing removed");
+  assert.equal(made.length, 1);
+  assert.equal(svg.children.length, before + 1);
+  assert.equal(svg.children[before], made[0]);
+  assert.equal(Object.fromEntries(made[0].attrs).class, "dp-tooltip");
+  assert.equal(made[0].children[1].text, "<b>x</b>", "a text node, never markup");
 });

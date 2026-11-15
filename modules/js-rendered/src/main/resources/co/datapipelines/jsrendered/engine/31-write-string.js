@@ -26,13 +26,19 @@
     return "<" + k.tag + attrs(k.attrs) + (inner === "" && k.text === null ? "/>" : ">" + inner + "</" + k.tag + ">");
   }
 
-  /** The picture as one SVG document string. theme: the resolved or given theme; its font names the text's family. */
-  function writeString(primitives, form, theme) {
+  /**
+   * The picture as one SVG document string. theme: the resolved or given theme; its font names the text's family. The
+   * picture is one image (`role="img"`); with `about` (R.write.describe's {title, desc}) its `<title>` and `<desc>` come
+   * first, escaped like every text (brief 990 D6).
+   */
+  function writeString(primitives, form, theme, about) {
     var font = R.theme.resolve(theme).font;
     var root = R.write.plan(primitives, form, font);
     var w = String(root.w), h = String(root.h);
-    var head = "<svg" + attrs([["xmlns", R.write.NS], ["width", w], ["height", h], ["viewBox", "0 0 " + w + " " + h], ["class", "dp-chart"]]) + ">";
+    var head = "<svg" + attrs([["xmlns", R.write.NS], ["width", w], ["height", h], ["viewBox", "0 0 " + w + " " + h], ["class", "dp-chart"], ["role", "img"]]) + ">";
     var body = "";
+    var described = R.write.aboutNodes(about);
+    for (var d = 0; d < described.length; d++) body += element(described[d]);
     for (var i = 0; i < root.kids.length; i++) body += element(root.kids[i]);
     return head + body + "</svg>";
   }

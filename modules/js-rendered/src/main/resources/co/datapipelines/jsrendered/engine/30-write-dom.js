@@ -91,6 +91,9 @@
       if (p.series !== null) a.push(["data-series", p.series]);
       if (p.legend !== null) a.push(["data-legend", p.legend]);
       if (p.label !== null) a.push(["aria-label", p.label]);
+      // A legend entry is a button that switches its series (record §4.8, brief 990 D4): pressed while the series is
+      // shown. The interaction layer answers its click and its keys; a picture without the layer only names it.
+      if (p.legend !== null) a.push(["role", "button"], ["aria-pressed", p.on ? "true" : "false"]);
       return { tag: "g", attrs: a, text: null, kids: [] };
     }
     throw new Error("write: unknown primitive kind " + p.k);
@@ -150,31 +153,82 @@
   }
 
   function build(doc, parent, kids) {
+    var made = [];
     for (var i = 0; i < kids.length; i++) {
       var k = kids[i], el = doc.createElementNS(NS, k.tag);
       for (var a = 0; a < k.attrs.length; a++) el.setAttribute(k.attrs[a][0], k.attrs[a][1]);
       if (k.text !== null) el.textContent = k.text;
       build(doc, el, k.kids);
       parent.appendChild(el);
+      made.push(el);
     }
+    return made;
+  }
+
+  /** "Bar", "Line": a type name with its first letter in capitals. */
+  function typeName(type) {
+    var t = typeof type === "string" ? type : "";
+    return t.charAt(0).toUpperCase() + t.slice(1);
   }
 
   /**
-   * writeDom(primitives, svg, theme): the picture into an svg element of the page, its old children removed. Every
+   * The accessible description of a draw (record §4.8, brief 990 D6): {title, desc}. title = the document's display
+   * name; desc = the type, the series names of the data, the mark count, then the document's description when it has
+   * one. Both are data and reach a picture as text nodes only. output = render's result; document = its input's.
+   */
+  function describe(output, document) {
+    var doc = document && typeof document === "object" ? document : {};
+    var summary = output && output.summary ? output.summary : { series: [], marks: 0 };
+    var parts = [typeName(output && output.type) + " chart"];
+    if (output && output.state === "no-data") parts.push("no data");
+    else {
+      var names = [];
+      for (var i = 0; i < summary.series.length; i++) names.push(summary.series[i].title);
+      if (names.length > 0) parts.push("series: " + names.join(", "));
+      parts.push(R.text.value(summary.marks, "integer") + (summary.marks === 1 ? " mark" : " marks"));
+    }
+    var desc = parts.join("; ") + ".";
+    if (typeof doc.description === "string" && doc.description !== "") desc += " " + doc.description;
+    return { title: typeof doc.display_name === "string" ? doc.display_name : "", desc: desc };
+  }
+
+  /** The two description elements of a picture (an `about` of describe's shape), as plan nodes; none without one. */
+  function aboutNodes(about) {
+    if (about === undefined || about === null) return [];
+    if (typeof about !== "object" || typeof about.title !== "string" || typeof about.desc !== "string") throw new Error("write: about is {title, desc}");
+    return [{ tag: "title", attrs: [], text: about.title, kids: [] }, { tag: "desc", attrs: [], text: about.desc, kids: [] }];
+  }
+
+  /**
+   * writeDom(primitives, svg, theme, about): the picture into an svg element of the page, its old children removed. Every
    * value is a literal: each colour the one its primitive carries, the font the given theme's (a name or {base, tokens},
    * as render takes it; absent → the engine's default font). The plan's literal form, the one the standalone string
-   * writes; no attribute value names a custom property.
+   * writes; no attribute value names a custom property. The picture is one image (`role="img"`); with `about`
+   * (describe's {title, desc}) its `<title>` and `<desc>` are its first children (D6).
    */
-  function writeDom(primitives, svg, theme) {
+  function writeDom(primitives, svg, theme, about) {
     var root = plan(primitives, "standalone", R.theme.resolve(theme).font);
+    var described = aboutNodes(about);
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     svg.setAttribute("viewBox", "0 0 " + num(root.w) + " " + num(root.h));
     svg.setAttribute("width", num(root.w));
     svg.setAttribute("height", num(root.h));
+    svg.setAttribute("role", "img");
+    build(svg.ownerDocument, svg, described);
     build(svg.ownerDocument, svg, root.kids);
     return svg;
   }
 
-  R.write = { plan: plan, pathText: pathText, NS: NS };
+  /**
+   * append(primitives, parent, theme): primitives written after the children `parent` already has, nothing removed
+   * (the interaction layer's card, guide and focus ring over a drawn picture, brief 990 D2). Returns the elements made
+   * at the top level, so their writer can remove exactly those.
+   */
+  function append(primitives, parent, theme) {
+    var kids = plan(primitives, "standalone", R.theme.resolve(theme).font).kids;
+    return build(parent.ownerDocument, parent, kids);
+  }
+
+  R.write = { plan: plan, pathText: pathText, NS: NS, append: append, describe: describe, aboutNodes: aboutNodes };
   R.writeDom = writeDom;
 })(JsRendered);

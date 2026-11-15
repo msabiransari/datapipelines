@@ -22,11 +22,18 @@ const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stac
   // The line family's (brief 989 D6, D7, D10a): its defaults, its legend keys, the direct legend's bounds and gap.
   "curveDefault", "pointsDefault", "lineLabelsDefault", "lastLabelFormat", "lineRound", "areaFade", "legendKeyLine", "legendKeyArea", "directMin", "directMax", "directGap"];
 
-test("LA5: the look table is closed and holds exactly the fixed values bar, the line family and the shared layout use", () => {
-  assert.deepEqual(Object.keys(R.tables.LOOK).sort(), [...LA5].sort());
+/**
+ * The interaction layer's fields (brief 990 D4a): consumer `interaction`, read on the page by the layer and never by
+ * render. Their A14 half is the browser's (a placed pointer sees each field's own result change); here they are only
+ * required to exist, to name their consumer, and to leave every picture render draws unchanged.
+ */
+const INTERACTION = ["tipDistance", "tipLine", "tipPad", "tipKey", "tipGap", "tipMax", "tipValueWeight", "crosshairDot", "focusGap"];
+
+test("LA5: the look table is closed and holds exactly the fixed values bar, the line family, the shared layout and the interaction layer use", () => {
+  assert.deepEqual(Object.keys(R.tables.LOOK).sort(), [...LA5, ...INTERACTION].sort());
   for (const [name, f] of Object.entries(R.tables.LOOK)) {
     assert.deepEqual(Object.keys(f), ["value", "consumer", "note"], name);
-    assert.equal(f.consumer, "render", name + ": F1's fields are read by render");
+    assert.equal(f.consumer, INTERACTION.includes(name) ? "interaction" : "render", name + ": its one consumer");
     assert.ok(f.note.length > 10, name);
   }
   assert.throws(() => R.tables.look("nope"), /no look-table field nope/);
@@ -53,7 +60,7 @@ test("A14 (render half): changing any one look field changes the primitives of a
   const key = (f, w, h) => f.wire + "/" + f.name + "@" + w + "x" + h;
   for (const f of FIXTURES) for (const [w, h] of A14_FRAMES) base.set(key(f, w, h), canonical(R.render(inputOf(f.fixture, w, h))));
   const dead = [];
-  for (const name of Object.keys(R.tables.LOOK)) {
+  for (const name of Object.keys(R.tables.LOOK).filter((n) => R.tables.LOOK[n].consumer === "render")) {
     const E = engine();
     E.tables.LOOK[name].value = other(name, E.tables.LOOK[name].value);
     let changed = false;
@@ -70,6 +77,32 @@ test("A14 (render half): changing any one look field changes the primitives of a
   }
   assert.deepEqual(dead, [], "look fields whose change no chart fixture shows");
   assert.ok(Object.keys(R.tables.LOOK).length >= 37, "fields checked");
+});
+
+test("A14 (the interaction fields): render never reads one; a change of each leaves every picture as it was (their check is the browser's)", () => {
+  const base = new Map();
+  const frames = [[960, 540], [200, 140], [80, 24]];
+  for (const f of FIXTURES) for (const [w, h] of frames) base.set(f.wire + "/" + f.name + "@" + w, canonical(R.render(inputOf(f.fixture, w, h))));
+  let pictures = 0;
+  for (const name of INTERACTION) {
+    const E = engine();
+    E.tables.LOOK[name].value = E.tables.LOOK[name].value * 2;
+    for (const f of FIXTURES) {
+      for (const [w, h] of frames) {
+        assert.equal(canonical(E.render(inputOf(f.fixture, w, h))), base.get(f.wire + "/" + f.name + "@" + w), name + " reached render: " + f.wire + "/" + f.name);
+        pictures++;
+      }
+    }
+  }
+  assert.ok(pictures >= INTERACTION.length * 100, "pictures compared: " + pictures);
+});
+
+test("LA13 (the table's half): with the default tokens 2p + h is no more than 24, so 80 × 24 holds one line of the card", () => {
+  const s = R.theme.resolve("light").n("--chart-text"), look = R.tables.look;
+  const h = look("tipLine") * s, p = look("tipPad") * s;
+  assert.ok(2 * p + h <= 24, "2p + h = " + (2 * p + h));
+  assert.equal(Math.floor((24 - 2 * p) / h), 1, "k at a height of 24");
+  assert.ok(80 - 2 * p > look("tipKey") * s + look("tipGap") * s, "the content area at 80 holds a key, a gap and a value");
 });
 
 // ---------------------------------------------------------------- LA1: the engine's defaults
