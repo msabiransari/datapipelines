@@ -145,6 +145,11 @@ val jsRenderedFixtureResources =
         into(fixtureResources)
         from(jsFixtures) { into("co/datapipelines/jsrendered/fixtures") }
         from(jsRenderedEmit) { into("co/datapipelines/jsrendered/emitted") }
+        // The invariant checker the Node suites run, loaded by the sandbox guard too (one checker, two runtimes).
+        from(jsTests) {
+            include("geometry.js")
+            into("co/datapipelines/jsrendered/test")
+        }
     }
 sourceSets["testFixtures"].resources.srcDir(jsRenderedFixtureResources)
 

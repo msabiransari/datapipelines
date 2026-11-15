@@ -1,0 +1,105 @@
+package co.datapipelines.visualization
+
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import org.junit.jupiter.api.Test
+
+/**
+ * `ChartType` (enums.md §63; design record 2026-11-14-js-rendered-charts §4.2): the wire values against the document's
+ * table, bar's channel descriptor against the record's example, the derived names, and the descriptor's own rules (a
+ * choice's `type` sets are disjoint; a list's bounds are ordered). The comparison with the engine's registered
+ * descriptor is `ChartTypeRegistryTest`'s (`modules/application`), where the sandbox is.
+ */
+class ChartTypeTest {
+    @Test
+    fun `the wire values are exactly enums md section 63's`() {
+        val enums = VisualizationTestFiles.read("docs/enums.md")
+        val start = enums.indexOf("## 63. `ChartType`")
+        check(start >= 0) { "§63 ChartType not found in enums.md" }
+        val rows =
+            ROW
+                .findAll(enums.substring(start).substringBefore("\n---"))
+                .map { it.groupValues[1] }
+                .toSet()
+        check(rows.isNotEmpty()) { "no rows parsed under §63" }
+        rows shouldBe ChartType.WIRE_VALUES.toSet()
+    }
+
+    @Test
+    fun `fromWire maps each wire value to its entry and refuses any other`() {
+        ChartType.entries.forEach { ChartType.fromWire(it.wire) shouldBe it }
+        ChartType.fromWire("Bar") shouldBe null
+        ChartType.fromWire("pie") shouldBe null
+    }
+
+    @Test
+    fun `bar's descriptor is the record's example, node for node`() {
+        ChartType.BAR.channels.map { it.wire() } shouldBe
+            listOf(
+                mapOf("key" to "x", "required" to true, "node" to BAND_OR_VALUE),
+                mapOf("key" to "y", "required" to true, "node" to BAND_OR_VALUE),
+                mapOf(
+                    "key" to "color",
+                    "required" to false,
+                    "node" to
+                        mapOf(
+                            "node" to "oneOf",
+                            "of" to
+                                listOf(
+                                    mapOf("shape" to "series", "types" to listOf("nominal", "ordinal")),
+                                    mapOf("shape" to "shade", "types" to listOf("quantitative")),
+                                ),
+                        ),
+                ),
+                mapOf(
+                    "key" to "tooltip",
+                    "required" to false,
+                    "node" to mapOf("node" to "list", "min" to 0, "max" to 6, "of" to mapOf("node" to "shape", "name" to "detail")),
+                ),
+            )
+    }
+
+    @Test
+    fun `the schema file, template file and fixtures directory derive from the wire value`() {
+        ChartType.BAR.schemaFile shouldBe ChartSchemas.BAR
+        ChartType.entries.forEach {
+            (it.schemaFile in ChartSchemas.FILES) shouldBe true
+            it.templateFile shouldBe "types/${it.wire}.js"
+            it.fixturesDirectory shouldBe it.wire
+        }
+    }
+
+    @Test
+    fun `a choice whose alternatives share a type value is refused, naming it`() {
+        val error =
+            shouldThrow<IllegalArgumentException> {
+                ChannelNode.OneOf(listOf(ShapeAlternative("band", listOf("nominal", "temporal")), ShapeAlternative("position", listOf("temporal"))))
+            }
+        error.message shouldContain "share a type value"
+        shouldThrow<IllegalArgumentException> { ChannelNode.OneOf(listOf(ShapeAlternative("band", listOf("nominal")))) }
+        shouldThrow<IllegalArgumentException> { ShapeAlternative("band", emptyList()) }
+    }
+
+    @Test
+    fun `a list's bounds are ordered and an object names a member`() {
+        shouldThrow<IllegalArgumentException> { ChannelNode.ListOf(min = 3, max = 1, of = ChannelNode.Shape("level")) }
+        shouldThrow<IllegalArgumentException> { ChannelNode.ListOf(min = -1, max = 1, of = ChannelNode.Shape("level")) }
+        shouldThrow<IllegalArgumentException> { ChannelNode.ObjectOf(emptyMap()) }
+        ChannelNode.ObjectOf(mapOf("y" to ChannelNode.Shape("value"))).wire() shouldBe
+            mapOf("node" to "object", "members" to mapOf("y" to mapOf("node" to "shape", "name" to "value")))
+    }
+
+    private companion object {
+        val ROW = Regex("^\\| `([a-z][a-z0-9_]*)` \\|", RegexOption.MULTILINE)
+        val BAND_OR_VALUE =
+            mapOf(
+                "node" to "oneOf",
+                "of" to
+                    listOf(
+                        mapOf("shape" to "band", "types" to listOf("nominal", "ordinal", "temporal")),
+                        mapOf("shape" to "value", "types" to listOf("quantitative")),
+                    ),
+            )
+    }
+}
