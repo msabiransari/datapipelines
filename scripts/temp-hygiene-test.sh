@@ -927,6 +927,7 @@ fake_type() { # fake_type <type>: $FX/outside/fake-lib runs the real helper with
   printf '%s\n%s\n%s\n' "$HELPER" /dev/shm "$1" > "$FX/outside/fake-lib/fake.conf"
   cat > "$FX/outside/fake-lib/temp-hygiene-helper.py" <<'PY'
 import dataclasses, importlib.util, os, sys
+sys.dont_write_bytecode = True  # no __pycache__ beside the real helper in the checkout
 here = os.path.dirname(os.path.abspath(__file__))
 real, fake_at, fake_type = open(os.path.join(here, "fake.conf")).read().split("\n")[:3]
 spec = importlib.util.spec_from_file_location("helper", real)
