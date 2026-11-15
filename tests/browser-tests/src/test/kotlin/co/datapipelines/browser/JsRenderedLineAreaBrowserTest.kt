@@ -286,10 +286,10 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
          * fixture-row limit (`datapipelines.visualization.max-fixture-rows-per-case`, 1,000 rows; the save refuses
          * more, so such a fixture here goes red on its save, never silently), and thinning starts above the drawing
          * caps (2,000 points per series on a line, 1,000 on an area), so those fixtures' rows cannot be saved directly
-         * as one case. That limit
-         * counts the case's fixture rows only: the rows after the case's transform are not counted by it (record
-         * §4.9, item 3), so a saved preview can still draw a thinned result. The thinned fixtures' pictures are
-         * compared with Node's byte for byte in the page by A4-3.
+         * as one case. That limit counts the case's fixture rows as written, and nothing else: the rows the case's
+         * pinned template returns from them are not counted by it (record §4.9, item 3), so a saved preview can still
+         * draw a thinned result. The thinned fixtures' pictures are compared with Node's byte for byte in the page by
+         * A4-3.
          */
         val DOM_FIXTURES =
             listOf(
