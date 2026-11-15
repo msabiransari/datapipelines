@@ -148,7 +148,7 @@ class JsRenderedIdentityTest {
             var given = JSON.parse(input.inputs[0]), r = JsRendered.render(given), plot = r.index.plot;
             return r.primitives.filter(function (p) {
               return p.k === "text" && p.role === "tick" && p.anchor === "end" && !p.rotate && p.x < plot.x;
-            }).sort(function (a, b) { return b.y - a.y; }).map(function (p) { return p.shown === undefined ? p.text : p.shown; }).join("|");
+            }).sort(function (a, b) { return b.y - a.y; }).map(function (p) { return p.shown === null || p.shown === undefined ? p.text : p.shown; }).join("|");
             """.trimIndent()
 
         /** The chart fixtures the emitter must have drawn, at least (lane 985 delivers 43). */
