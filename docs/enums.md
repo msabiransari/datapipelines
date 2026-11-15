@@ -882,7 +882,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `html` | RESERVED — authored HTML (D13, D46); refused in round one |
 | `svg` | RESERVED — authored SVG (D13, D46); refused in round one |
 
-**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`. The `plotly` kind is **retired** (#860): a body naming it is refused the same way, with a message that names `chart`.
+**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`. The `plotly` kind is **retired** (#860): a body naming it is refused the same way, as any unknown kind (`details.reason` `unknown_kind`; the message lists the allowed kinds).
 
 ---
 

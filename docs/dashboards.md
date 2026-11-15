@@ -81,7 +81,7 @@ retired, §2.1.2.)
 | Field | Rule |
 |---|---|
 | `display_name` | Required, 1–120 characters, not blank. `description` at most 2000. Both are content: they ride the release, and the index row shows the current version's |
-| `renderer.kind` | `chart`, `table` or `kpi` ([Enumerations §31](enums.md)). `html` and `svg` are reserved and refused in round one (`visualization.validation.renderer_unsupported`); the retired `plotly` kind is refused the same way, with a message naming `chart` |
+| `renderer.kind` | `chart`, `table` or `kpi` ([Enumerations §31](enums.md)). `html` and `svg` are reserved and refused in round one (`visualization.validation.renderer_unsupported`); the retired `plotly` kind is refused the same way, as any unknown kind (`details.reason` `unknown_kind`; the message lists the allowed kinds) |
 | `renderer.version` | The MAJOR version the host must provide (`"1"` for `chart`), matched at bootstrap — a positive integer of at most four digits |
 | `inputs` | At least one named input (`[a-z][a-z0-9_]{0,63}`), each a non-empty list of columns in the transform contract's vocabulary: a `name` (1–128 characters, no control character, unique in the input), a `type` — any logical type ([Type System](type-system.md)) — and `nullable` (default `false`). A bad contract is `visualization.validation.input_contract_invalid` |
 | `transform` | Optional. `template` pins a transform template version; `inputs` maps each of the contract's input names to one of the visualization's inputs. The pin must exist (a DRAFT is accepted here; the release requires it RELEASED — §3.2), be a transform, name exactly the contract's inputs, and each declared input's columns must EQUAL the mapped input's by name, type and nullability; every visualization input must be read. Without a transform the visualization has exactly one input and the renderer binds to it directly. Refusals are `visualization.validation.transform_binding_invalid`, naming the column |
@@ -146,7 +146,7 @@ each as `{field: [values]}` (§2.1.2).
   | `chart.unsupported.<field>` | library support | a meaning field the declared library cannot draw |
 
   The retired `plotly` kind (a native Plotly figure, D12) is refused `visualization.validation.renderer_unsupported`
-  with a message naming `chart`; Plotly stays as the library the product's pages draw charts with (§6.4).
+  as any unknown kind (`details.reason` `unknown_kind`; the message lists the allowed kinds); Plotly stays as the library the product's pages draw charts with (§6.4).
 - **`table`** — `columns`: a non-empty array (at most 64) of `{label, values, format?, align?}` — `label` a
   non-blank string of at most 120 characters, `values` the placeholder a binding fills, `format` one of `text`,
   `number`, `integer`, `percent`, `date`, `datetime`, `align` one of `left`, `center`, `right`; `page_size` an
