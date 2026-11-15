@@ -72,6 +72,7 @@
       gap: look("tipGap") * s,
       G: look("tipMax") * s,
       bold: look("tipValueWeight"),
+      join: look("tipTotalJoin"),
       dist: look("tipDistance"),
       dot: t.n("--chart-point") + look("crosshairDot"),
       focus: look("focusGap") * s,
@@ -122,6 +123,13 @@
   function fitLine(R, width, line, w, m) {
     var s = m.s;
     if (line.kind === "heading") {
+      // A stacked bar's heading is the category, the join and the stack's total (brief 990 r2 D2), shown whole or not
+      // at all: a total is a value, and a value is never cut (L8); the category alone is then cut as any heading is.
+      if (typeof line.total === "string" && line.total !== "") {
+        var joined = line.text + m.join + line.total;
+        var jw = width(joined, s, 400);
+        if (jw <= w + EPS) return { line: line, ok: true, text: joined, w: jw };
+      }
       var head = R.measure.fit(width, line.text, s, 400, w);
       return { line: line, ok: head !== "", text: head, w: head === "" ? 0 : width(head, s, 400) };
     }
@@ -351,7 +359,7 @@
    * Nothing here is a rule of the layer's own about which series is shown: the index and the primitives say it.
    */
   function modelOf(R, output, width) {
-    var model = { series: [], entries: [], cuts: [], titles: {}, colours: {}, bars: {}, lines: {}, crosshair: true, plot: null, axis: "x", order: {}, output: output };
+    var model = { series: [], entries: [], cuts: [], titles: {}, colours: {}, bars: {}, lines: {}, totals: null, crosshair: true, plot: null, axis: "x", order: {}, output: output };
     if (!output || !output.index || !Array.isArray(output.primitives)) return model;
     var prims = output.primitives;
     var summary = output.summary || { series: [] };
@@ -361,6 +369,8 @@
     }
     model.plot = output.index.plot;
     model.axis = output.index.axis || "x";
+    // A stacked bar's totals by datum (the engine's text, brief 990 r2 D1); absent on every other draw.
+    if (Array.isArray(output.index.totals)) model.totals = output.index.totals;
     for (var i = 0; i < prims.length; i++) {
       var p = prims[i];
       if (p.role === "mark" && p.series !== null && p.k !== "group" && p.k !== "text") {
@@ -541,7 +551,7 @@
 
   /**
    * The full card of a mark (contract §4.4; record §4.8): the heading (the category or the date: the mark's first tip
-   * line), one row per series drawn at that x (a bar's whole group; a stack top segment first), then the hovered mark's
+   * line; on a stacked bar with the stack's total from the index, joined when the card is drawn), one row per series drawn at that x (a bar's whole group; a stack top segment first), then the hovered mark's
    * `tooltip` fields. A row's value is its tip line after "name: ".
    */
   function cardLines(model, id, datum) {
@@ -569,7 +579,8 @@
       });
     }
     if (!model.crosshair && rows.length > 1) hovered.row.bold = true;
-    var lines = [{ kind: "heading", text: hovered.tip.length > 0 ? hovered.tip[0] : "" }].concat(rows);
+    var total = model.totals !== null && typeof model.totals[datum] === "string" ? model.totals[datum] : null;
+    var lines = [{ kind: "heading", text: hovered.tip.length > 0 ? hovered.tip[0] : "", total: total }].concat(rows);
     for (var f = 2; f < hovered.tip.length; f++) {
       var parts = fieldParts(hovered.tip[f]);
       lines.push({ kind: "field", title: parts.title, value: parts.value });

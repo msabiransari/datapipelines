@@ -360,6 +360,61 @@ test("a bar's stack: the segment under the pointer is the hovered one; the card 
   }
 });
 
+// Brief 990 r2 D2: a stacked bar's heading is the category, the look table's join, then the engine's total text.
+const JOIN = look("tipTotalJoin");
+
+test("r2 D2: a stacked bar's card heads with the category, the join and the stack's total; tip keeps the category", () => {
+  assert.equal(JOIN, " · ", "the join is the look table's interaction field, a middle dot with its spaces");
+  const out = renderFixture("bar", "parity-bar-stacked", { w: 600, h: 400 });
+  const m = model(out);
+  const on = out.index.series.filter((s) => s.on && s.at.length > 0);
+  let cards = 0;
+  for (const s of on) {
+    for (let k = 0; k < s.datum.length; k++) {
+      const datum = s.datum[k];
+      const category = s.tip[k][0];
+      const total = out.index.totals[datum];
+      assert.equal(typeof total, "string", "the engine gives this stack a total");
+      assert.ok(!category.includes(total) || category === total, "tip[k][0] stays the category: " + category);
+      const lines = I.cardLines(m, s.id, datum);
+      assert.equal(lines[0].text, category, "the heading line's text is the category");
+      const card = I.markCard(R, WIDTH, lines, s.id, { w: 600, h: 400 }, M);
+      assert.equal(card.lines[0].line.kind, "heading");
+      assert.equal(card.lines[0].text, category + JOIN + total, "the heading carries the stack's total (index.totals) after the category");
+      cards++;
+    }
+  }
+  assert.ok(cards >= 6, "stacked cards read: " + cards);
+});
+
+test("r2 D2: a grouped bar's heading is the category alone (no totals member)", () => {
+  const out = chart("bar", [["a", "P", 1], ["a", "Q", 2], ["b", "P", 4], ["b", "Q", 5]], { w: 600, h: 400 });
+  assert.equal(Object.prototype.hasOwnProperty.call(out.index, "totals"), false);
+  const m = model(out);
+  const lines = I.cardLines(m, "string:Q", 1);
+  assert.equal(lines[0].total, null);
+  const card = I.markCard(R, WIDTH, lines, "string:Q", { w: 600, h: 400 }, M);
+  assert.equal(card.lines[0].text, "b");
+});
+
+test("r2 D2: the total is shown whole or not at all: too wide for w, the heading falls back to the category, then cut", () => {
+  const cat = "Category";
+  const total = "3,702 kg";
+  const lines = [{ kind: "heading", text: cat, total }, row(A, "A", "1")];
+  const joinedW = HALF(cat + JOIN + total, S);
+  const catW = HALF(cat, S);
+  const ell = HALF("Cat" + R.measure.ELLIPSIS, S);
+  // Three widths computed here: the joined heading fits exactly; one px less; the category alone one px less.
+  const at = (w) => I.markCard(R, HALF, lines, A, { w: w + 2 * P, h: 200 }, M);
+  assert.equal(at(joinedW).lines[0].text, cat + JOIN + total, "w = the joined width: whole");
+  const fallback = at(joinedW - 1);
+  assert.equal(fallback.lines[0].text, cat, "w one px under the joined width: the category alone, never a cut total");
+  assert.equal(fallback.lines.length, 2);
+  const cut = at(catW - 1).lines[0].text;
+  assert.ok(cut.endsWith(R.measure.ELLIPSIS) && !cut.includes("3,702"), "narrower than the category: the category cut (L8), no total: " + cut);
+  assert.equal(at(ell).lines[0].text, "Cat" + R.measure.ELLIPSIS);
+});
+
 test("the crosshair's rows: one series hidden, and a null at that x, are no rows", () => {
   const rows = [["a", "P", 1], ["a", "Q", 2], ["a", "R", 3], ["b", "P", 4], ["b", "R", 6], ["c", "P", 7], ["c", "Q", 8], ["c", "R", 9]];
   const out = chart("line", rows, { w: 600, h: 400 }, { input: { hidden: ["string:R"] } });
