@@ -297,6 +297,53 @@ test("a thinned stack keeps one set of x positions, so its boundaries still meet
   assert.equal(thin.summary.marks, full.summary.marks);
 });
 
+/**
+ * The test's own reading of §4.9's rule (the oracle, written apart from 15-thin.js): per run between nulls and per pixel
+ * column (Math.floor of x) inside it, the first, the lowest (its first occurrence), the highest (its first occurrence)
+ * and the last index. Returns the kept indices, ascending.
+ */
+function keptByRule(xs, ys) {
+  const keep = new Set();
+  let i = 0;
+  while (i < xs.length) {
+    if (ys[i] === null) {
+      i++;
+      continue;
+    }
+    const col = Math.floor(xs[i]), idx = [];
+    while (i < xs.length && ys[i] !== null && Math.floor(xs[i]) === col) idx.push(i++);
+    let low = idx[0], high = idx[0];
+    for (const j of idx) {
+      if (ys[j] < ys[low]) low = j;
+      if (ys[j] > ys[high]) high = j;
+    }
+    for (const j of [idx[0], low, high, idx[idx.length - 1]]) keep.add(j);
+  }
+  return [...keep].sort((a, b) => a - b);
+}
+
+test("thinning keeps exactly the first, the lowest, the highest and the last point of each pixel column of each run (R.thin against the rule)", () => {
+  let seed = 4099, inner = 0;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  for (let trial = 0; trial < 200; trial++) {
+    const n = 20 + Math.floor(rnd() * 400), xs = [], lists = [[], []];
+    let x = rnd() * 3;
+    for (let i = 0; i < n; i++) {
+      x += rnd() * 0.6;
+      xs.push(x);
+      for (const ys of lists) ys.push(rnd() < 0.04 ? null : Math.round(rnd() * 50));
+    }
+    const kept = (ys) => [...R.thin.series(xs, ys, [])].flatMap((k, i) => (k === true ? [i] : []));
+    const one = kept(lists[0]), want = keptByRule(xs, lists[0]);
+    assert.deepEqual(one, want, "trial " + trial + ": one series");
+    // The kept first or last point of a column that is neither its lowest nor its highest (non-vacuity of the rule's ends).
+    inner += want.filter((i) => lists[0][i] !== null && lists[0].some((v, j) => j !== i && v !== null && Math.floor(xs[j]) === Math.floor(xs[i]) && v < lists[0][i]) && lists[0].some((v, j) => j !== i && v !== null && Math.floor(xs[j]) === Math.floor(xs[i]) && v > lists[0][i])).length;
+    const union = [...new Set([...keptByRule(xs, lists[0]), ...keptByRule(xs, lists[1])])].sort((a, b) => a - b);
+    assert.deepEqual([...R.thin.union(xs, lists)], union, "trial " + trial + ": a stack keeps the union");
+  }
+  assert.ok(inner >= 100, "kept ends that are neither a column's lowest nor its highest: " + inner);
+});
+
 test("A10's line half (G7): over the drawing cap and under the row cap a line is thinned with mark_count unchanged", () => {
   const f = fx("line", "thin-extremes-one-column");
   const n = f.columns.x.length;
