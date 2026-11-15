@@ -43,7 +43,8 @@ class DashboardCardsBrowserTest : DashboardBrowserSuite() {
     fun `every chart is a card whose heading names the pinned visualization - and no ready badge shows`() {
         startTrace()
         val root = ready("dpcards")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
         openBoard(board)
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
         page.locator("#dp-board svg.dp-chart").first().waitFor()

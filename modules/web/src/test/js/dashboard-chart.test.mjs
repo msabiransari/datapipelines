@@ -184,7 +184,7 @@ test("measure: one canvas context over the resolved font list and weight, each (
   assert.equal(browser.fonts.length, first, "the redraw measured nothing new: every width came from the cache");
 });
 
-test("#473: a chart title that only repeats the card heading (the display name) is not drawn; one that says more stays", async () => {
+test("#473: a chart title that only repeats the card heading (the display name) is not drawn; one that says more, or carries a subtitle, stays", async () => {
   const config = Object.assign({}, BAR, { title: { text: " Sales " } });
   const repeated = mount({ occurrence: { display_name: "Sales", config } });
   await repeated.handle.renderData({ name: "s" }, 1, { region: ["North"], amount: [1] });
@@ -192,6 +192,10 @@ test("#473: a chart title that only repeats the card heading (the display name) 
   const more = mount({ occurrence: { display_name: "Sales by region", config } });
   await more.handle.renderData({ name: "s" }, 1, { region: ["North"], amount: [1] });
   assert.ok(texts(more.svg).some((t) => t.trim() === "Sales"), "the title says more than the heading");
+  const subtitled = mount({ occurrence: { display_name: "Sales", config: Object.assign({}, BAR, { title: { text: "Sales", subtitle: "2026" } }) } });
+  await subtitled.handle.renderData({ name: "s" }, 1, { region: ["North"], amount: [1] });
+  const shown = texts(subtitled.svg).map((t) => t.trim());
+  assert.ok(shown.includes("Sales") && shown.includes("2026"), "a subtitle keeps its title: " + JSON.stringify(shown));
   assert.equal(JSON.stringify(config), JSON.stringify(Object.assign({}, BAR, { title: { text: " Sales " } })), "the occurrence's config is not changed");
 });
 

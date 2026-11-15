@@ -101,7 +101,8 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
     fun `bootstrap order - the initial action renders chart, table and kpi on the real page`() {
         startTrace()
         val root = ready("dpcboot")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
         openBoard(board)
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
         page.locator("#dp-board svg.dp-chart").first().waitFor()
@@ -115,7 +116,8 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
     fun `freshness across overlapping refreshes - a slow target and then all - the board stays coherent`() {
         startTrace()
         val root = ready("dpcover")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
         openBoard(board)
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
 
@@ -237,7 +239,8 @@ class DashboardPageConformanceBrowserTest : DashboardBrowserSuite() {
     fun `connection loss retains the content and offers retry through the page's sink`() {
         startTrace()
         val root = ready("dpcloss")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
         openBoard(board)
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
         page.route("**/runtime/visualizations") { route -> route.abort("connectionrefused") }
