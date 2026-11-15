@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.87 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.88 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-15
@@ -183,6 +183,7 @@ A `LAKE` datasource's pool owns one embedded DuckDB instance per pool generation
 | INFO | `lake.generation_stale` | The freshness tick found the catalog changed since the generation was built and retired it | `datasource`, `tables_stale` |
 | INFO | `lake.freshness_tick_retired` | A freshness tick retired one or more generations; logged once per tick, only when the count is not zero | `generations` |
 | WARN | `lake.freshness_read_failed` | The freshness tick's catalog read failed, including a read cancelled at the tick's 5 s statement bound (`sql_state=57014`). The tick skips that datasource, and the live generation serves until its age bound | `datasource`, `sql_state`, `error`, `message` |
+| WARN | `lake.freshness_tick_capped` | #819: the freshness tick found the catalog changed but did not retire the live generation, because `reads.max-retired-generations` retired generations of that datasource still hold their engine (a close that has not returned). The live generation serves until its age bound, which retires it regardless; one line per datasource per tick while the cap holds ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)) | `datasource`, `tables_stale`, `retired_generations`, `max_retired_generations`, `key`, `message` |
 | WARN | `lake.freshness_tick_failed` | A step of the freshness tick (`refresh` or `regrant`) failed, for example its statement was cancelled at the 5 s bound. The tick's next step, the next tick and the other scheduled jobs still run | `step`, `error` (the class), `sql_state`, `message` |
 | INFO | `lake.table_unavailable_omitted` | A generation was built without a view for a managed table: archived or purged, no catalog row, no lifecycle row, or the lake disabled. A node that reads it fails with `lake.table.unavailable` | `datasource`, `table`, `reason` |
 
@@ -619,6 +620,7 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.lake.reader_lease.lost` | counter | (none) | Generations losing reader protection, once each; the generation retires, executing readers may fail after TTL |
 | `datapipelines.lake.reader_lease.overlong` | counter | (none) | Live readers older than the hour slice, once per generation; pins remain protected |
 | `datapipelines.lake.reader_lease.round_slow` | counter | (none) | Keeper rounds longer than the 5 s cadence |
+| `datapipelines.lake.freshness_tick.capped` | counter | `datasource_name` | (#819) Freshness ticks that found a managed generation stale and left it serving because the retired generations still holding an engine had reached `datapipelines.lake.reads.max-retired-generations`; once per datasource per tick, beside §3.4C's `lake.freshness_tick_capped` |
 | `datapipelines.datasource.pool.close_stuck` | counter | `datasource_name` | (#818d) Retired pools whose close was still running at their own deadline (§3.4A's `deadline_seconds`; #840) after the reaper handed it off. Each one also logs the §3.4A `datasource.pool_close_stuck` WARN. A non-zero rate means a driver or Hikari shutdown that does not return; the close is never retried |
 | `datapipelines.datasource.pool.reaper_pass_slow` | counter | (none) | (#818d) Pool reaper passes that ran past their 1 s bound, the one the managed reads lifetime rule counts on. Each one also logs the §3.4A `datasource.reaper_pass_slow` WARN. No tag: the pass is per instance, not per pool |
 | `http.server.requests` | timer | `method`, `uri`, `status`, `outcome` | HTTP request duration. **Spring Boot's own metric — unprefixed.** `uri` is the templated path (`/api/v1/executions/{id}`), never the expanded one. |
@@ -882,6 +884,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.88 | 819 (#819) | **§3.4C**: WARN `lake.freshness_tick_capped` — the freshness tick leaves a stale managed generation serving while `datapipelines.lake.reads.max-retired-generations` retired generations still hold their engine; the age bound still retires it. **§4.1**: counter `datapipelines.lake.freshness_tick.capped` (`datasource_name`), once per capped datasource per tick. |
 | 2026-11-15 | v1.87 | 994 (#994) | **§3.4Z** (new, TEMPORARY with #994's guard): INFO `staging.guard.unguarded_read` (a DuckDB tempdb read the written form does not take — SHOW kinds, a PIVOT without an IN list, `PRAGMA`, `EXPLAIN`, several statements; execution, node and statement kind only) and WARN `staging.guard.drop_failed` (the guard relation's drop failed). §3.4's namespace sentence: fourteen catalogued, `staging` not enforced by the parity test. |
 | 2026-11-14 | v1.86 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.84 and #964's v1.85 (its section renumbered §3.4X → §3.4Y) | **§3.4Y** (new): the compaction part's three events: INFO `lake.maintenance.compaction_group_committed` (one per committed group, with D9's figures), WARN `lake.maintenance.compaction_blocked` (one per `capacity` result: the blocked count, the largest need, the limit and its source, the grant) and WARN `lake.maintenance.compaction_deadline` (a scratch-database failure the clock judged to be the deadline; class and SQLSTATE only). |
 | 2026-11-14 | v1.85 | 964 (#964, dp-lake P6) | **§3.4X** (new): WARN `lake.inventory.totals_mismatch` — the storage breakdown's six rows did not add up to the cleanup's listing; nothing stored, the two totals logged (counts and bytes only). |

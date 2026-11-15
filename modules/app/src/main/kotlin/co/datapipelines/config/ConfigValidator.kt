@@ -25,13 +25,16 @@ import java.util.Base64
  */
 class ConfigValidator(
     private val environment: Environment,
+    /** #819 — the container memory limit's input, separate from the heap; injectable for tests. */
+    private val containerMemoryLimit: ContainerMemoryLimitSource = CgroupMemoryLimitSource(),
 ) {
     private val log = LoggerFactory.getLogger(ConfigValidator::class.java)
 
     @PostConstruct
     fun validateOnStartup() {
-        val report = validate(snapshotFrom(environment))
+        val report = validate(snapshotFrom(environment, containerMemoryLimit))
         report.warnings.forEach { log.warn(it) }
+        report.notices.forEach { log.info(it) }
         if (report.violations.isNotEmpty()) {
             val message =
                 buildString {
@@ -79,8 +82,10 @@ class ConfigValidator(
          * judged whether or not the lake is enabled).
          * 49 since #957 added `SchedulerThreadsRules.checkMaintenanceThreads` (§3.29 / §7 — scheduler threads ≥
          * max-concurrent-maintenance + 2 with the lake and the scheduler enabled).
+         * 50 since #819 added `ProcessMemoryAdmission.checkProcessMemoryAdmission` (§7 / §3.36 — the process memory
+         * sum against the container limit, its two keys judged whether or not the lake is enabled).
          */
-        internal const val CHECK_COUNT = 49
+        internal const val CHECK_COUNT = 50
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -121,6 +126,7 @@ class ConfigValidator(
         internal fun validate(snapshot: ConfigSnapshot): ValidationReport {
             val violations = mutableListOf<String>()
             val warnings = mutableListOf<String>()
+            val notices = mutableListOf<String>()
             checkRequiredKeys(snapshot, violations)
             checkSecretStrength(snapshot, violations)
             checkKeyProvider(snapshot, violations)
@@ -183,7 +189,9 @@ class ConfigValidator(
             LakeRules.checkLakeReads(snapshot, violations)
             // §3.29 / §7 (#957) — with the lake and the scheduler on, enough scheduler threads for maintenance; own file.
             SchedulerThreadsRules.checkMaintenanceThreads(snapshot, violations)
-            return ValidationReport(violations, warnings)
+            // §7 / §3.36 (#819) — the process memory sum against the container limit; its breakdown line is a notice.
+            ProcessMemoryAdmission.checkProcessMemoryAdmission(snapshot, violations, notices)
+            return ValidationReport(violations, warnings, notices)
         }
 
         /** §2 — every required key present, all named in one pass. */
@@ -806,7 +814,10 @@ class ConfigValidator(
          * same shape `SecurityConfig.kt` and `PipelineExecutor.kt` already suppress `LongMethod` for.
          */
         @Suppress("LongMethod")
-        internal fun snapshotFrom(environment: Environment): ConfigSnapshot =
+        internal fun snapshotFrom(
+            environment: Environment,
+            containerMemoryLimit: ContainerMemoryLimitSource = CgroupMemoryLimitSource(),
+        ): ConfigSnapshot =
             ConfigSnapshot(
                 datasourceUrl = environment.getProperty("spring.datasource.url"),
                 datasourceUsername = environment.getProperty("spring.datasource.username"),
@@ -877,6 +888,8 @@ class ConfigValidator(
                 executorNodeQueryTimeoutSecondsByDialect = executorNodeQueryTimeoutSecondsByDialect(environment),
                 stagingMaxMemoryMb = environment.getProperty("datapipelines.staging.h2.max-memory-mb"),
                 maxHeapMb = Runtime.getRuntime().maxMemory() / BYTES_PER_MB,
+                maxHeapBytes = Runtime.getRuntime().maxMemory(),
+                containerMemoryLimit = containerMemoryLimit.read(),
                 // §3.19 promotion (055). The base-url is an ordinary value; both keys are
                 // bearer secrets and are carried as PRESENCE only — the §7 report is logged.
                 promotionTargetBaseUrl = environment.getProperty("datapipelines.deployment.promotion.target.base-url"),
@@ -1143,6 +1156,13 @@ internal data class ConfigSnapshot(
      * figure under `UseContainerSupport` — the cgroup limit in production, the `-Xmx` on a laptop.
      */
     val maxHeapMb: Long? = null,
+    /**
+     * #819 — the same `Runtime.maxMemory()` in bytes, the process memory admission's heap term (exact: no MB
+     * truncation). Null = not supplied, which skips the sum.
+     */
+    val maxHeapBytes: Long? = null,
+    /** #819 — the container's memory limit from its own source, never from the heap. Null = not supplied. */
+    val containerMemoryLimit: ContainerMemoryLimit? = null,
     /** §3.19 (055) — the promotion SENDER's target, if any. */
     val promotionTargetBaseUrl: String? = null,
     /** §3.19 (055) — presence ONLY: the target's pre-shared key is a bearer secret. */
@@ -1240,6 +1260,8 @@ internal data class ConfigSnapshot(
             "executorNodeQueryTimeoutSecondsByDialect=$executorNodeQueryTimeoutSecondsByDialect, " +
             "stagingMaxMemoryMb=$stagingMaxMemoryMb, " +
             "maxHeapMb=$maxHeapMb, " +
+            "maxHeapBytes=$maxHeapBytes, " +
+            "containerMemoryLimit=$containerMemoryLimit, " +
             "orgCurrencyName=$orgCurrencyName, " +
             "orgCurrencySymbol=$orgCurrencySymbol, " +
             "orgFiscalStartDate=$orgFiscalStartDate, " +
@@ -1363,4 +1385,6 @@ internal data class OidcProviderSnapshot(
 internal data class ValidationReport(
     val violations: List<String>,
     val warnings: List<String>,
+    /** INFO lines of a passing boot (#819: the process memory admission's breakdown when admitted or not compared). */
+    val notices: List<String> = emptyList(),
 )

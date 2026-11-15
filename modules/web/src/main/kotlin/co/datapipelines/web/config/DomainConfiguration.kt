@@ -430,6 +430,13 @@ class DomainConfiguration {
                     ?.reads
                     ?.maxGenerationAgeSeconds
                     ?.let(java.time.Duration::ofSeconds),
+            // #819 (owner ruling 2026-11-15): the retired managed generations that may still hold their engine (K).
+            // Unbound or disabled lake = no cap, like the age bound above.
+            maxRetiredGenerations =
+                lakeProperties.ifAvailable
+                    ?.takeIf { it.enabled }
+                    ?.reads
+                    ?.maxRetiredGenerations,
             // #818d (record §10 RULING 4 amended, item 6): the reaper hands each close to the `dp-pool-close`
             // threads (`PoolReaperSchedulingConfiguration.poolCloser`); application shutdown still closes in place.
             poolCloser = poolCloser,

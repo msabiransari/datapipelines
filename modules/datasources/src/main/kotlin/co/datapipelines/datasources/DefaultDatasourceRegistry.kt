@@ -10,6 +10,7 @@ import co.datapipelines.datasources.pooling.ManagedLakeGeneration
 import co.datapipelines.datasources.pooling.PoolCloser
 import co.datapipelines.datasources.pooling.PoolLifecycleMetrics
 import co.datapipelines.datasources.pooling.ReapOutcome
+import co.datapipelines.datasources.pooling.StaleRetirement
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -118,6 +119,8 @@ class DefaultDatasourceRegistry(
     private val managedLake: ManagedLakeCatalog = ManagedLakeCatalog.NONE,
     /** #818 RULING 4 item 1 — `reads.max-generation-age-seconds`; null when no lake is configured. */
     private val maxGenerationAge: Duration? = null,
+    /** #819 — `reads.max-retired-generations` (K), forwarded to the pool manager; null when no lake is configured. */
+    private val maxRetiredGenerations: Int? = null,
     /**
      * #818d (record §10 RULING 4 amended, item 6) — who closes a pool the reaper's pass has taken off its retiring
      * queue, forwarded to the pool manager. The assembling layer injects the deadline closer (the `dp-pool-close`
@@ -194,6 +197,7 @@ class DefaultDatasourceRegistry(
             retireCeiling = retireCeiling,
             managedRetireCeiling = managedRetireCeiling,
             maxGenerationAge = maxGenerationAge,
+            maxRetiredGenerations = maxRetiredGenerations,
             closer = poolCloser,
             pins = generationPins,
             metrics = poolMetrics,
@@ -615,7 +619,9 @@ class DefaultDatasourceRegistry(
      * [catalog] compared with the snapshot the generation was built from; a stale generation is retired
      * (`lake.generation_stale`), and the next lease builds from the catalog. Never touches any other
      * pool. A failed read, a statement cancelled at the caller's bound included (`sql_state=57014`),
-     * retires nothing: the live generation serves until its age bound.
+     * retires nothing: the live generation serves until its age bound. #819 D3: neither does a stale generation
+     * while the retired generations still holding their engine are at `reads.max-retired-generations`
+     * (`lake.freshness_tick_capped`, WARN); the live generation serves until its age bound.
      *
      * @return how many generations were retired.
      */
@@ -638,15 +644,21 @@ class DefaultDatasourceRegistry(
                     return@forEach
                 }
             val stale = generation.staleTableCount(current)
-            if (stale > 0 && poolManager.retireGeneration(name, pool)) {
-                poolRowVersions.remove(name)
-                retired++
-                log.info(
-                    "event=lake.generation_stale datasource={} tables_stale={} " +
-                        "message=\"managed lake generation retired: the catalog moved since it was built\"",
-                    name,
-                    stale,
-                )
+            if (stale == 0) return@forEach
+            when (poolManager.retireStaleGeneration(name, pool, stale)) {
+                StaleRetirement.Retired -> {
+                    poolRowVersions.remove(name)
+                    retired++
+                    log.info(
+                        "event=lake.generation_stale datasource={} tables_stale={} " +
+                            "message=\"managed lake generation retired: the catalog moved since it was built\"",
+                        name,
+                        stale,
+                    )
+                }
+
+                // #819 D3: at the retired-generation cap the tick waits; the manager logged the WARN and counted it.
+                StaleRetirement.NotLive, is StaleRetirement.Capped -> {}
             }
         }
         return retired

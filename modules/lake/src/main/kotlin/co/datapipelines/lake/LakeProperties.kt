@@ -2,6 +2,7 @@ package co.datapipelines.lake
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.util.unit.DataSize
+import java.math.BigDecimal
 import java.time.Duration
 
 /**
@@ -77,12 +78,21 @@ class LakeProperties(
         val maxOpenPartitionsPerAppend: Int = DEFAULT_MAX_OPEN_PARTITIONS,
         val jobTimeout: Duration = Duration.ofHours(2),
         val leaseWaitSeconds: Long = DEFAULT_LEASE_WAIT_SECONDS,
+        /**
+         * #819 — the process memory admission's reserve for everything the sum does not name (native memory outside
+         * the engines' buffer managers, metaspace, thread stacks, the JVM's own native allocators). Judged at boot by
+         * `ProcessMemoryAdmission` (app) whether or not the lake is enabled; nothing else reads it.
+         */
+        val processReserve: DataSize = DataSize.ofGigabytes(1),
+        /** #819 — the share of the container limit the admission keeps free: `0 ≤ h < 1`, exact decimal. */
+        val memoryHeadroom: BigDecimal = BigDecimal(DEFAULT_MEMORY_HEADROOM),
     ) {
         override fun toString(): String =
             "Admission(maxConcurrentIngestions=$maxConcurrentIngestions, maxConcurrentMaintenance=$maxConcurrentMaintenance, " +
                 "maxDeliveryBytes=$maxDeliveryBytes, stagingExpansionFactor=$stagingExpansionFactor, scratchBytes=$scratchBytes, " +
                 "stagingMemoryLimit=$stagingMemoryLimit, maxOpenPartitionsPerAppend=$maxOpenPartitionsPerAppend, " +
-                "jobTimeout=$jobTimeout, leaseWaitSeconds=$leaseWaitSeconds)"
+                "jobTimeout=$jobTimeout, leaseWaitSeconds=$leaseWaitSeconds, processReserve=$processReserve, " +
+                "memoryHeadroom=$memoryHeadroom)"
     }
 
     /** §6 `catalog.*` (call 27) — set on every catalog connection the fenced pool opens (§8a). */
@@ -113,6 +123,13 @@ class LakeProperties(
         val memoryLimit: DataSize = DataSize.ofMegabytes(DEFAULT_READS_MEMORY_LIMIT_MB),
         val egressProxy: String = "",
         val egressMaxAgeSeconds: Long = DEFAULT_EGRESS_MAX_AGE_SECONDS,
+        /**
+         * #819 (owner ruling 2026-11-15, record §6 amendment) — K: the most retired managed generations that may still
+         * hold their engine while a replacement is built. At K the freshness tick waits; above it a lease that needs
+         * a new generation is refused `lake.unavailable`. An integer ≥ 1; the process-memory admission charges
+         * `(1 + K) × memory-limit`.
+         */
+        val maxRetiredGenerations: Int = DEFAULT_MAX_RETIRED_GENERATIONS,
     ) {
         init {
             require(maxGenerationAgeSeconds > 0) { "$PREFIX.reads.max-generation-age-seconds must be > 0" }
@@ -124,11 +141,13 @@ class LakeProperties(
             }
             require(memoryLimit.toBytes() > 0) { "$PREFIX.reads.memory-limit must be a positive size" }
             require(egressMaxAgeSeconds > 0) { "$PREFIX.reads.egress-max-age-seconds must be > 0" }
+            require(maxRetiredGenerations >= 1) { "$PREFIX.reads.max-retired-generations must be at least 1" }
         }
 
         override fun toString(): String =
             "Reads(maxGenerationAgeSeconds=$maxGenerationAgeSeconds, freshnessTickSeconds=$freshnessTickSeconds, " +
-                "memoryLimit=$memoryLimit, egressProxy=$egressProxy, egressMaxAgeSeconds=$egressMaxAgeSeconds)"
+                "memoryLimit=$memoryLimit, egressProxy=$egressProxy, egressMaxAgeSeconds=$egressMaxAgeSeconds, " +
+                "maxRetiredGenerations=$maxRetiredGenerations)"
     }
 
     /**
@@ -182,6 +201,7 @@ class LakeProperties(
         const val DEFAULT_MAX_DELIVERY_GB = 2L
         const val DEFAULT_STAGING_EXPANSION_FACTOR = 3
         const val DEFAULT_SCRATCH_GB = 20L
+        const val DEFAULT_MEMORY_HEADROOM = "0.10"
         const val DEFAULT_MAX_OPEN_PARTITIONS = 64
         const val DEFAULT_LEASE_WAIT_SECONDS = 60L
         const val DEFAULT_LOCK_TIMEOUT_SECONDS = 5L
@@ -189,6 +209,7 @@ class LakeProperties(
         const val DEFAULT_MAX_GENERATION_AGE_SECONDS = 900L
         const val DEFAULT_FRESHNESS_TICK_SECONDS = 60L
         const val DEFAULT_READS_MEMORY_LIMIT_MB = 512L
+        const val DEFAULT_MAX_RETIRED_GENERATIONS = 1
 
         /** #845 D1: `node-query-timeout-max-seconds` (900) + 60 — a healthy query is never cut before its own timeout. */
         const val DEFAULT_EGRESS_MAX_AGE_SECONDS = 960L

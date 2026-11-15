@@ -33,6 +33,7 @@ own-module      co.datapipelines.config.ConfigValidatorSchedulerNotificationsTes
 own-module      co.datapipelines.config.ConfigValidatorTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
 own-module      co.datapipelines.config.LakeRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt modules/app/src/main/resources/application.yml
 own-module      co.datapipelines.config.ParametersRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ProcessMemoryAdmissionTest  reaches the root (cwd,marker) through ConfigSnapshots.lakeDefaults to read only its own module: modules/app/src/main/resources/application.yml
 own-module      co.datapipelines.config.SchedulerThreadsRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
 own-module      co.datapipelines.config.ScriptJavaScriptRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
 own-module      co.datapipelines.config.StagingH2ConfigKeysSpecDriftTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
