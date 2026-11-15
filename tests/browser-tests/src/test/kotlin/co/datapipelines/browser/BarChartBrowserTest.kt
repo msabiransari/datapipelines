@@ -100,7 +100,8 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
             assertDrawn(preview, markup)
             val legend =
                 preview.evaluate(
-                    "sel => Array.from(document.querySelectorAll(sel + ' svg.dp-chart g.dp-legend text')).map(t => t.textContent).join('\\n')",
+                    "sel => Array.from(document.querySelectorAll(sel + ' svg.dp-chart g.dp-legend text'))" +
+                        ".map(t => t.textContent).join('\\n')",
                     CASE,
                 ) as String
             withClue("the series names are text in the legend") { legend shouldContain "<b>bold</b>" }
@@ -119,8 +120,8 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
     /**
      * Q-L4 with the two `quirks.md:64` fixtures at the corpus's 900 px render and a 480 px phone column: the longest bar's
      * value label is inside the chart box. The control of the library era (the reference converter's layout planted
-     * through the old library's own relayout call) left with it; the control is now the probe's own: the same label moved past the box's right
-     * edge must read as outside, so the product's "inside" is a measurement.
+     * through the old library's own relayout call) left with it; the control is now the probe's own: the same label
+     * moved past the box's right edge must read as outside, so the product's "inside" is a measurement.
      */
     @Test
     fun `Q-L4 - the longest bar's value label stays inside the chart box, and a label moved past the box reads outside`() {
@@ -155,7 +156,8 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         Files.write(SHOTS.resolve("ql4-$name-$width-product.png"), preview.locator(CASE).screenshot())
         preview.evaluate(
             "sel => { const t = document.querySelector(sel + ' svg.dp-chart text.dp-guide[data-ql4-longest]');" +
-                " t.setAttribute('x', String(t.ownerSVGElement.viewBox.baseVal.width)); t.setAttribute('text-anchor', 'start'); return true; }",
+                " t.setAttribute('x', String(t.ownerSVGElement.viewBox.baseVal.width));" +
+                " t.setAttribute('text-anchor', 'start'); return true; }",
             CASE,
         )
         val control = preview.evaluate(LONGEST_LABEL, CASE) as Map<*, *>
@@ -222,8 +224,12 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
             try {
                 val lengths = (assertDrawn(preview, fixture)["lengths"] as List<*>).map { (it as Number).toDouble() }
                 val gap =
-                    (preview.evaluate("sel => getComputedStyle(document.querySelector(sel)).getPropertyValue('--chart-gap')", CASE) as String)
-                        .trim()
+                    (
+                        preview.evaluate(
+                            "sel => getComputedStyle(document.querySelector(sel)).getPropertyValue('--chart-gap')",
+                            CASE,
+                        ) as String
+                    ).trim()
                         .removeSuffix("px")
                         .toDouble()
                 withClue("the two shares are drawn equal and nonzero, the upper one less the stack's gap ($gap px): $lengths") {
@@ -402,9 +408,18 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
             val month = MONTHS[category.substring(YEAR_END + 1, MONTH_END).toInt() - 1]
             val (text, under) =
                 when (format) {
-                    "month" -> month to year
-                    "date" -> "$month ${category.substring(MONTH_END + 1, DAY_END).toInt()}" to year
-                    else -> category.substring(DAY_END + 1, TIME_END) to "$month ${category.substring(MONTH_END + 1, DAY_END).toInt()}, $year"
+                    "month" -> {
+                        month to year
+                    }
+
+                    "date" -> {
+                        "$month ${category.substring(MONTH_END + 1, DAY_END).toInt()}" to year
+                    }
+
+                    else -> {
+                        category.substring(DAY_END + 1, TIME_END) to
+                            "$month ${category.substring(MONTH_END + 1, DAY_END).toInt()}, $year"
+                    }
                 }
             val label = if (under != previous) "$text\n$under" else text
             previous = under
@@ -489,7 +504,8 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
 
         /**
          * The drawn bars (a mark with an area; a gap draws nothing), the band axis's tick texts sorted by their position
-         * (what a reader sees, left to right or top to bottom; a second line under a label, G9, joins it after a newline), the value axis's tick texts, each series' value labels by
+         * (what a reader sees, left to right or top to bottom; a second line under a label, G9, joins it after a
+         * newline), the value axis's tick texts, each series' value labels by
          * category (a label belongs to the bar whose centre along the band axis is nearest it), and each bar's length
          * across the band axis.
          */

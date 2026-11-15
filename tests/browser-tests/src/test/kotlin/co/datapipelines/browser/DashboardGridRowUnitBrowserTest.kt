@@ -79,7 +79,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
      * `title: null`). Each theme is recorded on its own, so one red run shows both themes' outcomes.
      */
     @Test
-    fun `a default chart with both axis titles draws at the compact level in a 2-row slot - no title line, the plot keeps half, in both themes`() {
+    fun `a default chart with both axis titles draws compact in a 2-row slot - no title line, the plot keeps half, in both themes`() {
         startTrace()
         val root = ready("dprowt")
         val board = seedBoardWithGrid(root)
@@ -455,7 +455,9 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     ) {
         val slotHeight = m.slot(name, "height")
         val plot = m.slot(name, "plot")
-        record("${m.label} plotArea[$name]=${plot}px of slot ${slotHeight}px ratio=${plot / slotHeight} (figure ${m.slot(name, "figure")}px)")
+        record(
+            "${m.label} plotArea[$name]=${plot}px of slot ${slotHeight}px ratio=${plot / slotHeight} (figure ${m.slot(name, "figure")}px)",
+        )
         withClue("the '$name' plot area ($plot px) is at least ${floor * slotHeight} px ($floor of the slot): $m") {
             (plot >= floor * slotHeight) shouldBe true
         }

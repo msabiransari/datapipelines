@@ -24,7 +24,8 @@ import java.nio.file.Paths
  * page and carries `?tab=`; Evidence shows a run's screenshot only once one was stored; the Release dialog lists its
  * refusals before the button and its POST releases through the service; a viewer's and a promoter's pages issue no
  * lifecycle request; the chart engine's files; every tab ZERO-CSP in both themes (the suite's after-each), at three
- * widths. #860: the fixture is the bar chart of `ChartBrowserFixtures.workspaceDocument`, its marks read off the DOM (#987: the engine's drawing).
+ * widths. #860: the fixture is the bar chart of `ChartBrowserFixtures.workspaceDocument`, its marks read off the DOM
+ * (#987: the engine's drawing).
  *
  * #426 — the strip's tab switches ride the shared history helper (workspace/history.js, family `visualizations`):
  * Back/Forward re-select in page, a restored root wires once, and another family's entry runs none of this glue.

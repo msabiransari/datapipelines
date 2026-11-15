@@ -72,7 +72,11 @@ class JsRenderedPageBrowserTest : ChartPageSuite() {
                     val agent = chartContext(width = width)
                     try {
                         for (name in G2_FIXTURES) {
-                            val page = preview(agent, documentOf("$root/charts/${name.replace('-', '_')}_$width", ChartBrowserFixtures.fixture(name)))
+                            val page =
+                                preview(
+                                    agent,
+                                    documentOf("$root/charts/${name.replace('-', '_')}_$width", ChartBrowserFixtures.fixture(name)),
+                                )
                             val read = page.evaluate(TEXT_BOXES, CASE) as Map<*, *>
                             lines += "$width $name $read"
                             withClue("$name at $width px: $read") {
@@ -111,9 +115,7 @@ class JsRenderedPageBrowserTest : ChartPageSuite() {
         try {
             val page = preview(agent, documentOf("$root/charts/identity", ChartBrowserFixtures.fixture("bar-vertical")))
             for (batch in entries.groupBy { it.substringBeforeLast('/') }.values) {
-                val pairs = batch.map { listOf(emitted("$it.input.json"), emitted("$it.output.json")) }
-                val result = page.evaluate(IDENTITY, pairs) as List<*>
-                batch.zip(result).forEach { (entry, diff) -> if (diff != null) differing += "$entry: $diff" }
+                differing += identityDiffs(page, batch)
                 compared += batch.size
             }
             page.close()
@@ -124,6 +126,16 @@ class JsRenderedPageBrowserTest : ChartPageSuite() {
         compared shouldBe entries.size
         withClue("the page's results that differ from Node's") { differing.shouldBeEmpty() }
         drainCspViolations().shouldBeEmpty()
+    }
+
+    /** One batch of emitted pictures drawn by the page's engine from Node's input: `"<entry>: <diff>"` for each that differs. */
+    private fun identityDiffs(
+        page: Page,
+        batch: List<String>,
+    ): List<String> {
+        val pairs = batch.map { listOf(emitted("$it.input.json"), emitted("$it.output.json")) }
+        val result = page.evaluate(IDENTITY, pairs) as List<*>
+        return batch.zip(result).filter { it.second != null }.map { (entry, diff) -> "$entry: $diff" }
     }
 
     /**
@@ -219,7 +231,13 @@ class JsRenderedPageBrowserTest : ChartPageSuite() {
             atCap.close()
 
             val over = preview(agent, documentOf("$root/charts/nine", seriesFixture(SERIES_CAP + 1)), states = null)
-            over.waitForFunction("args => document.querySelector(args.sel).textContent.indexOf(args.sentence) >= 0", mapOf("sel" to CASE, "sentence" to SERIES_SENTENCE))
+            over.waitForFunction(
+                "args => document.querySelector(args.sel).textContent.indexOf(args.sentence) >= 0",
+                mapOf(
+                    "sel" to CASE,
+                    "sentence" to SERIES_SENTENCE,
+                ),
+            )
             val refused = over.evaluate(MARKS, CASE) as Map<*, *>
             report("g7.txt", listOf("at cap $drawn", "over $refused"))
             withClue("over the cap: the sentence once, no mark: $refused") {
@@ -257,7 +275,10 @@ class JsRenderedPageBrowserTest : ChartPageSuite() {
         val differing =
             ENGINE_SCRIPTS.filter { path ->
                 val name = path.removePrefix(JsRenderedAssetConfig.PREFIX)
-                val own = checkNotNull(javaClass.classLoader.getResourceAsStream("${JsRenderedEngineFiles.ROOT}/$name")).use { it.readBytes() }
+                val own =
+                    checkNotNull(
+                        javaClass.classLoader.getResourceAsStream("${JsRenderedEngineFiles.ROOT}/$name"),
+                    ).use { it.readBytes() }
                 !(bodies[path]?.contentEquals(own) ?: false)
             }
         lines += "$where scripts=${scripts.size} received=${bodies.size} differing=$differing"

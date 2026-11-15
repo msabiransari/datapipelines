@@ -159,7 +159,8 @@ class ReleaseDialogStaleHashBrowserTest : VisualizationBrowserSuite() {
                 .waitFor()
             // #860: the one month's bar, read off the engine's drawn marks (#987: a mark with an area).
             preview.page.evaluate(
-                "() => Array.from(document.querySelectorAll(\"section[data-dp-case='one month'] svg.dp-chart g.dp-mark[data-series] > .dp-mark\"))" +
+                "() => Array.from(document.querySelectorAll(" +
+                    "\"section[data-dp-case='one month'] svg.dp-chart g.dp-mark[data-series] > .dp-mark\"))" +
                     ".filter(m => { const b = m.getBBox(); return b.width > 0 && b.height > 0; }).length",
             ) shouldBe 1
         } finally {

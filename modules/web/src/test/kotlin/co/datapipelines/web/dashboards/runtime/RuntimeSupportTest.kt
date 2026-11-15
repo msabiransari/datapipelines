@@ -135,21 +135,7 @@ class RuntimeSupportTest {
         val config = RuntimeViews.config(resolved, DashboardRuntimeConfig(), emptyMap())
         // The configuration's members, whole and in order (#987 D5, O-13: the page learns nothing about a chart
         // library from the wire).
-        config.fieldNames().asSequence().toList() shouldBe
-            listOf(
-                "configuration_id",
-                "dashboard",
-                "layout",
-                "parameter_set",
-                "visualizations",
-                "groups",
-                "actions",
-                "action_controls",
-                "parameter_scopes",
-                "parameter_state",
-                "timeouts",
-                "budgets",
-            )
+        config.fieldNames().asSequence().toList() shouldBe CONFIG_MEMBERS
         val visualization = config["visualizations"][0]
 
         visualization["name"].asText() shouldBe "rev"
@@ -366,5 +352,24 @@ class RuntimeSupportTest {
         registry.get(DashboardMetrics.EXECUTIONS_RESERVED).gauge().value() shouldBe 1.0
         held.close()
         registry.get(DashboardMetrics.EXECUTIONS_RESERVED).gauge().value() shouldBe 0.0
+    }
+
+    private companion object {
+        /** The runtime configuration's members, whole and in order: no chart library's name or bundle among them (#987 O-13). */
+        val CONFIG_MEMBERS =
+            listOf(
+                "configuration_id",
+                "dashboard",
+                "layout",
+                "parameter_set",
+                "visualizations",
+                "groups",
+                "actions",
+                "action_controls",
+                "parameter_scopes",
+                "parameter_state",
+                "timeouts",
+                "budgets",
+            )
     }
 }

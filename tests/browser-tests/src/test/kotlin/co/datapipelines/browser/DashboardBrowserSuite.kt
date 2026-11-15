@@ -342,7 +342,10 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         board: String,
         grid: String,
     ) {
-        sql("UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb) WHERE dashboard_id = '$board'::uuid")
+        sql(
+            "UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb) " +
+                "WHERE dashboard_id = '$board'::uuid",
+        )
     }
 
     /**

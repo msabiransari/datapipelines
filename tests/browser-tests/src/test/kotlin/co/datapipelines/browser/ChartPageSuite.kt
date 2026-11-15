@@ -84,8 +84,8 @@ abstract class ChartPageSuite : VisualizationBrowserSuite() {
      * The engine's own hostile fixture (record A8: `<script>`, `onload=`, `&`, `"`, a 200-character title, a category
      * named `__proto__`), read from the input Node rendered (the engine module's emitted data), as a fixture of this
      * suite: its document (column types in the product's names, [PRODUCT_TYPES]; its category columns not nullable;
-     * the keys the product's schema requires and the engine defaults filled), its rows, four bars. The page's drawing is compared with the page's
-     * own engine result (G5), never with Node's, so the filled keys change nothing a test reads.
+     * the keys the product's schema requires and the engine defaults filled), its rows, four bars. The page's drawing is
+     * compared with the page's own engine result (G5), never with Node's, so the filled keys change nothing a test reads.
      */
     protected fun hostileFixture(): ChartBrowserFixtures.Fixture {
         val input = JsonParser.parseString(emitted("bar/hostile/960x540.input.json")).asJsonObject

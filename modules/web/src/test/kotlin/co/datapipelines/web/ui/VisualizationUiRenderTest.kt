@@ -21,7 +21,8 @@ import java.util.UUID
 /**
  * #399 — the Visualizations pages pinned at the RENDER (DashboardUiRenderTest's mould): the flat catalog
  * (its rows, its empty and lens-unavailable states; since #466 no sidebar presentation is left in the
- * fragment — the tree is the REST one), the workspace page's chart scripts (the engine's files from the server's list, #987) and its tabs, the
+ * fragment — the tree is the REST one), the workspace page's chart scripts (the engine's files from the server's list,
+ * #987) and its tabs, the
  * choose-a-version state, and every pane's stated contract — the Preview's fixture label and its exact
  * empty-state sentence, the Evidence cap and its screenshot-or-"no screenshot" rule, the Used-by empty
  * state, the Versions verbs per role, and the lifecycle dialogs (refusals before the button, the ONE

@@ -54,7 +54,9 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.waitForURL("**/visualizations/$second")
         preview()
         sameShell()
-        page.evaluate("() => !!window.__engine && window.JsRendered===window.__engine && window.DatapipelinesDashboard===window.__runtime") shouldBe
+        page.evaluate(
+            "() => !!window.__engine && window.JsRendered===window.__engine && window.DatapipelinesDashboard===window.__runtime",
+        ) shouldBe
             true
         engineScripts() shouldBe JsRenderedAssetConfig.scripts
         page.click(".app-nav-link[data-nav-section='/visualizations']")

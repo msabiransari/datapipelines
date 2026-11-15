@@ -29,7 +29,10 @@ class ChartTokensBrowserTest : ChartPageSuite() {
         val agent = chartContext()
         try {
             val page = preview(agent, documentOf("$root/charts/tokens", ChartBrowserFixtures.fixture("bar-vertical")))
-            withClue("the root font size the rem rows assume") { page.evaluate("() => getComputedStyle(document.documentElement).fontSize") shouldBe "16px" }
+            withClue("the root font size the rem rows assume") {
+                page.evaluate("() => getComputedStyle(document.documentElement).fontSize") shouldBe
+                    "16px"
+            }
             val results = page.evaluate(RESOLVE_ROWS, mapOf("sel" to CASE, "rows" to TokenRows.RESOLVER)) as List<*>
             report("la4-resolver.txt", results.map { it.toString() })
             withClue("non-vacuity: every row ran") { results.size shouldBe TokenRows.RESOLVER.size }
@@ -68,7 +71,8 @@ class ChartTokensBrowserTest : ChartPageSuite() {
             page.evaluate(
                 """() => { var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); document.body.appendChild(svg);
                   var r = window.DatapipelinesDashboardChart._internal.resolveTheme(svg); svg.remove();
-                  return { tokens: Object.keys(r.theme.tokens).sort(), refused: r.refused.length, known: Object.keys(window.JsRendered.theme.TOKENS).length }; }""",
+                  return { tokens: Object.keys(r.theme.tokens).sort(), refused: r.refused.length,
+                    known: Object.keys(window.JsRendered.theme.TOKENS).length }; }""",
             ) as Map<*, *>
         report("la4-nowhere.txt", listOf(read.toString()))
         withClue("declared nowhere: $read") {

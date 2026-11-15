@@ -798,8 +798,7 @@ abstract class BrowserSuite {
 
         /** Returns what was collected and clears it — the per-test read in [closePage]. */
         @JvmStatic
-        protected fun drainCspViolations(): List<String> =
-            cspViolations.toList().also { cspViolations.clear() }
+        protected fun drainCspViolations(): List<String> = cspViolations.toList().also { cspViolations.clear() }
 
         private val browser: Browser
             get() {

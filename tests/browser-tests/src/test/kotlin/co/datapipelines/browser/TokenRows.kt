@@ -27,7 +27,12 @@ internal object TokenRows {
         expected: Int,
         refused: Boolean,
         extra: Map<String, String> = emptyMap(),
-    ) = row("$TEXT: $value${if (extra.isEmpty()) "" else " $extra"}", extra + (TEXT to value), mapOf(TEXT to expected), if (refused) listOf(TEXT) else emptyList())
+    ) = row(
+        "$TEXT: $value${if (extra.isEmpty()) "" else " $extra"}",
+        extra + (TEXT to value),
+        mapOf(TEXT to expected),
+        if (refused) listOf(TEXT) else emptyList(),
+    )
 
     private fun grid(
         label: String,
@@ -49,9 +54,18 @@ internal object TokenRows {
             listOf(
                 row("--chart-title: 18", mapOf("--chart-title" to "18"), mapOf("--chart-title" to 18, "--chart-title-weight" to 600)),
                 row("--chart-title-weight: 400", mapOf("--chart-title-weight" to "400"), mapOf("--chart-title-weight" to 400)),
-                row("--chart-title-weight: bold", mapOf("--chart-title-weight" to "bold"), mapOf("--chart-title-weight" to 600), listOf("--chart-title-weight")),
+                row(
+                    "--chart-title-weight: bold",
+                    mapOf("--chart-title-weight" to "bold"),
+                    mapOf("--chart-title-weight" to 600),
+                    listOf("--chart-title-weight"),
+                ),
                 grid("color-mix", mapOf(GRID to "color-mix(in srgb, #000 20%, white)"), listOf(204, 204, 204)),
-                grid("var(--border) where --border is a colour", mapOf("--border" to "#123456", GRID to "var(--border)"), listOf(18, 52, 86)),
+                grid(
+                    "var(--border) where --border is a colour",
+                    mapOf("--border" to "#123456", GRID to "var(--border)"),
+                    listOf(18, 52, 86),
+                ),
                 grid("$GRID: 12px", mapOf(GRID to "12px"), gridDefault, refused = true),
                 grid("$GRID: url(x.png)", mapOf(GRID to "url(x.png)"), gridDefault, refused = true),
                 grid("$GRID declared empty", mapOf(GRID to " "), gridDefault),
@@ -63,7 +77,11 @@ internal object TokenRows {
                     mapOf(GRID to gridDefault, "--chart-axis" to listOf(167, 172, 180)),
                 ),
                 grid("$GRID: var(--nothing, #ccd)", mapOf(GRID to "var(--nothing, #ccd)"), listOf(204, 204, 221)),
-                row("--chart-canvas translucent", mapOf("--chart-canvas" to "rgb(255 255 255 / 0.5)"), mapOf("--chart-canvas" to listOf(255, 255, 255, 0.5))),
+                row(
+                    "--chart-canvas translucent",
+                    mapOf("--chart-canvas" to "rgb(255 255 255 / 0.5)"),
+                    mapOf("--chart-canvas" to listOf(255, 255, 255, 0.5)),
+                ),
                 row("--chart-plot: transparent", mapOf("--chart-plot" to "transparent"), mapOf("--chart-plot" to listOf(0, 0, 0, 0))),
                 row(
                     "--chart-series-1 with alpha",
@@ -71,15 +89,29 @@ internal object TokenRows {
                     mapOf("--chart-series-1" to listOf(59, 91, 219)),
                     listOf("--chart-series-1"),
                 ),
-                row("--chart-series-1: transparent", mapOf("--chart-series-1" to "transparent"), mapOf("--chart-series-1" to listOf(59, 91, 219)), listOf("--chart-series-1")),
-                row("--chart-seq-3 with alpha", mapOf("--chart-seq-3" to "rgb(0 0 0 / 0.5)"), mapOf("--chart-seq-3" to listOf(170, 180, 217)), listOf("--chart-seq-3")),
+                row(
+                    "--chart-series-1: transparent",
+                    mapOf("--chart-series-1" to "transparent"),
+                    mapOf("--chart-series-1" to listOf(59, 91, 219)),
+                    listOf("--chart-series-1"),
+                ),
+                row(
+                    "--chart-seq-3 with alpha",
+                    mapOf("--chart-seq-3" to "rgb(0 0 0 / 0.5)"),
+                    mapOf("--chart-seq-3" to listOf(170, 180, 217)),
+                    listOf("--chart-seq-3"),
+                ),
                 row(
                     "--chart-on-fill-light transparent",
                     mapOf("--chart-on-fill-light" to "rgb(255 255 255 / 0)"),
                     mapOf("--chart-on-fill-light" to listOf(255, 255, 255)),
                     listOf("--chart-on-fill-light"),
                 ),
-                row("--chart-series-2: color(srgb 0.5 0.5 0.5)", mapOf("--chart-series-2" to "color(srgb 0.5 0.5 0.5)"), mapOf("--chart-series-2" to listOf(128, 128, 128))),
+                row(
+                    "--chart-series-2: color(srgb 0.5 0.5 0.5)",
+                    mapOf("--chart-series-2" to "color(srgb 0.5 0.5 0.5)"),
+                    mapOf("--chart-series-2" to listOf(128, 128, 128)),
+                ),
             )
 
     /** LA11's two rows that start from a stylesheet. */

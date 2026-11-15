@@ -126,21 +126,7 @@ class VisualizationPreviewControllerTest {
             .path("config")
             .fieldNames()
             .asSequence()
-            .toList() shouldBe
-            listOf(
-                "configuration_id",
-                "dashboard",
-                "layout",
-                "parameter_set",
-                "visualizations",
-                "groups",
-                "actions",
-                "action_controls",
-                "parameter_scopes",
-                "parameter_state",
-                "timeouts",
-                "budgets",
-            )
+            .toList() shouldBe CONFIG_MEMBERS
         val occurrence = data.path("config").path("visualizations")[0]
         occurrence.path("renderer").path("kind").asText() shouldBe "chart"
         data
@@ -240,5 +226,24 @@ class VisualizationPreviewControllerTest {
                 ),
             ),
         )
+    }
+
+    private companion object {
+        /** A case's configuration members, whole and in order: the board's own, no chart library among them (#987 O-13). */
+        val CONFIG_MEMBERS =
+            listOf(
+                "configuration_id",
+                "dashboard",
+                "layout",
+                "parameter_set",
+                "visualizations",
+                "groups",
+                "actions",
+                "action_controls",
+                "parameter_scopes",
+                "parameter_state",
+                "timeouts",
+                "budgets",
+            )
     }
 }
