@@ -456,7 +456,13 @@ grep -q 'SNAPSHOT-FAILED' "$rd/MANIFEST.txt" || fail 'snapshot failure missing'
 grep -q '^PRE-GATE FAIL.*mod=0.*snap=1' "$X/.pregate-logs/0-verdict.log" || fail 'snapshot failure overwrote Gradle exit'
 ok 'snapshot failure refuses PASS and stops later stages'
 
-# Exact provenance + complete live guard cases save four auth selections (33 → 29).
+# Exact provenance + complete live guard cases save the auth selections. #995: the expected
+# numbers are derived from the registry (124, 10 of them auth, when inventory 995 landed), never
+# typed; the saving stays the difference of two measured counts.
+registry_total="$(source "$ROOT/scripts/pregate-plan-lib.sh"; n=0; for m in "${!GUARDS[@]}"; do for c in ${GUARDS[$m]}; do n=$((n + 1)); done; done; echo "$n")"
+registry_auth="$(source "$ROOT/scripts/pregate-plan-lib.sh"; set -- ${GUARDS[":modules:auth"]}; echo "$#")"
+[ "$registry_auth" -ge 4 ] && [ "$registry_total" -gt "$registry_auth" ] \
+  || fail "registry read vacuous: total=$registry_total auth=$registry_auth"
 for mode in covered cached helper missing-xml missing-line ambiguous skipped covered-fail malformed partial failed-xml; do
   X="$T/guards-$mode"; pgres::_fixture "$X" "$mode"
   rc=0; run_fixture "$X" --continue-on-failure || rc=$?
@@ -468,7 +474,8 @@ for mode in covered cached helper missing-xml missing-line ambiguous skipped cov
     [[ "$guard_cmd" != *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail 'covered auth guards repeated'
     grep -q 'covered module=:modules:auth.*stage=2 evidence=2/modules/auth/' "$rd/GUARD-COVERAGE.txt" || fail 'covering evidence missing'
     count="$(printf '%s\n' "$guard_cmd" | awk '{for(i=1;i<=NF;i++)if($i=="--tests")n++}END{print n}')"
-    [ "$count" -eq 29 ] || fail 'unexpected guard count after covering auth'
+    [ "$count" -eq $((registry_total - registry_auth)) ] \
+      || fail "unexpected guard count after covering auth: $count, registry $registry_total minus auth $registry_auth"
     # Compare against an observed baseline recording from the identical fixture.
     B="$T/guards-baseline"; pgres::_fixture "$B" "$mode"
     cat >> "$B/scripts/pregate-results-lib.sh" <<'BASELINE'
@@ -476,7 +483,8 @@ pgres::guards_covered() { return 1; }
 BASELINE
     run_fixture "$B" || fail 'recording baseline red'
     baseline="$(sed -n '/co.datapipelines.integration.ArchitectureGuardTest/p' "$B/pregate-argv.log" | awk '{for(i=1;i<=NF;i++)if($i=="--tests")n++}END{print n}')"
-    [ "$baseline" -eq 33 ] || fail 'baseline inventory not 33'
+    [ "$baseline" -eq "$registry_total" ] || fail "baseline inventory $baseline, registry holds $registry_total"
+    [ $((baseline - count)) -eq "$registry_auth" ] || fail "covered saving $((baseline - count)) is not the $registry_auth auth guards"
     echo "  guard selections observed: baseline=$baseline optimized=$count (same stage-2 coverage)"
   else
     [[ "$guard_cmd" == *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail "unsafe guard omission: $mode"

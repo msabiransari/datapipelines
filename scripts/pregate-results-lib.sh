@@ -471,10 +471,17 @@ case "$args" in
       rm -f "$ROOT/.runone"
     fi
     if [[ "$mode" == covered* || "$mode" == cached || "$mode" == helper || "$mode" == missing-xml || "$mode" == missing-line || "$mode" == ambiguous || "$mode" == malformed || "$mode" == skipped || "$mode" == partial || "$mode" == failed-xml ]]; then
-      for c in ScopeMatrixSpecDriftTest PublicPathsTest RoleMatrixTest PermissionResolutionTest; do
-        write_tests "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.$c.xml" "co.datapipelines.auth.$c" 1 0
+      # #995: the auth guards are read from the fixture's own registry, never typed here, so a
+      # class added to GUARDS[":modules:auth"] is one this stage-2 record must cover too.
+      auth_guards="$(source "$ROOT/scripts/pregate-plan-lib.sh" && printf '%s' "${GUARDS[":modules:auth"]-}")"
+      if [ -z "$auth_guards" ]; then
+        echo "stand-in refused: no :modules:auth guards in the registry" >> "$ROOT/pregate-argv.log"
+        exit 65
+      fi
+      for c in $auth_guards; do
+        write_tests "$ROOT/modules/auth/build/test-results/test/TEST-$c.xml" "$c" 1 0
         # Summary-only XML is deliberately insufficient; write real testcase identity.
-        printf '<testsuite name="co.datapipelines.auth.%s" tests="1" failures="0" errors="0"><testcase classname="co.datapipelines.auth.%s" name="guard"/></testsuite>' "$c" "$c" > "$ROOT/modules/auth/build/test-results/test/TEST-co.datapipelines.auth.$c.xml"
+        printf '<testsuite name="%s" tests="1" failures="0" errors="0"><testcase classname="%s" name="guard"/></testsuite>' "$c" "$c" > "$ROOT/modules/auth/build/test-results/test/TEST-$c.xml"
       done
       case "$mode" in
         cached) echo '> Task :modules:auth:test FROM-CACHE' ;;

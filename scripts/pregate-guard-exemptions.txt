@@ -1,0 +1,305 @@
+# The lane check's guard exemptions (#995). Read by PregateGuardInventoryTest
+# (modules/mcp-server); no script executes this file.
+#
+# A test class that reads beyond its own Gradle module is registered in GUARDS
+# (scripts/pregate-plan-lib.sh, stage 3 of every lane check) or carries ONE line here:
+#
+#   own-module      <class>  <why: it reaches the repository root but reads only its own module>
+#   waived-for-cost <class>  <evidence: a container/context marker it reaches, or "measured <N> s" over 120>
+#
+# The two kinds are never mixed and a class is never both registered and listed. own-module
+# gives up no coverage. waived-for-cost is the owner's ruling of 2026-11-14 (#995, comment
+# issuecomment-6885432370): the lane check leaves out a cross-module guard that starts a
+# container or an application context, or takes more than 120 s by itself in stage 3, and only
+# those; the merge gate and CI still run every one. The check verifies a waiver's evidence and
+# fails on a stale line (the class is gone, or no longer reaches the root).
+
+# own-module: each reaches the repository root (a settings.gradle.kts marker, user.dir) only to
+# resolve a path inside its own module, so the module's own stage-2 check already covers it.
+own-module      co.datapipelines.application.dependencies.ReleaseGoldenGeneratorTest  reaches the root (marker,user.dir) to read only its own module: modules/application/src/test/resources/dependencies/release-goldens (ReleaseGoldens.DIR)
+own-module      co.datapipelines.application.dependencies.ReleaseGoldenParityTest  reaches the root (marker,user.dir) to read only its own module: modules/application/src/test/resources/dependencies/release-goldens (ReleaseGoldens.DIR)
+own-module      co.datapipelines.auth.AuthBoundaryTest  reaches the root (marker,user.dir) to read only its own module: modules/auth/src/main/kotlin
+own-module      co.datapipelines.auth.PromotionServerKeysTest  reaches the root (marker,user.dir) to read only its own module: modules/auth/src/main/kotlin/co/datapipelines/auth/PromotionProperties.kt
+own-module      co.datapipelines.calculators.CalculatorPurityTest  reaches the root (marker) to read only its own module: modules/calculators/build.gradle.kts modules/calculators/src/main/kotlin
+own-module      co.datapipelines.config.AuthProviderRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ConfigValidatorDemoApiTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ConfigValidatorEndpointsTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ConfigValidatorExecutorTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ConfigValidatorMailTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ConfigValidatorOrgTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ConfigValidatorPostureTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ConfigValidatorRedisTimeoutTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ConfigValidatorSchedulerNotificationsTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ConfigValidatorTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.LakeRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/kotlin/co/datapipelines/config/LakeRules.kt modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ParametersRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.SchedulerThreadsRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.ScriptJavaScriptRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.StagingH2ConfigKeysSpecDriftTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.config.VisualizationRulesTest  reaches the root (marker) to read only its own module: modules/app/src/main/resources/application.yml
+own-module      co.datapipelines.dependencies.DependencyContractBoundaryTest  reaches the root (marker) to read only its own module: modules/dependency-contract/src/main/kotlin
+own-module      co.datapipelines.dependencies.GraphFingerprintTest  reaches the root (marker) to read only its own module: modules/dependency-contract/src/test/resources/
+own-module      co.datapipelines.mcp.DocSetGoldenTest  reaches the root (marker,user.dir) to read only its own module: modules/mcp-server/src/main/resources/skill modules/mcp-server/src/test/resources/docs-golden
+own-module      co.datapipelines.mcp.NewRootConfirmationTest  reaches the root (marker,user.dir) to read only its own module: modules/mcp-server/src/main/resources/skill/core.md
+own-module      co.datapipelines.mcp.SkillCoreRulesTest  reaches the root (marker,user.dir) to read only its own module: modules/mcp-server/src/main/resources/skill/core.md modules/mcp-server/src/main/resources/skill/pipelines.md
+own-module      co.datapipelines.mcp.SkillHasNoDemoContentTest  reaches the root (marker,user.dir) to read only its own module: modules/mcp-server/src/main/resources/mcp/server-instructions.txt
+own-module      co.datapipelines.scheduler.ScheduleTrailAppendOnlyTest  reaches the root (marker,user.dir) to read only its own module: modules/scheduler/src/main/kotlin
+own-module      co.datapipelines.scheduler.SchedulerBoundaryTest  reaches the root (marker,user.dir) to read only its own module: modules/scheduler/src/main/kotlin
+own-module      co.datapipelines.scripting.JavaScriptBreachTest  reaches the root (marker) to read only its own module: modules/scripting/build/reports
+own-module      co.datapipelines.scripting.JavaScriptMeasurementsTest  reaches the root (marker) to read only its own module: modules/scripting/build/reports
+own-module      co.datapipelines.scripting.JavaScriptSandboxGuardTest  reaches the root (marker) to read only its own module: modules/scripting/src/main/kotlin
+own-module      co.datapipelines.scripting.JsonataBreachTest  reaches the root (marker) to read only its own module: modules/scripting/build/reports
+own-module      co.datapipelines.scripting.ScriptingPurityTest  reaches the root (marker) to read only its own module: modules/scripting/build.gradle.kts modules/scripting/src/main/kotlin
+own-module      co.datapipelines.web.parameters.stream.ParameterEvaluationEventProjectionTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/kotlin/co/datapipelines/web/parameters/stream
+own-module      co.datapipelines.web.ui.ShellPageGuardTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/kotlin
+own-module      co.datapipelines.web.ui.StaticJsCsrfAuditTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources
+own-module      co.datapipelines.web.ui.TemplateHtmxRenderAuditTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources
+own-module      co.datapipelines.web.ui.VendoredNonTextContrastTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources
+own-module      co.datapipelines.web.ui.VendoredThemeScopingTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources
+own-module      co.datapipelines.web.ui.site.SiteBatch2ContentTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources/templates/${}.html
+
+# waived-for-cost by time: a class measured over 120 s by itself in a stage-3 run (no container).
+waived-for-cost co.datapipelines.config.DriverVersionSpecDriftTest  measured 271 s alone (276 s in the full stage-3 run, 2026-11-15; its bump rehearsals walk the tree per case)
+
+# waived-for-cost: each starts a Testcontainers database or an application context (the marker
+# named is one the check finds in the class's own call graph). Most reach the root only to read
+# the migrations under modules/app. The merge gate and CI run them; follow-up issue named in #995.
+waived-for-cost co.datapipelines.ApplicationSmokeTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.application.checks.PipelineCheckRunRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.datasources.LakeTableRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.datasources.ManagedLakeTableRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.ApiAndScheduleConsumersIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.ArtifactGraphFactsPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.ArtifactReleaseProvidersPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.EndpointOperationalFactPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.IncomingBoundedQueryTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.IncomingConformancePostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.PipelineReleaseProviderPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.ReleaseSpeculativeReadPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.ReleaseStatementBudgetPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.ReleaseStatementCeilingPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.datasource.DatasourceDependencyProviderPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.prerequisites.ReleasePrerequisitesPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.dependencies.schedule.ScheduleDependencyProviderPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.EndpointPersistenceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.EndpointPromotionImportIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.EndpointVersionBodyHashIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.EndpointVersionConversionIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.EndpointVersionLifecycleIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.RetirePreRep5RowsMigrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.lake.LakeReferenceIndexRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.mcp.McpToolLearningsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.templates.TemplateImplementsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.visualization.PipelineReleaseFactsReaderRecordIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.ApiKeyIssuanceTransactionIntegrationTest  starts a container or context: AnnotationConfigApplicationContext, PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.AuditLogRetentionIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.AuditLoggerBatchingIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.AuthHttpBoundaryTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.AuthRepositoriesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.BootstrapActorProvisioningIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.KeyRetentionPurgeIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.LocalAdminSeederTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.LocalAuthServiceTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.LocalPasswordServiceTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.NonHumanRowRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.OAuth2LoginIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.OidcLoginIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.SecurityFilterChainOrderTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.SystemActorProvisioningIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.UserAdminIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.WorkspaceCreateTransactionIntegrationTest  starts a container or context: AnnotationConfigApplicationContext, PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.WorkspaceInvitationMaterialiseIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.WorkspaceInvitationOidcE2eTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.auth.WorkspaceMembershipIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.datasources.DatasourceIdentityIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.BoundedJdbcPostgresIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.ExecutionEventRetentionTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.ExecutionRepositoriesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.ParameterBindingIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.PostgresSourceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.ReadOnlyPostgresSourceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.integration.DatasourceIncarnationE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.integration.DependenciesGoldenE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.integration.DependenciesUnmetParameterNamesE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.integration.JarSmokeE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.integration.ManagedLakeDeliveryE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.integration.TaxiVsRideshareFourEngineE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.CatalogShapeIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.FencedPoolBoundTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.FencedPoolIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.FencedPoolPausedServerIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.LakeBootCheckIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.LakeBootCheckTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.LakeCatalogBootstrapIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.LakeFenceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.LakeLeasesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.LakeTestDuckDbTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.LibraryDeleteRefusalIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.ReaderPinsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.AppendCrashBoundaryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.AppendLostAcknowledgementIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.LakeBoundedJdbcPostgresIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.LakeWritebackRunnerIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.LakeWritebackRunnerScanFailureIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.ParquetAppendWriterIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.ParquetAppendWriterOrderedIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.ParquetAppendWriterProfileIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.ParquetAppendWriterSortedTableIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.RecipeProvenanceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.TruncatePartitionRunnerIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.append.TruncatePartitionWriterIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeApplyFaultIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeApplyUnclassifiedIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeDefinitionApplyIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeDefinitionAuditIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeDefinitionLifecycleIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeLeaseTakeoverIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeLifecycleApplyRaceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakePartitionEvolutionIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeSortColumnsLifecycleIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeSortOrderApplyIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.definitions.LakeSweepPerTableCatchIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.DeliveryAuditIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.DeliveryLandingIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.DeliveryLedgerIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.DeliverySettlerIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.LakeMetadataReadsIntegrationTest  starts a container or context: ApplicationContextRunner, PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.LakeProjectionRepairIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.LakeSettlementSweepIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.ManagedLakeChangedReadIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.ProtectionObservationIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.ProtectionWindowIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.ReplicationStallSettlementIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.SettlementOverrunTimingIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.SettlementWholeTickBoundIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.SettlementWorkBoundIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.delivery.UnsettledPageIndexIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.MaintenanceAdmissionIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.MaintenanceAdmissionOrderTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.MaintenanceDeadlineIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.MaintenanceLoopIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.MaintenanceSettlementIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.cleanup.CleanupExpiryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.cleanup.CleanupObserverIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.cleanup.CleanupOrphanIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.cleanup.CleanupReadsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.cleanup.CleanupTimeRecipeIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.cleanup.CleanupWiringIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.cleanup.DueParityIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.cleanup.PurgeDeletionIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.compaction.CompactionBoundReplayTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.compaction.CompactionEvolutionIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.compaction.CompactionGroupPlannerTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.compaction.CompactionRewriteIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.compaction.CompactionRunIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.compaction.CompactionScratchRefusalIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.inventory.InventoryGuardsTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.inventory.StorageInventoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.keep.KeepTagsCommitIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.manifests.ManifestRewriteIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.manifests.ManifestRewriteLeaseMeasurement  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.manifests.ManifestRewriteRunIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.plan.MaintenanceDueTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.plan.PlanGateIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.plan.PlanHistoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.plan.PlanMeasureIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.plan.PlanQueueIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.plan.PlanReaderFailuresIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.plan.PlanReadersIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.plan.PlanStaleIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.plan.PlanUsageIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.remove.ClockSkewProbeIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.remove.ReachabilityWalkerIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.remove.RemovalPlanTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.remove.RemoverFailureIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.remove.RemoverMarkerIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.remove.RemoverOrphanIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.remove.RemoverPurgeIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.maintenance.remove.RemoverResultIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.profiles.LakeProfileProtectionIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.profiles.LakeProfileSeedIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.profiles.LakeProfilesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.profiles.LakeProfilesMigrationIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.profiles.LakeTablePausesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.lake.reporting.LakeFeedLatenessIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.EvaluatorConcurrencyTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterEvaluationHistoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterEvaluationObserverTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterEvaluatorIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterEvaluatorTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterPinGuardIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterSetAuditReadBodyFreeIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterSetDashboardGuardsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterSetDatasourceRefsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterSetRestorePinsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterSetServiceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterSetTemplatePinsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParameterSetValidatorTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.ParametersConfigTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.SelectorRowsTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.parameters.SelectorRunnerIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.LastRunOutcomeFilterInvariantIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.ScheduleConditionFilterIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.ScheduleFindLiveByIdsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.ScheduleNotificationOutboxIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.ScheduleNotificationResendIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.ScheduleNotificationSenderIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.ScheduleOutcomeFilterIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.SchedulePayloadSchemaIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.ScheduleServiceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.ScheduleSummaryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.ScheduleWriterGuardIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.SchedulerPolicyIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.SchedulerRecoveryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.SchedulerSpikeIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.scheduler.SystemJobQueueIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.ArtifactDependentsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.ArtifactInventoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.ArtifactLifecycleFilterIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.ArtifactLifecycleIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.ArtifactTransferImportAtomicityTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.ArtifactTransferImportReleaseRulesTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.ArtifactTransferReaderBoundsTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.DashboardRefreshRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.DashboardServiceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.PinnedByBatchedStatementsTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.RestoreDependenciesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.TestSessionServiceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.VisualizationOverviewCatalogIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.VisualizationReleaseEvidenceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.VisualizationServiceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.visualization.VisualizationTransferServiceTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.EmitterDegradedDiagnosticsIntegrationTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.web.LifecycleWriteBoundIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.PersistenceBatchingIntegrationTest  starts a container or context: AnnotationConfigApplicationContext, GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.web.WebPersistenceIntegrationTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.web.config.ArtifactTransferConfigWiringTest  starts a container or context: ApplicationContextRunner, PostgreSQLContainer
+waived-for-cost co.datapipelines.web.config.LakeTableCatalogTransactionBoundsIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.config.PublishedEndpointRegistryIntegrationTest  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.web.config.ReaderLeaseKeeperIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.config.TemplateUndeclaredLoadingCheckTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.dashboards.LifecycleSwitchStatementCountTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.incoming.DatasourceDeleteGuardAdapterIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.incoming.IncomingCompleteAnswerTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.incoming.IncomingParityIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.measure.PersistenceMeasurement  starts a container or context: GenericContainer, PostgreSQLContainer
+waived-for-cost co.datapipelines.web.pipelines.ChildVersionProbeIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.pipelines.PromotableViewsStatementCountTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.pipelines.RepositoryPipelineResolverTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.pipelines.TemplateVersionProbeIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.release.DatasourceWriterGuardIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.release.EndpointInvalidationAfterCommitIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.release.IncomingArmWiringTest  starts a container or context: ApplicationContextRunner, PostgreSQLContainer
+waived-for-cost co.datapipelines.web.release.MetadataWriterGuardIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.release.MetadataWriterGuardOrderIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.release.ReleaseStatementBoundSourcesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.release.ReleaseStatementCeilingWiringTest  starts a container or context: ApplicationContextRunner
+waived-for-cost co.datapipelines.web.release.TemplateProviderParityPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.ui.FamilyInventoryE2eTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.ui.FamilyRecentE2eTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.ui.OverviewDashboardsE2eTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.ui.OverviewE2eTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.ui.OverviewParameterSetsE2eTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.ui.OverviewTemplatesE2eTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.ui.OverviewVisualizationsE2eTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.ui.ReleasePreviewPrerequisiteIntegrationTest  starts a container or context: PostgreSQLContainer

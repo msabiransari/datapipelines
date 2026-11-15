@@ -985,8 +985,13 @@ refusal using isolated fixtures and a refusing Gradle stand-in, including a fixt
 `main` (the default falls back to `origin/main`); (3) the
 cross-cutting guard classes still needed after stage 2, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
-the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
-reads the whole tree or the docs is added there in the same commit). Iterate on its output,
+the served-manual guards, the config-key drift tests (the list is `GUARDS` in
+`scripts/pregate-plan-lib.sh`; a test class that reads beyond its own module — the whole tree, the
+docs, the deploy files or another module — is registered there in the same commit, or carries one
+line in `scripts/pregate-guard-exemptions.txt`: `own-module` when it reaches the root only to read
+its own module, `waived-for-cost` when it starts a container or an application context or takes over
+120 s alone (the owner's ruling of 2026-11-14; the merge gate and CI still run it).
+`PregateGuardInventoryTest`, itself in `GUARDS`, fails naming every class that is neither). Iterate on its output,
 then deliver the lane for the lander's gate. It is not the gate: its exit code decides nothing
 about a merge. Every run appends its verdict line — `PRE-GATE PASS|FAIL`, the base, the merge-base, HEAD, the UTC time,
 the six stage exits (`scan=` for stage 0, between `at=` and `lint=`; a stage skipped for no
