@@ -352,7 +352,11 @@ class ConnectionPoolManagerRetiredCapTest {
         var capped = 0
 
         fun tableChange(reap: Boolean) {
-            val live = lease(manager) ?: run { refused++; null }
+            val live =
+                lease(manager) ?: run {
+                    refused++
+                    null
+                }
             if (live != null && manager.retireStaleGeneration(LAKE.name, live, staleTables = 1) is StaleRetirement.Capped) capped++
             sample(cap)
             if (reap) {

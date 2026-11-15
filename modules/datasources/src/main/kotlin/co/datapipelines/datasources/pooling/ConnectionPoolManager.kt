@@ -672,11 +672,15 @@ class ConnectionPoolManager(
             }
         val pending = holding.filter { it.drainedAtHandOff && !it.closeReturned.isDone }
         if (pending.isEmpty()) return
-        val bound = pending.maxOf { it.pool.connectionTimeout }
-        val closes = CompletableFuture.allOf(*pending.map { it.closeReturned }.toTypedArray())
-        // The bound passing with a close still running leaves its generation counted, and admitBuild decides.
-        runCatching { closes.get(bound.toMillis(), TimeUnit.MILLISECONDS) }
-            .onFailure { if (it !is TimeoutException) throw it }
+        // One shared deadline over every pending close. The bound passing with a close still running leaves its
+        // generation counted, and admitBuild decides.
+        val deadline = System.nanoTime() + pending.maxOf { it.pool.connectionTimeout }.toNanos()
+        for (entry in pending) {
+            val left = deadline - System.nanoTime()
+            if (left <= 0) break
+            runCatching { entry.closeReturned.get(left, TimeUnit.NANOSECONDS) }
+                .onFailure { if (it !is TimeoutException) throw it }
+        }
     }
 
     /**

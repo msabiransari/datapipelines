@@ -656,8 +656,9 @@ class DefaultDatasourceRegistry(
                         stale,
                     )
                 }
+
                 // #819 D3: at the retired-generation cap the tick waits; the manager logged the WARN and counted it.
-                StaleRetirement.NotLive, is StaleRetirement.Capped -> Unit
+                StaleRetirement.NotLive, is StaleRetirement.Capped -> {}
             }
         }
         return retired
