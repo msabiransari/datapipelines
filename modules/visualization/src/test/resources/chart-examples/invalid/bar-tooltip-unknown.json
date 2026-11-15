@@ -1,0 +1,72 @@
+{
+ "display_name": "A tooltip of no column",
+ "description": "G7: a detail field is a column of the input.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "bar"
+  },
+  "encoding": {
+   "x": {
+    "field": "region",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Region"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "format": "compact"
+   },
+   "tooltip": [
+    {
+     "field": "margin"
+    }
+   ]
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

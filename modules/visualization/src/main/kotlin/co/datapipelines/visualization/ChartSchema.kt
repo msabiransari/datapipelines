@@ -23,7 +23,7 @@ object ChartSchemas {
     /** The document skeleton every family shares. */
     const val SKELETON = "skeleton.schema.json"
 
-    /** The bar family — `allOf` the skeleton, narrowing `config`; v1's only family and so the document's entry schema. */
+    /** The bar family — `allOf` the skeleton, narrowing `config`; the entry of a document whose `config.mark.type` names no family. */
     const val BAR = "bar.schema.json"
 
     /** Every served file, in a stable order: the skeleton, then one schema per [ChartType] (its name derived, §4.2). */
@@ -47,8 +47,10 @@ data class ChartSchemaProblem(
 )
 
 /**
- * Layer 1 of a chart document's save (record §4.4): the v1 schema over the WHOLE body as stored. The registry knows
- * exactly the [ChartSchemas.FILES] (an in-memory map keyed by `$id`) and has NO IRI loader — the library adds one
+ * Layer 1 of a chart document's save (record §4.4): the v1 schema over the WHOLE body as stored. The entry is the
+ * family schema `config.mark.type` names ([ChartType.schemaFile]), so a family's refusals are its own schema's; a
+ * document naming no family is judged by [entry] (lane F5, #989; before it bar was the only family and the only
+ * entry). The registry knows exactly the [ChartSchemas.FILES] (an in-memory map keyed by `$id`) and has NO IRI loader — the library adds one
  * only when asked to fetch remote resources — so a `$ref` outside the map fails fast and offline
  * (`ChartSchemaValidatorTest` proves it against a listening socket that sees no connection). Patterns run on the
  * library's default JDK regex engine; every pattern in the files is a single anchored character-class run or a
@@ -58,17 +60,25 @@ class ChartSchemaValidator(
     resources: Map<String, String> = ChartSchemas.FILES.associate { ChartSchemas.ID_PREFIX + it to String(ChartSchemas.bytes(it)) },
     entry: String = ChartSchemas.ID_PREFIX + ChartSchemas.BAR,
 ) {
-    private val schema: Schema =
+    private val registry: SchemaRegistry =
         SchemaRegistry
             .withDefaultDialect(SpecificationVersion.DRAFT_2020_12) { builder ->
                 builder
                     .schemaRegistryConfig(SchemaRegistryConfig.builder().pathType(PathType.JSON_POINTER).build())
                     .schemaLoader { loader -> loader.fetchRemoteResources(false).resourceLoaders { it.resources(resources) } }
-            }.getSchema(SchemaLocation.of(entry))
+            }
+
+    private val fallback: Schema = registry.getSchema(SchemaLocation.of(entry))
+
+    /** One entry schema per family whose file the registry holds, by wire value. */
+    private val families: Map<String, Schema> =
+        ChartType.entries
+            .filter { ChartSchemas.ID_PREFIX + it.schemaFile in resources }
+            .associate { it.wire to registry.getSchema(SchemaLocation.of(ChartSchemas.ID_PREFIX + it.schemaFile)) }
 
     /** Every distinct (keyword, pointer) the document fails, in the library's order; empty when it conforms. */
     fun validate(body: JsonNode): List<ChartSchemaProblem> =
-        schema
+        (families[body.path("config").path("mark").path("type").asText()] ?: fallback)
             .validate(body)
             .map { ChartSchemaProblem(it.keyword ?: "schema", it.instanceLocation.toString()) }
             .distinct()

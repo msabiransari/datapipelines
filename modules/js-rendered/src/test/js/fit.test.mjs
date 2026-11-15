@@ -9,7 +9,8 @@ import { violations } from "./geometry.mjs";
 
 const R = engine();
 const FIXTURES = chartFixtures();
-const fx = (name) => FIXTURES.find((f) => f.name === name).fixture;
+// Bar's fixtures by name: a name is unique within its type's directory only (line/ and area/ have their own `hostile`).
+const fx = (name) => FIXTURES.find((f) => f.wire === "bar" && f.name === name).fixture;
 const MINUS = "−";
 
 /** The value axis's tick labels of a vertical bar, bottom to top: [{text, y}] (anchor end, left of the plot). */

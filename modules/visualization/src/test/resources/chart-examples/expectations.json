@@ -126,6 +126,196 @@
    "reason": "blank",
    "path": "display_name",
    "note": "passes the schema minLength 1; the product refuses a blank name (DocumentRules.texts, layer 2)"
+  },
+  "valid/line-temporal.json": {
+   "valid": true
+  },
+  "valid/line-nominal-direct.json": {
+   "valid": true
+  },
+  "valid/line-log.json": {
+   "valid": true
+  },
+  "valid/line-fields-unit-tooltip.json": {
+   "valid": true
+  },
+  "valid/line-zero-false-domain.json": {
+   "valid": true
+  },
+  "valid/line-quantitative-x.json": {
+   "valid": true
+  },
+  "valid/area-stacked.json": {
+   "valid": true
+  },
+  "valid/area-normalized-fields.json": {
+   "valid": true
+  },
+  "valid/area-unit-tooltip.json": {
+   "valid": true
+  },
+  "valid/bar-fields.json": {
+   "valid": true
+  },
+  "valid/bar-log.json": {
+   "valid": true
+  },
+  "valid/bar-unit-tooltip.json": {
+   "valid": true
+  },
+  "invalid/line-fields-with-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding",
+   "note": "G1: the fields are the series, so color is refused"
+  },
+  "invalid/bar-fields-one.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minItems",
+   "path": "/config/encoding/y/fields",
+   "note": "G1: 2 to 8 fields"
+  },
+  "invalid/area-fields-nine.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/encoding/y/fields",
+   "note": "G1: 2 to 8 fields"
+  },
+  "invalid/area-log.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported",
+   "pointer": "/config/encoding/y/scale/type",
+   "note": "G4: refused on area"
+  },
+  "invalid/bar-log-stacked.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported",
+   "pointer": "/config/encoding/y/scale/type",
+   "note": "G4: refused on a stacked value"
+  },
+  "invalid/line-log-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported",
+   "pointer": "/config/encoding/y/scale/type",
+   "note": "G4: refused beside scale.zero"
+  },
+  "invalid/line-log-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_log",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "G4: domain[0] must be greater than 0"
+  },
+  "invalid/line-log-domain-huge.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_log",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "G4: a number past a double's range (1e400 reads as Infinity) is not an increasing finite range"
+  },
+  "invalid/line-unit-long.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxLength",
+   "path": "/config/encoding/y/unit",
+   "note": "G6: 17 characters"
+  },
+  "invalid/area-tooltip-seven.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/encoding/tooltip",
+   "note": "G7: 6 entries at most"
+  },
+  "invalid/bar-tooltip-unknown.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.unknown",
+   "pointer": "/config/encoding/tooltip/0/field",
+   "note": "G7: the detail's field is not a column"
+  },
+  "invalid/area-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/y/scale/zero",
+   "note": "G8: false refused on area"
+  },
+  "invalid/bar-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding",
+   "note": "G8: false refused on bar (the bar's encoding is a oneOf of its two orientations)"
+  },
+  "invalid/line-domain-reversed.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "min < max"
+  },
+  "invalid/line-domain-huge.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "both ends finite: -1e400 reads as -Infinity"
+  },
+  "invalid/area-domain-without-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "an area's range holds zero"
+  },
+  "invalid/line-temporal-band.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/x",
+   "note": "record §4.2: a temporal x has ONE form on the line family"
+  },
+  "invalid/line-stacked.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y",
+   "note": "line: no stack"
+  },
+  "invalid/area-stack-without-series.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y",
+   "note": "area: stack only with series"
+  },
+  "invalid/bar-legend-direct.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding",
+   "note": "direct is admitted on line and area only"
+  },
+  "invalid/line-x-number-on-string.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/x/field",
+   "note": "a quantitative position on a STRING column"
+  },
+  "invalid/area-x-time-on-string.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.type_mismatch",
+   "pointer": "/config/encoding/x/type",
+   "note": "a temporal position on a STRING column"
   }
  }
 }

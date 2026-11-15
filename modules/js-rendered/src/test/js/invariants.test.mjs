@@ -4,13 +4,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { engine, chartFixtures, inputOf } from "./engine.mjs";
-import { violations, expectedBarMarks, WIDTHS, HEIGHTS } from "./geometry.mjs";
+import { violations, expectedBarMarks, expectedLineMarks, WIDTHS, HEIGHTS } from "./geometry.mjs";
 
 const R = engine();
 const FIXTURES = chartFixtures();
 
 /** Non-vacuity floors: the fixture set, the frames, and what the checker saw. */
-const FLOOR = { fixtures: 43, widths: 35, heights: 5, texts: 50000, marks: 33000, levels: 3 };
+const FLOOR = { fixtures: 91, widths: 35, heights: 5, texts: 50000, marks: 33000, levels: 3 };
 
 test("the invariant sweep is not vacuous (floors)", () => {
   assert.ok(FIXTURES.length >= FLOOR.fixtures, "chart fixtures: " + FIXTURES.length);
@@ -34,9 +34,12 @@ for (const f of FIXTURES) {
         seen.texts += v.texts;
         seen.marks += v.marks;
         const hidden = r.summary.series.filter((s) => s.hidden).map((s) => s.id);
-        const expected = r.state === "rendered" ? expectedBarMarks(f.fixture, hidden) : 0;
+        const bar = f.wire === "bar";
+        const expected = r.state === "rendered" ? (bar ? expectedBarMarks : expectedLineMarks)(f.fixture, hidden) : 0;
         if (r.summary.marks !== expected) v.violations.push({ inv: "I3", what: "summary.marks " + r.summary.marks + ", the rows give " + expected });
-        if (r.state === "rendered" && v.marks !== r.summary.marks) v.violations.push({ inv: "I3", what: "summary.marks " + r.summary.marks + ", the primitives hold " + v.marks });
+        // A bar's marks are its rectangles; a line's are its points, which the index holds every one of (§4.9).
+        const held = bar ? v.marks : r.state === "rendered" ? r.index.series.reduce((n, s) => n + s.at.length, 0) : 0;
+        if (r.state === "rendered" && held !== r.summary.marks) v.violations.push({ inv: "I3", what: "summary.marks " + r.summary.marks + ", the " + (bar ? "primitives" : "index") + " hold " + held });
         for (const x of v.violations) bad.push(`${x.inv} at ${w}x${h}: ${x.what}`);
       }
     }

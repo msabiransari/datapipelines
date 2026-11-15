@@ -1,0 +1,87 @@
+{
+ "display_name": "Amount by month",
+ "description": "G6 unit and G7 tooltip on an area; zero true is admitted.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "area"
+  },
+  "encoding": {
+   "x": {
+    "field": "month",
+    "type": "temporal",
+    "format": "month",
+    "title": "Month"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "format": "compact",
+    "unit": "USD",
+    "scale": {
+     "zero": true,
+     "domain": [
+      0,
+      5000
+     ]
+    }
+   },
+   "tooltip": [
+    {
+     "field": "segment",
+     "title": "Segment"
+    },
+    {
+     "field": "units",
+     "title": "Units",
+     "format": "integer",
+     "unit": "pcs"
+    }
+   ]
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

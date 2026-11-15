@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/line.schema.json",
+  "$comment": "Lane 989 (design record 2026-11-14-js-rendered-charts §4.2, §4.5 row line). Served at /schemas/chart/1/line.schema.json.",
+  "title": "datapipelines chart document, version 1, family line",
+  "description": "A skeleton document whose config is a line config (record §4.5 row line): rows sharing x and series are aggregated; a null is a gap in the path.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "line"
+            },
+            "points": {
+              "description": "end (default) = one dot on each series' last point; markers = a dot on every point; none.",
+              "enum": [
+                "none",
+                "end",
+                "markers"
+              ]
+            },
+            "curve": {
+              "description": "smooth (default) = a monotone cubic through the points, never above or below the data between two of them; step = held until the next point; linear = straight segments.",
+              "enum": [
+                "linear",
+                "smooth",
+                "step"
+              ]
+            },
+            "labels": {
+              "description": "last = each line's last value written after it (with its name when the names are on the lines); none (default).",
+              "enum": [
+                "none",
+                "last"
+              ]
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/x"
+        },
+        "y": {
+          "$ref": "#/$defs/value"
+        },
+        "color": {
+          "$ref": "#/$defs/series"
+        },
+        "tooltip": {
+          "$ref": "skeleton.schema.json#/$defs/tooltip"
+        }
+      },
+      "not": {
+        "description": "G1: with fields the fields are the series, so a colour channel is refused.",
+        "type": "object",
+        "required": [
+          "color"
+        ],
+        "properties": {
+          "y": {
+            "type": "object",
+            "required": [
+              "fields"
+            ]
+          }
+        }
+      }
+    },
+    "x": {
+      "description": "x is a band (nominal, ordinal: evenly spaced, sort required) or a position (temporal: a continuous UTC time axis; quantitative: a number axis). A temporal x has ONE form, position (record §4.2): a temporal band is refused.",
+      "oneOf": [
+        {
+          "type": "object",
+          "allOf": [
+            {
+              "$ref": "skeleton.schema.json#/$defs/band"
+            }
+          ],
+          "properties": {
+            "type": {
+              "$ref": "skeleton.schema.json#/$defs/seriesType"
+            }
+          }
+        },
+        {
+          "$ref": "skeleton.schema.json#/$defs/position"
+        }
+      ]
+    },
+    "value": {
+      "description": "The skeleton's value; a line is never stacked.",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "not": {
+        "type": "object",
+        "required": [
+          "stack"
+        ]
+      }
+    },
+    "series": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/series"
+        }
+      ],
+      "properties": {
+        "legend": {
+          "$ref": "skeleton.schema.json#/$defs/legendDirect"
+        }
+      }
+    }
+  }
+}

@@ -52,7 +52,9 @@ object ChartSaveRules {
         val shapes = ChartPositions.shapes(body.path("config"))
         // The positions' column rules first, then each shape's own rules (record §4.2): one walk, every type.
         shapes.flatMap { it.positions }.forEach { field(it, byName, refusals) }
+        val type = ChartType.fromWire(body.path("config").path("mark").path("type").asText())
         shapes.filter { it.shape == VALUE }.forEach { valueRules(it, refusals) }
+        shapes.filter { it.shape == VALUE || it.shape == POSITION }.forEach { scaleRules(type, it, refusals) }
         val derived =
             shapes
                 .flatMap { it.positions }
@@ -75,6 +77,14 @@ object ChartSaveRules {
     private const val BAND = "band"
     private const val VALUE = "value"
     private const val SERIES = "series"
+    private const val POSITION = "position"
+    private const val LOG = "log"
+
+    /** G8: the types whose value axis always holds zero (`scale.zero: false` is refused by their schema). */
+    private val ALWAYS_ZERO = setOf(ChartType.BAR, ChartType.AREA)
+
+    /** G4: the types that admit a log scale; any other is refused with `chart.scale.log_unsupported`. */
+    private val LOG_TYPES = setOf(ChartType.BAR, ChartType.LINE)
 
     // One refusal per position, first rule wins: a branch per save rule in the reference's order (record §4.4), each at
     // the pointer of its position (§4.2).
@@ -87,6 +97,7 @@ object ChartSaveRules {
         val path = position.pointer
         val shape = position.holder.shape
         val column = columns[position.field]
+        val holderType = position.holder.node.path("type").asText()
         val refusal =
             when {
                 column == null -> {
@@ -109,9 +120,15 @@ object ChartSaveRules {
                     )
                 }
 
-                shape == BAND && position.holder.node
-                    .path("type")
-                    .asText() == "temporal" && column.type !in ChartTypes.TEMPORAL -> {
+                shape == POSITION && holderType == "quantitative" && column.type !in ChartTypes.QUANTITATIVE -> {
+                    ChartRefusal(
+                        "chart.measure.not_numeric",
+                        path,
+                        "A quantitative axis must be an INTEGER, BIGINTEGER, DECIMAL or BIGDECIMAL column.",
+                    )
+                }
+
+                (shape == BAND || shape == POSITION) && holderType == "temporal" && column.type !in ChartTypes.TEMPORAL -> {
                     ChartRefusal(
                         "chart.category.type_mismatch",
                         "${position.holder.pointer}/type",
@@ -144,17 +161,6 @@ object ChartSaveRules {
         val domain = v.path("scale").get("domain")?.takeIf { it.isArray && it.size() == 2 }
         if (domain != null && normalize) {
             refusals += ChartRefusal("chart.scale.domain_normalize", "$vp/scale", "A normalized stack has the fixed range 0 to 100 %.")
-        } else if (domain != null) {
-            val lo = domain[0].asDouble()
-            val hi = domain[1].asDouble()
-            if (!(lo < hi && lo <= 0.0 && hi >= 0.0)) {
-                refusals +=
-                    ChartRefusal(
-                        "chart.scale.domain_invalid",
-                        "$vp/scale/domain",
-                        "The value range must be increasing and contain zero (bars grow from zero).",
-                    )
-            }
         }
         val format = v.get("format")?.takeIf { it.isTextual }?.asText()
         if (normalize && format != null && format != "percent") {
@@ -164,6 +170,54 @@ object ChartSaveRules {
         if (currency != null && currency !in CURRENCIES) {
             refusals +=
                 ChartRefusal("chart.format.currency_unknown", "$vp/format", "The currency code is not an ISO 4217 code this server knows.")
+        }
+    }
+
+    /**
+     * G4 and G8 over a value's or a position's `scale` (record §4.4): a log scale only on a type that admits it, never
+     * stacked or normalized and never beside `zero` (`chart.scale.log_unsupported`); a log range greater than 0 and
+     * increasing (`chart.scale.domain_log`); a linear range increasing, and holding zero where the axis always does —
+     * a bar's or an area's value, or `zero: true` (`chart.scale.domain_invalid`, today's bar rule unchanged). Both ends
+     * must be finite: a number past a double's range reads as an infinity and is refused like a reversed range. A
+     * normalized range is [valueRules]' refusal alone.
+     */
+    private fun scaleRules(
+        type: ChartType?,
+        holder: ChartShapeNode,
+        refusals: MutableList<ChartRefusal>,
+    ) {
+        val scale = holder.node.get("scale")?.takeIf { it.isObject } ?: return
+        val sp = "${holder.pointer}/scale"
+        val stacked = holder.node.get("stack")?.isTextual == true
+        val log = scale.path("type").asText() == LOG
+        if (log && (type !in LOG_TYPES || stacked || scale.has("zero"))) {
+            refusals +=
+                ChartRefusal(
+                    "chart.scale.log_unsupported",
+                    "$sp/type",
+                    "A log scale is refused on this chart type, on a stacked or normalized value and beside zero.",
+                )
+            return
+        }
+        val domain = scale.get("domain")?.takeIf { it.isArray && it.size() == 2 } ?: return
+        if (holder.node.path("stack").asText() == "normalize") return
+        val lo = domain[0].asDouble()
+        val hi = domain[1].asDouble()
+        val holdsZero = scale.path("zero").asBoolean(false) || (holder.shape == VALUE && type in ALWAYS_ZERO)
+        when {
+            log && !(lo > 0.0 && lo < hi && hi.isFinite()) -> {
+                refusals +=
+                    ChartRefusal("chart.scale.domain_log", "$sp/domain", "A log range must be greater than 0 and increasing.")
+            }
+
+            !log && !(lo.isFinite() && hi.isFinite() && lo < hi && (!holdsZero || (lo <= 0.0 && hi >= 0.0))) -> {
+                refusals +=
+                    ChartRefusal(
+                        "chart.scale.domain_invalid",
+                        "$sp/domain",
+                        "The range must be increasing, and contain zero where the axis holds zero (a bar or an area grows from zero).",
+                    )
+            }
         }
     }
 

@@ -32,9 +32,9 @@ function counted(edit) {
   });
 }
 
-test("the cap table: every entry has a kind, a limit, a basis and a note; the three bar needs are there", () => {
+test("the cap table: every entry has a kind, a limit, a basis and a note; the bar and line-family needs are there", () => {
   const caps = R.tables.CAPS;
-  assert.deepEqual(Object.keys(caps).sort(), ["bar.marks", "rows", "series"]);
+  assert.deepEqual(Object.keys(caps).sort(), ["area.points", "area.rows", "bar.marks", "line.points", "line.rows", "rows", "series"]);
   for (const [name, c] of Object.entries(caps)) {
     assert.ok(["row", "mark", "semantic"].includes(c.kind), name);
     assert.ok(Number.isInteger(c.limit) && c.limit > 0, name);

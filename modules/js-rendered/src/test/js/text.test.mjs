@@ -50,7 +50,7 @@ test("exact big numbers are labelled from their decimal string, never through a 
   assert.equal(v("-123456789012345678901234567890.125", "decimal(2)"), M + "123,456,789,012,345,678,901,234,567,890.12");
   assert.equal(v("0.135", "decimal(2)"), "0.14");
   assert.equal(v("12345678901234567890", "compact"), "12,345,678.9T", "past T the compact form keeps T, its digits grouped");
-  const beyond = chartFixtures().find((f) => f.name === "numeric-beyond-2-53");
+  const beyond = chartFixtures().find((f) => f.wire === "bar" && f.name === "numeric-beyond-2-53");
   assert.ok(beyond, "the fixture exists");
   const out = R.render(inputOf(beyond.fixture, 960, 540));
   const labels = out.primitives.filter((p) => p.k === "text" && p.role === "guide").map((p) => p.text);

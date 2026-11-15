@@ -19,3 +19,5 @@
 30-write-dom.js
 31-write-string.js
 types/bar.js
+types/line.js
+types/area.js

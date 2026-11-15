@@ -35,6 +35,12 @@ enum class ChartType(
             ChartChannel("tooltip", required = false, node = ChartChannelNodes.tooltip),
         ),
     ),
+
+    /** A line per series over a band or a continuous axis (§4.5 row `line`; lane F5, #989). */
+    LINE("line", ChartChannelNodes.lineFamily),
+
+    /** As [LINE], filled down to zero or to the series below it (§4.5 row `area`; lane F5, #989). */
+    AREA("area", ChartChannelNodes.lineFamily),
     ;
 
     /** The schema file under [ChartSchemas.RESOURCE_DIR]. */
@@ -143,4 +149,26 @@ private object ChartChannelNodes {
 
     /** `tooltip`: `list(0, 6, shape(detail))`. */
     val tooltip: ChannelNode = ChannelNode.ListOf(min = 0, max = 6, of = ChannelNode.Shape("detail"))
+
+    /**
+     * The line family's channels (§4.2's `line` example): `x` is a band (nominal, ordinal) or a position (temporal,
+     * quantitative) — a temporal `x` has ONE form, so `temporal` is not a band's here — `y` a value, `color` a series.
+     */
+    val lineFamily: List<ChartChannel> =
+        listOf(
+            ChartChannel(
+                "x",
+                required = true,
+                node =
+                    ChannelNode.OneOf(
+                        listOf(
+                            ShapeAlternative("band", listOf("nominal", "ordinal")),
+                            ShapeAlternative("position", listOf("temporal", "quantitative")),
+                        ),
+                    ),
+            ),
+            ChartChannel("y", required = true, node = ChannelNode.Shape("value")),
+            ChartChannel("color", required = false, node = ChannelNode.Shape("series")),
+            ChartChannel("tooltip", required = false, node = tooltip),
+        )
 }

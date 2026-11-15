@@ -1,0 +1,124 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "a stacked area with a missing value and a null: each is a gap in its own series",
+ "document": {
+  "display_name": "stacked-gap",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "area"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "stack": "zero"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "Stacked gaps"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-01-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-07-01",
+   "2024-07-01",
+   "2024-08-01",
+   "2024-08-01"
+  ],
+  "s": [
+   "Lower",
+   "Upper",
+   "Lower",
+   "Upper",
+   "Lower",
+   "Upper",
+   "Lower",
+   "Upper",
+   "Lower",
+   "Upper",
+   "Lower",
+   "Upper",
+   "Lower",
+   "Upper",
+   "Lower",
+   "Upper"
+  ],
+  "v": [
+   5,
+   6,
+   6,
+   7,
+   7,
+   8,
+   8,
+   null,
+   9,
+   10,
+   10,
+   11,
+   11,
+   12,
+   12,
+   13
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "s": "STRING",
+  "v": "DECIMAL"
+ }
+}

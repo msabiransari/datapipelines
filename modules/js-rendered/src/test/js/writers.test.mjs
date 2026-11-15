@@ -8,11 +8,19 @@ import { engine, chartFixtures, inputOf } from "./engine.mjs";
 
 const R = engine();
 const FIXTURES = chartFixtures();
-const hostile = FIXTURES.find((f) => f.name === "hostile");
+const hostile = FIXTURES.find((f) => f.wire === "bar" && f.name === "hostile");
+/** The hostile fixture of every type (brief 989 Security: line and area have their own). */
+const HOSTILES = FIXTURES.filter((f) => f.name === "hostile");
+const bar = (name) => FIXTURES.find((x) => x.wire === "bar" && x.name === name);
+/** The elements a picture may hold; the line family adds the dot and an area's fade (a gradient and its two stops). */
+const TAGS = new Set(["g", "line", "path", "rect", "svg", "text", "circle", "linearGradient", "stop"]);
+const FADE = new Set(["linearGradient", "stop"]);
 
 /** Every attribute name either writer may write. */
 const NAMES = new Set(["xmlns", "width", "height", "viewBox", "class", "x", "y", "rx", "x1", "y1", "x2", "y2", "d", "cx", "cy", "r", "fill", "stroke", "stroke-width", "opacity",
-  "text-anchor", "font-size", "font-family", "font-weight", "transform", "text-decoration", "data-series", "data-legend", "aria-label"]);
+  "text-anchor", "font-size", "font-family", "font-weight", "transform", "text-decoration", "data-series", "data-legend", "aria-label",
+  // Lane 989: a line's round joins and ends, and an area's fade (the gradient's id is made by the writer, never a document value).
+  "stroke-linejoin", "stroke-linecap", "id", "gradientUnits", "offset", "stop-color", "stop-opacity"]);
 
 /** A fake document that records every call the DOM writer makes; any other member is undefined, so its use throws. */
 function fakeDocument() {
@@ -75,38 +83,57 @@ test("writeDom uses createElementNS, setAttribute, textContent (and appendChild/
 });
 
 test("the hostile fixture is text in the DOM: every hostile string is a text node, never an element or a name", () => {
-  const { svg } = fakeDocument();
-  R.writeDom(R.render(inputOf(hostile.fixture, 960, 540)).primitives, svg);
-  const tags = new Set(), texts = [];
-  walk(svg, (el) => {
-    tags.add(el.tag);
-    if (el.text !== null) texts.push(el.text);
-    for (const [n] of el.attrs) assert.ok(NAMES.has(n), "attribute name " + n);
-  });
-  assert.deepEqual([...tags].sort(), ["g", "line", "path", "rect", "svg", "text"]);
-  assert.ok(texts.some((t) => t.includes("<script>alert(1)</script>") || t.startsWith("<script>")), "the category is drawn as text: " + texts.join(" | "));
-  assert.ok(texts.includes("__proto__"), "a category named __proto__ is drawn");
+  assert.deepEqual(HOSTILES.map((f) => f.wire), ["area", "bar", "line"]);
+  for (const f of HOSTILES) {
+    const { svg } = fakeDocument();
+    R.writeDom(R.render(inputOf(f.fixture, 960, 540)).primitives, svg);
+    const tags = new Set(), texts = [];
+    walk(svg, (el) => {
+      tags.add(el.tag);
+      if (el.text !== null) texts.push(el.text);
+      for (const [n] of el.attrs) assert.ok(NAMES.has(n), f.wire + ": attribute name " + n);
+    });
+    for (const t of tags) assert.ok(TAGS.has(t), f.wire + ": element " + t);
+    if (f.wire === "bar") assert.deepEqual([...tags].sort(), ["g", "line", "path", "rect", "svg", "text"]);
+    assert.ok(texts.some((t) => t.includes("<script>alert(1)</script>") || t.startsWith("<script>")), f.wire + ": the hostile text is drawn as text: " + texts.join(" | "));
+    assert.ok(texts.includes("__proto__"), f.wire + ": a name __proto__ is drawn");
+  }
 });
 
 test("writeDom sets what it is handed: each colour its primitive's literal, the theme's font, no var() (look contract §9)", () => {
   // A theme as the page's adapter hands it: tokens resolved off the stylesheet, so the picture carries them as values.
   const theme = { base: "dark", tokens: { "--chart-grid": [1, 2, 3], "--chart-canvas": [250, 251, 252], "--font-sans": "Inter, \"Noto Sans\", sans-serif" } };
   let colours = 0, fonts = 0, pictures = 0;
-  for (const name of ["look-one-series", "look-eight-series", "hostile", "look-empty-zero-rows"]) {
-    const f = FIXTURES.find((x) => x.name === name);
+  let fades = 0;
+  const cases = ["look-one-series", "look-eight-series", "hostile", "look-empty-zero-rows"].map(bar)
+    .concat(["two-series", "hostile"].map((n) => FIXTURES.find((x) => x.wire === "line" && x.name === n)))
+    .concat(["stacked", "hostile"].map((n) => FIXTURES.find((x) => x.wire === "area" && x.name === n)));
+  for (const f of cases) {
+    const name = f.wire + "/" + f.name;
     const prims = R.render(inputOf(f.fixture, 960, 540, { theme })).primitives;
     const { svg } = fakeDocument();
     R.writeDom(prims, svg, theme);
-    const els = [];
+    const els = [], gradients = new Map();
     walk(svg, (el) => {
-      if (el.tag !== "svg") els.push(el);
+      if (el.tag === "linearGradient") gradients.set(Object.fromEntries(el.attrs).id, el);
+      else if (el.tag !== "svg" && !FADE.has(el.tag)) els.push(el);
       for (const [n, v] of el.attrs) assert.ok(!String(v).includes("var("), name + ": " + n + "=" + v);
     });
-    // The DOM is the plan's tree in document order, one element per primitive: pair them and compare value by value.
+    // The DOM is the plan's tree in document order, one element per primitive (a fade's gradient and stops are the
+    // faded path's paint, not primitives): pair them and compare value by value.
     assert.equal(els.length, prims.length, name + ": one element per primitive");
     for (let i = 0; i < prims.length; i++) {
       const p = prims[i], a = Object.fromEntries(els[i].attrs);
-      if (p.fill !== undefined) {
+      if (p.fill !== undefined && p.k === "path" && p.fade !== null) {
+        // The faded fill names its gradient, whose two stops carry the primitive's colour and the fade's opacities.
+        const id = /^url\(#(dp-fade-[A-Za-z0-9_-]+)\)$/.exec(a.fill);
+        assert.ok(id && gradients.has(id[1]), name + " #" + i + " fade: " + a.fill);
+        const stops = gradients.get(id[1]).children.map((c) => Object.fromEntries(c.attrs));
+        assert.deepEqual(stops.map((x) => x["stop-color"]), [p.color, p.color], name + " #" + i + " stop colours");
+        assert.deepEqual(stops.map((x) => Number(x["stop-opacity"])), [p.fade[0], p.fade[1]], name + " #" + i + " stop opacities");
+        colours++;
+        fades++;
+      } else if (p.fill !== undefined) {
         assert.equal(a.fill, p.fill === null ? "none" : p.color, name + " #" + i + " fill");
         colours++;
       }
@@ -121,13 +148,14 @@ test("writeDom sets what it is handed: each colour its primitive's literal, the 
     }
     pictures++;
   }
-  assert.equal(pictures, 4);
+  assert.equal(pictures, 8);
+  assert.ok(fades >= 3, "faded fills compared: " + fades);
   assert.ok(colours > 150 && fonts > 50, "colours " + colours + ", fonts " + fonts + " compared");
-  const grid = R.render(inputOf(FIXTURES.find((x) => x.name === "look-one-series").fixture, 480, 360, { theme })).primitives.filter((p) => p.stroke === "--chart-grid");
+  const grid = R.render(inputOf(bar("look-one-series").fixture, 480, 360, { theme })).primitives.filter((p) => p.stroke === "--chart-grid");
   assert.ok(grid.length > 0 && grid.every((p) => p.strokeColor === "#010203"), "the grid carries the resolved colour");
   // No theme: the engine's default font, as a literal.
   const { svg } = fakeDocument();
-  R.writeDom(R.render(inputOf(FIXTURES.find((x) => x.name === "look-one-series").fixture, 480, 360)).primitives, svg);
+  R.writeDom(R.render(inputOf(bar("look-one-series").fixture, 480, 360)).primitives, svg);
   const families = [];
   walk(svg, (el) => {
     for (const [n, v] of el.attrs) if (n === "font-family") families.push(v);
@@ -136,27 +164,33 @@ test("writeDom sets what it is handed: each colour its primitive's literal, the 
 });
 
 test("writeString escapes every text and attribute value: the hostile fixture holds no element of its own, in both forms", () => {
-  const prims = R.render(inputOf(hostile.fixture, 960, 540)).primitives;
+  for (const f of HOSTILES) hostileString(f);
+});
+
+function hostileString(f) {
+  const prims = R.render(inputOf(f.fixture, 960, 540)).primitives;
   for (const form of ["page", "standalone"]) {
+    const label = f.wire + " " + form;
     const svg = R.writeString(prims, form, "light");
-    assert.equal((svg.match(/<script/gi) || []).length, 0, form + ": a script element");
-    assert.equal((svg.match(/<img/gi) || []).length, 0, form + ": an img element");
-    assert.ok(svg.includes("&lt;script&gt;"), form + ": the script text is escaped");
-    assert.ok(svg.includes("&amp;"), form);
-    assert.ok(svg.includes("&quot;"), form);
+    assert.equal((svg.match(/<script/gi) || []).length, 0, label + ": a script element");
+    assert.equal((svg.match(/<img/gi) || []).length, 0, label + ": an img element");
+    assert.ok(svg.includes("&lt;script&gt;"), label + ": the script text is escaped");
+    assert.ok(svg.includes("&amp;"), label);
+    assert.ok(svg.includes("&quot;"), label);
     const names = [...svg.matchAll(/\s([A-Za-z:-]+)="/g)].map((m) => m[1]);
-    for (const n of names) assert.ok(NAMES.has(n), form + ": attribute name " + n);
+    for (const n of names) assert.ok(NAMES.has(n), label + ": attribute name " + n);
     // Inside tags only (a value escapes >, so a tag ends at the first >): the hostile TEXT holds "onload=" as text.
     // A value holds no raw quote (escaped), so name="value" pairs parse exactly; a value may hold " onmouseover=" as text.
     const attrNames = (svg.match(/<[^>]*>/g) || []).flatMap((tag) => [...tag.matchAll(/\s([^\s="]+)="[^"]*"/g)].map((m) => m[1]));
     assert.ok(attrNames.length > 100, "attributes parsed: " + attrNames.length);
-    assert.deepEqual(attrNames.filter((n) => /^(href|xlink:href|style|on[a-z]+)$/i.test(n)), [], form + ": href, style or an event attribute");
-    for (const n of attrNames) assert.ok(NAMES.has(n), form + ": attribute name " + n);
-    assert.ok(/onload=/.test(svg), form + ": the hostile text is there, as text (non-vacuity of the check above)");
-    const tags = new Set([...svg.matchAll(/<([a-z]+)/g)].map((m) => m[1]));
-    assert.deepEqual([...tags].sort(), ["g", "line", "path", "rect", "svg", "text"]);
+    assert.deepEqual(attrNames.filter((n) => /^(href|xlink:href|style|on[a-z]+)$/i.test(n)), [], label + ": href, style or an event attribute");
+    for (const n of attrNames) assert.ok(NAMES.has(n), label + ": attribute name " + n);
+    assert.ok(/onload=/.test(svg), label + ": the hostile text is there, as text (non-vacuity of the check above)");
+    const tags = new Set([...svg.matchAll(/<([A-Za-z]+)/g)].map((m) => m[1]));
+    for (const t of tags) assert.ok(TAGS.has(t), label + ": element " + t);
+    if (f.wire === "bar") assert.deepEqual([...tags].sort(), ["g", "line", "path", "rect", "svg", "text"]);
   }
-});
+}
 
 test("no fixture's picture writes an attribute name outside the writers' constants, nor href, style or an event", () => {
   let pictures = 0;
@@ -165,10 +199,11 @@ test("no fixture's picture writes an attribute name outside the writers' constan
       const svg = R.writeString(R.render(inputOf(f.fixture, 960, 540)).primitives, form, "dark");
       for (const m of svg.matchAll(/\s([A-Za-z:-]+)="/g)) assert.ok(NAMES.has(m[1]), f.name + " " + form + ": attribute name " + m[1]);
       assert.ok(!/<(script|style|foreignObject|a|image|use)\b/i.test(svg), f.name + ": a forbidden element");
+      for (const m of svg.matchAll(/<([A-Za-z]+)/g)) assert.ok(TAGS.has(m[1]), f.wire + "/" + f.name + ": element " + m[1]);
       pictures++;
     }
   }
-  assert.ok(pictures >= 78, "pictures checked: " + pictures);
+  assert.ok(pictures >= 182, "pictures checked: " + pictures);
 });
 
 test("escape covers & < > \" ' and the three white-space controls", () => {
@@ -177,7 +212,7 @@ test("escape covers & < > \" ' and the three white-space controls", () => {
 });
 
 test("the two forms: page writes var(--token, value) and classes; standalone writes literal colours", () => {
-  const f = FIXTURES.find((x) => x.name === "look-one-series");
+  const f = bar("look-one-series");
   const prims = R.render(inputOf(f.fixture, 480, 360)).primitives;
   const page = R.writeString(prims, "page", "light"), alone = R.writeString(prims, "standalone", "light");
   assert.ok(page.includes('fill="var(--chart-canvas, '), "page form names the token");
@@ -189,7 +224,7 @@ test("the two forms: page writes var(--token, value) and classes; standalone wri
 });
 
 test("nested groups write as nested elements, every tag closed, the legend entries inside their group", () => {
-  const f = FIXTURES.find((x) => x.name === "look-eight-series");
+  const f = bar("look-eight-series");
   const svg = R.writeString(R.render(inputOf(f.fixture, 960, 540)).primitives, "standalone", "light");
   let depth = 0, legend = 0, maxDepth = 0;
   for (const m of svg.matchAll(/<(\/?)([a-z]+)\b[^>]*?(\/?)>/g)) {
@@ -207,7 +242,7 @@ test("nested groups write as nested elements, every tag closed, the legend entri
 });
 
 test("the text a writer draws is the shown text, the full text in the primitive (I4's carrier)", () => {
-  const f = FIXTURES.find((x) => x.name === "look-long-labels");
+  const f = bar("look-long-labels");
   const r = R.render(inputOf(f.fixture, 360, 240));
   const cut = r.primitives.filter((p) => p.k === "text" && p.shown !== null);
   assert.ok(cut.length > 0, "something is cut at 360 × 240");

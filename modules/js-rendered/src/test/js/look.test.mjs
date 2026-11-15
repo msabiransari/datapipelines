@@ -8,7 +8,8 @@ import { violations, WIDTHS, HEIGHTS } from "./geometry.mjs";
 
 const R = engine();
 const FIXTURES = chartFixtures();
-const fx = (name) => FIXTURES.find((f) => f.name === name).fixture;
+// Bar's fixtures by name: a name is unique within its type's directory only (line/ and area/ have their own `hostile`).
+const fx = (name) => FIXTURES.find((f) => f.wire === "bar" && f.name === name).fixture;
 const plain = (v) => JSON.parse(JSON.stringify(v));
 
 // ---------------------------------------------------------------- A14 and LA5: the look table
@@ -17,9 +18,11 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stackShare", "radiusMaxShare", "roundOuterOnly", "legendKeyBar", "labelsDefault", "stackTotalFormat",
   "levelFull", "levelCompact", "levelMinimal", "tickSpacing", "tickSpacingCompact", "rotateAngle", "rotateHiddenShare", "labelMinEm", "rotateMaxEm", "bandLabelMaxEm", "legendSideMaxEm",
   "textAscent", "textDescent", "edge", "lineHeight", "titleGap", "tickGap", "labelGap", "cornerClear", "axisTitleGap", "legendKey", "legendKeyGap", "legendEntryGap", "legendGap", "valueLabelGap",
-  "emptyText", "morePrefix"];
+  "emptyText", "morePrefix",
+  // The line family's (brief 989 D6, D7, D10a): its defaults, its legend keys, the direct legend's bounds and gap.
+  "curveDefault", "pointsDefault", "lineLabelsDefault", "lastLabelFormat", "lineRound", "areaFade", "legendKeyLine", "legendKeyArea", "directMin", "directMax", "directGap"];
 
-test("LA5: the look table is closed and holds exactly the fixed values bar and the shared layout use", () => {
+test("LA5: the look table is closed and holds exactly the fixed values bar, the line family and the shared layout use", () => {
   assert.deepEqual(Object.keys(R.tables.LOOK).sort(), [...LA5].sort());
   for (const [name, f] of Object.entries(R.tables.LOOK)) {
     assert.deepEqual(Object.keys(f), ["value", "consumer", "note"], name);
@@ -30,7 +33,8 @@ test("LA5: the look table is closed and holds exactly the fixed values bar and t
 });
 
 /** Another value of a field: its other form for a word, the other truth value, a number moved by a quarter. */
-const OTHER = { legendSideMaxEm: 2, legendKeyBar: "line", labelsDefault: "none", stackTotalFormat: "integer", emptyText: "Nothing to show", morePrefix: "and ", rotateAngle: 60 };
+const OTHER = { legendSideMaxEm: 2, legendKeyBar: "line", labelsDefault: "none", stackTotalFormat: "integer", emptyText: "Nothing to show", morePrefix: "and ", rotateAngle: 60,
+  curveDefault: "step", pointsDefault: "markers", lineLabelsDefault: "last", lastLabelFormat: "integer", legendKeyLine: "square", legendKeyArea: "line" };
 function other(name, v) {
   if (Object.prototype.hasOwnProperty.call(OTHER, name)) return OTHER[name];
   if (typeof v === "boolean") return !v;
