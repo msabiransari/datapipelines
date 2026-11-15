@@ -121,10 +121,10 @@ class ChartLibraryRemnantGuardTest {
     }
 
     internal companion object {
-        /** 4,493 tracked text files measured at the lane's base (2026-11-15); the floor leaves room for deletions. */
+        /** 4,484 tracked text files read by this guard at lane 988's tip (2026-11-15); the floor leaves room for deletions. */
         const val FILE_FLOOR = 4_000
 
-        /** 1,010,063 lines measured at the lane's base (2026-11-15). */
+        /** 1,011,852 lines read by this guard at lane 988's tip (2026-11-15). */
         const val LINE_FLOOR = 900_000
 
         /** (b) The identifiers of the library idea, matched with their exact case anywhere in a line. */
