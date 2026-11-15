@@ -18,10 +18,10 @@ import java.util.UUID
  * #10 L3b / #400 — the dashboards pages pinned at the RENDER (ShellRenderTest's mould): the
  * catalog's contract (a FLAT list — folders are NOT the catalog's axis; a row navigates to
  * the workspace with its full path; a draft-only dashboard's row says so; the lens decides
- * what renders; since #466 no sidebar presentation is left in the fragment), the workspace page's ONE-bundle
- * contract (exactly one Plotly script tag, its declaration equal to the server's
- * `renderer.bundle`, for a 2d board and a 3d board), the viewed-version chip and the version
- * selector (every version switch a FULL navigation), the choose-a-version state (#409: the
+ * what renders; since #466 no sidebar presentation is left in the fragment), the workspace page's chart
+ * scripts (the engine's files in load order from the server's list, then the runtime and its renderers,
+ * #987), the viewed-version chip and the version selector (every version link a prepared main-content
+ * navigation), the choose-a-version state (#409: the
  * NAME in the heading, no admitted draft, never the old empty `h1`), and the refusal state
  * that stands in for a board that cannot run.
  *
@@ -163,24 +163,31 @@ class DashboardUiRenderTest {
     // ------------------------------------------------------------------ the workspace page
 
     @Test
-    fun `a 2d board renders exactly one bundle script tag and its declaration is the server's value`() {
-        val html = workspacePage(bundle = "2d")
+    fun `a board with something to draw loads the engine's files in load order, then the runtime, its renderers and the glue`() {
+        val html = workspacePage()
 
-        Regex("<script[^>]*plotly-\\d+d?\\.min\\.js[^>]*>").findAll(html).toList().size shouldBe 1
-        html shouldContain "src=\"/vendor/plotly/plotly-3d.min.js\""
         html shouldContain "data-page-assets"
-        html shouldNotContain "plotly-2d.min.js"
-        // The runtime and its three renderers ride the page, then the glue — and the container
-        // carries the dashboard id, the only server value the glue reads. The DEFAULT
-        // resolution writes NO version attribute (the glue's init stays "released").
-        html shouldContain "/js/datapipelines-dashboard.js"
-        html shouldContain "/js/datapipelines-dashboard-chart.js"
-        html shouldContain "/js/datapipelines-dashboard-plotly.js"
-        // The chart kind loads before its Plotly converter, which registers with it at load (record 2026-11-06 §5.2).
-        (html.indexOf("/js/datapipelines-dashboard-chart.js") < html.indexOf("/js/datapipelines-dashboard-plotly.js")) shouldBe true
-        html shouldContain "/js/datapipelines-dashboard-table.js"
-        html shouldContain "/js/datapipelines-dashboard-kpi.js"
-        html shouldContain "/js/dashboards-page.js"
+        // The catalog opens with the chart scripts, whole and in order: the engine's files from the server's list
+        // (#987 D2: the same files the server draws with), then the runtime, its three renderers and the glue — and
+        // the container carries the dashboard id, the only server value the glue reads. The DEFAULT resolution
+        // writes NO version attribute (the glue's init stays "released").
+        val chartScripts =
+            JsRenderedAssetConfig.scripts +
+                listOf(
+                    "/js/datapipelines-dashboard.js",
+                    "/js/datapipelines-dashboard-chart.js",
+                    "/js/datapipelines-dashboard-table.js",
+                    "/js/datapipelines-dashboard-kpi.js",
+                    "/js/dashboards/events-dock.js",
+                    "/js/dashboards-page.js",
+                )
+        val catalogScripts =
+            Regex("src=\"(/[^\"]+)\"")
+                .findAll(html.substringAfter("<template data-page-assets>").substringBefore("</template>"))
+                .map { it.groupValues[1] }
+                .toList()
+        catalogScripts.take(chartScripts.size) shouldBe chartScripts
+        JsRenderedAssetConfig.scripts.first() shouldBe "/js/js-rendered/00-namespace.js"
         html shouldContain "data-dp-dashboard-id="
         html shouldNotContain "data-dp-dashboard-version="
         // A booting board has no refusal to show: the region stays hidden, server-side.
@@ -205,31 +212,20 @@ class DashboardUiRenderTest {
     }
 
     @Test
-    fun `a 3d board renders the 3d bundle and its declaration names it`() {
-        val html = workspacePage(bundle = "3d")
-
-        Regex("<script[^>]*plotly-\\d+d?\\.min\\.js[^>]*>").findAll(html).toList().size shouldBe 1
-        html shouldContain "src=\"/vendor/plotly/plotly-3d.min.js\""
-        html shouldContain "data-page-assets"
-        html shouldNotContain "plotly-2d.min.js"
-    }
-
-    @Test
-    fun `a NAMED version rides the data attribute channel, and every version switch is a full navigation`() {
-        val html = workspacePage(bundle = "2d", namedVersion = 2)
+    fun `a NAMED version rides the data attribute channel, and every version link is a prepared main-content navigation`() {
+        val html = workspacePage(namedVersion = 2)
 
         html shouldContain "data-dp-dashboard-version=\"2\""
         // The chip names the viewed version — the #369 banner's successor.
         html shouldContain "data-dp-viewed-label"
         html shouldContain "v2 · draft"
-        // The selector rows never boost: a draft's bundle can differ from the release's
-        // (the one-bundle rule, #369 review F1).
+        // The selector rows are boosted: the shell stays and the main content is replaced.
         Regex("<a[^>]*hx-boost=\"true\"[^>]*href=\"/dashboards/${board1.id}\\?version=[12][^>]*>").findAll(html).toList().size shouldBe 2
         html shouldContain "href=\"/dashboards/${board1.id}?version=1"
     }
 
     @Test
-    fun `#409 - the choose-a-version state with no admitted draft shows the NAME and loads no bundle`() {
+    fun `#409 - the choose-a-version state with no admitted draft shows the NAME and loads no chart script`() {
         val html =
             engine.process(
                 "dashboards/board",
@@ -267,13 +263,13 @@ class DashboardUiRenderTest {
         html shouldContain "has no release yet"
         html shouldContain "href=\"/dashboards/${board1.id}?version=2&amp;tab=board\""
         val body = html.replace(Regex("<!--[\\s\\S]*?-->"), "")
-        body shouldNotContain "plotly-2d.min.js"
+        body shouldNotContain JsRenderedAssetConfig.PREFIX
         body shouldNotContain "dashboards-page.js"
         body shouldNotContain "dashboard.not_found"
     }
 
     @Test
-    fun `a board that cannot run renders the refusal state and no bundle at all`() {
+    fun `a board that cannot run renders the refusal state and no chart script at all`() {
         val html =
             engine.process(
                 "dashboards/board",
@@ -302,7 +298,7 @@ class DashboardUiRenderTest {
                 },
             )
 
-        // Never a blank page: the refusal region, server-filled — and not one byte of Plotly
+        // Never a blank page: the refusal region, server-filled — and not one chart script
         // loaded for a board that has nothing to render into. The NAME stays in the h1.
         html shouldContain "This dashboard has no release to view yet."
         html shouldContain "dashboard.not_found"
@@ -310,8 +306,8 @@ class DashboardUiRenderTest {
         // The refusal is SHOWN: the hidden attribute is gone from the region's open tag.
         html shouldNotContain Regex("id=\"dp-board-refusal\"[^>]*hidden")
         val body = html.replace(Regex("<!--[\\s\\S]*?-->"), "")
-        body shouldNotContain "plotly-2d.min.js"
-        body shouldNotContain "plotly-3d.min.js"
+        body shouldNotContain JsRenderedAssetConfig.PREFIX
+        body shouldNotContain "/js/datapipelines-dashboard-chart.js"
         body shouldNotContain "dashboards-page.js"
     }
 
@@ -353,16 +349,13 @@ class DashboardUiRenderTest {
     }
 
     /** The workspace page through the real layout: the chrome plus the board's own model. */
-    private fun workspacePage(
-        bundle: String,
-        namedVersion: Int? = null,
-    ): String =
+    private fun workspacePage(namedVersion: Int? = null): String =
         engine.process(
             "dashboards/board",
             webContext("/dashboards/${board1.id}").apply {
                 setVariable("dashboardId", board1.id.toString())
                 setVariable("dashboardName", board1.name)
-                setVariable("bundle", bundle)
+                setVariable("chartEngineScripts", JsRenderedAssetConfig.scripts)
                 setVariable("hasSelected", true)
                 setVariable("viewedVersion", namedVersion ?: 1)
                 setVariable("viewedLabel", if (namedVersion != null) "v2 · draft" else "v1 · released · current")

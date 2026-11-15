@@ -88,6 +88,53 @@ test("the hostile fixture is text in the DOM: every hostile string is a text nod
   assert.ok(texts.includes("__proto__"), "a category named __proto__ is drawn");
 });
 
+test("writeDom sets what it is handed: each colour its primitive's literal, the theme's font, no var() (look contract §9)", () => {
+  // A theme as the page's adapter hands it: tokens resolved off the stylesheet, so the picture carries them as values.
+  const theme = { base: "dark", tokens: { "--chart-grid": [1, 2, 3], "--chart-canvas": [250, 251, 252], "--font-sans": "Inter, \"Noto Sans\", sans-serif" } };
+  let colours = 0, fonts = 0, pictures = 0;
+  for (const name of ["look-one-series", "look-eight-series", "hostile", "look-empty-zero-rows"]) {
+    const f = FIXTURES.find((x) => x.name === name);
+    const prims = R.render(inputOf(f.fixture, 960, 540, { theme })).primitives;
+    const { svg } = fakeDocument();
+    R.writeDom(prims, svg, theme);
+    const els = [];
+    walk(svg, (el) => {
+      if (el.tag !== "svg") els.push(el);
+      for (const [n, v] of el.attrs) assert.ok(!String(v).includes("var("), name + ": " + n + "=" + v);
+    });
+    // The DOM is the plan's tree in document order, one element per primitive: pair them and compare value by value.
+    assert.equal(els.length, prims.length, name + ": one element per primitive");
+    for (let i = 0; i < prims.length; i++) {
+      const p = prims[i], a = Object.fromEntries(els[i].attrs);
+      if (p.fill !== undefined) {
+        assert.equal(a.fill, p.fill === null ? "none" : p.color, name + " #" + i + " fill");
+        colours++;
+      }
+      if (p.stroke !== undefined && p.stroke !== null) {
+        assert.equal(a.stroke, p.strokeColor, name + " #" + i + " stroke");
+        colours++;
+      }
+      if (p.k === "text") {
+        assert.equal(a["font-family"], theme.tokens["--font-sans"], name + " #" + i + " font");
+        fonts++;
+      }
+    }
+    pictures++;
+  }
+  assert.equal(pictures, 4);
+  assert.ok(colours > 150 && fonts > 50, "colours " + colours + ", fonts " + fonts + " compared");
+  const grid = R.render(inputOf(FIXTURES.find((x) => x.name === "look-one-series").fixture, 480, 360, { theme })).primitives.filter((p) => p.stroke === "--chart-grid");
+  assert.ok(grid.length > 0 && grid.every((p) => p.strokeColor === "#010203"), "the grid carries the resolved colour");
+  // No theme: the engine's default font, as a literal.
+  const { svg } = fakeDocument();
+  R.writeDom(R.render(inputOf(FIXTURES.find((x) => x.name === "look-one-series").fixture, 480, 360)).primitives, svg);
+  const families = [];
+  walk(svg, (el) => {
+    for (const [n, v] of el.attrs) if (n === "font-family") families.push(v);
+  });
+  assert.ok(families.length > 0 && families.every((v) => v === "Noto Sans"), families.join(" | "));
+});
+
 test("writeString escapes every text and attribute value: the hostile fixture holds no element of its own, in both forms", () => {
   const prims = R.render(inputOf(hostile.fixture, 960, 540)).primitives;
   for (const form of ["page", "standalone"]) {

@@ -215,20 +215,18 @@
     "files": [
       "js/datapipelines-dashboard.js",
       "js/datapipelines-dashboard-chart.js",
-      "js/datapipelines-dashboard-plotly.js",
       "js/datapipelines-dashboard-table.js",
       "js/datapipelines-dashboard-kpi.js"
     ],
     "sha256": {
-      "js/datapipelines-dashboard.js": "bf31d4e8d8a6677c1fc3dd5c94a97b8a8ac3a0f8fff40897dac9bcec205f4631",
-      "js/datapipelines-dashboard-chart.js": "4b56c48b95f28d0ebfddc753afbdcd527745edcd0b6c4b76500984905c6bf42c",
-      "js/datapipelines-dashboard-plotly.js": "85da47639cfc25ffe658becc713808e8294b6e547fa27265505201b9dc35c3fb",
+      "js/datapipelines-dashboard.js": "2e175286823e60f7cc7980ec8e22b223174d3e2f279a60f1553b7c9a438fb24f",
+      "js/datapipelines-dashboard-chart.js": "0373bb0ad04a175b690d408dbf5532903d50a07fdef2f5071ac688fd880569a6",
       "js/datapipelines-dashboard-table.js": "3412e46ba63d4e045ac33fc7d3305352ab9da5bff015863b5dc96d4e56ce9e39",
       "js/datapipelines-dashboard-kpi.js": "1de1ea45789aebece9397f7c87622eb7cd27705874ce009b4623ce28f3bbcb28"
     },
     "source": "modules/web/src/main/resources/static/js/ (built by no one — hand-authored ES2019 IIFEs)",
     "license": "AGPL-3.0-only",
-    "note": "#10 L3a — NEW convention (the implementation spec's §10.1): the first-party client runtime and its adapters are versioned in this manifest with their sha256 like every vendored asset, so VendoredPlotlyAuditTest pins their bytes too — a changed first-party file must move its hash here in the same commit, and a hash that drifts from the served file is red. The versions are the ADAPTER versions the wire contract names (table and kpi answer \"1\"), not npm versions."
+    "note": "#10 L3a — NEW convention (the implementation spec's §10.1): the first-party client runtime and its adapters are versioned in this manifest with their sha256 like every vendored asset, so FirstPartyRuntimeAuditTest pins their bytes too (#987: moved out of the vendored library's audit) — a changed first-party file must move its hash here in the same commit, and a hash that drifts from the served file is red. The versions are the ADAPTER versions the wire contract names (table and kpi answer \"1\"), not npm versions."
   },
   "htmx": {
     "package": "htmx.org",

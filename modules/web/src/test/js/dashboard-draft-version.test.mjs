@@ -118,7 +118,6 @@ function scriptedAdapter() {
 function configPayload() {
   return {
     configuration_id: "cfg-draft",
-    renderer: { bundle: "2d" },
     dashboard: { id: "d1", name: "dbr/board", version: 3, status: "DRAFT" },
     layout: { columns: 12, grid: [] },
     parameter_set: null,

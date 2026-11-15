@@ -32,7 +32,7 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction(
             "() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })",
         )
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
 
         // The 303 landed on the canonical workspace URL, Board tab, viewing the draft.
         page.url() shouldContain "/dashboards/$board?version=2"
@@ -100,7 +100,7 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction(
             "() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })",
         )
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
         page.waitForTimeout(500.0)
         page.screenshot(
             com.microsoft.playwright.Page
@@ -114,7 +114,7 @@ class DashboardDraftPreviewBrowserTest : DashboardBrowserSuite() {
         ensureTheme("dark")
         page.reload()
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
         page.waitForTimeout(500.0)
         page.screenshot(
             com.microsoft.playwright.Page

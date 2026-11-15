@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import co.datapipelines.web.ui.JsRenderedAssetConfig
 import com.microsoft.playwright.Page
 import java.sql.DriverManager
 
@@ -12,7 +13,8 @@ import java.sql.DriverManager
  * on a policy the app no longer sends.
  *
  * The host page is where the conformance cases run: `DatapipelinesDashboard.init` with the
- * first-party composite adapter, the three vendored renderers, and the bundle the request names.
+ * first-party composite adapter and the three vendored renderers, after the chart engine's files in
+ * the list the product's own templates load (`JsRenderedAssetConfig.scripts`, #987 D2).
  * Everything else — the vendor scripts, the stylesheets, the runtime routes, the parameter engine,
  * the refresh stream — is the REAL application over the browser's own session; nothing here
  * bypasses the product's auth.
@@ -74,9 +76,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
      * The glue the fulfilled page loads as a FILE (the CSP allows no inline script): it boots the
      * runtime with the first-party composite adapter and exposes what the assertions read. The
      * renderers are wrapped at registration time so a case can COUNT renders — the mechanical
-     * count, never an impression. #860: the wrapper keeps every property of the registration
-     * (the chart kind's `libraries`, `judge` and `needsBundle` included) and replaces `create`
-     * only, and init declares `charts` as the product's pages do.
+     * count, never an impression. #860: the wrapper keeps every property of the registration and
+     * replaces `create` only; #987: init passes no `charts`, as the product's pages do.
      */
     protected val hostGlueJs =
         """
@@ -111,7 +112,6 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
               dashboard: { id: params.get('id'), version: 'released' },
               container: container,
               adapter: runtime.adapters(container),
-              charts: window.Plotly ? { library: 'plotly', instance: window.Plotly } : undefined,
               options: {
                 onNotification: function (n) { window.__dp.notifications.push(n); },
               },
@@ -132,14 +132,17 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
 
     /**
      * Serves the host page (+ its glue) at `/test/dashboards/host` under the LIVE CSP of a real
-     * response, with the Plotly bundle the query names. The page loads the same design-system
-     * sheets the app layout loads, so the chart tokens resolve exactly as they do in production.
+     * response. The page loads the same design-system sheets the app layout loads, so the chart
+     * tokens resolve exactly as they do in production, and the chart engine's files from the list
+     * the product's templates load (#987 D2) — never a hand-written run of tags.
      */
     protected fun installHostPage(
-        bundle: String = "2d",
         theme: String = "dark",
+        stylesheets: List<String> = HOST_STYLESHEETS,
     ) {
         val cspHeader = fetchLiveCsp()
+        val engineTags = JsRenderedAssetConfig.scripts.joinToString("\n") { "  <script src=\"$it\"></script>" }
+        val sheets = stylesheets.joinToString("\n") { "  <link rel=\"stylesheet\" href=\"${it.replace("{theme}", theme)}\">" }
         val html =
             """
             <!doctype html>
@@ -147,20 +150,13 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             <head>
               <meta charset="utf-8">
               <title>dashboard host</title>
-              <link rel="stylesheet" href="/vendor/design-system/tokens.css">
-              <link rel="stylesheet" href="/vendor/design-system/themes/$theme.css">
-              <link rel="stylesheet" href="/css/app.css">
-              <link rel="stylesheet" href="/css/dashboards.css">
-              <link rel="stylesheet" href="/vendor/plotly/plotly.css">
-              <!-- #456: the host must opt out before the bundle's first style lookup. -->
-              <template id="plotly.js-style-global" class="no-inline-styles"></template>
+            $sheets
             </head>
             <body>
               <main id="board"></main>
-              <script src="/vendor/plotly/plotly-$bundle.min.js" data-dp-plotly-bundle="$bundle"></script>
+            $engineTags
               <script src="/js/datapipelines-dashboard.js"></script>
               <script src="/js/datapipelines-dashboard-chart.js"></script>
-              <script src="/js/datapipelines-dashboard-plotly.js"></script>
               <script src="/js/datapipelines-dashboard-table.js"></script>
               <script src="/js/datapipelines-dashboard-kpi.js"></script>
               <script src="/test/dashboards/host-glue.js"></script>
@@ -192,6 +188,17 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     }
 
     /**
+     * The chart engine's scripts on [target] (#987 D2): the path of every script under [JsRenderedAssetConfig.PREFIX], in
+     * document order. A page that draws charts loads exactly [JsRenderedAssetConfig.scripts], each once.
+     */
+    @Suppress("UNCHECKED_CAST")
+    protected fun engineScripts(target: Page = page): List<String> =
+        target.evaluate(
+            "p => Array.from(document.scripts).filter(s => s.src).map(s => new URL(s.src).pathname).filter(n => n.startsWith(p))",
+            JsRenderedAssetConfig.PREFIX,
+        ) as List<String>
+
+    /**
      * The LIVE policy, copied off a real HTML response — the one way a browser-tests module can
      * read what the app actually sends (SecurityHeaders is out of reach by design).
      */
@@ -216,7 +223,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             val scripts =
                 page.evaluate(
                     "() => Array.from(document.scripts).map(function (s) {" +
-                        " return s.src + ' dp=' + (s.getAttribute('data-dp-plotly-bundle') || ''); })",
+                        " return s.src; })",
                 )
             val readyState = page.evaluate("() => document.readyState")
             val body = page.evaluate("() => document.body ? document.body.innerHTML.slice(0, 300) : 'no body'")
@@ -263,8 +270,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         )
         val chart =
             seedVisualization("$root/visualizations/chart", ChartBrowserFixtures.barBody("x", "INTEGER", "y"))
-        // The 2-row slot #386's plot-area floor measures (DashboardGridRowUnitBrowserTest): the figure main's Plotly seed
-        // drew, without axis titles — a chart's default band title is a second line under the ticks (#860 handback).
+        // The 2-row slot DashboardGridRowUnitBrowserTest measures, drawn without axis titles — a chart's default band
+        // title is a second line under the ticks (#860 handback).
         val slowChart =
             seedVisualization("$root/visualizations/slowchart", ChartBrowserFixtures.barBody("x", "INTEGER", "y", axisTitles = false))
         val cells =
@@ -324,6 +331,21 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             }
         sql("UPDATE dashboard_versions SET body_json = $layout WHERE dashboard_id = '$board'::uuid")
         return board
+    }
+
+    /**
+     * Pins [grid] (the layout's grid entries, JSON) on every version of [board] (#987): a chart the composite
+     * auto-places into a twelfth-width cell is `too-small` for the engine (record §4.3) and draws nothing, so a case
+     * that reads a drawn chart pins its slot.
+     */
+    protected fun pinGrid(
+        board: String,
+        grid: String,
+    ) {
+        sql(
+            "UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '{layout,grid}', '$grid'::jsonb) " +
+                "WHERE dashboard_id = '$board'::uuid",
+        )
     }
 
     /**
@@ -1038,6 +1060,14 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     }
 
     protected companion object {
+        /** The host page's sheets, in order (`{theme}` is the page's theme). */
+        val HOST_STYLESHEETS =
+            listOf(
+                "/vendor/design-system/tokens.css",
+                "/vendor/design-system/themes/{theme}.css",
+                "/css/app.css",
+                "/css/dashboards.css",
+            )
         const val DESKTOP_BOARD_WIDTH = 1440
 
         // Independent scenario inputs: expanded menu, this desktop band's padding, and a

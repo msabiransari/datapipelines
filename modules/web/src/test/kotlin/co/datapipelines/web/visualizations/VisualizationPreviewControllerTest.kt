@@ -14,6 +14,7 @@ import co.datapipelines.visualization.VisualizationErrorCodes
 import co.datapipelines.visualization.VisualizationReader
 import co.datapipelines.visualization.VisualizationService
 import co.datapipelines.visualization.VisualizationTestCapabilities
+import co.datapipelines.web.ui.JsRenderedAssetConfig
 import co.datapipelines.web.ui.UiProperties
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
@@ -111,7 +112,7 @@ class VisualizationPreviewControllerTest {
         response.status shouldBe 200
         model["available"] shouldBe true
         model["activeTheme"] shouldBe "light"
-        model["bundle"] shouldBe "2d"
+        model["chartEngineScripts"] shouldBe JsRenderedAssetConfig.scripts
         val json = model["previewJson"] as String
         json shouldNotContain "SECRET-TOKEN" // the page never echoes its capability
         json shouldNotContain "</script" // a case name cannot close the block
@@ -120,6 +121,12 @@ class VisualizationPreviewControllerTest {
         cases.size() shouldBe 3
 
         val data = cases[0]
+        // The configuration's members, whole and in order: the board's own (#987 D5, O-13).
+        data
+            .path("config")
+            .fieldNames()
+            .asSequence()
+            .toList() shouldBe CONFIG_MEMBERS
         val occurrence = data.path("config").path("visualizations")[0]
         occurrence.path("renderer").path("kind").asText() shouldBe "chart"
         data
@@ -219,5 +226,24 @@ class VisualizationPreviewControllerTest {
                 ),
             ),
         )
+    }
+
+    private companion object {
+        /** A case's configuration members, whole and in order: the board's own, no chart library among them (#987 O-13). */
+        val CONFIG_MEMBERS =
+            listOf(
+                "configuration_id",
+                "dashboard",
+                "layout",
+                "parameter_set",
+                "visualizations",
+                "groups",
+                "actions",
+                "action_controls",
+                "parameter_scopes",
+                "parameter_state",
+                "timeouts",
+                "budgets",
+            )
     }
 }

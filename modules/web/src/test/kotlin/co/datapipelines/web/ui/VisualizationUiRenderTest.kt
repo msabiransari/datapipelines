@@ -21,7 +21,8 @@ import java.util.UUID
 /**
  * #399 — the Visualizations pages pinned at the RENDER (DashboardUiRenderTest's mould): the flat catalog
  * (its rows, its empty and lens-unavailable states; since #466 no sidebar presentation is left in the
- * fragment — the tree is the REST one), the workspace page's ONE-bundle contract and its tabs, the
+ * fragment — the tree is the REST one), the workspace page's chart scripts (the engine's files from the server's list,
+ * #987) and its tabs, the
  * choose-a-version state, and every pane's stated contract — the Preview's fixture label and its exact
  * empty-state sentence, the Evidence cap and its screenshot-or-"no screenshot" rule, the Used-by empty
  * state, the Versions verbs per role, and the lifecycle dialogs (refusals before the button, the ONE
@@ -119,14 +120,27 @@ class VisualizationUiRenderTest {
     // ------------------------------------------------------------------ the workspace page
 
     @Test
-    fun `the workspace declares ONE Plotly bundle, the viewed chip, five tabs and lazy panes for the viewed version`() {
-        val html = workspace(bundle = "2d", activeTab = "preview")
+    fun `the workspace loads the chart engine's files then the preview runtime, the viewed chip, five tabs and lazy panes`() {
+        val html = workspace(withScripts = true, activeTab = "preview")
         val body = html.replace(Regex("<!--[\\s\\S]*?-->"), "")
 
-        Regex("<script[^>]*plotly-[23]d\\.min\\.js").findAll(body).toList().size shouldBe 1
-        body shouldContain "/vendor/plotly/plotly-3d.min.js"
         body shouldContain "data-page-assets"
-        body shouldContain "/js/visualization-preview.js"
+        // The catalog opens with the chart scripts, whole and in order (#987 D2): the engine's files from the
+        // server's list, then the runtime, its renderers and the preview glue.
+        val chartScripts =
+            JsRenderedAssetConfig.scripts +
+                listOf(
+                    "/js/datapipelines-dashboard.js",
+                    "/js/datapipelines-dashboard-chart.js",
+                    "/js/datapipelines-dashboard-table.js",
+                    "/js/datapipelines-dashboard-kpi.js",
+                    "/js/visualization-preview.js",
+                )
+        Regex("src=\"(/[^\"]+)\"")
+            .findAll(body.substringAfter("<template data-page-assets>").substringBefore("</template>"))
+            .map { it.groupValues[1] }
+            .toList()
+            .take(chartScripts.size) shouldBe chartScripts
         body shouldContain ">acme/charts/revenue<"
         body shouldContain "v3 · released · current"
         Regex("data-dp-tab=\"").findAll(body).toList().size shouldBe 6
@@ -156,10 +170,10 @@ class VisualizationUiRenderTest {
     }
 
     @Test
-    fun `a selected workspace with no bundle declares no Plotly or preview runtime`() {
-        val body = workspace(bundle = null, activeTab = "preview").replace(Regex("<!--[\\s\\S]*?-->"), "")
+    fun `a selected workspace without the engine's script list loads no chart script and no preview runtime`() {
+        val body = workspace(withScripts = false, activeTab = "preview").replace(Regex("<!--[\\s\\S]*?-->"), "")
 
-        Regex("<script[^>]*plotly-[23]d\\.min\\.js").findAll(body).toList().size shouldBe 0
+        body shouldNotContain JsRenderedAssetConfig.PREFIX
         body shouldNotContain "/js/visualization-preview.js"
         body shouldNotContain "/js/datapipelines-dashboard"
         body shouldContain "data-page-assets"
@@ -168,7 +182,7 @@ class VisualizationUiRenderTest {
 
     @Test
     fun `the active tab is the only pane without the hidden attribute`() {
-        val html = workspace(bundle = "2d", activeTab = "evidence")
+        val html = workspace(withScripts = true, activeTab = "evidence")
 
         Regex("id=\"viz-pane-evidence\"[^>]*hidden").containsMatchIn(html) shouldBe false
         for (other in listOf("preview", "overview", "used-by", "dependencies", "versions")) {
@@ -178,7 +192,7 @@ class VisualizationUiRenderTest {
     }
 
     @Test
-    fun `the choose-a-version state keeps the NAME, offers the versions, and loads no bundle and no panes`() {
+    fun `the choose-a-version state keeps the NAME, offers the versions, and loads no chart script and no panes`() {
         val html =
             engine.process(
                 VisualizationUiController.WORKSPACE_VIEW,
@@ -200,7 +214,7 @@ class VisualizationUiRenderTest {
         body shouldContain "data-viz-choose-version"
         body shouldContain "Choose a version"
         body shouldContain "href=\"/visualizations/$vizId?version=1&amp;tab=preview\""
-        body shouldNotContain "plotly-2d.min.js"
+        body shouldNotContain JsRenderedAssetConfig.PREFIX
         body shouldNotContain "/js/visualization-preview.js"
         body shouldNotContain "data-dp-pane"
     }
@@ -208,7 +222,7 @@ class VisualizationUiRenderTest {
     /** #714: the record follows the code — both version-link surfaces render `hx-boost="true"` (markup unchanged). */
     @Test
     fun `every version link on the workspace is a boosted, rail-preserving navigation that keeps the tab`() {
-        val document = Jsoup.parse(workspace(bundle = "2d", activeTab = "preview"))
+        val document = Jsoup.parse(workspace(withScripts = true, activeTab = "preview"))
         val versionLinks = document.select("nav.dp-versions a")
         println("#714 rendered version links: nav.dp-versions=${versionLinks.size} (the fixture carries 2 versions)")
         versionLinks.map { it.attr("hx-boost") } shouldBe listOf("true", "true")
@@ -223,7 +237,6 @@ class VisualizationUiRenderTest {
                 VisualizationUiController.WORKSPACE_VIEW,
                 webContext("/visualizations/$vizId").apply {
                     workspaceVariables(activeTab = "preview")
-                    setVariable("bundle", null)
                     setVariable("hasSelected", false)
                     setVariable("viewedVersion", null)
                     setVariable("viewedLabel", VisualizationUiController.NO_VERSION_SELECTED)
@@ -585,14 +598,14 @@ class VisualizationUiRenderTest {
     }
 
     private fun workspace(
-        bundle: String?,
+        withScripts: Boolean,
         activeTab: String,
     ): String =
         engine.process(
             VisualizationUiController.WORKSPACE_VIEW,
             webContext("/visualizations/$vizId").apply {
                 workspaceVariables(activeTab)
-                setVariable("bundle", bundle)
+                setVariable("chartEngineScripts", if (withScripts) JsRenderedAssetConfig.scripts else null)
                 setVariable("hasSelected", true)
                 setVariable("viewedVersion", 3)
                 setVariable("viewedLabel", "v3 · released · current")

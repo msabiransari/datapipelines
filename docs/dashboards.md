@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.74 — the mechanical check judges a chart case from the chart engine's canonical render at 640 × 400, a chart save has two layers and never draws, its write answers no `warnings`, and the retired `plotly` kind is refused as any unknown kind (§2.1, §2.1.2, §3.4, §6.1, #986) beside the Release dialogs render the shared release plan and a bare `release_pinned_*` is refused 428 (§3.1, §3.2, §7, #876) beside the dashboards and visualizations workspaces gain a Dependencies tab (§7, #876) beside the explicit action buttons are unavailable while the action gate is closed, `aria-disabled` and described by one sentence per refusal (visible for invalid parameters only), through the optional `renderActionAvailability` hook, and an in-flight refresh does not close the gate (§6.2, #548) beside a 2-row chart with both axis titles is held to a 40% plot-area floor, #386's half kept for untitled axes (§6.3, #870) beside `renderData` has one signature, the mounted handle's `(occurrenceRef, rows, bindings)`, and the composite's adapter-level function forwards exactly those three (§6.2, #852) beside the activity dock's toggle reads Expand while the dock is collapsed and Collapse while it is open (§7, #842) beside a refresh and a draft preview send a read-only request, so each source's DQL runs in the per-lease read-only mode where the database enforces it (§5.1, #463) beside the `chart` kind (the chart document v1, its served schema and three save layers) replaces the retired `plotly` kind, a chart occurrence's configuration carries its encoded fields' `columns`, `init` takes `charts`, and the runtime's mount refusals are tabled (§2.1, §3.4, §5.2, §5.3, §6.1–§6.4, §7, #860) beside the activity dock starts collapsed on short windows until a first gesture, and both docks use one handle class (§7, #800/#801) beside a never-admissible refresh refusal is published with no Retry offer and a fixed sentence naming the configuration key to raise, while a busy refusal keeps its Retry offer (§5.5, #771) beside a board taller than its region scrolls inside it with the activity dock kept in main, and the dock's height is the shared splitter's, remembered across tab switches, Back and reload (§7, #783) beside a refresh needing more distinct executions than the instance can ever admit is refused at once with `details.reason = never_admissible`, and startup refuses or warns on the ceilings that would cause it (§5.5, #762) beside a refresh sent for an older selection may render its result but never clears a later commit's stale mark (§6.6, #550) beside the Board tab flexes its panes into a full-height column so the activity dock stays visible without scrolling main (§7, #612) beside a 1280 px window with the resource browser shown already puts the board region under the filters' 820 px drawer threshold, and a resize of the browser at a fixed viewport crosses it (§7, #573) beside small Plotly cards keep a drawable body and renderer rejections leave a bounded browser diagnostic (§6.6, #536); committed parameter changes mark their affected cards stale after parent re-evaluation or immediately for leaves, and retain the mark through success settling (§6.6, #542) beside a stale card's border is the warning accent, not #536's gray (§6.6, #544) beside the card's border carries every state and the status chip is never shown: one class vocabulary shared by the runtime and the sheet, an animated loading edge, green success for three seconds, a stale border, red error and abort in both phases (§6.2, §6.6, #536) beside explicit action-control buttons in the filters pane (§6.2/§7, #543) beside a draft-only workspace opens its admitted draft directly, labelled (§7, #537) beside the default heatmap’s pixelated rendering hint is a CSSOM write under the enforced policy (§6.6, #531) beside Plotly’s colorbar fills are reset by removing the style attribute, so a colorbar draws under the enforced policy and the collector has no exception left (§6.4, §6.6, #525) beside the missing-marker fallback creates a CSP-compliant template marker (§6.6, #526) beside Plotly’s host marker precedes bundle load and CSP refusals are collected by provenance (§6.6, #456) beside the parameters pane's error row wraps its sentence as prose and its code chip stays inside the panel (§6.2, §7, #507) beside the drawer's Close heads the form and a rejected typed value stays in its field beside its error while the last valid value travels (§6.2, §7, #496/#497) beside the parameters pane's error row speaks the design system's field error and every checkbox or radio option is one row (§6.2, §7, #498/#499) beside the KPI has no label of its own and its card heading titles it (§2.1.2, §6.3, #475, owner ruling) beside the filters drawer follows the board region at 820 px (§7, #492) beside the compact chart card: the chip on the heading line, the message over the body's lower edge (§6.2, §6.6, #501) beside the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.75 — the pages draw charts with the product's own chart engine, its files loaded from one list, `init` refuses a `charts` option and the chart tokens are the look contract's, set once in `app.css` (§6.1–§6.4, §6.6, §7, #987) beside the mechanical check judges a chart case from the chart engine's canonical render at 640 × 400, a chart save has two layers and never draws, its write answers no `warnings`, and the retired `plotly` kind is refused as any unknown kind (§2.1, §2.1.2, §3.4, §6.1, #986) beside the Release dialogs render the shared release plan and a bare `release_pinned_*` is refused 428 (§3.1, §3.2, §7, #876) beside the dashboards and visualizations workspaces gain a Dependencies tab (§7, #876) beside the explicit action buttons are unavailable while the action gate is closed, `aria-disabled` and described by one sentence per refusal (visible for invalid parameters only), through the optional `renderActionAvailability` hook, and an in-flight refresh does not close the gate (§6.2, #548) beside a 2-row chart with both axis titles is held to a 40% plot-area floor, #386's half kept for untitled axes (§6.3, #870) beside `renderData` has one signature, the mounted handle's `(occurrenceRef, rows, bindings)`, and the composite's adapter-level function forwards exactly those three (§6.2, #852) beside the activity dock's toggle reads Expand while the dock is collapsed and Collapse while it is open (§7, #842) beside a refresh and a draft preview send a read-only request, so each source's DQL runs in the per-lease read-only mode where the database enforces it (§5.1, #463) beside the `chart` kind (the chart document v1, its served schema and three save layers) replaces the retired `plotly` kind, a chart occurrence's configuration carries its encoded fields' `columns`, `init` takes `charts`, and the runtime's mount refusals are tabled (§2.1, §3.4, §5.2, §5.3, §6.1–§6.4, §7, #860) beside the activity dock starts collapsed on short windows until a first gesture, and both docks use one handle class (§7, #800/#801) beside a never-admissible refresh refusal is published with no Retry offer and a fixed sentence naming the configuration key to raise, while a busy refusal keeps its Retry offer (§5.5, #771) beside a board taller than its region scrolls inside it with the activity dock kept in main, and the dock's height is the shared splitter's, remembered across tab switches, Back and reload (§7, #783) beside a refresh needing more distinct executions than the instance can ever admit is refused at once with `details.reason = never_admissible`, and startup refuses or warns on the ceilings that would cause it (§5.5, #762) beside a refresh sent for an older selection may render its result but never clears a later commit's stale mark (§6.6, #550) beside the Board tab flexes its panes into a full-height column so the activity dock stays visible without scrolling main (§7, #612) beside a 1280 px window with the resource browser shown already puts the board region under the filters' 820 px drawer threshold, and a resize of the browser at a fixed viewport crosses it (§7, #573) beside small Plotly cards keep a drawable body and renderer rejections leave a bounded browser diagnostic (§6.6, #536); committed parameter changes mark their affected cards stale after parent re-evaluation or immediately for leaves, and retain the mark through success settling (§6.6, #542) beside a stale card's border is the warning accent, not #536's gray (§6.6, #544) beside the card's border carries every state and the status chip is never shown: one class vocabulary shared by the runtime and the sheet, an animated loading edge, green success for three seconds, a stale border, red error and abort in both phases (§6.2, §6.6, #536) beside explicit action-control buttons in the filters pane (§6.2/§7, #543) beside a draft-only workspace opens its admitted draft directly, labelled (§7, #537) beside the default heatmap’s pixelated rendering hint is a CSSOM write under the enforced policy (§6.6, #531) beside Plotly’s colorbar fills are reset by removing the style attribute, so a colorbar draws under the enforced policy and the collector has no exception left (§6.4, §6.6, #525) beside the missing-marker fallback creates a CSP-compliant template marker (§6.6, #526) beside Plotly’s host marker precedes bundle load and CSP refusals are collected by provenance (§6.6, #456) beside the parameters pane's error row wraps its sentence as prose and its code chip stays inside the panel (§6.2, §7, #507) beside the drawer's Close heads the form and a rejected typed value stays in its field beside its error while the last valid value travels (§6.2, §7, #496/#497) beside the parameters pane's error row speaks the design system's field error and every checkbox or radio option is one row (§6.2, §7, #498/#499) beside the KPI has no label of its own and its card heading titles it (§2.1.2, §6.3, #475, owner ruling) beside the filters drawer follows the board region at 820 px (§7, #492) beside the compact chart card: the chip on the heading line, the message over the body's lower edge (§6.2, §6.6, #501) beside the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -144,7 +144,7 @@ each as `{field: [values]}` (§2.1.2).
   | `chart.bindings.mismatch` | save rules | `bindings` present and not the derived map |
 
   The retired `plotly` kind (a native Plotly figure, D12) is refused `visualization.validation.renderer_unsupported`
-  as any unknown kind (`details.reason` `unknown_kind`; the message lists the allowed kinds); Plotly stays as the library the product's pages draw charts with (§6.4).
+  as any unknown kind (`details.reason` `unknown_kind`; the message lists the allowed kinds); the product's pages draw charts with its own chart engine (§6.4, #987).
 - **`table`** — `columns`: a non-empty array (at most 64) of `{label, values, format?, align?}` — `label` a
   non-blank string of at most 120 characters, `values` the placeholder a binding fills, `format` one of `text`,
   `number`, `integer`, `percent`, `date`, `datetime`, `align` one of `left`, `center`, `right`; `page_size` an
@@ -693,7 +693,7 @@ dashboard. The first-party pages are §7 (L3b, since #400 the workspace); the da
 
 The browser half is one vendored script, `static/js/datapipelines-dashboard.js` — plain ES2019, one IIFE,
 no dependencies, no build step — publishing `window.DatapipelinesDashboard`, versioned in the vendor
-manifest with its sha256 like every vendored asset (`VendoredPlotlyAuditTest` pins the bytes; a hand
+manifest with its sha256 like every vendored asset (`FirstPartyRuntimeAuditTest` pins the bytes; a hand
 edit must move the manifest in the same commit). It owns the protocol below and NOTHING else: it never
 renders a chart (the renderers do), never evaluates a parameter (the server does), and never lets a
 stale frame touch the DOM.
@@ -706,7 +706,6 @@ const instance = DatapipelinesDashboard.init({
   dashboard: { id, version: "released" | 2 },  // the preview's named version (§5.2, #369)
   container: HTMLElement,
   adapter: DatapipelinesDashboard.adapters(container, { parametersContainer }),  // or the host's own §6.2 object
-  charts: { library, instance },  // the chart library the page loaded, below — beside options, not inside it
   options: { renderTimeoutMs, onNotification },
 });
 instance.ready   // Promise — resolves after the bootstrap barrier, rejects with the failing step
@@ -723,26 +722,20 @@ view is looking at (§5.2; the server refuses a version the caller may not see, 
 a container that already mounts an instance throws `DashboardAlreadyMounted`; after `dispose()` the
 container is unmarked and a fresh `init` is legitimate.
 
-**`charts`** — a key of `init`'s argument beside `options` — declares the chart library the page draws `chart` occurrences with (#860, design record
-2026-11-06 §5.2): `{ library, instance }`. `library` is one of the eight chart library identities — `plotly`,
-`echarts`, `chartjs`, `apexcharts`, `vegalite`, `highcharts`, `amcharts5`, `recharts` — and `instance` is that
-library's entry value as the library documents it, an object or a constructor function. The product's pages pass
-`{ library: "plotly", instance: window.Plotly }`; the runtime never looks a library up on `window` itself, and it only
-calls the instance to draw, resize and purge (Plotly: `react`, `Plots.resize`, `purge`) — never serializes or evaluates
-it. A board without a `chart` occurrence needs no `charts`. `init` refuses a malformed `charts` synchronously with
-`init.invalid`: not an object, the chart kind (`datapipelines-dashboard-chart.js`) not loaded before `init`, a
-`library` outside the eight (`details.libraries` lists them), or an `instance` that is neither an object nor a
-function; the message never echoes the host's value. A declared library still needs its converter loaded (the product
-ships Plotly's, `datapipelines-dashboard-plotly.js`, for the bar family); §6.2's refusals name what is missing.
+**No `charts` option (#987).** Charts are drawn by the datapipelines client library — the product's own chart
+engine, whose files the page loads before the runtime (§6.4) — so a page declares no chart library. `init` given a
+`charts` key, whatever its value, throws `init.invalid` with the sentence "charts is no longer an option: charts are
+drawn by the datapipelines client library"; the message never echoes the host's value.
 
 While drawing, a chart publishes render warnings — `{ scope: "render", severity: "warning", code, name, refreshId }`,
-each code once per occurrence per refresh, superseded by the next refresh's frame: `chart.rule.no-data` (no rows to
-draw; the card shows its empty state), `chart.rule.null-category` (rows with a null category or series were left out)
-and `chart.degraded.<field>` (the declared library draws that field only approximately; the save judges no library,
-§2.1.2). A warning carries its code and a fixed sentence, never document text or a bound value.
+each code once per occurrence per refresh, superseded by the next refresh's frame: `chart.rule.null-category` (rows
+with a null category or series were left out), `chart.rule.non-finite` (a value too large to draw was left out),
+`chart.frame-too-small`, `chart.text.width-missing`, and `chart.token-refused` — once per refused token, naming it —
+when the page's value of a `--chart-*` token is not one that token may hold and its default was drawn (§6.3). No rows
+is not a warning: the chart draws its no-data picture and the card shows its empty state. A warning carries its code
+and a fixed sentence, never document text or a bound value.
 
-Bootstrap is the four-step barrier, each step awaited: validate the adapter and the renderer/bundle
-pair → fetch the configuration → mount the layout → fetch and render the parameter state (an explicit
+Bootstrap is the four-step barrier, each step awaited: validate the adapter → fetch the configuration → mount the layout → fetch and render the parameter state (an explicit
 no-op without a set) → mount the occurrences → invoke the `initial` actions. Any failure rejects
 `ready`, publishes a notification naming the step, and disposes the instance — nothing half-mounted
 ever executes.
@@ -754,7 +747,7 @@ of them, and a no-op is not conformant (the conformance suite drives real behavi
 
 | Function | The host does | The runtime guarantees |
 |---|---|---|
-| `mountLayout(layout) → Promise` | build the grid from the system layout; the first-party adapter's rows are each one `--dashboard-row-unit` (app.css, default `var(--space-20)` = 5rem), so a slot of `h` rows is `h` units plus the gaps between them tall and a figure's height is its slot's less the card's compact chrome (#501: one heading line, the card's border and padding), subject to Plotly's minimum drawable body (§6.6); the empty default slot takes no row (`dashboards.css`); below `layout.breakpoint_px` (640 when absent; clamped to the server's 1–10 000, a non-number is the default), measured on the composite host's content width, the adapter places every item across all 12 columns, stacked in grid order (by `y`, then `x`) with its own row span — the row unit unchanged. A 0-wide host holds the stored grid until layout; the host's `ResizeObserver` re-places on reveal and at a narrow/wide crossing, resizing mounted renderers on crossings, and disconnects on `dispose`; without `ResizeObserver` the stored grid holds. The gap is the `--space-4` token | awaited before anything mounts |
+| `mountLayout(layout) → Promise` | build the grid from the system layout; the first-party adapter's rows are each one `--dashboard-row-unit` (app.css, default `var(--space-20)` = 5rem), so a slot of `h` rows is `h` units plus the gaps between them tall and a figure's height is its slot's less the card's compact chrome (#501: one heading line, the card's border and padding), subject to the chart's minimum drawable body (§6.6); the empty default slot takes no row (`dashboards.css`); below `layout.breakpoint_px` (640 when absent; clamped to the server's 1–10 000, a non-number is the default), measured on the composite host's content width, the adapter places every item across all 12 columns, stacked in grid order (by `y`, then `x`) with its own row span — the row unit unchanged. A 0-wide host holds the stored grid until layout; the host's `ResizeObserver` re-places on reveal and at a narrow/wide crossing, resizing mounted renderers on crossings, and disconnects on `dispose`; without `ResizeObserver` the stored grid holds. The gap is the `--space-4` token | awaited before anything mounts |
 | `mountVisualization(occurrence, renderer) → Promise<handle>` | create the placeholder and its renderer | the handle's `renderData` is the ONLY data path; since #473 the composite wraps every occurrence in a CARD — a bordered article whose heading names the pinned version's `display_name` (the body's, falling back to `config.label`, then the occurrence name), whose `data-dp-viz` attribute the pin rides, and whose border carries the state (§6.6); the status chip is visually hidden (§6.6, #536) and the message overlays the body's lower edge, so neither reserves a row of the card (#501) |
 | `renderParameters(state[, { restore }]) → Promise` | render the FULL server state, hidden and disabled included | awaited INSIDE the parameter gate — the lock releases only after the render resolves; `reset()` passes `{ restore: true }` (#497 — the applied state again, not a new answer; an adapter may ignore it); the composite mounts the pane into `parametersContainer` when the factory's second argument names one (#473 — the first-party page's filters panel BESIDE the chart container, so no adapter's mount scope claims it), APPENDED after the host's own head controls there (#496 — the board drawer's Close stays first), else into the layout container as before (its first child, before the grid); a failing parameter's row is the design system's field-error voice — the sentence first, the catalogued code after it as a muted mono chip (`data-dp-code` carries the codes; composed with createElement/textNode, never a server string as markup) and the row's design-system control wearing the vendored error border while in error (#498) — and a checkbox or radio group is a two-column grid whose every option's box and label share one centred row, the caption and the note/error rows full-width (#499) |
 | `readSelections() → {name: value}` | return every current committed value, in the wire's type | merged over the server state at each evaluation; hidden and disabled values included (D23) |
@@ -803,27 +796,21 @@ CSS grid, text-only parameter controls and the three shipped renderers, which re
 load: `chart` major `1` (`datapipelines-dashboard-chart.js`, the neutral chart document), `table` major `1` and
 `kpi` major `1` (the table and kpi versions are the seeded fixtures' wire value). The composite's own
 `renderData(occurrenceRef, rows, bindings)` forwards the same three arguments to the occurrence's mounted handle; the
-runtime itself calls the handle directly (#852). The chart kind draws through a
-library CONVERTER, registered with it the same way at load —
-`DatapipelinesDashboardChart.registerConverter({library, families, draw, resize, dispose})`; the product ships one,
-Plotly's bar family (`datapipelines-dashboard-plotly.js`, loaded after the chart kind). A host registers its own kind
-(`DatapipelinesDashboard.registerRenderer({kind, version, create})`) or converter before `init`; the renderer `kind`
+runtime itself calls the handle directly (#852). The chart kind draws with the chart engine the page loaded (§6.3,
+§6.4); there is nothing else to register for it. A host registers its own kind
+(`DatapipelinesDashboard.registerRenderer({kind, version, create})`) before `init`; the renderer `kind`
 and `version` on each occurrence's `renderer` are matched against the registrations at bootstrap, before any execution.
 
 **Mount refusals.** Each fails the WHOLE board before anything executes: `init.invalid` throws from `init` itself; the
 others reject `ready` at the renderer judgement, after the configuration is fetched and before the layout mounts — no
-card is drawn and no refresh is sent. The six bootstrap refusals are also published as a `bootstrap` notification
+card is drawn and no refresh is sent. The two bootstrap refusals are also published as a `bootstrap` notification
 carrying the code (§6.1); `init.invalid` is the thrown error alone. None echoes document text.
 
 | Code | When | `details` |
 |---|---|---|
-| `init.invalid` | `init` was called without its required options (`server`, `dashboard`, a container element), with malformed credentials or fixtures, or with a malformed `charts` (§6.1) | `{libraries}` for an unknown chart library, else none |
+| `init.invalid` | `init` was called without its required options (`server`, `dashboard`, a container element), with malformed credentials or fixtures, or with a `charts` key (§6.1) | none |
 | `renderer.unsupported` | an occurrence names no renderer, or a `kind` no loaded script registered | `{kind, name}` (`{name}` without a renderer) |
 | `renderer.version_mismatch` | the occurrence's renderer major is not the one its kind registered | `{kind, name}` |
-| `renderer.two_bundles` | the page declares more than one Plotly bundle (`script[data-dp-plotly-bundle]`, §6.4) | none |
-| `renderer.bundle_insufficient` | the board needs the 3D bundle and the page declared the 2D one (no v1 kind needs 3D) | `{name}` |
-| `chart.library_undeclared` | a `chart` occurrence, and `init` was given no `charts` | `{name}` |
-| `chart.converter_missing` | no converter is loaded for the declared library and the occurrence's chart family | `{library, family, name}` |
 
 **The parameter state the adapter receives is the writer's** (`EvaluateResponseJson` — rest-api
 §21.3): every parameter is a FLAT object — the stored definition's fields (`name`, `label`, `type`,
@@ -850,35 +837,29 @@ renderer shows the resolved value" for this case only).
 
 ### 6.3 The renderers
 
-- **Chart** (`datapipelines-dashboard-chart.js`, #860, design record 2026-11-06 §5.2). ONE adapter for the chart
-  document: `renderData` receives the runtime's columnar delivery `{field: [values]}`, builds the chart's model in the
-  library-neutral core — the band order by the column's type (`columns`, §5.3: exact decimal order for
-  BIGINTEGER/BIGDECIMAL, the UTC digit key for `temporal`), the aggregation (BIG* exact; `mean` rounded half-even at the
-  inputs' scale + 6), the stack, the ticks, the named number formats, the UTC labels and the 32-code-point label cut —
-  and hands it to the declared library's CONVERTER. The server's mechanical check builds the same model in Kotlin, and
-  a parity test runs both over one fixture set. Rows with a null category or series are left out with the
-  `chart.rule.null-category` warning; no rows draw no marks with `chart.rule.no-data` and the card's empty state (§6.1).
+- **Chart** (`datapipelines-dashboard-chart.js`, #860; since #987 the adapter over the js-rendered chart engine,
+  design record 2026-11-14 §5.2). ONE adapter for the chart document, registered as kind `chart`, major `1`. It mounts
+  one `svg.dp-chart` into the card's body and keeps the runtime's columnar delivery `{field: [values]}` while mounted;
+  each draw hands those columns, the column types (`columns`, §5.3), the body's measured frame and the resolved theme
+  to the engine's `render`, the same function the server's mechanical check runs in its sandbox over the same files
+  (§2.1.2). The engine answers one of four states: `rendered` and `no-data` are drawn (the card shows its success or
+  its empty state), `too-small` draws nothing, and `refused` rejects the render with the refusal's fixed sentence,
+  which the card shows as text while the code reported stays `render.failed` (§6.6). The picture reaches the page only
+  through the engine's DOM writer — `createElementNS`, `setAttribute` and `textContent`, never a markup string, a
+  `style` attribute, an `href` or an event attribute — so a data cell such as `<img onerror>` is drawn as text. Rows
+  with a null category or series are left out with the `chart.rule.null-category` warning (§6.1).
   The occurrence's `description`, when set, is the chart's accessible description (`role="img"` and `aria-label`,
   set with `setAttribute`). The card heading names the chart (its `display_name`; a chart has no `presentation`),
   so a `config.title` whose text repeats it exactly (trimmed) and carries no subtitle is not drawn (#473) — a card
-  never prints the same words twice; a title that says more, or carries a subtitle, is drawn whole. The theme reaches the chart at EACH render (D25): the adapter resolves the app's
-  `--chart-*` tokens (canvas, plot, grid, ink, muted, six series colours; app.css, bridged off the theme) and
-  `--font-sans` through a fresh probe element per declared property, and the document's `lang` as the locale; a chart
-  document carries no theme of its own, so nothing in it competes with the tokens.
-- **The Plotly converter** (`datapipelines-dashboard-plotly.js`, the bar family). A pure conversion of the model to
-  Plotly's `{data, layout, config}` — every string that reaches a Plotly text sink (trace names, tick text, hover
-  text, titles, bar text) is escaped (`&`, `<`, `>`) first, because Plotly renders a subset of HTML there and a data
-  cell is DATA, never markup: an `<img onerror>` in a column renders as text. Its host side calls the declared
-  instance ONLY through `react`, `Plots.resize` and `purge`. **The size frame (#386):** the conversion's margins are
-  the reference port's, sized for a 900 × 600 figure, so a 2-row slot (176 px) would keep a sliver of plot; `draw`
-  therefore lays every figure over a compact frame — `margin` `{l: 8, r: 8, t: 8, b: 8, pad: 0}`, `t: 36` with a
-  title and one more line (18 px) with a subtitle — with `automargin: true` on both axes, so each axis's tick labels
-  and title take what they need and no more. A value label drawn past the plotting rectangle takes no automargin, so
-  horizontal outside labels keep the conversion's right margin (sized to the widest label) and vertical ones add one
-  label line on top. An axis whose title is `null` is drawn with no title at all: Plotly reserves a title line for an
-  empty string. #386's half floor holds for a chart whose axes carry `title: null`, the shape a 2-row slot is for; a
-  default chart with both axis titles keeps at least 40% of a 2-row slot for its plot, each title being a second line
-  beside its ticks (#870; both floors measured by `DashboardGridRowUnitBrowserTest.kt`).
+  never prints the same words twice; a title that says more, or carries a subtitle, is drawn whole. **The theme
+  reaches the chart at EACH draw:** the adapter reads every `--chart-*` token the engine holds a default of, and
+  `--font-sans`, off the chart's own cascade and judges each value by the look contract's grammar — an empty value
+  (nobody declared the token) takes the default with nothing reported, a value valid for the token's kind and range is
+  taken, and any other value takes the default with one `chart.token-refused` warning naming the token. A colour
+  reaches the engine as whole-number channels. `app.css` sets the tokens once for every theme (§6.4); a chart document
+  carries no theme of its own, so nothing in it competes with them. The chart redraws from its kept columns, without a
+  request, when its body resizes, when the theme changes (an attribute of the document element, or the colour-scheme
+  media query) and once when the page's fonts are ready.
 - **Table.** `columns[]` (`label`, `values` — the path the binding fills, `format`, `align`),
   `page_size` capping the rows. Every cell is `textContent`.
 - **KPI.** `value` (the bound path), `format` (`number|integer|percent|currency`), `unit`,
@@ -886,24 +867,31 @@ renderer shows the resolved value" for this case only).
   titles it (the occurrence's `presentation.title`, else the pinned visualization's `display_name`).
   `comparison.label` names the comparison line. A zero renders — a zero is a value, not `no-data`.
 
-### 6.4 The two bundles
+### 6.4 The chart engine on the page
 
-Plotly — the library the product's pages draw `chart` occurrences with (§6.3), no longer a visualization kind — is
-vendored as two self-contained custom bundles (D63): `plotly-2d.min.js` (scatter, bar, pie, histogram, box,
-heatmap — the default) and `plotly-3d.min.js` (those plus scatter3d, surface, mesh3d — WebGL). The SERVER's
-`runtime/config` carries `renderer.bundle: "2d" | "3d"`; since the `plotly` kind is retired (#860) it is always
-`"2d"` — the bar family needs nothing more — and the 3D bundle stays vendored for the family that will need it.
-Standalone previews/embeds load exactly one matching bundle and declare it with `data-dp-plotly-bundle`.
-The runtime refuses two declarations, unsupported renderers, incompatible versions and a 3D config on a 2D bundle.
-Both bundles are built from the 4.1.1 tag plus the numbered source patch series `static/vendor/plotly/patches/*.patch`
-— `0001` the colorbar fill reset, `0002` the default heatmap's pixelated hint, both CSSOM writes (§6.6) — by the
-recipe in [Deployment](deployment.md) §6.2A; the manifest pins the bytes.
+The page draws every `chart` occurrence with the product's own chart engine (#987, js-rendered record §5.1): the
+classic scripts of the `js-rendered` module, published as the `JsRendered` namespace. ONE source: the page loads the
+same files the server's sandbox loads, from the engine module's resources, in the order its load-order list gives,
+under `/js/js-rendered/` — the product's own scripts, served like every other page script and under the same page
+policy (`JsRenderedAssetConfig`; only the listed names answer). A page that draws a chart loads, in this order, the
+engine's files, the runtime, the chart adapter, the table and KPI renderers and the page's glue; the server hands
+the templates the engine's list (`chartEngineScripts`), so no page writes its own run of tags. `runtime/config` and
+the preview configuration name no chart library and no script set (rest-api §23.3). An embedding host loads the same
+files from the product's origin (`examples/dashboard-embed/`).
 
-The signed-in shell (#460) lazily loads the existing 3D superset once and reuses it for 2D and 3D artifacts.
-Artifact/catalog/version links preserve the rail through main-content navigation. Destination validation and
-asset preparation precede outgoing disposal. Cached history contains inert markup and mounts once; pipeline
-observation detaches without cancelling execution, while dashboard disposal retains refresh cancellation.
-The loader establishes the existing CSP style marker before executing Plotly and adds no CSP allowance.
+The chart tokens are the look contract's (its §5.1): `app.css` sets every `--chart-*` token once, for all nine
+themes, and no theme file sets one. The seven that follow the theme — canvas, ink, secondary ink, muted, axis, tooltip
+surface and tooltip ink — are each a `var()` of the design-system token the contract names; every other token carries
+the contract's light value where the theme's colour scheme is light and its dark value where it is dark
+(`light-dark()`). `--chart-pad` is the stylesheet's alone: the card that holds a chart is padded with
+`var(--chart-pad, 16px)`, and a host value CSS cannot read as a length gives no padding. `--chart-tip-shadow` is a
+`filter` value set by colour scheme, for the tooltip that a later lane draws.
+
+The signed-in shell (#460) prepares the engine's files once per document, the first time a destination needs them,
+and reuses them. Artifact/catalog/version links preserve the rail through main-content navigation. Destination
+validation and asset preparation precede outgoing disposal. Cached history contains inert markup and mounts once;
+pipeline observation detaches without cancelling execution, while dashboard disposal retains refresh cancellation.
+The loader adds no page-policy allowance.
 
 ### 6.5 Credentials: session and proxy
 
@@ -987,13 +975,12 @@ durable target summary report `abort`, and the chip settles there. An execution 
 refresh (the executor's own abort) stays an `error` at the `abort` stage and the refresh `FAILED`. A delivered `ok`,
 an ordinary error and a timeout keep their recorded outcomes.
 
-A small Plotly card keeps a renderer body of at least `var(--space-16)` (64 px), including
-when its heading wraps. Plotly adds `js-plotly-plot` before measuring, so the minimum applies
-to its first draw too. The card grows to its minimum content height inside the fixed grid
-slot, whose existing overflow scrolls the whole bordered card; grid row spans do not change.
-Tables and KPIs keep their sizing. This avoids a 16 px body being consumed by the compact
-margins and rejecting with “Something went wrong with axis scaling” before a WebGL scene
-exists. Border states, the hidden chip and reduced-motion behavior remain the same (#536).
+A small chart card keeps a renderer body of at least `var(--space-16)` (64 px), including
+when its heading wraps. The chart adapter mounts the engine's `svg.dp-chart` into the body
+before it measures (#987), so the minimum applies to its first draw too. The card grows to its
+minimum content height inside the fixed grid slot, whose existing overflow scrolls the whole
+bordered card; grid row spans do not change. Tables and KPIs keep their sizing. Border states,
+the hidden chip and reduced-motion behavior remain the same (#536).
 
 Notifications are structured — `{instanceId, scope, severity, code, message, retryable, recover}` —
 deduplicated per outcome, delivered to the adapter and `options.onNotification`, and recovered ONLY
@@ -1005,7 +992,10 @@ A renderer rejection (`render.failed`) also writes one browser `console.error` w
 characters) and first four stack lines (at most 300 characters each). Renderer errors can quote
 values, so the diagnostic is bounded text, never the error object, figure or bindings. The card
 and notification retain their fixed public sentence; late or disposed renders cannot publish a
-diagnostic. A render deadline keeps its distinct `render.timeout` state reason.
+diagnostic. A render deadline keeps its distinct `render.timeout` state reason. A chart engine's
+refusal (#987) is the chart's answer, not a fault: the card shows the refusal's fixed sentence as
+text — only a sentence the runtime itself built from the engine's refusal, never words that arrived
+from anywhere else — the code reported stays `render.failed`, and no console line is written.
 
 The parameter lock (§5.6 of the record) covers the WHOLE attempt — the server call AND the host's
 asynchronous application of the accepted state: the gate releases, the committed state installs and
@@ -1021,25 +1011,13 @@ follows the same bounded path: the attempt terminates exactly once and a recover
 `parameters.render_failed` outcome is published. Reset's install yields the same way — a baseline
 re-rendered while a newer evaluation was accepted does not clobber the newer revision.
 
-The CSP design-around: Plotly's bundle would inject one `<style id="plotly.js-style-global">` and fill
-it with `insertRule` at load. Each host pre-places an empty `<template>` with that id and the class
-`no-inline-styles` (Plotly's own opt-out, `src/lib/dom.js`) in its head before any script:
-the shared layout covers boards and visualization workspaces, and the session-less preview
-places its own marker. The runtime's `_ensureStyleElement` runs after fetching configuration,
-too late to prevent bundle-load injection; it finds the host's marker instead. A host that pre-places
-no marker gets one from the fallback, which creates it as the same template — Chromium refuses every
-script-created `<style>` element at insertion as an inline style, with a text child, an empty comment
-or childless alike, while Plotly's check reads the id and the class alone (#526). The page loads the vendored
-`plotly.css` — the release build's own strict-CSP sheet, the same rules the bundle would inject — as a
-real stylesheet under `style-src 'self'`. The bundle injects no global stylesheet; no policy directive is widened;
-the conformance suite proves the rules APPLY and is red when the stylesheet is removed.
-The marker is a template because Chromium refuses even a parser-written empty style element;
-Plotly checks only the id and class, and the template has no stylesheet to inject rules into.
-The preview browser guard records the marker at Plotly's first lookup, checks that it has no sheet rules
-and the linked rules in both themes. The CSP collector exempts an empty-style hash only with
-harness provenance; a refusal from an application URL, including vendor and page-loader scripts,
+The page policy needs nothing for the charts (#987): the chart engine writes no style element, no `style`
+attribute and no markup string — every element it draws is created with `createElementNS`, its attributes set with
+`setAttribute` and its text with `textContent` — so no host pre-places a marker, no library stylesheet is loaded and no
+policy directive is widened. A chart drawn under the strict policy produces no violation. The CSP collector exempts
+nothing (#987): every refusal, from the harness or from an application URL, including vendor and page-loader scripts,
 fails the browser test and retains its source location.
-A colorbar draws without an inline style: the vendored bundles carry a colorbar source patch (§6.4) under which the fill
+A colorbar draws without an inline style: the vendored bundles carry a colorbar source patch ([Deployment](deployment.md) §6.2A) under which the fill
 reset removes the `style` attribute instead of writing an empty one. Since #531, a default heatmap’s
 `image-rendering` hint is set through the CSSOM in the original fallback order, ending in `pixelated`, so crisp cells
 render under the same CSP without a `zsmooth` fixture pin. Both patches stay in the bundles' pinned bytes; since the
@@ -1084,7 +1062,7 @@ its number on `data-dp-dashboard-version`, so the Board pane boots that draft di
 a redirect or second click; a released default keeps the runtime's `"released"` channel.
 A version that resolves but cannot run (a pin that does not hold, a source no longer read-only)
 is the Board pane's REFUSAL state — the code and sentence the runtime's read refused with,
-the NAME still in the `h1`, never a blank pane, and no bundle loads. **No served release,
+the NAME still in the `h1`, never a blank pane, and no chart script loads. **No served release,
 none named and no admitted draft is NOT an error (#409): the choose-a-version state** — the
 heading shows the dashboard's name and offers the admitted history, with the sentence saying
 there is no release yet. This remains for a caller whose lens hides the draft, or a dashboard
@@ -1093,12 +1071,10 @@ The six tabs:
 
 - **Board** — the Board tab is a full-height column: `.dp-ws-root` flexes and its panes shrink into it,
   so `<main>` does not scroll and the activity dock stays visible (#612). The board page, reorganised
-  by #473: the ONE bundle the server chose for the VIEWED
-  version declared on its script tag (§6.4; the same read the client's bootstrap performs), then the runtime, the
-  chart kind, its Plotly converter and the table and KPI renderers, in that order (#860),
-  the glue (`static/js/dashboards-page.js`) booting the runtime with `charts: {library: "plotly", instance:
-  window.Plotly}` (§6.1; omitted when no bundle loaded, so a chart occurrence is refused `chart.library_undeclared`
-  rather than drawn by a guess) and the FILTERS panel as the
+  by #473: when the VIEWED version can run (the same read the client's bootstrap performs), the chart engine's
+  files in their load order (§6.4, #987), then the runtime, the chart kind and the table and KPI renderers, in that
+  order, the glue (`static/js/dashboards-page.js`) booting the runtime without a `charts` option (§6.1) and the
+  FILTERS panel as the
   adapter's `parametersContainer` (§6.2 — the parameters pane lives BESIDE the chart container,
   never inside it, so no adapter's mount scope claims it and §2.2's breakpoint measures the
   board beside it; when the board region is 820 px or narrower the panel is a drawer announced by the toolbar's Filters
@@ -1176,7 +1152,7 @@ Refreshes, Versions, Keys) load their fragment once, on the tab's first activati
 hidden tab causes no fetch; the Dependencies pane reads its tree once on first activation the same way (#876). The Board pane's reveal runs the runtime instance's OWN
 `resize()`, and the composite host observer places the grid when a `?tab=versions` deep link
 reveals its 0-wide board, so a chart that booted while hidden re-fits its slot.
-Every version switch preserves the rail through prepared main-content navigation (#460, the compatible superset bundle), and
+Every version switch preserves the rail through prepared main-content navigation (#460; the chart engine's files run once per document, §6.4), and
 the version selector over the admitted history renders those deep links. **The draft
 preview is the named-version view**: `/dashboards/{id}/preview?version=N` answers 303 onto
 `/dashboards/{id}?version=N&tab=board`, so #369's deep links land in the workspace's Board
@@ -1193,7 +1169,7 @@ version a 400 that never echoes it. Its six tabs ([ui-screens §4.24](ui-screens
   runtime's FIXTURE mode (§3.4.1's capability page's mount and builder — `PreviewViews.page` writes
   the same per-case configuration, keyed by the version), one case at a time. It renders FIXTURES
   only; live data runs inside a dashboard, under `dashboard.execute` — the page never executes.
-- **Overview** — the version's definition, read-only (the renderer and its bundle, the inputs,
+- **Overview** — the version's definition, read-only (the renderer, the inputs,
   the transform pin and its status, the test-case count, the body hash).
 - **Evidence** — the version's test runs (§3.4), newest first, capped at 100 and saying so; a
   run's screenshot through the existing screenshot route, else "no screenshot".
@@ -1218,8 +1194,8 @@ version a 400 that never echoes it. Its six tabs ([ui-screens §4.24](ui-screens
   route wires, is session-only, is audited as the REST route audits it (a cascaded template's own
   event first) and answers `HX-Redirect` back onto this tab.
 
-Every version switch uses prepared main-content navigation (§6.4), retaining the rail and the
-single compatible Plotly bundle. The choose-a-version state mounts no chart.
+Every version switch uses prepared main-content navigation (§6.4), retaining the rail; a selected version's
+page loads the chart engine's files, then the preview runtime (#987). The choose-a-version state mounts no chart.
 
 The visualizations workspace's tab switches go through the same history helper as the dashboards'
 (`static/js/workspace/history.js`, family `visualizations`, tab only — the pushed-entry wording of §7's
@@ -1234,6 +1210,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v0.75 | 987 (#987, js-rendered F3) | **§6 opening:** the first-party runtime's bytes are pinned by `FirstPartyRuntimeAuditTest`. **§6.1:** `init` refuses a `charts` key with `init.invalid` and the sentence "charts is no longer an option: charts are drawn by the datapipelines client library"; the render warnings are the chart engine's (`chart.rule.null-category`, `chart.rule.non-finite`, `chart.frame-too-small`, `chart.text.width-missing`) and `chart.token-refused` naming its token; no rows is the no-data picture, not a warning; bootstrap validates the adapter, then the renderers. **§6.2:** the mount refusals lose the four chart-library rows; `init.invalid` carries no `details`. **§6.3:** the chart adapter draws with the js-rendered engine (four states, a refusal's fixed sentence on the card, the DOM writer only, the look contract's token grammar at each draw); the library converter is gone. **§6.4 (new content, same number): the chart engine on the page** — the engine's files served from the engine module under `/js/js-rendered/`, the page's load order, the chart tokens set once in `app.css`, `--chart-pad` on the chart's card. **§6.6:** the small-card minimum holds on the engine's container; an engine refusal's sentence on the card; the page policy needs nothing for the charts (no marker, no library stylesheet); the CSP collector exempts nothing, the empty-style hash filter is gone. **§7:** the Board pane, the Overview bullet and the two version-switch sentences describe loading the engine's files, without a bundle. **§2.1:** the pages draw charts with the product's own engine. Decided by the js-rendered charts record (O-13, §5.1, §5.4) and the look contract's §5.1. |
 | 2026-11-15 | v0.74 | 986 (#986, js-rendered F2) | **§2.1, §2.1.2:** the retired `plotly` kind is refused as any unknown kind (`details.reason` `unknown_kind`, the message listing the allowed kinds), no longer by a message naming `chart`. A chart save has two layers, the schema and the save rules: the declared library's support table, `chart.unsupported.<field>` and the write response's `warnings` are gone (js-rendered record O-13), and a save never draws the chart (O-12). **§3.4:** the mechanical check draws each chart case through the chart engine in the server's sandbox at 640 × 400 with the server's width table and judges `rendered`, `mark_count`, `no_data` and `text_visible` from that canonical render (record §4.12; `text_visible` is a shown text); a chart case records its render's `state`; on a host without the JavaScript runtime the four are `unjudged` and the state is `not_available`. **§6.1:** the `chart.degraded.<field>` sentence names no save-time library judgement. No route, tool or permission row. |
 | 2026-11-12 | v0.73 | #876 shared release dialog, alias flip — renumbered at final sync after #548's v0.71 | **§3.1, §3.2:** a DRAFT transform pin or visualization pin is released with its root when the caller's release plan selects it; a bare `release_pinned_templates` / `release_pinned_visualizations` is refused 428 `<family>.release.plan_required` ([Versioning §5.3](versioning.md#53-release-lock)), and the sentence that the dashboard's consent never reaches a visualization's transform pin leaves (the plan covers the closure). **§7:** the visualization Release dialog's ONE consent checkbox becomes the shared release plan, and a draft changed under an open dialog is refused `visualization.release.plan_conflict`, not `visualization.version.conflict`. |
 | 2026-11-12 | v0.72 | #876 the Dependencies tabs — renumbered at final sync after #548's v0.71 | **§7:** the dashboards workspace gains a sixth tab and the visualizations workspace a sixth, **Dependencies** — the viewed version's exact pins, transitively, drawn by the shared Dependencies pane (UI Screens §4.21/§4.24 v1.234); the board itself is unchanged. |

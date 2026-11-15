@@ -4,11 +4,10 @@
  *
  * Plain ES2019, one IIFE, no module syntax: it loads in any browser and under
  * `node --test`'s fake DOM via `require`. It expects, in this order:
- *   1. the Plotly "2d" bundle script with data-dp-plotly-bundle="2d" (every chart
- *      family the chart kind ships is a 2D trace),
+ *   1. the chart engine's files under /js/js-rendered/, in the engine's load order,
  *   2. /js/datapipelines-dashboard.js (publishes window.DatapipelinesDashboard),
- *   3. the chart kind's adapter and its Plotly converter, then the table and KPI
- *      renderers the dashboard's kinds need,
+ *   3. the chart kind's adapter, then the table and KPI renderers the dashboard's
+ *      kinds need,
  *   4. this file — it mounts every [data-dp-embed] container automatically.
  *
  * The host page declares ONE container (and optionally a parameters pane):
@@ -50,7 +49,6 @@
       dashboard: { id: dashboardId, version: "released" },
       container: container,
       adapter: adapter,
-      charts: { library: "plotly", instance: window.Plotly },
     });
 
     var handle = {

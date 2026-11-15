@@ -35,6 +35,9 @@ dependencies {
     // #868 G1 — the release wiring: the production FamilyRegistry, GraphLimits and the ReleasePlanningDeadline seam
     // (web/release/ReleaseConfiguration) are dependency-contract types.
     implementation(project(":modules:dependency-contract"))
+    // #987 (js-rendered F3, brief D2): ui/JsRenderedAssetConfig serves the chart engine's files to the page from the
+    // engine module's resources, in the order JsRenderedEngineFiles gives — the same files the server draws with.
+    implementation(project(":modules:js-rendered"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.actuator)

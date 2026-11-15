@@ -4,7 +4,6 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 import java.io.ByteArrayOutputStream
@@ -27,11 +26,8 @@ import java.util.zip.GZIPOutputStream
  *     so Plotly's runtime injection can be skipped (`.no-inline-styles`): it must carry the
  *     rules the runtime would otherwise inject, or the charts would render unstyled while
  *     every test still passes on a machine that never enforced the policy.
- *  4. **The first-party runtime and adapters are versioned here too** (§10.1's new
- *     convention): their hashes are recomputed from the served bytes, so a hand edit of a
- *     shipped file must move the manifest in the same commit.
- *  5. **No template loads Plotly from anywhere but the vendored path** — no CDN, in any
- *     template, under any spelling.
+ *  4. *(Moved, #987 D9: the first-party runtime's hashes are [FirstPartyRuntimeAuditTest]'s.)*
+ *  5. *(Retired with the page tags it read, #987 D9: no template loads a chart library.)*
  *  6. **The sizes are the ones recorded** — raw byte lengths for every file, and gzip
  *     lengths for both bundles under the pinned compression method.
  */
@@ -141,30 +137,6 @@ class VendoredPlotlyAuditTest {
         css shouldContain ".plotly-notifier"
     }
 
-    @Test
-    fun `the first-party runtime and adapters match the hashes the manifest records`() {
-        val firstParty = block("datapipelines-dashboard-runtime")
-        FIRST_PARTY_FILES.forEach { file ->
-            val declared = Regex("\"$file\"\\s*:\\s*\"([0-9a-f]{64})\"").find(firstParty)?.groupValues?.get(1)
-            withClue("$file must be hash-pinned in the manifest (a PENDING placeholder is not a hash)") {
-                (declared != null && !declared.startsWith("PENDING")) shouldBe true
-            }
-            sha256(classpathBytes(file)) shouldBe declared
-        }
-    }
-
-    @Test
-    fun `no template loads plotly from anywhere but the vendored path`() {
-        resolver.getResources("classpath:templates/**/*.html").forEach { resource ->
-            val html = resource.inputStream.readBytes().decodeToString()
-            withClue(resource.filename ?: "template") {
-                html shouldNotContain "cdn.plot.ly"
-                html shouldNotContain "cdn.jsdelivr.net/npm/plotly"
-                html shouldNotContain "unpkg.com/plotly"
-            }
-        }
-    }
-
     private companion object {
         const val GZIP_METHOD = "zlib deflate level 9, gzip framing, mtime 0"
         val SIZE_FORMAT = Regex("""^(\d+) bytes(?: \((\d+) gzipped(?:, ([^)]*))?\))?$""")
@@ -174,14 +146,6 @@ class VendoredPlotlyAuditTest {
                 "vendor/plotly/plotly-2d.min.js",
                 "vendor/plotly/plotly-3d.min.js",
                 PLOTLY_CSS,
-            )
-        val FIRST_PARTY_FILES =
-            listOf(
-                "js/datapipelines-dashboard.js",
-                "js/datapipelines-dashboard-chart.js",
-                "js/datapipelines-dashboard-plotly.js",
-                "js/datapipelines-dashboard-table.js",
-                "js/datapipelines-dashboard-kpi.js",
             )
     }
 }

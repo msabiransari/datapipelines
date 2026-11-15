@@ -2,15 +2,16 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- Signed-in chart pages share the shell's lazy 3D superset bundle. This inert catalog
-       declares reusable libraries and per-page mount glue; prepared navigation and cached
-       history preserve the rail and mount each live root once. Standalone embeds remain isolated. -->
+  <!-- This inert catalog declares the page's reusable scripts and per-page mount glue; prepared
+       navigation and cached history preserve the rail and run each script once per document.
+       The chart engine's files come first, in the engine's load order, from the server's list
+       (chartEngineScripts: the same files the server draws with); the list is present only
+       when the page has something to draw. Standalone embeds remain isolated. -->
   <template data-page-assets>
-    <th:block th:if="${bundle != null}">
-    <script th:src="@{/vendor/plotly/plotly-3d.min.js}"></script>
+    <th:block th:if="${chartEngineScripts != null}">
+    <script th:each="engineScript : ${chartEngineScripts}" th:src="@{${engineScript}}"></script>
     <script th:src="@{/js/datapipelines-dashboard.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-chart.js}"></script>
-    <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
     <!-- #473 — the dock's pure state/log/format module, before the page glue that drives it:
@@ -20,7 +21,7 @@
     <script data-page-mount th:src="@{/js/dashboards-page.js}" defer></script>
   </th:block>
   <!-- #400 — the workspace's tab state (the shared core, and the dashboards glue over it; the
-        pipeline editor runs the same core since #420). A bare tag here is safe by the one-bundle rule:
+        pipeline editor runs the same core since #420). A bare tag here is safe:
         this page is never a boosted SWAP TARGET, so the tag cannot replay from a history
         cache the way an editor page's would (#358's lesson does not apply). -->
   <script th:src="@{/js/workspace/tabs.js}"></script>
@@ -71,7 +72,7 @@
       </div>
       <!-- The version selector: READ navigation over the admitted history (#348's D5 rule,
            one family later). The row's href is the canonical deep link (middle-click,
-           no-JS); the click is a full navigation by the one-bundle rule, never intercepted. -->
+           no-JS); the click is a prepared main-content navigation that keeps the shell. -->
       <nav class="dp-versions" aria-label="View another version"
            th:if="${!#lists.isEmpty(versions)}">
         <a th:each="row : ${versions}" class="ds-button ds-button-ghost ds-button-sm" hx-boost="true"

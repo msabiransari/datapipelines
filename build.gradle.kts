@@ -308,13 +308,17 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         // #868 G1 — the release wiring assembles the production family registry, the GraphLimits object and the
         // ReleasePlanningDeadline seam (web/release/ReleaseConfiguration).
         ":modules:dependency-contract",
+        // #987 (js-rendered F3) — the page loads the chart engine's files from the engine module (ui/JsRenderedAssetConfig).
+        ":modules:js-rendered",
         // #756 — test-only: the shared log capture (module-structure §5.23).
         ":modules:log-capture",
     ),
     // #756 — test-only `log-capture` on both (module-structure §5.23).
     ":modules:app" to setOf(":modules:web", ":modules:log-capture"),
     ":tests:integration-tests" to setOf(":modules:app", ":modules:log-capture"),
-    ":tests:browser-tests" to setOf(":modules:app", ":modules:web"),
+    // #987 — test-only `js-rendered` (module-structure §5.12): the page's engine files compared with the module's own bytes,
+    // and Node's emitted results for the identity guard on the page (its `jsRenderedTestData` configuration).
+    ":tests:browser-tests" to setOf(":modules:app", ":modules:web", ":modules:js-rendered"),
 )
 
 // Kover wires a per-module SELF-edge through its `kover` aggregation bucket —

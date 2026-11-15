@@ -97,7 +97,7 @@ class DashboardWorkspaceControllerTest {
             createdBy = UUID.randomUUID(),
         )
 
-    private fun configJson(bundle: String = "2d"): com.fasterxml.jackson.databind.node.ObjectNode =
+    private fun configJson(): com.fasterxml.jackson.databind.node.ObjectNode =
         com.fasterxml.jackson.databind.node.JsonNodeFactory.instance
             .objectNode()
             .apply {
@@ -112,7 +112,6 @@ class DashboardWorkspaceControllerTest {
                             put("status", "DRAFT")
                         },
                 )
-                putObject("renderer").put("bundle", bundle)
             }
 
     private fun render(
@@ -125,7 +124,7 @@ class DashboardWorkspaceControllerTest {
     }
 
     @Test
-    fun `a resolved version fills the name, the served chip facts and the ONE bundle`() {
+    fun `a resolved version fills the name, the served chip facts and the chart engine's script list`() {
         authenticate()
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns workingVersion()
         every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns null
@@ -140,7 +139,7 @@ class DashboardWorkspaceControllerTest {
         m["viewedVersion"] shouldBe 2
         m["viewedIsDraft"] shouldBe true
         m["boardVersion"] shouldBe 2
-        m["bundle"] shouldBe "2d"
+        m["chartEngineScripts"] shouldBe JsRenderedAssetConfig.scripts
         m["activeTab"] shouldBe "board"
         m.containsKey("refusalCode") shouldBe false
     }
@@ -161,7 +160,7 @@ class DashboardWorkspaceControllerTest {
         m["viewedVersion"] shouldBe 1
         m["viewedIsDraft"] shouldBe false
         m["boardVersion"] shouldBe null
-        m["bundle"] shouldBe "2d"
+        m["chartEngineScripts"] shouldBe JsRenderedAssetConfig.scripts
     }
 
     @Test
@@ -186,7 +185,7 @@ class DashboardWorkspaceControllerTest {
             m["hasSelected"] shouldBe true
             m["viewedIsDraft"] shouldBe true
             m["viewedLabel"] shouldBe "v2 · draft"
-            m["bundle"] shouldBe "2d"
+            m["chartEngineScripts"] shouldBe JsRenderedAssetConfig.scripts
             runtimeCalls shouldBe 1
         }
         verify(exactly = 1) { runtime.config(any(), dashboardId, 2) }
@@ -209,7 +208,7 @@ class DashboardWorkspaceControllerTest {
         val versions = m["versions"] as List<DashboardWorkspaceController.VersionRow>
         versions.size shouldBe 1
         verify(exactly = 0) { runtime.config(any(), any(), any()) }
-        m.containsKey("bundle") shouldBe false
+        m.containsKey("chartEngineScripts") shouldBe false
     }
 
     @Test
@@ -240,7 +239,7 @@ class DashboardWorkspaceControllerTest {
     }
 
     @Test
-    fun `a board that cannot run is the refusal state IN PLACE - the name stays, no bundle loads`() {
+    fun `a board that cannot run is the refusal state IN PLACE - the name stays, no chart script loads`() {
         authenticate()
         every { dashboards.findWorking(workspaceId, ReadLens.Everything, dashboardId) } returns workingVersion()
         every { dashboards.findServed(workspaceId, ReadLens.Everything, dashboardId) } returns null
@@ -260,7 +259,7 @@ class DashboardWorkspaceControllerTest {
         m["refusalCode"] shouldBe "dashboard.runtime.dependency_missing"
         m["refusalMessage"] shouldBe
             "A visualization this dashboard pins is not released — release it first, then try this board again."
-        m.containsKey("bundle") shouldBe false
+        m.containsKey("chartEngineScripts") shouldBe false
     }
 
     @Test

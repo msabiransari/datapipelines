@@ -80,7 +80,7 @@ class ChartSchemaControllerTest {
 
     @Test
     fun `a name outside the v1 files is the 404 envelope, so nothing else on the classpath is reachable`() {
-        for (name in listOf("plotly", "chart-support", "skeleton.schema", "BAR")) {
+        for (name in listOf("kpi", "chart-support", "skeleton.schema", "BAR")) {
             mvc
                 .perform(get("/schemas/chart/1/$name.schema.json"))
                 .andExpect(status().isNotFound)
