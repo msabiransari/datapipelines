@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.86 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.87 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-15
 
 ---
 
@@ -102,7 +102,7 @@ The switch is `datapipelines.observability.logging.format` ([configuration.md §
 | `mcp-server` | tool calls (tool name + caller), transport errors |
 | `web` | request log (method, path, status, duration), CORS preflight, SSE connections opened/closed; `staging.scratch.health` on a scratch-health status change: WARN into a non-`UP` status (path, `usable_bytes` or `unknown` on a failed reading, `threshold_bytes`, reason), INFO on return to `UP` (path, reason with the usable and threshold bytes); never one per probe (§6.1, #806) |
 
-The tables below catalogue thirteen namespaces: `audit`, `dashboard`, `datasource`, `endpoint`, `execution`, `pipeline`, `shutdown`, `parameter`, `lake`, `mail`, `persistence`, `scheduler` and `retention`. All thirteen currently catalogued namespaces are enforced by `ObservabilityEventCatalogParityTest` (#439, #443): the `event=<namespace>.<name>` literals under `modules/<module>/src/main/kotlin` and the backticked names in these tables' event column must agree in both directions. Per-namespace non-vacuity floors prevent an empty extraction from passing. This is a source-text check (comments count), not an AST or runtime inventory; uncatalogued code namespaces remain outside it. Computed event identities in files logging an enforced namespace are refused. The two exact retained `audit_log write failed` formats in `AuditLogger.kt` (§3.4G) carry an audit-row identity in `event={}` rather than a structured-log identity; each exception is pinned to that file and required exactly once. `audit_event={}` is a separate field.
+The tables below catalogue fourteen namespaces: `audit`, `dashboard`, `datasource`, `endpoint`, `execution`, `pipeline`, `shutdown`, `parameter`, `lake`, `mail`, `persistence`, `scheduler`, `retention` and `staging` (§3.4Z only). The first thirteen are enforced by `ObservabilityEventCatalogParityTest` (#439, #443); `staging` is not (the test's `ENFORCED` map has no entry for it, and `staging.scratch.health` is catalogued in the module table above, which the test does not read): the `event=<namespace>.<name>` literals under `modules/<module>/src/main/kotlin` and the backticked names in these tables' event column must agree in both directions. Per-namespace non-vacuity floors prevent an empty extraction from passing. This is a source-text check (comments count), not an AST or runtime inventory; uncatalogued code namespaces remain outside it. Computed event identities in files logging an enforced namespace are refused. The two exact retained `audit_log write failed` formats in `AuditLogger.kt` (§3.4G) carry an audit-row identity in `event={}` rather than a structured-log identity; each exception is pinned to that file and required exactly once. `audit_event={}` is a separate field.
 
 #### 3.4A The pool-retirement events (094)
 
@@ -568,6 +568,18 @@ figures only: no file location, no storage endpoint, no message text, no credent
 | WARN | `lake.maintenance.compaction_blocked` | The part ended with files no run can take (once per blocked result): the part's outcome is `capacity`. With `limit_source=scratch` and a group's input as the largest need, the scratch database ran out mid-sort: the evidence to raise `compaction-scratch-factor` or `admission.scratch-bytes` | `run_id`, `table_id`, `blocked` (files), `largest_need_bytes`, `limit_bytes`, `limit_source` (`cap` \| `scratch` \| `time`), `grant_bytes` (the run's scratch for the part), `committed`, `left_for_fresh_run` |
 | WARN | `lake.maintenance.compaction_deadline` | A statement or the open of the run's scratch database failed after the run's deadline: the clock decided it was the deadline (whatever the driver said), the group is abandoned and the part ends `deadline` | `deadline`, `cause`, `sql_state` |
 
+#### 3.4Z The streamed-read guard events (#994, TEMPORARY)
+
+The guard of [Staging §8.5](staging.md#85-the-duckdb-engine) (**Streamed reads**) on an author's DuckDB tempdb read (a
+caller or a non-lake write-back output). Logged from the `dag` module (`NodeRunner`); removed with the guard when the
+pinned DuckDB driver throws mid-stream. Ids, a fixed kind word and an engine message only: never the author's SQL, a
+bound value, a row value or a path.
+
+| Level | Event | When | Fields |
+|---|---|---|---|
+| INFO | `staging.guard.unguarded_read` | An author's tempdb read that neither guarded form takes (the engine's parse refuses the written form and `count(*)` over the statement does not prepare: `PRAGMA`, `EXPLAIN`, several statements in one text) has executed and is read as before, without a count; once per read | `execution_id`, `node`, `kind` (the statement's first word upper-cased, `MULTI` for several statements, `OTHER` when it starts with no word) |
+| WARN | `staging.guard.drop_failed` | The `DROP` of the guard's own `dp_guard_<uuid>` relation, after a written read, failed (on success, failure or cancel); the read's own outcome stands and the staging database's close deletes its file anyway | `execution_id`, `node`, `cause` (the engine's message for the failed `DROP`) |
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -870,6 +882,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.87 | 994 (#994) | **§3.4Z** (new, TEMPORARY with #994's guard): INFO `staging.guard.unguarded_read` (a DuckDB tempdb read neither guarded form takes; execution, node and statement kind only) and WARN `staging.guard.drop_failed` (the guard relation's drop failed). §3.4's namespace sentence: fourteen catalogued, `staging` not enforced by the parity test. |
 | 2026-11-14 | v1.86 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.84 and #964's v1.85 (its section renumbered §3.4X → §3.4Y) | **§3.4Y** (new): the compaction part's three events: INFO `lake.maintenance.compaction_group_committed` (one per committed group, with D9's figures), WARN `lake.maintenance.compaction_blocked` (one per `capacity` result: the blocked count, the largest need, the limit and its source, the grant) and WARN `lake.maintenance.compaction_deadline` (a scratch-database failure the clock judged to be the deadline; class and SQLSTATE only). |
 | 2026-11-14 | v1.85 | 964 (#964, dp-lake P6) | **§3.4X** (new): WARN `lake.inventory.totals_mismatch` — the storage breakdown's six rows did not add up to the cleanup's listing; nothing stored, the two totals logged (counts and bytes only). |
 | 2026-11-14 | v1.84 | 962 (#962, dp-lake P6) | **§3.4W** (new): the cleanup parts' two events, WARN `lake.cleanup.stopped` (the figures of a part that throws, counts only) and WARN `lake.cleanup.observer_failed` (the observer's exception class; the cleanup unchanged). §3.4T: the remover's production callers are these parts. |

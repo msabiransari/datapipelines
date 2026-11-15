@@ -1,6 +1,7 @@
 package co.datapipelines.executor
 
 import co.datapipelines.datasources.ResultRowReader
+import co.datapipelines.logcapture.capturingLogEvents
 import co.datapipelines.pipeline.LakeAppendInput
 import co.datapipelines.pipeline.LakeAppendSession
 import co.datapipelines.pipeline.LakeStatementExecution
@@ -172,13 +173,165 @@ class StreamedReadGuardDagTest {
     }
 
     @Test
-    fun `a statement the engine cannot write into a relation still reads, unguarded, as it does today`() {
+    fun `DESCRIBE and SHOW TABLES still read, now through the counted form, with no unguarded-read line`() {
         withDuck { duck ->
             duck.staging.execute("CREATE TABLE src AS SELECT 1 AS v")
-            listOf("DESCRIBE src", "SHOW TABLES").forEach { sql ->
+            val lines =
+                unguardedLines {
+                    listOf("DESCRIBE src", "SHOW TABLES").forEach { sql ->
+                        val sink = RecordingSink()
+                        runBlocking { duck.run(sql, Fixtures.node("caller"), directSink = sink) }
+                        withClue(sql) { sink.rows.isNotEmpty() shouldBe true }
+                    }
+                }
+            withClue("neither statement read unguarded") { lines.shouldBeEmpty() }
+            duck.guardRelations() shouldBe 0L
+        }
+    }
+
+    // ---------------------------------------------------------------- C5's counted form (#994 round 2, D1)
+
+    @Test
+    fun `a PIVOT statement that fails mid-stream over many chunks fails as result_incomplete through the counted form`() {
+        withDuck { duck ->
+            duck.staging.execute(FAILING_VIEW)
+            duck.staging.execute(PIVOT_SMALL)
+            val sink = RecordingSink()
+            val error = duck.failureOf(FAILING_PIVOT, Fixtures.node("caller"), directSink = sink)
+            withClue("the caller was handed ${sink.rows.size} of $ROWS rows") {
+                error.code shouldBe StagingErrorCodes.RESULT_INCOMPLETE
+            }
+            error.details["rows_expected"] shouldBe ROWS
+            error.details["reader"] shouldBe TempdbReadGuard.TEMPDB_COUNTED_READER
+            val read = error.details["rows_read"] as Long
+            withClue("non-vacuity: the read was cut short mid-stream, past the first chunk") { (read in 1 until FAIL_AT + 1) shouldBe true }
+            sink.rows.size.toLong() shouldBe read
+        }
+    }
+
+    @Test
+    fun `a PIVOT write-back that fails mid-stream, with and without a bound value, fails as result_incomplete`() {
+        withDuck { duck ->
+            duck.staging.execute(FAILING_VIEW)
+            duck.staging.execute(PIVOT_SMALL)
+            listOf(FAILING_PIVOT to emptyMap(), "$FAILING_PIVOT WHERE p.g0 >= :lo" to mapOf("lo" to 0)).forEach { (sql, values) ->
+                val target = h2Datasource("tgt", listOf("CREATE TABLE tgt (v BIGINT, g0 BIGINT, g1 BIGINT, g2 BIGINT)"))
+                val node = Fixtures.node("wb", output = NodeOutput.Datasource("tgt", "tgt", WriteMode.APPEND))
+                val error = duck.failureOf(sql, node, registry = FakeDatasourceRegistry(mapOf("tgt" to target)), values = values)
+                withClue("$sql: ${error.message} ${error.details}") { error.code shouldBe StagingErrorCodes.RESULT_INCOMPLETE }
+                withClue(sql) { error.details["reader"] shouldBe TempdbReadGuard.TEMPDB_COUNTED_READER }
+            }
+        }
+    }
+
+    @Test
+    fun `SUMMARIZE, DESCRIBE, SHOW and a clean PIVOT read the same rows, labels, types and order as the plain statement`() {
+        withDuck { duck ->
+            duck.staging.execute("CREATE TABLE src AS SELECT range AS v, range % 3 AS g, 'x' || range AS s FROM range(50)")
+            val cases =
+                listOf(
+                    "SUMMARIZE src" to emptyMap(),
+                    "SUMMARIZE (SELECT * FROM src WHERE v >= :lo)" to mapOf("lo" to 10),
+                    "DESCRIBE src" to emptyMap(),
+                    "SHOW src" to emptyMap(),
+                    "SHOW TABLES" to emptyMap(),
+                    "PIVOT src ON g USING count(*) GROUP BY v ORDER BY v" to emptyMap(),
+                    "SELECT * FROM (PIVOT src ON g USING sum(v) GROUP BY s) ORDER BY s;" to emptyMap(),
+                )
+            val lines =
+                unguardedLines {
+                    cases.forEach { (sql, values) ->
+                        val oracle = runBlocking { duck.plainRead(sql, values) }
+                        val sink = RecordingSink()
+                        runBlocking { duck.run(sql, Fixtures.node("caller"), directSink = sink, values = values) }
+                        withClue("$sql: columns") { sink.schema shouldBe oracle.first }
+                        withClue("$sql: rows in order") { sink.rows shouldBe oracle.second }
+                        withClue("$sql: non-vacuity") { oracle.second.isNotEmpty() shouldBe true }
+                    }
+                }
+            withClue("every case was guarded (written or counted), none read unguarded") { lines.shouldBeEmpty() }
+        }
+    }
+
+    @Test
+    fun `no false alarm for a counted read when another connection changes the table between the count and the read`() {
+        withDuck { duck ->
+            duck.staging.execute("CREATE TABLE src AS SELECT range AS v, range % 3 AS g FROM range(6)")
+            val sql = "PIVOT src ON g USING count(*) GROUP BY v"
+            val bound = SqlBindTranslator.translate(sql, emptyMap())
+            val node = ExecutableNode.from(Fixtures.node("caller"))
+            val resolved = ResolvedQueryTimeout(TIMEOUT_SECONDS, QueryTimeoutSource.APPLICATION)
+            val ctx = duck.context()
+            val read =
+                duck.staging.withConnection { c ->
+                    val form = TempdbReadGuard.formOf(node, c, bound, ctx, resolved, duck.staging)
+                    val counted = form.shouldBeInstanceOf<TempdbReadForm.Counted>()
+                    counted.count.use { count ->
+                        TempdbReadGuard.readCounted(
+                            node,
+                            c,
+                            bound,
+                            ctx,
+                            resolved,
+                            count,
+                            block = { rs -> generateSequence { if (rs.next()) 1 else null }.count() },
+                            // The other connection's write commits between the count and the read.
+                            afterCount = { duck.staging.execute("INSERT INTO src SELECT range + 100, range % 3 FROM range(4)") },
+                        )
+                    }
+                }
+            withClue("the read sees the count's snapshot") { read shouldBe 6 }
+            withClue("non-vacuity: the other connection's rows were committed") {
+                duck.staging.withQuery("SELECT count(*) FROM src") { rs -> StreamedReadGuard.oneRow(rs, "test") { it.getLong(1) } } shouldBe
+                    10L
+            }
+        }
+    }
+
+    @Test
+    fun `PRAGMA and EXPLAIN still read, each with one unguarded-read line naming its kind and no SQL text`() {
+        withDuck { duck ->
+            duck.staging.execute("CREATE TABLE src_secret_name AS SELECT 1 AS v")
+            val cases = listOf("PRAGMA table_info('src_secret_name')" to "PRAGMA", "EXPLAIN SELECT v FROM src_secret_name" to "EXPLAIN")
+            cases.forEach { (sql, kind) ->
                 val sink = RecordingSink()
-                duck.run(sql, Fixtures.node("caller"), directSink = sink)
+                val lines = unguardedLines { runBlocking { duck.run(sql, Fixtures.node("n_$kind"), directSink = sink) } }
                 withClue(sql) { sink.rows.isNotEmpty() shouldBe true }
+                val line = lines.single()
+                withClue(line) {
+                    line shouldBe "event=staging.guard.unguarded_read execution_id=${duck.executionId} node=n_$kind kind=$kind"
+                    line.contains("src_secret_name") shouldBe false
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `D3 probe - a text of several statements reads the last statement's rows on both callers, unguarded and logged as MULTI`() {
+        withDuck { duck ->
+            duck.staging.execute("CREATE TABLE src AS SELECT range AS v FROM range(5)")
+            val cases =
+                listOf(
+                    "SELECT 42 AS answer; SELECT v FROM src ORDER BY v" to emptyMap(),
+                    "SELECT 42 AS answer; SELECT v FROM src WHERE v >= :lo ORDER BY v" to mapOf("lo" to 2),
+                )
+            cases.forEach { (sql, values) ->
+                val sink = RecordingSink()
+                val lines = unguardedLines { runBlocking { duck.run(sql, Fixtures.node("caller"), directSink = sink, values = values) } }
+                val lo = values["lo"] ?: 0
+                withClue("$sql: the LAST statement's rows came back") { sink.rows shouldBe (lo until 5).map { listOf(it.toLong()) } }
+                withClue(sql) { sink.schema.shouldNotBeNull().map { it.name } shouldBe listOf("v") }
+                val expectedLine = "event=staging.guard.unguarded_read execution_id=${duck.executionId} node=caller kind=MULTI"
+                withClue(sql) { lines.single() shouldBe expectedLine }
+
+                val target = h2Datasource("tgt", listOf("CREATE TABLE tgt (v BIGINT)"))
+                val node = Fixtures.node("wb", output = NodeOutput.Datasource("tgt", "tgt", WriteMode.APPEND))
+                val wbLines =
+                    unguardedLines {
+                        runBlocking { duck.run(sql, node, registry = FakeDatasourceRegistry(mapOf("tgt" to target)), values = values) }
+                    }
+                withClue("$sql: the write-back wrote the last statement's rows") { countIn(target) shouldBe 5 - lo }
+                withClue(sql) { wbLines.single().endsWith("node=wb kind=MULTI") shouldBe true }
             }
             duck.guardRelations() shouldBe 0L
         }
@@ -283,17 +436,35 @@ class StreamedReadGuardDagTest {
         ): MappedError = shouldThrow<NodeFailedSignal> { run(sql, node, registry, directSink = directSink, values = values) }.error
 
         /**
-         * The code TODAY's unguarded tempdb read gives an engine failure raised at execution, for [node]'s output: a
-         * SUMMARIZE (which the guard never writes into a relation, so it runs on the unguarded path) whose aggregate
-         * fails. The classification the guarded writing statement must keep.
+         * The code TODAY's unguarded tempdb read gives an engine failure raised at execution, for [node]'s output: an
+         * EXPLAIN ANALYZE (which neither guarded form takes, so it runs on the unguarded path) whose query fails. The
+         * classification the guarded writing statement must keep.
          */
         suspend fun executeTimeFailureCode(
             node: co.datapipelines.pipeline.Node = Fixtures.node("caller"),
             registry: FakeDatasourceRegistry = FakeDatasourceRegistry(emptyMap()),
         ): String =
-            failureOf("SUMMARIZE SELECT error('at-execute') AS v", node, registry, directSink = RecordingSink())
+            failureOf("EXPLAIN ANALYZE SELECT error('at-execute') AS v", node, registry, directSink = RecordingSink())
                 .code
                 .also { it shouldNotBe StagingErrorCodes.RESULT_INCOMPLETE }
+
+        /** [sql] read as a plain statement, as the unguarded path reads it: the executor's schema and decoded rows. */
+        suspend fun plainRead(
+            sql: String,
+            values: Map<String, Any?>,
+        ): Pair<List<co.datapipelines.typesystem.ColumnSchema>, List<List<Any?>>> {
+            val bound = SqlBindTranslator.translate(sql, values)
+            return staging.withConnection { c: Connection ->
+                BoundStatements.statementFor(c, bound).use { st ->
+                    BoundStatements.query(st, bound).use { rs ->
+                        val columns = ResultRowReader.schemaOf(rs.metaData, Dialect.DUCKDB).columns
+                        val rows = mutableListOf<List<Any?>>()
+                        while (rs.next()) rows += columns.indices.map { ResultRowReader.readValue(rs, it + 1, columns[it]) }
+                        columns to rows
+                    }
+                }
+            }
+        }
 
         /** Relations with the guard's prefix still in the database. */
         suspend fun guardRelations(): Long =
@@ -329,6 +500,12 @@ class StreamedReadGuardDagTest {
         (staging as DuckDbStaging).use { runBlocking { block(Duck(it, id)) } }
         factory.budget.reservedBytes shouldBe 0L
     }
+
+    /** The `staging.guard.unguarded_read` lines NodeRunner's logger wrote during [block]. */
+    private fun unguardedLines(block: () -> Unit): List<String> =
+        capturingLogEvents(org.slf4j.LoggerFactory.getLogger(NodeRunner::class.java) as ch.qos.logback.classic.Logger) { block() }
+            .map { it.formattedMessage }
+            .filter { it.startsWith("event=staging.guard.unguarded_read") }
 
     private fun countIn(target: co.datapipelines.datasources.Datasource): Int =
         DriverManager.getConnection(target.jdbcUrl, "sa", "").use { c -> oneInt(c, "SELECT COUNT(*) FROM tgt") }
@@ -380,6 +557,13 @@ class StreamedReadGuardDagTest {
         const val CANCEL_AFTER_MS = 700L
         const val FAILING_SELECT = "SELECT CASE WHEN range < $FAIL_AT THEN range ELSE error('boom') END AS v FROM range($ROWS)"
         const val FAILING_VIEW = "CREATE VIEW boom AS $FAILING_SELECT"
+        const val PIVOT_SMALL = "CREATE TABLE small AS SELECT 'g' || (range % 3) AS g FROM range(9)"
+
+        /**
+         * A statement with a PIVOT (the written form refuses PIVOT anywhere) whose result streams [ROWS] rows from the
+         * failing view, one per row of the one-row pivot: it fails mid-stream, past the first chunk, at 2 and 4 threads.
+         */
+        const val FAILING_PIVOT = "SELECT b.v, p.* FROM boom b CROSS JOIN (PIVOT small ON g USING count(*)) p"
 
         /** A writing statement that runs for many seconds and produces one row. */
         const val SLOW_SQL = "SELECT sum(a.range * b.range) AS v FROM range(300000) a, range(300000) b"

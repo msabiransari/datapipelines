@@ -19,6 +19,11 @@ import java.util.UUID
  * streamed drain — a one-row aggregate from the engine, whose own failure throws — taken in the same snapshot as the
  * read, and a read that ends with a different number of rows fails as `pipeline.staging.result_incomplete`.
  *
+ * An author's tempdb read (C5) takes the first of three forms the engine admits it to: WRITTEN (the parse admits it to
+ * `CREATE TABLE … AS`: written, then read back counted), COUNTED (the parse refuses it but `count(*)` over it prepares:
+ * counted, then read as written by the author, in one snapshot), else UNGUARDED (`PRAGMA`, `EXPLAIN`, several
+ * statements: read as before and logged as `event=staging.guard.unguarded_read`).
+ *
  * REMOVE when the driver throws mid-stream: StreamedResultTripwireTest goes red on that driver and names this file.
  */
 
@@ -106,8 +111,127 @@ object StreamedReadGuard {
     /** Whether reads of [staging] are guarded: only a DuckDB staging database streams its results. */
     fun appliesTo(staging: Staging): Boolean = staging is DuckDbStaging
 
-    /** The count beside a reader's own [sql] (C1–C4): `count(*)` over it. [sql] is DP's statement, never author SQL. */
+    /**
+     * The count beside a reader's own [sql]: `count(*)` over it, with [sql] on lines of its own so a trailing line
+     * comment cannot swallow the closing parenthesis. C1–C4 pass DP's own statement; C5's counted form passes the
+     * author's statement as [countableText] gives it, translated and bound as the read is, never concatenated with
+     * anything else.
+     */
     fun countOf(sql: String): String = "SELECT count(*) FROM (\n$sql\n) AS dp_guard_count"
+
+    /**
+     * [authorSql] without one trailing statement terminator (`;` as its last non-blank character), so that the count of
+     * C5's counted form can wrap a statement an author ended with `;`. Nothing else is changed. A `;` that is the last
+     * character of a line comment is dropped with the same effect: the comment's text is not SQL.
+     */
+    fun countableText(authorSql: String): String = authorSql.trimEnd().removeSuffix(";")
+
+    /** The statement kind [statementKind] reports for a text holding several statements (#994 D3). */
+    const val MULTI_KIND = "MULTI"
+
+    /** The statement kind [statementKind] reports when the text does not start with a word. */
+    const val OTHER_KIND = "OTHER"
+
+    /**
+     * The KIND of [authorSql] for the unguarded-read log line (#994 D4) — a label, never the decision of which form
+     * reads it (that is the engine's): [MULTI_KIND] when a `;` outside quotes and comments is followed by more SQL;
+     * otherwise the statement's first word, upper-cased (`PRAGMA`, `EXPLAIN`, …), or [OTHER_KIND]. Only that one word
+     * leaves this function: never other SQL text and never a value.
+     */
+    fun statementKind(authorSql: String): String {
+        val tokens = TopLevelTokens(authorSql)
+        val first = tokens.firstWord() ?: return OTHER_KIND
+        return if (tokens.hasSecondStatement()) MULTI_KIND else first.uppercase()
+    }
+
+    /** A minimal lexical walk over SQL: quotes (`'…'`, `"…"`, `$tag$…$tag$`) and comments (`--`, block) are skipped. */
+    private class TopLevelTokens(
+        private val sql: String,
+    ) {
+        /** The first word of the text after blanks and comments, letters and underscores only, or null. */
+        fun firstWord(): String? {
+            val start = skipBlank(0)
+            val limit = minOf(sql.length, start + MAX_KIND_CHARS)
+            var end = start
+            while (end < limit && isWordChar(sql[end])) end++
+            val wordEnds = end == sql.length || !sql[end].isLetterOrDigit()
+            return if (end > start && wordEnds) sql.substring(start, end) else null
+        }
+
+        /** True when a top-level `;` is followed by anything but blanks, comments and more `;`. */
+        fun hasSecondStatement(): Boolean {
+            var i = 0
+            var terminated = false
+            while (i < sql.length) {
+                val next = skipQuotedOrComment(i)
+                if (next != i) {
+                    i = next
+                    continue
+                }
+                val c = sql[i]
+                if (c == ';') {
+                    terminated = true
+                } else if (!c.isWhitespace() && terminated) {
+                    return true
+                }
+                i++
+            }
+            return false
+        }
+
+        private fun isWordChar(c: Char): Boolean = c.isLetter() || c == '_'
+
+        private fun skipBlank(from: Int): Int {
+            var i = from
+            while (i < sql.length) {
+                val next = if (sql.startsWith("--", i) || sql.startsWith("/*", i)) skipQuotedOrComment(i) else i
+                if (next != i) {
+                    i = next
+                } else if (sql[i].isWhitespace()) {
+                    i++
+                } else {
+                    break
+                }
+            }
+            return i
+        }
+
+        /** The index after the quoted text or comment starting at [i], or [i] when none starts there. */
+        private fun skipQuotedOrComment(i: Int): Int =
+            when {
+                sql.startsWith("--", i) -> sql.indexOf('\n', i).let { if (it < 0) sql.length else it + 1 }
+                sql.startsWith("/*", i) -> sql.indexOf("*/", i + 2).let { if (it < 0) sql.length else it + 2 }
+                sql[i] == '\'' || sql[i] == '"' -> closingQuote(i, sql[i])
+                sql[i] == '$' -> dollarQuoteEnd(i)
+                else -> i
+            }
+
+        private fun closingQuote(
+            open: Int,
+            quote: Char,
+        ): Int {
+            var j = open + 1
+            while (j < sql.length) {
+                if (sql[j] == quote) {
+                    if (j + 1 < sql.length && sql[j + 1] == quote) j += 2 else return j + 1
+                } else {
+                    j++
+                }
+            }
+            return sql.length
+        }
+
+        private fun dollarQuoteEnd(open: Int): Int {
+            val close = sql.indexOf('$', open + 1)
+            if (close < 0) return open
+            val tag = sql.substring(open, close + 1)
+            if (!tag.drop(1).dropLast(1).all { it.isLetterOrDigit() || it == '_' }) return open
+            val end = sql.indexOf(tag, close + 1)
+            return if (end < 0) sql.length else end + tag.length
+        }
+    }
+
+    private const val MAX_KIND_CHARS = 32
 
     /** The rows the engine counts for [countSql], read from a one-row result: no row is a failure, never 0. */
     fun expectedRows(

@@ -233,9 +233,81 @@ class StreamedReadGuardTest {
         }
     }
 
+    @Test
+    fun `the unguarded-read kind is the first word, or MULTI for a second statement, and carries nothing else`() {
+        val cases =
+            mapOf(
+                "PRAGMA table_info('secret_table')" to "PRAGMA",
+                "  -- a note; with a semicolon\n explain SELECT 1" to "EXPLAIN",
+                "/* lead; */ pragma version" to "PRAGMA",
+                "SELECT 1; SELECT 2" to StreamedReadGuard.MULTI_KIND,
+                "INSERT INTO t VALUES (1); SELECT * FROM t" to StreamedReadGuard.MULTI_KIND,
+                "SELECT ';' AS s, \"a;b\" FROM t" to "SELECT",
+                "SELECT \$\$a; b\$\$ AS s" to "SELECT",
+                "SELECT 'it''s; fine'" to "SELECT",
+                "SELECT 1;" to "SELECT",
+                "SELECT 1; -- trailing note\n ;" to "SELECT",
+                "(SELECT 1)" to StreamedReadGuard.OTHER_KIND,
+                "" to StreamedReadGuard.OTHER_KIND,
+            )
+        cases.forEach { (sql, kind) -> withClue(sql) { StreamedReadGuard.statementKind(sql) shouldBe kind } }
+    }
+
+    @Test
+    fun `the counted form's text drops one trailing terminator and nothing else`() {
+        StreamedReadGuard.countableText("SUMMARIZE t;  \n") shouldBe "SUMMARIZE t"
+        StreamedReadGuard.countableText("SUMMARIZE t") shouldBe "SUMMARIZE t"
+        StreamedReadGuard.countableText("SELECT ';'") shouldBe "SELECT ';'"
+        StreamedReadGuard.countOf("SUMMARIZE t -- note") shouldBe "SELECT count(*) FROM (\nSUMMARIZE t -- note\n) AS dp_guard_count"
+    }
+
+    /**
+     * #994 D2's measurement (TEMPORARY, with the guard): on a staging database's own connection, at 2 and 4 threads, an
+     * engine error inside the first streamed chunk throws at execute — at row 0, 2,047 and [FIRST_CHUNK_LAST_ROW]
+     * (129,023), five runs each — and one row later, at 129,024, the same statement ends silently. This is why a read
+     * that neither guarded form takes (`PRAGMA`, `EXPLAIN`, several statements) cannot come back short while its result
+     * fits the first chunk. If the edge moves (another driver, other settings), re-measure and correct staging.md §8.5.
+     */
+    @ParameterizedTest(name = "{0} threads")
+    @ValueSource(ints = [2, 4])
+    fun `an engine error inside the first streamed chunk throws, one row past it the read ends silently`(threads: Int) {
+        DuckDbStagingFactory(duckProps(scratch).copy(threads = threads)).open().use { staging ->
+            runBlocking {
+                staging.withConnection { c ->
+                    listOf(0L, 2_047L, FIRST_CHUNK_LAST_ROW).forEach { failAt ->
+                        repeat(FIRST_CHUNK_RUNS) { run ->
+                            withClue("error at row $failAt, run $run: thrown at execute") { drainFailingAt(c, failAt).second shouldBe true }
+                        }
+                    }
+                    val (rows, thrown) = drainFailingAt(c, FIRST_CHUNK_LAST_ROW + 1)
+                    withClue("non-vacuity: one row past the first chunk the error is lost ($rows rows read)") { thrown shouldBe false }
+                }
+            }
+        }
+    }
+
+    /** Drains a statement of [failAt] + 1 rows whose last row raises `error()`: the rows read, and whether it threw. */
+    private fun drainFailingAt(
+        connection: java.sql.Connection,
+        failAt: Long,
+    ): Pair<Long, Boolean> {
+        val rows = LongArray(1)
+        val sql = "SELECT CASE WHEN range < $failAt THEN range ELSE error('boom') END AS v FROM range(${failAt + 1})"
+        val thrown = runCatching { connection.createStatement().use { st -> countInto(st.executeQuery(sql), rows) } }.exceptionOrNull()
+        if (thrown != null && thrown !is SQLException) throw thrown
+        return rows[0] to (thrown != null)
+    }
+
+    private fun countInto(
+        rs: java.sql.ResultSet,
+        rows: LongArray,
+    ) = rs.use { while (it.next()) rows[0]++ }
+
     private companion object {
         const val ROWS = 400_000L
         const val FAIL_AT = 300_000L
+        const val FIRST_CHUNK_LAST_ROW = 129_023L
+        const val FIRST_CHUNK_RUNS = 5
         const val FAILING_VIEW =
             "CREATE VIEW boom AS SELECT CASE WHEN range < $FAIL_AT THEN range ELSE error('boom') END AS v FROM range($ROWS)"
     }

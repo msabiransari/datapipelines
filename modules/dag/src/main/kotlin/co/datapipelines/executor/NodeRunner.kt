@@ -28,6 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.sql.Connection
+import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Statement
@@ -516,16 +517,28 @@ class NodeRunner(
         op.phase(OperationPhase.CONNECTING)
         val duckDb = ctx.staging as? DuckDbStaging
         return ctx.staging.withConnection { connection ->
-            if (duckDb != null && TempdbReadGuard.materializable(node, connection, bound, ctx, resolved)) {
-                TempdbReadGuard.read(node, connection, bound, ctx, resolved, duckDb, block)
-            } else {
-                BoundStatements.statementFor(connection, bound).use { statement ->
-                    statement.queryTimeout = resolved.seconds
-                    ctx.handle.withStatement(node.id, statement) {
-                        op.phase(OperationPhase.EXECUTING)
-                        withQueryTimeoutSource(resolved) {
-                            ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }
-                        }.use { rs -> block(rs) }
+            // #994 C5 (TEMPORARY): on DuckDB the engine picks the form — written, counted, else unguarded (logged).
+            when (val form = duckDb?.let { TempdbReadGuard.formOf(node, connection, bound, ctx, resolved, it) }) {
+                is TempdbReadForm.Written -> {
+                    TempdbReadGuard.read(node, connection, bound, ctx, resolved, form.staging, block)
+                }
+
+                is TempdbReadForm.Counted -> {
+                    form.count.use { count -> TempdbReadGuard.readCounted(node, connection, bound, ctx, resolved, count, block) }
+                }
+
+                is TempdbReadForm.Unguarded, null -> {
+                    BoundStatements.statementFor(connection, bound).use { statement ->
+                        statement.queryTimeout = resolved.seconds
+                        ctx.handle.withStatement(node.id, statement) {
+                            op.phase(OperationPhase.EXECUTING)
+                            withQueryTimeoutSource(resolved) {
+                                ctx.handle.whileExecuting(node.id, statement) { BoundStatements.query(statement, bound) }
+                            }.use { rs ->
+                                form?.let { TempdbReadGuard.logUnguarded(node, ctx, it.kind) }
+                                block(rs)
+                            }
+                        }
                     }
                 }
             }
@@ -1308,15 +1321,125 @@ internal object SourceCommit {
 }
 
 /**
+ * TEMPORARY (#994, class C5; remove with [StreamedReadGuard]): the form an author's tempdb read takes on DuckDB, in
+ * order, each decided by the engine: [Written] (its parse admits the statement to `CREATE TABLE … AS`), [Counted] (it
+ * does not, but `count(*)` over the statement prepares; [count] is that prepared count, which the caller closes), else
+ * [Unguarded] (neither: `PRAGMA`, `EXPLAIN`, several statements), read as before and logged with its [Unguarded.kind].
+ */
+internal sealed interface TempdbReadForm {
+    class Written(
+        val staging: DuckDbStaging,
+    ) : TempdbReadForm
+
+    class Counted(
+        val count: PreparedStatement,
+    ) : TempdbReadForm
+
+    class Unguarded(
+        val kind: String,
+    ) : TempdbReadForm
+}
+
+/**
  * TEMPORARY (#994, class C5; remove with [StreamedReadGuard]): [NodeRunner]'s guarded read of an author's query over a
- * DuckDB tempdb — the parse check that admits a statement to it, the read itself and the drop of its relation. Kept
- * apart from the class so that removing the guard is deleting this object and its two call sites in `tempdbCursor`.
+ * DuckDB tempdb — the choice of [TempdbReadForm], the written read and the drop of its relation, the counted read, and
+ * the unguarded read's log line. Kept apart from the class so that removing the guard is deleting this object, the
+ * form, and the `when` over it in `tempdbCursor` (its plain branch stays).
  */
 internal object TempdbReadGuard {
-    /** The reader name the guard reports for these reads. */
+    /** The reader name the guard reports for a written read. */
     const val TEMPDB_READER = "tempdb_cursor"
 
+    /** The reader name the guard reports for a counted read (#994 D1). */
+    const val TEMPDB_COUNTED_READER = "tempdb_counted"
+
     private val log: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(NodeRunner::class.java)
+
+    /**
+     * The form of the author's read, in the fixed order of #994 D1: written if the engine's parse admits it
+     * ([materializable]); else counted if the engine prepares `count(*)` over it — translated from the author's text
+     * as the written form's statement is, with the same bound values; else unguarded. A count that does not prepare is
+     * the engine's answer, whatever the reason: the plain read then runs and fails or reads exactly as it did before.
+     * Preparing runs nothing but the parse and bind of that one wrapped statement (a text of several statements does
+     * not parse inside the parentheses).
+     */
+    @Suppress("LongParameterList", "SwallowedException") // the dispatch boundary's parameters; a refused prepare IS the answer
+    suspend fun formOf(
+        node: ExecutableNode,
+        connection: Connection,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        resolved: ResolvedQueryTimeout,
+        staging: DuckDbStaging,
+    ): TempdbReadForm {
+        if (materializable(node, connection, bound, ctx, resolved)) return TempdbReadForm.Written(staging)
+        val count =
+            SqlBindTranslator.translate(StreamedReadGuard.countOf(StreamedReadGuard.countableText(bound.originalSql)), ctx.values)
+        val prepared =
+            try {
+                connection.prepareStatement(count.sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)
+            } catch (refused: SQLException) {
+                return TempdbReadForm.Unguarded(StreamedReadGuard.statementKind(bound.originalSql))
+            }
+        return try {
+            SqlBindTranslator.bind(prepared, count.bindValues)
+            TempdbReadForm.Counted(prepared)
+        } catch (e: SQLException) {
+            prepared.close()
+            throw e
+        }
+    }
+
+    /**
+     * TEMPORARY (#994 D1, class C5's counted form): the author's statement read as the author wrote it — the same
+     * statement, bound values, columns and order as before — with its rows counted against [count], the engine's
+     * `count(*)` over the same statement, taken in ONE snapshot on the reader's connection (a staged table changed by
+     * another connection in between raises no false alarm). The read is judged when `next()` returns false: rows read
+     * ≠ the count → `pipeline.staging.result_incomplete` with reader [TEMPDB_COUNTED_READER]. The statement runs twice.
+     * [afterCount] runs between the count and the read: a test's seam, nothing in production.
+     */
+    @Suppress("LongParameterList") // the dispatch boundary's parameters, plus the prepared count and the test seam
+    suspend fun <T> readCounted(
+        node: ExecutableNode,
+        connection: Connection,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        resolved: ResolvedQueryTimeout,
+        count: PreparedStatement,
+        block: suspend (ResultSet) -> T,
+        afterCount: suspend () -> Unit = {},
+    ): T {
+        val op = ctx.operations.observerFor(node.id)
+        return StreamedReadGuard.inOneSnapshot(connection) {
+            op.phase(OperationPhase.EXECUTING)
+            val expected =
+                registered(node, ctx, resolved, count) {
+                    count.executeQuery().use { rs -> StreamedReadGuard.oneRow(rs, "$TEMPDB_COUNTED_READER count") { it.getLong(1) } }
+                }
+            afterCount()
+            BoundStatements.statementFor(connection, bound).use { read ->
+                read.queryTimeout = resolved.seconds
+                ctx.handle.withStatement(node.id, read) {
+                    withQueryTimeoutSource(resolved) {
+                        ctx.handle.whileExecuting(node.id, read) { BoundStatements.query(read, bound) }
+                    }.use { rs -> block(StreamedReadGuard.counted(rs, expected, TEMPDB_COUNTED_READER)) }
+                }
+            }
+        }
+    }
+
+    /**
+     * #994 D4: one INFO line for a DuckDB tempdb read neither form guards, once its statement has executed — the
+     * execution, the node and the statement [kind] ([StreamedReadGuard.statementKind]); never SQL text, a bound value
+     * or a path.
+     */
+    fun logUnguarded(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        kind: String,
+    ) {
+        log.info("event=staging.guard.unguarded_read execution_id={} node={} kind={}", ctx.executionId, node.id, kind)
+    }
 
     /**
      * TEMPORARY (#994, class C5): whether the engine's own parse admits the author's statement to the guarded read —
