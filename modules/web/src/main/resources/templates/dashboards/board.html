@@ -21,9 +21,9 @@
     <script data-page-mount th:src="@{/js/dashboards-page.js}" defer></script>
   </th:block>
   <!-- #400 — the workspace's tab state (the shared core, and the dashboards glue over it; the
-        pipeline editor runs the same core since #420). A bare tag here is safe:
-        this page is never a boosted SWAP TARGET, so the tag cannot replay from a history
-        cache the way an editor page's would (#358's lesson does not apply). -->
+        pipeline editor runs the same core since #420). These entries stay in the inert catalog:
+        page-assets.mjs loads the shared scripts once per document and mounts the workspace
+        for each live catalog after navigation or a cached history restore. -->
   <script th:src="@{/js/workspace/tabs.js}"></script>
   <!-- #402: the workspaces' own history entries — a tab switch pushes, Back/Forward re-selects. -->
   <script th:src="@{/js/workspace/history.js}"></script>
