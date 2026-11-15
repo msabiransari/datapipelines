@@ -37,10 +37,10 @@ abstract class ChartPageSuite : VisualizationBrowserSuite() {
 
     /** Serves each path of [copies] in [target] through its function (the signed-in context too, for the pages). */
     protected fun servingCopies(target: BrowserContext) {
-        for ((suffix, transform) in copies) {
+        for ((suffix, rewrite) in copies) {
             target.route("**$suffix") { route ->
                 val response = route.fetch()
-                route.fulfill(Route.FulfillOptions().setResponse(response).setBody(transform(response.text())))
+                route.fulfill(Route.FulfillOptions().setResponse(response).setBody(rewrite(response.text())))
             }
         }
     }

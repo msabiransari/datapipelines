@@ -601,7 +601,8 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         /**
          * One chart's level and drawn axis titles (absent: null): the level is the engine's reading of the drawn frame
          * (the viewBox) under the theme the adapter resolves; the band title is written level under the plot, the
-         * value title turned on the left (a vertical bar).
+         * value title turned on the left (a vertical bar). Turned is read off the drawn matrix (`getCTM()`'s rotation
+         * terms), so the case reads what the browser drew, not how the writer spelled it.
          */
         const val TITLES_JS =
             """(args) => {
@@ -611,8 +612,9 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
               var resolved = window.DatapipelinesDashboardChart._internal.resolveTheme(svg).theme;
               var lvl = window.JsRendered.chrome.level(box.width, box.height, window.JsRendered.theme.resolve(resolved));
               var titles = Array.from(svg.querySelectorAll('text.dp-axis'));
-              var flat = titles.filter(function (t) { return !t.getAttribute('transform'); })[0];
-              var turned = titles.filter(function (t) { return !!t.getAttribute('transform'); })[0];
+              var isTurned = function (t) { var m = t.getCTM(); return !!m && Math.abs(m.b) > 0.5; };
+              var flat = titles.filter(function (t) { return !isTurned(t); })[0];
+              var turned = titles.filter(isTurned)[0];
               return { level: lvl, xDrawn: flat ? flat.textContent : null, yDrawn: turned ? turned.textContent : null };
             }"""
         const val EXCERPT = 600
