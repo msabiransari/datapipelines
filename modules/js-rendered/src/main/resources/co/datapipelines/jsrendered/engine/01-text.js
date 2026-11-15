@@ -95,15 +95,6 @@
     return s;
   }
 
-  /** An integer part's digits grouped by "," before every third digit from the right. */
-  function grouped(intPart) {
-    if (intPart.length <= 3) return intPart;
-    // The first group holds n mod 3 digits (3 when that is 0).
-    var n = intPart.length, head = n % 3 === 0 ? 3 : n % 3, g = intPart.slice(0, head);
-    for (var i = head; i < n; i += 3) g += "," + intPart.slice(i, i + 3);
-    return g;
-  }
-
   /** Plain digits, grouped, with at least minFrac fraction digits (the decimal is already rounded to the maximum). */
   function plain(x, minFrac) {
     var intPart, frac;
@@ -121,16 +112,16 @@
       frac = x.d.slice(x.p);
     }
     if (frac.length < minFrac) frac += zeros(minFrac - frac.length);
-    return (x.neg && x.d !== "0" ? MINUS : "") + grouped(intPart) + (frac ? "." + frac : "");
+    if (intPart.length > 3) {
+      // A "," before every third digit from the right: the first group holds n mod 3 digits (3 when that is 0).
+      var n = intPart.length, head = n % 3 === 0 ? 3 : n % 3, g = intPart.slice(0, head);
+      for (var i = head; i < n; i += 3) g += "," + intPart.slice(i, i + 3);
+      intPart = g;
+    }
+    return (x.neg && x.d !== "0" ? MINUS : "") + intPart + (frac ? "." + frac : "");
   }
 
   function fixed(v, minFrac, maxFrac) {
-    // A whole number below 10^21 in size: String(v) is its own digits (no exponent, no fraction), so no rounding
-    // changes it and the text is those digits grouped, the true minus, and minFrac zeros: what the general path writes.
-    if (typeof v === "number" && v % 1 === 0 && v > -1e21 && v < 1e21) {
-      var s = String(v), neg = s.charCodeAt(0) === 45;
-      return (neg ? MINUS : "") + grouped(neg ? s.slice(1) : s) + (minFrac > 0 ? "." + zeros(minFrac) : "");
-    }
     return plain(round(decimal(v), maxFrac), minFrac);
   }
 
