@@ -290,7 +290,8 @@ test("the Dependencies mount is a named page mount: once per catalog node, after
 
 test("the chart engine's files, a run of a board's catalog before the chart kind, execute once each in load order; a second page's catalog executes none again", async () => {
   const engine = engineFiles().map(name => "/js/js-rendered/" + name);
-  assert.ok(engine.length >= 10 && engine.at(-1) === "/js/js-rendered/types/bar.js", JSON.stringify(engine));
+  // The engine's own list ends with its chart templates (`types/`), the last one whichever type was added last.
+  assert.ok(engine.length >= 10 && /^\/js\/js-rendered\/types\/[a-z]+\.js$/.test(engine.at(-1)), JSON.stringify(engine));
   const board = [...engine, "/js/datapipelines-dashboard.js", "/js/datapipelines-dashboard-chart.js"];
   const main = mainWith(catalogOf(board));
   await assets.preparePage(main); await settle();

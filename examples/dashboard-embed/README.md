@@ -37,7 +37,7 @@ visitor behind the relay.
 ## Script order
 
 1. the chart engine's files under `/js/js-rendered/`, in the engine's load order
-   (`00-namespace.js` first, `types/bar.js` last) — the same files the server
+   (`00-namespace.js` first, `types/area.js` last) — the same files the server
    draws its pictures with;
 2. `/js/datapipelines-dashboard.js` — the runtime;
 3. `/js/datapipelines-dashboard-chart.js` — the `chart` kind's adapter; it
