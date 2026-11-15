@@ -10,10 +10,11 @@ import co.datapipelines.browser.ChartInteractionSuite.Chart
 object InteractionCharts {
     val QUARTERS = listOf("Q1", "Q2", "Q3")
 
-    /** Grouped bars: series [values]' keys in order, one value per quarter. */
+    /** Grouped bars (or, with [stacked], a stack at zero): series [values]' keys in order, one value per quarter. */
     fun bar(
         values: Map<String, List<Int>>,
         title: String = "Bars",
+        stacked: Boolean = false,
     ): Chart {
         val k = mutableListOf<Any?>()
         val s = mutableListOf<Any?>()
@@ -27,8 +28,8 @@ object InteractionCharts {
         }
         val config =
             """{"mark":{"type":"bar"},"encoding":{"x":{"field":"k","type":"nominal","title":"Quarter"},""" +
-                """"y":{"field":"v","type":"quantitative","aggregate":"sum","title":"Value"},""" +
-                """"color":{"field":"s","type":"nominal","title":"Series"}},"title":{"text":"$title"}}"""
+                """"y":{"field":"v","type":"quantitative","aggregate":"sum",""" + (if (stacked) """"stack":"zero",""" else "") +
+                """"title":"Value"},"color":{"field":"s","type":"nominal","title":"Series"}},"title":{"text":"$title"}}"""
         return Chart(title, config, mapOf("k" to "STRING", "s" to "STRING", "v" to "DECIMAL"), mapOf("k" to k, "s" to s, "v" to v))
     }
 
@@ -89,6 +90,9 @@ object InteractionCharts {
         val keep = series.indices.filter { series[it] in ids }
         return chart.columns.mapValues { (_, column) -> keep.map { column[it] } }
     }
+
+    /** The join between a stacked bar's category and its total in the card's heading (the look table's tipTotalJoin). */
+    const val JOIN = " \u00b7 "
 
     /** The first day of month [i] of 2024, as the DATE column carries it. */
     fun month(i: Int): String = "2024-%02d-01".format(i + 1)

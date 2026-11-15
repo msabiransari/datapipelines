@@ -1,5 +1,7 @@
 package co.datapipelines.browser
 
+import co.datapipelines.browser.InteractionCharts.JOIN
+import co.datapipelines.browser.InteractionCharts.QUARTERS
 import co.datapipelines.browser.InteractionCharts.bar
 import co.datapipelines.browser.InteractionCharts.line
 import com.microsoft.playwright.Page
@@ -28,6 +30,7 @@ import org.junit.jupiter.api.Test
 class ChartPointerBrowserTest : ChartInteractionSuite() {
     private val bar2 = bar(linkedMapOf("A" to listOf(30, 50, 20), "B" to listOf(60, 90, 40)))
     private val line2 = line(linkedMapOf("A" to listOf(70, 90, 80), "B" to listOf(20, 40, 30)))
+    private val stacked2 = bar(linkedMapOf("A" to listOf(30, 50, 20), "B" to listOf(60, 90, 40)), title = "Stack", stacked = true)
     private val area2 = line(linkedMapOf("A" to listOf(70, 90, 80), "B" to listOf(20, 40, 30)), type = "area", title = "Areas")
 
     @Test
@@ -464,6 +467,90 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
     }
 
     @Test
+    fun `r2 D2 - by pointer a stacked bar's card heads with its category and total, a second join moves it, hostile stays text`() {
+        startTrace()
+        val root = ready("total")
+        val log = mutableListOf<String>()
+        try {
+            val (context, page) = openHarness(root, "total", VIEW_W, VIEW_H)
+            try {
+                stackHeadings(page, log)
+                hostileStack(page, log)
+            } finally {
+                context.close()
+            }
+            plantCopies = mapOf(TABLES to { text: String -> once(text, "tipTotalJoin: f(\"$JOIN\",", "tipTotalJoin: f(\"$SECOND_JOIN\",") })
+            val (second, page2) = openHarness(root, "total-join", VIEW_W, VIEW_H)
+            plantCopies = emptyMap()
+            try {
+                mount(page2, stacked2, FULL_W, FULL_H)["ok"] shouldBe true
+                hover(page2, pointOf(page2, "B", datums(page2, "B")[0]))
+                val r = read(page2)
+                log += "second join: ${r["card"]}"
+                withClue("A14 (tipTotalJoin): a second value of the join is the text between the category and the total: $r") {
+                    cardLines(r).first()["text"] shouldBe "Q1${SECOND_JOIN}90"
+                }
+            } finally {
+                second.close()
+            }
+        } finally {
+            report("stack-total.txt", log)
+        }
+    }
+
+    /** Every segment of a 2-series stack by pointer: the heading is the category, the join and the stack's sum (the test's). */
+    private fun stackHeadings(
+        page: Page,
+        log: MutableList<String>,
+    ) {
+        mount(page, stacked2, FULL_W, FULL_H)["ok"] shouldBe true
+        withClue("the page's look table holds the join") { page.evaluate("() => window.JsRendered.tables.look('tipTotalJoin')") shouldBe JOIN }
+        var read = 0
+        for (id in listOf("A", "B")) {
+            datums(page, id).forEachIndexed { c, datum ->
+                hover(page, pointOf(page, id, datum))
+                val r = read(page)
+                val total = stacked2.valueAt("A", c) + stacked2.valueAt("B", c)
+                log += "$id@${QUARTERS[c]}: ${(r["card"] as Map<*, *>?)?.get("texts")}"
+                withClue("r2 D2: hovering $id at ${QUARTERS[c]}: the heading is the category, the join and the stack's total $total: $r") {
+                    r["cards"] shouldBe 1
+                    cardLines(r).first()["text"] shouldBe "${QUARTERS[c]}$JOIN$total"
+                    boldName(r) shouldBe id
+                }
+                read++
+            }
+        }
+        withClue("stacked segments read (floor 6)") { read shouldBe 6 }
+    }
+
+    /** The hostile fixture stacked: each heading is its category's text, the join and the total, as text; no script. */
+    private fun hostileStack(
+        page: Page,
+        log: MutableList<String>,
+    ) {
+        val plainChart = engineChart("bar/hostile")
+        val chart = plainChart.copy(config = once(plainChart.config, "\"aggregate\":\"sum\"", "\"aggregate\":\"sum\",\"stack\":\"zero\""))
+        mount(page, chart, FULL_W, FULL_H)["ok"] shouldBe true
+        val k = chart.columns.getValue("k")
+        val v = chart.columns.getValue("v")
+        var shown = 0
+        k.forEachIndexed { i, category ->
+            val at = page.evaluate("h => window.__h.datum(h)", category) as Map<*, *>
+            hover(page, pointOf(page, at["id"] as String, (at["datum"] as Number).toInt()))
+            val r = read(page)
+            val total = (v[i] as Number).toDouble().let { if (it == Math.floor(it)) it.toLong().toString() else it.toString() }
+            log += "hostile stack $category: ${(r["card"] as Map<*, *>?)?.get("texts")}"
+            withClue("A8 with the total: the heading of $category is text, never markup: $r") {
+                r["scripts"] shouldBe 0
+                cardLines(r).first()["text"] shouldBe "$category$JOIN$total"
+            }
+            shown++
+        }
+        withClue("A8: no CSP violation with the stacked hostile chart") { drainCspViolations().shouldBeEmpty() }
+        withClue("hostile stacked headings read (floor 4)") { shown shouldBe k.size }
+    }
+
+    @Test
     fun `A8 - the hostile chart with the layer active - every mark by pointer and keys shows text, no script, no CSP violation`() {
         startTrace()
         val (context, page) = harnessPage("hostile", VIEW_W, VIEW_H)
@@ -651,6 +738,7 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
         const val LONG_PREFIX = 8
         const val TABLES = "/js/js-rendered/06-tables.js"
         const val TIP_RADIUS = "6"
+        const val SECOND_JOIN = " / "
         const val SECOND_SHADOW = "drop-shadow(rgb(255, 0, 0) 0px 2px 4px)"
 
         val TIP_TOKENS =
