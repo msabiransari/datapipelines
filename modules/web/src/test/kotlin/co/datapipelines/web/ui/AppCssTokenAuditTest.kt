@@ -86,10 +86,19 @@ class AppCssTokenAuditTest {
                 // tables (§5.1, call C7) — a chart palette has no design-system counterpart — and the contract's LA12
                 // holds them there. Only a line that DECLARES a --chart- token is excused, never one that reads it.
                 .filterNot { (_, line) -> CHART_TOKEN_DECLARATION.containsMatchIn(line) }
+                // #990 (brief D2, owner ruling L7): the tooltip's ONE `filter` rule reads --chart-tip-shadow with the
+                // contract's §3.5 Light value as its fallback, so a host that declares the token nowhere still gets the
+                // default shadow. Only that exact reading is excused, and only once (pinned below).
+                .filterNot { (_, line) -> line.trim().startsWith(TIP_SHADOW_READ) }
                 .filterNot { (_, line) -> line.trimStart().startsWith("*") || line.trimStart().startsWith("/*") }
                 .map { (index, line) -> "app.css:${index + 1} carries a literal colour: ${line.trim()}" }
 
         violations shouldBe emptyList()
+        appCss.lines().count { it.trim().startsWith(TIP_SHADOW_READ) } shouldBe 1
+        // The fallback IS the light declaration's value (the first --chart-tip-shadow declared, in :root).
+        val light = Regex("""--chart-tip-shadow:\s*([^;]+);""").find(appCss)?.groupValues?.get(1)
+        val fallback = appCss.lines().first { it.trim().startsWith(TIP_SHADOW_READ) }.trim().removePrefix(TIP_SHADOW_READ).removeSuffix(");")
+        fallback shouldBe light
     }
 
     @Test
@@ -174,6 +183,9 @@ class AppCssTokenAuditTest {
     private companion object {
         val SWATCH_RULE = Regex("""\.app-swatch\[data-swatch="([a-z-]+)"]\s*\{\s*background:\s*(#[0-9a-fA-F]{6})""")
         val ACCENT = Regex("""--_accent-primary:\s*(#[0-9a-fA-F]{6})""")
+
+        /** The tooltip's shadow rule (#990): the one reading of a chart token whose fallback is a literal. */
+        const val TIP_SHADOW_READ = "filter: var(--chart-tip-shadow, "
 
         /** `  --chart-grid: light-dark(#e6e9ee, #262c35);` — a declaration of a chart token, at the line's start. */
         val CHART_TOKEN_DECLARATION = Regex("""^\s*--chart-[a-z0-9-]+\s*:""")
