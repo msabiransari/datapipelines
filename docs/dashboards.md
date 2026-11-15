@@ -119,17 +119,16 @@ each as `{field: [values]}` (§2.1.2).
   plain text: no control characters, at most 200 characters, `<` and `>` drawn as text. The objects are closed: no
   theme, colour, font, size, URL or library option — the host's tokens style the chart (§6.3).
 
-  The save judges a chart in three layers, in order; a document that fails one is not judged by the next. Each
+  The save judges a chart in two layers, in order; a document that fails one is not judged by the next. Each
   refusal is `visualization.validation.config_schema_invalid` with `details.renderer` `chart`, and its message never
   echoes document text — the failure's `path` says where.
   1. **The schema** — `details.reason` `schema`, with the failing `keyword` and its JSON `pointer`.
   2. **The save rules** over the document and the contract the chart reads (the pinned transform's output, else the
      one input's columns) — `details.reason` is the code in the table below.
-  3. **The declared library's support table** — Plotly's, for the product's pages: a meaning field the library cannot
-     draw is refused `chart.unsupported.<field>`; a presentation field it draws only approximately is accepted with a
-     warning `{code: "chart.degraded.<field>", path, library}`. The write response — REST and the MCP tools, create
-     and update — always carries `warnings`, `[]` when clean; warnings are recomputed on every save and never stored.
-     Plotly draws every v1 field directly, so today this layer refuses and warns on nothing.
+
+  A save never draws the chart (the js-rendered record's O-12): the chart engine draws only in the test check (§3.4)
+  and in the browser. The write response — REST and the MCP tools, create and update — carries no `warnings`: a
+  document the two layers accept is drawn as written.
 
   | `details.reason` | Layer | When |
   |---|---|---|
@@ -143,7 +142,6 @@ each as `{field: [values]}` (§2.1.2).
   | `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | save rules | a `scale.domain` on a normalized stack / not increasing or without zero |
   | `chart.format.normalize_percent` / `chart.format.currency_unknown` | save rules | a normalized stack whose format is not `percent` / an unknown currency code |
   | `chart.bindings.mismatch` | save rules | `bindings` present and not the derived map |
-  | `chart.unsupported.<field>` | library support | a meaning field the declared library cannot draw |
 
   The retired `plotly` kind (a native Plotly figure, D12) is refused `visualization.validation.renderer_unsupported`
   as any unknown kind (`details.reason` `unknown_kind`; the message lists the allowed kinds); Plotly stays as the library the product's pages draw charts with (§6.4).
@@ -733,8 +731,8 @@ ships Plotly's, `datapipelines-dashboard-plotly.js`, for the bar family); §6.2'
 While drawing, a chart publishes render warnings — `{ scope: "render", severity: "warning", code, name, refreshId }`,
 each code once per occurrence per refresh, superseded by the next refresh's frame: `chart.rule.no-data` (no rows to
 draw; the card shows its empty state), `chart.rule.null-category` (rows with a null category or series were left out)
-and `chart.degraded.<field>` (the declared library draws that field only approximately — the same table the save's
-`warnings` read, §2.1.2). A warning carries its code and a fixed sentence, never document text or a bound value.
+and `chart.degraded.<field>` (the declared library draws that field only approximately; the save judges no library,
+§2.1.2). A warning carries its code and a fixed sentence, never document text or a bound value.
 
 Bootstrap is the four-step barrier, each step awaited: validate the adapter and the renderer/bundle
 pair → fetch the configuration → mount the layout → fetch and render the parameter state (an explicit

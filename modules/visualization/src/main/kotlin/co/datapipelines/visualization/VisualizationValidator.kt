@@ -26,12 +26,11 @@ import java.util.UUID
  *
  * Fixture VALUES are not judged here: the type gate judges them at the fixture run (§11.3 step 3, L4).
  *
- * A `chart` document (design record 2026-11-06 §4.4) runs in three layers and stops at the first that refuses:
+ * A `chart` document (design record 2026-11-06 §4.4) runs in two layers and stops at the first that refuses:
  * (1) the v1 JSON Schema over the body as stored — `config_schema_invalid`, `details.reason` = `schema` with the
  * `keyword` and the instance `pointer`; (2) the product rules above (display text, inputs, transform, tests) together
- * with the chart save rules — `config_schema_invalid`, `details.reason` = the `chart.*` code; (3) the D-A authority —
- * a `chart.unsupported.*` refusal, or a warning on the [ArtifactValidation.Valid] answer. A valid chart's `bindings`
- * are the derived map.
+ * with the chart save rules — `config_schema_invalid`, `details.reason` = the `chart.*` code. A valid chart's
+ * `bindings` are the derived map. A save never calls the chart engine (js-rendered record O-12).
  */
 class VisualizationValidator(
     private val templates: TemplateContractFacts,
@@ -95,12 +94,8 @@ class VisualizationValidator(
         val verdict = if (output.refused) null else charts.saveRules(tree, output.columns)
         verdict?.refusals?.forEach { chartRefusal(tree, it, failures) }
         if (verdict == null || !failures.isEmpty) return ArtifactValidation.Invalid(failures.toResult())
-        val library = charts.libraryRules(tree, output.columns.orEmpty())
-        library.refusals.forEach { chartRefusal(tree, it, failures) }
-        if (!failures.isEmpty) return ArtifactValidation.Invalid(failures.toResult())
-        val warnings = library.warnings.map { ArtifactWarning(it.code, ChartPaths.dotted(tree, it.pointer), charts.support.library) }
         val derived = document.copy(body = body.copy(bindings = verdict.derivedBindings), bindings = BindingsPresence.PRESENT)
-        return ArtifactValidation.Valid(derived, warnings)
+        return ArtifactValidation.Valid(derived)
     }
 
     private fun chartRefusal(

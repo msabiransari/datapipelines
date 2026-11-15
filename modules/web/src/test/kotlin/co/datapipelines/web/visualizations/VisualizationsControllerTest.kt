@@ -71,7 +71,7 @@ class VisualizationsControllerTest {
         authenticate()
         val document = slot<co.datapipelines.visualization.VisualizationDocument>()
         every { service.create(workspaceId, capture(document), userId, WriteSurface.SESSION) } returns
-            co.datapipelines.visualization.VisualizationSaved(draft(), emptyList())
+            co.datapipelines.visualization.VisualizationSaved(draft())
 
         val response = controller.create(DOCUMENT)
 
@@ -91,8 +91,8 @@ class VisualizationsControllerTest {
                     .get("kind")
                     .asText() shouldBe "chart"
             },
-            // #860: `warnings` is ALWAYS present on a save, `[]` when clean.
-            { response.data.get("warnings").toString() shouldBe "[]" },
+            // #986 (js-rendered O-13): a save answer carries no `warnings` key - the library layer is gone.
+            { response.data.has("warnings") shouldBe false },
         )
     }
 
@@ -137,15 +137,10 @@ class VisualizationsControllerTest {
     fun `update writes the draft at the If-Match hash`() {
         authenticate()
         every { service.write(workspaceId, id, any(), "hash-v0", userId, WriteSurface.SESSION) } returns
-            co.datapipelines.visualization.VisualizationSaved(
-                draft(),
-                listOf(co.datapipelines.visualization.ArtifactWarning("chart.degraded.title", "config.title", "plotly")),
-            )
+            co.datapipelines.visualization.VisualizationSaved(draft())
 
         val data = controller.update(id, "hash-v0", DOCUMENT).data
         data.get("version").asInt() shouldBe 1
-        // #860: a warned save carries {code, path, library} per degraded field, never document text.
-        data.get("warnings").toString() shouldBe """[{"code":"chart.degraded.title","path":"config.title","library":"plotly"}]"""
     }
 
     // ---- reads: the caller's lens, never Everything -----------------------------------------------------

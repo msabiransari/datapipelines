@@ -132,11 +132,6 @@ failure's `path` names the field. Its `details.reason` says what to fix:
 | `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | drop `scale.domain` on a normalized stack; else make it increasing and include zero |
 | `chart.format.normalize_percent` / `chart.format.currency_unknown` | format a normalized value `percent`; use a known currency code |
 | `chart.bindings.mismatch` | delete `bindings` — the save derives them |
-| `chart.unsupported.<field>` | the library cannot draw that field: drop it |
-
-A write answers `warnings` beside the version — `[]` when clean, else `{code: "chart.degraded.<field>", path,
-library}` for a field the library draws only approximately. A warning does not refuse the save; read it, and
-check that field in the preview.
 
 ## Proving a visualization — the test loop
 
