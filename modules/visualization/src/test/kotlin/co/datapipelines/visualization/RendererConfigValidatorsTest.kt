@@ -6,18 +6,11 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
 /**
- * The module's renderer schemas, pinned (Dashboards §2.1.2): the two vendored Plotly bundles' trace lists (the spec's
- * §10.4 — library facts the chart converter loads, no document vocabulary since the 860 retirement), and the `table`
- * and `kpi` schemas this module defines; a `chart` is judged as a whole document elsewhere.
+ * The module's renderer schemas, pinned (Dashboards §2.1.2): the `table` and `kpi` schemas this module defines; a
+ * `chart` is judged as a whole document elsewhere. (The Plotly trace lists left with the library layer, #986.)
  */
 class RendererConfigValidatorsTest {
     private val validator = RendererConfigValidators.default()
-
-    @Test
-    fun `the trace lists are the spec's two bundles - six 2D, three 3D`() {
-        RendererConfigValidators.PLOTLY_2D_TRACES shouldBe listOf("scatter", "bar", "pie", "histogram", "box", "heatmap")
-        RendererConfigValidators.PLOTLY_3D_TRACES shouldBe listOf("scatter3d", "surface", "mesh3d")
-    }
 
     @Test
     fun `a chart config is no concern of this port - the whole document is judged by its v1 schema`() {

@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.72
+**Status:** v1.73
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-13
@@ -520,7 +520,8 @@ fallback creates the same template for a host without one), the page loads this 
 `f797e8f2d54603fd9d11b08aae8eb31147200b67` verifies the source against the tag. Node 22+ per
 Plotly's own build matrix (the manifest's `build` field records the exact versions). After ANY rebuild: update the manifest's `sha256` map, the `sizes`, and the
 trace lists if they changed — `VendoredPlotlyAuditTest` guards all three raw byte counts, both gzip counts
-and their pinned method, as well as hashes and trace lists, and fails the build on a mismatch.
+and their pinned method, as well as hashes, and fails the build on a mismatch (the trace lists are the manifest's
+record only since #986: no server code reads a Plotly trace type).
 
 ### 6.3 Docker Compose (dev / evaluation)
 
@@ -1732,6 +1733,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.73 | 986 (#986, js-rendered F2) | **§6.2A:** `VendoredPlotlyAuditTest` no longer pins the manifest's trace lists: the server's Plotly trace constants left with the chart library layer, so the lists are the manifest's record of each bundle's build, guarded by nothing on the server. Hashes, sizes and the gzip method stay guarded. |
 | 2026-11-13 | v1.72 | #936 DuckDB patch bump to duckdb_jdbc 1.5.6.0 (core 1.5.6) | **§3.1:** the image's core and extension bundle move to v1.5.6 (httpfs, aws, iceberg and avro at the commits the build stage reads). The runbook records what the bump taught: step 1 names the check that refuses a raised catalog version left without regenerated locks (the first task that resolves the configuration; the `dependencies` report exits 0); step 2's cold command runs after steps 3–5, because `generateThirdPartyNotices` refuses a catalog core that is not the Dockerfile `ARG`, and the metadata writer keeps the old driver's component, which is removed by hand; step 6's rehearsal derives the next patch from the catalog, and the notices fixtures, the docs golden and the extension-loaded function catalog move with the bump; step 7 runs a copy of the posture harness and compares its case lines. |
 | 2026-11-12 | v1.71 | #753/#754 image account ids and distribution — renumbered at final sync after dependency-graph | **§3.1:** the image's `datapipelines` account has fixed ids, UID/GID 999 (the id the unpinned system account already received), and the reference chart's application pod `securityContext` pins `runAsUser`/`runAsGroup`/`fsGroup` to the same 999 instead of 1000, an id the image never had; `ImageUserPinSpecDriftTest` holds the Dockerfile, the chart and this bullet equal. Chart 0.4.0 → 0.4.1. The section no longer claims a registry publish: nothing in this repository pushes the image; build it from a checkout and point Compose or the chart at it. |
 | 2026-11-11 | v1.70 | #895 upgrade conversion, one rollback boundary | **§8.2:** the APIs and the schedules convert in ONE transaction, APIs first — a refused or failed conversion leaves every API, schedule and queued run as it was, and a restart after the fix converts everything; the migrations Flyway applied stay applied; a concurrent writer rolls the conversion back and it is retried from fresh rows up to three times (`event=upgrade.conversion.retry`); success lines are logged only after the commit. Replaces the schedules-only "ONE transaction" sentence of v1.68. |

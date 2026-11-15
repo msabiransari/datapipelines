@@ -22,7 +22,6 @@ import co.datapipelines.visualization.DashboardTimeouts
 import co.datapipelines.visualization.RefreshExecutionLink
 import co.datapipelines.visualization.RefreshRecord
 import co.datapipelines.visualization.RefreshStatus
-import co.datapipelines.visualization.RendererConfigValidators
 import co.datapipelines.visualization.RendererKind
 import co.datapipelines.visualization.RendererSpec
 import co.datapipelines.visualization.VisualizationBody
@@ -110,7 +109,7 @@ class RuntimeSupportTest {
         RuntimeViews.rendererBundle(listOf(pinned(RendererKind.TABLE, """{"columns":[]}"""))) shouldBe "2d"
         RuntimeViews.rendererBundle(listOf(pinned(RendererKind.KPI, """{}"""))) shouldBe "2d"
         // The retired kind's 3D trace types, spelled into a config, no longer select the heavy bundle.
-        RendererConfigValidators.PLOTLY_3D_TRACES.forEach { trace ->
+        listOf("scatter3d", "surface", "mesh3d").forEach { trace ->
             RuntimeViews.rendererBundle(listOf(pinned(RendererKind.CHART, """{"data":[{"type":"$trace"}]}"""))) shouldBe "2d"
         }
     }
