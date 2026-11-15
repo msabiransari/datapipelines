@@ -137,7 +137,30 @@ th::_private_dir_problem() { # dir → prints the problem, returns 1; silent 0 w
 }
 
 # ---- budget ---------------------------------------------------------------------------
+# ONE budget over the step: checked for every entry visited (kept or removed), between the
+# processes and references of the scan, around each listing, and in record cleanup. The
+# helper gets the same deadline (TH_DEADLINE_REAL) and checks it for every entry it reaches.
 th::_budget_left() { th::_clock; [ "$TH_CLOCK" -lt "$TH_DEADLINE" ]; }
+
+# th::_entries <dir> <find -printf format>: one level of <dir> into TH_ENTRIES. The listing
+# itself is bounded by what remains of the budget; 1 when the budget ended (TH_ENTRIES is then
+# empty: nothing listed part-way is acted on).
+th::_entries() {
+  local dir="$1" format="$2" remaining status
+  TH_ENTRIES=()
+  th::_budget_left || return 1
+  remaining=$(( TH_DEADLINE_REAL - $(printf '%(%s)T' -1) ))
+  [ "$remaining" -gt 0 ] || return 1
+  if command -v timeout >/dev/null 2>&1; then
+    mapfile -d '' TH_ENTRIES < <(timeout -s KILL "$remaining" find "$dir" -mindepth 1 -maxdepth 1 -printf "$format" 2>/dev/null; printf 'rc=%s\0' "$?")
+  else
+    mapfile -d '' TH_ENTRIES < <(find "$dir" -mindepth 1 -maxdepth 1 -printf "$format" 2>/dev/null; printf 'rc=%s\0' "$?")
+  fi
+  status="${TH_ENTRIES[${#TH_ENTRIES[@]}-1]:-}"
+  unset 'TH_ENTRIES[${#TH_ENTRIES[@]}-1]'
+  case "$status" in rc=124|rc=137) TH_ENTRIES=(); return 1 ;; esac
+  return 0
+}
 
 # ---- the process scan -----------------------------------------------------------------
 # One read of every process (temp-hygiene-helper.py scan), kept as a snapshot; th::_proc_refs
@@ -197,15 +220,25 @@ th::_scan_processes() { # base
       [ "${#TH_UNREADABLE_NAMES[@]}" -ge 5 ] || TH_UNREADABLE_NAMES+=("$pid ${TH_PROC_NAME:-?}")
     fi
   done
-  th::_index_refs "$base"
+  th::_index_refs "$base" || return 1
   return 0
 }
 
 # A directory is referenced when a read process has it, or a path below it, as cwd or an
-# open handle, or names it on its command line (followed by the end, '/' or a separator).
-# th::_index_refs turns TH_REFS and TH_ARGS into TH_REF_SET once per pass: every path under
-# the base that a reference names, and each of its ancestors below the base. A lookup is then
-# one hash probe (the per-candidate walk over ~650 references cost 7 ms per candidate).
+# open handle, or names it on its command line. th::_index_refs turns TH_REFS and TH_ARGS
+# into TH_REF_SET once per pass, so a lookup is one hash probe (the per-candidate walk over
+# ~650 references cost 7 ms per candidate):
+#   * cwd and handles are exact kernel paths: the path and each of its ancestors below the base;
+#   * a command-line argument is text: where a path inside it ends cannot be known (a space,
+#     a newline, ':', ',', ';', '=' and quotes are all legal in a name), so nothing is cut.
+#     After each "<base>/" in the argument, the text is read as '/'-separated segments and,
+#     for each of the first TH_REF_DEPTH segments, every prefix of that segment (up to a
+#     name's length) is indexed below the exact segments before it. A candidate is then kept
+#     when its name is ANY prefix of what the argument holds at its place: "<root>/a b/x"
+#     keeps "a b" (and "a", "a "), "--dir=<base>/x,y" keeps "x" and "x,y". Extra retention
+#     is the safe side; cutting an argument short deleted a live directory (#983 round 1).
+TH_REF_DEPTH=3      # the deepest candidate: <base>/dp-test-tmp-<uid>/<key>/<entry>
+TH_NAME_MAX=255     # a file name's longest length; a longer prefix can name no candidate
 th::_add_ancestors() { # base path
   local base="$1" path="$2"
   while [[ "$path" == "$base"/* ]]; do
@@ -216,16 +249,30 @@ th::_add_ancestors() { # base path
   done
 }
 
-th::_index_refs() { # base
+# th::_add_arg_prefixes <base> <text after one "<base>/">: see th::_index_refs above.
+th::_add_arg_prefixes() {
+  local base="$1" rest="$2" context="$1" segment depth=0 i limit
+  while [ "$depth" -lt "$TH_REF_DEPTH" ] && [ -n "$rest" ]; do
+    if [[ "$rest" == */* ]]; then segment="${rest%%/*}"; rest="${rest#*/}"; else segment="$rest"; rest=; fi
+    # "<base>//x" and "<base>/./x" name <base>/x: an empty or "." segment adds no level.
+    if [ -z "$segment" ] || [ "$segment" = . ]; then continue; fi
+    limit="${#segment}"; [ "$limit" -le "$TH_NAME_MAX" ] || limit="$TH_NAME_MAX"
+    for ((i = 1; i <= limit; i++)); do TH_REF_SET["$context/${segment:0:i}"]=1; done
+    context="$context/$segment"; depth=$((depth + 1))
+  done
+}
+
+th::_index_refs() { # base → 0 indexed, 1 stopped at the budget
   local base="$1" x rest
   unset TH_REF_SET
   declare -gA TH_REF_SET=()
-  for x in "${TH_REFS[@]}"; do th::_add_ancestors "$base" "$x"; done
+  for x in "${TH_REFS[@]}"; do th::_budget_left || return 1; th::_add_ancestors "$base" "$x"; done
   for x in "${TH_ARGS[@]}"; do
+    th::_budget_left || return 1
     rest="$x"
     while [[ "$rest" == *"$base/"* ]]; do
       rest="${rest#*"$base/"}"
-      th::_add_ancestors "$base" "$base/${rest%%[:,;= \"\']*}"
+      th::_add_arg_prefixes "$base" "$rest"
     done
   done
 }
@@ -291,7 +338,8 @@ th::_empty_root() { # root mode
     th::_warn "refusing the checkout root $root: it $problem; nothing removed through it"
     TH_ROOT_STATE=refused; return 0
   fi
-  mapfile -d '' entries < <(find "$root" -mindepth 1 -maxdepth 1 -printf '%U\t%y\t%P\0' 2>/dev/null)
+  th::_entries "$root" '%U\t%y\t%P\0' || { TH_STOPPED=1; TH_ROOT_STATE=stopped; return 0; }
+  entries=("${TH_ENTRIES[@]}")
   for entry in "${entries[@]}"; do
     th::_budget_left || { TH_STOPPED=1; TH_ROOT_STATE=stopped; return 0; }
     IFS=$'\t' read -r uid type _ <<< "$entry"
@@ -335,7 +383,8 @@ th::_old_enough() { # mtime(epoch, may be fractional)
 
 th::_sweep_shared() { # base mode
   local base="$1" mode="$2" entries=() entry uid mtime type name label port candidates=()
-  mapfile -d '' entries < <(find "$base" -mindepth 1 -maxdepth 1 -printf '%U\t%T@\t%y\t%P\0' 2>/dev/null)
+  th::_entries "$base" '%U\t%T@\t%y\t%P\0' || { TH_STOPPED=1; return 0; }
+  entries=("${TH_ENTRIES[@]}")
   th::_listening_ports
   for entry in "${entries[@]}"; do
     th::_budget_left || { TH_STOPPED=1; break; }
@@ -365,7 +414,8 @@ th::_sweep_shared() { # base mode
 th::_sweep_gone_roots() { # parent mode own-key
   local parent="$1" mode="$2" own="$3" entries=() entry type name key record checkout mtime root problem
   [ -d "$parent" ] && [ ! -L "$parent" ] || return 0
-  mapfile -d '' entries < <(find "$parent" -mindepth 1 -maxdepth 1 -printf '%y\t%T@\t%P\0' 2>/dev/null)
+  th::_entries "$parent" '%y\t%T@\t%P\0' || { TH_STOPPED=1; return 0; }
+  entries=("${TH_ENTRIES[@]}")
   declare -A seen=()
   for entry in "${entries[@]}"; do
     th::_budget_left || { TH_STOPPED=1; return 0; }
@@ -390,6 +440,7 @@ th::_sweep_gone_roots() { # parent mode own-key
   done
   # A record whose root and whose checkout are both gone.
   for entry in "${entries[@]}"; do
+    th::_budget_left || { TH_STOPPED=1; return 0; }
     IFS=$'\t' read -r type _ _ <<< "$entry"
     name="${entry#*$'\t'*$'\t'}"
     [ "$type" = f ] && [[ "$name" =~ ^([0-9a-f]{$TH_KEY_HEX_DIGITS})${TH_RECORD_SUFFIX//./\\.}$ ]] || continue
@@ -399,11 +450,13 @@ th::_sweep_gone_roots() { # parent mode own-key
     checkout="$(cat -- "$parent/$name" 2>/dev/null)" || continue
     [ ! -e "$checkout" ] || continue
     th::_drop_record "$mode" "$parent/$name"
+    [ "$TH_STOPPED" -eq 0 ] || return 0
   done
 }
 
 th::_drop_record() { # mode record — LAST, and only once its root is completely gone
   local mode="$1" record="$2" root="${2%"$TH_RECORD_SUFFIX"}"
+  th::_budget_left || { TH_STOPPED=1; return 0; }
   if [ "$mode" = dry-run ]; then th::_list would-remove-record gone "$record"; return 0; fi
   [ ! -e "$root" ] && [ ! -L "$root" ] || return 0
   [ -f "$record" ] && [ ! -L "$record" ] || return 0

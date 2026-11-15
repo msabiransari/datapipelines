@@ -444,6 +444,86 @@ for which in pregate gate; do
 done
 finish
 
+# ---- 21-23: a live command-line argument keeps its whole name (#983 round 2, C1) -------------
+# Each holder has no cwd and no open handle below the base: its ONLY reference is one
+# command-line argument. Its entry and an unused sibling get the same closed files (directly
+# inside and one level below); the sibling going in the same pass is the control that the
+# sweep ran and that the closed files would have been leased away.
+cmdline_has() { # cmdline_has <pid> <argument>: the exact argument, NUL-safe
+  local argument
+  while IFS= read -r -d '' argument; do [ "$argument" = "$2" ] && return 0; done < "/proc/$1/cmdline" 2>/dev/null
+  return 1
+}
+hold_arg() { # hold_arg <argument>: a sleeping process whose command line carries it
+  ( cd / && exec python3 -c 'import time; time.sleep(600)' "$1" ) < /dev/null > /dev/null 2>&1 9>&- 10>&- 11>&- &
+  remember "$!"; wait_for cmdline_has "$!" "$1" || fail "argument holder of $1 did not start"
+  HOLDER="$!"
+}
+fill_entry() { # fill_entry <dir>: closed files directly inside and one level below
+  mkdir -p "$1/nested"; payload "$1/closed-file"; payload "$1/nested/closed-file"
+}
+argument_case() { # argument_case <entry name> <sibling name> <argument with @ for the root>
+  local root entry sibling argument
+  root="$(mkroot "$CO")"; entry="$root/$1"; sibling="$root/$2"
+  fill_entry "$entry"; fill_entry "$sibling"
+  argument="${3//@/$root}"
+  hold_arg "$argument"
+  pass "c$CASE" real real
+  [ -n "${HOLDER:-}" ] && kill -0 "$HOLDER" 2>/dev/null || fail 'the holder did not stay alive through the pass'
+  exists "$entry/closed-file" 'the closed file directly inside the referenced entry'
+  exists "$entry/nested/closed-file" 'the closed file one level below the referenced entry'
+  gone "$sibling" 'the unused sibling with the same contents (the control)'
+  expect dirs-kept-live 1; expect root-removed 1
+}
+
+begin 21 'a plain absolute argument with a space keeps its entry whole'
+argument_case 'a b' 'a b2' '@/a b/nested'
+finish
+
+begin 22 'an option value with a space keeps its entry whole'
+argument_case 'opt dir' 'opt dir2' '--work-dir=@/opt dir'
+finish
+
+begin 23 'an argument naming an entry with a newline (and a comma) keeps it whole'
+argument_case $'nl\nx,y' $'nl\nx,z' $'@/nl\nx,y/nested'
+finish
+
+# ---- 24-25: the one budget covers kept entries too (#983 round 2, C2) -------------------------
+# Every file is kept (lease off: untried), so no removal ever happens; the deadline is passed
+# to the helper through the seam (argparse keeps the last --deadline), never by a sleep.
+kept_root() { # kept_root <count> → prints the root, holding <count> files (kept with the lease off)
+  local root n
+  root="$(mkroot "$CO")"
+  for n in $(seq 1 "$1"); do payload "$root/kept$n"; done
+  printf '%s\n' "$root"
+}
+list_lines() { grep -c "^$1 " "$LIST" || true; } # list_lines <verdict>
+
+begin 24 'a deadline already passed: no entry is visited, the budget is signalled'
+dir="$FX/kept-dir"; mkdir -p "$dir"; for n in 1 2 3; do payload "$dir/f$n"; done
+records="$(printf '%s\0' "$dir" | python3 "$HELPER" remove --mode real --lease off --uid "$UID_NOW" --deadline 0 | tr '\0' '\n')"
+[ "$records" = '#budget' ] || fail "the helper past its deadline visited or did not signal: $(printf '%q' "$records")"
+root="$(kept_root 4)"
+pass c24 real real 'th::_lease_mode() { echo off; }; th::_remover_extra_args() { echo --deadline 0; }'
+grep -q ' stopped at budget' "$OUT" || fail "no stopped at budget: $(cat "$OUT")"
+[ "$(list_lines kept)" -eq 0 ] || fail "entries were visited past the deadline: $(cat "$LIST")"
+for n in 1 2 3 4; do exists "$root/kept$n"; done
+finish
+
+begin 25 'the budget ends part-way through kept entries: the later ones are not visited'
+dir="$FX/kept-dir"; mkdir -p "$dir"; for n in 1 2 3 4 5 6; do payload "$dir/f$n"; done
+# Visit 1 is the directory, visits 2 and 3 two of its files; the fourth visit meets the limit.
+records="$(printf '%s\0' "$dir" | python3 "$HELPER" remove --mode real --lease off --uid "$UID_NOW" --deadline 99999999999 --stop-after-visits 3 | tr '\0' '\n')"
+[ "$records" = "kept"$'\t'"0"$'\t'"0"$'\t'"0"$'\t'"2"$'\t'"0"$'\t'"$dir"$'\n#budget' ] \
+  || fail "the helper visited past the limit or did not signal (expected 2 of 6 files visited): $(printf '%q' "$records")"
+root="$(kept_root 5)"
+pass c25 real real 'th::_lease_mode() { echo off; }; th::_remover_extra_args() { echo --stop-after-visits 2; }'
+grep -q ' stopped at budget' "$OUT" || fail "no stopped at budget: $(cat "$OUT")"
+[ "$(list_lines kept)" -eq 2 ] || fail "expected 2 visited entries, 3 not visited: $(cat "$LIST")"
+expect files-kept-lease-untried 2
+for n in 1 2 3 4 5; do exists "$root/kept$n"; done
+finish
+
 # ---- every captured summary names a fixture base ---------------------------------------------
 CASE=bases
 lines="$(wc -l < "$T/summaries")"

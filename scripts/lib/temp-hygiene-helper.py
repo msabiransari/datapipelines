@@ -9,7 +9,7 @@ scan   --base B --deadline T
     "#budget" record means the deadline ended the scan: the caller removes nothing.
     The scan can only KEEP a directory; nothing it reads can make a file removable.
 
-remove --mode real|dry-run --lease try|off --uid N --deadline T [--stop-after N]
+remove --mode real|dry-run --lease try|off --uid N --deadline T [--stop-after N] [--stop-after-visits N]
     Reads NUL-separated absolute candidate paths on stdin. The caller has already decided that
     each may go: on the allowlist, owned by the uid, old enough, and not referenced by a live
     process it could read. Removal happens only on the kernel's answer:
@@ -24,11 +24,14 @@ remove --mode real|dry-run --lease try|off --uid N --deadline T [--stop-after N]
     Writes one NUL-terminated record per candidate reached:
         <status>\t<entries>\t<bytes>\t<refused>\t<untried>\t<other>\t<path>
     status: removed (gone; dry-run: would be), partial (something below it went or would),
-    kept. A final "#budget" record: the budget ended; no later candidate was reached and the
-    last one may be partly removed (a later run finishes it). dry-run takes and releases the
-    same leases and removes nothing. --stop-after N stops after N removals exactly as the
-    deadline does (the self-test's way to stop part-way). No argument removes a file without
-    the lease.
+    kept. The ONE deadline is checked before each candidate, for every entry reached (kept or
+    removed, whatever keeps it), for every name read while listing a directory, and before
+    every removal. A final "#budget" record: the deadline ended; nothing more was visited, no
+    later candidate was reached (a candidate the deadline met before it was reached has no
+    record) and the last one may be partly removed (a later run finishes it). dry-run takes and
+    releases the same leases and removes nothing. --stop-after N stops after N removals, and
+    --stop-after-visits N once N entries have been visited, exactly as the deadline does (the
+    self-test's ways to stop part-way). No argument removes a file without the lease.
 """
 import argparse
 import errno
@@ -136,12 +139,26 @@ class Remover:
         self.uid: int = arguments.uid
         self.deadline: float = arguments.deadline
         self.stop_after: Optional[int] = arguments.stop_after
-        self.removals = 0
+        self.stop_after_visits: Optional[int] = arguments.stop_after_visits
+        self.removals = self.visits = 0
         self.entries = self.bytes = self.refused = self.untried = self.other = 0
+
+    def check(self) -> None:
+        """The ONE budget: raises Budget once the deadline (or the self-test's visit limit) is reached."""
+        if time.time() >= self.deadline or (
+            self.stop_after_visits is not None and self.visits >= self.stop_after_visits
+        ):
+            raise Budget()
+
+    def visit(self) -> None:
+        """Called for every entry reached, before anything is read of it, whether it is then kept or removed."""
+        self.check()
+        self.visits += 1
 
     def spend(self) -> None:
         """Called before every removal: at the budget, nothing more is removed."""
-        if time.time() >= self.deadline or (self.stop_after is not None and self.removals >= self.stop_after):
+        self.check()
+        if self.stop_after is not None and self.removals >= self.stop_after:
             raise Budget()
         self.removals += 1
 
@@ -194,8 +211,11 @@ class Remover:
             if (opened.st_dev, opened.st_ino) != (st.st_dev, st.st_ino):
                 self.other += 1
                 return False
+            names: list[str] = []
             with os.scandir(fd) as children:
-                names = [child.name for child in children]
+                for child in children:
+                    self.check()
+                    names.append(child.name)
             gone = True
             for child in names:
                 if not self.entry(fd, child, st.st_dev):
@@ -216,6 +236,7 @@ class Remover:
 
     def entry(self, dirfd: int, name: str, top_dev: Optional[int]) -> bool:
         """True when the entry is gone (dry-run: would be). Raises Budget at the budget."""
+        self.visit()
         try:
             st = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
         except FileNotFoundError:
@@ -239,6 +260,7 @@ class Remover:
     def candidate(self, out: BinaryIO, path: str) -> None:
         parent, name = os.path.split(path)
         self.entries = self.bytes = self.refused = self.untried = self.other = 0
+        self.check()  # past the budget, the candidate is not reached and gets no record
         try:
             parent_fd = os.open(parent, OPEN_DIR)
         except OSError:
@@ -287,6 +309,7 @@ def main() -> int:
     remover.add_argument("--uid", type=int, required=True)
     remover.add_argument("--deadline", type=float, required=True)
     remover.add_argument("--stop-after", type=int)
+    remover.add_argument("--stop-after-visits", type=int)
     arguments = parser.parse_args()
     return scan(arguments) if arguments.command == "scan" else remove(arguments)
 
