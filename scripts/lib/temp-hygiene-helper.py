@@ -131,9 +131,9 @@ class Resolver:
     path in it starts and ends cannot be known (any byte but NUL and '/' is legal in a name), so EVERY
     '/' starts an absolute path (from the process's own root), every place a name of the process's cwd
     (or "..") occurs starts a relative one, and every place a path could end is an end: each proper
-    prefix of a component, the empty one included, except a run of dots that a further dot continues
-    (so "live/../other" never ends at "live/" or "live/.": '/' then ".." continues the path), and the
-    whole text. Each component is looked up through descriptors with O_NOFOLLOW; a symbolic link is
+    prefix of a component, the empty one included, except inside a component that is exactly ".."
+    (the kernel's step out: "live/../other" never ends at "live/" or "live/.", while "live/.x" and
+    "live/..." may end at "live/"), and the whole text. Each component is looked up through descriptors with O_NOFOLLOW; a symbolic link is
     followed by reading it (an absolute target restarts at the process's root), ".." at the process's
     root stays there, a procfs link is opened by the kernel. An end's identity (device, inode) is then
     walked up through ".." to the top of its mount tree (another mount namespace, a bind mount, a
