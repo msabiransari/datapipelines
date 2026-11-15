@@ -7,8 +7,11 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { engine, chartFixtures, inputOf, canonical } from "./engine.mjs";
 
-/** One frame per level and the empty below it: full, compact, minimal, too small. */
-const FRAMES = [[960, 540], [480, 360], [300, 180], [120, 40], [60, 20]];
+/**
+ * One frame per level and the empty below it: full, compact, minimal, too small; and the full and compact level
+ * boundaries themselves (#985 R1: the frames the levels advertise must fit, so the sandbox checks them too).
+ */
+const FRAMES = [[960, 540], [480, 360], [300, 180], [120, 40], [60, 20], [360, 240], [200, 140]];
 
 const out = process.argv[2];
 if (!out) throw new Error("usage: node emit.mjs <out dir>");

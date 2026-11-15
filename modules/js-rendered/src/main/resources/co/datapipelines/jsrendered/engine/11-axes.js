@@ -44,7 +44,8 @@
    * use left and right: the frame inside its edge, less a side legend), plot: {x, y, w, h},
    * corner: the lowest value tick label's box {x0, y0, x1, y1} or null, cornerIsFirst: true when the row's first
    * label IS that tick (a horizontal bar: never cut it), rotate: "never" | "allow" | "force", room: px free below the
-   * row}. Returns {texts, drawn: [label index], height, rotated, corner: "clear" | "moved" | "cut", need: the px the
+   * row, maxLen: optional, the length a rotated label is cut to when the layout has less room than the look's
+   * rotateMaxEm}. Returns {texts, drawn: [label index], height, rotated, corner: "clear" | "moved" | "cut", need: the px the
    * corner asked to move down}.
    */
   function labelRow(h, o) {
@@ -76,7 +77,7 @@
       var cs = angle(), cos = cs[0], sin = cs[1], perp = h.boxH(s) + gap;
       k = 1;
       while (k * step * sin < perp && k < n) k++;
-      var maxLen = look("rotateMaxEm") * s;
+      var maxLen = rotatedMax(h, o.maxLen);
       if (cz !== null && cz.y1 > top) {
         res.need = cz.y1 - top;
         top = cz.y1;
@@ -154,8 +155,14 @@
     return m;
   }
 
+  /** The length a rotated label is cut to: the look's rotateMaxEm, or less where the layout gives less room. */
+  function rotatedMax(h, maxLen) {
+    var m = look("rotateMaxEm") * h.text;
+    return maxLen === undefined || maxLen === null ? m : Math.min(m, maxLen);
+  }
+
   /** The height labelRow will take before the corner moves it: the reserve a layout makes for the row. */
-  function rowReserve(h, labels, rotated) {
+  function rowReserve(h, labels, rotated, maxLen) {
     var s = h.text, tg = h.em("tickGap"), widest = 0, anyUnder = false;
     for (var i = 0; i < labels.length; i++) {
       if (labels[i].under !== null && labels[i].under !== undefined) anyUnder = true;
@@ -164,10 +171,9 @@
     }
     if (labels.length === 0) return 0;
     if (!rotated) return tg + h.boxH(s) + (anyUnder ? look("lineHeight") * s : 0);
-    var maxLen = look("rotateMaxEm") * s;
     var cs = angle();
-    return tg + cs[0] * h.boxH(s) + cs[1] * Math.min(maxLen, rotatedWidest(h, labels));
+    return tg + cs[0] * h.boxH(s) + cs[1] * Math.min(rotatedMax(h, maxLen), rotatedWidest(h, labels));
   }
 
-  R.axes = { valueAxis: valueAxis, labelRow: labelRow, rowReserve: rowReserve, overlaps: overlaps, ANGLES: ANGLES };
+  R.axes = { valueAxis: valueAxis, labelRow: labelRow, rowReserve: rowReserve, angle: angle, overlaps: overlaps, ANGLES: ANGLES };
 })(JsRendered);

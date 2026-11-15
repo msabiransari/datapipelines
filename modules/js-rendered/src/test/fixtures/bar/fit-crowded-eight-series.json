@@ -1,0 +1,146 @@
+{
+ "source": [
+  "lane 985 make-r2-fixtures.mjs"
+ ],
+ "note": "#985 R1: a crowded full frame (eight long series names, a title and a two-line subtitle); at 360 x 240 the legend's rows pushed the axes out of the frame",
+ "document": {
+  "display_name": "Eight series",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "A chart title",
+    "subtitle": "A long subtitle A long subtitle A long subtitle A long subtitle A long subtitle A long subtitle A long subtitle A long subtitle A long subtitle A long subtitle A long subtitle"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3"
+  ],
+  "s": [
+   "Series 1 a very long series name that should still be valid plain text",
+   "Series 2 a very long series name that should still be valid plain text",
+   "Series 3 a very long series name that should still be valid plain text",
+   "Series 4 a very long series name that should still be valid plain text",
+   "Series 5 a very long series name that should still be valid plain text",
+   "Series 6 a very long series name that should still be valid plain text",
+   "Series 7 a very long series name that should still be valid plain text",
+   "Series 8 a very long series name that should still be valid plain text",
+   "Series 1 a very long series name that should still be valid plain text",
+   "Series 2 a very long series name that should still be valid plain text",
+   "Series 3 a very long series name that should still be valid plain text",
+   "Series 4 a very long series name that should still be valid plain text",
+   "Series 5 a very long series name that should still be valid plain text",
+   "Series 6 a very long series name that should still be valid plain text",
+   "Series 7 a very long series name that should still be valid plain text",
+   "Series 8 a very long series name that should still be valid plain text",
+   "Series 1 a very long series name that should still be valid plain text",
+   "Series 2 a very long series name that should still be valid plain text",
+   "Series 3 a very long series name that should still be valid plain text",
+   "Series 4 a very long series name that should still be valid plain text",
+   "Series 5 a very long series name that should still be valid plain text",
+   "Series 6 a very long series name that should still be valid plain text",
+   "Series 7 a very long series name that should still be valid plain text",
+   "Series 8 a very long series name that should still be valid plain text"
+  ],
+  "v": [
+   13,
+   20,
+   27,
+   11,
+   18,
+   25,
+   32,
+   16,
+   14,
+   21,
+   28,
+   12,
+   19,
+   26,
+   10,
+   17,
+   15,
+   22,
+   29,
+   13,
+   20,
+   27,
+   11,
+   18
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "s": "STRING",
+  "v": "DOUBLE"
+ }
+}

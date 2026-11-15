@@ -189,38 +189,54 @@
       }
     }
     if (!/^-?[0-9]+(\.[0-9]+)?$/.test(t)) return NaN;
-    var n = Number(t + (unit > 0 ? "e" + 3 * unit : ""));
-    return pct ? n / 100 : n;
+    // The scale goes into the decimal text's own exponent, which every runtime parses correctly rounded: a label that
+    // carries all of a value's digits reads back as that very value (n / 100 could miss it by one unit in the last place).
+    return Number(t + (pct ? "e-2" : unit > 0 ? "e" + 3 * unit : ""));
+  }
+
+  /** The fraction digits a value needs to be written exactly: those of String(v) (shifted two places for a percent). */
+  function exactDigits(v, shift) {
+    var x = decimal(v);
+    return x.d === "0" ? 0 : Math.max(0, x.d.length - (x.p + shift));
   }
 
   /**
-   * Axis tick labels with the fewest fraction digits (0 to 3) at which every label, read back, IS its tick (lane
-   * 972's rule). A percent axis writes percentages; any other axis writes plain digits below 1,000 and the compact
-   * form at or above it while one fraction digit suffices (§4.7), plain grouped digits otherwise.
+   * Axis tick labels with the fewest fraction digits at which every label, read back, IS its tick (lane 972's rule,
+   * within a millionth of the smallest tick gap, so each label keeps its tick's value and no two ticks share a text).
+   * The search starts at 0 digits and ends at the digits that write every tick exactly, where the read-back is exact
+   * by construction; it never returns labels that lost a value (#985 R2: a fixed limit of 3 digits wrote 0, 0.0001,
+   * 0.0002 as "0", "0", "0"). A percent axis writes percentages; any other axis writes plain digits below 1,000 and the
+   * compact form at or above it while one fraction digit suffices (§4.7), plain grouped digits otherwise.
    */
   function ticks(values, format) {
-    var step = 0;
-    for (var i = 1; i < values.length; i++) {
+    var pct = format === "percent";
+    var step = 0, most = 0;
+    for (var i = 0; i < values.length; i++) {
+      most = Math.max(most, exactDigits(values[i], pct ? 2 : 0));
+      if (i === 0) continue;
       var gap = values[i] - values[i - 1];
       if (gap < 0) gap = -gap;
       if (gap > 0 && (step === 0 || gap < step)) step = gap;
     }
     if (step === 0) step = 1;
-    var out = [];
-    for (var digits = 0; digits <= 3; digits++) {
-      out = [];
+    // Each count of digits up to `most` (at least 1, the compact form's one fraction digit: 2.5K), then plain digits
+    // at `most` (a compact attempt above 1,000 can miss where plain grouped digits are exact: 1,250 is not 1.2K).
+    var last = Math.max(most, 1);
+    for (var digits = 0; digits <= last + 1; digits++) {
+      var plainOnly = digits > last, d = plainOnly ? most : digits;
+      var out = [];
       var exact = true;
       for (var k = 0; k < values.length; k++) {
         var v = values[k], a = v < 0 ? -v : v, label;
-        if (format === "percent") label = percent(v, digits);
-        else label = a < 1000 || digits > 1 ? fixed(v, 0, digits) : compact(v, digits);
+        if (pct) label = percent(v, d);
+        else label = plainOnly || a < 1000 || d > 1 ? fixed(v, 0, d) : compact(v, d);
         out.push(label);
         var back = readLabel(label) - v;
         if (!(back <= step * 1e-6 && back >= -step * 1e-6)) exact = false;
       }
-      if (exact) break;
+      if (exact) return out;
     }
-    return out;
+    throw new Error("ticks: no fraction digits write every tick as its own value: " + values.join(", "));
   }
 
   // ---- dates: UTC, from the wire string's own digits (no Date object, no clock, no zone) ----

@@ -190,10 +190,11 @@
       },
     };
     // A series is hidden in this draw when its id is on the list AND its entry is drawn (look contract §4.2). The
-    // legend's layout depends on neither the axes nor the visibility, so it is laid out first and decides `visible`.
+    // legend's layout depends on neither the axes' drawing nor the visibility (only on the room the model's layout
+    // part needs, R.cartesian.legendRoom), so it is laid out first and decides `visible`.
     var visible = {};
     if (lg !== null) {
-      var probe = C.legendLayout(h, series, place, W - 2 * h.em("edge"), H - t.bottom - h.em("edge"));
+      var probe = C.legendLayout(h, series, place, W - 2 * h.em("edge"), R.cartesian.legendRoom(h, lvl, m.layout, place, H - t.bottom - h.em("edge")));
       lg.drawn = probe.drawn;
     }
     for (var v = 0; v < series.length; v++) {

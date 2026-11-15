@@ -1,5 +1,6 @@
 // A.3: invariants I1 to I5 and I7 (record §8) for every chart fixture at every width and height of D7 (widths 240 to
-// 1,600 in steps of 40, heights 100, 200, 480), each count floored so a checker that saw nothing is red.
+// 1,600 in steps of 40, heights 100, 140, 200, 240, 480: the level heights 140 and 240 since #985 R1), each count
+// floored so a checker that saw nothing is red.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { engine, chartFixtures, inputOf } from "./engine.mjs";
@@ -9,14 +10,15 @@ const R = engine();
 const FIXTURES = chartFixtures();
 
 /** Non-vacuity floors: the fixture set, the frames, and what the checker saw. */
-const FLOOR = { fixtures: 39, widths: 35, heights: 3, texts: 30000, marks: 20000, levels: 3 };
+const FLOOR = { fixtures: 43, widths: 35, heights: 5, texts: 50000, marks: 33000, levels: 3 };
 
 test("the invariant sweep is not vacuous (floors)", () => {
   assert.ok(FIXTURES.length >= FLOOR.fixtures, "chart fixtures: " + FIXTURES.length);
   assert.equal(WIDTHS.length, FLOOR.widths);
   assert.equal(WIDTHS[0], 240);
   assert.equal(WIDTHS[WIDTHS.length - 1], 1600);
-  assert.deepEqual(HEIGHTS, [100, 200, 480]);
+  assert.equal(HEIGHTS.length, FLOOR.heights);
+  assert.deepEqual(HEIGHTS, [100, 140, 200, 240, 480]);
 });
 
 const seen = { texts: 0, marks: 0, levels: new Set(), pictures: 0 };

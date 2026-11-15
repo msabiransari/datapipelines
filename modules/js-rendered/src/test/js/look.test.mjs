@@ -198,7 +198,7 @@ for (const [end, at] of [["low", 3], ["high", 4]]) {
         }
       }
     }
-    assert.ok(pictures >= 39 * 140 && texts > 10000, `pictures ${pictures}, texts ${texts}`);
+    assert.ok(pictures >= 43 * 35 * 6 && texts > 10000, `pictures ${pictures}, texts ${texts}`);
     assert.deepEqual([...levels].sort(), ["compact", "full", "minimal"], "every level is met");
     assert.deepEqual(bad.slice(0, 10), [], bad.length + " violations");
   });
@@ -221,7 +221,7 @@ test("LA3 between the ends: each text size low or high on its own (the eight cor
       }
     }
   }
-  assert.ok(pictures >= 9 * 39 * 60, "pictures " + pictures);
+  assert.ok(pictures >= 9 * 43 * 60, "pictures " + pictures);
   assert.deepEqual(bad.slice(0, 10), [], bad.length + " violations");
 });
 

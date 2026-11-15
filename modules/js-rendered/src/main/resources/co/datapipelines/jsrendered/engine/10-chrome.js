@@ -141,7 +141,9 @@
   /**
    * The legend's layout: rows (top, bottom, compact) or a column (left, right) inside a box of width boxW and at most
    * boxH high. Entries that do not fit are folded into one "+n" text; a folded entry is not drawn, so its series is
-   * drawn (§4.2). Returns {place, w, h, items: [{s, x, y, e}], more: null | {text, x, y}, drawn: {id: true}} with x, y
+   * drawn (§4.2). Rows wrap while they stay inside boxH (the compact level: one row); the last row that fits keeps
+   * room for the "+n" as the compact row does (#985 R1: eight wrapped rows pushed the axes out of a full frame); a box
+   * lower than one row holds no legend. Returns {place, w, h, items: [{s, x, y, e}], more: null | {text, x, y}, drawn: {id: true}} with x, y
    * relative to the box (y = the row's top).
    */
   function legendLayout(h, series, place, boxW, boxH) {
@@ -152,6 +154,8 @@
       return h.width(look("morePrefix") + String(n), h.text);
     };
     var maxName = side ? Math.min(boxW, look("legendSideMaxEm") * h.text) : boxW;
+    var maxRows = place === "compact" ? 1 : Math.floor(boxH / row + 1e-9), rowIdx = 0;
+    if (!side && maxRows < 1) return { place: place, w: 0, h: 0, items: [], more: null, drawn: drawn };
     var i;
     for (i = 0; i < series.length; i++) {
       var e = entry(h, series[i], maxName);
@@ -162,25 +166,27 @@
         items.push({ s: series[i], x: 0, y: y, e: e });
         y += row;
         if (e.w > w) w = e.w;
-      } else {
-        var start = x === 0 ? 0 : x + sep;
-        var reserve = place === "compact" && left > 0 ? sep + moreW(left) : 0;
-        if (start + e.w + reserve > boxW) {
-          if (place === "compact" || x === 0) {
-            if (x === 0 && place !== "compact") {
-              items.push({ s: series[i], x: 0, y: y, e: e });
-              x = e.w;
-              continue;
-            }
-            break;
-          }
-          y += row;
-          start = 0;
-        }
-        items.push({ s: series[i], x: start, y: y, e: e });
-        x = start + e.w;
-        if (x > w) w = x;
+        continue;
       }
+      var placed = false;
+      for (;;) {
+        var lastRow = rowIdx >= maxRows - 1;
+        var start = x === 0 ? 0 : x + sep;
+        var reserve = lastRow && left > 0 ? sep + moreW(left) : 0;
+        if (start + e.w + reserve <= boxW || (x === 0 && !lastRow)) {
+          // An entry wider than the box keeps a row of its own on any row but the last.
+          items.push({ s: series[i], x: start, y: y, e: e });
+          x = start + e.w;
+          if (x > w) w = x;
+          placed = true;
+          break;
+        }
+        if (x === 0 || lastRow) break;
+        rowIdx++;
+        y += row;
+        x = 0;
+      }
+      if (!placed) break;
     }
     for (var d = 0; d < items.length; d++) drawn[items[d].s.id] = true;
     var more = null, rest = series.length - items.length;

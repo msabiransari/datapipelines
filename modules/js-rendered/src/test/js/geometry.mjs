@@ -55,6 +55,9 @@ export function expectedBarMarks(fx, hiddenIds) {
   return n;
 }
 
-/** D7's widths and heights: every level is met. */
+/**
+ * D7's widths and heights: every level is met. The record's three heights (100, 200, 480) and, since #985 R1, the
+ * compact and full level heights themselves (140, 240), where the refusal found texts meeting and leaving the frame.
+ */
 export const WIDTHS = Array.from({ length: (1600 - 240) / 40 + 1 }, (_, i) => 240 + 40 * i);
-export const HEIGHTS = [100, 200, 480];
+export const HEIGHTS = [100, 140, 200, 240, 480];

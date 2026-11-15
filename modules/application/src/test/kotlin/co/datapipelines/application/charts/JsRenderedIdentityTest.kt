@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import org.junit.jupiter.api.TestInstance
+import java.math.BigDecimal
 
 /**
  * I6 / A3 (design record 2026-11-14-js-rendered-charts §8; brief 985 A.5, G3): for every chart fixture at every frame
@@ -97,12 +98,64 @@ class JsRenderedIdentityTest {
         (r.single()["marks"] as Number).toInt() shouldBeGreaterThan 0
     }
 
-    private companion object {
-        /** The chart fixtures the emitter must have drawn, at least (lane 985 delivers 40). */
-        const val FIXTURE_FLOOR = 40
+    @Test
+    fun `tick text keeps each tick's value in the sandbox, read back by this test's own decimal reader (R2)`() {
+        val direct =
+            sandbox.evaluate(
+                """
+                var cases = [[[0, 0.0001, 0.0002], null], [[0, 0.00001, 0.00002, 0.00003], null],
+                  [[0, 0.0000025, 0.000005, 0.0000075, 0.00001], null], [[0, 0.0001, 0.0002], "percent"]];
+                return cases.map(function (c) { return JsRendered.text.ticks(c[0], c[1]).join("|"); }).join("\n");
+                """.trimIndent(),
+                null,
+            ) as String
+        direct.lines() shouldBe
+            listOf(
+                "0|0.0001|0.0002",
+                "0|0.00001|0.00002|0.00003",
+                "0|0.0000025|0.000005|0.0000075|0.00001",
+                "0%|0.01%|0.02%",
+            )
+        for ((fixture, most) in SMALL_VALUE_FIXTURES) {
+            for (frame in listOf("960x540", "300x180")) {
+                val input = ChartGuardFiles.resource("${ChartGuardFiles.EMITTED}/$fixture/$frame.input.json")
+                val texts = sandbox.evaluate(VALUE_TICKS, mapOf("inputs" to listOf(input))) as String
+                val values = texts.split("|").map(::readLabel)
+                val where = "$fixture $frame: $texts"
+                check(values.size >= 2) { where }
+                values.first().signum() shouldBe 0
+                val step = values[1] - values[0]
+                (step.signum() > 0) shouldBe true
+                values.zipWithNext { a, b -> (b - a).compareTo(step) }.all { it == 0 }.let { check(it) { "unevenly spaced: $where" } }
+                check(values.last() >= BigDecimal(most)) { "the axis does not cover $most: $where" }
+            }
+        }
+    }
 
-        /** emit.mjs's frames: one per level and one below the smallest. */
-        const val FRAME_FLOOR = 5
+    /** A tick label's exact value, by this test alone: grouping commas dropped, U+2212 read as minus, % moved two places. */
+    private fun readLabel(label: String): BigDecimal {
+        val t = label.replace(",", "").replace('\u2212', '-')
+        return if (t.endsWith("%")) BigDecimal(t.dropLast(1)).movePointLeft(2) else BigDecimal(t)
+    }
+
+    private companion object {
+        /** #985 R2's rendered fixtures and the largest value each delivers (read from the fixture files). */
+        val SMALL_VALUE_FIXTURES = listOf("bar/ticks-small-decimal" to "0.0002", "bar/ticks-small-percent" to "0.00003")
+
+        /** The value axis's tick texts of a vertical bar, bottom to top, joined by "|". */
+        val VALUE_TICKS =
+            """
+            var given = JSON.parse(input.inputs[0]), r = JsRendered.render(given), plot = r.index.plot;
+            return r.primitives.filter(function (p) {
+              return p.k === "text" && p.role === "tick" && p.anchor === "end" && !p.rotate && p.x < plot.x;
+            }).sort(function (a, b) { return b.y - a.y; }).map(function (p) { return p.shown === undefined ? p.text : p.shown; }).join("|");
+            """.trimIndent()
+
+        /** The chart fixtures the emitter must have drawn, at least (lane 985 delivers 43). */
+        const val FIXTURE_FLOOR = 43
+
+        /** emit.mjs's frames: one per level, one below the smallest, and the full and compact boundaries (#985 R1). */
+        const val FRAME_FLOOR = 7
 
         const val ON_FILL_CHOICES = 31
 
