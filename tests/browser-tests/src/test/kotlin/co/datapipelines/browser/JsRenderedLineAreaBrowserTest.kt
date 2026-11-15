@@ -199,26 +199,14 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
     ): String {
         val input = JsonParser.parseString(emitted("$wire/$fixture/960x540.input.json")).asJsonObject
         val source = input.getAsJsonObject("document")
-        val columns = input.getAsJsonObject("columns")
-        val encoding = source.getAsJsonObject("config").getAsJsonObject("encoding")
-        val x = encoding.getAsJsonObject("x")
-        val strict =
-            listOfNotNull(
-                x.get("field").asString.takeIf { x.get("type").asString in BAND_TYPES },
-                encoding.getAsJsonObject("color")?.get("field")?.asString,
-            ).toSet()
+        val strict = strictColumns(source.getAsJsonObject("config").getAsJsonObject("encoding"))
         val (inputName, contract) = source.getAsJsonObject("inputs").entrySet().single()
         val declared = contract.deepCopy().asJsonObject
         declared.getAsJsonArray("columns").forEach { column ->
             val c = column.asJsonObject
             if (c.get("name").asString in strict) c.addProperty("nullable", false)
         }
-        val count = columns.entrySet().maxOfOrNull { it.value.asJsonArray.size() } ?: 0
-        val rows = JsonArray()
-        (0 until count)
-            .map { i -> JsonObject().apply { columns.entrySet().forEach { (field, values) -> add(field, values.asJsonArray[i]) } } }
-            .filter { row -> strict.all { row.get(it) != null && !row.get(it).isJsonNull } }
-            .forEach(rows::add)
+        val rows = rowsOf(input.getAsJsonObject("columns"), strict)
         val assertions = JsonArray()
         assertions.add(JsonObject().apply { addProperty("kind", if (rows.size() == 0) "no_data" else "rendered") })
         val case =
@@ -237,6 +225,29 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
                 add("tests", JsonObject().apply { add("cases", JsonArray().apply { add(case) }) })
             }
         return GSON.toJson(document)
+    }
+
+    /** The columns the save refuses nullable: the band `x` (a nominal or ordinal one) and the series column, when present. */
+    private fun strictColumns(encoding: JsonObject): Set<String> {
+        val x = encoding.getAsJsonObject("x")
+        return listOfNotNull(
+            x.get("field").asString.takeIf { x.get("type").asString in BAND_TYPES },
+            encoding.getAsJsonObject("color")?.get("field")?.asString,
+        ).toSet()
+    }
+
+    /** Node's columns turned into rows, a row with a null in a [strict] column dropped. */
+    private fun rowsOf(
+        columns: JsonObject,
+        strict: Set<String>,
+    ): JsonArray {
+        val count = columns.entrySet().maxOfOrNull { it.value.asJsonArray.size() } ?: 0
+        val rows = JsonArray()
+        (0 until count)
+            .map { i -> JsonObject().apply { columns.entrySet().forEach { (field, values) -> add(field, values.asJsonArray[i]) } } }
+            .filter { row -> strict.all { row.get(it) != null && !row.get(it).isJsonNull } }
+            .forEach(rows::add)
+        return rows
     }
 
     /** The engine module's fixture files of [wire] (one `.json` file per fixture). */
