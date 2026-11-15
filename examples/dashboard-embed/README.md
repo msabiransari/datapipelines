@@ -40,11 +40,14 @@ visitor behind the relay.
    (`00-namespace.js` first, `types/area.js` last) — the same files the server
    draws its pictures with;
 2. `/js/datapipelines-dashboard.js` — the runtime;
-3. `/js/datapipelines-dashboard-chart.js` — the `chart` kind's adapter; it
+3. `/js/datapipelines-chart-interactions.js` — the charts' interaction layer
+   (tooltip, highlight, legend switch, keyboard); the chart adapter requires it
+   and refuses to draw without it;
+4. `/js/datapipelines-dashboard-chart.js` — the `chart` kind's adapter; it
    registers the kind at script load, before init;
-4. `/js/datapipelines-dashboard-table.js` and `/js/datapipelines-dashboard-kpi.js`
+5. `/js/datapipelines-dashboard-table.js` and `/js/datapipelines-dashboard-kpi.js`
    — the table and KPI kinds' adapters, each registering its kind at load;
-5. `embed.js` — mounts the container and inits.
+6. `embed.js` — mounts the container and inits.
 
 The boot glue passes no chart library: charts are drawn by the datapipelines
 client library, and `init` refuses a `charts` option.

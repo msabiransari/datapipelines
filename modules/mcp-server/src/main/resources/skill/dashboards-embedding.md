@@ -42,8 +42,10 @@ person releases the dashboard and holds the key.
   this order: first the chart engine's files, `/js/js-rendered/<name>` for every name of the engine's
   load order — the datapipelines client library that draws every chart; the example page
   `examples/dashboard-embed/index.html` carries the current list, in order, and the server's own pages
-  load the same files; then the runtime `/js/datapipelines-dashboard.js`; then the `chart` kind's
-  adapter `/js/datapipelines-dashboard-chart.js` (registers the kind at script load, before init); then
+  load the same files; then the runtime `/js/datapipelines-dashboard.js`; then the charts' interaction
+  layer `/js/datapipelines-chart-interactions.js` (tooltip, highlight, legend switch, keyboard; the
+  chart adapter refuses to draw without it); then the `chart` kind's adapter
+  `/js/datapipelines-dashboard-chart.js` (registers the kind at script load, before init); then
   the other kinds' adapters your dashboards use: `datapipelines-dashboard-table.js`,
   `datapipelines-dashboard-kpi.js` (each registers its renderer kind at script load, before init).
   The runtime refuses at bootstrap a renderer no loaded script registered (`renderer.unsupported`)

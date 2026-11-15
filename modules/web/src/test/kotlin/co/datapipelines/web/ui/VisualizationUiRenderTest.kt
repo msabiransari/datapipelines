@@ -131,6 +131,7 @@ class VisualizationUiRenderTest {
             JsRenderedAssetConfig.scripts +
                 listOf(
                     "/js/datapipelines-dashboard.js",
+                    "/js/datapipelines-chart-interactions.js",
                     "/js/datapipelines-dashboard-chart.js",
                     "/js/datapipelines-dashboard-table.js",
                     "/js/datapipelines-dashboard-kpi.js",
