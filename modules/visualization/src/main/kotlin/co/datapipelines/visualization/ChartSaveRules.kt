@@ -52,7 +52,14 @@ object ChartSaveRules {
         val shapes = ChartPositions.shapes(body.path("config"))
         // The positions' column rules first, then each shape's own rules (record §4.2): one walk, every type.
         shapes.flatMap { it.positions }.forEach { field(it, byName, refusals) }
-        val type = ChartType.fromWire(body.path("config").path("mark").path("type").asText())
+        val type =
+            ChartType.fromWire(
+                body
+                    .path("config")
+                    .path("mark")
+                    .path("type")
+                    .asText(),
+            )
         shapes.filter { it.shape == VALUE }.forEach { valueRules(it, refusals) }
         shapes.filter { it.shape == VALUE || it.shape == POSITION }.forEach { scaleRules(type, it, refusals) }
         val derived =
@@ -97,7 +104,10 @@ object ChartSaveRules {
         val path = position.pointer
         val shape = position.holder.shape
         val column = columns[position.field]
-        val holderType = position.holder.node.path("type").asText()
+        val holderType =
+            position.holder.node
+                .path("type")
+                .asText()
         val refusal =
             when {
                 column == null -> {
@@ -188,9 +198,8 @@ object ChartSaveRules {
     ) {
         val scale = holder.node.get("scale")?.takeIf { it.isObject } ?: return
         val sp = "${holder.pointer}/scale"
-        val stacked = holder.node.get("stack")?.isTextual == true
         val log = scale.path("type").asText() == LOG
-        if (log && (type !in LOG_TYPES || stacked || scale.has("zero"))) {
+        if (log && !logAdmitted(type, holder, scale)) {
             refusals +=
                 ChartRefusal(
                     "chart.scale.log_unsupported",
@@ -204,21 +213,42 @@ object ChartSaveRules {
         val lo = domain[0].asDouble()
         val hi = domain[1].asDouble()
         val holdsZero = scale.path("zero").asBoolean(false) || (holder.shape == VALUE && type in ALWAYS_ZERO)
-        when {
-            log && !(lo > 0.0 && lo < hi && hi.isFinite()) -> {
-                refusals +=
+        val fine = if (log) logRange(lo, hi) else linearRange(lo, hi, holdsZero)
+        if (!fine) {
+            refusals +=
+                if (log) {
                     ChartRefusal("chart.scale.domain_log", "$sp/domain", "A log range must be greater than 0 and increasing.")
-            }
-
-            !log && !(lo.isFinite() && hi.isFinite() && lo < hi && (!holdsZero || (lo <= 0.0 && hi >= 0.0))) -> {
-                refusals +=
+                } else {
                     ChartRefusal(
                         "chart.scale.domain_invalid",
                         "$sp/domain",
                         "The range must be increasing, and contain zero where the axis holds zero (a bar or an area grows from zero).",
                     )
-            }
+                }
         }
+    }
+
+    /** A log range: greater than 0, increasing, its top finite. */
+    private fun logRange(
+        lo: Double,
+        hi: Double,
+    ): Boolean = lo > 0.0 && lo < hi && hi.isFinite()
+
+    /** G4: a log scale on a type that admits it, on a value that is not stacked or normalized, without `zero`. */
+    private fun logAdmitted(
+        type: ChartType?,
+        holder: ChartShapeNode,
+        scale: JsonNode,
+    ): Boolean = type in LOG_TYPES && holder.node.get("stack")?.isTextual != true && !scale.has("zero")
+
+    /** A linear range: both ends finite, increasing, and holding zero when [holdsZero]. */
+    private fun linearRange(
+        lo: Double,
+        hi: Double,
+        holdsZero: Boolean,
+    ): Boolean {
+        val increasing = lo.isFinite() && hi.isFinite() && lo < hi
+        return increasing && (!holdsZero || (lo <= 0.0 && hi >= 0.0))
     }
 
     /** The authored map equals [derived] entry for entry (order-free — a JSON object's member order carries no meaning). */
