@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/area.schema.json",
+  "$comment": "Lane 989 (design record 2026-11-14-js-rendered-charts §4.2, §4.5 row area). Served at /schemas/chart/1/area.schema.json.",
+  "title": "datapipelines chart document, version 1, family area",
+  "description": "A skeleton document whose config is an area config (record §4.5 row area): as line, with a zero baseline always, a fade under each line, and y.stack.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "area"
+            },
+            "curve": {
+              "description": "smooth (default) = a monotone cubic through the points, never above or below the data between two of them; step = held until the next point; linear = straight segments.",
+              "enum": [
+                "linear",
+                "smooth",
+                "step"
+              ]
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/x"
+        },
+        "y": {
+          "$ref": "#/$defs/value"
+        },
+        "color": {
+          "$ref": "#/$defs/series"
+        },
+        "tooltip": {
+          "$ref": "skeleton.schema.json#/$defs/tooltip"
+        }
+      },
+      "not": {
+        "description": "G1: with fields the fields are the series, so a colour channel is refused.",
+        "type": "object",
+        "required": [
+          "color"
+        ],
+        "properties": {
+          "y": {
+            "type": "object",
+            "required": [
+              "fields"
+            ]
+          }
+        }
+      },
+      "if": {
+        "description": "Without series (no color, no fields) an area has nothing to stack.",
+        "type": "object",
+        "not": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "color"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "y": {
+                  "type": "object",
+                  "required": [
+                    "fields"
+                  ]
+                }
+              },
+              "required": [
+                "y"
+              ]
+            }
+          ]
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "y": {
+            "not": {
+              "type": "object",
+              "required": [
+                "stack"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "x": {
+      "description": "x is a band (nominal, ordinal: evenly spaced, sort required) or a position (temporal: a continuous UTC time axis; quantitative: a number axis). A temporal x has ONE form, position (record §4.2): a temporal band is refused.",
+      "oneOf": [
+        {
+          "type": "object",
+          "allOf": [
+            {
+              "$ref": "skeleton.schema.json#/$defs/band"
+            }
+          ],
+          "properties": {
+            "type": {
+              "$ref": "skeleton.schema.json#/$defs/seriesType"
+            },
+            "sort": {
+              "description": "The x order, required: ascending, descending, null (input order) or an explicit list. A line has no by-total order.",
+              "$ref": "skeleton.schema.json#/$defs/orderSort"
+            }
+          }
+        },
+        {
+          "$ref": "skeleton.schema.json#/$defs/position"
+        }
+      ]
+    },
+    "value": {
+      "description": "The skeleton's value; an area's axis always holds zero (G8: scale.zero false is refused).",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "properties": {
+        "scale": {
+          "type": "object",
+          "properties": {
+            "zero": {
+              "const": true
+            }
+          }
+        }
+      }
+    },
+    "series": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/series"
+        }
+      ],
+      "properties": {
+        "legend": {
+          "$ref": "skeleton.schema.json#/$defs/legendDirect"
+        }
+      }
+    }
+  }
+}

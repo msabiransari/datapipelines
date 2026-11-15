@@ -2,7 +2,7 @@
 // tickSpacing px), the x label row, and the cartesian frame a template draws its marks into. THE X LABEL ROW IS ONE
 // FUNCTION (brief D7): it takes labels as a list of {text, under, x}, the frame, the plot and the box of the value
 // axis's lowest tick label, thins, rotates or cuts by §4.6 and applies the corner rule (#981); nothing in it knows
-// where the list came from (bar's bands here, F5's time ticks later, lane 985's D9 harness for line and point).
+// where the list came from (bar's bands, the line family's time and number ticks, lane 985's D9 harness).
 (function (R) {
   "use strict";
   var S = R.scales, T = R.text, C = R.chrome, look = R.tables.look, r2 = S.r2;
@@ -40,12 +40,32 @@
   }
 
   /**
+   * A log value axis (record §4.4 G4; brief 989 D4) over ext = [smallest positive value, largest value] (null, null when
+   * no value is positive) or the author's domain, `length` px long: {lo, hi, ticks, texts, log: true}. Ticks are 1, 2, 5 ×
+   * a power of ten, at most one per tickSpacing px (R.scales.logNice); each tick's text is its own value written
+   * exactly, since a log axis's ticks share no step.
+   */
+  function logAxis(lvl, ext, domain, length, format) {
+    var spacing = look(lvl === "compact" ? "tickSpacingCompact" : "tickSpacing");
+    var n = S.logNice(ext[0], ext[1], Math.max(1, Math.floor(length / spacing)), domain);
+    var texts = [];
+    for (var i = 0; i < n.ticks.length; i++) texts.push(T.ticks([n.ticks[i]], format)[0]);
+    return { lo: n.lo, hi: n.hi, ticks: n.ticks, texts: texts, log: true };
+  }
+
+  /** The scale of an axis {lo, hi, log?} onto [r0, r1]: the log scale for a log axis, else the linear one. */
+  function scaleOf(ax, r0, r1) {
+    return ax.log === true ? S.log(ax.lo, ax.hi, r0, r1) : S.linear(ax.lo, ax.hi, r0, r1);
+  }
+
+  /**
    * The x label row. o = {labels: [{text, under, x}] (centres, ascending), bounds: {x0, x1} (the room a label may
    * use left and right: the frame inside its edge, less a side legend), plot: {x, y, w, h},
    * corner: the lowest value tick label's box {x0, y0, x1, y1} or null, cornerIsFirst: true when the row's first
    * label IS that tick (a horizontal bar: never cut it), rotate: "never" | "allow" | "force", room: px free below the
    * row, maxLen: optional, the length a rotated label is cut to when the layout has less room than the look's
-   * rotateMaxEm}. Returns {texts, drawn: [label index], height, rotated, corner: "clear" | "moved" | "cut", need: the px the
+   * rotateMaxEm, whole: true on a position axis (brief 989 D5), where a tick label is drawn whole or not at all: a cut
+   * tick would name a value it does not show}. Returns {texts, drawn: [label index], height, rotated, corner: "clear" | "moved" | "cut", need: the px the
    * corner asked to move down}.
    */
   function labelRow(h, o) {
@@ -105,7 +125,7 @@
       var x = labels[j].x;
       var roomJ = Math.min(k * step - gap, 2 * (x - x0), 2 * (x1 - x));
       var sh = roomJ > 0 ? h.fit(labels[j].text, s, 400, roomJ) : "";
-      if (sh === "") continue;
+      if (sh === "" || (o.whole === true && sh !== labels[j].text)) continue;
       var under = labels[j].under !== null && labels[j].under !== undefined && (placed.length === 0 || labels[j].under !== prevUnder) ? labels[j].under : null;
       if (labels[j].under !== null && labels[j].under !== undefined) prevUnder = labels[j].under;
       placed.push({ i: j, x: x, shown: sh, w: h.width(sh, s), room: roomJ, under: under });
@@ -122,7 +142,7 @@
           var cutRoom = Math.min(f.room, 2 * (f.x - cz.x1));
           var cut = cutRoom > 0 ? h.fit(labels[f.i].text, s, 400, cutRoom) : "";
           res.corner = "cut";
-          if (cut === "") placed.shift();
+          if (cut === "" || (o.whole === true && cut !== labels[f.i].text)) placed.shift();
           else {
             f.shown = cut;
             f.w = h.width(cut, s);
@@ -137,7 +157,7 @@
       res.texts.push(h.label({ role: "tick", x: q.x, y: base, text: labels[q.i].text, shown: q.shown, anchor: "middle", size: s, ink: "--chart-muted" }));
       if (q.under !== null) {
         var us = h.fit(q.under, s, 400, q.room);
-        if (us !== "") res.texts.push(h.label({ role: "tick", x: q.x, y: base + look("lineHeight") * s, text: q.under, shown: us, anchor: "middle", size: s, ink: "--chart-muted" }));
+        if (us !== "" && (o.whole !== true || us === q.under)) res.texts.push(h.label({ role: "tick", x: q.x, y: base + look("lineHeight") * s, text: q.under, shown: us, anchor: "middle", size: s, ink: "--chart-muted" }));
       }
     }
     res.height = tg + dy + h.boxH(s) + (anyUnder ? look("lineHeight") * s : 0);
@@ -175,5 +195,5 @@
     return tg + cs[0] * h.boxH(s) + cs[1] * Math.min(rotatedMax(h, maxLen), rotatedWidest(h, labels));
   }
 
-  R.axes = { valueAxis: valueAxis, labelRow: labelRow, rowReserve: rowReserve, angle: angle, overlaps: overlaps, ANGLES: ANGLES };
+  R.axes = { valueAxis: valueAxis, logAxis: logAxis, scaleOf: scaleOf, labelRow: labelRow, rowReserve: rowReserve, angle: angle, overlaps: overlaps, ANGLES: ANGLES };
 })(JsRendered);

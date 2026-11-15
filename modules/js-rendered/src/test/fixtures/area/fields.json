@@ -1,0 +1,140 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "series from columns (G1): the fields are the series, in the list's order, with units",
+ "document": {
+  "display_name": "fields",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "a",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "b",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "c",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "area"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "type": "quantitative",
+     "aggregate": "sum",
+     "fields": [
+      {
+       "field": "a",
+       "title": "Revenue",
+       "unit": "USD"
+      },
+      {
+       "field": "b",
+       "title": "Cost",
+       "unit": "USD"
+      },
+      {
+       "field": "c",
+       "title": "Margin"
+      }
+     ],
+     "title": "Amount"
+    }
+   },
+   "title": {
+    "text": "Fields"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-07-01",
+   "2024-08-01",
+   "2024-09-01",
+   "2024-10-01",
+   "2024-11-01",
+   "2024-12-01"
+  ],
+  "a": [
+   100,
+   105,
+   110,
+   115,
+   120,
+   125,
+   130,
+   135,
+   140,
+   145,
+   150,
+   155
+  ],
+  "b": [
+   60,
+   63,
+   66,
+   69,
+   72,
+   75,
+   78,
+   81,
+   84,
+   87,
+   90,
+   93
+  ],
+  "c": [
+   40,
+   42,
+   44,
+   46,
+   48,
+   50,
+   52,
+   54,
+   56,
+   58,
+   60,
+   62
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "a": "DECIMAL",
+  "b": "DECIMAL",
+  "c": "DECIMAL"
+ }
+}

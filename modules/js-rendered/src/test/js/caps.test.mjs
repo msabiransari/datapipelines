@@ -32,9 +32,9 @@ function counted(edit) {
   });
 }
 
-test("the cap table: every entry has a kind, a limit, a basis and a note; the three bar needs are there", () => {
+test("the cap table: every entry has a kind, a limit, a basis and a note; the bar and line-family needs are there", () => {
   const caps = R.tables.CAPS;
-  assert.deepEqual(Object.keys(caps).sort(), ["bar.marks", "rows", "series"]);
+  assert.deepEqual(Object.keys(caps).sort(), ["area.points", "area.rows", "bar.marks", "line.points", "line.rows", "rows", "series"]);
   for (const [name, c] of Object.entries(caps)) {
     assert.ok(["row", "mark", "semantic"].includes(c.kind), name);
     assert.ok(Number.isInteger(c.limit) && c.limit > 0, name);
@@ -43,6 +43,13 @@ test("the cap table: every entry has a kind, a limit, a basis and a note; the th
   }
   assert.equal(caps.series.limit, 8);
   assert.equal(caps["bar.marks"].limit, 1000);
+  // The line family's caps as lane 989 round 3 measured them (D9 (d), (a), (b)); area's rows are line's, inherited.
+  assert.deepEqual(["line.points", "line.rows", "area.points", "area.rows"].map((k) => [k, caps[k].limit, caps[k].basis]), [
+    ["line.points", 2000, "measured"],
+    ["line.rows", 10000, "measured"],
+    ["area.points", 1000, "measured"],
+    ["area.rows", 10000, "inherited"],
+  ]);
   assert.throws(() => R.tables.cap("pie.marks"), /no cap-table entry pie\.marks/);
 });
 

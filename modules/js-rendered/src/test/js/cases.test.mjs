@@ -208,9 +208,9 @@ test("the input is closed: an unknown member, an unknown type or a wrong frame t
   assert.throws(() => R.render(Object.assign({}, base, { document: doc({ x: X, y: Y }, { type: "line" }) })), /mark\.type is not bar/);
 });
 
-test("the registry: types() lists bar with its descriptor; a second registration or a wrong member throws", () => {
-  same(R.types().map((t) => t.name), ["bar"]);
-  same(R.types()[0].channels.map((c) => c.key), ["x", "y", "color", "tooltip"]);
+test("the registry: types() lists bar, line and area with their descriptors; a second registration or a wrong member throws", () => {
+  same(R.types().map((t) => t.name), ["bar", "line", "area"]);
+  for (const t of R.types()) same(t.channels.map((c) => c.key), ["x", "y", "color", "tooltip"]);
   const ok = { channels: [], model: () => null, marks: () => [], axes: "cartesian" };
   assert.throws(() => R.type("bar", ok), /already registered/);
   assert.throws(() => R.type("x1", Object.assign({}, ok, { extra: 1 })), /unknown member extra/);

@@ -297,7 +297,7 @@ class JsRenderedPageBrowserTest : ChartPageSuite() {
         Files.write(REPORTS.resolve(name), lines)
     }
 
-    private companion object {
+    internal companion object {
         val REPORTS: Path = Paths.get("build", "reports", "js-rendered-page")
         val G1_FIXTURES = listOf("bar-vertical", "bar-horizontal", "bar-grouped", "bar-stacked", "bar-utc-date", "bar-negatives")
         val G2_WIDTHS = listOf(1280, 800, 480)

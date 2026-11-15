@@ -33,6 +33,27 @@ class ChartSchemaValidatorTest {
         ChartSchemaValidator().validate(stored) shouldBe listOf(ChartSchemaProblem("additionalProperties", ""))
     }
 
+    /**
+     * #989: the family registry is a `oneOf` over bar, line and area, so a refused config also fails the two OTHER
+     * branches; their problems (a bar's `config.mark.type` against `line`, a line's `encoding.x` against bar's shapes)
+     * are not the document's. Each family's refusal is its own schema's plus the registry's one `oneOf` at `/config`.
+     */
+    @Test
+    fun `a family's refusal names its own schema's problems and never another family's registry branch`() {
+        val unknownKey = setOf(ChartSchemaProblem("additionalProperties", "/config"), ChartSchemaProblem("oneOf", "/config"))
+        for (file in listOf("valid/bar-log.json", "valid/line-log.json", "valid/area-stacked.json")) {
+            val body = example(file)
+            withClue("$file conforms") { ChartSchemaValidator().validate(body).shouldBeEmpty() }
+            (body.path("config") as com.fasterxml.jackson.databind.node.ObjectNode).put("bogus_attr", 1)
+            withClue("$file with an unknown config key") { ChartSchemaValidator().validate(body).toSet() shouldBe unknownKey }
+        }
+        ChartSchemaValidator().validate(example("invalid/line-unit-long.json")).toSet() shouldBe
+            setOf(ChartSchemaProblem("maxLength", "/config/encoding/y/unit"), ChartSchemaProblem("oneOf", "/config"))
+    }
+
+    private fun example(file: String): JsonNode =
+        ArtifactJson.mapper.readTree(checkNotNull(javaClass.getResource("/chart-examples/$file")) { "no example $file" }.readText())
+
     @Test
     fun `every served file carries its v1 id and the schema files are exactly the served list`() {
         ChartSchemas.FILES.forEach { file ->

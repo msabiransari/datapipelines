@@ -119,15 +119,29 @@
   }
 
   /**
-   * Where the legend is (look contract §4.2, lines 1, 2, 3 and 5; line 4, the names on the lines, is lane 989's):
-   * null, "top", "bottom", "left" or "right"; at the compact level every legend is one row at the bottom (§4.5).
-   * series = [{id, title}] of the FULL data; hidden = the list of ids; legend = the author's `legend` (absent,
-   * null, or {orient}).
+   * Where the legend is (look contract §4.2, the owner's ruling L5; the record's §4.3, §4.5; brief 989 D7): ONE pure
+   * function of the series of the data, the list of switched-off ids, the level, the `legend` the author wrote, and
+   * whether the type writes names on its lines (line and area). The first line that applies decides:
+   *   1. the level is minimal, or the author wrote `legend: null` → null (no legend, no names on the lines);
+   *   2. the data has one series and its id is not on the list → null;
+   *   3. the author wrote a place (top, bottom, left, right) → there;
+   *   4. names on the lines, 2 to 4 series IN THE DATA (look fields directMin, directMax), none of their ids on the list,
+   *      the level full → "direct";
+   *   5. otherwise → "top".
+   * At the compact level the legend of line 3 or 5 is one row at the bottom ("compact"). Every count is of the series
+   * in the data, never of the visible ones. series = [{id, title}] of the FULL data; legend = absent, null or {orient}.
    */
-  function legendPlace(series, hidden, lvl, legend) {
+  function legendPlace(series, hidden, lvl, legend, direct) {
     if (lvl === "minimal" || legend === null) return null;
     if (series.length === 1 && hidden.indexOf(series[0].id) < 0) return null;
-    var place = legend && typeof legend === "object" && typeof legend.orient === "string" ? legend.orient : "top";
+    var orient = legend && typeof legend === "object" && typeof legend.orient === "string" ? legend.orient : null;
+    var place = orient === "top" || orient === "bottom" || orient === "left" || orient === "right" ? orient : null;
+    if (place === null && direct === true && lvl === "full" && series.length >= look("directMin") && series.length <= look("directMax")) {
+      var listed = false;
+      for (var i = 0; i < series.length; i++) if (hidden.indexOf(series[i].id) >= 0) listed = true;
+      if (!listed) return "direct";
+    }
+    if (place === null) place = "top";
     return lvl === "compact" ? "compact" : place;
   }
 
@@ -210,13 +224,14 @@
    * the key, a square of the series colour (§4.2: a bar's key; its opacity --chart-dim when hidden) and the name in
    * ink-2, struck through when hidden. colourOf(id) → the series' colour token.
    */
-  function legendPrims(h, lay, ox, oy, hiddenOf, colourOf, out) {
+  function legendPrims(h, lay, ox, oy, hiddenOf, colourOf, out, keyField) {
     var row = look("lineHeight") * h.text;
     for (var i = 0; i < lay.items.length; i++) {
       var it = lay.items[i], e = it.e, x = ox + it.x, cy = oy + it.y + row / 2, off = hiddenOf(it.s.id);
       var token = colourOf(it.s.id), kids = [];
-      // The key's form: "square" (a bar's, contract §4.2) or "line" (a stroke of --chart-line across the key's width).
-      var form = look("legendKeyBar"), kh = form === "square" ? e.key : form === "line" ? h.theme.n("--chart-line") : -1;
+      // The key's form, from the look field the type names (contract §4.2: a square for bars and areas, a short line for
+      // lines): "square", or "line" (a stroke of --chart-line across the key's width).
+      var form = look(keyField === undefined ? "legendKeyBar" : keyField), kh = form === "square" ? e.key : form === "line" ? h.theme.n("--chart-line") : -1;
       if (kh < 0) throw new Error("unknown legend key " + form);
       kids.push(P.rect({ role: "legend", x: x, y: r2(cy - kh / 2), w: e.key, h: kh, fill: token, color: h.theme.css(token), opacity: off ? h.theme.n("--chart-dim") : 1, series: it.s.id }));
       if (e.shown !== "") {
@@ -230,5 +245,84 @@
     return out;
   }
 
-  R.chrome = { helpers: helpers, level: level, titles: titles, wrapTwo: wrapTwo, legendPlace: legendPlace, legendLayout: legendLayout, legendPrims: legendPrims };
+  /**
+   * The labels at the lines' ends (look contract §2 "legend", §4.5; brief 989 D6, D7): the names on the lines and the
+   * values of `labels: last`. A label is {id, name: null | text, value: null | text}: name alone, value alone, or both
+   * as ONE label, the name first ("Revenue 3.7K"). A name is written in secondary ink at the text size; a value alone in
+   * the ink and size of a value label; a label holding a name is a legend entry without a key (role legend, its group
+   * names the series). The longest a label may be is legendSideMaxEm (a longer one is cut, its full text kept, I4).
+   */
+  function endLabel(h, l) {
+    var named = l.name !== null, text = named ? (l.value !== null ? l.name + " " + l.value : l.name) : l.value;
+    var size = l.value !== null ? h.small : h.text;
+    var shown = h.fit(text, size, 400, look("legendSideMaxEm") * h.text);
+    return { id: l.id, named: named, title: l.name, text: text, shown: shown, size: size, w: shown === "" ? 0 : h.width(shown, size) };
+  }
+
+  /** The room the end labels take right of the plot: the widest label plus the gap after the last point (0 for none). */
+  function endRoom(h, labels) {
+    var w = 0;
+    for (var i = 0; i < labels.length; i++) w = Math.max(w, endLabel(h, labels[i]).w);
+    return w > 0 ? w + h.em("directGap") : 0;
+  }
+
+  /**
+   * The end labels' primitives. ends = [{id, y}]: the y of each drawn series' last point; labels as endLabel takes
+   * them; x = where a label starts; lo, hi = the band a label's box must lie in. Two labels closer than one text line are
+   * pushed apart vertically (contract §2), first down in the order of their points, then up from the band's end, so no
+   * two meet (I1) and every one stays inside the band (I2). Where the band cannot hold them all, the labels of the last
+   * series in the data's order are left out until it can (a label that does not fit is not drawn, contract §4.3).
+   * Returns {texts, drawn: {id: true} for the names written}.
+   */
+  function endLabels(h, ends, labels, x, lo, hi) {
+    var byId = new Map(), rows = [];
+    for (var i = 0; i < labels.length; i++) byId.set(labels[i].id, endLabel(h, labels[i]));
+    for (var j = 0; j < ends.length; j++) {
+      var l = byId.get(ends[j].id);
+      if (l === undefined || l.shown === "") continue;
+      rows.push({ l: l, want: ends[j].y, order: j, y: 0 });
+    }
+    var placed = null;
+    while (rows.length > 0) {
+      placed = pushApart(h, rows, lo, hi);
+      if (placed) break;
+      var last = 0;
+      for (var q = 1; q < rows.length; q++) if (rows[q].order > rows[last].order) last = q;
+      rows.splice(last, 1);
+    }
+    var out = { texts: [], drawn: {} };
+    for (var k = 0; k < rows.length; k++) {
+      var r = rows[k], t = h.label({ role: r.l.named ? "legend" : "guide", x: x, y: h.middle(r.y, r.l.size), text: r.l.text, shown: r.l.shown, size: r.l.size, ink: "--chart-ink-2", series: r.l.id });
+      if (!r.l.named) {
+        out.texts.push(t);
+        continue;
+      }
+      out.drawn[r.l.id] = true;
+      P.group(out.texts, { role: "legend", series: r.l.id, legend: r.l.id, label: r.l.title, on: true }, [t]);
+    }
+    return out;
+  }
+
+  /** Centres for rows inside [lo, hi] at least a text line apart, nearest their wants; false when they cannot fit. */
+  function pushApart(h, rows, lo, hi) {
+    rows.sort(function (a, b) {
+      return a.want - b.want || a.order - b.order;
+    });
+    var half = function (r) {
+      return h.boxH(r.l.size) / 2;
+    };
+    var apart = function (a, b) {
+      return look("lineHeight") * Math.max(a.l.size, b.l.size);
+    };
+    for (var i = 0; i < rows.length; i++) {
+      var floor = i === 0 ? lo + half(rows[0]) : rows[i - 1].y + apart(rows[i - 1], rows[i]);
+      rows[i].y = Math.max(rows[i].want, floor);
+    }
+    var n = rows.length - 1;
+    rows[n].y = Math.min(rows[n].y, hi - half(rows[n]));
+    for (var j = n - 1; j >= 0; j--) rows[j].y = Math.min(rows[j].y, rows[j + 1].y - apart(rows[j], rows[j + 1]));
+    return rows[0].y - half(rows[0]) >= lo - 1e-9;
+  }
+
+  R.chrome = { helpers: helpers, level: level, titles: titles, wrapTwo: wrapTwo, legendPlace: legendPlace, legendLayout: legendLayout, legendPrims: legendPrims, endRoom: endRoom, endLabels: endLabels };
 })(JsRendered);

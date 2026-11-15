@@ -1,0 +1,74 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "a quantitative x: a number axis, points sorted by x whatever the row order",
+ "document": {
+  "display_name": "quantitative-x",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "Distance (km)"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   },
+   "title": {
+    "text": "By distance"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   5,
+   1,
+   3,
+   2,
+   8,
+   13,
+   21
+  ],
+  "v": [
+   10,
+   4,
+   7,
+   5,
+   12,
+   15,
+   18
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "v": "DECIMAL"
+ }
+}

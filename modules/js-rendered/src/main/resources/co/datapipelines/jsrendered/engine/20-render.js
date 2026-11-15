@@ -113,7 +113,7 @@
     if (p.k === "circle") return axis === "x" ? p.cx : p.cy;
     var lo = Infinity, hi = -Infinity, d = p.d, off = axis === "x" ? 0 : 1;
     for (var i = 0; i < d.length; i++) {
-      var n = d[i] === "M" || d[i] === "L" ? 2 : d[i] === "A" ? 3 : 0;
+      var n = P.ARITY[d[i]];
       if (n === 0) continue;
       var v = d[i + n - 1 + off];
       if (v < lo) lo = v;
@@ -151,8 +151,10 @@
       out.summary.warnings.push({ code: "chart.frame-too-small" });
       return out;
     }
-    var rows = D.rowCount(ok.columns);
-    if (rows > cap("rows")) return refuse(out, "chart.too_many_rows", { rows: rows, limit: cap("rows") });
+    // The row cap before the model is entered (§4.9 "What bounds the work", 1): the type's own (`<type>.rows`, the line
+    // family's measured cap, brief 989 D9) where the table holds one, else the one of every type.
+    var rows = D.rowCount(ok.columns), rowCap = cap(Object.prototype.hasOwnProperty.call(R.tables.CAPS, input.type + ".rows") ? input.type + ".rows" : "rows");
+    if (rows > rowCap) return refuse(out, "chart.too_many_rows", { rows: rows, limit: rowCap });
     var meter = R.measure.measurer(input.measure), h = C.helpers(theme, meter);
     var m = reg.model(doc, ok.columns, input.types);
     if (m.rule) return refuse(out, m.rule.code, m.rule.details || {});
@@ -175,7 +177,7 @@
       return finish(out, meter);
     }
     if (reg.axes !== "cartesian") throw new Error("render: axes " + reg.axes + " are not drawn by this engine version");
-    var place = C.legendPlace(series, ok.hidden, lvl, m.legend);
+    var place = C.legendPlace(series, ok.hidden, lvl, m.legend, m.direct === true);
     var colourOf = new Map();
     for (var c = 0; c < m.series.length; c++) colourOf.set(m.series[c].id, m.series[c].colour);
     var lg = place === null ? null : {
@@ -188,12 +190,16 @@
       colourOf: function (id) {
         return colourOf.get(id);
       },
+      key: m.legendKey,
     };
     // A series is hidden in this draw when its id is on the list AND its entry is drawn (look contract §4.2). The
     // legend's layout depends on neither the axes' drawing nor the visibility (only on the room the model's layout
     // part needs, R.cartesian.legendRoom), so it is laid out first and decides `visible`.
     var visible = {};
-    if (lg !== null) {
+    if (lg !== null && place === "direct") {
+      // Line 4: names on the lines; no id of the data is on the list, so every series is drawn (look contract §4.2).
+      for (var a = 0; a < series.length; a++) lg.drawn[series[a].id] = true;
+    } else if (lg !== null) {
       var probe = C.legendLayout(h, series, place, W - 2 * h.em("edge"), R.cartesian.legendRoom(h, lvl, m.layout, place, H - t.bottom - h.em("edge")));
       lg.drawn = probe.drawn;
     }
@@ -201,16 +207,67 @@
       series[v].hidden = lg !== null && lg.drawn[series[v].id] === true && ok.hidden.indexOf(series[v].id) >= 0;
       if (!series[v].hidden) visible[series[v].id] = true;
     }
+    // The labels at the lines' ends (brief 989 D6, D7): the names on the lines (line 4) and the values of `labels:
+    // last`; their room is kept right of the plot before the frame is laid out. None at the minimal level (marks only).
+    var ends = endLabelsOf(m, series, visible, place, lvl);
+    if (ends.length > 0) m.layout.right = C.endRoom(h, ends);
     var geo = R.cartesian.cartesian(h, W, H, lvl, t.bottom, m.layout, visible, lg);
     for (var x = 0; x < series.length; x++) series[x].hidden = lg !== null && lg.drawn[series[x].id] === true && ok.hidden.indexOf(series[x].id) >= 0;
-    var marks = reg.marks(m, { plot: geo.plot, value: geo.value, band: geo.band, visible: visible, level: lvl }, h);
-    prims = prims.concat(geo.under, marks, geo.over, geo.axes, t.texts);
-    var count = 0;
-    for (var p = 0; p < marks.length; p++) if (marks[p].role === "mark" && marks[p].k !== "group" && marks[p].k !== "text") count++;
+    var drawn = reg.marks(m, { plot: geo.plot, value: geo.value, band: geo.band, x: geo.x, visible: visible, level: lvl }, h);
+    // A template returns its mark primitives (bar), or {primitives, index, count, ends} (the line family): index = per
+    // visible series every data point's {at, datum, tip} as lists, which the index holds, and count = their number,
+    // which summary.marks is (§4.9: thinning never changes either); ends = [{id, y}] of each drawn series' last point.
+    var marks = Array.isArray(drawn) ? drawn : drawn.primitives;
+    var labelled = [];
+    if (ends.length > 0 && !Array.isArray(drawn)) {
+      var el = C.endLabels(h, drawn.ends, ends, geo.plot.x + geo.plot.w + h.em("directGap"), geo.boxTop, geo.labelTop);
+      labelled = el.texts;
+    }
+    prims = prims.concat(geo.under, marks, geo.over, geo.axes, labelled, t.texts);
     out.primitives = prims;
-    out.summary.marks = count;
-    out.index = index(m.layout.vertical ? "x" : "y", geo.plot, series, visible, marks);
+    if (Array.isArray(drawn)) {
+      var count = 0;
+      for (var p = 0; p < marks.length; p++) if (marks[p].role === "mark" && marks[p].k !== "group" && marks[p].k !== "text") count++;
+      out.summary.marks = count;
+      out.index = index(m.layout.vertical ? "x" : "y", geo.plot, series, visible, marks);
+    } else {
+      out.summary.marks = drawn.count;
+      out.index = pointIndex(geo.plot, series, visible, drawn.index);
+    }
     return finish(out, meter);
+  }
+
+  /**
+   * The end labels of a draw: for each visible series, its name when the names are on the lines and its last value
+   * when the type writes it (`labels: last`, m.lasts = [{id, value: text | null}]); none at the minimal level.
+   */
+  function endLabelsOf(m, series, visible, place, lvl) {
+    var out = [];
+    if (lvl === "minimal" || !Array.isArray(m.lasts)) return out;
+    for (var i = 0; i < m.lasts.length; i++) {
+      var l = m.lasts[i];
+      if (visible[l.id] !== true) continue;
+      var title = null;
+      for (var s = 0; s < series.length; s++) if (series[s].id === l.id) title = series[s].title;
+      var name = place === "direct" ? title : null;
+      if (name === null && l.value === null) continue;
+      out.push({ id: l.id, name: name, value: l.value });
+    }
+    return out;
+  }
+
+  /**
+   * The data index of the line family: per series every point's x (sorted by the template), datum and tip lines. drawn
+   * = the template's [{series, at, datum, tip}] of the series it drew; a series it did not draw has empty lists.
+   */
+  function pointIndex(plot, series, visible, drawn) {
+    var by = new Map(), out = { axis: "x", plot: plot, series: [] };
+    for (var d = 0; d < drawn.length; d++) by.set(drawn[d].series, drawn[d]);
+    for (var s = 0; s < series.length; s++) {
+      var q = by.get(series[s].id);
+      out.series.push({ id: series[s].id, on: visible[series[s].id] === true, at: q ? q.at : [], datum: q ? q.datum : [], tip: q ? q.tip : [] });
+    }
+    return out;
   }
 
   function finish(out, meter) {

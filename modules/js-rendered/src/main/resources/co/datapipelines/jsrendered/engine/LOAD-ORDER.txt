@@ -11,7 +11,13 @@
 10-chrome.js
 11-axes.js
 12-cartesian.js
+13-time.js
+14-curve.js
+15-thin.js
+16-lines.js
 20-render.js
 30-write-dom.js
 31-write-string.js
 types/bar.js
+types/line.js
+types/area.js

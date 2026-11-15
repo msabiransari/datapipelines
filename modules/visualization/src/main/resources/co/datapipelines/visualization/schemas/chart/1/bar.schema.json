@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://datapipelines.co/schemas/chart/1/bar.schema.json",
-  "$comment": "Product copy of the 854 lane schema (lane #860, design record 2026-11-06-neutral-chart-grammar §4.3), unchanged except this comment. Served at /schemas/chart/1/bar.schema.json.",
+  "$comment": "Product copy of the 854 lane schema (lane #860, design record 2026-11-06-neutral-chart-grammar §4.3); lane 989 (design record 2026-11-14-js-rendered-charts §4.4, D2) moved band, value and series to the skeleton's $defs and admits G1, G4, G6, G7 and G8. Served at /schemas/chart/1/bar.schema.json.",
   "title": "datapipelines chart document, version 1, family bar",
   "description": "A skeleton document whose config is a bar config (spec/bar.md). Orientation is not a field: it is derived from which channel is quantitative (y = vertical bars, x = horizontal bars); exactly one of the two encodings matches.",
   "type": "object",
@@ -74,6 +74,9 @@
         },
         "color": {
           "$ref": "#/$defs/series"
+        },
+        "tooltip": {
+          "$ref": "skeleton.schema.json#/$defs/tooltip"
         }
       },
       "if": {
@@ -103,6 +106,21 @@
                 "stack"
               ]
             }
+          }
+        }
+      },
+      "not": {
+        "description": "G1: with fields the fields are the series, so a colour channel is refused.",
+        "type": "object",
+        "required": [
+          "color"
+        ],
+        "properties": {
+          "y": {
+            "type": "object",
+            "required": [
+              "fields"
+            ]
           }
         }
       }
@@ -123,6 +141,9 @@
         },
         "color": {
           "$ref": "#/$defs/series"
+        },
+        "tooltip": {
+          "$ref": "skeleton.schema.json#/$defs/tooltip"
         }
       },
       "if": {
@@ -154,13 +175,28 @@
             }
           }
         }
+      },
+      "not": {
+        "description": "G1: with fields the fields are the series, so a colour channel is refused.",
+        "type": "object",
+        "required": [
+          "color"
+        ],
+        "properties": {
+          "x": {
+            "type": "object",
+            "required": [
+              "fields"
+            ]
+          }
+        }
       }
     },
     "bandVertical": {
       "type": "object",
       "allOf": [
         {
-          "$ref": "#/$defs/bandCommon"
+          "$ref": "skeleton.schema.json#/$defs/band"
         }
       ],
       "properties": {
@@ -184,7 +220,7 @@
       "type": "object",
       "allOf": [
         {
-          "$ref": "#/$defs/bandCommon"
+          "$ref": "skeleton.schema.json#/$defs/band"
         }
       ],
       "properties": {
@@ -204,140 +240,33 @@
         }
       }
     },
-    "bandCommon": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "field",
-        "type",
-        "sort"
-      ],
-      "properties": {
-        "title": {
-          "$ref": "skeleton.schema.json#/$defs/channelTitle"
-        },
-        "type": {
-          "$ref": "skeleton.schema.json#/$defs/bandType"
-        },
-        "field": {
-          "$ref": "skeleton.schema.json#/$defs/fieldName"
-        },
-        "sort": true,
-        "format": {
-          "$ref": "skeleton.schema.json#/$defs/temporalFormat"
-        },
-        "axis": {
-          "$ref": "skeleton.schema.json#/$defs/axis"
-        }
-      },
-      "if": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "const": "temporal"
-          }
-        }
-      },
-      "else": {
-        "not": {
-          "type": "object",
-          "required": [
-            "format"
-          ]
-        }
-      }
-    },
     "value": {
+      "description": "The skeleton's value; on a bar the axis always holds zero (G8: scale.zero false is refused).",
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "type",
-        "aggregate"
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
       ],
       "properties": {
-        "title": {
-          "$ref": "skeleton.schema.json#/$defs/channelTitle"
-        },
-        "type": {
-          "const": "quantitative"
-        },
-        "field": {
-          "$ref": "skeleton.schema.json#/$defs/fieldName"
-        },
-        "aggregate": {
-          "$ref": "skeleton.schema.json#/$defs/aggregate"
-        },
-        "stack": {
-          "description": "Required when color is set, forbidden otherwise: zero = stacked, normalize = stacked to 100 % of each category, null = grouped side by side.",
-          "enum": [
-            "zero",
-            "normalize",
-            null
-          ]
-        },
-        "format": {
-          "$ref": "skeleton.schema.json#/$defs/numberFormat"
-        },
         "scale": {
           "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "domain"
-          ],
           "properties": {
-            "domain": {
-              "$ref": "skeleton.schema.json#/$defs/domain"
+            "zero": {
+              "const": true
             }
           }
-        },
-        "axis": {
-          "$ref": "skeleton.schema.json#/$defs/axis"
         }
-      },
-      "if": {
-        "type": "object",
-        "properties": {
-          "aggregate": {
-            "const": "count"
-          }
-        }
-      },
-      "then": {
-        "not": {
-          "type": "object",
-          "required": [
-            "field"
-          ]
-        }
-      },
-      "else": {
-        "type": "object",
-        "required": [
-          "field"
-        ]
       }
     },
     "series": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "field",
-        "type",
-        "sort"
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/series"
+        }
       ],
       "properties": {
-        "title": {
-          "$ref": "skeleton.schema.json#/$defs/channelTitle"
-        },
-        "type": {
-          "$ref": "skeleton.schema.json#/$defs/seriesType"
-        },
-        "field": {
-          "$ref": "skeleton.schema.json#/$defs/fieldName"
-        },
-        "sort": {
-          "$ref": "skeleton.schema.json#/$defs/orderSort"
-        },
         "legend": {
           "$ref": "skeleton.schema.json#/$defs/legend"
         }

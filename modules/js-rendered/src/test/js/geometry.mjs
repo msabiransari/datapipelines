@@ -56,6 +56,49 @@ export function expectedBarMarks(fx, hiddenIds) {
 }
 
 /**
+ * I3's expected count for a line or area fixture (brief 989 D8: mark_count counts the data's non-null points), computed
+ * by this test from the delivered columns, never by the engine: rows sharing x and series are one point, aggregated; a
+ * null x, a null series or a null aggregate is no point; on a log value axis (a line's) a value at or below 0 is none.
+ * A temporal x counts any non-null text (the fixtures carry only valid dates); a quantitative one any finite number.
+ */
+export function expectedLineMarks(fx, hiddenIds) {
+  const e = fx.document.config.encoding, x = e.x, y = e.y, color = e.color || null;
+  const col = (f) => (f && Object.prototype.hasOwnProperty.call(fx.columns, f) ? fx.columns[f] : []);
+  const X = col(x.field), C = color ? col(color.field) : null;
+  const measures = Array.isArray(y.fields) ? y.fields.map((f, i) => ({ id: "field:" + f.field, V: col(f.field) })) : [{ id: "measure", V: y.field ? col(y.field) : null }];
+  const log = fx.document.config.mark.type === "line" && y.scale && y.scale.type === "log";
+  const cells = new Map();
+  for (let i = 0; i < X.length; i++) {
+    const xv = X[i];
+    if (xv === null || xv === undefined) continue;
+    if (x.type === "quantitative" && !Number.isFinite(Number(xv))) continue;
+    if (C && (C[i] === null || C[i] === undefined)) continue;
+    for (const m of measures) {
+      const sid = C ? typeof C[i] + ":" + String(C[i]) : m.id;
+      if (hiddenIds.includes(sid)) continue;
+      const key = JSON.stringify([sid, x.type === "quantitative" ? Number(xv) : String(xv)]);
+      if (!cells.has(key)) cells.set(key, []);
+      cells.get(key).push(m.V ? m.V[i] : 1);
+    }
+  }
+  let n = 0;
+  for (const vals of cells.values()) {
+    let r;
+    if (y.aggregate === "count") r = vals.length;
+    else {
+      const xs = vals.filter((v) => v !== null && v !== undefined).map(Number);
+      if (xs.length === 0) continue;
+      r = y.aggregate === "min" || y.aggregate === "max" ? xs[0] : 0;
+      for (const v of xs) r = y.aggregate === "min" ? Math.min(r, v) : y.aggregate === "max" ? Math.max(r, v) : r + v;
+      if (y.aggregate === "mean") r /= xs.length;
+    }
+    if (!Number.isFinite(r) || (log && !(r > 0))) continue;
+    n++;
+  }
+  return n;
+}
+
+/**
  * D7's widths and heights: every level is met. The record's three heights (100, 200, 480) and, since #985 R1, the
  * compact and full level heights themselves (140, 240), where the refusal found texts meeting and leaving the frame.
  */

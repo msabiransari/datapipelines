@@ -1,0 +1,107 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "A8's hostile fixture: <script>, onload=, &, \", a 200-character title, a series named __proto__",
+ "document": {
+  "display_name": "Hostile <script>",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "sort": null,
+     "title": "<b onload=alert(1)>x</b>"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "a & b \"q\" 'a'",
+     "unit": "<i>"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "<script>"
+    },
+    "tooltip": [
+     {
+      "field": "k",
+      "title": "<script>alert(1)</script>"
+     }
+    ]
+   },
+   "title": {
+    "text": "TTTTTTTTTT a very long title that keeps on going a very long title that keeps on going a very long title that keeps on going a very long title that keeps on going a very long title that keeps on going",
+    "subtitle": "<img src=x onerror=alert(1)> & \"quoted\""
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "<script>alert(1)</script>",
+   "__proto__",
+   "a & b \"c\" 'd'",
+   "constructor",
+   "<script>alert(1)</script>",
+   "__proto__",
+   "a & b \"c\" 'd'",
+   "constructor"
+  ],
+  "s": [
+   "__proto__",
+   "__proto__",
+   "__proto__",
+   "__proto__",
+   "\" onmouseover=\"x",
+   "\" onmouseover=\"x",
+   "\" onmouseover=\"x",
+   "\" onmouseover=\"x"
+  ],
+  "v": [
+   3,
+   5,
+   2,
+   4,
+   6,
+   1,
+   3,
+   2
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "s": "STRING",
+  "v": "DECIMAL"
+ }
+}

@@ -1,0 +1,75 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "dates across a year change and a leap day: the axis is continuous, Feb 29 exists",
+ "document": {
+  "display_name": "temporal-year-leap",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Day",
+     "format": "date"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   },
+   "title": {
+    "text": "Year change"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2023-12-30",
+   "2023-12-31",
+   "2024-01-01",
+   "2024-01-02",
+   "2024-02-28",
+   "2024-02-29",
+   "2024-03-01"
+  ],
+  "v": [
+   4,
+   6,
+   5,
+   7,
+   9,
+   8,
+   10
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "v": "DECIMAL"
+ }
+}

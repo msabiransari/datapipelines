@@ -5,9 +5,13 @@
 // categories and series {key, raw, first, full}, cells {num, exact, text, aggregate}, markCount. Adapted: the number
 // text follows §4.7 (01-text.js) where the core used Intl, and the model adds what the shared layout reads (`layout`,
 // series ids and titles). Lane 977's 10-template-bar-t1.js was the reference for what the marks compute.
+// Lane 989 (brief D3) adds what the shared shapes admit, each inert when the document does not use it: G1 `fields`
+// (series from columns, in the list's order), G4 a log value axis (a bar grows from its lower bound; a value <= 0 is
+// not drawn), G6 `unit` (after the number in tooltips and value labels, and in the value axis's title) and G7
+// `encoding.tooltip` (its lines carried on each mark; the value of an aggregated bar's detail is its first row's).
 (function (R) {
   "use strict";
-  var P = R.prim, D = R.data, T = R.text, S = R.scales, look = R.tables.look, r2 = S.r2;
+  var P = R.prim, D = R.data, T = R.text, S = R.scales, L = R.lines, look = R.tables.look, r2 = S.r2;
 
   /** Bar's channel descriptor (record §4.2), the same data as ChartType.bar's in Kotlin (R-REG compares them). */
   var BAND_OR_VALUE = { node: "oneOf", of: [{ shape: "band", types: ["nominal", "ordinal", "temporal"] }, { shape: "value", types: ["quantitative"] }] };
@@ -29,8 +33,28 @@
     types = types && typeof types === "object" ? types : {};
     var warnings = [];
     var B = D.column(columns, band.field), V = value.field ? D.column(columns, value.field) : null, C = color ? D.column(columns, color.field) : null;
+    // G1: with fields, each entry is a series (key "field:<index>"), read from its own column.
+    var fields = Array.isArray(value.fields) ? value.fields : null;
+    var FV = fields ? fields.map(function (f) {
+      return D.column(columns, f.field);
+    }) : null;
+    var tips = Array.isArray(e.tooltip) ? e.tooltip : [];
+    var tipCols = tips.map(function (d) {
+      return D.column(columns, d.field);
+    });
+    var log = !!(value.scale && value.scale.type === "log");
     var temporal = band.type === "temporal";
-    var cats = new Map(), sers = new Map(), groups = new Map(), droppedCat = 0, droppedSer = 0;
+    var cats = new Map(), sers = new Map(), groups = new Map(), firstRow = new Map(), droppedCat = 0, droppedSer = 0;
+    var put = function (bk, sk, v, row) {
+      if (!groups.has(bk)) groups.set(bk, new Map());
+      var bySeries = groups.get(bk);
+      if (!bySeries.has(sk)) bySeries.set(sk, []);
+      bySeries.get(sk).push(v);
+      if (tips.length) {
+        if (!firstRow.has(bk)) firstRow.set(bk, new Map());
+        if (!firstRow.get(bk).has(sk)) firstRow.get(bk).set(sk, row);
+      }
+    };
     for (var i = 0; i < B.length; i++) {
       var b = B[i], s = C ? C[i] : null;
       if (D.isNull(b)) {
@@ -43,20 +67,28 @@
       }
       var bk = D.keyOf(b), sk = C ? D.keyOf(s) : "";
       if (!cats.has(bk)) cats.set(bk, { key: bk, raw: b, first: cats.size, full: temporal ? T.temporalFull(b, band.format) : String(b) });
-      if (!sers.has(sk)) sers.set(sk, { key: sk, raw: s, first: sers.size, full: C ? String(s) : String(value.field || "count") });
-      if (!groups.has(bk)) groups.set(bk, new Map());
-      var bySeries = groups.get(bk);
-      if (!bySeries.has(sk)) bySeries.set(sk, []);
-      bySeries.get(sk).push(V ? V[i] : 1);
+      if (fields) {
+        for (var fi = 0; fi < fields.length; fi++) {
+          var fk = "field:" + fi, title = fields[fi].title === undefined ? fields[fi].field : fields[fi].title;
+          if (!sers.has(fk)) sers.set(fk, { key: fk, raw: null, first: sers.size, full: String(title), field: fields[fi].field, unit: fields[fi].unit });
+          put(bk, fk, FV[fi][i], i);
+        }
+        continue;
+      }
+      if (!sers.has(sk)) sers.set(sk, { key: sk, raw: s, first: sers.size, full: C ? String(s) : String(value.field || "count"), unit: value.unit });
+      put(bk, sk, V ? V[i] : 1, i);
     }
     if (droppedCat || droppedSer) warnings.push({ code: "chart.rule.null-category" });
+    // The series cap before any work that grows with series × categories (the cells, the band totals): the refusal is
+    // the one render gives after the model, so the result is the same and the work stays linear in the rows.
+    if (sers.size > R.tables.cap("series")) return { rule: { code: "chart.too_many_series", details: { series: sers.size, limit: R.tables.cap("series") } } };
     var agg = value.aggregate;
     var stack = color ? (value.stack === undefined ? null : value.stack) : undefined;
     var raw = new Map();
     groups.forEach(function (bySeries, key) {
       var m = new Map();
       bySeries.forEach(function (vals, sk2) {
-        m.set(sk2, D.aggregate(vals, agg, value.field || "count"));
+        m.set(sk2, D.aggregate(vals, agg, fields ? sers.get(sk2).field : value.field || "count"));
       });
       raw.set(key, m);
     });
@@ -92,12 +124,17 @@
       }
       return { maximum: maximum, total: total };
     }) : [];
-    var undrawn = 0;
+    var undrawn = 0, nonPositive = 0;
     var cells = series.map(function (s2) {
       return categories.map(function (c, index) {
         var r = cell(c, s2);
         if (r.num === null || !isFinite(r.num)) {
           if (r.num !== null) undrawn++;
+          return { num: null, exact: null, text: "", aggregate: null };
+        }
+        // G4: a log axis has no zero; a value at or below it is not drawn (record §4.4).
+        if (log && !(r.num > 0)) {
+          nonPositive++;
           return { num: null, exact: null, text: "", aggregate: null };
         }
         var text = r.exact !== null ? r.exact : String(r.num);
@@ -107,14 +144,15 @@
           if (share === 0) share = 0;
           return { num: share, exact: null, text: T.value(share, format), aggregate: text };
         }
-        return { num: r.num, exact: r.exact, text: T.value(r.exact !== null ? r.exact : r.num, format), aggregate: text };
+        return { num: r.num, exact: r.exact, text: L.withUnit(T.value(r.exact !== null ? r.exact : r.num, format), s2.unit), aggregate: text };
       });
     });
     if (undrawn) warnings.push({ code: "chart.rule.non-finite" });
+    if (nonPositive) warnings.push({ code: "chart.rule.log-nonpositive" });
     var markCount = 0;
     for (var si = 0; si < cells.length; si++) for (var ci = 0; ci < cells[si].length; ci++) if (cells[si][ci].num !== null) markCount++;
     for (var q = 0; q < series.length; q++) {
-      series[q].id = color ? series[q].key : "measure";
+      series[q].id = color ? series[q].key : fields ? "field:" + series[q].field : "measure";
       series[q].title = series[q].full;
       series[q].colour = R.theme.SERIES[q] || null;
     }
@@ -140,6 +178,15 @@
       }
     }
     var a0 = value.aggregate.charAt(0).toUpperCase() + value.aggregate.slice(1);
+    var vt = titleOf(value, value.field ? a0 + " of " + value.field : fields ? a0 : "Count");
+    if (vt !== null && !fields && typeof value.unit === "string" && value.unit !== "") vt = vt + " (" + value.unit + ")";
+    var details = function (si, ci) {
+      var out = [];
+      if (!tips.length) return out;
+      var byS = firstRow.get(categories[ci].key), row = byS ? byS.get(series[si].key) : undefined;
+      for (var d = 0; d < tips.length; d++) out.push(L.detailLine(tips[d], row === undefined ? null : tipCols[d][row], types));
+      return out;
+    };
     return {
       vertical: vertical,
       stack: stack,
@@ -151,19 +198,22 @@
       legend: color ? color.legend : null,
       labelsOn: labelsOn,
       format: format,
+      details: details,
       layout: {
         vertical: vertical,
+        log: log,
         bands: categories.map(function (c) {
           return temporal ? T.temporalAxis(c.raw, band.format) : { text: c.full, under: null };
         }),
         bandTitle: titleOf(band, band.field),
-        valueTitle: titleOf(value, value.field ? a0 + " of " + value.field : "Count"),
+        valueTitle: vt,
         bandGrid: band.axis ? band.axis.grid : undefined,
         valueGrid: value.axis ? value.axis.grid : undefined,
         format: format,
         domain: value.scale && value.scale.domain ? value.scale.domain : null,
         endLabels: endLabels,
         extent: function (visible) {
+          if (log) return logExtent(series, cells, visible);
           var lo = 0, hi = 0;
           for (var c2 = 0; c2 < categories.length; c2++) {
             var pos = 0, neg = 0;
@@ -187,6 +237,21 @@
         },
       },
     };
+  }
+
+  /** G4: [the smallest, the largest] drawn value of the visible series (all > 0), or [null, null] when none is drawn. */
+  function logExtent(series, cells, visible) {
+    var lo = null, hi = null;
+    for (var s = 0; s < series.length; s++) {
+      if (visible[series[s].id] !== true) continue;
+      for (var c = 0; c < cells[s].length; c++) {
+        var v = cells[s][c].num;
+        if (v === null) continue;
+        if (lo === null || v < lo) lo = v;
+        if (hi === null || v > hi) hi = v;
+      }
+    }
+    return [lo, hi];
   }
 
   /** A bar with its data end rounded (look contract §2): a rect when r is 0, else a path. dir = the data end's side. */
@@ -258,7 +323,7 @@
         len -= shift;
         var isOuter = !stacked || look("roundOuterOnly") !== true || (v >= 0 ? outer[ci].pos === si : outer[ci].neg === si);
         var r = isOuter ? Math.min(radius, barW * maxShare, len) : 0;
-        var tip = [m.categories[ci].full, (m.series.length > 1 || ser.id !== "measure" ? ser.title + ": " : "") + cellv.text];
+        var tip = [m.categories[ci].full, (m.series.length > 1 || ser.id !== "measure" ? ser.title + ": " : "") + cellv.text].concat(m.details(si, ci));
         var baseF = { fill: ser.colour, color: theme.css(ser.colour), series: ser.id, datum: ci, tip: tip };
         var mk, box;
         if (vertical) {

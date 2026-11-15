@@ -1,0 +1,76 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "a spike under the smooth curve: the monotone cubic never overshoots a point",
+ "document": {
+  "display_name": "spike-smooth",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line",
+    "curve": "smooth",
+    "points": "markers"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "Index"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   },
+   "title": {
+    "text": "Spike"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6
+  ],
+  "v": [
+   1,
+   1,
+   1,
+   10,
+   1,
+   1,
+   1
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "v": "DECIMAL"
+ }
+}

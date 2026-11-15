@@ -8,7 +8,8 @@ import { violations, WIDTHS, HEIGHTS } from "./geometry.mjs";
 
 const R = engine();
 const FIXTURES = chartFixtures();
-const fx = (name) => FIXTURES.find((f) => f.name === name).fixture;
+// Bar's fixtures by name: a name is unique within its type's directory only (line/ and area/ have their own `hostile`).
+const fx = (name) => FIXTURES.find((f) => f.wire === "bar" && f.name === name).fixture;
 const plain = (v) => JSON.parse(JSON.stringify(v));
 
 // ---------------------------------------------------------------- A14 and LA5: the look table
@@ -17,9 +18,11 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stackShare", "radiusMaxShare", "roundOuterOnly", "legendKeyBar", "labelsDefault", "stackTotalFormat",
   "levelFull", "levelCompact", "levelMinimal", "tickSpacing", "tickSpacingCompact", "rotateAngle", "rotateHiddenShare", "labelMinEm", "rotateMaxEm", "bandLabelMaxEm", "legendSideMaxEm",
   "textAscent", "textDescent", "edge", "lineHeight", "titleGap", "tickGap", "labelGap", "cornerClear", "axisTitleGap", "legendKey", "legendKeyGap", "legendEntryGap", "legendGap", "valueLabelGap",
-  "emptyText", "morePrefix"];
+  "emptyText", "morePrefix",
+  // The line family's (brief 989 D6, D7, D10a): its defaults, its legend keys, the direct legend's bounds and gap.
+  "curveDefault", "pointsDefault", "lineLabelsDefault", "lastLabelFormat", "lineRound", "areaFade", "legendKeyLine", "legendKeyArea", "directMin", "directMax", "directGap"];
 
-test("LA5: the look table is closed and holds exactly the fixed values bar and the shared layout use", () => {
+test("LA5: the look table is closed and holds exactly the fixed values bar, the line family and the shared layout use", () => {
   assert.deepEqual(Object.keys(R.tables.LOOK).sort(), [...LA5].sort());
   for (const [name, f] of Object.entries(R.tables.LOOK)) {
     assert.deepEqual(Object.keys(f), ["value", "consumer", "note"], name);
@@ -30,7 +33,10 @@ test("LA5: the look table is closed and holds exactly the fixed values bar and t
 });
 
 /** Another value of a field: its other form for a word, the other truth value, a number moved by a quarter. */
-const OTHER = { legendSideMaxEm: 2, legendKeyBar: "line", labelsDefault: "none", stackTotalFormat: "integer", emptyText: "Nothing to show", morePrefix: "and ", rotateAngle: 60 };
+const OTHER = { legendSideMaxEm: 2, legendKeyBar: "line", labelsDefault: "none", stackTotalFormat: "integer", emptyText: "Nothing to show", morePrefix: "and ", rotateAngle: 60,
+  curveDefault: "step", pointsDefault: "markers", lineLabelsDefault: "last", lastLabelFormat: "integer", legendKeyLine: "square", legendKeyArea: "line",
+  // A quarter down, not up: no fixture has five series, so 5 shows nothing; at 3 the four-line fixture loses its names on the lines.
+  directMax: 3 };
 function other(name, v) {
   if (Object.prototype.hasOwnProperty.call(OTHER, name)) return OTHER[name];
   if (typeof v === "boolean") return !v;
@@ -42,7 +48,9 @@ const A14_FRAMES = [[960, 540], [480, 360], [372, 250], [300, 180], [240, 160], 
 
 test("A14 (render half): changing any one look field changes the primitives of at least one chart fixture", () => {
   const base = new Map();
-  const key = (f, w, h) => f.name + "@" + w + "x" + h;
+  // A fixture's name is unique within its type only (line/, area/ and bar/ each have an `empty` and a `hostile`): the
+  // key carries the type, or one type's picture would be compared with another's and every field would look alive.
+  const key = (f, w, h) => f.wire + "/" + f.name + "@" + w + "x" + h;
   for (const f of FIXTURES) for (const [w, h] of A14_FRAMES) base.set(key(f, w, h), canonical(R.render(inputOf(f.fixture, w, h))));
   const dead = [];
   for (const name of Object.keys(R.tables.LOOK)) {

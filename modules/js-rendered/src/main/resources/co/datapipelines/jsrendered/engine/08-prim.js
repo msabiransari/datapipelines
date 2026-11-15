@@ -20,7 +20,8 @@
     line: [["role", STR, true], ["x1", COORD, true], ["y1", COORD, true], ["x2", COORD, true], ["y2", COORD, true],
       ["stroke", STR, true], ["strokeColor", STR, true], ["strokeWidth", NUM, true], ["series", OPT_STR, false, null]],
     path: [["role", STR, true], ["d", LIST, true], ["fill", OPT_STR, false, null], ["color", OPT_STR, false, null], ["stroke", OPT_STR, false, null],
-      ["strokeColor", OPT_STR, false, null], ["strokeWidth", NUM, false, 0], ["opacity", NUM, false, 1], ["series", OPT_STR, false, null], ["datum", ANY, false, null], ["tip", LIST, false, null]],
+      ["strokeColor", OPT_STR, false, null], ["strokeWidth", NUM, false, 0], ["opacity", NUM, false, 1], ["series", OPT_STR, false, null], ["datum", ANY, false, null], ["tip", LIST, false, null],
+      ["round", BOOL, false, false], ["fade", LIST, false, null]],
     circle: [["role", STR, true], ["cx", COORD, true], ["cy", COORD, true], ["r", COORD, true], ["fill", OPT_STR, false, null], ["color", OPT_STR, false, null],
       ["stroke", OPT_STR, false, null], ["strokeColor", OPT_STR, false, null], ["strokeWidth", NUM, false, 0], ["opacity", NUM, false, 1], ["series", OPT_STR, false, null], ["datum", ANY, false, null], ["tip", LIST, false, null]],
     text: [["role", STR, true], ["x", COORD, true], ["y", COORD, true], ["text", STR, true], ["shown", OPT_STR, false, null], ["anchor", STR, false, "start"],
@@ -70,11 +71,17 @@
     return out;
   }
 
-  /** Path data: commands M x y, L x y, A r x y (a circular arc of radius r, the shorter way, clockwise), Z. */
+  /** The coordinates each path command takes. */
+  var ARITY = { M: 2, L: 2, A: 3, C: 6, Z: 0 };
+
+  /**
+   * Path data: commands M x y, L x y, A r x y (a circular arc of radius r, the shorter way, clockwise), C x1 y1 x2 y2 x y
+   * (a cubic Bézier segment: two control points, then its end; the line family's smooth curve, brief 989 D6), Z.
+   */
   function pathData(d) {
     var out = [], i = 0;
     while (i < d.length) {
-      var c = d[i], n = c === "M" || c === "L" ? 2 : c === "A" ? 3 : c === "Z" ? 0 : -1;
+      var c = d[i], n = Object.prototype.hasOwnProperty.call(ARITY, c) ? ARITY[c] : -1;
       if (n < 0 || i + n >= d.length + (n === 0 ? 1 : 0)) throw new Error("path: bad command at " + i);
       out.push(c);
       for (var j = 1; j <= n; j++) {
@@ -86,7 +93,21 @@
     return out;
   }
 
+  /**
+   * A path's fade (look contract §2 "area"): null, or [top, bottom, y0, y1]: its fill colour at opacity `top` at y0
+   * falling to opacity `bottom` at y1, straight down the frame (the writers draw it as a vertical gradient from y0 to
+   * y1). The two opacities are shares in [0, 1]; the two ys are coordinates, rounded as every coordinate is.
+   */
+  function fadeOf(p) {
+    var f = p.fade;
+    if (p.fill === null || f.length !== 4) throw new Error("path: a fade is [top, bottom, y0, y1] on a filled path");
+    for (var i = 0; i < 4; i++) if (!finite(f[i])) throw new Error("path: a fade value is not a finite number");
+    if (f[0] < 0 || f[0] > 1 || f[1] < 0 || f[1] > 1) throw new Error("path: a fade opacity is outside [0, 1]");
+    return [f[0], f[1], r2(f[2]), r2(f[3])];
+  }
+
   R.prim = {
+    ARITY: ARITY,
     KINDS: KINDS,
     rect: function (f) {
       return make("rect", f);
@@ -97,6 +118,7 @@
     path: function (f) {
       var p = make("path", f);
       p.d = pathData(p.d);
+      if (p.fade !== null) p.fade = fadeOf(p);
       return p;
     },
     circle: function (f) {

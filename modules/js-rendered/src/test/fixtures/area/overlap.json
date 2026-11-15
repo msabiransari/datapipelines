@@ -1,0 +1,147 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "two unstacked areas overlap with the fade",
+ "document": {
+  "display_name": "overlap",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "area"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "Overlap"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-01-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-07-01",
+   "2024-07-01",
+   "2024-08-01",
+   "2024-08-01",
+   "2024-09-01",
+   "2024-09-01",
+   "2024-10-01",
+   "2024-10-01",
+   "2024-11-01",
+   "2024-11-01",
+   "2024-12-01",
+   "2024-12-01"
+  ],
+  "s": [
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second",
+   "First",
+   "Second"
+  ],
+  "v": [
+   20,
+   10,
+   23,
+   14,
+   26,
+   18,
+   29,
+   22,
+   20,
+   26,
+   23,
+   10,
+   26,
+   14,
+   29,
+   18,
+   20,
+   22,
+   23,
+   26,
+   26,
+   10,
+   29,
+   14
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "s": "STRING",
+  "v": "DECIMAL"
+ }
+}

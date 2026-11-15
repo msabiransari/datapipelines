@@ -61,6 +61,36 @@ class ChartTypeTest {
     }
 
     @Test
+    fun `line's and area's descriptor is the record's line example - a temporal x has ONE form, position`() {
+        val expected =
+            listOf(
+                mapOf(
+                    "key" to "x",
+                    "required" to true,
+                    "node" to
+                        mapOf(
+                            "node" to "oneOf",
+                            "of" to
+                                listOf(
+                                    mapOf("shape" to "band", "types" to listOf("nominal", "ordinal")),
+                                    mapOf("shape" to "position", "types" to listOf("temporal", "quantitative")),
+                                ),
+                        ),
+                ),
+                mapOf("key" to "y", "required" to true, "node" to mapOf("node" to "shape", "name" to "value")),
+                mapOf("key" to "color", "required" to false, "node" to mapOf("node" to "shape", "name" to "series")),
+                mapOf(
+                    "key" to "tooltip",
+                    "required" to false,
+                    "node" to mapOf("node" to "list", "min" to 0, "max" to 6, "of" to mapOf("node" to "shape", "name" to "detail")),
+                ),
+            )
+        ChartType.LINE.channels.map { it.wire() } shouldBe expected
+        ChartType.AREA.channels.map { it.wire() } shouldBe expected
+        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area")
+    }
+
+    @Test
     fun `the schema file, template file and fixtures directory derive from the wire value`() {
         ChartType.BAR.schemaFile shouldBe ChartSchemas.BAR
         ChartType.entries.forEach {

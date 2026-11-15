@@ -1,0 +1,65 @@
+{
+ "display_name": "A time axis of text",
+ "description": "A temporal x is a DATE or TIMESTAMP column.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "area"
+  },
+  "encoding": {
+   "x": {
+    "field": "region",
+    "type": "temporal"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "format": "compact"
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

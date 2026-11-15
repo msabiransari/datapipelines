@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.82 (frozen contract — additive-only changes after this point)
+**Status:** v1.83 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-11-15
@@ -2037,7 +2037,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: the bar family's {mark, encoding, title}, validated against the v1 JSON Schema (https://datapipelines.co/schemas/chart/1/bar.schema.json, served at /schemas/chart/1/bar.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line or area), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2049,7 +2049,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the bars drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       },
       "confirm_new_root": {
         "type": "boolean",
@@ -2117,7 +2117,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: the bar family's {mark, encoding, title}, validated against the v1 JSON Schema (https://datapipelines.co/schemas/chart/1/bar.schema.json, served at /schemas/chart/1/bar.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line or area), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2129,7 +2129,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the bars drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       }
     },
     "additionalProperties": false
@@ -3124,6 +3124,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.83 | 989 (#989, js-rendered F5) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the three chart families (bar, line, area) and the schema address per family; the `tests` description's `mark_count` names a line's or an area's data points beside a bar's bars. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-15 | v1.82 | 988 (#988, js-rendered F4) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update`:** the `renderer` description no longer names the kind retired by #860; it reads "html and svg are reserved and refused". Text only: the input schema, the accepted kinds and every refusal are unchanged. |
 | 2026-11-15 | v1.81 | 986 (#986, js-rendered F2) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` — deliberate break, decided by the js-rendered charts record O-13:** the answer is `{id, name, version, status, body_hash}`; the `warnings` array and the descriptions' sentence about it are gone with the server's chart library layer. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-11 | v1.80 | #877 G7 (importer arm, ruling A.0 option 1) | **§6.2.32 `templates_purge_draft`: the guard gains its FOURTH arm** — a template version (any status; a DISCARDED one while its template keeps a live version) whose `imports` pin any version of the draft refuses `template.in_use` with `details.referencing_templates`, narrowed by the caller's view with `pins_hidden` exactly as the other three arms (#300). A guard CORRECTION, not a dependency feature (record §22, Draft 9 erratum): before it a library draft could be purged out from under a draft importer. The tool's description names the arm; schema, permission row and tool count (61) unchanged; `templates_used_by` unchanged. |

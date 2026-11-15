@@ -1,0 +1,75 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "a step curve with markers",
+ "document": {
+  "display_name": "curve-step",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line",
+    "curve": "step",
+    "points": "markers"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   },
+   "title": {
+    "text": "Step"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-06-01"
+  ],
+  "v": [
+   2,
+   4,
+   3,
+   6,
+   6,
+   1
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "v": "DECIMAL"
+ }
+}
