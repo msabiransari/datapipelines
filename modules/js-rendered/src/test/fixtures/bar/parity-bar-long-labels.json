@@ -1,0 +1,105 @@
+{
+ "source": [
+  "modules/web/src/test/resources/chart-parity/fixtures/bar-long-labels.json",
+  "tests/browser-tests/src/test/resources/chart-fixtures/bar-long-labels.json"
+ ],
+ "note": "labels over 32 code points are cut with an ellipsis (one label is astral: code points, not UTF-16 units); the tooltip keeps the full text",
+ "document": {
+  "display_name": "Long labels",
+  "description": "Regions ranked by total amount.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "month",
+      "type": "DATE"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "units",
+      "type": "INTEGER"
+     },
+     {
+      "name": "payload",
+      "type": "BINARY",
+      "nullable": true
+     },
+     {
+      "name": "segment",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar",
+    "labels": "values"
+   },
+   "encoding": {
+    "y": {
+     "field": "region",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": null
+    },
+    "x": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount (USD)",
+     "format": "currency(USD)",
+     "axis": {
+      "grid": true
+     }
+    }
+   },
+   "title": {
+    "text": "Amount by region",
+    "subtitle": "Largest first"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "Regional distribution centre, north-eastern corridor (A)",
+   "Regional distribution centre, north-eastern corridor (B)",
+   "Short",
+   "Exactly thirty-two characters ok",
+   "📦📦📦📦📦📦📦📦📦📦 parcels, north-eastern corridor"
+  ],
+  "amount": [
+   100,
+   200,
+   300,
+   400,
+   500
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "month": "DATE",
+  "channel": "STRING",
+  "amount": "DECIMAL",
+  "units": "INTEGER",
+  "payload": "BINARY",
+  "segment": "STRING"
+ }
+}

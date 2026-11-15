@@ -1,0 +1,96 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: horizontal stack with negatives, a legend at the right (the author's orient)",
+ "document": {
+  "display_name": "Horizontal stack",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "y": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "x": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "stack": "zero",
+     "format": "compact"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "title": "Channel",
+     "legend": {
+      "orient": "right"
+     }
+    }
+   },
+   "title": {
+    "text": "Net by channel"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "North",
+   "North",
+   "South",
+   "South",
+   "West",
+   "West"
+  ],
+  "s": [
+   "Online",
+   "Retail",
+   "Online",
+   "Retail",
+   "Online",
+   "Retail"
+  ],
+  "v": [
+   1200,
+   -300,
+   800,
+   2500,
+   -150,
+   640
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "s": "STRING",
+  "v": "DOUBLE"
+ }
+}

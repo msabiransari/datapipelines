@@ -1,0 +1,116 @@
+{
+ "source": [
+  "design-records/charts-evidence/977-js-rendered-spike/cases/production-monthly--x_three_years.json"
+ ],
+ "note": "D9: the label row's input for lane 977's corner picture production-monthly--x_three_years at 960x540, as the lane's D9 harness recorded it (notes/evidence/985-js-rendered-engine-foundation/s4, run-3, margin 1.00, the last of the draw's label-row calls = the pass whose texts are drawn): the frame, the plot, the lowest value tick's label and its box, the x labels with their centres (977's timeTicks through the harness's x-axis copy). Not a chart document: never given to render. Lane 989 adds the whole picture as a line fixture.",
+ "frame": {
+  "w": 960,
+  "h": 540
+ },
+ "theme": "light",
+ "measure": {
+  "table": "noto-sans-regular",
+  "margin": 1
+ },
+ "lowestTick": "0",
+ "input": {
+  "labels": [
+   {
+    "text": "Jan 2023",
+    "under": null,
+    "x": 59.83
+   },
+   {
+    "text": "Apr",
+    "under": null,
+    "x": 134.89
+   },
+   {
+    "text": "Jul",
+    "under": null,
+    "x": 210.78
+   },
+   {
+    "text": "Oct",
+    "under": null,
+    "x": 287.5
+   },
+   {
+    "text": "Jan 2024",
+    "under": null,
+    "x": 364.23
+   },
+   {
+    "text": "Apr",
+    "under": null,
+    "x": 440.12
+   },
+   {
+    "text": "Jul",
+    "under": null,
+    "x": 516.01
+   },
+   {
+    "text": "Oct",
+    "under": null,
+    "x": 592.73
+   },
+   {
+    "text": "Jan 2025",
+    "under": null,
+    "x": 669.46
+   },
+   {
+    "text": "Apr",
+    "under": null,
+    "x": 744.51
+   },
+   {
+    "text": "Jul",
+    "under": null,
+    "x": 820.4
+   },
+   {
+    "text": "Oct",
+    "under": null,
+    "x": 897.13
+   }
+  ],
+  "bounds": {
+   "x0": 6,
+   "x1": 954
+  },
+  "plot": {
+   "x": 53.83,
+   "y": 39.01,
+   "w": 900.17,
+   "h": 449.21
+  },
+  "corner": {
+   "x0": 40.966,
+   "y0": 480.048,
+   "x1": 47.83,
+   "y1": 496.39200000000005
+  },
+  "cornerIsFirst": false,
+  "rotate": "never",
+  "room": 3.132000000000062
+ },
+ "recorded": {
+  "corner": "moved",
+  "shown": [
+   "Jan 2023",
+   "Apr",
+   "Jul",
+   "Oct",
+   "Jan 2024",
+   "Apr",
+   "Jul",
+   "Oct",
+   "Jan 2025",
+   "Apr",
+   "Jul",
+   "Oct"
+  ]
+ }
+}

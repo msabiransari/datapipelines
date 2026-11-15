@@ -1,0 +1,66 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: negative values only (bars hang from the zero line at the top)",
+ "document": {
+  "display_name": "Negative",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   },
+   "title": {
+    "text": "All below zero"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "North",
+   "South",
+   "East"
+  ],
+  "v": [
+   -12.5,
+   -40,
+   -3.25
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE"
+ }
+}

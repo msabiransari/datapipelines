@@ -1,0 +1,58 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: empty (a delivery with zero rows)",
+ "document": {
+  "display_name": "Empty",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   },
+   "title": {
+    "text": "Nothing yet"
+   }
+  }
+ },
+ "columns": {
+  "k": [],
+  "v": []
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE"
+ }
+}

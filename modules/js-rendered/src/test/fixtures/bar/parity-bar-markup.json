@@ -1,0 +1,119 @@
+{
+ "source": [
+  "modules/web/src/test/resources/chart-parity/fixtures/bar-markup.json",
+  "tests/browser-tests/src/test/resources/chart-fixtures/bar-markup.json"
+ ],
+ "note": "markup in a category and a series is shown as text in axis, legend and tooltip; nothing executes",
+ "document": {
+  "display_name": "Markup as text",
+  "description": "Total amount per region, one bar per channel.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "month",
+      "type": "DATE"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "units",
+      "type": "INTEGER"
+     },
+     {
+      "name": "payload",
+      "type": "BINARY",
+      "nullable": true
+     },
+     {
+      "name": "segment",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": null,
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "stack": null,
+     "format": "decimal(0)"
+    },
+    "color": {
+     "field": "channel",
+     "type": "nominal",
+     "sort": null,
+     "title": "Channel",
+     "legend": {
+      "orient": "top"
+     }
+    }
+   },
+   "title": {
+    "text": "Amount by region and channel"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "<img src=x onerror=__xss=1>",
+   "<img src=x onerror=__xss=1>",
+   "Plain",
+   "Plain",
+   "&amp; entity",
+   "&amp; entity"
+  ],
+  "channel": [
+   "<b>bold</b>",
+   "Normal",
+   "<b>bold</b>",
+   "Normal",
+   "<b>bold</b>",
+   "Normal"
+  ],
+  "amount": [
+   10,
+   20,
+   30,
+   40,
+   50,
+   60
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "month": "DATE",
+  "channel": "STRING",
+  "amount": "DECIMAL",
+  "units": "INTEGER",
+  "payload": "BINARY",
+  "segment": "STRING"
+ }
+}

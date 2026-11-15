@@ -1,0 +1,69 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: long category labels (thinning, rotation, cutting)",
+ "document": {
+  "display_name": "Long labels",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "The northern distribution region of the company",
+   "Southern coastal warehouses and depots",
+   "Eastern mountain logistics",
+   "Western plains",
+   "Central metropolitan area and suburbs",
+   "Overseas territories"
+  ],
+  "v": [
+   5,
+   8,
+   11,
+   14,
+   17,
+   20
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE"
+ }
+}

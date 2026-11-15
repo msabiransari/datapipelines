@@ -1,0 +1,123 @@
+{
+ "source": [
+  "modules/web/src/test/resources/chart-parity/fixtures/bar-negatives.json",
+  "tests/browser-tests/src/test/resources/chart-fixtures/bar-negatives.json"
+ ],
+ "note": "stacked: positives up from zero, negatives down from zero",
+ "document": {
+  "display_name": "Negatives",
+  "description": "Monthly amount, stacked by channel, in UTC months.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "month",
+      "type": "DATE"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "units",
+      "type": "INTEGER"
+     },
+     {
+      "name": "payload",
+      "type": "BINARY",
+      "nullable": true
+     },
+     {
+      "name": "segment",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "stack": "zero",
+     "format": "compact",
+     "axis": {
+      "grid": true
+     }
+    },
+    "color": {
+     "field": "channel",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Channel",
+     "legend": {
+      "orient": "bottom"
+     }
+    }
+   },
+   "title": {
+    "text": "Monthly amount by channel",
+    "subtitle": "Stacked"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "North",
+   "North",
+   "South",
+   "South",
+   "West",
+   "West"
+  ],
+  "channel": [
+   "Online",
+   "Retail",
+   "Online",
+   "Retail",
+   "Online",
+   "Retail"
+  ],
+  "amount": [
+   500,
+   -200,
+   -300,
+   -100,
+   200,
+   400
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "month": "DATE",
+  "channel": "STRING",
+  "amount": "DECIMAL",
+  "units": "INTEGER",
+  "payload": "BINARY",
+  "segment": "STRING"
+ }
+}

@@ -1,0 +1,62 @@
+{
+ "source": [
+  "lane 985 make-r2-fixtures.mjs"
+ ],
+ "note": "#985 R2: value-axis ticks of 0.0001 and below (the tick text kept only 3 fraction digits and wrote every tick as 0)",
+ "document": {
+  "display_name": "Small values",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "format": "decimal(6)"
+    }
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "b"
+  ],
+  "v": [
+   0.0001,
+   0.0002
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE"
+ }
+}
