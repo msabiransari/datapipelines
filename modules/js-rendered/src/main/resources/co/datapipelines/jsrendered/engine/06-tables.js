@@ -81,6 +81,7 @@
     tipKey: f(0.67, "interaction", "× s: the width of a card row's key, a square of the series colour (contract §4.4, L8)"),
     tipGap: f(0.5, "interaction", "× s: the gap between the parts of a card row: key, name, value (contract §4.4, L8)"),
     tipMax: f(36, "interaction", "× s: the card's greatest width G (contract §4.4, L8)"),
+    tipTotalJoin: f(" · ", "interaction", "contract §4.4: a stacked bar's card heads with the category, this text, then the stack's total (index.totals); shown whole or the category alone (L8)"),
     tipValueWeight: f(600, "interaction", "contract §4.4: a card row's value is bold, and the hovered series' name in a bar's group"),
     crosshairDot: f(0.5, "interaction", "contract §3.4: a crosshair dot's radius is --chart-point plus this many px"),
     focusGap: f(0.25, "interaction", "em: the keyboard's focus ring stands this far outside its target's box"),

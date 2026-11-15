@@ -27,7 +27,7 @@ const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stac
  * render. Their A14 half is the browser's (a placed pointer sees each field's own result change); here they are only
  * required to exist, to name their consumer, and to leave every picture render draws unchanged.
  */
-const INTERACTION = ["tipDistance", "tipLine", "tipPad", "tipKey", "tipGap", "tipMax", "tipValueWeight", "crosshairDot", "focusGap"];
+const INTERACTION = ["tipDistance", "tipLine", "tipPad", "tipKey", "tipGap", "tipMax", "tipTotalJoin", "tipValueWeight", "crosshairDot", "focusGap"];
 
 test("LA5: the look table is closed and holds exactly the fixed values bar, the line family, the shared layout and the interaction layer use", () => {
   assert.deepEqual(Object.keys(R.tables.LOOK).sort(), [...LA5, ...INTERACTION].sort());
