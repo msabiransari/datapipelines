@@ -60,6 +60,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * [JavaScriptRuntime] builds every Engine and Context; the isolate has no host, file, network,
  * process, thread or environment access. A runtime whose isolate cannot start refuses every
  * evaluation with "the JavaScript engine is unavailable: …".
+ *
+ * ## Trusted product code
+ *
+ * [call] runs a [JavaScriptProgram] (the chart engine, brief 986 D1): the same Context builder, limits, byte bounds,
+ * watchdog and cancellation as [evaluate], no prelude; the program's Source is counted like an author's.
  */
 class JavaScriptEngine internal constructor(
     private val runtime: JavaScriptRuntime,

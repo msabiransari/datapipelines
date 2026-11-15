@@ -19,8 +19,11 @@ class JavaScriptProgram private constructor(
     val name: String,
     internal val source: Source,
 ) {
-    /** Whether the Source is internal: always false (the record's counted Source); read by the module's own guard test. */
-    internal val internal: Boolean get() = source.isInternal
+    /**
+     * Whether the Source's statements are counted: true, because the Source is NOT internal (the record's counted
+     * Source). Read by the guards that pin it (the scripting module's own, and the chart engine's in application).
+     */
+    val counted: Boolean get() = !source.isInternal
 
     companion object {
         /**
