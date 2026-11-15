@@ -11,10 +11,12 @@ import org.junit.jupiter.api.TestInstance
 import java.math.BigDecimal
 
 /**
- * I6 / A3 (design record 2026-11-14-js-rendered-charts §8; brief 985 A.5, G3): for every chart fixture at every frame
- * `jsRenderedEmit` drew, the sandbox's `JsRendered.render` of the SAME input text returns the same canonical JSON text
- * as Node, byte for byte; and the same primitives meet I1, I2, I4 and I5 in the sandbox too (A2's second half), checked
- * by the one checker the Node suite runs (`geometry.js`). LA11's helper chooses the same ink in both runtimes (G13).
+ * I6 / A3 (design record 2026-11-14-js-rendered-charts §8; brief 985 A.5, G3; on the product's entry since brief 986
+ * D10, G5): for every chart fixture at every frame `jsRenderedEmit` drew, the PRODUCT's chart entry
+ * ([JsRenderedChartEngine.renderText]: the counted program, `JavaScriptEngine.call`, the script pool and the product's
+ * limits) answers the SAME input text with the same canonical JSON text as Node, byte for byte; and the primitives of
+ * that answer meet I1, I2, I4 and I5 (A2's second half), checked in the sandbox by the one checker the Node suite runs
+ * (`geometry.js`). LA11's helper chooses the same ink in both runtimes (G13).
  *
  * The `_layout` fixture is not part of it: the label row's identity across the runtimes is carried by every chart
  * fixture, whose `render` runs it.
@@ -46,7 +48,7 @@ class JsRenderedIdentityTest {
     }
 
     @TestFactory
-    fun `the sandbox draws each chart fixture byte for byte as Node did, and the picture meets I1 I2 I4 I5`(): List<DynamicTest> {
+    fun `the product's entry draws each chart fixture byte for byte as Node did, and the picture meets I1 I2 I4 I5`(): List<DynamicTest> {
         check(pictures.size >= FIXTURE_FLOOR) { "only ${pictures.size} chart fixtures emitted (floor $FIXTURE_FLOOR)" }
         return pictures.map { (fixture, frames) -> DynamicTest.dynamicTest(fixture) { assertPicturesOf(fixture, frames) } }
     }
@@ -57,21 +59,26 @@ class JsRenderedIdentityTest {
     ) {
         val base = "${ChartGuardFiles.EMITTED}/$fixture"
         val inputs = frames.map { ChartGuardFiles.resource("$base/$it.input.json") }
-
-        @Suppress("UNCHECKED_CAST")
-        val results = sandbox.evaluate(DRAW, mapOf("inputs" to inputs), withInvariants = true) as List<Map<String, Any?>>
+        val answers = inputs.map { ChartEngines.engine.renderText(it) }
+        val different = frames.filterIndexed { i, frame -> answers[i] != ChartGuardFiles.resource("$base/$frame.output.json") }
+        val results = checked(inputs, answers)
         results.size shouldBe frames.size
-        val different = mutableListOf<String>()
         val violations = mutableListOf<String>()
         frames.forEachIndexed { i, frame ->
-            val r = results[i]
-            if (r["text"] != ChartGuardFiles.resource("$base/$frame.output.json")) different += frame
             @Suppress("UNCHECKED_CAST")
-            (r["violations"] as List<Map<String, Any?>>).forEach { v -> violations += "$frame ${v["inv"]}: ${v["what"]}" }
+            (results[i]["violations"] as List<Map<String, Any?>>).forEach { v -> violations += "$frame ${v["inv"]}: ${v["what"]}" }
         }
         different shouldBe emptyList()
         violations shouldBe emptyList()
     }
+
+    /** The checker over the entry's [answers], each at its input's frame. */
+    @Suppress("UNCHECKED_CAST")
+    private fun checked(
+        inputs: List<String>,
+        answers: List<String>,
+    ): List<Map<String, Any?>> =
+        sandbox.evaluate(CHECK, mapOf("inputs" to inputs, "answers" to answers), withInvariants = true) as List<Map<String, Any?>>
 
     @Test
     fun `the ink on a fill is chosen the same in the sandbox as in Node (LA11)`() {
@@ -86,14 +93,8 @@ class JsRenderedIdentityTest {
     fun `the checker the sandbox runs sees texts and marks (non-vacuity)`() {
         val fixture = pictures.keys.first { it.startsWith("bar/") }
         val frame = pictures.getValue(fixture).first()
-
-        @Suppress("UNCHECKED_CAST")
-        val r =
-            sandbox.evaluate(
-                DRAW,
-                mapOf("inputs" to listOf(ChartGuardFiles.resource("${ChartGuardFiles.EMITTED}/$fixture/$frame.input.json"))),
-                withInvariants = true,
-            ) as List<Map<String, Any?>>
+        val input = ChartGuardFiles.resource("${ChartGuardFiles.EMITTED}/$fixture/$frame.input.json")
+        val r = checked(listOf(input), listOf(ChartEngines.engine.renderText(input)))
         (r.single()["texts"] as Number).toInt() shouldBeGreaterThan 0
         (r.single()["marks"] as Number).toInt() shouldBeGreaterThan 0
     }
@@ -159,15 +160,15 @@ class JsRenderedIdentityTest {
 
         const val ON_FILL_CHOICES = 31
 
-        /** Per input text: the canonical JSON of the result (Node's `canonical`: JSON.stringify) and its I1 I2 I4 I5. */
-        val DRAW =
+        /** Per entry answer: I1 I2 I4 I5 over its primitives at its input's frame, and what the checker saw. */
+        val CHECK =
             """
             var out = [];
             for (var i = 0; i < input.inputs.length; i++) {
               var given = JSON.parse(input.inputs[i]);
-              var r = JsRendered.render(given);
+              var r = JSON.parse(input.answers[i]);
               var v = G.violations(r.primitives, given.frame.w, given.frame.h);
-              out.push({ text: JSON.stringify(r), violations: v.violations, texts: v.texts, marks: v.marks });
+              out.push({ violations: v.violations, texts: v.texts, marks: v.marks });
             }
             return out;
             """.trimIndent()

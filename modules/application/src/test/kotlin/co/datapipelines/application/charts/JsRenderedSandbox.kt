@@ -1,6 +1,5 @@
 package co.datapipelines.application.charts
 
-import co.datapipelines.jsrendered.JsRenderedEngineFiles
 import co.datapipelines.scripting.Availability
 import co.datapipelines.scripting.EvaluationLimits
 import co.datapipelines.scripting.JavaScriptEngine
@@ -9,10 +8,14 @@ import java.io.File
 import java.time.Duration
 
 /**
- * The js-rendered engine in the server's sandbox, for the chart guards (brief 985 D11): the engine's files in load
- * order, optionally the invariant checker, and a [tail] that reads `input` and returns a value, compiled as ONE body
- * through the scripting module's existing public path (`JavaScriptRuntime`, `JavaScriptEngine.compile`, `evaluate`).
- * No main source changes for it; lane F2 replaces this harness with the product's entry.
+ * The js-rendered engine in the server's sandbox, for what the chart guards read BESIDE the product's entry (brief 985
+ * D11; brief 986 D10): the product program's whole text ([JsRenderedChartEngine.TEXT] — the engine's files in load
+ * order, then the entry's function, evaluated and unused here), optionally the invariant checker, and a [tail] that reads
+ * `input` and returns a value, compiled as ONE body through the scripting module's public path
+ * (`JavaScriptRuntime`, `JavaScriptEngine.compile`, `evaluate`). Since lane F2 the byte identity and the registry read
+ * the product's entry itself ([JsRenderedChartEngine.renderText], [JsRenderedChartEngine.typesText]); this harness
+ * carries only what the entry does not expose: the invariant checker over the entry's output, LA11's ink helper and
+ * R2's tick helper.
  *
  * The limits are the product's defaults for one evaluation (`datapipelines.script` in `WebProperties.ScriptProperties`:
  * `evaluateTimeoutSeconds` 10, `maxDepth` 100; heap, statements and byte caps are the runtime's own defaults): the
@@ -38,7 +41,7 @@ internal class JsRenderedSandbox : AutoCloseable {
         withInvariants: Boolean = false,
     ): Any? {
         val checker = if (withInvariants) ChartGuardFiles.resource(GEOMETRY) + "\nvar G = JsRenderedInvariants(JsRendered);\n" else ""
-        val script = engine.compile(JsRenderedEngineFiles.concatenation + checker + tail)
+        val script = engine.compile(JsRenderedChartEngine.TEXT + ";\n" + checker + tail)
         return engine.evaluate(script, input, LIMITS)
     }
 

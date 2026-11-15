@@ -9,29 +9,23 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
-import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 
 /**
  * R-REG (design record 2026-11-14-js-rendered-charts §4.2; brief 985 A.5, G4): the chart types are ONE closed list,
  * held six ways that must be equal — the `ChartType` enum, the schema files' `config.mark.type` constants, the
- * skeleton's `familyConfig` branches, the engine's template files, the names `JsRendered.types()` returns in the
- * sandbox, and enums.md §63 — and each type's channel descriptor on the enum is the one its template registers, node
- * for node. Every type has at least five chart fixtures, one of them the empty case.
+ * skeleton's `familyConfig` branches, the engine's template files, the names `JsRendered.types()` returns through the
+ * PRODUCT's chart entry ([JsRenderedChartEngine.typesText], brief 986 D10), and enums.md §63 — and each type's channel
+ * descriptor on the enum is the one the product's program registers, node for node. Every type has at least five chart
+ * fixtures, one of them the empty case.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ChartTypeRegistryTest {
-    private val sandbox = JsRenderedSandbox()
     private val json = jacksonObjectMapper()
 
-    @AfterAll
-    fun close() = sandbox.close()
-
-    /** `JsRendered.types()` in the sandbox: `[{name, channels}]`. */
-    private val registered: List<Map<String, Any?>> by lazy {
-        json.readValue(sandbox.evaluate("return JSON.stringify(JsRendered.types());", null) as String)
-    }
+    /** `JsRendered.types()` through the product's entry: `[{name, channels}]`. */
+    private val registered: List<Map<String, Any?>> by lazy { json.readValue(ChartEngines.engine.typesText()) }
 
     private fun schema(file: String): JsonNode = json.readTree(ChartSchemas.bytes(file))
 
@@ -46,7 +40,7 @@ class ChartTypeRegistryTest {
                 "schema mark.type constants" to schemaConstants(),
                 "skeleton familyConfig branches" to skeletonBranches(),
                 "engine template files" to templateFiles(),
-                "JsRendered.types() in the sandbox" to registered.map { it["name"] as String }.toSet(),
+                "JsRendered.types() through the product's entry" to registered.map { it["name"] as String }.toSet(),
                 "enums.md §63" to enumsSection(),
             )
         sets

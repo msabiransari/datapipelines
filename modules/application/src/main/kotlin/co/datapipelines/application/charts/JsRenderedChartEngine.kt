@@ -55,6 +55,12 @@ class JsRenderedChartEngine(
      */
     internal fun renderText(inputText: String): String = call("{\"input\":$inputText,\"write\":null}")
 
+    /**
+     * The program's own registry, unchanged: `JsRendered.types()` as JSON text, `[{name, channels}]` (the registry guard
+     * holds [co.datapipelines.visualization.ChartType] to what the product's program registers, brief 986 D10).
+     */
+    internal fun typesText(): String = call(TYPES_REQUEST)
+
     private fun request(
         input: ChartInput,
         frame: ChartFrame,
@@ -101,6 +107,7 @@ class JsRenderedChartEngine(
         private const val TIMEOUT = "timeout"
         private const val POOL = "pool"
         private const val STANDALONE = "standalone"
+        private const val TYPES_REQUEST = "{\"types\":true}"
 
         /** The server's width table and margin (record §4.3, O-4; lane 985 D9 measured margin 1.00). */
         val MEASURE: Map<String, Any> = mapOf("table" to "noto-sans-regular", "margin" to 1)
@@ -109,6 +116,7 @@ class JsRenderedChartEngine(
          * The one function the program evaluates to (record §5.3): a request `{input, write}` in, JSON text out —
          * `JsRendered.render(input)` as its canonical JSON when `write` is null, else `{state, svg}` with the picture
          * written by the engine's one escaping string writer in its `standalone` form (null for a state with no picture).
+         * The request `{types: true}` answers the engine's registry, `JsRendered.types()`, and draws nothing.
          */
         val ENTRY: String =
             """
@@ -116,6 +124,7 @@ class JsRenderedChartEngine(
               "use strict";
               return function (json) {
                 var request = JSON.parse(json);
+                if (request.types === true) return JSON.stringify(R.types());
                 var out = R.render(request.input);
                 if (request.write === null) return JSON.stringify(out);
                 if (request.write !== "standalone") throw new Error("entry: unknown write form");
