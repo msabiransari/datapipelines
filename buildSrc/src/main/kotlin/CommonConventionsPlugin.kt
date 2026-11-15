@@ -568,6 +568,8 @@ class CommonConventionsPlugin : Plugin<Project> {
                 ":modules:typesystem" to 96,
                 // #194: measured baseline 100.0 on the module's first Kover run (DagTest moved with Dag.kt), minus 2.
                 ":modules:graph" to 98,
+                // #985: the module's only Kotlin is JsRenderedEngineFiles (100.0 on the first Kover run), minus 2.
+                ":modules:js-rendered" to 98,
                 // #868 G1: measured 98.46% line (2026-11-10, lane 868) minus 2, rounded down.
                 ":modules:dependency-contract" to 96,
                 // #266: measured baseline 97.27 on the module's first Kover run (30 tests), minus 2, floored.
