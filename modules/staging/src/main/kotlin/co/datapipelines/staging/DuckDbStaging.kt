@@ -54,6 +54,11 @@ import kotlin.coroutines.coroutineContext
  *    timeout and cancels it with the node), and the driver's cancel does nothing to a statement
  *    that has not yet entered its execute, so a [close] landing in those microseconds misses it.
  *    A zero query timeout disables the timeout bound, including that cancellation window.
+ *  - **A streamed read is counted (TEMPORARY, #994).** The pinned driver ends a streamed cursor without an error when
+ *    the engine fails after the first chunk, so [withQuery] counts its statement in the same snapshot before the read
+ *    and its cursor fails as `result_incomplete` when it ends after a different number of rows ([StreamedReadGuard]);
+ *    this class's own one-row reads fail when the row is missing. Removed with [StreamedReadGuard] when the driver
+ *    reports the error (`StreamedResultTripwireTest` says when).
  */
 class DuckDbStaging internal constructor(
     override val executionId: UUID,
