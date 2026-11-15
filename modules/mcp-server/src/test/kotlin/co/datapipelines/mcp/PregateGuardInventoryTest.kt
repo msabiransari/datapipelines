@@ -237,7 +237,8 @@ class PregateGuardInventoryTest {
             )
             write(
                 "modules/alpha/src/test/kotlin/probe/FixedProbeTest.kt",
-                "package probe\n\nclass FixedProbeTest {\n    @Test\n    fun reads() {\n" +
+                // A qualified JUnit annotation must identify the guard just like an imported @Test.
+                "package probe\n\nclass FixedProbeTest {\n    @org.junit.jupiter.api.Test\n    fun reads() {\n" +
                     "        File(root(), \"docs/spec.md\").readText()\n    }\n\n$locate\n}\n",
             )
             write(
@@ -1082,7 +1083,7 @@ internal object References {
 
 /** Runnable test classes: top-level, not abstract, holding a JUnit test or a Kotest spec, or extending one. */
 internal object TestClasses {
-    private val TEST_ANNOTATION = Regex("""@(Test|ParameterizedTest|TestFactory|RepeatedTest|TestTemplate)\b""")
+    private val TEST_ANNOTATION = Regex("""@(?:[\w.]+\.)?(Test|ParameterizedTest|TestFactory|RepeatedTest|TestTemplate)\b""")
     private val KOTEST_SPEC =
         Regex(
             """:\s*(FunSpec|StringSpec|DescribeSpec|BehaviorSpec|ShouldSpec|WordSpec|FreeSpec|ExpectSpec|""" +
