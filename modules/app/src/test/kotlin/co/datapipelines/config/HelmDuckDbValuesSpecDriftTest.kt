@@ -28,6 +28,11 @@ import java.io.File
  * shape for the text-level template assertions. CI renders the chart with a pinned `helm`
  * (`scripts/helm-check.sh`); this guard stays textual so the pregate, which has no `helm`,
  * still pins the shape — it reads the chart files, it does not render them.
+ *
+ * #819 adds the three process memory admission keys under `memoryAdmission:` (configuration.md
+ * §3.36, §7): the same three-place agreement, with one difference in the guard. These values are
+ * numbers, and `memoryHeadroom: 0` is a legal value that a plain `if` would drop (Go templates read
+ * 0 as false), so each entry is guarded by the nil/`toString` form the script.js values already use.
  */
 class HelmDuckDbValuesSpecDriftTest {
     private val shipped: Map<String, Any?> by lazy { load("deploy/helm/datapipelines/values.yaml") }
@@ -141,6 +146,84 @@ class HelmDuckDbValuesSpecDriftTest {
         }
     }
 
+    @Test
+    fun `819 - the three memory admission keys agree across the doc, the env entries and the values block`() {
+        val documented =
+            ADMISSION_ROW_REGEX
+                .findAll(lakeSection())
+                .map { it.groupValues[1] }
+                .filter { it in ADMISSION_PROPERTIES }
+                .sorted()
+                .toList()
+        val envEntries =
+            ADMISSION_ENV_ENTRY_REGEX
+                .findAll(template)
+                .map { it.groupValues[1] }
+                .filter { it in ADMISSION_ENV_VARS }
+                .sorted()
+                .toList()
+        val valueKeys =
+            shipped.keys
+                .filter { it.startsWith("$ADMISSION_BLOCK.") }
+                .map { it.removePrefix("$ADMISSION_BLOCK.") }
+                .sorted()
+                .toList()
+
+        withClue("configuration.md §3.36 rows for the three keys") {
+            documented shouldContainExactly ADMISSION_PROPERTIES.sorted()
+        }
+        withClue("deployment.yaml's - name: entries for the three env vars (duplicates included)") {
+            envEntries shouldContainExactly ADMISSION_ENV_VARS.sorted()
+        }
+        withClue("values.yaml's keys under $ADMISSION_BLOCK:") {
+            valueKeys shouldContainExactly ADMISSION.values.sorted()
+        }
+        for (key in ADMISSION.values) {
+            withClue("$ADMISSION_BLOCK.$key defaults to empty, so the application's own default applies") {
+                shipped["$ADMISSION_BLOCK.$key"] shouldBe ""
+            }
+        }
+    }
+
+    @Test
+    fun `819 - each memory admission entry is guarded by the nil and toString form on its own key and opens the env block`() {
+        val lines = template.lines()
+        for ((property, key) in ADMISSION) {
+            val envVar = envVarOf(property)
+            val index = lines.indexOfFirst { it.trim() == "- name: $envVar" }
+            withClue("an env entry for $envVar") { (index > 0) shouldBe true }
+            val guard = nonEmptyGuard(key)
+            withClue("the entry for $envVar must sit directly under {{- if $guard }}; found: ${lines[index - 1].trim()}") {
+                lines[index - 1].trim() shouldBe "{{- if $guard }}"
+            }
+            withClue("the entry's value is .Values.$ADMISSION_BLOCK.$key, quoted") {
+                lines[index + 1].trim() shouldBe "value: {{ .Values.$ADMISSION_BLOCK.$key | quote }}"
+            }
+            val envOpen = lines.single { it.trim().startsWith("{{- if or .Values.extraEnv ") }
+            withClue("the env: block opens when $key alone is set (the if-or list names its guard)") {
+                envOpen.contains("($guard)") shouldBe true
+            }
+            val refusal = lines.filter { it.contains("hasKey .Values.extraEnv \"$envVar\"") }
+            withClue("exactly one extraEnv refusal for $envVar, whose fail message names it") {
+                refusal.size shouldBe 1
+                FAIL_REGEX
+                    .find(refusal.single())
+                    ?.groupValues
+                    ?.get(1)
+                    ?.contains(envVar) shouldBe true
+            }
+        }
+    }
+
+    /** §3.36's section text, bounded by the §4 heading. */
+    private fun lakeSection(): String {
+        val text = repoFile("docs/configuration.md").readText()
+        val start = text.indexOf("### 3.36 ")
+        val end = text.indexOf("## 4. ")
+        check(start >= 0 && end > start) { "configuration.md §3.36/§4 headings not found" }
+        return text.substring(start, end)
+    }
+
     /** §3.25's section text, bounded by the next §3.26 heading (the change log comes after and quotes history). */
     private fun configurationSection(): String {
         val text = repoFile("docs/configuration.md").readText()
@@ -193,6 +276,30 @@ class HelmDuckDbValuesSpecDriftTest {
         val ENV_ENTRY_REGEX = Regex("""(?m)^\s*- name: (DATAPIPELINES_DUCKDB_[A-Z_]+)\s*$""")
 
         val FAIL_REGEX = Regex("""fail "([^"]+)"""")
+
+        const val ADMISSION_BLOCK = "memoryAdmission"
+
+        /** Each #819 property (configuration.md §3.36) and its camelCase key under [ADMISSION_BLOCK]. */
+        val ADMISSION =
+            linkedMapOf(
+                "datapipelines.lake.admission.process-reserve" to "processReserve",
+                "datapipelines.lake.admission.memory-headroom" to "memoryHeadroom",
+                "datapipelines.lake.reads.max-retired-generations" to "maxRetiredGenerations",
+            )
+        val ADMISSION_PROPERTIES = ADMISSION.keys.toList()
+
+        /** The relaxed-binding env name: DATAPIPELINES_LAKE_ADMISSION_PROCESS_RESERVE. */
+        fun envVarOf(property: String): String = property.uppercase().replace('.', '_').replace('-', '_')
+
+        val ADMISSION_ENV_VARS = ADMISSION_PROPERTIES.map { envVarOf(it) }
+
+        /** The guard that renders 0 but not nil or the empty string. */
+        fun nonEmptyGuard(key: String): String =
+            "and (ne .Values.$ADMISSION_BLOCK.$key nil) (ne (toString .Values.$ADMISSION_BLOCK.$key) \"\")"
+
+        val ADMISSION_ROW_REGEX = Regex("""(?m)^\| `(datapipelines\.lake\.[a-z0-9.-]+)` \|""")
+
+        val ADMISSION_ENV_ENTRY_REGEX = Regex("""(?m)^\s*- name: (DATAPIPELINES_LAKE_[A-Z_]+)\s*$""")
 
         val CHART_VERSION_REGEX = Regex("""(?m)^version: (\d+\.\d+\.\d+)\s*$""")
     }

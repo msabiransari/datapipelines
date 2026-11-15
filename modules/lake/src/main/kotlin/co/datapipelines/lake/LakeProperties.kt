@@ -2,6 +2,7 @@ package co.datapipelines.lake
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.util.unit.DataSize
+import java.math.BigDecimal
 import java.time.Duration
 
 /**
@@ -77,12 +78,21 @@ class LakeProperties(
         val maxOpenPartitionsPerAppend: Int = DEFAULT_MAX_OPEN_PARTITIONS,
         val jobTimeout: Duration = Duration.ofHours(2),
         val leaseWaitSeconds: Long = DEFAULT_LEASE_WAIT_SECONDS,
+        /**
+         * #819 — the process memory admission's reserve for everything the sum does not name (native memory outside
+         * the engines' buffer managers, metaspace, thread stacks, the JVM's own native allocators). Judged at boot by
+         * `ProcessMemoryAdmission` (app) whether or not the lake is enabled; nothing else reads it.
+         */
+        val processReserve: DataSize = DataSize.ofGigabytes(1),
+        /** #819 — the share of the container limit the admission keeps free: `0 ≤ h < 1`, exact decimal. */
+        val memoryHeadroom: BigDecimal = BigDecimal(DEFAULT_MEMORY_HEADROOM),
     ) {
         override fun toString(): String =
             "Admission(maxConcurrentIngestions=$maxConcurrentIngestions, maxConcurrentMaintenance=$maxConcurrentMaintenance, " +
                 "maxDeliveryBytes=$maxDeliveryBytes, stagingExpansionFactor=$stagingExpansionFactor, scratchBytes=$scratchBytes, " +
                 "stagingMemoryLimit=$stagingMemoryLimit, maxOpenPartitionsPerAppend=$maxOpenPartitionsPerAppend, " +
-                "jobTimeout=$jobTimeout, leaseWaitSeconds=$leaseWaitSeconds)"
+                "jobTimeout=$jobTimeout, leaseWaitSeconds=$leaseWaitSeconds, processReserve=$processReserve, " +
+                "memoryHeadroom=$memoryHeadroom)"
     }
 
     /** §6 `catalog.*` (call 27) — set on every catalog connection the fenced pool opens (§8a). */
@@ -191,6 +201,7 @@ class LakeProperties(
         const val DEFAULT_MAX_DELIVERY_GB = 2L
         const val DEFAULT_STAGING_EXPANSION_FACTOR = 3
         const val DEFAULT_SCRATCH_GB = 20L
+        const val DEFAULT_MEMORY_HEADROOM = "0.10"
         const val DEFAULT_MAX_OPEN_PARTITIONS = 64
         const val DEFAULT_LEASE_WAIT_SECONDS = 60L
         const val DEFAULT_LOCK_TIMEOUT_SECONDS = 5L

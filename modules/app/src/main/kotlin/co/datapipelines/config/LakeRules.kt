@@ -35,9 +35,9 @@ import java.time.Duration
  *   reaper delay is a code constant, not a key: [ReaperDelay.SECONDS] (the scheduling layer) derived and pinned where
  *   it is produced.
  *
- * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` and the cgroup memory
- * sum to P1/P6 (the sum's amendment adds keys that do not exist yet, and E10b is its acceptance — owner
- * 2026-11-02); the sum's `reads.memory-limit` term is a filed follow-up of #818 (owner 2026-11-04).
+ * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` to P1/P6 (owner
+ * 2026-11-02). The cgroup memory sum, with its `reads.memory-limit` term, is `ProcessMemoryAdmission` (#819); its
+ * two keys, [PROCESS_RESERVE] and [MEMORY_HEADROOM], are named here and judged there.
  */
 internal object LakeRules {
     private const val PREFIX = "datapipelines.lake"
@@ -61,6 +61,8 @@ internal object LakeRules {
     const val STAGING_EXPANSION_FACTOR = "$PREFIX.admission.staging-expansion-factor"
     const val SCRATCH_BYTES = "$PREFIX.admission.scratch-bytes"
     const val STAGING_MEMORY_LIMIT = "$PREFIX.admission.staging-memory-limit"
+    const val PROCESS_RESERVE = "$PREFIX.admission.process-reserve"
+    const val MEMORY_HEADROOM = "$PREFIX.admission.memory-headroom"
     const val MAX_OPEN_PARTITIONS = "$PREFIX.admission.max-open-partitions-per-append"
     const val JOB_TIMEOUT = "$PREFIX.admission.job-timeout"
     const val LEASE_WAIT_SECONDS = "$PREFIX.admission.lease-wait-seconds"
@@ -105,6 +107,8 @@ internal object LakeRules {
             STAGING_EXPANSION_FACTOR,
             SCRATCH_BYTES,
             STAGING_MEMORY_LIMIT,
+            PROCESS_RESERVE,
+            MEMORY_HEADROOM,
             MAX_OPEN_PARTITIONS,
             JOB_TIMEOUT,
             LEASE_WAIT_SECONDS,
@@ -137,6 +141,12 @@ internal object LakeRules {
      * enabled-gated. `DomainConfiguration.stagingFactoryFor` binds exactly these for `DuckDbStagingFactory`.
      */
     val STAGING_ADMISSION_KEYS: Set<String> = setOf(STAGING_MEMORY_LIMIT, STAGING_EXPANSION_FACTOR, SCRATCH_BYTES)
+
+    /**
+     * #819 — the process memory admission's two keys, judged at every boot whether or not the lake is enabled
+     * (`ProcessMemoryAdmission`, configuration.md §7).
+     */
+    val PROCESS_ADMISSION_KEYS: Set<String> = setOf(PROCESS_RESERVE, MEMORY_HEADROOM)
 
     /** What `ConfigSnapshot.lake` carries for [key]: the raw value, or for a credential only [PRESENT] / empty. */
     fun carried(

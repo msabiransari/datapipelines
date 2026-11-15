@@ -108,6 +108,8 @@ class LakeConfigKeysSpecDriftTest {
                 "$PREFIX.admission.max-concurrent-maintenance",
                 "$PREFIX.admission.max-delivery-bytes",
                 "$PREFIX.admission.max-open-partitions-per-append",
+                "$PREFIX.admission.memory-headroom",
+                "$PREFIX.admission.process-reserve",
                 "$PREFIX.admission.scratch-bytes",
                 "$PREFIX.admission.staging-expansion-factor",
                 "$PREFIX.admission.staging-memory-limit",

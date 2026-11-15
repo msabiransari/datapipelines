@@ -683,6 +683,10 @@ datapipelines:
       staging-expansion-factor: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_EXPANSION_FACTOR:3}
       scratch-bytes: ${DATAPIPELINES_LAKE_ADMISSION_SCRATCH_BYTES:20GB}
       staging-memory-limit: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_MEMORY_LIMIT:1GB}
+      # #819: the process memory admission (configuration.md §7), judged at every boot whether or not the lake is
+      # enabled: staging + reader + heap + process-reserve < the container limit × (1 − memory-headroom).
+      process-reserve: ${DATAPIPELINES_LAKE_ADMISSION_PROCESS_RESERVE:1GB}
+      memory-headroom: ${DATAPIPELINES_LAKE_ADMISSION_MEMORY_HEADROOM:0.10}
       max-open-partitions-per-append: ${DATAPIPELINES_LAKE_ADMISSION_MAX_OPEN_PARTITIONS_PER_APPEND:64}
       job-timeout: ${DATAPIPELINES_LAKE_ADMISSION_JOB_TIMEOUT:2h}
       lease-wait-seconds: ${DATAPIPELINES_LAKE_ADMISSION_LEASE_WAIT_SECONDS:60}

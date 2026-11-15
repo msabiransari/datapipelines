@@ -31,8 +31,12 @@ class LakeRulesTest {
         violations(emptyMap()) shouldContainExactly emptyList()
         // Disabled with nonsense everywhere: still nothing — a deployment without a lake is not refused for its
         // keys. The three DuckDB staging inputs are the #804 exception (staging consumes them with or without a
-        // lake), so they keep their shipped defaults here and have their own cases below.
-        val unconsumed = LakeRules.KEYS.filter { it !in LakeRules.STAGING_ADMISSION_KEYS && it != LakeRules.ENABLED }
+        // lake), so they keep their shipped defaults here and have their own cases below; so are the two #819 process
+        // memory admission keys, judged at every boot (ProcessMemoryAdmissionTest).
+        val unconsumed =
+            LakeRules.KEYS.filter {
+                it !in LakeRules.STAGING_ADMISSION_KEYS && it !in LakeRules.PROCESS_ADMISSION_KEYS && it != LakeRules.ENABLED
+            }
         violations(unconsumed.associateWith { "nonsense" }) shouldContainExactly emptyList()
     }
 

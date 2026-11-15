@@ -61,6 +61,8 @@ class ConfigValidatorCheckCountTest {
             listOf(
                 "modules/app/src/main/kotlin/co/datapipelines/config/ConfigValidator.kt",
                 "modules/app/src/main/kotlin/co/datapipelines/config/PostureRules.kt",
+                // #819 — the process memory admission, its own file.
+                "modules/app/src/main/kotlin/co/datapipelines/config/ProcessMemoryAdmission.kt",
                 // 137 — the two §3.27 mail rules, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/MailRules.kt",
                 // 7b — the §3.28 script bounds, split out for the same size reason.
