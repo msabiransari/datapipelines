@@ -327,9 +327,14 @@
     return v < lo ? lo : v > hi ? hi : v;
   }
 
-  /** The tooltip lines of one point (G7; carried on the point for the interaction layer, F6). */
-  function tipOf(m, si, xi, c) {
-    var s = m.series[si], lines = [m.xFull(m.xs[xi]), (m.series.length > 1 || s.id !== "measure" ? s.title + ": " : "") + c.text];
+  /**
+   * The tooltip lines of one point (G7; carried on the point for the interaction layer, F6). xText = the call's texts
+   * of the x positions, each written the first time a point at that x asks for it (every series shares them).
+   */
+  function tipOf(m, si, xi, c, xText) {
+    var xt = xText[xi];
+    if (xt === undefined) xt = xText[xi] = m.xFull(m.xs[xi]);
+    var s = m.series[si], lines = [xt, (m.series.length > 1 || s.id !== "measure" ? s.title + ": " : "") + c.text];
     for (var d = 0; d < m.tips.length; d++) lines.push(detailLine(m.tips[d], m.tipCols[d][c.row], m.types));
     return lines;
   }
@@ -341,7 +346,7 @@
    * fitted; a stack keeps one set of x positions for all its series. Returns {primitives, points, ends}.
    */
   function marks(m, plot, hp) {
-    var theme = hp.theme, out = [], points = [], ends = [], vis = [];
+    var theme = hp.theme, out = [], index = [], count = 0, ends = [], vis = [], xText = new Array(m.xs.length), atText = null;
     for (var s = 0; s < m.series.length; s++) if (plot.visible[m.series[s].id] === true) vis.push(s);
     var val = plot.value, lo = val.lo, hi = val.hi, ys = val.scale;
     var xpx = m.xs.map(function (xe, j) {
@@ -472,14 +477,21 @@
       }
       if (lastPt !== null) ends.push({ id: ser.id, y: lastPt.y });
       P.group(out, { role: "mark", series: ser.id, label: ser.title }, kids);
-      // The index holds every point, thinned or not (§4.9).
+      // The index holds every point, thinned or not (§4.9): per series its points' x (rounded once per x for every
+      // series), datum and tip lines, in x order.
+      if (atText === null) atText = xpx.map(R.scales.r2);
+      var ix = { series: ser.id, at: [], datum: [], tip: [] };
       for (var z = 0; z < m.xs.length; z++) {
         var cz = row[z];
         if (!cz) continue;
-        points.push({ series: ser.id, at: R.scales.r2(xpx[z]), datum: z, tip: tipOf(m, si, z, cz) });
+        ix.at.push(atText[z]);
+        ix.datum.push(z);
+        ix.tip.push(tipOf(m, si, z, cz, xText));
       }
+      count += ix.at.length;
+      index.push(ix);
     }
-    return { primitives: out, points: points, ends: ends };
+    return { primitives: out, index: index, count: count, ends: ends };
   }
 
   function countOf(row) {

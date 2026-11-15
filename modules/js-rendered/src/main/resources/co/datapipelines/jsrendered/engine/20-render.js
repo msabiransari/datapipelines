@@ -214,9 +214,9 @@
     var geo = R.cartesian.cartesian(h, W, H, lvl, t.bottom, m.layout, visible, lg);
     for (var x = 0; x < series.length; x++) series[x].hidden = lg !== null && lg.drawn[series[x].id] === true && ok.hidden.indexOf(series[x].id) >= 0;
     var drawn = reg.marks(m, { plot: geo.plot, value: geo.value, band: geo.band, x: geo.x, visible: visible, level: lvl }, h);
-    // A template returns its mark primitives (bar), or {primitives, points, ends} (the line family): points = every data
-    // point of the visible series {series, at, datum, tip}, which summary.marks counts and the index holds (§4.9: thinning
-    // never changes either); ends = [{id, y}] of each drawn series' last point.
+    // A template returns its mark primitives (bar), or {primitives, index, count, ends} (the line family): index = per
+    // visible series every data point's {at, datum, tip} as lists, which the index holds, and count = their number,
+    // which summary.marks is (§4.9: thinning never changes either); ends = [{id, y}] of each drawn series' last point.
     var marks = Array.isArray(drawn) ? drawn : drawn.primitives;
     var labelled = [];
     if (ends.length > 0 && !Array.isArray(drawn)) {
@@ -231,8 +231,8 @@
       out.summary.marks = count;
       out.index = index(m.layout.vertical ? "x" : "y", geo.plot, series, visible, marks);
     } else {
-      out.summary.marks = drawn.points.length;
-      out.index = pointIndex(geo.plot, series, visible, drawn.points);
+      out.summary.marks = drawn.count;
+      out.index = pointIndex(geo.plot, series, visible, drawn.index);
     }
     return finish(out, meter);
   }
@@ -256,20 +256,16 @@
     return out;
   }
 
-  /** The data index of the line family: per series every point's x (sorted by the template), datum and tip lines. */
-  function pointIndex(plot, series, visible, points) {
+  /**
+   * The data index of the line family: per series every point's x (sorted by the template), datum and tip lines. drawn
+   * = the template's [{series, at, datum, tip}] of the series it drew; a series it did not draw has empty lists.
+   */
+  function pointIndex(plot, series, visible, drawn) {
     var by = new Map(), out = { axis: "x", plot: plot, series: [] };
+    for (var d = 0; d < drawn.length; d++) by.set(drawn[d].series, drawn[d]);
     for (var s = 0; s < series.length; s++) {
-      var e = { id: series[s].id, on: visible[series[s].id] === true, at: [], datum: [], tip: [] };
-      by.set(series[s].id, e);
-      out.series.push(e);
-    }
-    for (var i = 0; i < points.length; i++) {
-      var q = by.get(points[i].series);
-      if (q === undefined) continue;
-      q.at.push(points[i].at);
-      q.datum.push(points[i].datum);
-      q.tip.push(points[i].tip);
+      var q = by.get(series[s].id);
+      out.series.push({ id: series[s].id, on: visible[series[s].id] === true, at: q ? q.at : [], datum: q ? q.datum : [], tip: q ? q.tip : [] });
     }
     return out;
   }
