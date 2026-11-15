@@ -58,11 +58,21 @@
     return h;
   }
 
-  /** The layout level of a frame (record §4.6): "full", "compact", "minimal", or null below the smallest. */
-  function level(w, h) {
+  /** The three text sizes the level numbers are written for (their defaults, contract §3.4). */
+  var SIZES = ["--chart-text", "--chart-text-small", "--chart-title"];
+
+  /**
+   * The layout level of a frame (record §4.6): "full", "compact", "minimal", or null below the smallest. The full and
+   * compact numbers hold at the default text sizes; a theme whose text is larger raises both in proportion to its
+   * largest ratio over a default, so text still never collides nor leaves the frame at the top of each range (LA3).
+   * Smaller text never lowers them. The minimal level draws no text and keeps its numbers.
+   */
+  function level(w, h, theme) {
+    var k = 1, col = theme.name === "dark" ? 2 : 1;
+    for (var i = 0; i < SIZES.length; i++) k = Math.max(k, theme.n(SIZES[i]) / R.theme.TOKENS[SIZES[i]][col]);
     var f = look("levelFull"), c = look("levelCompact"), m = look("levelMinimal");
-    if (w >= f[0] && h >= f[1]) return "full";
-    if (w >= c[0] && h >= c[1]) return "compact";
+    if (w >= f[0] * k && h >= f[1] * k) return "full";
+    if (w >= c[0] * k && h >= c[1] * k) return "compact";
     if (w >= m[0] && h >= m[1]) return "minimal";
     return null;
   }
@@ -199,8 +209,10 @@
     for (var i = 0; i < lay.items.length; i++) {
       var it = lay.items[i], e = it.e, x = ox + it.x, cy = oy + it.y + row / 2, off = hiddenOf(it.s.id);
       var token = colourOf(it.s.id), kids = [];
-      if (look("legendKeyBar") !== "square") throw new Error("unknown legend key " + look("legendKeyBar"));
-      kids.push(P.rect({ role: "legend", x: x, y: r2(cy - e.key / 2), w: e.key, h: e.key, fill: token, color: h.theme.css(token), opacity: off ? h.theme.n("--chart-dim") : 1, series: it.s.id }));
+      // The key's form: "square" (a bar's, contract §4.2) or "line" (a stroke of --chart-line across the key's width).
+      var form = look("legendKeyBar"), kh = form === "square" ? e.key : form === "line" ? h.theme.n("--chart-line") : -1;
+      if (kh < 0) throw new Error("unknown legend key " + form);
+      kids.push(P.rect({ role: "legend", x: x, y: r2(cy - kh / 2), w: e.key, h: kh, fill: token, color: h.theme.css(token), opacity: off ? h.theme.n("--chart-dim") : 1, series: it.s.id }));
       if (e.shown !== "") {
         kids.push(h.label({ role: "legend", x: x + e.key + e.gap, y: h.middle(cy, h.text), text: it.s.title, shown: e.shown, size: h.text, ink: "--chart-ink-2", struck: off, series: it.s.id }));
       }

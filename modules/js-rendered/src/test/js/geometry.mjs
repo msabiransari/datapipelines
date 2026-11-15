@@ -92,6 +92,40 @@ function numbers(p, out) {
 }
 
 /**
+ * The cut texts of a picture in groups: a title-role text drawn on more than one line (a wrapped subtitle, record §4.4
+ * G5) is one group of its lines in order; every other cut text is a group of one.
+ */
+function cutGroups(ts) {
+  const groups = new Map();
+  for (const t of ts) {
+    if (t.shown === null) continue;
+    const key = t.role === "title" ? JSON.stringify(["title", t.text, t.size, t.weight]) : Symbol();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * I4 over one group, or null when it holds: the lines, each without its ellipsis, joined by one space are a prefix of
+ * the full text; only the last line may end with the ellipsis; a group ending without one shows the whole text and is
+ * more than one line (one line without an ellipsis is a silent cut); a cut text is never its full text.
+ */
+function i4(lines) {
+  const text = lines[0].text, heads = [];
+  for (let i = 0; i < lines.length; i++) {
+    const shown = lines[i].shown, cut = shown.endsWith("…");
+    if (cut && i < lines.length - 1) return "an ellipsis before the last line";
+    heads.push(cut ? shown.slice(0, -1).trimEnd() : shown);
+  }
+  const joined = heads.join(" "), last = lines[lines.length - 1].shown;
+  if (lines.length === 1 && last === text) return "a cut text equal to its full text";
+  if (!text.startsWith(joined)) return "not a prefix of the full text";
+  if (!last.endsWith("…") && (lines.length === 1 || joined !== text)) return "cut without an ellipsis";
+  return null;
+}
+
+/**
  * The violations of I1, I2, I4 and I5 in one picture of frame W × H: [{inv, what}]. Also returns the counts it checked,
  * so a caller can floor them (a checker that saw nothing is not a pass).
  */
@@ -107,11 +141,10 @@ export function violations(prims, W, H) {
         break;
       }
     }
-    const t = ts[i];
-    if (t.shown !== null) {
-      const head = t.shown.endsWith("…") ? t.shown.slice(0, -1).trimEnd() : null;
-      if (head === null || !t.text.startsWith(head) || t.text === t.shown) out.push({ inv: "I4", what: "cut text " + JSON.stringify(t.shown) + " does not carry its full text " + JSON.stringify(t.text) });
-    }
+  }
+  for (const lines of cutGroups(ts)) {
+    const t = lines[0], why = i4(lines);
+    if (why !== null) out.push({ inv: "I4", what: why + ": " + JSON.stringify(lines.map((l) => l.shown)) + " of " + JSON.stringify(t.text) });
   }
   let marks = 0;
   for (const p of prims) {

@@ -256,7 +256,7 @@
         var off = plot.band.start + step * ci + (step - groupW) / 2 + (stacked ? 0 : j * (barW + gap));
         var len = Math.abs(p1 - p0), shift = !first && len > 0 ? Math.min(gap, len) : 0;
         len -= shift;
-        var isOuter = !stacked || (v >= 0 ? outer[ci].pos === si : outer[ci].neg === si);
+        var isOuter = !stacked || look("roundOuterOnly") !== true || (v >= 0 ? outer[ci].pos === si : outer[ci].neg === si);
         var r = isOuter ? Math.min(radius, barW * maxShare, len) : 0;
         var tip = [m.categories[ci].full, (m.series.length > 1 || ser.id !== "measure" ? ser.title + ": " : "") + cellv.text];
         var baseF = { fill: ser.colour, color: theme.css(ser.colour), series: ser.id, datum: ci, tip: tip };
@@ -287,28 +287,42 @@
     return x0 >= p.x && y0 >= p.y && x1 <= p.x + p.w && y1 <= p.y + p.h;
   }
 
-  /** A value label at the data end of a box, or null when it does not fit (contract §4.3: not drawn). */
-  function labelAt(m, plot, hp, box, text, maxW, thick) {
+  /** True when a box [x0, y0, x1, y1] fits the plot and meets no label already placed; then it is placed. */
+  function free(plot, placed, x0, y0, x1, y1) {
+    if (!inside(plot, x0, y0, x1, y1)) return false;
+    for (var i = 0; i < placed.length; i++) {
+      var q = placed[i];
+      if (x0 < q[2] && q[0] < x1 && y0 < q[3] && q[1] < y1) return false;
+    }
+    placed.push([x0, y0, x1, y1]);
+    return true;
+  }
+
+  /**
+   * A value label at the data end of a box, or null when it does not fit (contract §4.3: not drawn): wider than maxW,
+   * outside the plot, or meeting a label already placed.
+   */
+  function labelAt(m, plot, hp, box, text, maxW, thick, placed) {
     var s = hp.small, g = look("valueLabelGap") * s, w = hp.width(text, s), bh = hp.boxH(s);
     if (w > maxW + 1e-9) return null;
     if (m.vertical) {
       var cx = box.x + box.w / 2, y0 = box.up ? box.end - g - bh : box.end + g;
-      if (!inside(plot, cx - w / 2, y0, cx + w / 2, y0 + bh)) return null;
+      if (!free(plot, placed, cx - w / 2, y0, cx + w / 2, y0 + bh)) return null;
       return hp.label({ role: "guide", x: cx, y: y0 + hp.ascent(s), text: text, anchor: "middle", size: s, ink: "--chart-ink-2" });
     }
     if (bh > thick + 1e-9) return null;
     var cy = box.y + box.w / 2, x0 = box.up ? box.end + g : box.end - g - w;
-    if (!inside(plot, x0, cy - bh / 2, x0 + w, cy + bh / 2)) return null;
+    if (!free(plot, placed, x0, cy - bh / 2, x0 + w, cy + bh / 2)) return null;
     return hp.label({ role: "guide", x: box.up ? x0 : x0 + w, y: hp.middle(cy, s), text: text, anchor: box.up ? "start" : "end", size: s, ink: "--chart-ink-2" });
   }
 
   /** Grouped and single bars: every bar when every label fits its own bar's width, else the tallest of each group. */
   function barLabels(m, plot, hp, rects, barW, groupW, out) {
-    var every = true;
+    var every = true, placed = [];
     if (m.vertical) for (var i = 0; i < rects.length && every; i++) every = hp.width(rects[i].text, hp.small) <= barW + 1e-9;
     if (!m.vertical || every) {
       for (var j = 0; j < rects.length; j++) {
-        var l = labelAt(m, plot, hp, rects[j].box, rects[j].text, m.vertical ? barW : Infinity, barW);
+        var l = labelAt(m, plot, hp, rects[j].box, rects[j].text, m.vertical ? barW : Infinity, barW, placed);
         if (l !== null) out.push(l);
       }
       return;
@@ -321,14 +335,14 @@
     for (var c = 0; c < m.categories.length; c++) {
       var r = best.get(c);
       if (r === undefined) continue;
-      var lb = labelAt(m, plot, hp, r.box, r.text, groupW, barW);
+      var lb = labelAt(m, plot, hp, r.box, r.text, groupW, barW, placed);
       if (lb !== null) out.push(lb);
     }
   }
 
   /** A stack's total beyond its end, in the short form (contract §4.3, look field stackTotalFormat). */
   function stackTotals(m, plot, hp, rects, groupW, out) {
-    var sums = new Map(), ends = new Map();
+    var sums = new Map(), ends = new Map(), placed = [];
     for (var i = 0; i < rects.length; i++) {
       var r = rects[i];
       sums.set(r.c, (sums.has(r.c) ? sums.get(r.c) : 0) + r.v);
@@ -342,7 +356,7 @@
       var total = sums.get(c), en = ends.get(c), box = total >= 0 ? en.pos || en.neg : en.neg || en.pos;
       var outerBox = { x: box.x, y: box.y, w: box.w, end: box.end, up: total >= 0 ? true : false };
       if (total >= 0 && en.pos === null) outerBox.end = plot.value.scale(Math.max(plot.value.lo, Math.min(plot.value.hi, 0)));
-      var lb = labelAt(m, plot, hp, outerBox, T.value(total, look("stackTotalFormat")), groupW, groupW);
+      var lb = labelAt(m, plot, hp, outerBox, T.value(total, look("stackTotalFormat")), groupW, groupW, placed);
       if (lb !== null) out.push(lb);
     }
   }

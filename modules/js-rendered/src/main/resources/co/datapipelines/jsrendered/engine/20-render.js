@@ -144,7 +144,7 @@
 
   function render(input) {
     var ok = checkInput(input), reg = TYPES.get(input.type), doc = input.document;
-    var W = input.frame.w, H = input.frame.h, lvl = C.level(W, H);
+    var theme = R.theme.resolve(input.theme), W = input.frame.w, H = input.frame.h, lvl = C.level(W, H, theme);
     var out = result(input, "rendered", lvl);
     if (lvl === null) {
       out.state = "too-small";
@@ -153,7 +153,7 @@
     }
     var rows = D.rowCount(ok.columns);
     if (rows > cap("rows")) return refuse(out, "chart.too_many_rows", { rows: rows, limit: cap("rows") });
-    var theme = R.theme.resolve(input.theme), meter = R.measure.measurer(input.measure), h = C.helpers(theme, meter);
+    var meter = R.measure.measurer(input.measure), h = C.helpers(theme, meter);
     var m = reg.model(doc, ok.columns, input.types);
     if (m.rule) return refuse(out, m.rule.code, m.rule.details || {});
     if (m.series.length > cap("series")) return refuse(out, "chart.too_many_series", { series: m.series.length, limit: cap("series") });

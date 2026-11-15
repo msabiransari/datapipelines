@@ -25,7 +25,7 @@
     stackShare: f(0.7, "render", "§2 bars: a stacked bar fills 70% of its band"),
     radiusMaxShare: f(0.5, "render", "§2 corners: the rounded end is never more than half the bar's width"),
     roundOuterOnly: f(true, "render", "§2 corners: in a stack only the outermost segment is rounded"),
-    legendKeyBar: f("square", "render", "§4.2: a bar's legend key is a square"),
+    legendKeyBar: f("square", "render", "§4.2: a bar's legend key is a square (the shared layout also draws \"line\", a stroke across the key)"),
     labelsDefault: f("values", "render", "§4.3 and the record's §4.5: bar value labels are on by default"),
     stackTotalFormat: f("compact", "render", "§4.3: a stack's total is written in the short form"),
     // the record's §4.6: levels, ticks, rotation
