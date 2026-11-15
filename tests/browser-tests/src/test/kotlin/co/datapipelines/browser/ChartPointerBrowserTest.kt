@@ -318,6 +318,19 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
             }
 
             page.mouse().move(1.0, 1.0)
+            // A name wider than the content area w but not than the box's greatest width W (= the frame's width here):
+            // it is cut to w, and the card with its texts stays inside the picture (G4: the content width is W − 2p).
+            mount(page, line(linkedMapOf(LONG to listOf(20, 40, 30), "B" to listOf(10, 15, 12)), title = "Cut"), CUT_W, CUT_H)["ok"] shouldBe true
+            tabIn(page)
+            press(page, "ArrowRight")
+            val cut = read(page)
+            log += "cut name at ${CUT_W}x$CUT_H: ${cut["card"]}"
+            withClue("D2a: at $CUT_W x $CUT_H the long name is cut and the card with its texts lies inside the picture: $cut") {
+                names(cut).first { it.startsWith(LONG.take(LONG_PREFIX)) } shouldEndWith "…"
+                inside(cut) shouldBe true
+            }
+
+            page.mouse().move(1.0, 1.0)
             val big = mount(page, line2, SMALL_W, SMALL_H, tokens = mapOf("--chart-text" to "32"))
             tabIn(page)
             press(page, "ArrowRight")
@@ -525,6 +538,8 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
         const val VIEW_H = 480
         const val MOVE_H = 60
         const val MORE_H = 110
+        const val CUT_W = 120
+        const val CUT_H = 60
         const val EIGHT = 8
         const val SIX = 6
         const val TEXT = 12.0
