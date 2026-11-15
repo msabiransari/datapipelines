@@ -1305,7 +1305,8 @@ three recounts matched: 1564 files, 13346 tests, 0 failures, 0 errors, 15 skippe
 start at 22 GB demonstrated the two-fork fallback header; no final verdict for that start was
 preserved. Another run started at 25 GB with four forks and failed its cycle; the lane reports
 full-`/tmp` native-library extraction failures (#983), but did not retain that cycle's detailed
-logs. Cleanup between M1 and M2 is a confound, so the wall-time
+logs. Since #983, test JVMs extract into their checkout's own temp root, which the gate and
+pregate empty after the lock, and the shared `/tmp` leftovers are swept (§9.7). Cleanup between M1 and M2 is a confound, so the wall-time
 improvement is not attributed to the fork feature. Observed MemAvailable troughs were 6–8.5 GB
 from starts of 27–34 GB; they do not guarantee 8 GB of headroom at the 24 GB admission floor.
 The long serialized class tracked in #982 limits parallelism; more than four forks were not
@@ -1371,6 +1372,157 @@ alone on the line directly above it when the construction line would pass 120 co
 (buildSrc, run by the gate and CI's cold job) refuses any other raw construction, naming it
 `path:line` (#484), and refuses a `SnapshotListAppender.kt` or `SnapshotListAppenderTest.kt`
 outside `modules/log-capture` (#756).
+
+### 9.7 Test temp files: each checkout's own root, and the sweep
+
+Before #983 every test JVM wrote to the shared `/tmp`. A worker that was killed, or that the gate
+abandoned, left its extracted `libduckdb_java*.so` (about 60 MB each) and its Tomcat work folders
+there. On the tmpfs these copies added up until native-library extraction failed. Two things now keep
+temp files bounded.
+
+**Where test temp files go.** Every test JVM — each module `Test` task, buildSrc's own `test` task,
+and the module `Test` tasks of the TestKit probe builds that buildSrc's tests start — runs with
+
+```
+java.io.tmpdir = <base>/dp-test-tmp-<uid>/<checkout key>/<project path>/<task name>
+```
+
+The derivation rule is written once, here. It is followed by `TestTempRoot` in
+`buildSrc/src/main/kotlin/CommonConventionsPlugin.kt`, by `buildSrc/build.gradle.kts` and by
+`scripts/lib/temp-hygiene.sh`. `CommonConventionsPluginTest` pins the script's `--print-root` to the
+plugin's root.
+
+- **base**: the real path of `$TMPDIR` when it names an existing absolute directory, else the real path
+  of `/tmp`. There is no filesystem check: when `$TMPDIR` points at a disk, the disk is used. A run
+  under another `$TMPDIR` has another base, and only the runs that use a base clean it. Do not point
+  `$TMPDIR` inside the repository: the repository-tree input of the TestKit tests (#718) would then
+  see the temp files, and buildSrc's `test` would never be `UP-TO-DATE`.
+- **checkout key**: the first 16 hex digits of the SHA-256 of the UTF-8 real path of the OWNING
+  checkout. For the main build, that is the root project. For buildSrc, it is the checkout that
+  contains it. For a probe, it is the checkout whose buildSrc test started it: buildSrc's `test` task
+  hands that path to the probe in `DP_TEST_TMP_OWNER_CHECKOUT`. The key is never derived from the
+  probe's own temporary directory.
+- **project path**: the Gradle path with `:` turned into `/` (`:modules:staging` → `modules/staging`;
+  the root project is `_root`). buildSrc's own JVM uses `buildSrc/test`. A probe's JVM uses
+  `testkit/<project path>/<task name>`.
+- `dp-test-tmp-<uid>` and the root are created mode `0700`. Before any JVM directory is made below
+  them, each is checked: a real directory, not a symbolic link, owned by the current uid, and not
+  writable by group or others. A failed check fails the test task with the reason ("Refusing the test
+  temp parent …"). It never falls back to the shared temp directory.
+- Beside each root, `dp-test-tmp-<uid>/<key>.checkout` records the checkout's real path. It is written
+  atomically and lives outside the root.
+- The path is passed through a JVM argument provider. It is not a task input, so a moved base never
+  makes a test task out of date or misses the build cache.
+
+**What the step removes.** `gate.sh` and `pregate.sh` call the step right after
+`verification::lock` succeeds, so no gate or pregate of this checkout is running at that point. The
+step prints one summary line into the header, `temp-hygiene: mode=… base=… root=… …`, and writes the
+full list to `temp-hygiene.txt` in the run's log folder. A failure of the step only warns: it never
+fails the run.
+
+1. **This checkout's root is emptied, with no age limit.** A leftover that is one second old is
+   removed.
+2. **Shared sweep: named families only.** Only entries directly in the base qualify. Each entry must
+   be on the list below, owned by the current uid, and STRICTLY older than
+   `VERIFICATION_TMP_SWEEP_AGE_S`. Age is measured from one clock reading for the whole pass against
+   the entry's own `lstat` mtime. An entry with an mtime in the future is kept.
+3. **Roots of checkouts that are gone.** A root whose record names a path that no longer exists is
+   removed under the same conditions. The root goes first; its record goes LAST, and only once the
+   root is completely gone. A removal that stops part-way leaves the record, so a later run finishes
+   it. The sweep only tests whether the recorded path exists; it deletes nothing through it. A root
+   with no readable record is kept and counted (`roots-unrecorded=`). A root whose checkout still
+   exists is never touched by another checkout's run.
+
+How things are removed:
+
+- **Files** go only under a kernel write lease (`fcntl(F_SETLEASE, F_WRLCK)`, in
+  `scripts/lib/temp-hygiene-helper.py`). Linux refuses that lease while any other process has the
+  file open or mapped. A loaded `.so` is mapped, not held open, so `/proc/<pid>/fd` alone would miss
+  it. A refused lease, or one that cannot be tried (no `python3`, a filesystem without leases, any
+  error), keeps the file.
+- **Directories** are decided before anything below them is touched. One process scan per pass reads
+  every process's `cwd`, open handles and command line. A directory that a live process references,
+  itself or through any path below it, is kept whole: there is no descent and no lease attempt below
+  it. Any other directory is walked through descriptors (`O_NOFOLLOW`, no crossing of a filesystem
+  boundary) and removed once it is empty.
+- **Symbolic links** are removed as links; their targets are never followed.
+- Entries owned by another uid, and sockets, fifos and devices, are kept.
+- A scan or removal stopped by the budget removes nothing more.
+
+**The live-process check and its limits.**
+
+- A gone process holds nothing, and neither does a zombie.
+- **The unreadable-process assumption (owner ruling 2026-11-14).** A live process whose `cwd` or
+  `fd` cannot be read keeps no directory. This covers other uids' daemons, container processes and
+  some of the user's own helpers; on the development machine that is 170–230 processes. The
+  assumption is that such a program does not sit in an empty test temp folder. It reaches EMPTY
+  directories only, because every file still needs the lease. If it is ever wrong, the program finds
+  an empty folder gone and no data is lost. Every summary line counts these processes
+  (`unreadable-processes=`), and one stderr line names at most five of them by PID and name.
+- A program that has a directory only as a path held in memory is not seen. It uses no `cwd`, no open
+  handle and no argument under the base. Only an empty folder can go that way, under the same "no data
+  is lost" reasoning.
+
+**Variables.**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VERIFICATION_TMP_SWEEP` | `real` | `real`: steps 1–3 remove. `dry-run`: step 1 removes and steps 2–3 only list what they would remove. Any other value runs as `dry-run`, with one stderr line. |
+| `VERIFICATION_TMP_SWEEP_AGE_S` | `3600` | The age a shared entry must strictly exceed. Must be a whole number ≥ 0; any other value uses the default, with one stderr line. |
+| `VERIFICATION_TMP_BUDGET_S` | `60` | One time budget over the scan, step 1, the sweep and the counting. Must be a whole number ≥ 1; any other value uses the default, with one stderr line. At the budget the step removes nothing more and the summary line ends `stopped at budget`. |
+
+No variable switches off or redirects the lease test or the process scan.
+
+**The manual command.** Run `./scripts/lib/temp-hygiene.sh --dry-run` from a checkout to print what
+all three parts would remove; it removes nothing. Run `./scripts/lib/temp-hygiene.sh --print-root` to
+print this checkout's root. There is no manual real run: the real step runs only inside the wrappers,
+after the lock.
+
+**The families** (`TH_FAMILIES` in the library). Each one was traced to the code that creates it, and
+none of them is mounted into a container. Since #983, the JVM-created families below land in a
+checkout's root. Copies in the shared base come from runs before #983, from child JVMs a test starts
+(the jar smoke test's `java -jar` app writes to its own `java.io.tmpdir`), or from a checkout that does
+not yet have #983.
+
+| Family | Created by |
+|---|---|
+| `libduckdb_java<digits>.so` (file) | the DuckDB JDBC driver's native-library extraction into `java.io.tmpdir` |
+| `tomcat.<port>.<digits>`, `tomcat-docbase.<port>.<digits>` | Spring Boot's embedded Tomcat work and docbase folders, for every test or child app that starts a web server. Either folder is kept when its port is non-zero and listening (`/proc/net/tcp`, `/proc/net/tcp6`), and also when that list cannot be read. |
+| `legacy-row-e2e`, `endpoint-migration-e2e`, `demo-api-key-e2e`, `keys-v2-e2e`, `bootstrap-e2e`, `sweep186-roots`, `dp845-egress` + digits | `Files.createTempDirectory` in the integration tests `LegacyEndpointRowE2eTest`, `EndpointVersionMigrationE2eTest`, `DemoApiKeyE2eTest`, `KeysV2E2eTest`, `SampleDataBootstrapE2eTest`, `DatasourceInProcessRegistrationE2eTest` and `ManagedLakeEgressProxyE2eTest` |
+| `lake-(connectivity\|minio\|790\|778\|mi2\|browser)-it` + digits | `LakeConnectivityIntegrationTest`, `LakeMinioE2eTest`, `LakeReferenceIndexE2eTest` (790, 778), `LakeRegistryTwoInstanceE2eTest` and `LakeDatasourceDetailBrowserTest` |
+| `dp-roots`, `dp-roots-(real\|outside\|gone\|l4\|l4-narrow)`, `dp-outside-l4`, `dp-(h2\|l2)-pool` + digits | `DatasourceFileRootsTest`, `ConnectionPoolManagerTest` and `H2InProcessPoolTest` (modules/datasources) |
+| `h2-session` + digits | `H2RestrictedSessionTest` (modules/typesystem) |
+| `jar-smoke-(no\|enabled)-isolate` + digits; `jar-smoke`, `jar-smoke-agreement`, `jar-smoke-js-timeout` + digits + `.log` (files) | `JarSmokeE2eTest` |
+| `entry-inventory-app` + digits + `.log` (file) | `EntryInventoryE2eTest` |
+| `pregate-safety.XXXXXX`, `pgres-selftest.XXXXXX`, `temp-hygiene-test.XXXXXX` | the `mktemp -d` of `scripts/pregate-safety-test.sh`, `scripts/pregate-results-lib.sh` (its self-test) and `scripts/temp-hygiene-test.sh` |
+
+**Never touched, checked before the list:**
+
+- dot entries (`.X11-unix` …)
+- `claude-*` and `com.google.Chrome*`
+- `hsperfdata_*` and `systemd-private-*`
+- `playwright-java-*`
+- `opencode`
+- `dp-test-tmp-*` (reached only through step 3's records)
+
+**Not swept**, because they could not be traced to this repository alone or are shared with other
+tools. They are listed here instead of being guessed in:
+
+- `kotlin-daemon.*` and other `kotlin-*`
+- `junit-*` (JUnit's `@TempDir`; inside a root since #983)
+- `mockk_boot*.jar`, `snappy-*` and `.java_pid*`
+- `lander-*`, `cadence-*`, `lane*` and `probe*` (agent and operator scratch)
+- `pregate-*` outputs other than the self-test folder above
+- `dp*-sqlite*` and `dp*-runtime-style*.log`
+- `playwright-java-*` (never touched, above)
+
+A family that any code mounts into a container is never added.
+
+**Self-test.** `scripts/temp-hygiene-test.sh` runs from `./scripts/pregate.sh --self-test`, which is
+the gate's "pregate self-test" stage. It covers cases 1–20 of #983 on fixture directories only and
+prints how many cases it ran. Every fixture run of a copied wrapper, in this self-test and in the two
+existing ones, sets its temp base to a fixture directory. Each self-test fails when a summary line it
+captured names a base outside its fixtures.
 
 ---
 
