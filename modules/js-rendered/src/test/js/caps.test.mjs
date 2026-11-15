@@ -43,12 +43,12 @@ test("the cap table: every entry has a kind, a limit, a basis and a note; the ba
   }
   assert.equal(caps.series.limit, 8);
   assert.equal(caps["bar.marks"].limit, 1000);
-  // The line family's caps as lane 989 round 2 measured them (D9 (d), (a), (b)); area's rows are line's, inherited.
+  // The line family's caps as lane 989 round 3 measured them (D9 (d), (a), (b)); area's rows are line's, inherited.
   assert.deepEqual(["line.points", "line.rows", "area.points", "area.rows"].map((k) => [k, caps[k].limit, caps[k].basis]), [
     ["line.points", 2000, "measured"],
-    ["line.rows", 20000, "measured"],
-    ["area.points", 2000, "measured"],
-    ["area.rows", 20000, "inherited"],
+    ["line.rows", 10000, "measured"],
+    ["area.points", 1000, "measured"],
+    ["area.rows", 10000, "inherited"],
   ]);
   assert.throws(() => R.tables.cap("pie.marks"), /no cap-table entry pie\.marks/);
 });

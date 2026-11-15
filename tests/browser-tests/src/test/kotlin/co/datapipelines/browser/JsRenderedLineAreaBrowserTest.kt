@@ -285,7 +285,8 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
          * gaps, stacks. The large thinned fixtures are not among them: a saved case holds at most the product's
          * fixture-row limit (`datapipelines.visualization.max-fixture-rows-per-case`, 1,000 rows; the save refuses
          * more, so such a fixture here goes red on its save, never silently), and thinning starts above the drawing
-         * cap (2,000 points per series), so those fixtures' rows cannot be saved directly as one case. That limit
+         * caps (2,000 points per series on a line, 1,000 on an area), so those fixtures' rows cannot be saved directly
+         * as one case. That limit
          * counts the case's fixture rows only: the rows after the case's transform are not counted by it (record
          * §4.9, item 3), so a saved preview can still draw a thinned result. The thinned fixtures' pictures are
          * compared with Node's byte for byte in the page by A4-3.
