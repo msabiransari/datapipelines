@@ -77,7 +77,7 @@ class VisualizationTestsToolsTest {
                         "id" to id.toString(),
                         "session_id" to sessionId.toString(),
                         "cases" to listOf(mapOf("name" to "one", "verdict" to "green", "notes" to "ok")),
-                        "environment" to mapOf("browser" to "chromium 130", "renderer_version" to "plotly 4.1.1"),
+                        "environment" to mapOf("browser" to "chromium 130", "renderer_version" to "js-rendered 1"),
                     ),
                 ),
                 ctx,
