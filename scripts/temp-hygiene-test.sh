@@ -547,12 +547,12 @@ expect files-kept-lease-untried 2
 for n in 1 2 3 4 5; do exists "$root/kept$n"; done
 finish
 
-# ---- 26-38: a live reference keeps by what it RESOLVES to, never by its spelling (#983 round 3) ----
+# ---- 26-39: a live reference keeps by what it RESOLVES to, never by its spelling (#983 round 3) ----
 # Each holder's ONLY reference to its entry is one command-line argument (its cwd is outside the
 # entry, it holds no handle there). Before the pass, the argument is shown to resolve into the
 # entry (a red is never a setup error); after it, the closed files directly inside and one level
 # below are still there, the holder is alive, and an unused sibling with the same contents went
-# in the same pass. S1-S9 are the round 3 brief's rows; 35-38 are the classes found while working.
+# in the same pass. S1-S9 are the round 3 brief's rows; 35-39 are the classes found while working.
 into() { # into <path> <entry> [cwd]: the path, resolved by the kernel from cwd, is the entry or below it
   local resolved
   resolved="$(cd "${3:-/}" && realpath -e -- "$1" 2>/dev/null)" || resolved=
@@ -725,6 +725,29 @@ pass c38 real real
 held_whole "$root/dots"; HOLDER="$first"; held_whole "$root/live"
 gone "$root/live-unused" 'the unused sibling with the same contents (the control)'
 expect dirs-kept-live 2; expect root-removed 1
+finish
+
+begin 39 'argument starts the code reads differently: an unlistable cwd, ".." at the root, /proc/self'
+# (a) The holder's cwd can be searched but not listed: a relative path may start anywhere in the
+#     argument (here after "--dir="), not only where a name of the cwd appears.
+# (b) ".." at the holder's root stays at the root, as the kernel resolves it.
+# (c) "/proc/self" in the holder's argument names the holder (its cwd), not the scanning process.
+root="$(mkroot "$CO")"
+for entry in blind rooted self; do fill_entry "$root/$entry"; done; fill_entry "$root/unused"
+mkdir -p "$FX/blind" "$FX/selfcwd"
+ln -s "$root/blind" "$FX/blind/in"; ln -s "$root/self" "$FX/selfcwd/in"
+chmod 311 "$FX/blind"
+into "in/nested" "$root/blind" "$FX/blind"
+into "/../..$root/rooted/nested" "$root/rooted"
+into "/proc/self/cwd/in/nested" "$root/self" "$FX/selfcwd"
+hold_arg "--dir=in/nested" "$FX/blind"; held_blind="$HOLDER"
+hold_arg "/../..$root/rooted/nested"; held_rooted="$HOLDER"
+hold_arg "/proc/self/cwd/in/nested" "$FX/selfcwd"
+pass c39 real real
+held_whole "$root/self"; HOLDER="$held_rooted"; held_whole "$root/rooted"; HOLDER="$held_blind"; held_whole "$root/blind"
+gone "$root/unused" 'the unused sibling with the same contents (the control)'
+expect dirs-kept-live 3; expect root-removed 1; expect processes-in-doubt 0
+stop_holders; chmod 700 "$FX/blind"
 finish
 
 # ---- every captured summary names a fixture base ---------------------------------------------
