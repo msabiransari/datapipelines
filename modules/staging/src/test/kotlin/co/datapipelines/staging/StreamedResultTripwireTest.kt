@@ -3,7 +3,9 @@ package co.datapipelines.staging
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.sql.SQLException
 import java.util.Properties
 
@@ -21,20 +23,30 @@ class StreamedResultTripwireTest {
     @Test
     fun `an engine error after the first streamed chunk still ends the cursor without an exception`() {
         val props = Properties().apply { setProperty("jdbc_stream_results", "true") }
-        DriverManager.getConnection("jdbc:duckdb:", props).use { connection ->
-            connection.createStatement().use { statement ->
-                var rows = 0L
-                val thrown =
-                    try {
-                        statement.executeQuery(SQL).use { rs -> while (rs.next()) rows++ }
-                        null
-                    } catch (e: SQLException) {
-                        e
-                    }
-                withClue(MESSAGE + " (thrown after $rows rows: ${thrown?.message?.lineSequence()?.first()})") { thrown shouldBe null }
-                withClue("non-vacuity: the read ended short of the rows the statement produces") { (rows in 1 until FAIL_AT + 1) shouldBe true }
-            }
+        val (rows, thrown) = DriverManager.getConnection("jdbc:duckdb:", props).use { connection -> drain(connection) }
+        withClue(MESSAGE + " (thrown after $rows rows: ${thrown?.message?.lineSequence()?.first()})") { thrown shouldBe null }
+        withClue("non-vacuity: the read ended short of the rows the statement produces") {
+            (rows in 1 until FAIL_AT + 1) shouldBe true
         }
+    }
+
+    /** Drains [SQL] on [connection]: the rows read, and what the driver threw (null when nothing). */
+    private fun drain(connection: Connection): Pair<Long, SQLException?> {
+        val rows = LongArray(1)
+        return try {
+            connection.createStatement().use { statement -> statement.executeQuery(SQL).use { rs -> countInto(rs, rows) } }
+            rows[0] to null
+        } catch (e: SQLException) {
+            rows[0] to e
+        }
+    }
+
+    /** Counts into [rows] as it goes, so the count survives a throw from `next()`. */
+    private fun countInto(
+        rs: ResultSet,
+        rows: LongArray,
+    ) {
+        while (rs.next()) rows[0]++
     }
 
     private companion object {

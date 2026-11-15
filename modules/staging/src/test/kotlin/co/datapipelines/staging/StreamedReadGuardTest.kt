@@ -75,9 +75,19 @@ class StreamedReadGuardTest {
     fun `a LIMIT read is judged against min(n, count), and a reader that stops early is not judged`() {
         duckFactory(scratch).open().use { staging ->
             runBlocking { staging.execute("""CREATE TABLE "t" AS SELECT range AS v FROM range(25)""") }
-            val limited = runBlocking { staging.withQuery("""SELECT v FROM "t" LIMIT 10""") { rs -> generateSequence { if (rs.next()) 1 else null }.count() } }
+            val limited =
+                runBlocking {
+                    staging.withQuery(
+                        """SELECT v FROM "t" LIMIT 10""",
+                    ) { rs -> generateSequence { if (rs.next()) 1 else null }.count() }
+                }
             limited shouldBe 10
-            val short = runBlocking { staging.withQuery("""SELECT v FROM "t" LIMIT 100""") { rs -> generateSequence { if (rs.next()) 1 else null }.count() } }
+            val short =
+                runBlocking {
+                    staging.withQuery(
+                        """SELECT v FROM "t" LIMIT 100""",
+                    ) { rs -> generateSequence { if (rs.next()) 1 else null }.count() }
+                }
             short shouldBe 25
             val firstOnly = runBlocking { staging.withQuery("""SELECT v FROM "t"""") { rs -> rs.next().also { rs.close() } } }
             firstOnly shouldBe true
@@ -92,7 +102,15 @@ class StreamedReadGuardTest {
                 runBlocking {
                     staging.withQuery("""SELECT a, b AS "B label", c FROM "t" LIMIT 0""") { rs ->
                         val md = rs.metaData
-                        val columns = (1..md.columnCount).map { listOf(md.getColumnLabel(it), md.getColumnTypeName(it), md.getPrecision(it), md.getScale(it)) }
+                        val columns =
+                            (1..md.columnCount).map {
+                                listOf(
+                                    md.getColumnLabel(it),
+                                    md.getColumnTypeName(it),
+                                    md.getPrecision(it),
+                                    md.getScale(it),
+                                )
+                            }
                         columns to rs.next()
                     }
                 }
@@ -112,7 +130,9 @@ class StreamedReadGuardTest {
                     runBlocking {
                         staging.withConnection { c ->
                             c.createStatement().use { st ->
-                                st.executeQuery("SELECT 42 WHERE false").use { rs -> StreamedReadGuard.oneRow(rs, "probe") { it.getInt(1) } }
+                                st.executeQuery("SELECT 42 WHERE false").use { rs ->
+                                    StreamedReadGuard.oneRow(rs, "probe") { it.getInt(1) }
+                                }
                             }
                         }
                     }
@@ -127,7 +147,9 @@ class StreamedReadGuardTest {
             val value =
                 runBlocking {
                     staging.withConnection { c ->
-                        c.createStatement().use { st -> st.executeQuery("SELECT 42").use { rs -> StreamedReadGuard.oneRow(rs, "probe") { it.getInt(1) } } }
+                        c.createStatement().use { st ->
+                            st.executeQuery("SELECT 42").use { rs -> StreamedReadGuard.oneRow(rs, "probe") { it.getInt(1) } }
+                        }
                     }
                 }
             value shouldBe 42
@@ -135,7 +157,9 @@ class StreamedReadGuardTest {
                 runBlocking {
                     staging.withConnection { c ->
                         c.createStatement().use { st ->
-                            st.executeQuery("SELECT error('at-execute')").use { rs -> StreamedReadGuard.oneRow(rs, "probe") { it.getInt(1) } }
+                            st.executeQuery("SELECT error('at-execute')").use { rs ->
+                                StreamedReadGuard.oneRow(rs, "probe") { it.getInt(1) }
+                            }
                         }
                     }
                 }
@@ -159,7 +183,14 @@ class StreamedReadGuardTest {
                 runBlocking {
                     staging.withConnection { c ->
                         StreamedReadGuard.inOneSnapshot(c) {
-                            val expected = c.createStatement().use { StreamedReadGuard.expectedRows(it, """SELECT count(*) FROM "t"""", "latch") }
+                            val expected =
+                                c.createStatement().use {
+                                    StreamedReadGuard.expectedRows(
+                                        it,
+                                        """SELECT count(*) FROM "t"""",
+                                        "latch",
+                                    )
+                                }
                             // The other connection's write commits between the count and the read.
                             staging.execute("""INSERT INTO "t" SELECT range FROM range(2)""")
                             c.createStatement().use { st ->

@@ -55,7 +55,8 @@ class ScriptStreamedReadGuardTest {
                     "CAST(CASE WHEN range < $FAIL_AT THEN range ELSE error('boom') END AS INTEGER) AS order_id, " +
                     "CAST(100 AS INTEGER) AS amount_cents, CAST('c' AS VARCHAR) AS customer_id FROM range($ROWS)",
             )
-            val error = failureOf(staging, node(output = NodeOutput.Tempdb("order_lines")), resolved(rowContract(rejects = false), MAP_BODY))
+            val error =
+                failureOf(staging, node(output = NodeOutput.Tempdb("order_lines")), resolved(rowContract(rejects = false), MAP_BODY))
             error.code shouldBe StagingErrorCodes.RESULT_INCOMPLETE
             error.details["rows_expected"] shouldBe ROWS
             withClue("the read was cut short mid-stream") { ((error.details["rows_read"] as Long) in 1 until FAIL_AT + 1) shouldBe true }
@@ -122,11 +123,16 @@ class ScriptStreamedReadGuardTest {
                                         StreamedReadGuard.expectedRows(it, StreamedReadGuard.countOf(SAMPLE_SQL), "withQuery")
                                     }
                                 withClue("the engine's count of the sample") { count shouldBe expected }
-                                StreamedReadGuard.counted(endingAfter(k), count, "withQuery").use { rs -> while (rs.next()) rs.getString(1) }
+                                StreamedReadGuard.counted(endingAfter(k), count, "withQuery").use { rs ->
+                                    while (rs.next()) rs.getString(1)
+                                }
                             }
                         }
                     }
-                withClue("k=$k of $rejected") { failure.details shouldBe mapOf("rows_read" to k.toLong(), "rows_expected" to expected, "reader" to "withQuery") }
+                withClue("k=$k of $rejected") {
+                    failure.details shouldBe
+                        mapOf("rows_read" to k.toLong(), "rows_expected" to expected, "reader" to "withQuery")
+                }
             }
         }
     }
@@ -272,7 +278,12 @@ class ScriptStreamedReadGuardTest {
                     template = TemplateRef(TEMPLATE, 3),
                     output = output,
                     dependsOn = listOf("stage_orders"),
-                    inputs = mapOf("orders" to com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.textNode("stg_orders")),
+                    inputs =
+                        mapOf(
+                            "orders" to
+                                com.fasterxml.jackson.databind.node.JsonNodeFactory.instance
+                                    .textNode("stg_orders"),
+                        ),
                     strict = strict,
                 ),
             )

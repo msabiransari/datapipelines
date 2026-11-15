@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.LakeAppendSession
 import co.datapipelines.pipeline.LakeOrderKey
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.staging.DuckDbStaging
+import co.datapipelines.staging.Staging
 import co.datapipelines.staging.StreamedReadGuard
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -77,14 +78,7 @@ internal object LakeNodeWriteback {
                     ctx.handle.withStatement(node.id, statement) {
                         op.phase(OperationPhase.WRITING)
                         val input =
-                            StableInput(
-                                statement,
-                                table,
-                                columns,
-                                checkActive,
-                                StableInput.engineFailures(ctx.staging),
-                                guarded = StreamedReadGuard.appliesTo(ctx.staging),
-                            ) { action ->
+                            StableInput.forStaging(statement, table, columns, checkActive, ctx.staging) { action ->
                                 runBlocking(job) { ctx.handle.whileExecuting(node.id, statement, action) }
                             }
                         session.append(output, input, checkActive)
@@ -150,6 +144,16 @@ internal object LakeNodeWriteback {
             /** Staging's own engine-failure classification when the staging is DuckDB; any other engine's failure is unchanged. */
             fun engineFailures(staging: Any?): (SQLException) -> Exception =
                 (staging as? DuckDbStaging)?.let { it::classifyEngineFailure } ?: { it }
+
+            /** The scan over [staging]: its engine-failure classification, and #994's guard when it is a DuckDB staging. */
+            fun forStaging(
+                statement: Statement,
+                table: String,
+                columns: List<LakeAppendColumn>,
+                checkActive: () -> Unit,
+                staging: Staging,
+                execute: (() -> Unit) -> Unit,
+            ) = StableInput(statement, table, columns, checkActive, engineFailures(staging), StreamedReadGuard.appliesTo(staging), execute)
         }
     }
 }

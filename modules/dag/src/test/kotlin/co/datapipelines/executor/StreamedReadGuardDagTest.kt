@@ -94,7 +94,10 @@ class StreamedReadGuardDagTest {
             val result = duck.run("SELECT v FROM src ORDER BY k DESC, v", Fixtures.node("caller"), directSink = sink)
             val expected = (0 until ORDERED_ROWS).sortedWith(compareByDescending<Long> { (it * 7919) % 300007 }.thenBy { it })
             result.rowsOut shouldBe ORDERED_ROWS
-            withClue("non-vacuity: the expected order is not the insertion order") { (expected != (0 until ORDERED_ROWS).toList()) shouldBe true }
+            withClue("non-vacuity: the expected order is not the insertion order") {
+                (expected != (0 until ORDERED_ROWS).toList()) shouldBe
+                    true
+            }
             sink.rows.map { it.single() } shouldBe expected
             duck.guardRelations() shouldBe 0L
         }
@@ -202,7 +205,8 @@ class StreamedReadGuardDagTest {
                     ) { duck.swapAppendRelationForFailingView() }
                 }
             withClue("non-vacuity: the scan was cut short mid-stream, not at execute") { (scanned in 1 until FAIL_AT + 1) shouldBe true }
-            failure.details shouldBe mapOf("rows_read" to scanned, "rows_expected" to ROWS, "reader" to LakeNodeWriteback.StableInput.APPEND_SCAN)
+            failure.details shouldBe
+                mapOf("rows_read" to scanned, "rows_expected" to ROWS, "reader" to LakeNodeWriteback.StableInput.APPEND_SCAN)
         }
     }
 
@@ -211,7 +215,10 @@ class StreamedReadGuardDagTest {
         withDuck { duck ->
             val output = NodeOutput.Datasource("managed", "ns.orders", WriteMode.APPEND)
             val values = mutableListOf<Long>()
-            val session = PublishingSession { input -> input.scan { rows -> while (rows.next()) values += rows.getLong(1) }.let { values.size.toLong() } }
+            val session =
+                PublishingSession { input ->
+                    input.scan { rows -> while (rows.next()) values += rows.getLong(1) }.let { values.size.toLong() }
+                }
             LakeNodeWriteback.run(
                 ExecutableNode.from(Fixtures.node("append", output = output)),
                 output,
@@ -284,7 +291,8 @@ class StreamedReadGuardDagTest {
             node: co.datapipelines.pipeline.Node = Fixtures.node("caller"),
             registry: FakeDatasourceRegistry = FakeDatasourceRegistry(emptyMap()),
         ): String =
-            failureOf("SUMMARIZE SELECT error('at-execute') AS v", node, registry, directSink = RecordingSink()).code
+            failureOf("SUMMARIZE SELECT error('at-execute') AS v", node, registry, directSink = RecordingSink())
+                .code
                 .also { it shouldNotBe StagingErrorCodes.RESULT_INCOMPLETE }
 
         /** Relations with the guard's prefix still in the database. */
@@ -323,8 +331,14 @@ class StreamedReadGuardDagTest {
     }
 
     private fun countIn(target: co.datapipelines.datasources.Datasource): Int =
-        DriverManager.getConnection(target.jdbcUrl, "sa", "").use { c ->
-            c.createStatement().use { st -> st.executeQuery("SELECT COUNT(*) FROM tgt").use { rs -> rs.next().let { rs.getInt(1) } } }
+        DriverManager.getConnection(target.jdbcUrl, "sa", "").use { c -> oneInt(c, "SELECT COUNT(*) FROM tgt") }
+
+    private fun oneInt(
+        connection: Connection,
+        sql: String,
+    ): Int =
+        connection.createStatement().use { st ->
+            st.executeQuery(sql).use { rs -> if (rs.next()) rs.getInt(1) else error("no row: $sql") }
         }
 
     /** An append session that hands the input to [publish]; nothing is written anywhere. */
