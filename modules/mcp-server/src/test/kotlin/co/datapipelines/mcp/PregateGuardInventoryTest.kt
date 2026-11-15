@@ -37,6 +37,8 @@ import java.util.concurrent.TimeUnit
  *  - `marker` — the literal `settings.gradle.kts` (the house locator: walk up to the build root);
  *  - `git-ls-files` — the literal `ls-files` (a `git ls-files` walk of the index; always a walk);
  *  - `user.dir` — the working directory, the start of every walk-up;
+ *  - `cwd` — the working directory as an empty or `.` path handed straight to `File(`,
+ *    `Paths.get(` or `Path.of(` (the other spelling of a walk-up's start);
  *  - `relative` — a literal starting `../` that, resolved from the module directory, is a tracked
  *    path (the test task's working directory is the module).
  * A helper is not a class Gradle can run, so it never becomes a row: references are resolved inside
@@ -52,7 +54,7 @@ import java.util.concurrent.TimeUnit
  *
  * LIMITS, stated: `buildSrc` is a separate build the lane check runs no test of, and its results
  * directory is no root the lane check's evidence snapshot accepts, so its tests (which read the
- * repository through `repo.catalog`) are not scanned (follow-up issue named in #995's handback). A
+ * repository through `repo.catalog`) are not scanned (follow-up #1004). A
  * test that reaches the root in a way not listed above (a new system property, a
  * path assembled from pieces none of which is a top-level entry, a classpath resource the build
  * copied from outside the module) is invisible here; a reference through an instance of an object
@@ -103,6 +105,8 @@ class PregateGuardInventoryTest {
                 "co.datapipelines.auth.SecurityConfigCsrfExemptionParityTest" to "marker",
                 // Another module's tree through a cwd-relative path.
                 "co.datapipelines.web.ui.InlineWidthAuditTest" to "relative",
+                // A walk up from File("").absoluteFile through a helper (pipeline-contract's Fixtures.repoFile).
+                "co.datapipelines.pipeline.PipelineErrorCodesSpecDriftTest" to "cwd",
             )
         for ((name, idiom) in expected) {
             val row = rows[name] ?: fail("$name is no longer an inventory row — the scan lost an idiom")
@@ -418,7 +422,7 @@ internal data class Verdict(
     /** The inventory as printed evidence: one row per class, then the counts. */
     fun table(): String =
         buildString {
-            appendLine("GUARD INVENTORY (#995): class | module | idioms | helpers | reads | status")
+            appendLine("GUARD INVENTORY (#995): class | module | idioms | helpers | reads | containers | status")
             for ((row, status) in rows) {
                 val reads =
                     when {
@@ -440,7 +444,8 @@ internal data class Verdict(
                     }
                 appendLine(
                     "${row.className} | ${row.module.path} | ${row.idioms.sorted().joinToString(",")} | " +
-                        "${row.helpers.sorted().joinToString(",").ifEmpty { "-" }} | $reads | $status",
+                        "${row.helpers.sorted().joinToString(",").ifEmpty { "-" }} | $reads | " +
+                        "${row.markers.sorted().joinToString(",").ifEmpty { "-" }} | $status",
                 )
             }
             val counts = rows.groupingBy { it.second.substringBefore(' ') }.eachCount().toSortedMap()
@@ -463,6 +468,10 @@ internal object GuardInventory {
             "user.dir" to "user.dir",
         )
     private val MEASURED = Regex("""measured (\d+) s""")
+
+    /** `File("")`, `File(".")`, `Paths.get("")`, `Path.of(".")`: the working directory, a walk-up's start. */
+    private val CWD_CALL = Regex("""\b(?:File|Paths\s*\.\s*get|Path\s*\.\s*of)\s*\(\s*(")[ ]?"\s*\)""")
+    private val CWD_VALUES = setOf("", ".")
 
     fun scan(
         root: File,
@@ -669,6 +678,17 @@ internal object GuardInventory {
         decl.file.lexed.literals
             .filter { (offset, _) -> offset >= decl.start && offset < decl.end }
             .forEach { (_, value) -> literalFact(value, own, tree, idioms, cross) }
+        val cwd =
+            CWD_CALL
+                .findAll(decl.file.lexed.code, decl.start)
+                .takeWhile { it.range.first < decl.end }
+                .any { call ->
+                    call.groups[1]
+                        ?.range
+                        ?.first
+                        ?.let { decl.file.literalAt[it] } in CWD_VALUES
+                }
+        if (cwd) idioms += "cwd"
         val markers =
             CONTAINER_MARKERS
                 .findAll(
@@ -745,6 +765,9 @@ internal class SourceFile(
             ?.groupValues
             ?.get(1)
             .orEmpty()
+
+    /** Each string literal's value by the offset of its opening quote. */
+    val literalAt: Map<Int, String> = lexed.literals.toMap()
 }
 
 /**

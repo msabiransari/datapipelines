@@ -457,7 +457,7 @@ grep -q '^PRE-GATE FAIL.*mod=0.*snap=1' "$X/.pregate-logs/0-verdict.log" || fail
 ok 'snapshot failure refuses PASS and stops later stages'
 
 # Exact provenance + complete live guard cases save the auth selections. #995: the expected
-# numbers are derived from the registry (124, 10 of them auth, when inventory 995 landed), never
+# numbers are derived from the registry (151, 10 of them auth, when inventory 995 landed), never
 # typed; the saving stays the difference of two measured counts.
 registry_total="$(source "$ROOT/scripts/pregate-plan-lib.sh"; n=0; for m in "${!GUARDS[@]}"; do for c in ${GUARDS[$m]}; do n=$((n + 1)); done; done; echo "$n")"
 registry_auth="$(source "$ROOT/scripts/pregate-plan-lib.sh"; set -- ${GUARDS[":modules:auth"]}; echo "$#")"

@@ -210,6 +210,33 @@ GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteDuckDbVersionTest"  #
 GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteSemanticLayerGuardsTest"  # inventory 995: reads docs/enums.md
 GUARDS[":modules:web"]+=" co.datapipelines.web.visualizations.VisualizationAuditEventsSpecDriftTest"  # inventory 995: reads docs/enums.md
 GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.PackagedResolverTest"  # inventory 995: reads modules/app/build/libs/datapipelines-app.jar modules/auth/src/main
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.BootstrapDatasourceFileReaderTest"  # inventory 995: reads deploy/sample-data/bootstrap-datasources-census.yml deploy/sample-data/bootstrap-datasources-lake.yml
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.DatasourceAuditEventsSpecDriftTest"  # inventory 995: reads docs/enums.md
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.DatasourceErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ManagedLakeErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ReadOnlyEnforcementSpecDriftTest"  # inventory 995: reads docs/dag-executor.md
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ShippedMigrationsTest"  # inventory 995: reads README.md modules/app/src/main/resources/db/migration
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.semantics.LearnedFactKindSpecDriftTest"  # inventory 995: reads docs/enums.md modules/app/src/main/resources/db/migration/V25__learned_facts.sql
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.semantics.SemanticsErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
+GUARDS[":modules:pipeline-contract"]+=" co.datapipelines.pipeline.CompositionRulesReplayTest"  # inventory 995: reads scripts/sample-data/content/examples-lake.json scripts/sample-data/content/examples.json
+GUARDS[":modules:pipeline-contract"]+=" co.datapipelines.pipeline.DemoPipelineHashNeutralityTest"  # inventory 995: reads config scripts/sample-data/content/examples-lake.json
+GUARDS[":modules:pipeline-contract"]+=" co.datapipelines.pipeline.NodeTypeSpecDriftTest"  # inventory 995: reads docs/enums.md
+GUARDS[":modules:pipeline-contract"]+=" co.datapipelines.pipeline.PipelineNameGrammarSpecDriftTest"  # inventory 995: reads docs/template-hierarchy-design.md
+GUARDS[":modules:pipeline-contract"]+=" co.datapipelines.pipeline.VersioningSpecDriftTest"  # inventory 995: reads docs/versioning.md
+GUARDS[":modules:staging"]="co.datapipelines.staging.StagingErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
+GUARDS[":modules:templates"]="co.datapipelines.templates.ForbiddenConstructSpecDriftTest"  # inventory 995: reads docs/templates.md
+GUARDS[":modules:templates"]+=" co.datapipelines.templates.SampleDataExamplesContentTest"  # inventory 995: reads deploy/sample-data/bootstrap-datasources-census.yml deploy/sample-data/bootstrap-datasources-lake.yml
+GUARDS[":modules:templates"]+=" co.datapipelines.templates.TemplateErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
+GUARDS[":modules:templates"]+=" co.datapipelines.templates.TemplateNameGrammarSpecDriftTest"  # inventory 995: reads docs/template-hierarchy-design.md
+GUARDS[":modules:templates"]+=" co.datapipelines.templates.TemplatesPropertiesSpecDriftTest"  # inventory 995: reads docs/configuration.md
+GUARDS[":modules:typesystem"]="co.datapipelines.typesystem.ColumnSchemaSpecDriftTest"  # inventory 995: reads docs/type-system.md
+GUARDS[":modules:typesystem"]+=" co.datapipelines.typesystem.StagingEngineSpecDriftTest"  # inventory 995: reads docs/enums.md
+GUARDS[":modules:web"]+=" co.datapipelines.web.endpoints.RetiredApiPrefixGuardTest"  # inventory 995: reads deploy docs
+GUARDS[":modules:web"]+=" co.datapipelines.web.ui.SiteRenderTest"  # inventory 995: reads docs docs/[A-Za-z0-9._/-]+\.md
+GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteEngineFactsGuardTest"  # inventory 995: reads docs docs/$doc
+GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteFaqCitationTest"  # inventory 995: reads docs docs/[A-Za-z0-9._/-]+\.md
+GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.OrderedTestAnnotationGuardTest"  # inventory 995: reads modules modules/pipeline-contract
+GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.ScratchDatabaseOnceGuardTest"  # inventory 995: reads modules modules/pipeline-contract
 
 # Only runtime retained evidence can populate PG_COVERED; preview passes none.
 pgplan::guard_args() {
