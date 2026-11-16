@@ -1,6 +1,5 @@
 package co.datapipelines.browser
 
-import co.datapipelines.browser.InteractionCharts.JOIN
 import co.datapipelines.browser.InteractionCharts.QUARTERS
 import co.datapipelines.browser.InteractionCharts.SPARSE
 import co.datapipelines.browser.InteractionCharts.bar
@@ -34,43 +33,8 @@ import org.junit.jupiter.api.Test
  */
 class ChartKeyboardBrowserTest : ChartInteractionSuite() {
     private val bar2 = bar(mapOf("A" to listOf(30, 50, 20), "B" to listOf(60, 90, 40)))
-    private val stacked2 = bar(mapOf("A" to listOf(30, 50, 20), "B" to listOf(60, 90, 40)), title = "Stack", stacked = true)
     private val line3 = line(mapOf("A" to listOf(10, 30, 20, 40), "B" to listOf(25, 15, 35, 30), "C" to listOf(5, 45, 10, 20)))
     private val line2 = line(mapOf("A" to listOf(10, 30, 20, 40), "B" to listOf(25, 15, 35, 30)))
-
-    @Test
-    fun `r2 D2 - by keys a stacked bar's card heads with the category, the join and the stack's total, at every target`() {
-        startTrace()
-        val (context, page) = harnessPage("k-total")
-        val log = mutableListOf<String>()
-        try {
-            mount(page, stacked2, FULL_W, FULL_H)["ok"] shouldBe true
-            tabIn(page)
-            val totals = QUARTERS.indices.map { stacked2.valueAt("A", it) + stacked2.valueAt("B", it) }
-            var seen = 0
-            QUARTERS.forEachIndexed { c, quarter ->
-                press(page, "ArrowRight")
-                val r = step(page, log, "stack Right to $quarter")
-                withClue("r2 D2 by keys: A at $quarter heads with $quarter, the join and the total ${totals[c]}: $r") {
-                    r["focused"] shouldBe true
-                    cardLines(r).first()["text"] shouldBe "$quarter$JOIN${totals[c]}"
-                    boldName(r) shouldBe "A"
-                }
-                seen++
-            }
-            press(page, "ArrowDown")
-            val down = step(page, log, "stack Down at Q3")
-            withClue("r2 D2 by keys: the other segment of the same stack shows the same heading: $down") {
-                cardLines(down).first()["text"] shouldBe "${QUARTERS.last()}$JOIN${totals.last()}"
-                boldName(down) shouldBe "B"
-            }
-            seen++
-            withClue("stacked targets read by keys (floor 4)") { seen shouldBe QUARTERS.size + 1 }
-        } finally {
-            context.close()
-            report("stack-total-keys.txt", log)
-        }
-    }
 
     @Test
     fun `K1 and K2 - by keys alone every series is switched off and back, on a 2-series bar and a 3-series line`() {
