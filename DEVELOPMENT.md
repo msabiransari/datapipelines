@@ -1423,6 +1423,20 @@ plugin's root.
 - The path is passed through a JVM argument provider. It is not a task input, so a moved base never
   makes a test task out of date or misses the build cache.
 
+**Child JVMs that tests start (#998).** A JVM that a test starts with `ProcessBuilder` does not
+inherit the rule: a system property is not inherited, and a JVM ignores `$TMPDIR`. Without its own
+flag a child extracts `libduckdb_java*.so` and makes its Tomcat folders in the JVM's default temp
+directory (`/tmp` on Linux), outside every root, where the sweep may not look. So every child JVM is
+started with `-Djava.io.tmpdir=<the parent's java.io.tmpdir>/<child name>` as the FIRST argument after
+the `java` executable. An option after `-jar <file>`, after the main class or after a source file is a
+program argument and configures nothing. The child name is a fixed literal per launch site
+(`[a-z0-9-]+`, unique within its test class), and the launch site creates the directory before the
+launch; a directory that cannot be made fails the test. No child gets the parent's own directory: a
+file that parent and child both use travels as an explicit path. `JAVA_TOOL_OPTIONS` is not used: the
+JVM announces it on stderr, which tests read, and some tests clear the child's environment.
+`ChildJvmTempDirectoryGuardTest` (`modules/app`, run by every lane check) reads every tracked test
+source and fails a JVM launch without the flag in that position, naming its `path:line`.
+
 **What the step removes.** `gate.sh` and `pregate.sh` call the step right after
 `verification::lock` succeeds, so no gate or pregate of this checkout is running at that point. The
 step prints one summary line into the header, `temp-hygiene: mode=… base=… root=… …`, and writes the

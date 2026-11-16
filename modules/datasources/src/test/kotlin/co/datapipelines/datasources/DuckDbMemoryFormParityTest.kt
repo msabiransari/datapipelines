@@ -45,7 +45,14 @@ class DuckDbMemoryFormParityTest {
                 .command()
                 .orElseThrow { IllegalStateException("no java command") }
         val process =
-            ProcessBuilder(java, "-cp", System.getProperty("java.class.path"), Probe::class.java.name, url)
+            ProcessBuilder(
+                java,
+                "-Djava.io.tmpdir=${childTempDirectory()}",
+                "-cp",
+                System.getProperty("java.class.path"),
+                Probe::class.java.name,
+                url,
+            )
                 .directory(workDir.toFile())
                 .redirectErrorStream(true)
                 .start()
@@ -136,4 +143,7 @@ class DuckDbMemoryFormParityTest {
         const val PROBE_TIMEOUT_SECONDS = 60L
         const val CATALOG_PREFIX = "CATALOG="
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "memory-form-probe"))
 }

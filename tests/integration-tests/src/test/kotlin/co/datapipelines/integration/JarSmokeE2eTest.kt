@@ -386,7 +386,10 @@ class JarSmokeE2eTest {
         val directory = Files.createTempDirectory("jar-smoke-no-isolate")
         val log = Files.createTempFile("jar-smoke-agreement", ".log").toFile()
         val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
-        val builder = ProcessBuilder(javaBin, "-jar", jarFile().absolutePath).redirectErrorStream(true).redirectOutput(log)
+        val builder =
+            ProcessBuilder(javaBin, "-Djava.io.tmpdir=${childTempDirectory("jar-smoke-refusal")}", "-jar", jarFile().absolutePath)
+                .redirectErrorStream(true)
+                .redirectOutput(log)
         builder.environment().putAll(appEnvironment())
         builder.environment()["LOADER_PATH"] = "/app/lib,$directory"
         builder.environment()["DATAPIPELINES_SCRIPT_JS_ISOLATE_DIR"] = directory.toString()
@@ -492,7 +495,10 @@ class JarSmokeE2eTest {
         log: File,
     ): Process {
         val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
-        val builder = ProcessBuilder(javaBin, "-jar", jarFile().absolutePath).redirectErrorStream(true).redirectOutput(log)
+        val builder =
+            ProcessBuilder(javaBin, "-Djava.io.tmpdir=${childTempDirectory("jar-smoke-timeout")}", "-jar", jarFile().absolutePath)
+                .redirectErrorStream(true)
+                .redirectOutput(log)
         builder.environment().putAll(appEnvironment())
         builder.environment()["SERVER_PORT"] = childPort.toString()
         builder.environment()["DATAPIPELINES_AUTH_BASE_URL"] = childBase
@@ -665,7 +671,7 @@ class JarSmokeE2eTest {
         val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
         val log = Files.createTempFile("jar-smoke", ".log").toFile()
         val pb =
-            ProcessBuilder(javaBin, "-jar", jar.absolutePath)
+            ProcessBuilder(javaBin, "-Djava.io.tmpdir=${childTempDirectory("jar-smoke-app")}", "-jar", jar.absolutePath)
                 .redirectErrorStream(true)
                 .redirectOutput(log)
         // Disabled-path proof: no host launcher configuration leaks into this child.
@@ -709,6 +715,9 @@ class JarSmokeE2eTest {
             "DATAPIPELINES_AUTH_OIDC_PROVIDERS_0_CLIENT_SECRET" to "smoke",
             "DATAPIPELINES_AUTH_OIDC_PROVIDERS_0_ISSUER_URI" to "http://127.0.0.1:${oidcStub!!.address.port}",
         )
+
+    /** One launch site's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(name: String): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), name))
 
     private fun jarFile(): File {
         val override = System.getProperty("jarSmoke.jar")

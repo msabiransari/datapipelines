@@ -200,6 +200,7 @@ class JavaScriptMeasurementsTest {
         val command =
             listOf(
                 java,
+                "-Djava.io.tmpdir=${childTempDirectory()}",
                 "-Xmx256m",
             ) + jvmArgs + listOf("-cp", System.getProperty("java.class.path"), JavaScriptChildMain::class.java.name) +
                 args
@@ -234,4 +235,7 @@ class JavaScriptMeasurementsTest {
         const val CHILD_SECONDS = 120L
         val HEAP_STEPS_MIB = listOf(1L, 2L, 4L, 8L, 16L, 32L, 64L, 128L, 256L)
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "javascript-child"))
 }

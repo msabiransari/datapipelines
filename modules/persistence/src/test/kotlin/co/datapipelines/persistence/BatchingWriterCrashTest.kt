@@ -3,6 +3,7 @@ package co.datapipelines.persistence
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import java.nio.file.Files
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
@@ -43,7 +44,14 @@ class BatchingWriterCrashTest {
     ) {
         val java = File(System.getProperty("java.home"), "bin/java").path
         val process =
-            ProcessBuilder(java, "-cp", System.getProperty("java.class.path"), CrashHarness::class.java.name, dir.toString())
+            ProcessBuilder(
+                java,
+                "-Djava.io.tmpdir=${childTempDirectory()}",
+                "-cp",
+                System.getProperty("java.class.path"),
+                CrashHarness::class.java.name,
+                dir.toString(),
+            )
                 .redirectErrorStream(true)
                 .redirectOutput(dir.resolve("child.log").toFile())
                 .start()
@@ -150,4 +158,7 @@ object CrashHarness {
             channel.force(false)
         }
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "crash-harness"))
 }

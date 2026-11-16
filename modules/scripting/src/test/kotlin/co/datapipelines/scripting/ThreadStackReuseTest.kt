@@ -3,6 +3,7 @@ package co.datapipelines.scripting
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import java.nio.file.Files
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
@@ -57,6 +58,7 @@ class ThreadStackReuseTest {
         val builder =
             ProcessBuilder(
                 java,
+                "-Djava.io.tmpdir=${childTempDirectory()}",
                 "-Xmx256m",
                 "-XX:ErrorFile=" + dir.resolve("hs_err_pid%p.log"),
                 "-cp",
@@ -137,4 +139,7 @@ object StackReuseProbe {
     }
 
     private fun recurse(depth: Int): Int = recurse(depth + 1) + 1
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "stack-reuse-probe"))
 }

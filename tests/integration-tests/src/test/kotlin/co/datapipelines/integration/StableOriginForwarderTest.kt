@@ -495,7 +495,7 @@ class StableOriginForwarderTest {
         val verdict = Files.createTempFile("port-contender-", ".txt")
         try {
             val process =
-                ProcessBuilder(javaBin, source.toString(), port.toString(), verdict.toString())
+                ProcessBuilder(javaBin, "-Djava.io.tmpdir=${childTempDirectory()}", source.toString(), port.toString(), verdict.toString())
                     .redirectErrorStream(true)
                     .start()
             val output = ByteArrayOutputStream()
@@ -547,4 +547,7 @@ class StableOriginForwarderTest {
 
     /** The drained child output, for a diagnostic; the pipe may have been closed mid-drain. */
     private fun ByteArrayOutputStream.toStringTail(): String = toString(StandardCharsets.UTF_8).trim()
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "port-contender"))
 }

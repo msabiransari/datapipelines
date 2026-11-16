@@ -321,7 +321,12 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
                 val managementPort = freePort()
                 val log = Files.createTempFile("entry-inventory-app", ".log").toFile()
                 val builder =
-                    ProcessBuilder(File(System.getProperty("java.home"), "bin/java").absolutePath, "-jar", jar().absolutePath)
+                    ProcessBuilder(
+                        File(System.getProperty("java.home"), "bin/java").absolutePath,
+                        "-Djava.io.tmpdir=${childTempDirectory()}",
+                        "-jar",
+                        jar().absolutePath,
+                    )
                         .redirectErrorStream(true)
                         .redirectOutput(log)
                 builder.environment().putAll(
@@ -348,6 +353,10 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
             }
 
             private fun freePort(): Int = ServerSocket(0).use { it.localPort }
+
+            /** The packaged app's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+            private fun childTempDirectory(): Path =
+                Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "entry-inventory-app"))
 
             private fun jar(): File {
                 var dir: File? = File("").absoluteFile

@@ -114,6 +114,7 @@ class DuckDbOwnerPathRaceTest {
             ProcessBuilder(
                 listOf(
                     Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "-Djava.io.tmpdir=${childTempDirectory()}",
                     "-Xmx256m",
                     "-cp",
                     System.getProperty("java.class.path"),
@@ -210,4 +211,7 @@ object DuckDbOwnerPathRaceChild {
         if (state is DuckDbScratchOwnership.OwnerState.Dead) state.proof.use { it.deleteOwnerFile() }
         say("PROBE_DONE ${state.javaClass.simpleName}")
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "owner-path-child"))
 }

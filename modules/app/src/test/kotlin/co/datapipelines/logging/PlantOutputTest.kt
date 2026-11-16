@@ -7,6 +7,8 @@ import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import java.nio.file.Files
+import java.nio.file.Path
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -131,6 +133,7 @@ class PlantOutputTest {
         val process =
             ProcessBuilder(
                 "${System.getProperty("java.home")}/bin/java",
+                "-Djava.io.tmpdir=${childTempDirectory()}",
                 "-D${ObservabilityLoggingFormatPostProcessor.SWITCH_KEY}=$format",
                 "-cp",
                 classpath,
@@ -151,4 +154,7 @@ class PlantOutputTest {
             .let { node: JsonNode -> node.path("message").asText("") }
 
     private fun stackTraceOf(jsonLine: String): String = mapper.readTree(jsonLine).path("stack_trace").asText("")
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "plant-child"))
 }
