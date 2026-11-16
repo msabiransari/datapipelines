@@ -6,6 +6,7 @@ import co.datapipelines.browser.InteractionCharts.bar
 import com.microsoft.playwright.Page
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
@@ -87,11 +88,12 @@ class ChartStackTotalBrowserTest : ChartInteractionSuite() {
     }
 
     @Test
-    fun `the hostile chart stacked heads with its category text, the join and its total, never markup (A8)`() {
+    fun `the hostile chart stacked heads with its category text, the join and its total, by pointer and keys (A8)`() {
         startTrace()
         val (context, page) = harnessPage("stack-hostile", VIEW_W, VIEW_H)
         val log = mutableListOf<String>()
         var shown = 0
+        var keyed = 0
         try {
             val plainChart = engineChart("bar/hostile")
             val chart = plainChart.copy(config = once(plainChart.config, SUM, "$SUM,\"stack\":\"zero\""))
@@ -109,12 +111,32 @@ class ChartStackTotalBrowserTest : ChartInteractionSuite() {
                 }
                 shown++
             }
+            val headings = k.indices.map { "${k[it]}$JOIN${whole(v[it])}" }
+            page.mouse().move(1.0, 1.0)
+            tabIn(page)
+            val keyedHeadings = mutableSetOf<Any?>()
+            HOSTILE_KEYS.forEachIndexed { step, key ->
+                press(page, key)
+                val r = read(page)
+                log += "hostile stack keys $step $key: ${texts(r)}"
+                withClue("A8 by keys, step $step ($key): the heading is a hostile category, the join and its total, as text: $r") {
+                    r["focused"] shouldBe true
+                    r["scripts"] shouldBe 0
+                    headings shouldContain cardLines(r).first()["text"]
+                }
+                keyedHeadings += cardLines(r).first()["text"]
+                keyed++
+            }
+            withClue("A8 by keys: every hostile segment's heading was reached") { keyedHeadings shouldBe headings.toSet() }
             withClue("A8: no CSP violation with the stacked hostile chart") { drainCspViolations().shouldBeEmpty() }
         } finally {
             context.close()
-            report("stack-total-hostile.txt", log + "headings read=$shown")
+            report("stack-total-hostile.txt", log + "headings read=$shown keyed=$keyed")
         }
-        withClue("hostile stacked headings read (floor 4)") { shown shouldBe HOSTILE_FLOOR }
+        withClue("hostile stacked headings read by pointer and by keys (floor 4 each)") {
+            shown shouldBe HOSTILE_FLOOR
+            keyed shouldBe HOSTILE_FLOOR
+        }
     }
 
     @Test
@@ -164,6 +186,9 @@ class ChartStackTotalBrowserTest : ChartInteractionSuite() {
         const val SUM = "\"aggregate\":\"sum\""
         const val SECOND_JOIN = " / "
         const val HOSTILE_FLOOR = 4
+
+        /** Two marks of the first series, then the nearest mark of the second and its next (as the sparse walk). */
+        val HOSTILE_KEYS = listOf("ArrowRight", "ArrowRight", "ArrowDown", "ArrowRight")
         const val JOIN_READ = "() => window.JsRendered.tables.look('tipTotalJoin')"
     }
 }
