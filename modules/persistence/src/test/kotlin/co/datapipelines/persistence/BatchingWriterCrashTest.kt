@@ -86,6 +86,9 @@ class BatchingWriterCrashTest {
             ?.readLines()
             ?.filter { it.isNotBlank() }
             ?.toSet() ?: emptySet()
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "crash-harness"))
 }
 
 /**
@@ -157,7 +160,4 @@ object CrashHarness {
             channel.force(false)
         }
     }
-
-    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
-    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "crash-harness"))
 }

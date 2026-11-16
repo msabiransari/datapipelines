@@ -143,6 +143,9 @@ class DuckDbOwnerPathRaceTest {
             error("child did not print $prefix; output=$seen")
         }
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "owner-path-child"))
 }
 
 /** Two real JVMs keep the JVM-local held-owner registry out of the cross-process schedule. */
@@ -211,7 +214,4 @@ object DuckDbOwnerPathRaceChild {
         if (state is DuckDbScratchOwnership.OwnerState.Dead) state.proof.use { it.deleteOwnerFile() }
         say("PROBE_DONE ${state.javaClass.simpleName}")
     }
-
-    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
-    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "owner-path-child"))
 }

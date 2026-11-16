@@ -95,6 +95,9 @@ class ThreadStackReuseTest {
         const val CHILD_TIMEOUT_SECONDS = 75L
         const val CLEANUP_TIMEOUT_SECONDS = 5L
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "stack-reuse-probe"))
 }
 
 /**
@@ -139,7 +142,4 @@ object StackReuseProbe {
     }
 
     private fun recurse(depth: Int): Int = recurse(depth + 1) + 1
-
-    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
-    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "stack-reuse-probe"))
 }
