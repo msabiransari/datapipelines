@@ -325,11 +325,66 @@
     });
   }
 
-  function fontsReady() {
-    var faces = ['400 12px "Noto Sans"', '600 12px "Noto Sans"'];
-    return Promise.all(faces.map(function (f) { return document.fonts.load(f); })).then(function () {
-      return document.fonts.ready;
+  /**
+   * The engine's font in use, not merely loaded. The product declares its faces `font-display: optional`: on a cold
+   * visit, and on every visit under the browser test (request interception turns the HTTP cache off), the file
+   * arrives after the short block period and the browser keeps the fallback for the whole document, although
+   * `document.fonts` reports the face loaded. Measured: the fallback lays the text out about 16 % narrower, so the
+   * page would be measured and judged in another font than the product's. The page therefore declares the product's
+   * own faces of the engine's family once more, read from the copied stylesheets' rules (same files, weights, styles
+   * and ranges), with `display: block`, and draws after they loaded. That is loading only; no rule of the look is
+   * restated. Then it checks the font is in use and marks the body `data-font` (`real`, or `fallback` with a sentence
+   * in words), which the browser test reads.
+   */
+  var FONT_PROBE = "Enterprise accounts 0123456789";
+
+  function productFaces(family) {
+    var faces = [];
+    Array.prototype.forEach.call(document.styleSheets, function (sheet) {
+      Array.prototype.forEach.call(sheet.cssRules, function (rule) {
+        if (rule.type !== CSSRule.FONT_FACE_RULE) return;
+        var st = rule.style;
+        if (st.getPropertyValue("font-family").replace(/["']/g, "").trim() !== family) return;
+        var src = st.getPropertyValue("src").replace(/url\((["']?)([^"')]+)\1\)/g, function (all, quote, address) {
+          return 'url("' + new URL(address, sheet.href).href + '")';
+        });
+        var face = new FontFace(family, src, {
+          style: st.getPropertyValue("font-style") || "normal",
+          weight: st.getPropertyValue("font-weight") || "normal",
+          unicodeRange: st.getPropertyValue("unicode-range") || "U+0-10FFFF",
+          display: "block",
+        });
+        document.fonts.add(face);
+        faces.push(face.load());
+      });
     });
+    if (faces.length === 0) throw new Error("the product's stylesheets declare no face of " + family);
+    return Promise.all(faces);
+  }
+
+  function fontInUse(family) {
+    var ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = '12px "' + family + '", serif';
+    var withFont = ctx.measureText(FONT_PROBE).width;
+    ctx.font = "12px serif";
+    return withFont !== ctx.measureText(FONT_PROBE).width;
+  }
+
+  function fontsReady() {
+    var family = R.theme.resolve("light").font.replace(/["']/g, "").trim();
+    return productFaces(family)
+      .then(function () {
+        return document.fonts.ready;
+      })
+      .then(function () {
+        if (fontInUse(family)) {
+          document.body.setAttribute("data-font", "real");
+          return;
+        }
+        document.body.setAttribute("data-font", "fallback");
+        var note = el("p", "ref-line ref-font-note", "The product's font (" + family + ") is not in use: the charts are drawn in the browser's fallback font.");
+        document.body.insertBefore(note, document.body.firstChild);
+      });
   }
 
   var ready = Promise.all([fontsReady(), Promise.all(WIRES.map(function (w) { return fetchJson("tiles/" + w + ".json"); })), page === "reference" ? fetchJson("study/provenance.json") : null])

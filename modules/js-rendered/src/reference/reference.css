@@ -57,11 +57,23 @@
   padding-bottom: var(--space-2);
 }
 
+/* Tiles flow at their own width: a fixed tile is as wide as its card (its caption wraps to it), so a 480 or 640 px
+   frame is seen whole on a desktop instead of scrolling inside a narrow column; a fluid tile takes the room left. */
 .ref-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-6);
-  align-items: start;
+  align-items: flex-start;
+}
+
+.ref-grid > .ref-fixed {
+  flex: 0 1 auto;
+  width: min-content;
+  min-width: min(100%, 18rem);
+}
+
+.ref-grid > .ref-fluid {
+  flex: 1 1 24rem;
 }
 
 .ref-pairs {

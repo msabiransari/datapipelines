@@ -7,6 +7,7 @@ import com.microsoft.playwright.BrowserType
 import com.microsoft.playwright.Frame
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
+import com.microsoft.playwright.PlaywrightException
 import com.microsoft.playwright.Route
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -255,23 +256,45 @@ class LookReferencePageBrowserTest {
          * Waits for a condition the test reads with `evaluate`, polled from the test's side: Playwright's
          * `waitForFunction` polls with a compiled string inside the page, which the page's own policy (no
          * `unsafe-eval`) refuses whenever the first check is false. A condition never met fails naming D11's lists.
+         * A check that meets a page between two documents (the one reload a cold font asks for) reads as not yet met.
          */
         fun until(
             what: String,
             condition: () -> Boolean,
         ) {
             val deadline = System.nanoTime() + WAIT_NANOS
-            while (!condition()) {
-                if (System.nanoTime() >
-                    deadline
-                ) {
-                    throw AssertionError("$what: not reached in ${WAIT_NANOS / NANOS_PER_SECOND} s; ${seen()}")
+            var lastError = ""
+            while (true) {
+                val met =
+                    try {
+                        condition()
+                    } catch (e: PlaywrightException) {
+                        lastError = "; the last check met: ${e.message?.lineSequence()?.firstOrNull()}"
+                        false
+                    }
+                if (met) return
+                if (System.nanoTime() > deadline) {
+                    throw AssertionError("$what: not reached in ${WAIT_NANOS / NANOS_PER_SECOND} s$lastError; ${seen()}")
                 }
                 page.waitForTimeout(POLL_MILLIS)
             }
         }
 
-        fun ready() = until("the page sets data-ready") { page.evaluate(READY_JS) == true }
+        fun ready() {
+            until("the page sets data-ready") { page.evaluate(READY_JS) == true }
+            realFont(page.mainFrame(), "the reference page")
+        }
+
+        /**
+         * D8's "with the real font": the product's faces are `font-display: optional`, so a loaded font can still be
+         * unused for a whole document; I1 and I2 measured in the fallback would prove nothing about the real look.
+         */
+        private fun realFont(
+            frame: Frame,
+            where: String,
+        ) {
+            withClue("$where draws in the product's font, not the browser's fallback") { frame.evaluate(FONT_JS) shouldBe "real" }
+        }
 
         fun switchTo(theme: String) {
             page.evaluate("t => DatapipelinesReference.setTheme(t)", theme)
@@ -384,7 +407,7 @@ class LookReferencePageBrowserTest {
                 frame = page.frames().firstOrNull { it.url().endsWith("/forest.html") }
                 frame?.evaluate(READY_JS) == true
             }
-            return requireNotNull(frame) { "no forest frame" }
+            return requireNotNull(frame) { "no forest frame" }.also { realFont(it, "the forest page") }
         }
 
         override fun close() = context.close()
@@ -465,6 +488,7 @@ class LookReferencePageBrowserTest {
         private const val NANOS_PER_SECOND = 1_000_000_000L
         private const val POLL_MILLIS = 50.0
         private const val READY_JS = "() => document.body.dataset.ready === 'true'"
+        private const val FONT_JS = "() => document.body.dataset.font"
         private const val FRAME_W_JS = "([k, w]) => DatapipelinesReference.snapshot(k).frame.w === w"
         private const val OK = 200
         private const val NOT_FOUND = 404
