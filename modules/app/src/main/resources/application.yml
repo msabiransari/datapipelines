@@ -714,7 +714,7 @@ datapipelines:
       plan-max-abandoned-reads: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_MAX_ABANDONED_READS:4}
       # #969: compaction's two deployment values (configuration.md §3.36): scratch per byte of a group's input, and the
       # input bytes a group is assumed to get through per second (MB = MiB in Spring's DataSize).
-      compaction-scratch-factor: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_SCRATCH_FACTOR:6}
+      compaction-scratch-factor: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_SCRATCH_FACTOR:7}
       compaction-bytes-per-second: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_BYTES_PER_SECOND:2MB}
     retention:
       protection-days: ${DATAPIPELINES_LAKE_RETENTION_PROTECTION_DAYS:7}

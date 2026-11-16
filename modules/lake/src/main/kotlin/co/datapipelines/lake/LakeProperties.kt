@@ -173,14 +173,14 @@ class LakeProperties(
         /** The most measurements given up at their bound and still running; at the limit a plan measures nothing more; 1 – 64. */
         val planMaxAbandonedReads: Int = DEFAULT_PLAN_MAX_ABANDONED_READS,
         /**
-         * #969 D4: scratch needed per byte of a rewrite group's input; at least 1. 6 = ⌈4.69 × 1.25⌉: the largest scratch
-         * peak ÷ input #997 measured over spilling groups (mixed data, `--cpus 2`), on mixed and incompressible data; it does
-         * not cover highly compressible data (not measured).
+         * #969 D4: scratch needed per byte of a rewrite group's input; at least 1. 7 = ⌈5.435 × 1.25⌉: the largest scratch
+         * peak ÷ input #997 measured over spilling groups (a 3.3 GB group of a 10 GB mixed table, `--cpus 2`), on mixed and
+         * incompressible data; it does not cover highly compressible data (not measured).
          */
         val compactionScratchFactor: Int = DEFAULT_COMPACTION_SCRATCH_FACTOR,
         /**
          * #969 D4: input bytes a rewrite group is assumed to get through per second; above 0. 2 MiB = half the slowest
-         * spilling group #997 measured (5,395,968 B/s, mixed data, `--cpus 2`), rounded down to a whole MiB; measured on mixed
+         * spilling group #997 measured (5,093,164 B/s, mixed data, `--cpus 2`), rounded down to a whole MiB; measured on mixed
          * and incompressible data, it does not cover highly compressible data (not measured).
          */
         val compactionBytesPerSecond: DataSize = DataSize.ofMegabytes(DEFAULT_COMPACTION_MEGABYTES_PER_SECOND),
@@ -232,7 +232,7 @@ class LakeProperties(
         const val DEFAULT_PLAN_PAGE_SIZE = 200
         const val DEFAULT_PLAN_TABLE_TIMEOUT_SECONDS = 60L
         const val DEFAULT_PLAN_MAX_ABANDONED_READS = 4
-        const val DEFAULT_COMPACTION_SCRATCH_FACTOR = 6
+        const val DEFAULT_COMPACTION_SCRATCH_FACTOR = 7
         const val DEFAULT_COMPACTION_MEGABYTES_PER_SECOND = 2L
         const val DEFAULT_PROTECTION_DAYS = 7
         const val DEFAULT_ORPHAN_GRACE_HOURS = 72
