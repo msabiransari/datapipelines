@@ -665,15 +665,11 @@ private object LookReferenceChecks {
           const y = Number(el.getAttribute("y"));
           const anchor = el.getAttribute("text-anchor") || "start";
           const x0 = anchor === "middle" ? x - w / 2 : anchor === "end" ? x - w : x;
-          let pts = [[x0, y - ASC * size], [x0 + w, y - ASC * size], [x0 + w, y + DESC * size], [x0, y + DESC * size]];
-          const tr = el.getAttribute("transform");
-          const m = tr ? /rotate\(\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)\s*\)/.exec(tr) : null;
-          if (m) {
-            const r = (Number(m[1]) * Math.PI) / 180;
-            const cx = Number(m[2]);
-            const cy = Number(m[3]);
-            pts = pts.map((q) => [cx + (q[0] - cx) * Math.cos(r) - (q[1] - cy) * Math.sin(r), cy + (q[0] - cx) * Math.sin(r) + (q[1] - cy) * Math.cos(r)]);
-          }
+          // The text's own coordinates carried into the chart's: the browser's matrix from the text to the screen,
+          // composed with the inverse of the chart's (a rotated tick and any offset group are both in it).
+          const toChart = el.ownerSVGElement.getScreenCTM().inverse().multiply(el.getScreenCTM());
+          const pts = [[x0, y - ASC * size], [x0 + w, y - ASC * size], [x0 + w, y + DESC * size], [x0, y + DESC * size]]
+            .map((q) => [toChart.a * q[0] + toChart.c * q[1] + toChart.e, toChart.b * q[0] + toChart.d * q[1] + toChart.f]);
           const xs = pts.map((q) => q[0]);
           const ys = pts.map((q) => q[1]);
           return { pts: pts, x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys), text: el.textContent };
