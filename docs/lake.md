@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.37 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown; #969, compaction; #994, a streamed scan that ended short)
+**Status:** v1.38 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown; #969, compaction; #994, a streamed scan that ended short; #997, the read test after compaction)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -1214,6 +1214,17 @@ aggregate deliveries reserve from) and the part's scratch database.
   group's `input_files`, `input_bytes`, `output_files`, `output_bytes`, `rows`, `read_write_seconds`, `lease_seconds`
   and `scratch_peak_bytes`. The planner reads `committed` and `left_for_fresh_run` (step 6 above). Log events
   [Observability §3.4Y](observability.md#34y-lake-compaction-events-969).
+- **What compaction did to reads, measured once (#997).** On the object store, through the managed reader, two
+  synthetic tables sorted on `customer_id` (480,000,000 rows in 156 files of 10 GB; 49,228,399 rows in 17 files of
+  1 GB), before and after the product's compaction rewrote them into 20 and 2 files (row counts and content checksums
+  unchanged). A point filter on the sort column read 5 of 156 files before and 3 of 20 after; on the smaller table 4 of
+  17, then 1 of 2. A 1 % range read the same numbers; a filter on a column outside the sort order read every file both
+  times. So compaction cut the files a sort-column filter opens and the files a table has, while the fraction of the
+  table's files the filter opens rose, because each file is larger; the median DuckDB time of the selective queries
+  did not fall on that machine (27 ms before, 80 ms after on the large table, on a shared machine). These are figures
+  for those two tables, not a guarantee: files of different rewrite groups can overlap on the sort columns, and a
+  table built from large ordered appends is not due for compaction under the seeded `production` profile (its files
+  are already in order and few are small), so the tables were made due for the measurement.
 
 ---
 
@@ -1221,6 +1232,7 @@ aggregate deliveries reserve from) and the part's scratch database.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-16 | v1.38 | 997 (#997, dp-lake P6 evidence) | **§11 Compaction** gains *What compaction did to reads, measured once*: the object-store read test's files read before and after compaction on two synthetic tables, with its limits. |
 | 2026-11-15 | v1.37 | 994 (#994) | §7, *Files are written in the table's order*: one sentence — a managed append whose scan ended short reports `lake.append.failed` with the staging cause `pipeline.staging.result_incomplete` (TEMPORARY, with #994's guard). |
 | 2026-11-14 | v1.36 | #969 merge review F1 | **§11 Compaction:** due work is decided by its positive declaration and current candidates; a refused scratch reservation is `capacity` / `scratch_refused`, with nothing opened or rewritten. |
 | 2026-11-14 | v1.35 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #963's v1.32, #962's v1.33 and #964's v1.34 | **§11 Maintenance runs** gains *Compaction*: the one candidate rule shared with the planner, the declaration and the due check, the rewrite group (one partition of one spec, the need of a small in-order file, oldest first, re-planned before each group), the rewrite (sorted by field id in the run's trusted scratch database, written before the lease, one `RewriteFiles` commit, nothing deleted), the whole-run limit and the limit now, `capacity` and its three remedies, the deadline, and the run row's compaction keys. The section's opening names compaction among the landed parts. |

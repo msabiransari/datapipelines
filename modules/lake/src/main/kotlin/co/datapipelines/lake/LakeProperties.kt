@@ -72,6 +72,11 @@ class LakeProperties(
         val maxConcurrentIngestions: Int = DEFAULT_MAX_CONCURRENT_INGESTIONS,
         val maxConcurrentMaintenance: Int = 1,
         val maxDeliveryBytes: DataSize = DataSize.ofGigabytes(DEFAULT_MAX_DELIVERY_GB),
+        /**
+         * Scratch reserved per ingestion = delivery bytes × this factor. 10 = ⌈7.84 × 1.25⌉: the largest scratch peak ÷
+         * delivery bytes #997 measured (2 GB mixed delivery, `--cpus 2`), on mixed and incompressible data; it does not
+         * cover highly compressible data (not measured).
+         */
         val stagingExpansionFactor: Int = DEFAULT_STAGING_EXPANSION_FACTOR,
         val scratchBytes: DataSize = DataSize.ofGigabytes(DEFAULT_SCRATCH_GB),
         val stagingMemoryLimit: DataSize = DataSize.ofGigabytes(1),
@@ -167,9 +172,17 @@ class LakeProperties(
         val planTableTimeout: Duration = Duration.ofSeconds(DEFAULT_PLAN_TABLE_TIMEOUT_SECONDS),
         /** The most measurements given up at their bound and still running; at the limit a plan measures nothing more; 1 – 64. */
         val planMaxAbandonedReads: Int = DEFAULT_PLAN_MAX_ABANDONED_READS,
-        /** #969 D4: scratch needed per byte of a rewrite group's input (the spike saw 2.5 – 2.9); at least 1. */
+        /**
+         * #969 D4: scratch needed per byte of a rewrite group's input; at least 1. 6 = ⌈4.69 × 1.25⌉: the largest scratch
+         * peak ÷ input #997 measured over spilling groups (mixed data, `--cpus 2`), on mixed and incompressible data; it does
+         * not cover highly compressible data (not measured).
+         */
         val compactionScratchFactor: Int = DEFAULT_COMPACTION_SCRATCH_FACTOR,
-        /** #969 D4: input bytes a rewrite group is assumed to get through per second (below the spike's 6.7 MiB); above 0. */
+        /**
+         * #969 D4: input bytes a rewrite group is assumed to get through per second; above 0. 2 MiB = half the slowest
+         * spilling group #997 measured (5,395,968 B/s, mixed data, `--cpus 2`), rounded down to a whole MiB; measured on mixed
+         * and incompressible data, it does not cover highly compressible data (not measured).
+         */
         val compactionBytesPerSecond: DataSize = DataSize.ofMegabytes(DEFAULT_COMPACTION_MEGABYTES_PER_SECOND),
     ) {
         override fun toString(): String =
@@ -199,7 +212,7 @@ class LakeProperties(
         const val DEFAULT_LANDING_PREFIX = "landing/"
         const val DEFAULT_MAX_CONCURRENT_INGESTIONS = 2
         const val DEFAULT_MAX_DELIVERY_GB = 2L
-        const val DEFAULT_STAGING_EXPANSION_FACTOR = 3
+        const val DEFAULT_STAGING_EXPANSION_FACTOR = 10
         const val DEFAULT_SCRATCH_GB = 20L
         const val DEFAULT_MEMORY_HEADROOM = "0.10"
         const val DEFAULT_MAX_OPEN_PARTITIONS = 64
@@ -219,8 +232,8 @@ class LakeProperties(
         const val DEFAULT_PLAN_PAGE_SIZE = 200
         const val DEFAULT_PLAN_TABLE_TIMEOUT_SECONDS = 60L
         const val DEFAULT_PLAN_MAX_ABANDONED_READS = 4
-        const val DEFAULT_COMPACTION_SCRATCH_FACTOR = 3
-        const val DEFAULT_COMPACTION_MEGABYTES_PER_SECOND = 4L
+        const val DEFAULT_COMPACTION_SCRATCH_FACTOR = 6
+        const val DEFAULT_COMPACTION_MEGABYTES_PER_SECOND = 2L
         const val DEFAULT_PROTECTION_DAYS = 7
         const val DEFAULT_ORPHAN_GRACE_HOURS = 72
 
