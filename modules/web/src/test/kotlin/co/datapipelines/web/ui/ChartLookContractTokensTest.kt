@@ -27,7 +27,11 @@ class ChartLookContractTokensTest {
     private val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
 
     private fun read(path: String): String =
-        resolver.getResource("classpath:static/$path").inputStream.readBytes().decodeToString()
+        resolver
+            .getResource("classpath:static/$path")
+            .inputStream
+            .readBytes()
+            .decodeToString()
 
     private val appCss = declarations(read("css/app.css"))
     private val tokensCss = declarations(read("vendor/design-system/tokens.css"))
@@ -64,7 +68,11 @@ class ChartLookContractTokensTest {
         val darkContexts = surfaces().filter { it.scheme == DARK }.map { it.appCssContext }.toSet()
         darkContexts.size shouldBe 2
         val problems = mutableListOf<String>()
-        chart.map { it.name }.toSet().minus(CONTRACT.keys).forEach { problems += "$it is no token of the contract's §3" }
+        chart
+            .map { it.name }
+            .toSet()
+            .minus(CONTRACT.keys)
+            .forEach { problems += "$it is no token of the contract's §3" }
         chart
             .groupBy { it.name to it.context }
             .filterValues { it.size > 1 }
@@ -179,7 +187,11 @@ class ChartLookContractTokensTest {
     private fun schemeOf(vars: Map<String, String>): String =
         requireNotNull(vars["color-scheme"]) { "a theme without color-scheme" }.trim().split(Regex("\\s+")).first()
 
-    private data class Decl(val context: List<String>, val name: String, val value: String)
+    private data class Decl(
+        val context: List<String>,
+        val name: String,
+        val value: String,
+    )
 
     companion object {
         private const val CHART_PREFIX = "--chart-"
@@ -195,7 +207,10 @@ class ChartLookContractTokensTest {
         private const val DARK_QUERY = "prefers-color-scheme: dark"
         private val ROOT = listOf(":root")
 
-        private fun t(light: String, dark: String = light) = light to dark
+        private fun t(
+            light: String,
+            dark: String = light,
+        ) = light to dark
 
         /** The look contract's §3 (draft 8), Light and Dark, written from its text: §3.1, §3.2, §3.3, §3.4, §3.5. */
         private val CONTRACT: Map<String, Pair<String, String>> =
@@ -273,7 +288,7 @@ class ChartLookContractTokensTest {
         /** LA12's ONE list of exceptions (§5.1, O-2): forest's card `#faf8f3`, accepted as measured, not fixed. */
         private val EXCEPTIONS = mapOf(("forest" to "series 3") to 2.94, ("forest" to "series 4") to 2.89)
 
-        private val VALUE = """hex\("#[0-9a-fA-F]{6}"\)|TRANSPARENT|"[^"]*"|-?\d+(?:\.\d+)?"""
+        private const val VALUE = """hex\("#[0-9a-fA-F]{6}"\)|TRANSPARENT|"[^"]*"|-?\d+(?:\.\d+)?"""
         private val ENGINE_LINE = Regex("""^"(--[a-z0-9-]+)":\s*\["\w+",\s*($VALUE),\s*($VALUE)(?:,\s*-?[\d.]+,\s*-?[\d.]+)?],$""")
         private val VAR = Regex("""^var\((--[\w-]+)\)$""")
         private val LIGHT_DARK = Regex("""^light-dark\(([^,]+),([^,]+)\)$""")
@@ -291,16 +306,40 @@ class ChartLookContractTokensTest {
         private fun norm(value: String): String {
             val v = value.trim().replace(Regex("\\s+"), " ")
             return when {
-                NUMBER.matches(v) -> BigDecimal(v).stripTrailingZeros().toPlainString()
-                v.matches(Regex("^#[0-9a-fA-F]{3}$")) -> "#" + v.drop(1).map { "$it$it" }.joinToString("").lowercase()
-                v.startsWith("#") -> v.lowercase()
-                v.first().isUpperCase() -> v
-                else -> v.lowercase().replace(Regex("\\s*([,()])\\s*"), "$1")
+                NUMBER.matches(v) -> {
+                    BigDecimal(v).stripTrailingZeros().toPlainString()
+                }
+
+                v.matches(Regex("^#[0-9a-fA-F]{3}$")) -> {
+                    "#" +
+                        v
+                            .drop(1)
+                            .map { "$it$it" }
+                            .joinToString("")
+                            .lowercase()
+                }
+
+                v.startsWith("#") -> {
+                    v.lowercase()
+                }
+
+                v.first().isUpperCase() -> {
+                    v
+                }
+
+                else -> {
+                    v.lowercase().replace(Regex("\\s*([,()])\\s*"), "$1")
+                }
             }
         }
 
         /** A value as a page under [scheme] computes it: `var()` followed through [vars], `light-dark()` picked. */
-        private fun resolve(value: String, vars: Map<String, String>, scheme: String, hops: Int = 0): String {
+        private fun resolve(
+            value: String,
+            vars: Map<String, String>,
+            scheme: String,
+            hops: Int = 0,
+        ): String {
             require(hops < 8) { "a var() cycle at $value" }
             val v = norm(value)
             VAR.matchEntire(v)?.let {
@@ -311,7 +350,10 @@ class ChartLookContractTokensTest {
             return v
         }
 
-        private fun contrast(a: String, b: String): Double {
+        private fun contrast(
+            a: String,
+            b: String,
+        ): Double {
             val (hi, lo) = listOf(luminance(a), luminance(b)).sortedDescending()
             return (hi + 0.05) / (lo + 0.05)
         }
@@ -328,34 +370,43 @@ class ChartLookContractTokensTest {
         private fun round2(x: Double): Double = BigDecimal(x).setScale(2, RoundingMode.HALF_UP).toDouble()
 
         /** Every custom property and `color-scheme` declaration of a stylesheet, with the preludes that enclose it. */
-        private fun declarations(css: String): List<Decl> {
-            val text = css.replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), " ")
-            val stack = ArrayDeque<String>()
-            val out = mutableListOf<Decl>()
-            val buf = StringBuilder()
-            var quote: Char? = null
-            var depth = 0
-            for (c in text) {
-                when {
-                    quote != null -> buf.append(c).also { if (c == quote) quote = null }
-                    c == '"' || c == '\'' -> buf.append(c).also { quote = c }
-                    c == '(' -> buf.append(c).also { depth++ }
-                    c == ')' -> buf.append(c).also { depth-- }
-                    depth > 0 -> buf.append(c)
-                    c == '{' -> stack.addLast(buf.toString().trim().replace(Regex("\\s+"), " ")).also { buf.clear() }
-                    c == ';' || c == '}' -> {
-                        val d = buf.toString().trim()
-                        val name = d.substringBefore(':').trim()
-                        if (d.contains(':') && (name.startsWith("--") || name == "color-scheme")) {
-                            out += Decl(stack.toList(), name, d.substringAfter(':').trim())
-                        }
-                        buf.clear()
-                        if (c == '}') stack.removeLast()
-                    }
-                    else -> buf.append(c)
-                }
+        private fun declarations(css: String): List<Decl> = CssScanner().apply { css.replace(COMMENT, " ").forEach(::take) }.out
+
+        private val COMMENT = Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL)
+        private val SPACES = Regex("\\s+")
+    }
+
+    /** Reads CSS text one character at a time, minding quotes, parentheses and the block preludes around each declaration. */
+    private class CssScanner {
+        val out = mutableListOf<Decl>()
+        private val stack = ArrayDeque<String>()
+        private val buf = StringBuilder()
+        private var quote: Char? = null
+        private var depth = 0
+
+        fun take(c: Char) {
+            if (quote != null || depth > 0 || c !in "{;}") return text(c)
+            if (c == '{') stack.addLast(buf.toString().trim().replace(SPACES, " ")) else declaration()
+            buf.clear()
+            if (c == '}') stack.removeLast()
+        }
+
+        private fun text(c: Char) {
+            buf.append(c)
+            when {
+                quote != null -> if (c == quote) quote = null
+                c == '"' || c == '\'' -> quote = c
+                c == '(' -> depth++
+                c == ')' -> depth--
             }
-            return out
+        }
+
+        private fun declaration() {
+            val d = buf.toString().trim()
+            val name = d.substringBefore(':').trim()
+            if (d.contains(':') && (name.startsWith("--") || name == "color-scheme")) {
+                out += Decl(stack.toList(), name, d.substringAfter(':').trim())
+            }
         }
     }
 }
