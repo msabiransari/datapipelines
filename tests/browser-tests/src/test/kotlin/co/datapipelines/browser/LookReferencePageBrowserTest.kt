@@ -63,13 +63,7 @@ class LookReferencePageBrowserTest {
                 s.clean("after switching to $pass")
                 s.cardsAre(theme)
                 withClue("$screen: the page never scrolls sideways under $pass") { s.overflow() shouldBe 0 }
-                val problems = mutableListOf<String>()
-                for (key in s.keys()) {
-                    val r = s.check(s.page.mainFrame(), key, useExpect = true)
-                    problems += r.problems
-                    counts.merge("$pass/${key.substringBefore(':')}", 1, Int::plus)
-                    r.counts.forEach { (k, v) -> counts.merge("$pass/$k", v, Int::plus) }
-                }
+                val problems = everyTile(s, pass, counts)
                 withClue("$screen $pass: tiles that differ from their expect") { problems.shouldBeEmpty() }
             }
             s.drag("bar:full-edge", listOf(300, 120, 520, 360))
@@ -90,16 +84,9 @@ class LookReferencePageBrowserTest {
             var walks = 0
             for (theme in listOf("light", "dark")) {
                 s.switchTo(theme)
-                val problems = mutableListOf<String>()
-                for (key in s.keys()) {
-                    val r = s.cardOf(key)
-                    problems += r.first
-                    cards += r.second
-                    if (key.endsWith(":minimal-edge")) {
-                        problems += s.walk(key)
-                        walks++
-                    }
-                }
+                val (problems, opened, walked) = everyCard(s)
+                cards += opened
+                walks += walked
                 withClue("$screen $theme: cards that differ from the contract's §4.4 (L8)") { problems.shouldBeEmpty() }
                 s.clean("after the pointer and the keys under $theme")
             }
@@ -202,6 +189,39 @@ class LookReferencePageBrowserTest {
             }
             s.clean("after reading the assembly")
         }
+    }
+
+    /** Every tile of the page checked against its expect under the current theme; [counts] gathers per [pass]. */
+    private fun everyTile(
+        s: Session,
+        pass: String,
+        counts: MutableMap<String, Int>,
+    ): List<String> {
+        val problems = mutableListOf<String>()
+        for (key in s.keys()) {
+            val r = s.check(s.page.mainFrame(), key, useExpect = true)
+            problems += r.problems
+            counts.merge("$pass/${key.substringBefore(':')}", 1, Int::plus)
+            r.counts.forEach { (k, v) -> counts.merge("$pass/$k", v, Int::plus) }
+        }
+        return problems
+    }
+
+    /** The card opened on every tile under the current theme, and the key walk on each 80 x 24 tile: problems, cards, walks. */
+    private fun everyCard(s: Session): Triple<List<String>, Int, Int> {
+        val problems = mutableListOf<String>()
+        var cards = 0
+        var walks = 0
+        for (key in s.keys()) {
+            val r = s.cardOf(key)
+            problems += r.first
+            cards += r.second
+            if (key.endsWith(":minimal-edge")) {
+                problems += s.walk(key)
+                walks++
+            }
+        }
+        return Triple(problems, cards, walks)
     }
 
     /** The floors of D8 (non-vacuity): per pass, every type's tiles, and the counts each check saw. */
