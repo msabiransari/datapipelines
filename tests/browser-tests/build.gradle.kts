@@ -3,6 +3,12 @@
 // only `siteShots` below stays outside build/check (#297).
 plugins { id("datapipelines.common-conventions") }
 
+val lookReference: Configuration by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    description = "The assembled look reference page (modules/js-rendered build/reference), for LookReferencePageBrowserTest (#991)."
+}
+
 dependencies {
     testImplementation(project(":modules:app"))
     // #721: SiteShotsRailOrderTest pins the screenshot driver's rail table against AppNav.ITEMS.
@@ -11,6 +17,9 @@ dependencies {
     // Node's emitted inputs and results the page's own draw must equal (the jsRenderedTestData configuration).
     testImplementation(project(":modules:js-rendered"))
     testImplementation(project(path = ":modules:js-rendered", configuration = "jsRenderedTestData"))
+    // #991 (js-rendered F7): the assembled look reference page, a task output of the same module (no new edge);
+    // LookReferencePageBrowserTest serves that directory to its own browser (the test task's dp.reference.dir, below).
+    lookReference(project(path = ":modules:js-rendered", configuration = "jsRenderedReference"))
 
     // Seeding the local admin needs a real Argon2id hash of the known password —
     // same declared-exception rationale as tests/integration-tests (§5.11's note).
@@ -89,6 +98,9 @@ tasks.register<JavaExec>("siteShots") {
 // Chromium (SharedBrowserE2e is per JVM), so the count is dp.test.forks.e2e — the RAM-priced
 // knob — not the ordinary dp.test.forks. DEVELOPMENT.md §9.5.
 tasks.named<Test>("test") {
+    // #991: the look reference page is a declared input, so a changed page reruns the class that checks it.
+    inputs.files(lookReference).withPropertyName("lookReference").withPathSensitivity(PathSensitivity.RELATIVE)
+    jvmArgumentProviders.add(CommandLineArgumentProvider { listOf("-Ddp.reference.dir=" + lookReference.singleFile.absolutePath) })
     maxParallelForks =
         project.providers.gradleProperty("dp.test.forks.e2e").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
     // #139: ONE class order for CI and the box — each fork boots its own containers, app and

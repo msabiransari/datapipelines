@@ -1,0 +1,2377 @@
+[
+ {
+  "id": "study-grouped",
+  "title": "The study's grouped bar",
+  "document": {
+   "display_name": "Revenue by region",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Revenue by region",
+     "subtitle": "Thousands of dollars, three years"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "North",
+    "South",
+    "East",
+    "West",
+    "Central",
+    "Online",
+    "North",
+    "South",
+    "East",
+    "West",
+    "Central",
+    "Online",
+    "North",
+    "South",
+    "East",
+    "West",
+    "Central",
+    "Online"
+   ],
+   "s": [
+    "2024",
+    "2024",
+    "2024",
+    "2024",
+    "2024",
+    "2024",
+    "2025",
+    "2025",
+    "2025",
+    "2025",
+    "2025",
+    "2025",
+    "2026",
+    "2026",
+    "2026",
+    "2026",
+    "2026",
+    "2026"
+   ],
+   "v": [
+    574,
+    750,
+    978,
+    813,
+    900,
+    959,
+    1020,
+    954,
+    1165,
+    984,
+    997,
+    1099,
+    923,
+    1164,
+    1284,
+    1459,
+    1439,
+    1572
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 393,
+   "h": 342
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  },
+  "study": {
+   "chart": "grouped",
+   "light": "grouped-light.png",
+   "dark": "grouped-dark.png"
+  }
+ },
+ {
+  "id": "study-stacked",
+  "title": "The study's stacked bar (four series: C1's amber)",
+  "document": {
+   "display_name": "Orders by channel",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null,
+      "stack": "zero"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by channel",
+     "subtitle": "Stacked, per month"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug"
+   ],
+   "s": [
+    "Direct",
+    "Direct",
+    "Direct",
+    "Direct",
+    "Direct",
+    "Direct",
+    "Direct",
+    "Direct",
+    "Search",
+    "Search",
+    "Search",
+    "Search",
+    "Search",
+    "Search",
+    "Search",
+    "Search",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Email",
+    "Email",
+    "Email",
+    "Email",
+    "Email",
+    "Email",
+    "Email",
+    "Email"
+   ],
+   "v": [
+    957,
+    1013,
+    1195,
+    1199,
+    1279,
+    1302,
+    1310,
+    1396,
+    764,
+    822,
+    1031,
+    947,
+    955,
+    1158,
+    1214,
+    1057,
+    631,
+    823,
+    877,
+    889,
+    908,
+    731,
+    830,
+    797,
+    417,
+    596,
+    572,
+    513,
+    645,
+    589,
+    766,
+    711
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 393,
+   "h": 342
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "labels": "totals"
+  },
+  "study": {
+   "chart": "stacked",
+   "light": "stacked-light.png",
+   "dark": "stacked-dark.png"
+  },
+  "note": "The contract's call C1: in light, series slot 4 is #c98500 where the study drew #e29400. The fourth series shows the two ambers side by side; the contract leaves that step of amber to the owner's eye here (O-4). In dark the study and the contract both draw #b88a00."
+ },
+ {
+  "id": "study-ranked",
+  "title": "The study's ranked bar, with losses",
+  "document": {
+   "display_name": "Change in orders by team",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "y": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "x": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     }
+    },
+    "title": {
+     "text": "Change in orders by team",
+     "subtitle": "Against last quarter, with losses"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Platform",
+    "Billing",
+    "Search",
+    "Mobile",
+    "Growth",
+    "Support",
+    "Data",
+    "Partners"
+   ],
+   "v": [
+    412,
+    318,
+    240,
+    156,
+    64,
+    -38,
+    -120,
+    -205
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 393,
+   "h": 342
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  },
+  "study": {
+   "chart": "ranked",
+   "light": "ranked-light.png",
+   "dark": "ranked-dark.png"
+  }
+ },
+ {
+  "id": "empty",
+  "title": "No rows",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter"
+    }
+   }
+  },
+  "columns": {
+   "x": [],
+   "s": [],
+   "v": []
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "no-data"
+  }
+ },
+ {
+  "id": "one-series",
+  "title": "One series",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     }
+    },
+    "title": {
+     "text": "Orders by quarter"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "eight-series",
+  "title": "Eight series",
+  "document": {
+   "display_name": "Orders by region",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by region"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "H1",
+    "H2",
+    "H1",
+    "H2",
+    "H1",
+    "H2",
+    "H1",
+    "H2",
+    "H1",
+    "H2",
+    "H1",
+    "H2",
+    "H1",
+    "H2",
+    "H1",
+    "H2"
+   ],
+   "s": [
+    "North",
+    "North",
+    "South",
+    "South",
+    "East",
+    "East",
+    "West",
+    "West",
+    "Central",
+    "Central",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    10,
+    14,
+    13,
+    16,
+    16,
+    18,
+    19,
+    20,
+    22,
+    22,
+    25,
+    24,
+    28,
+    26,
+    31,
+    28
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 640,
+   "h": 320
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "negative",
+  "title": "Negative values",
+  "document": {
+   "display_name": "Change by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Change by quarter"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Plan",
+    "Plan",
+    "Plan",
+    "Plan",
+    "Actual",
+    "Actual",
+    "Actual",
+    "Actual"
+   ],
+   "v": [
+    12,
+    -8,
+    20,
+    -3,
+    9,
+    -14,
+    16,
+    5
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "long-labels",
+  "title": "Long labels",
+  "document": {
+   "display_name": "Revenue by team, a long title that does not fit a small card",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Revenue by team, a long title that does not fit a small card",
+     "subtitle": "A subtitle long enough to be cut where the frame ends"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Platform engineering and reliability",
+    "Billing operations",
+    "Search relevance and ranking",
+    "Mobile applications",
+    "Platform engineering and reliability",
+    "Billing operations",
+    "Search relevance and ranking",
+    "Mobile applications",
+    "Platform engineering and reliability",
+    "Billing operations",
+    "Search relevance and ranking",
+    "Mobile applications"
+   ],
+   "s": [
+    "Enterprise accounts in the northern region",
+    "Enterprise accounts in the northern region",
+    "Enterprise accounts in the northern region",
+    "Enterprise accounts in the northern region",
+    "Small teams on the annual plan",
+    "Small teams on the annual plan",
+    "Small teams on the annual plan",
+    "Small teams on the annual plan",
+    "Self-serve trials and pilots",
+    "Self-serve trials and pilots",
+    "Self-serve trials and pilots",
+    "Self-serve trials and pilots"
+   ],
+   "v": [
+    120,
+    90,
+    75,
+    40,
+    80,
+    60,
+    95,
+    30,
+    30,
+    45,
+    20,
+    55
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "full-edge",
+  "title": "Three series at 360 × 240",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "full-below",
+  "title": "Three series at 359 × 240",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 359,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "compact",
+   "legend": "bottom",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "compact-edge",
+  "title": "Three series at 200 × 140",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 200,
+   "h": 140
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "compact",
+   "legend": "bottom",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "compact-below",
+  "title": "Three series at 199 × 140",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 199,
+   "h": 140
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "minimal-edge",
+  "title": "Three series at 80 × 24",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 80,
+   "h": 24
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "minimal-below",
+  "title": "Three series at 79 × 24",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 79,
+   "h": 24
+  },
+  "hidden": [],
+  "expect": {
+   "state": "too-small"
+  }
+ },
+ {
+  "id": "hidden",
+  "title": "One series switched off",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [
+   "string:Retail"
+  ],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [
+    "string:Retail"
+   ],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "legend-null",
+  "title": "legend: null",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series",
+      "legend": null
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "legend-bottom",
+  "title": "A written legend place: bottom",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series",
+      "legend": {
+       "orient": "bottom"
+      }
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "bottom",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "normalized",
+  "title": "Normalized stack",
+  "document": {
+   "display_name": "Share by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null,
+      "stack": "normalize",
+      "format": "percent"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Share by quarter"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0
+  },
+  "note": "The contract's §4.3 gives no label rule for a normalized stack, and its card heads with the category alone: shown, not asserted (D10)."
+ },
+ {
+  "id": "horizontal",
+  "title": "Horizontal, two series",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "y": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "x": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "labels-none",
+  "title": "labels: none",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar",
+     "labels": "none"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "log",
+  "title": "A log value axis",
+  "document": {
+   "display_name": "Rows by table",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null,
+      "scale": {
+       "type": "log"
+      },
+      "format": "compact"
+     }
+    },
+    "title": {
+     "text": "Rows by table"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "tiny",
+    "small",
+    "medium",
+    "large",
+    "huge"
+   ],
+   "v": [
+    3,
+    40,
+    900,
+    12000,
+    450000
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ },
+ {
+  "id": "refused",
+  "title": "Nine series: refused",
+  "document": {
+   "display_name": "Orders by region",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by region"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "H1",
+    "H1",
+    "H1",
+    "H1",
+    "H1",
+    "H1",
+    "H1",
+    "H1",
+    "H1"
+   ],
+   "s": [
+    "North",
+    "South",
+    "East",
+    "West",
+    "Central",
+    "Online",
+    "Retail",
+    "Partner",
+    "Other"
+   ],
+   "v": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "refused",
+   "code": "chart.too_many_series"
+  }
+ },
+ {
+  "id": "fluid",
+  "title": "The phone's tile: the card's width",
+  "document": {
+   "display_name": "Orders by quarter",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Orders by quarter",
+     "subtitle": "Three channels"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4"
+   ],
+   "s": [
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    42,
+    55,
+    61,
+    48,
+    30,
+    38,
+    35,
+    44,
+    18,
+    22,
+    27,
+    25
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "fluid": true,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "full": {
+    "state": "rendered",
+    "level": "full",
+    "legend": "top",
+    "struck": [],
+    "dots": 0,
+    "labels": "bars"
+   },
+   "compact": {
+    "state": "rendered",
+    "level": "compact",
+    "legend": "bottom",
+    "struck": [],
+    "dots": 0
+   },
+   "minimal": {
+    "state": "rendered",
+    "level": "minimal",
+    "legend": "none",
+    "struck": [],
+    "dots": 0,
+    "labels": "none"
+   },
+   "too-small": {
+    "state": "too-small"
+   }
+  }
+ },
+ {
+  "id": "hostile",
+  "title": "Hostile names (text, never markup)",
+  "document": {
+   "display_name": "<b>bold?</b> & <i>title</i>",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "bar"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null,
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "<b>bold?</b> & <i>title</i>",
+     "subtitle": "<script>alert(0)</script>"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "<a href=x>A</a>",
+    "B & C",
+    "<a href=x>A</a>",
+    "B & C",
+    "<a href=x>A</a>",
+    "B & C"
+   ],
+   "s": [
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<img src=x onerror=alert(2)>",
+    "<img src=x onerror=alert(2)>",
+    "\"><svg onload=alert(3)>",
+    "\"><svg onload=alert(3)>"
+   ],
+   "v": [
+    3,
+    4,
+    5,
+    2,
+    1,
+    6
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "labels": "bars"
+  }
+ }
+]

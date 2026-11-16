@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" data-theme="forest">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Look reference — the forest theme</title>
+  <link rel="stylesheet" href="vendor/design-system/tokens.css">
+  <link rel="stylesheet" id="theme-link" href="vendor/design-system/themes/forest.css">
+  <link rel="stylesheet" href="vendor/design-system/base.css">
+  <link rel="stylesheet" href="vendor/design-system/primitives.css">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/dashboards.css">
+  <link rel="stylesheet" href="reference.css">
+</head>
+<body class="ref-page ref-forest" data-page="forest" data-forest-tiles="bar:eight-series line:study-line">
+  <main class="ref-main">
+    <h1 class="ref-forest-title">The forest theme: the colours the product gives a chart</h1>
+    <table class="ref-forest-tokens">
+      <caption>The seven chart tokens that follow the theme, read from the product's stylesheets under forest (contract §5.1)</caption>
+      <thead><tr><th scope="col">Chart token</th><th scope="col">Design-system token</th><th scope="col">Value under forest</th></tr></thead>
+      <tbody id="forest-tokens"></tbody>
+    </table>
+    <div class="ref-probes" aria-hidden="true">
+      <span class="ref-probe ref-probe-surface-default" data-probe="--surface-default"></span>
+      <span class="ref-probe ref-probe-text-primary" data-probe="--text-primary"></span>
+      <span class="ref-probe ref-probe-text-secondary" data-probe="--text-secondary"></span>
+      <span class="ref-probe ref-probe-text-muted" data-probe="--text-muted"></span>
+      <span class="ref-probe ref-probe-border-subtle" data-probe="--border-subtle"></span>
+      <span class="ref-probe ref-probe-surface-raised" data-probe="--surface-raised"></span>
+    </div>
+    <div id="forest-tiles" class="ref-grid"></div>
+  </main>
+  <!-- js-rendered: engine scripts -->
+</body>
+</html>

@@ -1,0 +1,243 @@
+/* The look reference page's own stylesheet (lane 991, brief D1a): it lays the page out and nothing more. Linked
+   last, after the product's six stylesheets. Every colour is a design-system token; no chart token is declared
+   here and no colour is written as a literal (both counted by the build). The chart card, its padding, the
+   tooltip's shadow, the dimming and the struck legend entry are the product's rules, not this file's. */
+
+.ref-page {
+  margin: 0;
+  background: var(--surface-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.ref-header,
+.ref-main {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: var(--space-4);
+}
+
+.ref-header h1 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-2xl);
+}
+
+.ref-lede,
+.ref-line,
+.ref-text {
+  max-width: 72rem;
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.ref-actions {
+  margin: var(--space-3) 0;
+}
+
+.ref-nav ul {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.ref-nav-title {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-lg);
+}
+
+.ref-section {
+  margin: 0 0 var(--space-12);
+  min-width: 0;
+}
+
+.ref-section > h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xl);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--space-2);
+}
+
+/* Tiles flow at their own width: a fixed tile is as wide as its card (its caption wraps to it), so a 480 or 640 px
+   frame is seen whole on a desktop instead of scrolling inside a narrow column; a fluid tile takes the room left. */
+.ref-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  align-items: flex-start;
+}
+
+.ref-grid > .ref-fixed {
+  flex: 0 1 auto;
+  width: min-content;
+  min-width: min(100%, 18rem);
+}
+
+.ref-grid > .ref-fluid {
+  flex: 1 1 24rem;
+}
+
+.ref-pairs {
+  display: grid;
+  gap: var(--space-8);
+}
+
+.ref-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.ref-study {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ref-study-img {
+  display: block;
+  border: 1px solid var(--border-subtle);
+}
+
+.ref-tile {
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ref-pair > .ref-tile {
+  flex: 1 1 26rem;
+}
+
+.ref-caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.ref-tile-title {
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.ref-mark {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.ref-expect {
+  flex-basis: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.ref-note {
+  flex-basis: 100%;
+  color: var(--text-primary);
+}
+
+.ref-drag {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.ref-drag input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 16rem;
+}
+
+/* A fixed frame wider than the screen scrolls inside its own tile, never the page (brief D2b). */
+.ref-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ref-fixed .dp-dashboard-card {
+  width: max-content;
+}
+
+.ref-fluid .dp-dashboard-card {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* The dashboard row (brief D2b): three cards side by side as a dashboard holds them; narrower than three cards,
+   they stack. */
+.ref-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.ref-row-slot {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ref-row-slot > .ref-tile {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+
+.ref-forest-frame {
+  display: block;
+  width: 100%;
+  height: 72rem;
+  border: 1px solid var(--border-subtle);
+}
+
+.ref-forest-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xl);
+}
+
+.ref-forest-tokens {
+  margin: 0 0 var(--space-6);
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.ref-forest-tokens caption {
+  text-align: left;
+  margin-bottom: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.ref-forest-tokens th,
+.ref-forest-tokens td {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  font-family: var(--font-mono);
+}
+
+/* The forest page's probes (brief D2a): each takes one design-system token as its colour, which the page's script
+   reads back as channels. Never shown. */
+.ref-probes {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.ref-probe-surface-default { color: var(--surface-default); }
+.ref-probe-text-primary { color: var(--text-primary); }
+.ref-probe-text-secondary { color: var(--text-secondary); }
+.ref-probe-text-muted { color: var(--text-muted); }
+.ref-probe-border-subtle { color: var(--border-subtle); }
+.ref-probe-surface-raised { color: var(--surface-raised); }
