@@ -75,7 +75,7 @@ class LakeProperties(
         /**
          * Scratch reserved per ingestion = delivery bytes × this factor. 10 = ⌈7.84 × 1.25⌉: the largest scratch peak ÷
          * delivery bytes #997 measured (2 GB mixed delivery, `--cpus 2`), on mixed and incompressible data; it does not
-         * cover highly compressible data (not measured).
+         * cover highly compressible data (35.32 at 100 MB, which would need 45).
          */
         val stagingExpansionFactor: Int = DEFAULT_STAGING_EXPANSION_FACTOR,
         val scratchBytes: DataSize = DataSize.ofGigabytes(DEFAULT_SCRATCH_GB),
@@ -175,13 +175,13 @@ class LakeProperties(
         /**
          * #969 D4: scratch needed per byte of a rewrite group's input; at least 1. 7 = ⌈5.435 × 1.25⌉: the largest scratch
          * peak ÷ input #997 measured over spilling groups (a 3.3 GB group of a 10 GB mixed table, `--cpus 2`), on mixed and
-         * incompressible data; it does not cover highly compressible data (not measured).
+         * incompressible data; it does not cover highly compressible data (25.26 for a 381 MB group, which would need 32).
          */
         val compactionScratchFactor: Int = DEFAULT_COMPACTION_SCRATCH_FACTOR,
         /**
          * #969 D4: input bytes a rewrite group is assumed to get through per second; above 0. 2 MiB = half the slowest
          * spilling group #997 measured (5,093,164 B/s, mixed data, `--cpus 2`), rounded down to a whole MiB; measured on mixed
-         * and incompressible data, it does not cover highly compressible data (not measured).
+         * and incompressible data, it does not cover highly compressible data (1,613,093 B/s for a 381 MB group).
          */
         val compactionBytesPerSecond: DataSize = DataSize.ofMegabytes(DEFAULT_COMPACTION_MEGABYTES_PER_SECOND),
     ) {
