@@ -3,12 +3,12 @@ package co.datapipelines.persistence
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
-import java.nio.file.Files
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.nio.channels.FileChannel
+import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.util.concurrent.CountDownLatch
@@ -51,8 +51,7 @@ class BatchingWriterCrashTest {
                 System.getProperty("java.class.path"),
                 CrashHarness::class.java.name,
                 dir.toString(),
-            )
-                .redirectErrorStream(true)
+            ).redirectErrorStream(true)
                 .redirectOutput(dir.resolve("child.log").toFile())
                 .start()
         process.waitFor(90, TimeUnit.SECONDS) shouldBe true

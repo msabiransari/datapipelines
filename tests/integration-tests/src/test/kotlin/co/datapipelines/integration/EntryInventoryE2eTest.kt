@@ -326,8 +326,7 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
                         "-Djava.io.tmpdir=${childTempDirectory()}",
                         "-jar",
                         jar().absolutePath,
-                    )
-                        .redirectErrorStream(true)
+                    ).redirectErrorStream(true)
                         .redirectOutput(log)
                 builder.environment().putAll(
                     mapOf(

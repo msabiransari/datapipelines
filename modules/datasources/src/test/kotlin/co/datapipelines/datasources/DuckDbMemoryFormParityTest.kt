@@ -52,8 +52,7 @@ class DuckDbMemoryFormParityTest {
                 System.getProperty("java.class.path"),
                 Probe::class.java.name,
                 url,
-            )
-                .directory(workDir.toFile())
+            ).directory(workDir.toFile())
                 .redirectErrorStream(true)
                 .start()
         check(process.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {

@@ -118,7 +118,9 @@ class ChildJvmTempDirectoryGuardTest {
         offenders(dir, reassigned) shouldContainExactly listOf("$PROBE:6")
         val parameter = "class Probe {\n    fun run(command: List<String>) {\n        $LAUNCH\n    }\n}\n"
         offenders(dir, parameter) shouldContainExactly listOf("$PROBE:3")
-        val property = "class Probe {\n    val command = listOf(java, \"-Djava.io.tmpdir=/t/a\")\n\n    fun run() {\n        $LAUNCH\n    }\n}\n"
+        val property =
+            "class Probe {\n    val command = listOf(java, \"-Djava.io.tmpdir=/t/a\")\n\n" +
+                "    fun run() {\n        $LAUNCH\n    }\n}\n"
         offenders(dir, property) shouldContainExactly listOf("$PROBE:5")
         val built = fn("""ProcessBuilder().command(java, "-Djava.io.tmpdir=/t/a").start()""")
         offenders(dir, built) shouldContainExactly listOf("$PROBE:4")
@@ -214,7 +216,8 @@ private object ChildJvmLaunches {
     private const val FLAG = "-Djava.io.tmpdir="
     private val SCANNED = Regex("""^(?:modules/[^/]+/src/test/|tests/[^/]+/src/test/|buildSrc/src/test/).*\.(?:kt|java)$""")
     private val LAUNCH = Regex("""(?<![\w$])ProcessBuilder\s*\(""")
-    private val LIST = Regex("""\G\s*(?:listOf|mutableListOf|arrayListOf|arrayOf|(?:java\.util\.)?List\.of|(?:java\.util\.)?Arrays\.asList)\s*\(""")
+    private val LIST =
+        Regex("""\G\s*(?:listOf|mutableListOf|arrayListOf|arrayOf|(?:java\.util\.)?List\.of|(?:java\.util\.)?Arrays\.asList)\s*\(""")
     private val JOIN = Regex("""\G\s*\+""")
     private val NAME = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
     private val FUN = Regex("""\bfun\b""")
@@ -290,13 +293,16 @@ private object ChildJvmLaunches {
         if (Regex("""(?<![\w$])$name\s*:""").containsMatchIn(code.substring(parameters))) return null
         val text = code.substring(body)
         val declarations = Regex("""\b(?:val|var)\s+$name\b\s*(?::[^=\n]*)?=(?!=)""").findAll(text).toList()
-        val javaDeclarations = Regex("""(?<=[\w$>\]])\s+$name\s*=(?!=)""").findAll(text).filterNot { hit ->
-            Regex("""\b(?:val|var|return)$""").containsMatchIn(text.substring(0, hit.range.first))
-        }.toList()
+        val javaDeclarations =
+            Regex("""(?<=[\w$>\]])\s+$name\s*=(?!=)""")
+                .findAll(text)
+                .filterNot { hit -> Regex("""\b(?:val|var|return)$""").containsMatchIn(text.substring(0, hit.range.first)) }
+                .toList()
         val writes =
-            Regex("""(?<![\w$.])$name\s*[-+*/]?=(?!=)""").findAll(text).filterNot { hit ->
-                Regex("""(?:\b(?:val|var)\s+|[\w$>\]]\s+)$""").containsMatchIn(text.substring(0, hit.range.first))
-            }.toList()
+            Regex("""(?<![\w$.])$name\s*[-+*/]?=(?!=)""")
+                .findAll(text)
+                .filterNot { hit -> Regex("""(?:\b(?:val|var)\s+|[\w$>\]]\s+)$""").containsMatchIn(text.substring(0, hit.range.first)) }
+                .toList()
         val all = declarations.map { it.range.last + 1 } + javaDeclarations.map { it.range.last + 1 }
         if (all.size != 1 || writes.isNotEmpty()) return null
         val value = body.first + all.single()
@@ -417,8 +423,8 @@ private object ChildJvmLaunches {
 
 /**
  * A source text with comments, string and char literals and backticked names masked (offsets and newlines kept; a
- * string's text becomes `#`, so an argument's range keeps its literal whole; a Kotlin template's code stays code), plus the range of every string literal. [of] answers null for a text it
- * cannot read to its end.
+ * string's text becomes `#`, so an argument's range keeps its literal whole; a Kotlin template's code stays code),
+ * plus the range of every string literal. [of] answers null for a text it cannot read to its end.
  */
 private class SourceMask private constructor(
     val code: String,
@@ -452,28 +458,30 @@ private class SourceMask private constructor(
             var i = start
             var braces = 0
             while (i < src.length) {
-                val c = src[i]
-                i =
-                    when {
-                        src.startsWith("//", i) -> blank(i, src.indexOf('\n', i).let { if (it < 0) src.length else it })
-                        src.startsWith("/*", i) -> blank(i, comment(i))
-                        src.startsWith("\"\"\"", i) -> string(i, raw = true)
-                        c == '"' -> string(i, raw = false)
-                        c == '\'' -> blank(i + 1, char(i) - 1) + 1
-                        kotlin && c == '`' -> name(i)
-                        c == '}' && template && braces == 0 -> return i
-                        else -> i + 1
-                    }
+                if (src[i] == '}' && template && braces == 0) return i
                 braces +=
-                    when (c) {
+                    when (src[i]) {
                         '{' -> 1
                         '}' -> -1
                         else -> 0
                     }
+                i = next(i)
             }
             if (template) throw Unreadable()
             return i
         }
+
+        /** Masks the token that starts at [i], if any; the index after it. */
+        private fun next(i: Int): Int =
+            when {
+                src.startsWith("//", i) -> blank(i, src.indexOf('\n', i).let { if (it < 0) src.length else it })
+                src.startsWith("/*", i) -> blank(i, comment(i))
+                src.startsWith("\"\"\"", i) -> string(i, raw = true)
+                src[i] == '"' -> string(i, raw = false)
+                src[i] == '\'' -> blank(i + 1, char(i) - 1) + 1
+                kotlin && src[i] == '`' -> name(i)
+                else -> i + 1
+            }
 
         private fun comment(start: Int): Int {
             var depth = 0
@@ -497,37 +505,35 @@ private class SourceMask private constructor(
             start: Int,
             raw: Boolean,
         ): Int {
-            val quotes = if (raw) 3 else 1
-            var i = start + quotes
+            var i = start + if (raw) RAW_QUOTES else 1
             var textFrom = start
             while (true) {
                 if (i >= src.length || (!raw && src[i] == '\n')) throw Unreadable()
-                when {
-                    raw && src.startsWith("\"\"\"", i) -> {
-                        var end = i + quotes
-                        while (end < src.length && src[end] == '"') end++
-                        return close(start, textFrom, end)
-                    }
-                    !raw && src[i] == '"' -> return close(start, textFrom, i + 1)
-                    src[i] == '\\' && (!raw || !kotlin) -> i += 2
-                    kotlin && src.startsWith("\${", i) -> {
-                        blank(textFrom, i + 2, TEXT)
-                        i = code(i + 2, template = true)
-                        textFrom = i
-                        i++
-                    }
-                    else -> i++
+                val end = closingQuotes(i, raw)
+                if (end > 0) {
+                    blank(textFrom, end, TEXT)
+                    literals[start] = end
+                    return end
+                }
+                if (kotlin && src.startsWith("\${", i)) {
+                    blank(textFrom, i + 2, TEXT)
+                    textFrom = code(i + 2, template = true)
+                    i = textFrom + 1
+                } else {
+                    i += if (src[i] == '\\' && (!raw || !kotlin)) 2 else 1
                 }
             }
         }
 
-        private fun close(
-            start: Int,
-            textFrom: Int,
-            end: Int,
+        /** The index after the quotes that close the string at [i]; 0 when the string does not close there. */
+        private fun closingQuotes(
+            i: Int,
+            raw: Boolean,
         ): Int {
-            blank(textFrom, end, TEXT)
-            literals[start] = end
+            if (!raw) return if (src[i] == '"') i + 1 else 0
+            if (!src.startsWith("\"\"\"", i)) return 0
+            var end = i + RAW_QUOTES
+            while (end < src.length && src[end] == '"') end++
             return end
         }
 
@@ -558,6 +564,7 @@ private class SourceMask private constructor(
     companion object {
         /** A string literal's text, masked: not whitespace (an argument's range keeps its literal whole), not code. */
         private const val TEXT = '#'
+        private const val RAW_QUOTES = 3
 
         fun of(
             source: String,
