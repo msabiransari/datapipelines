@@ -14,6 +14,7 @@
 //   jsRenderedEmit — Node's render result for every chart fixture at the fixed frames, one file per fixture, under
 //     build/. The JVM identity guard (modules/application JsRenderedIdentityTest) compares the sandbox's result with
 //     these files byte for byte (I6/A3), reading them from this module's jsRenderedTestData configuration.
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 plugins {
@@ -166,4 +167,189 @@ artifacts.add(jsRenderedTestData.name, fixtureResources.get().asFile) {
 
 tasks.named("check") {
     dependsOn("jsRenderedTest")
+}
+
+// jsRenderedReference — the look reference page (lane 991; design record §9 F7, look contract §10 LA9; brief 991 D1,
+// D1a). A static page for people looking at the look, assembled into build/reference/: the engine's files in the
+// order of LOAD-ORDER.txt with the script tags GENERATED from that list (the pages carry one marker line where they
+// go), the interaction layer's one file, the page's own script, stylesheet, tiles and chosen pictures, and the product's
+// stylesheets copied byte for byte at their own relative addresses with every file they name by url() (the fonts).
+// In no jar and behind no route (record O-11): nothing here is a resource of any source set. The browser test reads
+// the directory through the jsRenderedReference configuration (tests/browser-tests, an edge its root-map row holds).
+val referenceSource = file("src/reference")
+val webStatic = file("../web/src/main/resources/static")
+val referenceDir = layout.buildDirectory.dir("reference")
+
+/** The product's leanest chart page links these six, in this order (templates/visualizations/preview.html). */
+val referenceStylesheets =
+    listOf(
+        "vendor/design-system/tokens.css",
+        "vendor/design-system/themes/light.css",
+        "vendor/design-system/base.css",
+        "vendor/design-system/primitives.css",
+        "css/app.css",
+        "css/dashboards.css",
+    )
+
+/** The theme files the two pages swap or link: light and dark (the switch), forest (its own page, brief D2a). */
+val referenceThemes = listOf("vendor/design-system/themes/dark.css", "vendor/design-system/themes/forest.css")
+val referenceLayer = "js/datapipelines-chart-interactions.js"
+val referenceMarker = "<!-- js-rendered: engine scripts -->"
+
+/** The CSS colour keywords (CSS Color 4 named colours plus the system-free extras) a layout file may not write. */
+val cssColourNames =
+    (
+        "aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood " +
+            "cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray " +
+            "darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen " +
+            "darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue " +
+            "firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew " +
+            "hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan " +
+            "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray " +
+            "lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue " +
+            "mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred " +
+            "midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid " +
+            "palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple " +
+            "rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue " +
+            "slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white " +
+            "whitesmoke yellow yellowgreen transparent currentcolor"
+    ).split(" ").toSet()
+
+fun sha256(f: File): String =
+    MessageDigest
+        .getInstance("SHA-256")
+        .digest(f.readBytes())
+        .joinToString("") { "%02x".format(it) }
+
+val jsRenderedReference =
+    tasks.register("jsRenderedReference") {
+        group = "documentation"
+        description = "Assembles the look reference page into build/reference/ (lane 991): engine, layer, stylesheets, tiles."
+        inputs.dir(engineResources).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("engine")
+        inputs.dir(referenceSource).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("page")
+        inputs.dir(File(webStatic, "vendor/design-system")).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("designSystem")
+        inputs.dir(File(webStatic, "vendor/fonts")).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("fonts")
+        inputs
+            .files(File(webStatic, "css/app.css"), File(webStatic, "css/dashboards.css"), File(webStatic, referenceLayer))
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .withPropertyName("productFiles")
+        outputs.dir(referenceDir).withPropertyName("reference")
+        val outDir = referenceDir
+        val engineDir = File(engineResources, "co/datapipelines/jsrendered/engine")
+        val source = referenceSource
+        val static = webStatic
+        val sheets = referenceStylesheets
+        val themes = referenceThemes
+        val layer = referenceLayer
+        val marker = referenceMarker
+        val colourNames = cssColourNames
+        doLast {
+            val out = outDir.get().asFile
+            out.deleteRecursively()
+            out.mkdirs()
+            val report = mutableListOf<String>()
+
+            fun copyChecked(from: File, rel: String) {
+                if (!from.isFile) throw GradleException("jsRenderedReference: $rel is missing at $from")
+                val to = File(out, rel)
+                to.parentFile.mkdirs()
+                from.copyTo(to, overwrite = true)
+                val a = sha256(from)
+                val b = sha256(to)
+                if (a != b) throw GradleException("jsRenderedReference: the copy of $rel differs from its source")
+                report += "  $rel sha256=$a"
+            }
+
+            // 1. The engine, in load order: the generated script list is this list, line for line (G1).
+            val names = File(engineDir, "LOAD-ORDER.txt").readLines().map(String::trim).filter(String::isNotEmpty)
+            if (names.isEmpty()) throw GradleException("jsRenderedReference: LOAD-ORDER.txt lists no file")
+            report += "engine (${names.size} files, LOAD-ORDER.txt order):"
+            names.forEach { copyChecked(File(engineDir, it), "engine/$it") }
+            report += "interaction layer:"
+            copyChecked(File(static, layer), layer)
+
+            // 2. The product's stylesheets, unedited, at their own addresses, and every file they name by url().
+            report += "stylesheets (the six of preview.html in its order, then the theme files):"
+            (sheets + themes).forEach { copyChecked(File(static, it), it) }
+            report += "files the stylesheets name:"
+            val urlPattern = Regex("""url\(\s*(['"]?)([^'")]+)\1\s*\)""")
+            val named = sortedSetOf<String>()
+            (sheets + themes).forEach { rel ->
+                urlPattern.findAll(File(static, rel).readText()).forEach { m ->
+                    val ref = m.groupValues[2].trim()
+                    if (ref.startsWith("data:") || ref.startsWith("#")) return@forEach
+                    if (ref.contains("://") || ref.startsWith("/")) {
+                        throw GradleException("jsRenderedReference: $rel names $ref, outside the page's own directory")
+                    }
+                    val clean = ref.substringBefore('?').substringBefore('#')
+                    val target = File(File(static, rel).parentFile, clean).normalize()
+                    val relTarget = target.relativeTo(static.normalize()).invariantSeparatorsPath
+                    if (relTarget.startsWith("..")) throw GradleException("jsRenderedReference: $rel names $ref, outside the static tree")
+                    named += relTarget
+                }
+            }
+            if (named.isEmpty()) throw GradleException("jsRenderedReference: the stylesheets name no file (the fonts): the scan ran vacuously")
+            named.forEach { copyChecked(File(static, it), it) }
+
+            // 3. The page: the two documents with the script tags generated at their one marker line.
+            val tags =
+                (names.map { "engine/$it" } + layer + "reference.js").joinToString("\n") { "  <script src=\"$it\"></script>" }
+            listOf("index.html", "forest.html").forEach { page ->
+                val text = File(source, page).readText()
+                val count = text.split(marker).size - 1
+                if (count != 1) throw GradleException("jsRenderedReference: $page carries the marker $count times (expected 1)")
+                if (Regex("""<script\b""").containsMatchIn(text)) throw GradleException("jsRenderedReference: $page writes a script tag by hand")
+                if (Regex("""\sstyle\s*=""").containsMatchIn(text)) throw GradleException("jsRenderedReference: $page carries a style attribute")
+                File(out, page).writeText(text.replace(marker, tags))
+            }
+            listOf("reference.js", "reference.css").forEach { File(source, it).copyTo(File(out, it), overwrite = true) }
+            File(source, "tiles").copyRecursively(File(out, "tiles"), overwrite = true)
+            File(source, "study").copyRecursively(File(out, "study"), overwrite = true)
+
+            // 4. The counts the brief asks for (A.1, Security): each one fails the task when it is not 0.
+            val css = File(source, "reference.css").readText().replace(Regex("""/\*[\s\S]*?\*/"""), "")
+            val chartDeclarations = Regex("""--chart-[a-z0-9-]*\s*:""").findAll(css).count()
+            val values = Regex(""":([^;{}]+)[;}]""").findAll(css).map { it.groupValues[1] }.toList()
+            val colourLiterals =
+                values.sumOf { v ->
+                    Regex("""#[0-9a-fA-F]{3,8}\b""").findAll(v).count() +
+                        Regex("""\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|light-dark)\(""").findAll(v).count() +
+                        Regex("""[A-Za-z]+""").findAll(v.replace(Regex("""var\([^)]*\)"""), "")).count { it.value.lowercase() in colourNames }
+                }
+            val script = File(source, "reference.js").readText()
+            val sinks =
+                listOf("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "Function(")
+                    .associateWith { script.split(it).size - 1 }
+            report += "reference.css: --chart- declarations=$chartDeclarations colour literals=$colourLiterals (values read: ${values.size})"
+            report += "reference.js sinks: " + sinks.entries.joinToString(" ") { "${it.key}=${it.value}" }
+            if (values.isEmpty()) throw GradleException("jsRenderedReference: reference.css has no declaration: the count ran vacuously")
+            if (chartDeclarations != 0 || colourLiterals != 0) {
+                throw GradleException("jsRenderedReference: reference.css declares $chartDeclarations chart tokens and writes $colourLiterals colour literals (expected 0 and 0)")
+            }
+            if (sinks.values.any { it != 0 }) throw GradleException("jsRenderedReference: reference.js names a markup or code sink: $sinks")
+
+            // 5. The tiles: one file per type, every tile with its hand-written expect.
+            listOf("bar", "line", "area").forEach { wire ->
+                @Suppress("UNCHECKED_CAST")
+                val tiles = groovy.json.JsonSlurper().parse(File(source, "tiles/$wire.json")) as List<Map<String, Any?>>
+                val missing = tiles.filter { it["expect"] !is Map<*, *> || (it["expect"] as Map<*, *>).isEmpty() }.map { it["id"] }
+                if (tiles.isEmpty() || missing.isNotEmpty()) throw GradleException("jsRenderedReference: tiles/$wire.json: ${tiles.size} tiles, without an expect: $missing")
+                report += "tiles/$wire.json: ${tiles.size} tiles, each with its expect"
+            }
+            val pictures = File(source, "study").listFiles { f -> f.name.endsWith(".png") }.orEmpty().size
+            report += "study: $pictures pictures"
+            File(out, "ASSEMBLY.txt").writeText(report.joinToString("\n") + "\n")
+            logger.lifecycle("jsRenderedReference: {}\n{}", out, report.joinToString("\n"))
+        }
+    }
+
+val jsRenderedReferenceOut =
+    configurations.create("jsRenderedReference") {
+        isCanBeConsumed = true
+        isCanBeResolved = false
+        description = "The assembled look reference page (build/reference/), for the browser test that checks it (lane 991)."
+    }
+artifacts.add(jsRenderedReferenceOut.name, referenceDir.get().asFile) {
+    type = "directory"
+    builtBy(jsRenderedReference)
 }

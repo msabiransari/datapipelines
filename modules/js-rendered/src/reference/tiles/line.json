@@ -1,0 +1,2939 @@
+[
+ {
+  "id": "study-line",
+  "title": "The study's line (four series: C1's amber)",
+  "document": {
+   "display_name": "Active accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Active accounts by plan",
+     "subtitle": "Monthly, two years"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2025-01-01",
+    "2025-02-01",
+    "2025-03-01",
+    "2025-04-01",
+    "2025-05-01",
+    "2025-06-01",
+    "2025-07-01",
+    "2025-08-01",
+    "2025-09-01",
+    "2025-10-01",
+    "2025-11-01",
+    "2025-12-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-07-01",
+    "2026-08-01",
+    "2026-09-01",
+    "2026-10-01",
+    "2026-11-01",
+    "2026-12-01",
+    "2025-01-01",
+    "2025-02-01",
+    "2025-03-01",
+    "2025-04-01",
+    "2025-05-01",
+    "2025-06-01",
+    "2025-07-01",
+    "2025-08-01",
+    "2025-09-01",
+    "2025-10-01",
+    "2025-11-01",
+    "2025-12-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-07-01",
+    "2026-08-01",
+    "2026-09-01",
+    "2026-10-01",
+    "2026-11-01",
+    "2026-12-01",
+    "2025-01-01",
+    "2025-02-01",
+    "2025-03-01",
+    "2025-04-01",
+    "2025-05-01",
+    "2025-06-01",
+    "2025-07-01",
+    "2025-08-01",
+    "2025-09-01",
+    "2025-10-01",
+    "2025-11-01",
+    "2025-12-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-07-01",
+    "2026-08-01",
+    "2026-09-01",
+    "2026-10-01",
+    "2026-11-01",
+    "2026-12-01",
+    "2025-01-01",
+    "2025-02-01",
+    "2025-03-01",
+    "2025-04-01",
+    "2025-05-01",
+    "2025-06-01",
+    "2025-07-01",
+    "2025-08-01",
+    "2025-09-01",
+    "2025-10-01",
+    "2025-11-01",
+    "2025-12-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-07-01",
+    "2026-08-01",
+    "2026-09-01",
+    "2026-10-01",
+    "2026-11-01",
+    "2026-12-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial",
+    "Trial"
+   ],
+   "v": [
+    10042,
+    10794,
+    10962,
+    11546,
+    11579,
+    12305,
+    12696,
+    13157,
+    13279,
+    13872,
+    14317,
+    14500,
+    14953,
+    15768,
+    16450,
+    16959,
+    17719,
+    17897,
+    18584,
+    18869,
+    19574,
+    20631,
+    21622,
+    22796,
+    6210,
+    6398,
+    6435,
+    6401,
+    6605,
+    6683,
+    6590,
+    6592,
+    6773,
+    6953,
+    7362,
+    7200,
+    7622,
+    7549,
+    7978,
+    8279,
+    8535,
+    8863,
+    9122,
+    9231,
+    9628,
+    9511,
+    9839,
+    9881,
+    4332,
+    4232,
+    4530,
+    4635,
+    4929,
+    5141,
+    5069,
+    5006,
+    5182,
+    5050,
+    5386,
+    5508,
+    5658,
+    5712,
+    5828,
+    5693,
+    5544,
+    5896,
+    5956,
+    5761,
+    5828,
+    5625,
+    5463,
+    5702,
+    2364,
+    2321,
+    2312,
+    2450,
+    2677,
+    2714,
+    2738,
+    2850,
+    2619,
+    2645,
+    2812,
+    2953,
+    3152,
+    3052,
+    3101,
+    3154,
+    2921,
+    2803,
+    2745,
+    2549,
+    2512,
+    2252,
+    2036,
+    1791
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 393,
+   "h": 342
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "lines",
+   "struck": [],
+   "dots": 4,
+   "labels": "none"
+  },
+  "study": {
+   "chart": "line",
+   "light": "line-light.png",
+   "dark": "line-dark.png"
+  },
+  "note": "The contract's call C1: in light, series slot 4 is #c98500 where the study drew #e29400. The fourth series shows the two ambers side by side; the contract leaves that step of amber to the owner's eye here (O-4). In dark the study and the contract both draw #b88a00."
+ },
+ {
+  "id": "empty",
+  "title": "No rows",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan"
+    }
+   }
+  },
+  "columns": {
+   "x": [],
+   "s": [],
+   "v": []
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "no-data"
+  }
+ },
+ {
+  "id": "one-series",
+  "title": "One series",
+  "document": {
+   "display_name": "Accounts",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     }
+    },
+    "title": {
+     "text": "Accounts"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 1,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "two-series",
+  "title": "Two series: names on the lines",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "lines",
+   "struck": [],
+   "dots": 2,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "five-series",
+  "title": "Five series: the legend at the top",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "B",
+    "B",
+    "B",
+    "B",
+    "B",
+    "B",
+    "C",
+    "C",
+    "C",
+    "C",
+    "C",
+    "C",
+    "D",
+    "D",
+    "D",
+    "D",
+    "D",
+    "D",
+    "E",
+    "E",
+    "E",
+    "E",
+    "E",
+    "E"
+   ],
+   "v": [
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 5,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "eight-series",
+  "title": "Eight series",
+  "document": {
+   "display_name": "Accounts by region",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by region"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "West",
+    "West",
+    "West",
+    "West",
+    "West",
+    "West",
+    "Central",
+    "Central",
+    "Central",
+    "Central",
+    "Central",
+    "Central",
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner",
+    "Partner"
+   ],
+   "v": [
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30,
+    25,
+    25,
+    25,
+    25,
+    25,
+    25,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    35,
+    37,
+    39,
+    41,
+    43,
+    45,
+    40,
+    40,
+    40,
+    40,
+    40,
+    40,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 640,
+   "h": 320
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 8,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "negative",
+  "title": "Negative values",
+  "document": {
+   "display_name": "Net change",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Net change"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South"
+   ],
+   "v": [
+    5,
+    -3,
+    8,
+    -6,
+    2,
+    4,
+    -2,
+    4,
+    -5,
+    3,
+    -1,
+    6
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "lines",
+   "struck": [],
+   "dots": 2,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "long-labels",
+  "title": "Long labels",
+  "document": {
+   "display_name": "Accounts by plan, a long title that does not fit a small card",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan, a long title that does not fit a small card",
+     "subtitle": "A subtitle long enough to be cut where the frame ends"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise accounts in the northern region",
+    "Enterprise accounts in the northern region",
+    "Enterprise accounts in the northern region",
+    "Enterprise accounts in the northern region",
+    "Enterprise accounts in the northern region",
+    "Enterprise accounts in the northern region",
+    "Small teams on the annual plan",
+    "Small teams on the annual plan",
+    "Small teams on the annual plan",
+    "Small teams on the annual plan",
+    "Small teams on the annual plan",
+    "Small teams on the annual plan",
+    "Self-serve trials and pilots",
+    "Self-serve trials and pilots",
+    "Self-serve trials and pilots",
+    "Self-serve trials and pilots",
+    "Self-serve trials and pilots",
+    "Self-serve trials and pilots"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "lines",
+   "struck": [],
+   "dots": 3,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "full-edge",
+  "title": "Three series at 360 × 240",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "lines",
+   "struck": [],
+   "dots": 3,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "full-below",
+  "title": "Three series at 359 × 240",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 359,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "compact",
+   "legend": "bottom",
+   "struck": [],
+   "dots": 3,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "compact-edge",
+  "title": "Three series at 200 × 140",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 200,
+   "h": 140
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "compact",
+   "legend": "bottom",
+   "struck": [],
+   "dots": 3,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "compact-below",
+  "title": "Three series at 199 × 140",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 199,
+   "h": 140
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 3,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "minimal-edge",
+  "title": "Three series at 80 × 24",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 80,
+   "h": 24
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 3,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "minimal-below",
+  "title": "Three series at 79 × 24",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 79,
+   "h": 24
+  },
+  "hidden": [],
+  "expect": {
+   "state": "too-small"
+  }
+ },
+ {
+  "id": "hidden",
+  "title": "One of three switched off",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [
+   "string:Team"
+  ],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [
+    "string:Team"
+   ],
+   "dots": 2,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "all-hidden",
+  "title": "Every series switched off",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [
+   "string:Enterprise",
+   "string:Team",
+   "string:Starter"
+  ],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [
+    "string:Enterprise",
+    "string:Team",
+    "string:Starter"
+   ],
+   "dots": 0,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "legend-null",
+  "title": "legend: null",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series",
+      "legend": null
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 3,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "legend-bottom",
+  "title": "A written legend place: bottom",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series",
+      "legend": {
+       "orient": "bottom"
+      }
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "bottom",
+   "struck": [],
+   "dots": 3,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "null-gap",
+  "title": "A temporal x with a null gap",
+  "document": {
+   "display_name": "Readings",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Readings"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South"
+   ],
+   "v": [
+    5,
+    7,
+    null,
+    9,
+    11,
+    10,
+    3,
+    4,
+    6,
+    null,
+    7,
+    8
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "lines",
+   "struck": [],
+   "dots": 2,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "log",
+  "title": "A log value axis",
+  "document": {
+   "display_name": "Rows by month",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null,
+      "scale": {
+       "type": "log"
+      },
+      "format": "compact"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Rows by month"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Small",
+    "Small",
+    "Small",
+    "Small",
+    "Small",
+    "Small",
+    "Large",
+    "Large",
+    "Large",
+    "Large",
+    "Large",
+    "Large"
+   ],
+   "v": [
+    3,
+    10,
+    30,
+    80,
+    200,
+    600,
+    1000,
+    4000,
+    9000,
+    30000,
+    90000,
+    250000
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "lines",
+   "struck": [],
+   "dots": 2,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "refused",
+  "title": "Nine series: refused",
+  "document": {
+   "display_name": "Accounts by region",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by region"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-01-01",
+    "2026-02-01"
+   ],
+   "s": [
+    "North",
+    "North",
+    "South",
+    "South",
+    "East",
+    "East",
+    "West",
+    "West",
+    "Central",
+    "Central",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Other",
+    "Other"
+   ],
+   "v": [
+    1,
+    2,
+    2,
+    3,
+    3,
+    4,
+    4,
+    5,
+    5,
+    6,
+    6,
+    7,
+    7,
+    8,
+    8,
+    9,
+    9,
+    10
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "refused",
+   "code": "chart.too_many_series"
+  }
+ },
+ {
+  "id": "fluid",
+  "title": "The phone's tile: the card's width",
+  "document": {
+   "display_name": "Accounts by plan",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "Accounts by plan",
+     "subtitle": "Three plans"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-04-01",
+    "2026-05-01",
+    "2026-06-01"
+   ],
+   "s": [
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Enterprise",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Team",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter",
+    "Starter"
+   ],
+   "v": [
+    40,
+    44,
+    47,
+    52,
+    55,
+    61,
+    30,
+    31,
+    35,
+    34,
+    38,
+    41,
+    12,
+    15,
+    14,
+    18,
+    21,
+    22
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "fluid": true,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "full": {
+    "state": "rendered",
+    "level": "full",
+    "legend": "lines",
+    "struck": [],
+    "dots": 3,
+    "labels": "none"
+   },
+   "compact": {
+    "state": "rendered",
+    "level": "compact",
+    "legend": "bottom",
+    "struck": [],
+    "dots": 3,
+    "labels": "none"
+   },
+   "minimal": {
+    "state": "rendered",
+    "level": "minimal",
+    "legend": "none",
+    "struck": [],
+    "dots": 3,
+    "labels": "none"
+   },
+   "too-small": {
+    "state": "too-small"
+   }
+  }
+ },
+ {
+  "id": "hostile",
+  "title": "Hostile names (text, never markup)",
+  "document": {
+   "display_name": "<b>bold?</b> & <i>title</i>",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "line"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal",
+      "format": "month",
+      "title": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "title": null
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Series"
+     }
+    },
+    "title": {
+     "text": "<b>bold?</b> & <i>title</i>",
+     "subtitle": "<script>alert(0)</script>"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01",
+    "2026-01-01",
+    "2026-02-01",
+    "2026-03-01"
+   ],
+   "s": [
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<img src=x onerror=alert(2)>",
+    "<img src=x onerror=alert(2)>",
+    "<img src=x onerror=alert(2)>",
+    "\"><svg onload=alert(3)>",
+    "\"><svg onload=alert(3)>",
+    "\"><svg onload=alert(3)>"
+   ],
+   "v": [
+    3,
+    4,
+    5,
+    5,
+    2,
+    6,
+    1,
+    6,
+    2
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "lines",
+   "struck": [],
+   "dots": 3,
+   "labels": "none"
+  }
+ }
+]

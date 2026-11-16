@@ -1,0 +1,321 @@
+{
+ "study": "/home/msabiransari/development/projects/datapipelines-orchestration/design-records/charts-evidence/2026-11-14-look-study",
+ "owner_line": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+ "files_sha256": {
+  "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+  "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+  "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+ },
+ "pictures": [
+  {
+   "file": "grouped-light.png",
+   "chart": "grouped",
+   "title": "Revenue by region",
+   "theme": "light",
+   "hash": "#%7B%22theme%22%3A%22light%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 284,
+    "y": 173.1875,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 301,
+    "y": 190.1875,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:04Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  },
+  {
+   "file": "line-light.png",
+   "chart": "line",
+   "title": "Active accounts by plan",
+   "theme": "light",
+   "hash": "#%7B%22theme%22%3A%22light%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 727,
+    "y": 173.1875,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 744,
+    "y": 190.1875,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:05Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  },
+  {
+   "file": "stacked-light.png",
+   "chart": "stacked",
+   "title": "Orders by channel",
+   "theme": "light",
+   "hash": "#%7B%22theme%22%3A%22light%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 284,
+    "y": 565.265625,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 301,
+    "y": 582.265625,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:05Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  },
+  {
+   "file": "area-light.png",
+   "chart": "area",
+   "title": "Sessions",
+   "theme": "light",
+   "hash": "#%7B%22theme%22%3A%22light%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 727,
+    "y": 565.265625,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 744,
+    "y": 582.265625,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:05Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  },
+  {
+   "file": "ranked-light.png",
+   "chart": "ranked",
+   "title": "Change in orders by team",
+   "theme": "light",
+   "hash": "#%7B%22theme%22%3A%22light%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 284,
+    "y": 957.34375,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 301,
+    "y": 974.34375,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:05Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  },
+  {
+   "file": "grouped-dark.png",
+   "chart": "grouped",
+   "title": "Revenue by region",
+   "theme": "dark",
+   "hash": "#%7B%22theme%22%3A%22dark%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 284,
+    "y": 173.1875,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 301,
+    "y": 190.1875,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:06Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  },
+  {
+   "file": "line-dark.png",
+   "chart": "line",
+   "title": "Active accounts by plan",
+   "theme": "dark",
+   "hash": "#%7B%22theme%22%3A%22dark%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 727,
+    "y": 173.1875,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 744,
+    "y": 190.1875,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:06Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  },
+  {
+   "file": "stacked-dark.png",
+   "chart": "stacked",
+   "title": "Orders by channel",
+   "theme": "dark",
+   "hash": "#%7B%22theme%22%3A%22dark%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 284,
+    "y": 565.265625,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 301,
+    "y": 582.265625,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:06Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  },
+  {
+   "file": "area-dark.png",
+   "chart": "area",
+   "title": "Sessions",
+   "theme": "dark",
+   "hash": "#%7B%22theme%22%3A%22dark%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 727,
+    "y": 565.265625,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 744,
+    "y": 582.265625,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:06Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  },
+  {
+   "file": "ranked-dark.png",
+   "chart": "ranked",
+   "title": "Change in orders by team",
+   "theme": "dark",
+   "hash": "#%7B%22theme%22%3A%22dark%22%2C%22cols%22%3A%222%22%2C%22start%22%3A%22quiet%22%2C%22look%22%3A%7B%22colours%22%3A%22jewel%22%2C%22grid%22%3A%22both%22%2C%22axis%22%3A%22frame%22%2C%22corners%22%3A%22round%22%2C%22bars%22%3A%22full%22%2C%22gaps%22%3A%22gap%22%2C%22line%22%3A%22smooth%22%2C%22weight%22%3A%222%22%2C%22points%22%3A%22end%22%2C%22area%22%3A%22fade%22%2C%22legend%22%3A%22direct%22%2C%22labels%22%3A%22on%22%2C%22donut%22%3A%22ring%22%2C%22density%22%3A%22roomy%22%2C%22tooltip%22%3A%22card%22%7D%7D",
+   "selection": "look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card",
+   "window": {
+    "w": 1170,
+    "h": 1000,
+    "deviceScaleFactor": 2
+   },
+   "box": {
+    "x": 284,
+    "y": 957.34375,
+    "w": 427,
+    "h": 376.078125
+   },
+   "inner": {
+    "x": 301,
+    "y": 974.34375,
+    "w": 393,
+    "h": 342.078125
+   },
+   "captured": "2026-11-16T01:12:06Z",
+   "sha256": {
+    "index.html": "5c59512adaf2dc349be1e7cc260587c9d0d999021e2b6a5d73528ecdf867ace3",
+    "look.js": "c07fac2321eb655e0c6c8dbdabc5faea479e17269b55654606d38afb1cf239b2",
+    "look.css": "0d898e15ada837224ffba813acd0da83a041755803aef9603b32e39ba88bdf7f"
+   }
+  }
+ ]
+}
