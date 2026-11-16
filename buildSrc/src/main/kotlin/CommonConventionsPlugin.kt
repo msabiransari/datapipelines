@@ -1,3 +1,4 @@
+import com.sun.security.auth.module.UnixSystem
 import io.gitlab.arturbosch.detekt.Detekt
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
 import kotlinx.kover.gradle.plugin.dsl.KoverProjectExtension
@@ -22,11 +23,25 @@ import org.gradle.kotlin.dsl.dependencies
 import org.gradle.kotlin.dsl.dependencyLocking
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.withType
+import org.gradle.process.CommandLineArgumentProvider
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 import org.jlleitschuh.gradle.ktlint.tasks.BaseKtLintCheckTask
 import java.io.File
+import java.nio.file.FileAlreadyExistsException
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFileAttributes
+import java.nio.file.attribute.PosixFilePermission.GROUP_WRITE
+import java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE
+import java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE
+import java.nio.file.attribute.PosixFilePermission.OWNER_READ
+import java.nio.file.attribute.PosixFilePermission.OWNER_WRITE
+import java.nio.file.attribute.PosixFilePermissions
+import java.security.MessageDigest
 import java.util.zip.ZipFile
 
 /**
@@ -300,6 +315,22 @@ class CommonConventionsPlugin : Plugin<Project> {
                 },
             )
             doFirst { crashFileDirectory.get().asFile.mkdirs() }
+            // Every test JVM's java.io.tmpdir is its own directory under the checkout's test temp
+            // root (#983, DEVELOPMENT.md §9.7; TestTempRoot), never the shared temp directory: a
+            // killed run's leftovers are then found by WHERE they are, and the next gate or pregate
+            // of this checkout empties the root. A TestKit probe is handed its owning checkout
+            // through TestTempRoot.OWNER_ENV by buildSrc's test task. The directory is created and
+            // its parents verified before the JVM starts; a refused parent fails the task.
+            val testTempDirectory =
+                TestTempDirectory(
+                    rootProjectDirectory = project.rootDir,
+                    ownerCheckout = project.providers.environmentVariable(TestTempRoot.OWNER_ENV),
+                    tmpdir = project.providers.environmentVariable("TMPDIR"),
+                    projectSegment = TestTempRoot.segment(project.path),
+                    taskName = name,
+                )
+            jvmArgumentProviders.add(testTempDirectory)
+            doFirst { testTempDirectory.prepare() }
             // glibc's thread-stack cache is OFF in every test JVM (#685, DEVELOPMENT.md §9.4).
             // Syscall captures showed isolate threads leaving a protected page inside a stack
             // later reused by a Java thread; recursion faulted there with exit 139 and no
@@ -867,3 +898,184 @@ private fun testEngineServiceLines(entry: File): List<String>? =
             null
         }
     }
+
+/**
+ * Where a test JVM's `java.io.tmpdir` lives (#983, DEVELOPMENT.md §9.7). Test JVMs write their
+ * temporary files below a root that belongs to ONE checkout, so what a killed run leaves is known
+ * by where it is; `scripts/lib/temp-hygiene.sh` empties that root when the next gate or pregate
+ * of the checkout starts, after it holds the verification lock.
+ *
+ * The rule, followed character for character by this object, by `buildSrc/build.gradle.kts` (for
+ * buildSrc's own tests, which cannot apply this plugin) and by `temp-hygiene.sh --print-root`:
+ *  - base: the real path of `$TMPDIR` when it names an existing absolute directory, else of `/tmp`;
+ *  - root: `<base>/dp-test-tmp-<uid>/<key>`, the key being the first 16 hex digits of the
+ *    SHA-256 of the UTF-8 real path of the owning checkout;
+ *  - a test task's directory: `<root>/<project path, ':' → '/', the root project `_root`>/<task>`;
+ *    a TestKit probe's tree sits under `<root>/testkit/`.
+ *
+ * The owning checkout is the root project's directory, unless [OWNER_ENV] names one: buildSrc's
+ * test task hands its TestKit probes the checkout they belong to, so a probe's root is never
+ * derived from the probe's own temporary directory.
+ *
+ * `dp-test-tmp-<uid>` and the root are created mode 0700 and verified before anything is created
+ * below them — a real directory, not a link, owned by the current uid, not writable by group or
+ * others. A failed check fails the test task with the reason; it never falls back to the shared
+ * temp directory. Beside each root, `<key>.checkout` records the checkout's real path, so the
+ * sweep can tell a root whose checkout is gone (DEVELOPMENT.md §9.7).
+ */
+internal object TestTempRoot {
+    /** The environment variable that names the owning checkout of a TestKit probe build. */
+    const val OWNER_ENV = "DP_TEST_TMP_OWNER_CHECKOUT"
+
+    /** The directory under the temp base that holds every checkout's root, suffixed with the uid. */
+    const val PARENT_PREFIX = "dp-test-tmp-"
+
+    /** The suffix of the record file beside a root: `<key>.checkout`. */
+    const val RECORD_SUFFIX = ".checkout"
+
+    /** The subtree of a root where TestKit probe builds put their test JVMs' directories. */
+    const val TESTKIT_SEGMENT = "testkit"
+
+    private const val KEY_HEX_DIGITS = 16
+    private const val FALLBACK_BASE = "/tmp"
+    private val PRIVATE = PosixFilePermissions.asFileAttribute(setOf(OWNER_READ, OWNER_WRITE, OWNER_EXECUTE))
+
+    /** The temp base for a `$TMPDIR` value (null or blank when unset). */
+    fun base(tmpdir: String?): Path {
+        val named = tmpdir?.takeIf { it.isNotBlank() }?.let { Path.of(it) }
+        val chosen = if (named != null && named.isAbsolute && Files.isDirectory(named)) named else Path.of(FALLBACK_BASE)
+        return chosen.toRealPath()
+    }
+
+    /** The current process's numeric uid. */
+    fun uid(): Long = UnixSystem().uid
+
+    /** The checkout key: the first 16 hex digits of the SHA-256 of the checkout's UTF-8 real path. */
+    fun key(checkout: Path): String =
+        MessageDigest
+            .getInstance("SHA-256")
+            .digest(checkout.toRealPath().toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+            .take(KEY_HEX_DIGITS)
+
+    /** `<base>/dp-test-tmp-<uid>`. */
+    fun parent(
+        base: Path,
+        uid: Long,
+    ): Path = base.resolve(PARENT_PREFIX + uid)
+
+    /** `<base>/dp-test-tmp-<uid>/<key>`. */
+    fun root(
+        base: Path,
+        uid: Long,
+        checkout: Path,
+    ): Path = parent(base, uid).resolve(key(checkout))
+
+    /** The directory segment of a Gradle project path: `:modules:web` → `modules/web`, `:` → `_root`. */
+    fun segment(projectPath: String): String = if (projectPath == ":") "_root" else projectPath.removePrefix(":").replace(':', '/')
+
+    /**
+     * Creates and verifies `dp-test-tmp-<uid>` and the checkout's root, writes the record beside
+     * the root, then creates [directory] below the root. Throws [GradleException] with the reason
+     * when either directory fails the check; nothing is created below a directory that failed.
+     */
+    fun prepare(
+        base: Path,
+        uid: Long,
+        checkout: Path,
+        directory: Path,
+    ) {
+        val parent = parent(base, uid)
+        val root = root(base, uid, checkout)
+        require(directory.startsWith(root)) { "$directory is not below the test temp root $root" }
+        ensurePrivateDirectory(parent, uid, "parent")
+        ensurePrivateDirectory(root, uid, "root")
+        writeRecord(parent, root.fileName.toString(), checkout.toRealPath().toString())
+        Files.createDirectories(directory)
+    }
+
+    private fun ensurePrivateDirectory(
+        directory: Path,
+        uid: Long,
+        role: String,
+    ) {
+        try {
+            Files.createDirectory(directory, PRIVATE)
+        } catch (_: FileAlreadyExistsException) {
+            // Verified below whoever created it: a pre-created link or foreign directory is refused.
+        }
+        val problems = privateDirectoryProblems(directory, uid)
+        if (problems.isNotEmpty()) {
+            throw GradleException(
+                "Refusing the test temp $role $directory: it ${problems.joinToString(" and ")}. Test JVMs never fall " +
+                    "back to the shared temp directory (#983, DEVELOPMENT.md §9.7); remove or repair it by hand.",
+            )
+        }
+    }
+
+    /** Why [directory] is not a private directory of [uid]; empty when it is one. */
+    fun privateDirectoryProblems(
+        directory: Path,
+        uid: Long,
+    ): List<String> {
+        val attributes = Files.readAttributes(directory, PosixFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+        val owner = (Files.getAttribute(directory, "unix:uid", LinkOption.NOFOLLOW_LINKS) as Number).toLong()
+        return buildList {
+            when {
+                attributes.isSymbolicLink -> add("is a symbolic link")
+                !attributes.isDirectory -> add("is not a directory")
+            }
+            if (owner != uid) add("is owned by uid $owner, not $uid")
+            if (attributes.permissions().any { it == GROUP_WRITE || it == OTHERS_WRITE }) add("is writable by group or others")
+        }
+    }
+
+    private fun writeRecord(
+        parent: Path,
+        key: String,
+        checkout: String,
+    ) {
+        val record = parent.resolve(key + RECORD_SUFFIX)
+        val content = checkout + "\n"
+        val current = if (Files.isRegularFile(record, LinkOption.NOFOLLOW_LINKS)) Files.readString(record) else null
+        if (current == content) return
+        val staged = Files.createTempFile(parent, key + RECORD_SUFFIX + ".", ".tmp")
+        try {
+            Files.writeString(staged, content)
+            Files.move(staged, record, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(staged)
+        }
+    }
+}
+
+/**
+ * Hands a test JVM `-Djava.io.tmpdir=<its directory>` (#983, [TestTempRoot]). No annotated
+ * property: the absolute path is resolved at execution and is not a task input, so a moved
+ * checkout or another `$TMPDIR` neither re-runs a test task nor misses the build cache.
+ */
+private class TestTempDirectory(
+    private val rootProjectDirectory: File,
+    private val ownerCheckout: Provider<String>,
+    private val tmpdir: Provider<String>,
+    private val projectSegment: String,
+    private val taskName: String,
+) : CommandLineArgumentProvider {
+    private fun checkout(): Path = ownerCheckout.orNull?.takeIf { it.isNotBlank() }?.let { Path.of(it) } ?: rootProjectDirectory.toPath()
+
+    private fun segment(): String =
+        if (ownerCheckout.orNull.isNullOrBlank()) projectSegment else TestTempRoot.TESTKIT_SEGMENT + "/" + projectSegment
+
+    private fun base(): Path = TestTempRoot.base(tmpdir.orNull)
+
+    private fun directory(): Path =
+        TestTempRoot
+            .root(base(), TestTempRoot.uid(), checkout())
+            .resolve(segment())
+            .resolve(taskName)
+
+    /** Creates the directory before the JVM starts (the JVM does not create it). */
+    fun prepare() = TestTempRoot.prepare(base(), TestTempRoot.uid(), checkout(), directory())
+
+    override fun asArguments(): Iterable<String> = listOf("-Djava.io.tmpdir=" + directory())
+}

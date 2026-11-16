@@ -58,4 +58,10 @@ object StagingErrorCodes {
      * directory together measured more than the reservation after a write.
      */
     const val SCRATCH_LIMIT_EXCEEDED = "pipeline.staging.scratch_limit_exceeded"
+
+    /**
+     * A DuckDB staging read ended before the rows the engine counted for it (staging.md §8.3, §8.5; #994): the pinned
+     * driver ended a streamed cursor without reporting the engine's failure. TEMPORARY, with the guard that raises it.
+     */
+    const val RESULT_INCOMPLETE = "pipeline.staging.result_incomplete"
 }

@@ -6,6 +6,8 @@ source "$ROOT/scripts/pregate-2b-lib.sh"
 source "$ROOT/scripts/pregate-results-lib.sh"
 T="$(mktemp -d /tmp/pregate-safety.XXXXXX)"
 trap 'rm -rf "$T"' EXIT
+# #983: every copied wrapper's temp base is a fixture directory, never the real /tmp.
+mkdir -p "$T/fixture-tmp"; export TMPDIR="$T/fixture-tmp"
 
 fail() { echo "  FAIL $*" >&2; exit 1; }
 ok() { echo "  ok   $*"; }
@@ -141,7 +143,7 @@ ok 'gate.sh, CI workflows and gradle.properties never enable the build cache (#4
 G="$T/other-checkout"
 mkdir -p "$G/scripts/lib" "$G/.gate-logs"
 cp "$ROOT/scripts/gate.sh" "$G/scripts/"
-cp "$ROOT/scripts/lib/verification-lock.sh" "$G/scripts/lib/"
+cp "$ROOT/scripts/lib/verification-lock.sh" "$ROOT/scripts/lib/temp-hygiene.sh" "$ROOT/scripts/lib/temp-hygiene-helper.py" "$G/scripts/lib/"
 printf 'prior gate evidence\n' > "$G/.gate-logs/sentinel"
 export XDG_CACHE_HOME="$F/.fixture-cache"
 CACHE="$XDG_CACHE_HOME/datapipelines"
@@ -454,7 +456,13 @@ grep -q 'SNAPSHOT-FAILED' "$rd/MANIFEST.txt" || fail 'snapshot failure missing'
 grep -q '^PRE-GATE FAIL.*mod=0.*snap=1' "$X/.pregate-logs/0-verdict.log" || fail 'snapshot failure overwrote Gradle exit'
 ok 'snapshot failure refuses PASS and stops later stages'
 
-# Exact provenance + complete live guard cases save four auth selections (33 → 29).
+# Exact provenance + complete live guard cases save the auth selections. #995: the expected
+# numbers are derived from the registry (151, 10 of them auth, when inventory 995 landed), never
+# typed; the saving stays the difference of two measured counts.
+registry_total="$(source "$ROOT/scripts/pregate-plan-lib.sh"; n=0; for m in "${!GUARDS[@]}"; do for c in ${GUARDS[$m]}; do n=$((n + 1)); done; done; echo "$n")"
+registry_auth="$(source "$ROOT/scripts/pregate-plan-lib.sh"; set -- ${GUARDS[":modules:auth"]}; echo "$#")"
+[ "$registry_auth" -ge 4 ] && [ "$registry_total" -gt "$registry_auth" ] \
+  || fail "registry read vacuous: total=$registry_total auth=$registry_auth"
 for mode in covered cached helper missing-xml missing-line ambiguous skipped covered-fail malformed partial failed-xml; do
   X="$T/guards-$mode"; pgres::_fixture "$X" "$mode"
   rc=0; run_fixture "$X" --continue-on-failure || rc=$?
@@ -466,7 +474,8 @@ for mode in covered cached helper missing-xml missing-line ambiguous skipped cov
     [[ "$guard_cmd" != *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail 'covered auth guards repeated'
     grep -q 'covered module=:modules:auth.*stage=2 evidence=2/modules/auth/' "$rd/GUARD-COVERAGE.txt" || fail 'covering evidence missing'
     count="$(printf '%s\n' "$guard_cmd" | awk '{for(i=1;i<=NF;i++)if($i=="--tests")n++}END{print n}')"
-    [ "$count" -eq 29 ] || fail 'unexpected guard count after covering auth'
+    [ "$count" -eq $((registry_total - registry_auth)) ] \
+      || fail "unexpected guard count after covering auth: $count, registry $registry_total minus auth $registry_auth"
     # Compare against an observed baseline recording from the identical fixture.
     B="$T/guards-baseline"; pgres::_fixture "$B" "$mode"
     cat >> "$B/scripts/pregate-results-lib.sh" <<'BASELINE'
@@ -474,7 +483,8 @@ pgres::guards_covered() { return 1; }
 BASELINE
     run_fixture "$B" || fail 'recording baseline red'
     baseline="$(sed -n '/co.datapipelines.integration.ArchitectureGuardTest/p' "$B/pregate-argv.log" | awk '{for(i=1;i<=NF;i++)if($i=="--tests")n++}END{print n}')"
-    [ "$baseline" -eq 33 ] || fail 'baseline inventory not 33'
+    [ "$baseline" -eq "$registry_total" ] || fail "baseline inventory $baseline, registry holds $registry_total"
+    [ $((baseline - count)) -eq "$registry_auth" ] || fail "covered saving $((baseline - count)) is not the $registry_auth auth guards"
     echo "  guard selections observed: baseline=$baseline optimized=$count (same stage-2 coverage)"
   else
     [[ "$guard_cmd" == *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail "unsafe guard omission: $mode"
@@ -988,3 +998,7 @@ recount_rc=0
 bash "$ROOT/scripts/test-recount.sh" "$recount_modules" "$recount_browser" > "$T/recount-out" 2> "$T/recount-err" || recount_rc=$?
 [ "$recount_rc" -eq 4 ] && [ ! -s "$T/recount-out" ] && grep -q 'TEST-WebTest.xml' "$T/recount-err" || fail '#669: overlapping artifact roots were accepted'
 ok '#669: both artifact roots recounted, buildSrc and saved trees excluded, cross-artifact duplicate refused'
+
+# #983: every temp-hygiene summary line this test captured names a fixture base.
+hygiene_lines="$(pgres::_check_hygiene_bases "$T")" || fail "#983: $hygiene_lines"
+ok "#983: $hygiene_lines temp-hygiene summary line(s) captured, every one names a fixture base"
