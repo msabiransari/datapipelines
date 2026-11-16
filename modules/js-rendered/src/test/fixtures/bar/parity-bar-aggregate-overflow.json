@@ -1,0 +1,93 @@
+{
+ "source": [
+  "modules/web/src/test/resources/chart-parity/fixtures/bar-aggregate-overflow.json"
+ ],
+ "note": "860b R1: two 1e308 rows on one (region, channel) pair sum past float64's range; the cell draws as a gap (no mark) with one rule.non-finite data warning, on both sides.",
+ "document": {
+  "display_name": "Overflow aggregate",
+  "description": "Amount by region, stacked by channel, with one cell beyond float64.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "stack": "zero",
+     "format": "compact",
+     "axis": {
+      "grid": true
+     }
+    },
+    "color": {
+     "field": "channel",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Channel"
+    }
+   },
+   "title": {
+    "text": "Amount by region"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "North",
+   "North",
+   "North",
+   "South",
+   "South"
+  ],
+  "channel": [
+   "Online",
+   "Online",
+   "Retail",
+   "Online",
+   "Retail"
+  ],
+  "amount": [
+   1e+308,
+   1e+308,
+   500,
+   400,
+   300
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "channel": "STRING",
+  "amount": "DECIMAL"
+ }
+}

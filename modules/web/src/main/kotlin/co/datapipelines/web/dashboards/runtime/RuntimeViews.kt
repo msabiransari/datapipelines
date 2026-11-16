@@ -25,9 +25,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 internal object RuntimeViews {
     private val nodes = JsonNodeFactory.instance
 
-    /** The light Plotly bundle (`plotly-2d.min.js`, a vendored custom build, D63): all a v1 chart family needs. */
-    private const val BUNDLE_2D = "2d"
-
     /**
      * `GET /runtime/config` (spec §8.1). `bindings` ride BESIDE each `config` — the renderer configuration is stored
      * verbatim and the bindings (a config path → a column) are what the client fills from `visualization_data`.
@@ -45,9 +42,6 @@ internal object RuntimeViews {
         val mapper = ArtifactJson.mapper
         return nodes.objectNode().also { out ->
             out.put("configuration_id", resolved.configurationId)
-            out.putObject("renderer").also {
-                it.put("bundle", rendererBundle(resolved.visualizations.values))
-            }
             out.putObject("dashboard").also {
                 it.put("id", served.record.id.toString())
                 it.put("name", served.record.name)
@@ -126,14 +120,6 @@ internal object RuntimeViews {
         body: DashboardBody,
         runtime: DashboardRuntimeConfig,
     ): Int = minOf(body.timeouts?.refreshSeconds ?: runtime.defaultRefreshSeconds, runtime.maxRefreshSeconds)
-
-    /**
-     * The Plotly bundle the host page loads (the implementation spec's §10.4, D63): always `"2d"` since the `plotly`
-     * kind retired (design record 2026-11-06 §5.1) — every `chart` family the converter draws in v1 is a 2D trace,
-     * and the `"3d"` bundle stays vendored for the family that will need it. One dashboard, exactly one bundle.
-     */
-    @Suppress("UNUSED_PARAMETER", "UnusedParameter", "FunctionOnlyReturningConstant") // the seam the next family reads
-    fun rendererBundle(visualizations: Collection<ArtifactVersion<VisualizationBody>>): String = BUNDLE_2D
 
     /**
      * `POST /runtime/parameters` (spec §8.2): the engine's [EvaluateResponseJson] UNCHANGED plus

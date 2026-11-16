@@ -488,7 +488,7 @@ class RoleVisibilityRenderTest {
         setVariable("draftVersion", 2)
         setVariable("boardVersion", 2)
         setVariable("activeTab", "board")
-        setVariable("bundle", "2d")
+        setVariable("chartEngineScripts", JsRenderedAssetConfig.scripts)
         setVariable("refusalCode", null)
         setVariable("refusalMessage", null)
         setVariable(

@@ -1,0 +1,90 @@
+{
+ "display_name": "Seven tooltip lines",
+ "description": "G7: at most 6 detail entries.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "area"
+  },
+  "encoding": {
+   "x": {
+    "field": "month",
+    "type": "temporal",
+    "format": "month",
+    "title": "Month"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "format": "compact"
+   },
+   "tooltip": [
+    {
+     "field": "units"
+    },
+    {
+     "field": "units"
+    },
+    {
+     "field": "units"
+    },
+    {
+     "field": "units"
+    },
+    {
+     "field": "units"
+    },
+    {
+     "field": "units"
+    },
+    {
+     "field": "units"
+    }
+   ]
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

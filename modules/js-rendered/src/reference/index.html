@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Look reference — bar, line and area at look v1</title>
+  <link rel="stylesheet" href="vendor/design-system/tokens.css">
+  <link rel="stylesheet" id="theme-link" href="vendor/design-system/themes/light.css">
+  <link rel="stylesheet" href="vendor/design-system/base.css">
+  <link rel="stylesheet" href="vendor/design-system/primitives.css">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/dashboards.css">
+  <link rel="stylesheet" href="reference.css">
+</head>
+<body class="ref-page" data-page="reference">
+  <header class="ref-header">
+    <h1>Look reference: bar, line and area at look v1</h1>
+    <p class="ref-lede">The js-rendered engine draws every tile below directly (<code>JsRendered.render</code>, then <code>JsRendered.writeDom</code>), with the product's interaction layer over it and the product's own stylesheets around it. Each tile's expectation is written by hand from the look contract and the design record; the browser test checks every tile against it. Spec 1 ends when the owner confirms this page.</p>
+    <p class="ref-line">The owner's pick: <code>look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card</code></p>
+    <div class="ref-actions">
+      <button type="button" id="theme-switch" class="ds-button ds-button-secondary ds-button-sm" aria-pressed="false">Switch to dark</button>
+    </div>
+    <nav class="ref-nav" aria-label="On this page">
+      <h2 class="ref-nav-title">Where the open points are settled</h2>
+      <ul>
+        <li><a href="#forest">O-2: a chart on the forest theme</a> (its own page, in a frame)</li>
+        <li><a href="#dashboard-row">O-3: a chart card in a dashboard row</a>, beside a table and a KPI</li>
+        <li><a href="#levels">O-4: the levels' edge tiles</a>, the phone's screen (open this page 390 px wide) and <a href="#study">C1's amber</a> beside the study's stacked bar and line</li>
+        <li><a href="#small-cards">O-10: the card on the small tiles</a> (200 × 140 and 80 × 24; hover, or focus and use the arrow keys)</li>
+      </ul>
+    </nav>
+  </header>
+  <main class="ref-main">
+    <section id="study" class="ref-section" aria-labelledby="study-title">
+      <h2 id="study-title">The chosen pictures beside the engine</h2>
+      <p class="ref-text">Left: the look study's card at look v1, captured from the study's own files (study/provenance.json). Right: the engine's drawing of the same data, with the card's inner box as its frame. Tiles the study never drew are marked "not in the study".</p>
+      <div id="study-pairs" class="ref-pairs"></div>
+    </section>
+    <section id="levels" class="ref-section" aria-labelledby="levels-title">
+      <h2 id="levels-title">The levels, each at its lower edge and one pixel below</h2>
+      <p class="ref-text">The record's §4.6 numbers: <code>full</code> from 360 × 240, <code>compact</code> from 200 × 140, <code>minimal</code> from 80 × 24; below that nothing is drawn and the draw carries the warning <code>chart.frame-too-small</code>. The edge tiles are the "Three series at …" tiles of each type below; the owner freezes the numbers by confirming them. On a phone the fluid tile of each type is drawn at the card's width.</p>
+      <p id="small-cards" class="ref-text">The card on the small tiles (contract §4.4, ruling L8): on the 200 × 140 tiles a card that fits is shown whole; on the 80 × 24 tiles the card shows what fits — the hovered series first — and the arrow keys step through each series' value.</p>
+    </section>
+    <section id="bar" class="ref-section" aria-labelledby="bar-title">
+      <h2 id="bar-title">Bar</h2>
+      <div id="tiles-bar" class="ref-grid"></div>
+    </section>
+    <section id="line" class="ref-section" aria-labelledby="line-title">
+      <h2 id="line-title">Line</h2>
+      <div id="tiles-line" class="ref-grid"></div>
+    </section>
+    <section id="area" class="ref-section" aria-labelledby="area-title">
+      <h2 id="area-title">Area</h2>
+      <div id="tiles-area" class="ref-grid"></div>
+    </section>
+    <section id="dashboard-row" class="ref-section" aria-labelledby="row-title">
+      <h2 id="row-title">A chart card in a dashboard row</h2>
+      <p class="ref-text">Three of the product's <code>.dp-dashboard-card</code> side by side: an engine-drawn bar (its card padded by the chart's rule, 16 px), and a table and a KPI as static markup of the classes their renderers write, with synthetic values (padded 8 px, as every other card). The table's and the KPI's look are not the contract's to change.</p>
+      <div class="ref-row">
+        <div id="row-chart" class="ref-row-slot"></div>
+        <div class="ref-row-slot">
+          <article class="dp-dashboard-card" data-row-card="table">
+            <div class="dp-dashboard-card-head">
+              <h3 class="dp-dashboard-card-title">Orders by quarter (table)</h3>
+              <p class="dp-dashboard-card-description"></p>
+            </div>
+            <div class="dp-dashboard-viz">
+              <table class="dp-dashboard-table">
+                <thead><tr><th scope="col">Quarter</th><th scope="col">Online</th><th scope="col">Retail</th><th scope="col">Partner</th></tr></thead>
+                <tbody>
+                  <tr><td>Q1</td><td>42</td><td>30</td><td>18</td></tr>
+                  <tr><td>Q2</td><td>55</td><td>38</td><td>22</td></tr>
+                  <tr><td>Q3</td><td>61</td><td>35</td><td>27</td></tr>
+                  <tr><td>Q4</td><td>48</td><td>44</td><td>25</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="dp-dashboard-card-foot"><div class="dp-dashboard-card-message"></div></div>
+          </article>
+        </div>
+        <div class="ref-row-slot">
+          <article class="dp-dashboard-card" data-row-card="kpi">
+            <div class="dp-dashboard-card-head">
+              <h3 class="dp-dashboard-card-title">Orders this year (KPI)</h3>
+              <p class="dp-dashboard-card-description"></p>
+            </div>
+            <div class="dp-dashboard-viz">
+              <div class="dp-dashboard-kpi">
+                <div class="dp-dashboard-kpi-value"><span class="dp-dashboard-kpi-number">445</span><span class="dp-dashboard-kpi-unit"> orders</span></div>
+                <div class="dp-dashboard-kpi-comparison"><span class="dp-dashboard-kpi-comparison-label">Against last year</span><span class="dp-dashboard-kpi-comparison-value">+12%</span></div>
+              </div>
+            </div>
+            <div class="dp-dashboard-card-foot"><div class="dp-dashboard-card-message"></div></div>
+          </article>
+        </div>
+      </div>
+    </section>
+    <section id="forest" class="ref-section" aria-labelledby="forest-title">
+      <h2 id="forest-title">A chart on the forest theme</h2>
+      <p class="ref-text">The product gives a page ONE theme, so forest has its own page, shown here in a frame: the same stylesheets with <code>forest.css</code> as its theme file, and the seven chart tokens that follow the theme read from the product's stylesheets. On this card the series slots 3 and 4 measure 2.94 and 2.89 : 1, under the 3 : 1 every other surface keeps: accepted and listed by the contract, not fixed. A theme with series colours of its own is a look option (#978).</p>
+      <iframe class="ref-forest-frame" src="forest.html" title="The forest theme's page: a bar and a line of four or more series"></iframe>
+    </section>
+    <section id="tokens" class="ref-section" aria-labelledby="tokens-title">
+      <h2 id="tokens-title">Tokens valued in this lane</h2>
+      <p class="ref-text">None. Every token bar, line, area and the interaction layer read has a value in the look contract's §3.</p>
+    </section>
+  </main>
+  <!-- js-rendered: engine scripts -->
+</body>
+</html>

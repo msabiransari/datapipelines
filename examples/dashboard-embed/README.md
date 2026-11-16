@@ -34,32 +34,31 @@ DP_BASE_URL=https://dp.internal.example DASHBOARD_KEY=<the dashboard key> PORT=8
 One key is one budget: the stream cap and the rate limit are shared by every
 visitor behind the relay.
 
-## Script order, and why the bundle attribute matters
+## Script order
 
-1. the Plotly `2d` bundle (`plotly-2d.min.js`) with
-   `data-dp-plotly-bundle="2d"` on the tag — every chart family the chart kind
-   ships is a 2D trace, so the example never needs the 3D bundle; the runtime
-   reads these declarations and refuses a mismatched pair at bootstrap;
+1. the chart engine's files under `/js/js-rendered/`, in the engine's load order
+   (`00-namespace.js` first, `types/area.js` last) — the same files the server
+   draws its pictures with;
 2. `/js/datapipelines-dashboard.js` — the runtime;
-3. `/js/datapipelines-dashboard-chart.js` — the `chart` kind's adapter; it
+3. `/js/datapipelines-chart-interactions.js` — the charts' interaction layer
+   (tooltip, highlight, legend switch, keyboard); the chart adapter requires it
+   and refuses to draw without it;
+4. `/js/datapipelines-dashboard-chart.js` — the `chart` kind's adapter; it
    registers the kind at script load, before init;
-4. `/js/datapipelines-dashboard-plotly.js` — the Plotly converter the chart
-   adapter draws through (it registers no kind of its own);
 5. `/js/datapipelines-dashboard-table.js` and `/js/datapipelines-dashboard-kpi.js`
    — the table and KPI kinds' adapters, each registering its kind at load;
 6. `embed.js` — mounts the container and inits.
 
-The boot glue declares `charts: { library: "plotly", instance: window.Plotly }`
-at init so the chart adapter uses the loaded Plotly library.
+The boot glue passes no chart library: charts are drawn by the datapipelines
+client library, and `init` refuses a `charts` option.
 
 ## Stylesheets, in this order
 
-`tokens.css`, the theme sheet, `base.css`, `primitives.css`, `app.css`,
-`dashboards.css`, then `plotly.css`. `dashboards.css` reads design tokens the
-design-system sheets define; loading only `app.css` + `dashboards.css` renders
-half-styled. The empty `<template id="plotly.js-style-global">` must stand in
-`<head>` before any script, so Plotly writes no inline styles and the chart
-rules come from `plotly.css`.
+`tokens.css`, the theme sheet, `base.css`, `primitives.css`, `app.css`, then
+`dashboards.css`. `dashboards.css` reads design tokens the design-system sheets
+define; loading only `app.css` + `dashboards.css` renders half-styled. The
+charts' colours, sizes and font are the `--chart-*` tokens `app.css` sets; a
+host may set its own on the board container.
 
 ## Any framework
 

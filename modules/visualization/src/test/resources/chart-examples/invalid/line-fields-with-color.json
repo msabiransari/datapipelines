@@ -1,0 +1,82 @@
+{
+ "display_name": "Fields and a colour",
+ "description": "G1: with fields a colour channel is refused.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "line"
+  },
+  "encoding": {
+   "x": {
+    "field": "month",
+    "type": "temporal",
+    "format": "month",
+    "title": "Month"
+   },
+   "y": {
+    "type": "quantitative",
+    "aggregate": "sum",
+    "fields": [
+     {
+      "field": "amount",
+      "title": "Amount",
+      "unit": "USD"
+     },
+     {
+      "field": "units",
+      "title": "Units"
+     }
+    ]
+   },
+   "color": {
+    "field": "channel",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Channel"
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

@@ -31,8 +31,8 @@ import java.util.UUID
 
 /**
  * #399 — the Visualizations page controller: the catalog is the flat list under the caller's lens; the workspace
- * resolves ONE version (the current pointer, else the working draft, else the named one), declares the ONE bundle
- * the viewed version's renderer needs, keeps the NAME in every state, and refuses a DISCARDED or lens-hidden
+ * resolves ONE version (the current pointer, else the working draft, else the named one), gives the page the chart
+ * engine's script list when a version resolved, keeps the NAME in every state, and refuses a DISCARDED or lens-hidden
  * version with the family's 404. The version parse is a 400 that never echoes its input; the tab set is closed.
  */
 class VisualizationUiControllerTest {
@@ -61,14 +61,9 @@ class VisualizationUiControllerTest {
         return model
     }
 
-    /** v1 released + current, v2 the working draft; [config] is v1's trace set. */
-    private fun releasedWithDraft(config: String? = null) {
-        val v1 =
-            if (config == null) {
-                version(vizId, workspaceId, 1, PipelineVersionStatus.RELEASED, currentVersion = 1)
-            } else {
-                version(vizId, workspaceId, 1, PipelineVersionStatus.RELEASED, currentVersion = 1, config = config)
-            }
+    /** v1 released + current, v2 the working draft. */
+    private fun releasedWithDraft() {
+        val v1 = version(vizId, workspaceId, 1, PipelineVersionStatus.RELEASED, currentVersion = 1)
         val v2 = version(vizId, workspaceId, 2, PipelineVersionStatus.DRAFT, currentVersion = 1)
         every { visualizations.findWorking(workspaceId, any(), vizId) } returns v2
         every { visualizations.findVersion(workspaceId, any(), vizId, 1) } returns v1
@@ -78,7 +73,7 @@ class VisualizationUiControllerTest {
     }
 
     @Test
-    fun `no version named views the current pointer, with its chip, its bundle and the default Preview tab`() {
+    fun `no version named views the current pointer, with its chip, the chart engine's scripts and the default Preview tab`() {
         authenticate(workspaceId, WorkspaceRole.AUTHOR)
         releasedWithDraft()
 
@@ -91,7 +86,7 @@ class VisualizationUiControllerTest {
         model["viewedIsDraft"] shouldBe false
         model["currentVersion"] shouldBe 1
         model["draftVersion"] shouldBe 2
-        model["bundle"] shouldBe "2d"
+        model["chartEngineScripts"] shouldBe JsRenderedAssetConfig.scripts
         model["activeTab"] shouldBe "preview"
         @Suppress("UNCHECKED_CAST")
         (model["versions"] as List<VisualizationUiController.VersionRow>).map { it.version to it.isSelected } shouldBe
@@ -99,17 +94,16 @@ class VisualizationUiControllerTest {
     }
 
     @Test
-    fun `a named draft is viewed as the draft, and every version declares the 2d bundle since the plotly kind retired`() {
+    fun `a named draft is viewed as the draft, and every version loads the same chart engine's scripts`() {
         authenticate(workspaceId, WorkspaceRole.AUTHOR)
-        // A retired 3D trace name spelled into the released version's config selects nothing any more.
-        releasedWithDraft(config = """{"data":[{"type":"surface"}]}""")
+        releasedWithDraft()
 
         open(version = "2").let {
             it["viewedLabel"] shouldBe "v2 · draft"
             it["viewedIsDraft"] shouldBe true
-            it["bundle"] shouldBe "2d"
+            it["chartEngineScripts"] shouldBe JsRenderedAssetConfig.scripts
         }
-        open(version = "1")["bundle"] shouldBe "2d"
+        open(version = "1")["chartEngineScripts"] shouldBe JsRenderedAssetConfig.scripts
     }
 
     @Test
@@ -164,7 +158,7 @@ class VisualizationUiControllerTest {
     }
 
     @Test
-    fun `no current and no draft for this caller is the choose-a-version state - the NAME kept, no bundle`() {
+    fun `no current and no draft for this caller is the choose-a-version state - the NAME kept, no chart script`() {
         authenticate(workspaceId, WorkspaceRole.AUTHOR)
         // The working row is released but the caller's lens resolves no current version (a pointer the lens hides).
         val working = version(vizId, workspaceId, 3, PipelineVersionStatus.RELEASED, currentVersion = 3)
@@ -177,7 +171,7 @@ class VisualizationUiControllerTest {
         model["hasSelected"] shouldBe false
         model["visualizationName"] shouldBe VisualizationUiFixtures.NAME
         model["viewedLabel"] shouldBe VisualizationUiController.NO_VERSION_SELECTED
-        model.containsAttribute("bundle") shouldBe false
+        model.containsAttribute("chartEngineScripts") shouldBe false
     }
 
     @Test

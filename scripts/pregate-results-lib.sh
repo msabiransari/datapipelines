@@ -299,7 +299,7 @@ pgres::write_provenance() {
   {
     printf '# provenance for %s — test-task status lines from the stage log\n' "$(basename "$stage_dir")"
     if [ -f "$log" ]; then
-      grep -E '^> Task :(modules|tests):[a-z-]+:(test|breachSuite|editorJsTest|securityAssuranceTest)([[:space:]]|$)' "$log" \
+      grep -E '^> Task :(modules|tests):[a-z-]+:(test|breachSuite|editorJsTest|securityAssuranceTest|jsRenderedTest)([[:space:]]|$)' "$log" \
         | sort -u || true
     else
       printf '# (stage log %s is absent)\n' "$log"

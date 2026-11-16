@@ -11,7 +11,7 @@
  * (record §5.5) — everything goes through here.
  *
  * ## Bootstrap (R22's four-step barrier)
- * validate the adapter and the renderer/bundle pair → fetch the configuration → mount the layout and
+ * validate the adapter and every occurrence's renderer → fetch the configuration → mount the layout and
  * await it → fetch the parameter state, render it and await it (an explicit no-op without a parameter
  * set) → mount the visualizations → invoke the initial actions. A failure at ANY step fails `ready`
  * before anything executes.
@@ -54,7 +54,6 @@
   // issue border. The failure MESSAGE inside the card persists; only the loud border settles.
   var ERROR_ACCENT_MS = 3000;
   var MOUNTED_ATTRIBUTE = "data-datapipelines-dashboard";
-  var STYLE_ELEMENT_ID = "plotly.js-style-global";
 
   /** The occurrence states a parameter change marks stale (#542); error and abort keep their issue voice. */
   function carriesStaleMark(state) {
@@ -283,8 +282,6 @@
     this._server = initOptions.server;
     this._fixtures = initOptions.server.fixtures || null;
     this._options = initOptions.options || {};
-    // Record 2026-11-06 §5.2: the host's chart library, validated at init; handed to the chart kind at mount only.
-    this._charts = initOptions.charts || null;
     this._config = null;
     this._parameters = null;
     this._baseline = null;
@@ -607,11 +604,10 @@
       // Step 0 — the adapter was validated synchronously in init (§10.3).
       steps.push("adapter_validated");
 
-      // Step 1 — the configuration; the renderer/bundle pair is judged BEFORE any execution.
+      // Step 1 — the configuration; every occurrence's renderer is checked BEFORE any execution.
       self._config = await self._call(self._configPath());
       steps.push("config_fetched");
-      self._judgeRenderers();
-      self._ensureStyleElement();
+      self._checkRenderers();
 
       // Step 2 — the layout, awaited.
       await withDeadline(
@@ -757,20 +753,12 @@
   }
 
   /**
-   * The renderer/bundle judgement (§10.4): every occurrence's renderer must be a kind the adapter side
-   * registered, at the major version it declared; a kind may judge its own occurrences (the chart kind:
-   * `chart.library_undeclared`, `chart.converter_missing` — record 2026-11-06 §5.2) and declare the Plotly
-   * bundle an occurrence needs (`needsBundle(occurrence) → "2d" | "3d"`), which the ONE bundle on the page
-   * must cover. All of it fails here — before any execution.
+   * The renderer check (§10.4): every occurrence's renderer must be a kind the adapter side registered, at the
+   * major version it declared. It fails here — before any execution. (Record 2026-11-14 §4.11: the chart kind
+   * needs nothing from the host, so no kind judges its own occurrences and no bundle is judged.)
    */
-  DashboardInstance.prototype._judgeRenderers = function () {
+  DashboardInstance.prototype._checkRenderers = function () {
     var renderers = this._env.renderers;
-    // The server's `renderer.bundle` (spec §10.4) is the board-wide need; a kind's `needsBundle` adds its own.
-    var bundle = this._config.renderer && this._config.renderer.bundle ? this._config.renderer.bundle : "2d";
-    var declaredBundles = this._env.declaredPlotlyBundles();
-    if (declaredBundles.length > 1) {
-      throw this._fail("renderer.two_bundles", "the page loads more than one Plotly bundle; the two are never on one page");
-    }
     var visualizations = this._config.visualizations || [];
     for (var i = 0; i < visualizations.length; i++) {
       var occurrence = visualizations[i];
@@ -792,42 +780,7 @@
           { kind: renderer.kind, name: occurrence.name },
         );
       }
-      if (typeof implementation.judge === "function") {
-        var refusal = implementation.judge(occurrence, { charts: this._charts });
-        if (refusal) throw this._fail(refusal.code, refusal.message, refusal.details);
-      }
-      var needs = typeof implementation.needsBundle === "function" ? implementation.needsBundle(occurrence) : bundle;
-      if ((needs === "3d" || bundle === "3d") && declaredBundles[0] === "2d") {
-        throw this._fail("renderer.bundle_insufficient", "the dashboard needs the 3D bundle; the page loaded the 2D bundle", {
-          name: occurrence.name,
-        });
-      }
     }
-  };
-
-  /**
-   * The design-around (§10.4): place the empty element Plotly checks, so `addRelatedStyleRule`
-   * returns early and Plotly's rules come from the vendored plotly.css under `style-src 'self'`.
-   * Idempotent — the host may have placed it already; an element without the class gains it.
-   * #526 — the fallback creates the marker as a TEMPLATE, the same shape every first-party host
-   * pre-places (#456): Chromium refuses EVERY script-created `<style>` element at insertion as an
-   * inline style under `style-src 'self'` — with a text child (the pre-#526 `createTextNode("")`),
-   * with an empty comment, or childless, each refused with the empty-text hash — while a template
-   * is never processed as a stylesheet. Plotly's check is the id and the class alone
-   * (`getElementById` + `matches(".no-inline-styles")`), never the tag or a sheet; the rules come
-   * from the linked plotly.css.
-   */
-  DashboardInstance.prototype._ensureStyleElement = function () {
-    if (typeof document === "undefined") return;
-    var existing = document.getElementById(STYLE_ELEMENT_ID);
-    if (existing) {
-      if (!(" " + existing.className + " ").match(/ no-inline-styles /)) existing.className += " no-inline-styles";
-      return;
-    }
-    var marker = document.createElement("template");
-    marker.setAttribute("id", STYLE_ELEMENT_ID);
-    marker.className = "no-inline-styles";
-    document.head.appendChild(marker);
   };
 
   // --------------------------------------------------------------------------------------- parameters
@@ -1544,7 +1497,10 @@
       function (error) {
         if (self._disposed || !self._owns(name, refreshId)) return;
         var code = isDashboardError(error) ? error.code : "render.failed";
-        if (code === "render.failed" && typeof console !== "undefined" && typeof console.error === "function") {
+        // Record 2026-11-14 §4.3: an engine refusal carries its code's fixed sentence; the card shows it as text and
+        // the code reported stays render.failed. A refusal is the chart's answer, not a fault: no console line.
+        var refusal = engineRefusal(error);
+        if (refusal === null && code === "render.failed" && typeof console !== "undefined" && typeof console.error === "function") {
           // Renderer messages can quote bound values. Bound the text and stack, and never log the
           // error object (which can retain a figure, bindings or row data).
           console.error(
@@ -1562,7 +1518,7 @@
         self._renderOccurrenceStatus(name, {
           state: "error",
           stale: false,
-          reason: { code: code },
+          reason: refusal === null ? { code: code } : refusalReason(code, refusal),
           refreshId: refreshId,
         });
         self._publishNotification({
@@ -1662,7 +1618,8 @@
     for (var i = 0; i < warnings.length; i++) {
       var warning = warnings[i];
       if (!warning || typeof warning.code !== "string" || typeof warning.message !== "string") continue;
-      var key = "render:" + name + ":" + refreshId + ":" + warning.code;
+      // chart.token-refused names its token (look contract §3.7): one warning per refused token.
+      var key = "render:" + name + ":" + refreshId + ":" + warning.code + (typeof warning.token === "string" ? ":" + warning.token : "");
       if (record.keys.indexOf(key) !== -1) continue;
       record.keys.push(key);
       this._publishNotification({
@@ -1678,6 +1635,33 @@
       });
     }
   };
+
+  /** The longest refusal sentence the card shows; the engine's are one short sentence (record §4.3). */
+  var REFUSAL_SENTENCE_MAX = 300;
+
+  /**
+   * The engine refusal a renderer's rejection carries (record 2026-11-14 §4.3): `error.refusal = {code, sentence}`
+   * with a `chart.` code and its fixed sentence, else null. Any other rejection keeps the generic sentence.
+   */
+  function engineRefusal(error) {
+    var refusal = error && typeof error === "object" ? error.refusal : null;
+    if (!refusal || typeof refusal !== "object") return null;
+    if (typeof refusal.code !== "string" || !/^chart\.[a-z0-9_.-]+$/.test(refusal.code)) return null;
+    if (typeof refusal.sentence !== "string" || refusal.sentence === "" || refusal.sentence.length > REFUSAL_SENTENCE_MAX) return null;
+    return { code: refusal.code, sentence: refusal.sentence };
+  }
+
+  /**
+   * The reasons this runtime built from an engine refusal. The card shows a reason's `sentence` only for one of these:
+   * a reason that arrived on the wire, or from anywhere else, never puts its own words on the card (#473's rule).
+   */
+  var REFUSAL_REASONS = typeof WeakSet === "function" ? new WeakSet() : null;
+
+  function refusalReason(code, refusal) {
+    var reason = { code: code, refusal: refusal.code, sentence: refusal.sentence };
+    if (REFUSAL_REASONS !== null) REFUSAL_REASONS.add(reason);
+    return reason;
+  }
 
   /** The next refresh's data frame (or empty state) supersedes the previous refresh's render warnings. */
   DashboardInstance.prototype._supersedeRenderWarnings = function (name, refreshId) {
@@ -2312,7 +2296,7 @@
     var visualizations = (this._config && this._config.visualizations) || [];
     var mounts = visualizations.map(function (occurrence) {
       return Promise.resolve(
-        self._adapter.mountVisualization(occurrence, occurrence.renderer, { charts: self._charts }),
+        self._adapter.mountVisualization(occurrence, occurrence.renderer),
       ).then(function (handle) {
         if (!handle || typeof handle.renderData !== "function") {
           throw self._fail("adapter.mount_incomplete", "mountVisualization returned no renderer for '" + occurrence.name + "'", {
@@ -2375,7 +2359,11 @@
       throw DashboardError("init.invalid", "proxy credentials require proxyBaseUrl");
     }
     validateAdapter(options.adapter);
-    if (options.charts !== undefined) validateCharts(options.charts);
+    // Record 2026-11-14 §4.11: the chart kind draws with the client library's own engine; a host's chart library is
+    // not an option any more, and a host that still passes one is told so rather than silently ignored.
+    if (options.charts !== undefined) {
+      throw DashboardError("init.invalid", "charts is no longer an option: charts are drawn by the datapipelines client library");
+    }
 
     var env = {
       uuid: randomUuid,
@@ -2395,7 +2383,6 @@
         clearTimeout(id);
       },
       renderers: REGISTERED_RENDERERS,
-      declaredPlotlyBundles: declaredPlotlyBundles,
     };
 
     var instance = new DashboardInstance(options, env);
@@ -2454,7 +2441,6 @@
       setTimeout: function (fn, ms) { return setTimeout(fn, ms); },
       clearTimeout: function (id) { clearTimeout(id); },
       renderers: REGISTERED_RENDERERS,
-      declaredPlotlyBundles: declaredPlotlyBundles,
     };
     var instance = new DashboardInstance(options, env);
     instance._parametersOnly = true;
@@ -2462,35 +2448,6 @@
     instance._wrapCallbacks();
     instance._bootstrapParameters();
     return instance;
-  }
-
-  /**
-   * `options.charts = {library, instance}` (record 2026-11-06 §5.2, frozen): `library` one of the chart kind's library
-   * identities, `instance` the library's entry value as the library documents it — an object or a constructor
-   * function. Refused synchronously, like every other init refusal; the message never echoes the host's value.
-   */
-  function validateCharts(charts) {
-    if (!isPlainObject(charts)) throw DashboardError("init.invalid", "charts is { library, instance }");
-    var chart = REGISTERED_RENDERERS.chart;
-    if (!chart || !Array.isArray(chart.libraries)) {
-      throw DashboardError("init.invalid", "charts needs the chart renderer (datapipelines-dashboard-chart.js) loaded before init");
-    }
-    if (typeof charts.library !== "string" || chart.libraries.indexOf(charts.library) === -1) {
-      throw DashboardError("init.invalid", "charts.library is not one of the chart library identities", { libraries: chart.libraries.slice() });
-    }
-    var type = typeof charts.instance;
-    if (charts.instance === null || (type !== "object" && type !== "function")) {
-      throw DashboardError("init.invalid", "charts.instance is the library's entry value: an object or a constructor function");
-    }
-  }
-
-  /** The `<script data-dp-plotly-bundle="2d|3d">` declarations — the host names the bundle it loaded. */
-  function declaredPlotlyBundles() {
-    if (typeof document === "undefined" || !document.querySelectorAll) return [];
-    var tags = document.querySelectorAll("script[data-dp-plotly-bundle]");
-    var out = [];
-    for (var i = 0; i < tags.length; i++) out.push(tags[i].getAttribute("data-dp-plotly-bundle"));
-    return out;
   }
 
   // --------------------------------------------------------------------- renderer registration
@@ -2501,9 +2458,7 @@
    * Renderer registration: the first-party adapters call this at load — `kind`, the major `version`
    * the wire's `renderer.version` is matched against, and `create(context) → {renderData(occurrenceRef, rows,
    * bindings), renderEmpty()?, renderStatus?, resize?, dispose?}` (#852: `rows` is the data frame's row count,
-   * `bindings` its columnar `{path: [values]}`); optionally `judge(occurrence, {charts}) → null | {code, message, details}`,
-   * `needsBundle(occurrence) → "2d" | "3d"` and `libraries` (the chart kind's identities). A host registers its own
-   * kind the same way, before init.
+   * `bindings` its columnar `{path: [values]}`). A host registers its own kind the same way, before init.
    */
   function registerRenderer(spec) {
     if (!isPlainObject(spec) || typeof spec.kind !== "string" || typeof spec.create !== "function") {
@@ -2513,10 +2468,6 @@
       kind: spec.kind,
       version: spec.version === undefined ? "1" : String(spec.version),
       create: spec.create,
-      // Optional (record 2026-11-06 §5.2): a kind's own mount judgement, the bundle it needs, its library identities.
-      judge: typeof spec.judge === "function" ? spec.judge : null,
-      needsBundle: typeof spec.needsBundle === "function" ? spec.needsBundle : null,
-      libraries: Array.isArray(spec.libraries) ? spec.libraries.slice() : null,
     };
     return api;
   }
@@ -2745,6 +2696,8 @@
     /** The safe failure sentence: words from a fixed dictionary plus the wire's CODE — never a raw message. */
     function cardStatusText(reason, fallback) {
       if (!reason || !reason.code) return fallback;
+      // An engine refusal's fixed sentence (record 2026-11-14 §4.3), checked by engineRefusal; set as text.
+      if (REFUSAL_REASONS !== null && REFUSAL_REASONS.has(reason)) return reason.sentence;
       var text = STATUS_CODE_TEXT[reason.code] || reason.code;
       if (reason.stage && reason.stage !== "refresh") text += " (" + reason.stage + ")";
       return text + ".";
@@ -2941,7 +2894,7 @@
               if (nextCollapsed === observation.collapsed) return;
               observation.collapsed = nextCollapsed;
               placeGridSlots(items, slots, defaultSlot, columns, nextCollapsed);
-              // Only a narrow/wide crossing changes slot widths. Plotly does not re-fit on host resize.
+              // Only a narrow/wide crossing changes slot widths; each renderer is told so through its `resize`.
               resizeMounted();
             });
           });
@@ -2950,7 +2903,7 @@
         }
         return Promise.resolve(undefined);
       },
-      mountVisualization: function (occurrence, renderer, mount) {
+      mountVisualization: function (occurrence, renderer) {
         try {
           var slot = this.grid && this.grid[occurrence.name] ? this.grid[occurrence.name] : this.defaultSlot;
           // #473 — every visualization renders INSIDE a card: a bordered shell with a heading (the
@@ -3007,8 +2960,6 @@
             instanceId: null,
             host: body,
             occurrence: occurrence,
-            // The host's declared chart library (init's `charts`): only the chart kind reads it.
-            charts: mount && mount.charts ? mount.charts : null,
             notify: this.notify,
             signal: function (name, payload) {
               if (listeners.commit && name === "commit") listeners.commit(payload);

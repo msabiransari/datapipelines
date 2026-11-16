@@ -1,0 +1,85 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: a colour channel with legend: null (no legend, no name: contract §4.5)",
+ "document": {
+  "display_name": "No legend",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": null
+    }
+   },
+   "title": {
+    "text": "Colours without a legend"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "A",
+   "A",
+   "B",
+   "B"
+  ],
+  "s": [
+   "u",
+   "w",
+   "u",
+   "w"
+  ],
+  "v": [
+   3,
+   5,
+   4,
+   2
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "s": "STRING",
+  "v": "DOUBLE"
+ }
+}

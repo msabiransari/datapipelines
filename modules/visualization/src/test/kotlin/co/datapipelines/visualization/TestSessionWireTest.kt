@@ -29,11 +29,11 @@ class TestSessionWireTest {
                 mapper.readTree(
                     """{"cases": [{"name": "a", "verdict": "green", "notes": "fine"}, {"name": "b", "verdict": "red", "notes": null}],
                         "environment": {"theme": "dark", "viewport": "1280x720", "browser": "chromium", "locale": "en",
-                                        "renderer_version": "plotly 4.1.1"}}""",
+                                        "renderer_version": "js-rendered 1"}}""",
                 ),
             )
         read.verdicts shouldBe listOf(SubmittedCase("a", CaseVerdict.GREEN, "fine"), SubmittedCase("b", CaseVerdict.RED, null))
-        read.environment shouldBe TestEnvironment("dark", "1280x720", "chromium", "en", "plotly 4.1.1")
+        read.environment shouldBe TestEnvironment("dark", "1280x720", "chromium", "en", "js-rendered 1")
         TestSubmissionReader.read(mapper.readTree("""{"cases": [], "environment": null}""")).environment.shouldBeNull()
         TestSubmissionReader
             .read(mapper.readTree("""{"cases": [], "environment": {"theme": null}}"""))

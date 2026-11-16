@@ -993,17 +993,6 @@
   ],
   "bars": 48,
   "data_warnings": 0,
-  "degraded": {
-   "plotly": [],
-   "echarts": [
-    "color.title"
-   ],
-   "chartjs": [],
-   "apexcharts": [
-    "color.title"
-   ],
-   "vegalite": []
-  },
   "hover": [],
   "label_texts": []
  }

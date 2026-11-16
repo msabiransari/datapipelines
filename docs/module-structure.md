@@ -1,9 +1,9 @@
 # Module Structure Specification
 
-**Status:** v1.20 (frozen contract — additive-only changes after this point)
+**Status:** v1.24 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-16
 
 ---
 
@@ -48,6 +48,7 @@ datapipelines/
 │   ├── dependency-contract/             # the neutral business-object dependency contract, layer 0, #868 (§5.22)
 │   ├── persistence/                     # the generic batching writer — ordered group commit, layer 0 (§5.19)
 │   ├── log-capture/                     # the shared test log capture — TEST-ONLY, layer 0, #756 (§5.23)
+│   ├── js-rendered/                     # the chart engine — the product's own JavaScript, layer 0, #985 (§5.24)
 │   ├── calculators/                     # [Calculators catalog] — pure kinds, layer 0 (§5.14)
 │   ├── scripting/                       # Script engine seam, layer 0 (§5.15)
 │   ├── pipeline-contract/               # [Pipeline Contract spec]
@@ -79,6 +80,7 @@ datapipelines/
 | `dependency-contract` | (this spec, §5.22; the dependency-graph design record) | The neutral business-object dependency contract (#868 G1): immutable graph types (`ObjectRequest`, `Node`, `Edge`, `GraphSnapshot`), the closed §11.1 vocabularies, the provider contract and its conformance harness, the DI-assembled `FamilyRegistry`, the bounded `DependencyWalker` and its internal fingerprint, `GraphLimits` and `Deadline`; the §11.1 wire schema and payload goldens as main resources. Kotlin/JDK only, no internal dependencies. | — (no persistence; providers read through their families' repositories in `application/dependencies`) |
 | `persistence` | [DAG Executor §10](dag-executor.md#10-sse-event-integration), [Auth §10](auth.md) (this spec, §5.19) | The generic batching writer (#266) — `BatchingWriter<T>`: an ordered, bounded, partitioned group commit in front of ONE store, with a bounded wait that falls back to the caller's own write, a singles retry that isolates a poison row, and a bounded shutdown drain. Knows no store: each supplies a `BatchSink`. Stdlib, coroutines and slf4j only. | — (writes whatever its sinks write; owns no table) |
 | `log-capture` | (this spec, §5.23) | TEST-ONLY (#756): the one shared Logback snapshot capture — `SnapshotListAppender` (appends and snapshot reads under the list's own monitor, #362/#391), `capturingLogEvents(logger, …)` and the root-logger `capturingLogs(…)`. Consumed by `testImplementation` alone; `verifyModuleDependencies` refuses any other edge into it. Logback only, no internal dependencies. | — (no persistence) |
+| `js-rendered` | the js-rendered charts design record (this spec, §5.24) | The chart engine (#985, F1): the product's own JavaScript that turns a chart document plus its rows into primitives (`rect`, `line`, `path`, `circle`, `text`, `group`), never markup — classic script files on one namespace, `JsRendered`, in the fixed order of `LOAD-ORDER.txt`, run unchanged in a browser page and in the server's GraalJS sandbox; one template per chart type (`types/bar.js`). `JsRenderedEngineFiles` lists and concatenates the files for a JVM caller. No internal and no external dependency, no bundler, no npm. | — (no persistence) |
 | `scripting` | (this spec, §5.15) | The script engine seam: `ScriptEngine` (JSONata in-process; JavaScript in a GraalJS isolate, #8), one registry wired in web and injected into the validator, test runner and node support, the evaluation pool, the type gate, canonical JSON. Pure library — evaluates untrusted script bodies with no I/O surface. | — (no persistence) |
 | `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. | `PipelineRepository` → `pipelines`, `pipeline_versions` |
 | `templates` | [templates.md](templates.md) | Freemarker integration, library macros, template registry, versioning. | `TemplateRepository` → `templates`, `template_versions` |
@@ -120,6 +122,10 @@ layer 0 — no internal deps
 ┌───────────────┐
 │  log-capture  │  TEST-ONLY ← testImplementation of persistence, datasources, auth, dag, parameters,
 └───────────────┘               lake, web, app, tests/integration-tests — never a runtime edge (§5.23)
+┌───────────────┐
+│  js-rendered  │  the chart engine (JavaScript resources) ← application (the ChartEngine port's
+└───────────────┘                                            implementation and the chart guards, §5.24),
+                                                             web (the page loads the engine's files)
 
 layer 1 — typesystem (auth also persistence)
 ┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
@@ -153,7 +159,8 @@ layer 6
 ┌──────────────┐
 │ application  │  ← typesystem, scripting, pipeline-contract, templates,
 │ (use cases)  │    datasources, dag, auth, parameters, visualization,
-│              │    dependency-contract (allowed ahead: scheduler)
+│              │    dependency-contract, js-rendered
+│              │    (allowed ahead: scheduler)
 └──────────────┘
 
 layer 7
@@ -166,8 +173,8 @@ layer 8
 ┌──────────────┐
 │     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
 │              │    datasources, staging, dag, auth, application, mcp-server, scheduler,
-│              │    parameters, persistence, visualization, lake, dependency-contract
-│              │    (declared explicitly, not transitively)
+│              │    parameters, persistence, visualization, lake, dependency-contract,
+│              │    js-rendered (declared explicitly, not transitively)
 └──────────────┘
 
 layer 9
@@ -177,7 +184,7 @@ layer 9
 
 layer 10 — the test suites
 ┌─────────────────────────┐ ┌─────────────────────┐
-│ tests/integration-tests │ │ tests/browser-tests │  ← app (browser-tests: + web)
+│ tests/integration-tests │ │ tests/browser-tests │  ← app (browser-tests: + web, js-rendered)
 └─────────────────────────┘ └─────────────────────┘
 ```
 
@@ -193,6 +200,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `graph` | *(none)* |
 | `dependency-contract` | *(none)* |
 | `log-capture` | *(none)* |
+| `js-rendered` | *(none)* |
 | `persistence` | `log-capture` |
 | `calculators` | `typesystem` |
 | `scripting` | `typesystem` |
@@ -206,12 +214,12 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources`, `log-capture` |
 | `visualization` | `typesystem`, `pipeline-contract`, `templates`, `parameters` |
 | `lake` | `typesystem`, `persistence`, `datasources`, `staging`, `pipeline-contract`, `scheduler`, `auth`, `log-capture` |
-| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization`, `dependency-contract`, `scheduler` |
+| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization`, `dependency-contract`, `scheduler`, `js-rendered` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters`, `visualization` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake`, `dependency-contract`, `log-capture` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization`, `lake`, `dependency-contract`, `js-rendered`, `log-capture` |
 | `app` | `web`, `log-capture` |
 | `tests/integration-tests` | `app`, `log-capture` |
-| `tests/browser-tests` | `app`, `web` |
+| `tests/browser-tests` | `app`, `web`, `js-rendered` |
 
 Notes on the shape (explanatory, not additional rules):
 
@@ -229,6 +237,7 @@ Notes on the shape (explanatory, not additional rules):
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
 - `app` lists `web` for its main sources and `log-capture` for its tests. It contains `main()`, configuration (including the single `metadataTransactionManager`, §8.5), logback config, and the Flyway migrations (§3.1) — no domain code.
 - `log-capture` (#756) is the one **test-only** module: the shared Logback snapshot capture that replaced nine module-local test-source copies. It is listed in the nine rows whose test sources capture logs (`persistence`, `datasources`, `auth`, `dag`, `parameters`, `lake`, `web`, `app`, `tests/integration-tests`), and every one of those edges is a `testImplementation`: `verifyModuleDependencies` fails when any configuration whose name does not start with `test` declares it (its `testOnlyModules` set), so test tooling never reaches a runtime classpath. `persistence`'s row is therefore no longer empty, but its main sources still have no internal dependency. The §4.3 "no `common` module" rule is unchanged: this module holds one fixture and carries its own guard.
+- `js-rendered` (#985) has no internal dependencies: the chart engine is JavaScript resources and one Kotlin object that lists them, and it must sit below every module that draws a chart. It is NOT test-only (unlike `log-capture`). `application` declares it from main sources since #986 (F2): `JsRenderedChartEngine`, the `ChartEngine` port's implementation, loads the engine files as the scripting module's trusted-code program (§5.15). Its tests add one `testImplementation` edge to the consumable `jsRenderedTestData` configuration (Node's emitted results and the invariant checker) for the chart guards (§5.24). `web` declares it from main sources since #987 (F3): `ui/JsRenderedAssetConfig` serves the engine's files to the page from this module's resources, in the order `JsRenderedEngineFiles` gives, so the page and the server run the same files.
 - A module may use `api(project(...))` instead of `implementation(...)` only where its own public API exposes the other module's types (e.g. `pipeline-contract` exposes `ColumnSchema` from `typesystem`). The allowed-set is the same either way.
 
 **Enforcement:** a Gradle verification task compares each subproject's declared project dependencies against this table and fails the build on any extra entry. Adding an edge means editing this table first — that is the review gate.
@@ -560,7 +569,7 @@ was vendored like the rest (`VendoredHtmxAuditTest` pins the bytes and the licen
 
 ### 5.12 `tests/browser-tests`
 
-**Dependencies (internal):** `:modules:app` (full app context, same allowance as §5.11) and `:modules:web` (`testImplementation`, #721: `SiteShotsRailOrderTest` reads `AppNav.ITEMS`; `app` carries `web` as `implementation`, so the edge is declared, not leaked).
+**Dependencies (internal):** `:modules:app` (full app context, same allowance as §5.11) and `:modules:web` (`testImplementation`, #721: `SiteShotsRailOrderTest` reads `AppNav.ITEMS`; `app` carries `web` as `implementation`, so the edge is declared, not leaked), and `:modules:js-rendered` (`testImplementation`, #987: the page's chart-engine files are compared with `JsRenderedEngineFiles`' bytes, and the module's `jsRenderedTestData` configuration supplies Node's emitted inputs and results that the page's own draw must equal; test scope only). Since #991 the test configuration `lookReference` takes the module's `jsRenderedReference` directory (§5.24, the look reference page), which `LookReferencePageBrowserTest` serves to its own browser by request interception; the edge is the same declared one.
 
 **Dependencies (external):**
 - `com.microsoft.playwright:playwright` — pinned in the catalog; the pin covers the
@@ -683,6 +692,7 @@ build's `allowedInternalDependencies` map carries the same closed set).
 - `JavaScriptRuntime`, `JavaScriptRuntimeOptions`, `Availability`, `EngineScope` — the one factory of every polyglot Engine and Context (`SandboxPolicy.UNTRUSTED`, `spawnIsolate(true)`, no host, IO, polyglot, native, process or environment access), one Engine per JVM with a fresh Context per evaluation, and the isolate's sizing
 - `ConsoleSink`, `ConsoleLine`, `ConsoleLevel` — where a JavaScript body's console lines go
 - `JavaScriptResourcesMain` — the image build's pre-install of the isolate's native resources
+- `JavaScriptProgram` and `JavaScriptEngine.call` — the one entry for TRUSTED product code (#986, the js-rendered charts record §5.3): a named Source built once, cached and NOT internal (its statements are counted), whose text evaluates to one function of JSON text; each call goes through the evaluator's own path — a fresh Context from the one builder, the input and result byte bounds, the watchdog, the cancellation — and adds no sandbox option. Its one caller is `application`'s chart engine
 - `CompiledScript` — opaque engine-produced handle
 - `ScriptEvaluationPool` — the bounded pool every production evaluate call runs on; `ScriptClock` is its injected time source
 - `TypeGate` (+ `GateRefusal`/`GateResult`) — the §5.3/R1 output contract of the script design; DECIMAL rounds half-even, BIGDECIMAL is exact
@@ -770,11 +780,14 @@ build's `allowedInternalDependencies` map carries the same closed set).
 - `VisualizationBody` / `DashboardBody` and their parts — the two documents ([dashboards.md §2](dashboards.md), the implementation spec §3), bound by `VisualizationReader` / `DashboardReader` (an explicit key table per level; unknown keys, wrong JSON types and missing keys refused as `*.validation.body_invalid` naming the path; the collection bounds checked before their members are walked) and `ArtifactJson`'s strict mapper.
 - `VisualizationErrorCodes` / `DashboardErrorCodes` — the `visualization.*` / `dashboard.*` families ([Pipeline Contract §13.22/§13.23](pipeline-contract.md)); `PipelineErrorCodes.Visualization` / `.Dashboard` mirror them, pinned equal by reflection.
 - `VisualizationValidator` / `DashboardValidator` — the save-time rules (the spec's §3.1/§3.2), exhaustive, one code per rule. The ports they judge through, declared here and implemented by the surfaces: `TemplateContractFacts` (a pinned template version's type and script contract — `TemplateContractFacts.over(TemplateDryRenderer, TemplateVersionStatuses)` is the production adapter), `RendererConfigValidator` (this module's `table`/`kpi` schemas; a `chart` document is judged WHOLE by `ChartDocumentRules` instead — #860, below), `PipelineReleaseFacts` (a pinned pipeline release: status, read-only, parameters, caller output columns — `application` implements it over `ReadOnlyPipelineRule`, L1b), `ParameterSetFacts` (a pinned set version's parameters and their dependents — `ParameterSetFacts.over(ParameterSetRepository)` is the production adapter).
-- The `chart` kind v1 (#860, design record 2026-11-06-neutral-chart-grammar §4): `ChartSchemas` / `ChartSchemaValidator` (the two v1 JSON Schema files on the classpath — the bytes the web module serves at `/schemas/chart/1/` — validated offline, every `$ref` from the classpath), `ChartSaveRules` (the `chart.*` save rules), `ChartLibrarySupport` (the server library's support table: `chart.unsupported.*` refusals, `chart.degraded.*` warnings), and `ChartDocumentRules`, the three layers in that order — `VisualizationValidator` stops at the first that refuses, so a document fails at exactly one; `ChartColumns` resolves the encoded fields' logical types from the same contract the save rules read, for every surface that hands a chart occurrence to the runtime.
+- The `chart` kind v1 (#860, design record 2026-11-06-neutral-chart-grammar §4): `ChartSchemas` / `ChartSchemaValidator` (the two v1 JSON Schema files on the classpath — the bytes the web module serves at `/schemas/chart/1/` — validated offline, every `$ref` from the classpath), `ChartSaveRules` (the `chart.*` save rules), and `ChartDocumentRules`, the two layers in that order (#986: the server library's support table and its save warnings are gone, js-rendered record O-13) — `VisualizationValidator` stops at the first that refuses, so a document fails at exactly one; `ChartColumns` resolves the encoded fields' logical types from the same contract the save rules read, for every surface that hands a chart occurrence to the runtime.
 - `VisualizationRepository` / `DashboardRepository` (jdbc; V42) over ONE generic core, `ArtifactRepository` — the `ParameterSetRepository` API for each family: every statement takes the workspace, the hash is the database's (`HASH_EXPR` over the bound body), the one-draft index and the draft race mapped to `*.version.conflict`.
 - `VisualizationService` / `DashboardService` — the versioning §3.5 verb table over one generic core (`ArtifactLifecycle`): create, the draft write, release, purge, discard, restore, switch, import, and the lensed reads (every read takes a `ReadLens`, no default). A visualization's release cascades its DRAFT transform pins with consent (`TemplateReleaser`) and passes the `ReleaseEvidence` gate — whose default REFUSES (`visualization.release.tests_missing`) until L4 installs the evidence tables' gate. A dashboard's release checks its sources, set and visualizations and cascades DRAFT visualization pins with consent through `VisualizationService.release`, inside ONE transaction. Since L1b the lifecycle core's `repository`, `transactions` and `flipDraft`, and both services' `repository`, are module-INTERNAL (the L1a security pass's O3): a surface reads only through the lensed reads — which gained `findVersionByName` (a pin's address) and `DashboardService.pinnedBy` (D30's `used_by`, lensed) for the MCP tools.
 - `ArtifactTransferService` — the export envelopes (rest-api §21.4's shape: `templates` at a visualization envelope's root, `visualizations` at a dashboard's) and the import (the lifecycle keys stripped by name, the strict bind, templates → visualizations → the artifact) behind the `TemplateBundle` port; the routes are L1c's.
 - `VisualizationProperties` / `VisualizationConfig` — `datapipelines.visualization.*` ([Configuration §3.33](configuration.md)).
+- The chart engine's port (#986, js-rendered record §5.3, O-11, O-12): `ChartEngine` — `render(ChartInput, ChartFrame) → ChartOutput` and `picture(ChartInput, ChartFrame, ChartTheme) → ChartPicture`, the standalone SVG for a frame clamped to 16–4,096 px per side and a theme NAME from a closed list (`ChartTheme`); `ChartEngineFailure` names the limit that ended a call. Implemented in `application` (`JsRenderedChartEngine`); no route, tool or permission reaches it, and a save never calls it.
+- The test check's chart judge (#986, record §4.12): `VisualizationMechanicalCheck` judges a chart case's `rendered`, `mark_count`, `no_data` and `text_visible` from the case's canonical render (640 × 400, the server's width table, nothing hidden), taken through the `RenderedStateCheck` seam — `EngineRenderedStateCheck` over the port where the JavaScript runtime is available, `RenderedStateCheck.NOT_AVAILABLE` (the four `unjudged`, state `not_available`) where it is not; `web`'s configuration chooses by the runtime's own answer.
+- Type-driven chart code (#986, record §4.2, O-12): `ChartType` (the closed list of chart types, each with its channel descriptor) and `ChartPositions`, the one walk over a descriptor that lists every shape object and every field-bearing position with its JSON Pointer; `ChartSaveRules`, `ChartColumns`, the derived bindings and `ChartSchemas.FILES` read it, so a new type adds a descriptor, not a rule.
 - The closed vocabularies `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` ([Enumerations §31–§37](enums.md)); `ReleaseEvidence` (the D56 gate, `NOT_INSTALLED` by default — refusing) and `TemplateBundle` (the transfer's template half) are ports L4 and L1c implement.
 
 **Why it is its own module.** The design record's D29: a separate module whose responsibilities and edges are specified before implementation. Dashboards and visualizations are two aggregates that share one lifecycle shape; the runtime that executes a dashboard (`DashboardRuntime`, L2) is cross-aggregate and lives in `application`.
@@ -840,6 +853,20 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Why it is its own module.** Until #756 every capturing module carried its own copy (nine, byte-identical but for the package line, one of them divergent). The owner ruled for one shared test-only module (2026-11-10, option A) over the earlier "one test-source copy per module" convention. `RawListAppenderGuardTest` (buildSrc) scans this module's main sources beside every test source, exempts the helper file by name, and refuses a module-local copy of the helper or its test anywhere else (`DEVELOPMENT.md` §9.6).
 
 **Tests:** `SnapshotListAppenderTest` — a returned snapshot stays unchanged after another append; snapshots keep event identity, level, arguments and throwable metadata; a throwing capture detaches and stops; a finite producer and reader see ordered independent snapshots; writer threads appending while a reader takes snapshots (no `ConcurrentModificationException`, nothing lost); the root-logger capture formats messages, detaches on a throw and records again when reused.
+
+### 5.24 `js-rendered`
+
+**Dependencies (internal):** none — layer 0. **Dependencies (external):** none (the charts record's R17: the product's own code only — no third-party file in the engine, nothing vendored, nothing fetched). Node ≥ 18 is a BUILD tool of this module, for its own tests: never a runtime dependency.
+
+**What it is (#985, the js-rendered charts record §4.3, §5.1).** The chart engine: the product's own JavaScript that turns a chart document plus its rows into a picture of **primitives** (`rect`, `line`, `path`, `circle`, `text`, `group`), never markup. Classic script files on one namespace, `JsRendered`, under `src/main/resources/co/datapipelines/jsrendered/engine/`, run in the fixed order of `LOAD-ORDER.txt` — no bundler, no module system, no npm at build or run time. The same files run in a browser page and in the server's GraalJS sandbox (`scripting`) and draw the same picture there byte for byte (record I6). The shared files are the namespace, number and date text (§4.7), the server's width table, the measurer, the sRGB table, the theme's tokens and their defaults, the look and cap tables, scales, the primitive constructors (each takes ONE object of named fields and throws on an unknown or missing one), the data layer, the shared layout (level, titles, legend, axes, the x label row with the corner rule), `render`, and the two writers (`writeDom`: `createElementNS`, `setAttribute`, `textContent` only; `writeString`: the one file holding markup strings, escaping every text and attribute value). A chart type is one template file, `types/<wire>.js`, a plain function registered with `JsRendered.type(name, {channels, model, marks, axes})`; this lane ships `bar`.
+
+**Public API.** JavaScript: `JsRendered.render(input) → {version, type, state, level, primitives, index, summary}` (states `too-small`, `refused`, `no-data`, `rendered`), `JsRendered.type`, `JsRendered.types()` (`[{name, channels}]`), `JsRendered.writeDom`, `JsRendered.writeString`, `JsRendered.version`. Kotlin: `co.datapipelines.jsrendered.JsRenderedEngineFiles` — `ROOT`, `LOAD_ORDER`, `names` (load order), `sources`, `concatenation`; nothing else (no entry point, no evaluation: `application`'s `JsRenderedChartEngine` loads these files in load order, then its entry's function, as one `JavaScriptProgram`, #986).
+
+**Build tasks.** `jsRenderedTest` — the engine's Node suite (`node --test src/test/js/*.test.mjs`), a plain cacheable task with a CLOSED input list (the engine, the tests, the fixtures, the `node --version` string) and one output file (the counts); a recorded green run is not repeated for the same inputs (R15), and a machine without `node` FAILS it (unlike `web`'s `editorJsTest`, which skips). Attached to `check`; the pregate records it as a verdict task. `jsRenderedEmit` — Node's `render` result for every chart fixture (`src/test/fixtures/<wire>/`) at seven frames, written under `build/`. `jsRenderedFixtureResources` syncs those results and the invariant checker (`src/test/js/geometry.js`) into the directory artifact of the consumable configuration `jsRenderedTestData`, which `application`'s chart guards put on their test class path. `jsRenderedReference` assembles the look reference page (below) into `build/reference/` and is the artifact of the consumable configuration of the same name.
+
+**The look reference page (#991, F7; the look contract's LA9).** A static page for people looking at the look, NOT a product surface: in no jar and behind no route (record O-11). Its source is `src/reference/` (`index.html`, `forest.html`, `reference.js`, `reference.css`, one tile file per chart type under `tiles/`, each tile with an `expect` written by hand from the contract and the record, and the look study's chosen pictures under `study/` with `provenance.json`); no file of it is a resource of any source set. `jsRenderedReference` copies the engine's files in `LOAD-ORDER.txt`'s order and GENERATES their script tags from that list, adds `web`'s interaction layer, and copies the six stylesheets of the product's leanest chart page (`templates/visualizations/preview.html`), the `dark` and `forest` theme files and every file they name (the fonts) byte for byte at their own relative addresses; it fails on a hand-written script tag, a style attribute, a chart token or a colour literal in `reference.css`, a markup or code sink in `reference.js`, or a tile without its `expect`. The page draws with `JsRendered.render` and `JsRendered.writeDom` directly, attaches the interaction layer, and re-declares the product's own faces of the engine's font with `display: block` so that it is measured and seen in the real font (the product's faces are `optional`). A later chart-type lane adds its own tile file and changes no other. Its guards: `tests/browser-tests`' `LookReferencePageBrowserTest` (every tile against its `expect`, both themes, two screens, a clean console) and `web`'s `ChartLookContractTokensTest` (the contract's LA1 and LA12: the engine's token defaults and the product stylesheet's chart tokens against the contract's §3).
+
+**Tests.** The Node suite (geometry and cases, the four states and their sentences, numbers and dates, the invariants I1–I5 and I7 over every chart fixture at widths 240–1,600 by 40 at heights 100, 140, 200, 240 and 480, the fit at the compact and full level boundaries and their neighbours at each valid larger text size (`fit.test.mjs`, #985 R1) and tick text that keeps each tick's value (R2), the caps, the text and the writers, the look table and the look contract's rows, the frozen corpus, and the x label row over the `_layout` fixtures: label-row inputs that are not chart documents, never given to `render` and counted apart from the chart fixtures). `JsRenderedEngineFilesTest` (the names are `LOAD-ORDER.txt`'s lines, every listed file exists and every engine file is listed, the concatenation). In `application` (`charts/`): `ChartTypeRegistryTest` (R-REG — six sets of chart types equal, the enum's channel descriptor equal to the template's node for node, five fixtures per type with the empty case), `JsRenderedIdentityTest` (I6 — the PRODUCT's chart entry's answer byte-identical to `jsRenderedEmit`'s for every chart fixture and frame (#986 D10), I1/I2/I4/I5 over that answer, the on-fill helper's choices equal, small-value tick text read back by the test's own decimal reader), `JsRenderedSourceGuardTest` (R-BAN — none of the 23 banned patterns in the engine's code, markup strings in the string writer only; the product's program is exactly these files in load order plus its entry, the entry clean, the Source counted). `ChartTypeRegistryTest` reads the registry through the product's entry too.
 
 ## 6. Version Catalog
 
@@ -1347,6 +1374,10 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-16 | v1.24 | 991 (#991, js-rendered F7) | **§5.24:** the look reference page (`src/reference/`, in no jar and behind no route), its task `jsRenderedReference` and the consumable configuration of that name; its two guards. **§5.12:** `tests/browser-tests`' `lookReference` test configuration takes that directory over the existing `js-rendered` edge. No new module, edge in the map or external dependency. |
+| 2026-11-15 | v1.23 | 987 (#987, js-rendered F3) | `web` declares `js-rendered` from main sources (§4.1 box and diagram, §4.2 row and the note under it): `ui/JsRenderedAssetConfig` serves the chart engine's files to the page, the same files the server draws with. `tests/browser-tests` declares `js-rendered` from its tests only (§4.1 diagram, §4.2 row, §5.12): the page's engine files against the module's bytes, and Node's emitted results against the page's draw (`jsRenderedTestData`). No new module or external dependency. |
+| 2026-11-15 | v1.22 | 986 (#986, js-rendered F2) | `application` declares `js-rendered` from main sources (§4.1 box and diagram, the note under §4.2): `JsRenderedChartEngine`, the `ChartEngine` port's implementation. **§5.15:** `JavaScriptProgram` and `JavaScriptEngine.call`, the entry for trusted product code. **§5.20:** the save has two layers (the library support table and its warnings are gone, O-13); the `ChartEngine` port, the chart judge behind the `RenderedStateCheck` seam, and `ChartType` / `ChartPositions` driving the save rules, the columns, the bindings and the schema files. **§5.24:** the engine files are loaded by the chart entry; F1's guards read the product's entry. No new module, edge in the map or external dependency. |
+| 2026-11-15 | v1.21 | 985 (#985, js-rendered F1) | New layer-0 module `js-rendered`, the chart engine (§3 list and matrix row, §4.1 box, §4.2 row *(none)* and note, new §5.24); `application`'s row and diagram gain `js-rendered`, declared from its tests only so far (the three chart guards, through the module and its `jsRenderedTestData` configuration). |
 | 2026-11-14 | v1.20 | 957 (#957, dp-lake P6) | `lake` declares `scheduler` (§4.1 diagram edge, §4.2 note, §5.21; the §4.2 row already allowed it) for the system-job seam; db-scheduler stays the scheduler's `implementation` dependency. §5.21 gains the maintenance runs' public API. No new module, no new external dependency. |
 | 2026-11-14 | v1.19 | 669 (#669) | §5.12's design rule: a local `build`/`check` still runs `:tests:browser-tests:test`; CI's gate job (like `scripts/gate.sh`) excludes it and compiles its classes, and CI's `browser` job runs it in three shards (`BrowserShards`, buildSrc). The old "CI's build step lists it; every gate log shows it" stopped being true at the 2026-10-09 gate ruling and at #669. |
 | 2026-11-12 | v1.18 | 756 (#756) | New TEST-ONLY layer-0 module `log-capture` (§3, §3.1, §4.1, §4.2 row and note, §4.3, §5.23): the one shared Logback snapshot capture replaces nine module-local `SnapshotListAppender` copies; the nine capturing modules declare it with `testImplementation` alone, and `verifyModuleDependencies` refuses any non-test edge into it. No production dependency change. |

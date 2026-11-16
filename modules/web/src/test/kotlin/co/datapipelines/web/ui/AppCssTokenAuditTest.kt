@@ -18,13 +18,15 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver
  *
  * ## What it checks
  *
- * 1. **`app.css` writes no literal colour**, except in two places that are literals ON PURPOSE
- *    and are named here so a third one cannot slip in unremarked:
+ * 1. **`app.css` writes no literal colour**, except in the places that are literals ON PURPOSE
+ *    and are named here so another one cannot slip in unremarked:
  *
  *    - the `--node-*` / `--edge-*` block at the top, where the hex is a `var(…, fallback)`
  *      SECOND argument. The Cytoscape stylesheet reads these through `getComputedStyle`, and a
  *      token that failed to resolve there would paint a graph in `unset` rather than degrade;
  *    - the six theme swatches (079 §B), for the reason below.
+ *    - the chart tokens' declarations (#987): their values are the js-rendered look contract's §3 tables,
+ *      held there by the contract's LA12 browser rows.
  *
  * 2. **Each swatch shows its theme's REAL accent.** A swatch has to display a theme the page
  *    is not currently wearing, so its colour cannot come from a live `var()` — every swatch
@@ -68,7 +70,7 @@ class AppCssTokenAuditTest {
             ?.lowercase()
 
     @Test
-    fun `app css carries no literal colour outside the two declared exceptions`() {
+    fun `app css carries no literal colour outside the declared exceptions`() {
         val violations =
             appCss
                 .lines()
@@ -80,22 +82,38 @@ class AppCssTokenAuditTest {
                 // own comment explains the contrast argument. Every other token there bridges.
                 .filterNot { (_, line) -> line.contains("--type-ddl") || line.contains("--type-calc") }
                 .filterNot { (_, line) -> SWATCH_RULE.containsMatchIn(line) }
+                // #987 (js-rendered F3, D6): the chart tokens' declarations. Their values ARE the look contract's §3
+                // tables (§5.1, call C7) — a chart palette has no design-system counterpart — and the contract's LA12
+                // holds them there. Only a line that DECLARES a --chart- token is excused, never one that reads it.
+                .filterNot { (_, line) -> CHART_TOKEN_DECLARATION.containsMatchIn(line) }
+                // #990 (brief D2, owner ruling L7): the tooltip's ONE `filter` rule reads --chart-tip-shadow with the
+                // contract's §3.5 Light value as its fallback, so a host that declares the token nowhere still gets the
+                // default shadow. Only that exact reading is excused, and only once (pinned below).
+                .filterNot { (_, line) -> line.trim().startsWith(TIP_SHADOW_READ) }
                 .filterNot { (_, line) -> line.trimStart().startsWith("*") || line.trimStart().startsWith("/*") }
                 .map { (index, line) -> "app.css:${index + 1} carries a literal colour: ${line.trim()}" }
 
         violations shouldBe emptyList()
+        appCss.lines().count { it.trim().startsWith(TIP_SHADOW_READ) } shouldBe 1
+        // The fallback IS the light declaration's value (the first --chart-tip-shadow declared, in :root).
+        val light = Regex("""--chart-tip-shadow:\s*([^;]+);""").find(appCss)?.groupValues?.get(1)
+        val read = appCss.lines().map { it.trim() }.first { it.startsWith(TIP_SHADOW_READ) }
+        val fallback = read.removePrefix(TIP_SHADOW_READ).removeSuffix(");")
+        fallback shouldBe light
     }
 
     @Test
     fun `the sweep names its own scope, and it is not vacuous`() {
         // Non-vacuity in both directions: the file must be the real one (it is thousands of
-        // lines and defines the shell), and the two declared exceptions must actually be
+        // lines and defines the shell), and the declared exceptions must actually be
         // present — a sweep whose exclusions matched everything would pass while checking
         // nothing.
         appCss.lines().size shouldBeGreaterThanOrEqual MIN_LINES
         val fallbackLines = appCss.lines().count { it.contains("--node-") && LITERAL_COLOUR.containsMatchIn(it) }
         fallbackLines shouldBeGreaterThanOrEqual MIN_FALLBACK_LINES
         swatches.size shouldBe EXPECTED_PALETTES
+        val chartLiteralLines = appCss.lines().count { CHART_TOKEN_DECLARATION.containsMatchIn(it) && LITERAL_COLOUR.containsMatchIn(it) }
+        chartLiteralLines shouldBeGreaterThanOrEqual MIN_CHART_LITERAL_LINES
     }
 
     @Test
@@ -167,11 +185,20 @@ class AppCssTokenAuditTest {
         val SWATCH_RULE = Regex("""\.app-swatch\[data-swatch="([a-z-]+)"]\s*\{\s*background:\s*(#[0-9a-fA-F]{6})""")
         val ACCENT = Regex("""--_accent-primary:\s*(#[0-9a-fA-F]{6})""")
 
+        /** The tooltip's shadow rule (#990): the one reading of a chart token whose fallback is a literal. */
+        const val TIP_SHADOW_READ = "filter: var(--chart-tip-shadow, "
+
+        /** `  --chart-grid: light-dark(#e6e9ee, #262c35);` — a declaration of a chart token, at the line's start. */
+        val CHART_TOKEN_DECLARATION = Regex("""^\s*--chart-[a-z0-9-]+\s*:""")
+
         /** Six digits only — `#abc` is indistinguishable from an id and this file has none. */
         val LITERAL_COLOUR = Regex("""(?:#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?\b|\b(?:rgba?|hsla?)\()""")
 
         const val MIN_LINES = 800
         const val MIN_FALLBACK_LINES = 10
         const val EXPECTED_PALETTES = 6
+
+        /** The chart palette (series 1–8, sequential 1–7, grid, on-fill pair, tip border) and the tip shadow's rgba lines. */
+        const val MIN_CHART_LITERAL_LINES = 20
     }
 }

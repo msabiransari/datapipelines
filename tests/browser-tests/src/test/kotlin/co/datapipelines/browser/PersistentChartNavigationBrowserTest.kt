@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import co.datapipelines.web.ui.JsRenderedAssetConfig
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Route
 import io.kotest.assertions.withClue
@@ -13,12 +14,12 @@ import java.nio.file.Paths
 class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
     @Test
     @Suppress("LongMethod") // a single chart/history/zero-width journey keeps identity witnesses live
-    fun `two chart workspaces, versions and cached history share one bundle and retain the shell`() {
+    fun `two chart workspaces, versions and cached history share one chart engine and retain the shell`() {
         val root = ready("persistcharts")
         page.setViewportSize(1440, 1000)
         val (flat, _) = createVisualization("$root/charts/flat")
-        // #860: the second workspace is a second bar chart (the 3d surface left with the plotly kind); the shell's one
-        // bundle is still the 3d superset it loads for every chart page.
+        // #860: the second workspace is a second bar chart. #987: the shell loads the chart engine's files once per
+        // document, and every chart page after the first finds them already there.
         val (second, _) = createVisualization("$root/charts/second")
         openVisualizations(root)
         page.evaluate(
@@ -30,7 +31,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.onRequest { if (it.url().contains("/api/v1/visualizations/tree")) treeRequests += it.url() }
         page.click("#nav-tree-visualizations a[href='/visualizations/$flat']")
         preview()
-        page.evaluate("() => {window.__plotly=window.Plotly;window.__runtime=window.DatapipelinesDashboard}")
+        page.evaluate("() => {window.__engine=window.JsRendered;window.__runtime=window.DatapipelinesDashboard}")
         sameShell()
         // #554: the browser's End (the range's ceiling at 1440) narrows main and the chart with it;
         // Home (the range's floor since #784) gives the chart room back. #788: the widths derive
@@ -40,7 +41,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.locator("#browser-boundary").focus()
         page.keyboard().press("End")
         page.waitForFunction("expected => document.getElementById('app-main').getBoundingClientRect().width === expected", mainAtCeiling)
-        val narrow = "() => document.querySelector('[data-viz-case-index=\"0\"] .js-plotly-plot')?.getBoundingClientRect().width"
+        val narrow = "() => document.querySelector('[data-viz-case-index=\"0\"] svg.dp-chart')?.getBoundingClientRect().width"
         page.waitForFunction("limit => ($narrow)() < limit", mainAtCeiling)
         val chart = (page.evaluate(narrow) as Number).toDouble()
         page.keyboard().press("Home")
@@ -53,10 +54,11 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.waitForURL("**/visualizations/$second")
         preview()
         sameShell()
-        page.evaluate("() => window.Plotly===window.__plotly && window.DatapipelinesDashboard===window.__runtime") shouldBe true
-        page.locator("script[data-dp-plotly-bundle]").count() shouldBe 1
-        page.locator("script[data-dp-plotly-bundle]").getAttribute("data-dp-plotly-bundle") shouldBe "3d"
-        page.evaluate("() => performance.getEntriesByType('resource').filter(x=>x.name.includes('plotly-2d.min.js')).length") shouldBe 0
+        page.evaluate(
+            "() => !!window.__engine && window.JsRendered===window.__engine && window.DatapipelinesDashboard===window.__runtime",
+        ) shouldBe
+            true
+        engineScripts() shouldBe JsRenderedAssetConfig.scripts
         page.click(".app-nav-link[data-nav-section='/visualizations']")
         // #581: the Visualizations item lands on the family overview (a boosted leave either way).
         page.waitForSelector(".app-overview[data-overview='visualizations']")
@@ -187,7 +189,8 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         page.navigate("$baseUrl/pipelines/$pipeline")
         page.waitForFunction("() => !!window.__peInstance")
         page.evaluate("() => {window.__observer=window.__peInstance;window.__rail=document.getElementById('app-rail')}")
-        page.route("**/vendor/plotly/plotly-3d.min.js") {
+        // #987: the chart engine's last file is what the chart page needs and the pipeline page never loaded.
+        page.route("**" + JsRenderedAssetConfig.scripts.last()) {
             it.fulfill(
                 Route
                     .FulfillOptions()
@@ -245,7 +248,7 @@ class PersistentChartNavigationBrowserTest : VisualizationBrowserSuite() {
         ) shouldBe true
         page.locator("#dp-board[data-datapipelines-dashboard]").count() shouldBe 1
         page.evaluate("() => window.__disposals") shouldBe 1
-        page.locator("script[data-dp-plotly-bundle]").count() shouldBe 1
+        engineScripts() shouldBe JsRenderedAssetConfig.scripts
     }
 
     @Test

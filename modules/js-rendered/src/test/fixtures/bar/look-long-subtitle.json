@@ -1,0 +1,67 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: a subtitle that wraps to two lines and is then cut (record §4.4 G5, §4.6)",
+ "document": {
+  "display_name": "Long subtitle",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    }
+   },
+   "title": {
+    "text": "Revenue by region",
+    "subtitle": "Every region's revenue for the quarter, summed over all channels and all product lines, net of refunds and of the discounts granted at the till, in US dollars"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "North",
+   "South",
+   "East"
+  ],
+  "v": [
+   120,
+   95,
+   60
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE"
+ }
+}

@@ -1,0 +1,88 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: two series, one hidden by the page (the hidden list of record §4.3)",
+ "document": {
+  "display_name": "Hidden series",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "title": "Channel"
+    }
+   },
+   "title": {
+    "text": "One series switched off"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Mon",
+   "Mon",
+   "Tue",
+   "Tue"
+  ],
+  "s": [
+   "Online",
+   "Retail",
+   "Online",
+   "Retail"
+  ],
+  "v": [
+   10,
+   40,
+   20,
+   35
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "s": "STRING",
+  "v": "DOUBLE"
+ },
+ "hidden": [
+  "string:Retail"
+ ]
+}

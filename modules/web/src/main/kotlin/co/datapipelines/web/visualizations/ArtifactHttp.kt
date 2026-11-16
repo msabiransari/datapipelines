@@ -155,23 +155,10 @@ internal object ArtifactResponses {
     }
 
     /**
-     * A visualization save's answer (rest-api §22 POST/PUT, #860): the [full] projection of the saved version plus
-     * `warnings` — ALWAYS present, `[]` on a clean save, one `{code, path, library}` per field the chart library
-     * honours only in part (design record 2026-11-06 §4.4; the release response's `warnings` shape, pipelines §5.10).
-     * Never document text: a code, a dotted body path and a library name.
+     * A visualization save's answer (rest-api §22 POST/PUT): the [full] projection of the saved version. A save carries
+     * no caveat (js-rendered record O-13: the library layer and its `warnings` are gone).
      */
-    fun saved(saved: VisualizationSaved): JsonNode {
-        val node = full(saved.version, draftOf(saved.version)) as ObjectNode
-        val warnings = node.putArray("warnings")
-        saved.warnings.forEach {
-            warnings
-                .addObject()
-                .put("code", it.code)
-                .put("path", it.path)
-                .put("library", it.library)
-        }
-        return node
-    }
+    fun saved(saved: VisualizationSaved): JsonNode = full(saved.version, draftOf(saved.version))
 
     /** One entry of the versions listing — metadata only, no body. */
     fun versionSummary(version: ArtifactVersionDetail): Map<String, Any?> =

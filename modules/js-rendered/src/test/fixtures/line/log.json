@@ -1,0 +1,151 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "a log value axis (G4): ticks on 1, 2, 5 × 10^k, a value ≤ 0 not drawn with a warning",
+ "document": {
+  "display_name": "log",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "scale": {
+      "type": "log"
+     },
+     "format": "compact"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "Log scale"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-01-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-07-01",
+   "2024-07-01",
+   "2024-08-01",
+   "2024-08-01",
+   "2024-09-01",
+   "2024-09-01",
+   "2024-10-01",
+   "2024-10-01",
+   "2024-11-01",
+   "2024-11-01",
+   "2024-12-01",
+   "2024-12-01"
+  ],
+  "s": [
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large",
+   "Small",
+   "Large"
+  ],
+  "v": [
+   3,
+   1000,
+   10,
+   4000,
+   17,
+   9000,
+   24,
+   16000,
+   0,
+   25000,
+   38,
+   36000,
+   45,
+   49000,
+   52,
+   64000,
+   59,
+   81000,
+   66,
+   100000,
+   73,
+   121000,
+   80,
+   144000
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "s": "STRING",
+  "v": "DECIMAL"
+ }
+}

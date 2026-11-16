@@ -5,7 +5,6 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.web.api.currentPrincipal
-import co.datapipelines.web.dashboards.runtime.RuntimeViews
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -28,9 +27,8 @@ import java.util.UUID
  * segment-exact): both pages, and every fragment, require a signed-in session. The browser never authors a
  * visualization: no create, update or import control exists on either page (#396).
  *
- * Every link INTO a workspace is a full navigation (`hx-boost="false"`): the page declares ONE Plotly bundle,
- * chosen server-side for the viewed version ([RuntimeViews.rendererBundle]); a version switch can change it
- * (dashboards.md §6.4's one-bundle rule).
+ * A link that names a version is a prepared main-content navigation (`hx-boost="true"`): the shell stays and the
+ * page's catalog loads the chart engine's scripts ([JsRenderedAssetConfig.scripts]) once per document.
  */
 @Controller
 class VisualizationUiController(
@@ -99,8 +97,8 @@ class VisualizationUiController(
                 )
             },
         )
-        // The ONE Plotly bundle the page declares, for the viewed version — only when a version resolved.
-        resolved.selected?.let { model.addAttribute("bundle", RuntimeViews.rendererBundle(listOf(it))) }
+        // The chart engine's script list — only when a version resolved (the template loads the chart scripts with it).
+        if (resolved.selected != null) model.addAttribute("chartEngineScripts", JsRenderedAssetConfig.scripts)
         return WORKSPACE_VIEW
     }
 

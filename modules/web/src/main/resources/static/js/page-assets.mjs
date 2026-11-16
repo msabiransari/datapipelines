@@ -13,8 +13,8 @@ const mounted = new WeakMap(); // catalog node -> its one mount attempt
 /** The global each singleton provides: a source whose global already exists never executes again. */
 const PROVIDED = {
   "/js/datapipelines-dashboard.js": "DatapipelinesDashboard",
+  "/js/datapipelines-chart-interactions.js": "DatapipelinesChartInteractions",
   "/js/datapipelines-dashboard-chart.js": "DatapipelinesDashboardChart",
-  "/js/datapipelines-dashboard-plotly.js": "DatapipelinesDashboardPlotly",
   "/js/datapipelines-dashboard-table.js": "DatapipelinesDashboardTable",
   "/js/datapipelines-dashboard-kpi.js": "DatapipelinesDashboardKpi",
   "/js/visualization-preview.js": "DatapipelinesPreviewMount",
@@ -59,7 +59,7 @@ function entriesOf(catalog) {
   return Array.from(catalog.content.querySelectorAll("script[src]"));
 }
 
-/** A compatible singleton bundle, with CSP setup BEFORE the vendor executes. */
+/** One script, executed once per document in catalog order (async=false keeps the order of a run of scripts). */
 export function loadScript(source) {
   assetPath(source);
   if (loaded.has(source)) return loaded.get(source);
@@ -68,11 +68,6 @@ export function loadScript(source) {
   const promise = new Promise((resolve, reject) => {
     const script = document.createElement("script"); script.src = source; script.async = false;
     if (source.endsWith(".mjs")) script.type = "module";
-    if (source === "/vendor/plotly/plotly-3d.min.js") {
-      let style = document.getElementById("plotly.js-style-global");
-      if (!style) { style = document.createElement("style"); style.id = "plotly.js-style-global"; document.head.append(style); }
-      style.classList.add("no-inline-styles"); script.setAttribute("data-dp-plotly-bundle", "3d");
-    }
     script.onload = () => resolve();
     script.onerror = () => { script.remove(); loaded.delete(source); reject(new Error("Could not load page dependencies")); };
     // The head is outside the history element: a cached restore never replays these.

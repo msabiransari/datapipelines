@@ -1,0 +1,145 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "look state: many series, the limit of 8, grouped",
+ "document": {
+  "display_name": "Eight series",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "Eight series side by side"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q1",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q2",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3",
+   "Q3"
+  ],
+  "s": [
+   "Series 1",
+   "Series 2",
+   "Series 3",
+   "Series 4",
+   "Series 5",
+   "Series 6",
+   "Series 7",
+   "Series 8",
+   "Series 1",
+   "Series 2",
+   "Series 3",
+   "Series 4",
+   "Series 5",
+   "Series 6",
+   "Series 7",
+   "Series 8",
+   "Series 1",
+   "Series 2",
+   "Series 3",
+   "Series 4",
+   "Series 5",
+   "Series 6",
+   "Series 7",
+   "Series 8"
+  ],
+  "v": [
+   13,
+   20,
+   27,
+   11,
+   18,
+   25,
+   32,
+   16,
+   14,
+   21,
+   28,
+   12,
+   19,
+   26,
+   10,
+   17,
+   15,
+   22,
+   29,
+   13,
+   20,
+   27,
+   11,
+   18
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "s": "STRING",
+  "v": "DOUBLE"
+ }
+}

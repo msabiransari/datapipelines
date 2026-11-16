@@ -82,13 +82,6 @@ class VisualizationReader(
         val CASE_KEYS: Set<String> = setOf("name", "fixtures", "assertions")
         val ASSERTION_KEYS: Set<String> = setOf("kind", "equals", "text")
 
-        /** The renderer kind the chart kind retired (design record 2026-11-06 R5) — refused as an unknown kind. */
-        const val RETIRED_PLOTLY_KIND = "plotly"
-
-        /** Its refusal names the replacement and echoes nothing of the input. */
-        const val PLOTLY_RETIRED_MESSAGE =
-            "The plotly kind is retired; author a chart document (renderer {kind: \"chart\", version: \"1\"})."
-
         /** Every logical type is allowed in an input contract (the spec's §3.1) — `NULL` included. */
         val COLUMN_TYPES: List<String> = LogicalType.entries.map { it.wire }
     }
@@ -121,16 +114,6 @@ private class VisualizationScan(
 
     private fun renderer(node: JsonNode) {
         scan.unknownKeys(node, VisualizationReader.RENDERER_KEYS, "renderer")
-        if (node.get("kind")?.let { it.isTextual && it.asText() == VisualizationReader.RETIRED_PLOTLY_KIND } == true) {
-            failures.add(
-                VisualizationErrorCodes.RENDERER_UNSUPPORTED,
-                "renderer.kind",
-                VisualizationReader.PLOTLY_RETIRED_MESSAGE,
-                mapOf("reason" to "unknown_kind", "allowed" to RendererKind.WIRE_VALUES),
-            )
-            scan.requiredText(node, "version", "renderer.version")
-            return
-        }
         scan.literal(
             node,
             "kind",

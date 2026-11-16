@@ -2,15 +2,17 @@
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layouts/default :: page(~{::content})}">
 <th:block th:fragment="content">
-  <!-- Signed-in chart pages share the shell's lazy 3D superset bundle. This inert catalog
-       declares reusable libraries and per-page mount glue; prepared navigation and cached
-       history preserve the rail and mount each live root once. Standalone embeds remain isolated. -->
+  <!-- This inert catalog declares the page's reusable scripts and per-page mount glue; prepared
+       navigation and cached history preserve the rail and run each script once per document.
+       The chart engine's files come first, in the engine's load order, from the server's list
+       (chartEngineScripts: the same files the server draws with); the list is present only
+       when the page has something to draw. Standalone embeds remain isolated. -->
   <template data-page-assets>
-    <th:block th:if="${bundle != null}">
-    <script th:src="@{/vendor/plotly/plotly-3d.min.js}"></script>
+    <th:block th:if="${chartEngineScripts != null}">
+    <script th:each="engineScript : ${chartEngineScripts}" th:src="@{${engineScript}}"></script>
     <script th:src="@{/js/datapipelines-dashboard.js}"></script>
+    <script th:src="@{/js/datapipelines-chart-interactions.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-chart.js}"></script>
-    <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
     <script th:src="@{/js/visualization-preview.js}"></script>

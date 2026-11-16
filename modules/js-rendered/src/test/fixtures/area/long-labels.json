@@ -1,0 +1,100 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "long series names on the lines and long category names on a nominal x",
+ "document": {
+  "display_name": "long-labels",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "area"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "nominal",
+     "sort": null,
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "Long labels",
+    "subtitle": "Category names longer than their band"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "The first category with a long name",
+   "The first category with a long name",
+   "The second category with a long name",
+   "The second category with a long name",
+   "The third category with a long name",
+   "The third category with a long name",
+   "The fourth category",
+   "The fourth category"
+  ],
+  "s": [
+   "A series with a name far too long to fit beside the lines",
+   "Another long series name that must be cut",
+   "A series with a name far too long to fit beside the lines",
+   "Another long series name that must be cut",
+   "A series with a name far too long to fit beside the lines",
+   "Another long series name that must be cut",
+   "A series with a name far too long to fit beside the lines",
+   "Another long series name that must be cut"
+  ],
+  "v": [
+   10,
+   15,
+   13,
+   18,
+   16,
+   21,
+   19,
+   24
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "s": "STRING",
+  "v": "DECIMAL"
+ }
+}

@@ -1,0 +1,97 @@
+{
+ "source": [
+  "modules/web/src/test/resources/chart-parity/fixtures/bar-utc-date.json",
+  "tests/browser-tests/src/test/resources/chart-fixtures/bar-utc-date.json"
+ ],
+ "note": "DATE at UTC midnight = the previous evening in America/New_York: a local formatter would print 2026-02-28",
+ "document": {
+  "display_name": "UTC dates",
+  "description": "Total amount per region, 2024 to 2025.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "month",
+      "type": "DATE"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "units",
+      "type": "INTEGER"
+     },
+     {
+      "name": "payload",
+      "type": "BINARY",
+      "nullable": true
+     },
+     {
+      "name": "segment",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "month",
+     "type": "temporal",
+     "sort": "ascending",
+     "format": "date",
+     "title": "Day (UTC)"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount",
+     "format": "compact"
+    }
+   },
+   "title": {
+    "text": "Amount by region"
+   }
+  }
+ },
+ "columns": {
+  "month": [
+   "2026-03-01",
+   "2026-03-02",
+   "2026-03-03"
+  ],
+  "amount": [
+   10,
+   20,
+   30
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "month": "DATE",
+  "channel": "STRING",
+  "amount": "DECIMAL",
+  "units": "INTEGER",
+  "payload": "BINARY",
+  "segment": "STRING"
+ }
+}

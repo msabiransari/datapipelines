@@ -109,15 +109,6 @@
   ],
   "bars": 2,
   "data_warnings": 0,
-  "degraded": {
-   "plotly": [],
-   "echarts": [],
-   "chartjs": [
-    "mark.labels"
-   ],
-   "apexcharts": [],
-   "vegalite": []
-  },
   "hover": [
    {
     "si": 0,

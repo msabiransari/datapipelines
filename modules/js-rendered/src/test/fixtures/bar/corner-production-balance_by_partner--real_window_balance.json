@@ -1,0 +1,94 @@
+{
+ "source": [
+  "design-records/charts-evidence/977-js-rendered-spike/cases/production-balance_by_partner--real_window_balance.json"
+ ],
+ "note": "D9: lane 977's corner picture (its rows as columns; the document unchanged)",
+ "document": {
+  "display_name": "Goods balance by partner",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "partner_name",
+      "type": "STRING"
+     },
+     {
+      "name": "net_balance_bn",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "title": {
+    "text": "Goods balance by partner"
+   },
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "partner_name",
+     "type": "nominal",
+     "sort": null,
+     "title": "Partner"
+    },
+    "y": {
+     "type": "quantitative",
+     "aggregate": "sum",
+     "field": "net_balance_bn",
+     "format": "decimal(2)",
+     "title": "Exports − imports (USD bn)",
+     "axis": {
+      "grid": true
+     }
+    }
+   }
+  }
+ },
+ "columns": {
+  "partner_name": [
+   "NETHERLANDS",
+   "UNITED KINGDOM",
+   "BRAZIL",
+   "FRANCE",
+   "ITALY",
+   "INDIA",
+   "KOREA, SOUTH",
+   "TAIWAN",
+   "CANADA",
+   "JAPAN",
+   "IRELAND",
+   "GERMANY",
+   "VIETNAM",
+   "MEXICO",
+   "CHINA"
+  ],
+  "net_balance_bn": [
+   96.976461719,
+   22.169483751,
+   12.120294968,
+   -29.367428952,
+   -87.415910897,
+   -88.691664441,
+   -117.047685243,
+   -121.616547888,
+   -124.764228183,
+   -139.679805711,
+   -152.088619704,
+   -166.915168249,
+   -227.820095741,
+   -317.090840601,
+   -576.655478123
+  ]
+ },
+ "types": {
+  "partner_name": "STRING",
+  "net_balance_bn": "DECIMAL"
+ }
+}

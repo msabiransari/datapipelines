@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.80 (frozen contract — additive-only changes after this point)
+**Status:** v1.83 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-15
 
 ---
 
@@ -2000,7 +2000,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
 ```json
 {
   "name": "visualizations_create",
-  "description": "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — the renderer's configuration schema, every binding path (it must already exist in config) and column, the transform pin's contract against the inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the id the other tools take, the body_hash an update needs, and warnings: [] on a clean save, else one {code, path, library} per chart field the library draws only in part (the save landed; the warning names what will look different).",
+  "description": "Create a visualization: version 1 lands as a DRAFT (a human releases it; no tool releases anything). The document is validated in FULL at save — the renderer's configuration schema, every binding path (it must already exist in config) and column, the transform pin's contract against the inputs, the test cases — and a refusal names every failing path. A NEW top-level folder is refused until you confirm it: reuse an existing root, or ask the person first and then pass confirm_new_root: true. Returns the id the other tools take and the body_hash an update needs.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2025,7 +2025,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "renderer": {
         "type": "object",
-        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (plotly is retired; html and svg are reserved; all three are refused); version is the renderer major the host must provide, as a string."
+        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (html and svg are reserved and refused); version is the renderer major the host must provide, as a string."
       },
       "inputs": {
         "type": "object",
@@ -2037,7 +2037,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: the bar family's {mark, encoding, title}, validated against the v1 JSON Schema (https://datapipelines.co/schemas/chart/1/bar.schema.json, served at /schemas/chart/1/bar.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line or area), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2049,7 +2049,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the bars drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       },
       "confirm_new_root": {
         "type": "boolean",
@@ -2061,7 +2061,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
 }
 ```
 
-**Permission:** `visualization.create`. **Mutating.** **Returns:** `{id, name, version, status, body_hash, warnings}` — `warnings` is always present: `[]` on a clean save, else one `{code, path, library}` per chart field the declared library draws only in part (`chart.degraded.<field>`, design record 2026-11-06 §4.4; recomputed on every save, never stored, never document text). The save has landed either way. **Errors:** `visualization.validation.*` (every failure in `details.failures`; `name_taken` 409), `visualization.validation.new_root_requires_confirmation` (`details.existing_roots`), `visualization.authoring.disabled`.
+**Permission:** `visualization.create`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}` — no `warnings`: a save judges no chart library (js-rendered record O-13). **Errors:** `visualization.validation.*` (every failure in `details.failures`; `name_taken` 409), `visualization.validation.new_root_requires_confirmation` (`details.existing_roots`), `visualization.authoring.disabled`.
 
 #### 6.2.53 `visualizations_update`
 
@@ -2070,7 +2070,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
 ```json
 {
   "name": "visualizations_update",
-  "description": "Edit a visualization by ID: the first change after a release opens a DRAFT (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from visualizations_get (or the previous update's result) for the version this edit is based on; a mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. A visualization is never renamed: a document naming another is refused. Returns the new body_hash and warnings, as visualizations_create does.",
+  "description": "Edit a visualization by ID: the first change after a release opens a DRAFT (copy-on-write); later updates overwrite that same draft in place. Requires expected_hash — the body_hash you read from visualizations_get (or the previous update's result) for the version this edit is based on; a mismatch is a 409 conflict: re-read and rebase. The whole document is sent and validated in full. A visualization is never renamed: a document naming another is refused.",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -2105,7 +2105,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "renderer": {
         "type": "object",
-        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (plotly is retired; html and svg are reserved; all three are refused); version is the renderer major the host must provide, as a string."
+        "description": "{kind, version}: kind is chart (the neutral chart document), table or kpi, each at version \"1\" (html and svg are reserved and refused); version is the renderer major the host must provide, as a string."
       },
       "inputs": {
         "type": "object",
@@ -2117,7 +2117,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: the bar family's {mark, encoding, title}, validated against the v1 JSON Schema (https://datapipelines.co/schemas/chart/1/bar.schema.json, served at /schemas/chart/1/bar.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line or area), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2129,7 +2129,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the bars drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       }
     },
     "additionalProperties": false
@@ -2137,7 +2137,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
 }
 ```
 
-**Permission:** `visualization.update`. **Mutating.** **Returns:** `{id, name, version, status, body_hash, warnings}` — `warnings` as `visualizations_create` answers it. **Errors:** `visualization.not_found`, `visualization.version.conflict` (stale `expected_hash` — re-read and rebase), `visualization.validation.*` (`name_invalid` / `immutable` for another name).
+**Permission:** `visualization.update`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`, as `visualizations_create` answers it. **Errors:** `visualization.not_found`, `visualization.version.conflict` (stale `expected_hash` — re-read and rebase), `visualization.validation.*` (`name_invalid` / `immutable` for another name).
 
 #### 6.2.54 `visualizations_purge_draft`
 
@@ -3124,6 +3124,9 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.83 | 989 (#989, js-rendered F5) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the three chart families (bar, line, area) and the schema address per family; the `tests` description's `mark_count` names a line's or an area's data points beside a bar's bars. Input schemas, permission rows and the tool count unchanged. |
+| 2026-11-15 | v1.82 | 988 (#988, js-rendered F4) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update`:** the `renderer` description no longer names the kind retired by #860; it reads "html and svg are reserved and refused". Text only: the input schema, the accepted kinds and every refusal are unchanged. |
+| 2026-11-15 | v1.81 | 986 (#986, js-rendered F2) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` — deliberate break, decided by the js-rendered charts record O-13:** the answer is `{id, name, version, status, body_hash}`; the `warnings` array and the descriptions' sentence about it are gone with the server's chart library layer. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-11 | v1.80 | #877 G7 (importer arm, ruling A.0 option 1) | **§6.2.32 `templates_purge_draft`: the guard gains its FOURTH arm** — a template version (any status; a DISCARDED one while its template keeps a live version) whose `imports` pin any version of the draft refuses `template.in_use` with `details.referencing_templates`, narrowed by the caller's view with `pins_hidden` exactly as the other three arms (#300). A guard CORRECTION, not a dependency feature (record §22, Draft 9 erratum): before it a library draft could be purged out from under a draft importer. The tool's description names the arm; schema, permission row and tool count (61) unchanged; `templates_used_by` unchanged. |
 | 2026-11-11 | v1.79 | #896 docs: datasource grants | **Text only, no surface change.** The resource listing's "Role filtering" paragraph names the datasources GRANTED to the key's pinned workspace (`DatasourceRepository.findAllVisible`, the grant predicate) instead of "its bound datasources plus global ones"; §6.2.29's permission note says mutating an INSTANCE datasource's registry (owned by no workspace) needs super admin, not "a GLOBAL datasource … admin". |
 | 2026-11-10 | v1.78 | #786 U1 (API versions, exact pins) | **§6.2.23 `endpoints_create`: `pipeline_version` is a REQUIRED input** (owner ruling 2026-11-08: the pin is authored input on every surface, MCP included — a named exception to the additive-only rule). The tool creates the API's version 1 as a DRAFT pinned to that exact version; the pin must be eligible under the posture (`endpoint.pipeline_version.not_eligible`) and creation is refused on an authoring-disabled deployment (`endpoint.authoring_disabled`). No tool releases an API. The response shape, `endpoints_list` and `endpoints_get` are unchanged; **§6.2.26 `endpoints_delete` is the guarded entity deletion** (#786 R1): an API holding a RELEASED or DISCARDED version is refused `endpoint.version.last_release` and nothing is removed, a draft-only API or a legacy row is deleted as before — its description says so, its input is unchanged; `pipeline` in every response is the CURRENT version's pinned name. No tool added, removed or renamed; no permission change. |

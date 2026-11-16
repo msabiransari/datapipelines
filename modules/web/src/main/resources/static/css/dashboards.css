@@ -1,6 +1,6 @@
 /*
  * dashboards.css (#10 L3a) — the dashboard client runtime's own classes, TOKENS ONLY (the THEME
- * SYSTEM rule: no literal colour, the same discipline app.css's chart-token block follows).
+ * SYSTEM rule: no literal colour; the chart tokens themselves are app.css's, #987).
  *
  * The first-party composite adapter builds its grid inline from the configuration (CSSOM from a
  * file is CSP-clean); this sheet styles the classes it and the renderers emit — the status chip,
@@ -469,7 +469,7 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 }
 
 /* #371 — the board's ROW UNIT. The composite adapter's grid sets its columns, its gap and each
-   slot's row SPAN inline but no row height, so a slot whose only content is a responsive Plotly
+   slot's row SPAN inline but no row height, so a slot whose only content is a chart that sizes to its
    host had nothing to span and the figure collapsed. Every row is one `--dashboard-row-unit`
    (app.css), a FIXED track (not `minmax(unit, auto)`: an `auto` maximum lets a tall caption push
    the row, and the figure then measures the pushed row). The slot is a flex column and the
@@ -501,8 +501,8 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
 /* ---- The dashboard workspace (#400) ------------------------------------------------ */
 
 /* The top bar: back to the catalog, the crumb (name + viewed-version chip), the version
-   selector (a full navigation per switch — the one-bundle rule — so the rows are plain
-   links, ghost buttons). The pipeline editor's topbar shape, one family over. */
+   selector (each row a link that names a version: a prepared main-content navigation that
+   keeps the shell, ghost buttons). The pipeline editor's topbar shape, one family over. */
 .dp-workspace {
   display: flex;
   flex-direction: column;
@@ -773,16 +773,20 @@ fieldset.dp-dashboard-parameter > .dp-dashboard-parameter-error {
   overflow: hidden;
 }
 
-/* #536 — a wrapped heading in a one-row slot can leave only 16px for Plotly: its compact
-   margins consume that height and axis scaling rejects before a WebGL scene exists. Keep a
+/* #536 — a wrapped heading in a one-row slot can leave only a sliver for the chart. Keep a
    drawable body and let the existing slot scroll the whole card, with its border intact.
-   Plotly adds js-plotly-plot before measuring; tables and KPIs keep their existing sizing. */
-.dp-dashboard-viz.js-plotly-plot {
+   #987: the chart adapter mounts the engine's `svg.dp-chart` into the body before it measures,
+   so these rules hold from the first draw; tables and KPIs keep their existing sizing. */
+.dp-dashboard-viz:has(> svg.dp-chart) {
   min-height: var(--space-16);
 }
 
-.dp-dashboard-card:has(> .dp-dashboard-viz.js-plotly-plot) {
+/* #987 (js-rendered look contract §5.1/§5.2): the card that holds a chart takes the chart's
+   padding. The fallback carries its unit; a host value CSS cannot read as a length gives 0, CSS
+   alone decides (the adapter never reads --chart-pad). */
+.dp-dashboard-card:has(> .dp-dashboard-viz > svg.dp-chart) {
   min-height: min-content;
+  padding: var(--chart-pad, 16px);
 }
 
 .dp-dashboard-viz:has(.dp-dashboard-table) {

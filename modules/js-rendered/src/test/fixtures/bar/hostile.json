@@ -1,0 +1,86 @@
+{
+ "source": [
+  "lane 985 make-look-fixtures.mjs"
+ ],
+ "note": "A8's hostile fixture: <script>, onload=, &, \", a 200-character title, a category named __proto__",
+ "document": {
+  "display_name": "Hostile",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "<b onload=alert(1)>x</b>"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "a & b \"q\" 'a'"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "title": "<script>"
+    }
+   },
+   "title": {
+    "text": "TTTTTTTTTT a very long title that keeps on going a very long title that keeps on going a very long title that keeps on going a very long title that keeps on going a very long title that keeps on going",
+    "subtitle": "<img src=x onerror=alert(1)> & \"quoted\""
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "<script>alert(1)</script>",
+   "__proto__",
+   "a & b \"c\" 'd'",
+   "constructor"
+  ],
+  "s": [
+   "onload=alert(1)",
+   "onload=alert(1)",
+   "\" onmouseover=\"x",
+   "\" onmouseover=\"x"
+  ],
+  "v": [
+   3,
+   5,
+   2,
+   4
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "s": "STRING",
+  "v": "DOUBLE"
+ }
+}

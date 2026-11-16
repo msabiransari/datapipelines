@@ -12,14 +12,15 @@
    * selected one `hidden`), a `<select data-viz-case-select>` and the `{visualization, cases}`
    * block (#viz-preview-data, ScriptSafeJson). A case mounts LAZILY, on its first selection,
    * through window.DatapipelinesPreviewMount — the capability page's own mount, fixture mode, no
-   * server base URL — so a ten-case visualization boots one Plotly instance, not ten. A case
+   * server base URL — so a ten-case visualization boots one runtime instance, not ten. A case
    * revealed again re-fits through the instance's own resize.
    *
    * The Preview partial arrives by an htmx swap into the pane: ONE document listener (a window
    * registry, #437) answers it for the workspace on show, resolved at event time.
    *
-   * Version state does NOT live here: every version switch is a full navigation (the
-   * one-bundle rule). The pure half (caseIndexFrom) is exported for `node --test`.
+   * Version state does NOT live here: a link that names a version is a prepared main-content
+   * navigation (hx-boost) that keeps the shell, and the server writes the pinned version into the
+   * page it returns. The pure half (caseIndexFrom) is exported for `node --test`.
    */
 
   var TABS = ["preview", "overview", "evidence", "used-by", "dependencies", "versions"];
@@ -108,7 +109,7 @@
     if (live && target === live) wirePreview(live);
   }
 
-  /** Save fixture shells, never a mounted runtime marker or Plotly's generated style attributes. */
+  /** Save fixture shells, never a mounted runtime marker or a drawn picture. */
   function onPreviewHistorySave(historyRoot) {
     var live = livePreviewPane();
     if (!live || !historyRoot || !historyRoot.contains(live)) return;
@@ -124,9 +125,6 @@
       var board = live.querySelector('[data-viz-case-board="' + sections[i].getAttribute("data-viz-case-index") + '"]');
       if (board) board.replaceChildren();
     }
-    // The board page removes this same global scratch SVG; Plotly recreates it on the next draw.
-    var tester = document.getElementById("js-plotly-tester");
-    if (tester && tester.parentElement) tester.parentElement.removeChild(tester);
   }
 
   /**

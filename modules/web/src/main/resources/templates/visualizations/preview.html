@@ -18,11 +18,6 @@
   <link th:href="@{/vendor/design-system/primitives.css}" rel="stylesheet">
   <link th:href="@{/css/app.css}" rel="stylesheet">
   <link th:href="@{/css/dashboards.css}" rel="stylesheet">
-  <link th:if="${available}" th:href="@{/vendor/plotly/plotly.css}" rel="stylesheet">
-  <!-- #456: Plotly's addRelatedStyleRule checks #plotly.js-style-global.no-inline-styles
-       at bundle load. The runtime's _ensureStyleElement runs too late for that;
-       pre-place the empty opt-out here, before scripts. Rules come from plotly.css. -->
-  <template id="plotly.js-style-global" class="no-inline-styles"></template>
 </head>
 <body class="dp-preview-body">
   <main class="dp-preview">
@@ -54,11 +49,12 @@
       <!--/* The fixtures, the per-case configuration and the results, as ONE JSON block through
            ScriptSafeJson — the glue parses it; no server value reaches a script body. */-->
       <script type="application/json" id="dp-preview-data" th:utext="${previewJson}"></script>
-      <script th:src="@{/vendor/plotly/plotly-{bundle}.min.js(bundle=${bundle})}"
-              th:attr="data-dp-plotly-bundle=${bundle}"></script>
+      <!--/* The chart engine's files in the engine's load order, from the server's list (the same
+           files the server draws with), then the runtime, the adapters and the glue. */-->
+      <script th:each="engineScript : ${chartEngineScripts}" th:src="@{${engineScript}}"></script>
       <script th:src="@{/js/datapipelines-dashboard.js}"></script>
+      <script th:src="@{/js/datapipelines-chart-interactions.js}"></script>
       <script th:src="@{/js/datapipelines-dashboard-chart.js}"></script>
-      <script th:src="@{/js/datapipelines-dashboard-plotly.js}"></script>
       <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
       <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>
       <script th:src="@{/js/visualization-preview.js}"></script>

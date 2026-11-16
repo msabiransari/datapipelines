@@ -8,8 +8,6 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
-import co.datapipelines.visualization.ChartLibrarySupport.Companion.DEGRADED
-import co.datapipelines.visualization.ChartLibrarySupport.Companion.PRESENTATION
 import co.datapipelines.visualization.DocumentFixtures.obj
 import co.datapipelines.visualization.VisualizationTestDb.AUTHOR
 import co.datapipelines.visualization.VisualizationTestDb.WORKSPACE
@@ -77,41 +75,6 @@ class VisualizationServiceIntegrationTest {
         // The entity purge is entity by definition — the only version is a DRAFT.
         val onlyDraft = h.createVisualization("acme/viz/only_draft")
         h.visualizations.purgeEntity(WORKSPACE, onlyDraft.record.id) shouldBe Purged.Entity
-    }
-
-    @Test
-    fun `a save answers the rules' warnings beside the version - recomputed on every save, never stored (860)`() {
-        val warned =
-            LifecycleHarness(
-                charts =
-                    ChartDocumentRules(
-                        support =
-                            ChartLibrarySupport(
-                                "plotly",
-                                mapOf("category.title" to ChartLibrarySupport.Support(PRESENTATION, DEGRADED)),
-                            ),
-                    ),
-            )
-        val created = warned.visualizations.create(WORKSPACE, warned.visualizationDocument(), AUTHOR, WriteSurface.MCP)
-        created.warnings shouldBe listOf(ArtifactWarning("chart.degraded.category.title", "config.encoding.x.title", "plotly"))
-        // Never stored: the version read back carries no trace of the caveat.
-        val stored = checkNotNull(warned.visualizationRepository.findVersion(WORKSPACE, created.version.record.id, 1))
-        ArtifactJson.mapper.writeValueAsString(stored.body).contains("degraded") shouldBe false
-        // Recomputed: the same visualization saved without the degraded field answers none.
-        val untitled =
-            warned.visualizations.write(
-                WORKSPACE,
-                created.version.record.id,
-                warned.visualizationDocument { it.obj("config.encoding.x").remove("title") },
-                created.version.detail.bodyHash,
-                AUTHOR,
-                WriteSurface.MCP,
-            )
-        untitled.warnings shouldBe emptyList()
-        // The shipped table (every row direct) warns on nothing.
-        h.visualizations
-            .create(WORKSPACE, h.visualizationDocument("acme/viz/clean"), AUTHOR, WriteSurface.MCP)
-            .warnings shouldBe emptyList()
     }
 
     private fun rows(): Int =

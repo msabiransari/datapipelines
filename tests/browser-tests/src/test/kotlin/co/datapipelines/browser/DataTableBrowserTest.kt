@@ -728,15 +728,12 @@ class DataTableBrowserTest : BrowserSuite() {
         private val WIDTHS = listOf(1440, 1024, 400)
         private const val RUN_TIMEOUT_MS = 120_000.0
 
-        /** SHA-256 of the empty inline style Playwright's own screenshot path adds — see BrowserSuite. */
-        private const val EMPTY_INLINE_STYLE_HASH = "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"
         private val ownCsp = CopyOnWriteArrayList<String>()
 
         private fun watchCsp(page: Page) {
             page.onConsoleMessage { message ->
                 val text = message.text()
                 if (!text.contains("Content Security Policy")) return@onConsoleMessage
-                if (text.startsWith("Applying inline style") && text.contains(EMPTY_INLINE_STYLE_HASH)) return@onConsoleMessage
                 ownCsp += "${page.url()} — $text"
             }
         }

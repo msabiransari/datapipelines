@@ -1,0 +1,186 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "eight series with one hidden: its entry is struck, its line not drawn",
+ "document": {
+  "display_name": "hidden-series",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "area"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "Hidden"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-01-01",
+   "2024-01-01",
+   "2024-01-01",
+   "2024-01-01",
+   "2024-01-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-06-01"
+  ],
+  "s": [
+   "Alpha",
+   "Bravo",
+   "Charlie",
+   "Delta",
+   "Echo",
+   "Foxtrot",
+   "Alpha",
+   "Bravo",
+   "Charlie",
+   "Delta",
+   "Echo",
+   "Foxtrot",
+   "Alpha",
+   "Bravo",
+   "Charlie",
+   "Delta",
+   "Echo",
+   "Foxtrot",
+   "Alpha",
+   "Bravo",
+   "Charlie",
+   "Delta",
+   "Echo",
+   "Foxtrot",
+   "Alpha",
+   "Bravo",
+   "Charlie",
+   "Delta",
+   "Echo",
+   "Foxtrot",
+   "Alpha",
+   "Bravo",
+   "Charlie",
+   "Delta",
+   "Echo",
+   "Foxtrot"
+  ],
+  "v": [
+   5,
+   8,
+   11,
+   14,
+   17,
+   20,
+   6,
+   9,
+   12,
+   15,
+   18,
+   21,
+   7,
+   10,
+   13,
+   16,
+   19,
+   22,
+   8,
+   11,
+   14,
+   17,
+   20,
+   23,
+   9,
+   12,
+   15,
+   18,
+   21,
+   24,
+   10,
+   13,
+   16,
+   19,
+   22,
+   25
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "s": "STRING",
+  "v": "DECIMAL"
+ },
+ "hidden": [
+  "Charlie"
+ ]
+}
