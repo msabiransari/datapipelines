@@ -156,6 +156,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
               <main id="board"></main>
             $engineTags
               <script src="/js/datapipelines-dashboard.js"></script>
+              <script src="/js/datapipelines-chart-interactions.js"></script>
               <script src="/js/datapipelines-dashboard-chart.js"></script>
               <script src="/js/datapipelines-dashboard-table.js"></script>
               <script src="/js/datapipelines-dashboard-kpi.js"></script>

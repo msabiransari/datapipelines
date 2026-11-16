@@ -11,6 +11,7 @@
     <th:block th:if="${chartEngineScripts != null}">
     <script th:each="engineScript : ${chartEngineScripts}" th:src="@{${engineScript}}"></script>
     <script th:src="@{/js/datapipelines-dashboard.js}"></script>
+    <script th:src="@{/js/datapipelines-chart-interactions.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-chart.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-table.js}"></script>
     <script th:src="@{/js/datapipelines-dashboard-kpi.js}"></script>

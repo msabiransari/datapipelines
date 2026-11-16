@@ -187,6 +187,29 @@
       for (var d = 0; d < tips.length; d++) out.push(L.detailLine(tips[d], row === undefined ? null : tipCols[d][row], types));
       return out;
     };
+    // The stack's total in the card's form (look contract §4.4 "the total in the heading"; brief 990 r2 D1): per
+    // category, the sum with its sign of the visible series' drawn cells (the cells the stack draws and its end label
+    // adds up), written as a row's value is (the chart's format and unit), or null where no segment is drawn. Only a
+    // stack at zero has one: a normalized stack's total is always 100 % (no end label either, §4.3). When every cell
+    // summed is exact (a DECIMAL column), the sum is exact too, so the card states what the cells add up to; otherwise
+    // it is the float sum, and one beyond float64's range is no total (a total is shown whole or not at all).
+    var totals = stack !== "zero" ? null : function (visible) {
+      var out = [];
+      for (var c5 = 0; c5 < categories.length; c5++) {
+        var texts = [], sum = 0, allExact = true;
+        for (var s5 = 0; s5 < series.length; s5++) {
+          var cv5 = cells[s5][c5];
+          if (cv5.num === null || visible[series[s5].id] !== true) continue;
+          texts.push(cv5.exact);
+          if (cv5.exact === null) allExact = false;
+          sum += cv5.num;
+        }
+        if (texts.length === 0) out.push(null);
+        else if (allExact) out.push(L.withUnit(T.value(D.aggregate(texts, "sum", value.field).exact, format), value.unit));
+        else out.push(isFinite(sum) ? L.withUnit(T.value(sum, format), value.unit) : null);
+      }
+      return out;
+    };
     return {
       vertical: vertical,
       stack: stack,
@@ -199,6 +222,7 @@
       labelsOn: labelsOn,
       format: format,
       details: details,
+      totals: totals,
       layout: {
         vertical: vertical,
         log: log,

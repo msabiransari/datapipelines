@@ -71,6 +71,20 @@
     directGap: f(0.5, "render", "em: between the plot's right edge and a name or a last value written after the lines"),
     emptyText: f("No data", "render", "record §4.3: the empty state's one text, until the look lane words it"),
     morePrefix: f("+", "render", "record §4.6: the compact legend's '+n' entry"),
+    // The interaction layer's (record §4.8, §4.10; look contract §3.8, §4.4, L8; brief 990 D2a, D4a): read on the page
+    // by datapipelines-chart-interactions.js, never by render. The card's five measures are × --chart-text (s); with
+    // the default tokens 2 × tipPad + tipLine = 2 × 3.96 + 15.6 = 23.52 ≤ 24, so the record's smallest frame (80 × 24)
+    // holds the one-row card (LA13).
+    tipDistance: f(14, "interaction", "contract §3.8 (C5): the tooltip card stands this many px from its anchor, flipped at the frame's edges"),
+    tipLine: f(1.3, "interaction", "× s: the card's line height h (contract §4.4, L8)"),
+    tipPad: f(0.33, "interaction", "× s: the card's padding p, the same on all four sides, its border inside it (contract §4.4, L8)"),
+    tipKey: f(0.67, "interaction", "× s: the width of a card row's key, a square of the series colour (contract §4.4, L8)"),
+    tipGap: f(0.5, "interaction", "× s: the gap between the parts of a card row: key, name, value (contract §4.4, L8)"),
+    tipMax: f(36, "interaction", "× s: the card's greatest width G (contract §4.4, L8)"),
+    tipTotalJoin: f(" · ", "interaction", "contract §4.4: a stacked bar's card heads with the category, this text, then the stack's total (index.totals); shown whole or the category alone (L8)"),
+    tipValueWeight: f(600, "interaction", "contract §4.4: a card row's value is bold, and the hovered series' name in a bar's group"),
+    crosshairDot: f(0.5, "interaction", "contract §3.4: a crosshair dot's radius is --chart-point plus this many px"),
+    focusGap: f(0.25, "interaction", "em: the keyboard's focus ring stands this far outside its target's box"),
   };
 
   var CAPS = {

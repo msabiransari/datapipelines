@@ -82,7 +82,10 @@
     return out;
   }
 
-  /** The data index (§4.3): per series, its marks' centres along the band axis, sorted, with datum and tooltip lines. */
+  /**
+   * The data index (§4.3): per series, its marks' centres along the band axis, sorted, with datum and tooltip lines. A
+   * stacked bar's index adds `totals` after it is built (render).
+   */
   function index(axis, plot, series, visible, prims) {
     var by = new Map(), out = { axis: axis, plot: plot, series: [] };
     for (var s = 0; s < series.length; s++) {
@@ -230,6 +233,9 @@
       for (var p = 0; p < marks.length; p++) if (marks[p].role === "mark" && marks[p].k !== "group" && marks[p].k !== "text") count++;
       out.summary.marks = count;
       out.index = index(m.layout.vertical ? "x" : "y", geo.plot, series, visible, marks);
+      // A stacked bar's index also carries `totals` (brief 990 r2 D1): by datum, the stack's total as the card's text,
+      // or null. A model without the member (every other type, an unstacked or normalized bar) adds nothing.
+      if (typeof m.totals === "function") out.index.totals = m.totals(visible);
     } else {
       out.summary.marks = drawn.count;
       out.index = pointIndex(geo.plot, series, visible, drawn.index);

@@ -85,16 +85,46 @@ export function fakeBrowser({ declared = {}, fontPx = 14, width = 600, height = 
   const doc = {};
   function element(tag, ns) {
     const attrs = {};
+    const listeners = [];
     const el = {
       tagName: tag,
+      localName: tag,
+      nodeType: 1,
       namespaceURI: ns || null,
       attrs,
+      listeners,
       childNodes: [],
       parentNode: null,
       ownerDocument: doc,
       _text: null,
       get firstChild() {
         return el.childNodes[0] || null;
+      },
+      get nextSibling() {
+        if (!el.parentNode) return null;
+        const siblings = el.parentNode.childNodes;
+        return siblings[siblings.indexOf(el) + 1] || null;
+      },
+      // The interaction layer's listeners (brief 990 D7): recorded, so a test can dispatch to them and count them.
+      addEventListener(type, fn) {
+        listeners.push({ type, fn });
+      },
+      removeEventListener(type, fn) {
+        const i = listeners.findIndex((l) => l.type === type && l.fn === fn);
+        if (i !== -1) listeners.splice(i, 1);
+      },
+      /** Calls the listeners of [type] with [event] (a plain object); the test's stand-in for a browser event. */
+      dispatch(type, event = {}) {
+        let prevented = false;
+        const e = Object.assign({ type, preventDefault: () => (prevented = true) }, event);
+        listeners.filter((l) => l.type === type).forEach((l) => l.fn(e));
+        return prevented;
+      },
+      /** The element's box on the page: its width and height attributes at the page's origin (1 px per unit). */
+      getBoundingClientRect() {
+        const w = Number(attrs.width || 0);
+        const h = Number(attrs.height || 0);
+        return { left: 0, top: 0, width: w, height: h, right: w, bottom: h };
       },
       set textContent(v) {
         el._text = String(v);

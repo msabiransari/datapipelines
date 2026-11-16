@@ -292,13 +292,14 @@ test("the chart engine's files, a run of a board's catalog before the chart kind
   const engine = engineFiles().map(name => "/js/js-rendered/" + name);
   // The engine's own list ends with its chart templates (`types/`), the last one whichever type was added last.
   assert.ok(engine.length >= 10 && /^\/js\/js-rendered\/types\/[a-z]+\.js$/.test(engine.at(-1)), JSON.stringify(engine));
-  const board = [...engine, "/js/datapipelines-dashboard.js", "/js/datapipelines-dashboard-chart.js"];
+  const board = [...engine, "/js/datapipelines-dashboard.js", "/js/datapipelines-chart-interactions.js", "/js/datapipelines-dashboard-chart.js"];
   const main = mainWith(catalogOf(board));
   await assets.preparePage(main); await settle();
   assert.equal(main.notices.length, 0);
   const seen = executed.filter(source => engine.includes(source));
   assert.deepEqual(seen, engine, "every engine file executed once, in the engine's load order");
   assert.ok(executed.indexOf("/js/datapipelines-dashboard-chart.js") > executed.indexOf(engine.at(-1)), "the chart kind after the engine");
+  assert.ok(executed.indexOf("/js/datapipelines-chart-interactions.js") === executed.indexOf("/js/datapipelines-dashboard-chart.js") - 1, "the interaction layer directly before the chart kind (#990 D1)");
   const before = executed.length;
   await assets.preparePage(mainWith(catalogOf(board))); await settle();
   assert.equal(executed.length, before, "a later page in the same document executes no engine file again");

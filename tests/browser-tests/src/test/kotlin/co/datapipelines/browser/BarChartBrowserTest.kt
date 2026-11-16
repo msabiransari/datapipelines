@@ -18,9 +18,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.fail
 import java.nio.file.Files
 import java.nio.file.Paths
 
@@ -34,8 +32,8 @@ import java.nio.file.Paths
  * Since #987 (js-rendered F3) the page draws with the product's own chart engine. Everything asserted is read off what
  * the engine drew on the page — the `svg.dp-chart` it wrote (marks by `g.dp-mark[data-series]`, ticks `text.dp-tick`,
  * value labels `text.dp-guide`, the title `text.dp-title`, the legend `g.dp-legend`) — or off the data index of that
- * same draw (`index()` of the occurrence's chart handle, record §4.3): the index carries each bar's tooltip lines, which
- * no element shows until the interaction layer lands (lane 990; the one parked case below).
+ * same draw (`index()` of the occurrence's chart handle, record §4.3): the index carries each bar's tooltip lines, and
+ * since #990 the interaction layer's card shows them under the pointer (the pointer case below).
  *
  * The record (2026-11-06 §4.4, R11) lets `<` and `>` into a title and requires them escaped at render: the markup
  * fixture and the `markup-title` example are rendered as TEXT, nothing executes and no element is injected.
@@ -246,27 +244,62 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
     }
 
     /**
-     * Treatment 4 of #987 D7: the library showed a bar's hover text when the pointer moved over it; the engine's drawing
-     * answers no pointer until the interaction layer lands. The tooltip lines themselves are asserted today off the draw's
-     * data index ([assertDrawn]); what is parked is the page showing them.
+     * Treatment 4 of #987 D7, un-parked by #990 (D9): the pointer moves onto the bar, and the tooltip card the page then
+     * shows (the interaction layer's `g.dp-tooltip`, read from the DOM) carries every expected part of the fixture's
+     * `expect.hover`, for all five expectations of the five bar fixtures that carry one. The text half ([assertDrawn],
+     * off the draw's data index) is unchanged.
      */
     @Test
-    @Disabled("js-rendered F6 #990: moving the pointer over a bar shows its tooltip lines on the page")
     fun `moving the pointer over a bar shows its tooltip lines on the page`() {
         startTrace()
         val root = ready("vbarpointer")
         val agent = newYorkContext()
+        var read = 0
         try {
-            val fixture = ChartBrowserFixtures.fixture("bar-markup")
-            val preview = open(agent, "$root/charts/pointer", fixture)
-            val bar = preview.locator("$CASE svg.dp-chart g.dp-mark[data-series] > .dp-mark").first()
-            bar.scrollIntoViewIfNeeded()
-            val box = checkNotNull(bar.boundingBox()) { "the first series has no drawn bar" }
-            preview.mouse().move(box.x + box.width / 2, box.y + box.height / 2)
-            fail("the interaction layer (lane 990) shows a bar's tooltip lines on the page; this case is written when it lands")
+            for (name in ChartBrowserFixtures.NAMES) read += readHovers(agent, root, name)
         } finally {
             agent.close()
         }
+        withClue("the five hover expectations were read from the shown card (non-vacuity floor)") { read shouldBe HOVER_EXPECTATIONS }
+    }
+
+    /** Opens fixture [name]'s preview when it carries `expect.hover` entries and reads each one; returns how many were read. */
+    private fun readHovers(
+        agent: BrowserContext,
+        root: String,
+        name: String,
+    ): Int {
+        val fixture = ChartBrowserFixtures.fixture(name)
+        val hovers = fixture.expect.getAsJsonArray("hover").map { it.asJsonObject }
+        if (hovers.isEmpty()) return 0
+        val preview = open(agent, "$root/charts/pointer_${name.replace('-', '_')}", fixture)
+        try {
+            return hovers.sumOf { e -> hoverAndRead(preview, fixture.name, e) }
+        } finally {
+            preview.close()
+        }
+    }
+
+    /** Moves the pointer onto the bar of one `expect.hover` entry and asserts the shown card holds each expected part; returns 1. */
+    private fun hoverAndRead(
+        preview: Page,
+        fixture: String,
+        e: JsonObject,
+    ): Int {
+        val (si, ci) = e.get("si").asInt to e.get("ci").asInt
+        val at =
+            requireNotNull(preview.evaluate(BAR_CENTRE, mapOf("sel" to CASE, "si" to si, "ci" to ci)) as Map<*, *>?) {
+                "$fixture: series $si, category $ci has no drawn bar"
+            }
+        preview.mouse().move((at["x"] as Number).toDouble(), (at["y"] as Number).toDouble())
+        preview.waitForFunction("sel => !!document.querySelector(sel + ' svg.dp-chart g.dp-tooltip')", CASE)
+        val shown = preview.evaluate(SHOWN_CARD, CASE) as String
+        println("$fixture: series $si, category $ci: the shown card reads $shown")
+        e.getAsJsonArray("contains").map { it.asString }.forEach { part ->
+            withClue("$fixture: the card shown over series $si, category $ci: $shown") { shown shouldContain part }
+        }
+        preview.mouse().move(0.0, 0.0)
+        return 1
     }
 
     private fun overflowFixture(): ChartBrowserFixtures.Fixture {
@@ -548,6 +581,39 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
               const k = e ? e.datum.indexOf(args.ci) : -1;
               return k < 0 ? null : e.tip[k];
             }"""
+
+        /** The expectations of `expect.hover` over the bar fixtures (5, in 5 of the 14; #987's count). */
+        const val HOVER_EXPECTATIONS = 5
+
+        /**
+         * The client centre of series [si]'s bar at category [ci]: the data index names its place along the band axis, the
+         * drawn bar of that series nearest it is the one (scrolled into view first).
+         */
+        const val BAR_CENTRE =
+            """args => {
+              $INDEX
+              const svg = document.querySelector(args.sel + ' svg.dp-chart');
+              const e = ix.series[args.si];
+              if (!e) return null;
+              const k = e.datum.indexOf(args.ci);
+              if (k < 0) return null;
+              const vertical = ix.axis === 'x';
+              let best = null;
+              svg.querySelectorAll('g.dp-mark[data-series="' + CSS.escape(e.id) + '"] > .dp-mark').forEach(b => {
+                const bb = b.getBBox();
+                if (bb.width <= 0 || bb.height <= 0) return;
+                const d = Math.abs((vertical ? bb.x + bb.width / 2 : bb.y + bb.height / 2) - e.at[k]);
+                if (best === null || d < best.d) best = { d: d, b: b };
+              });
+              if (best === null) return null;
+              best.b.scrollIntoView({ block: 'center', inline: 'center' });
+              const r = best.b.getBoundingClientRect();
+              return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+            }"""
+
+        /** The texts of the tooltip card the page shows, one per line. */
+        const val SHOWN_CARD =
+            """sel => Array.from(document.querySelectorAll(sel + ' svg.dp-chart g.dp-tooltip text')).map(t => t.textContent).join('\n')"""
 
         /** What markup would leave behind had it been parsed: an image, a bold run, a foreign object, the payload's global. */
         const val INJECTED =

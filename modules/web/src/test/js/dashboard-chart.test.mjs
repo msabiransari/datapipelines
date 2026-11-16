@@ -14,6 +14,9 @@ const require = createRequire(import.meta.url);
 const R = loadEngine();
 globalThis.JsRendered = R;
 globalThis.CSS = { supports };
+// The interaction layer is loaded directly before the adapter, as every page loads it (brief 990 D1).
+const layer = require(path.join(STATIC_JS, "datapipelines-chart-interactions.js"));
+globalThis.DatapipelinesChartInteractions = layer;
 const chart = require(path.join(STATIC_JS, "datapipelines-dashboard-chart.js"));
 const { resolveTheme, parseColour, warningsOf, WARNING_TEXT } = chart._internal;
 
@@ -116,12 +119,19 @@ test("a measure outside its wire form rejects the draw (the runtime reports rend
 
 // --------------------------------------------------------------------------------------- the host contract
 
-test("the host: one svg for the mount's life, the description as the image's name; dispose removes it and drops the columns", async () => {
+test("the host: one svg for the mount's life, the picture its own described image; dispose removes it and drops the columns", async () => {
   const { browser, handle, svg } = mount({ occurrence: { description: "Sales by region" } });
-  assert.equal(browser.host.getAttribute("role"), "img");
-  assert.equal(browser.host.getAttribute("aria-label"), "Sales by region", "the description, set through setAttribute");
   assert.equal(svg.getAttribute("class"), "dp-chart");
   await handle.renderData({ name: "sales" }, 2, ROWS);
+  // D6: the picture carries role img, its <title> and its <desc>; the host carries no role of its own (no nested image).
+  assert.equal(svg.getAttribute("role"), "img");
+  assert.equal(browser.host.getAttribute("role"), null);
+  assert.equal(browser.host.getAttribute("aria-label"), null);
+  const title = svg.childNodes.find((c) => c.tagName === "title");
+  const desc = svg.childNodes.find((c) => c.tagName === "desc");
+  assert.equal(title.textContent, "Sales");
+  assert.match(desc.textContent, /^Bar chart; .* Sales by region$/);
+  assert.equal(svg.childNodes[0], title, "the description first");
   assert.equal(browser.host.childNodes.length, 1, "one svg, never a second");
   handle.dispose();
   assert.equal(browser.host.childNodes.length, 0, "the picture is gone");
@@ -131,7 +141,71 @@ test("the host: one svg for the mount's life, the description as the image's nam
   handle.resize();
   assert.equal(browser.frames.length, 0, "a disposed chart schedules nothing");
   const quiet = mount();
-  assert.equal(quiet.browser.host.getAttribute("role"), null, "no description: no image name");
+  await quiet.handle.renderData({ name: "sales" }, 2, ROWS);
+  assert.match(quiet.svg.childNodes.find((c) => c.tagName === "desc").textContent, /^Bar chart; [^.]*\.$/, "no description: the generated sentence alone");
+});
+
+// ------------------------------------------------------------------------------- the interaction layer (990)
+
+const SERIES_BAR = {
+  mark: { type: "bar" },
+  encoding: { x: { field: "region", type: "nominal", sort: null }, y: { field: "amount", type: "quantitative", aggregate: "sum" }, color: { field: "channel", type: "nominal", sort: null } },
+};
+const SERIES_COLUMNS = { region: "STRING", channel: "STRING", amount: "DECIMAL" };
+const seriesRows = (channels) => {
+  const out = { region: [], channel: [], amount: [] };
+  ["North", "South"].forEach((r, i) => channels.forEach((c, j) => (out.region.push(r), out.channel.push(c), out.amount.push(1 + i + j))));
+  return out;
+};
+const drawnSeries = (svg) => new Set(descendants(svg).filter((e) => e.tagName === "g" && /(^| )dp-mark( |$)/.test(e.getAttribute("class") || "") && e.getAttribute("data-series")).map((e) => e.getAttribute("data-series")));
+
+test("D4: the list of switched-off series: a click on an entry changes it and redraws at once; a refresh keeps it; dispose drops it", async () => {
+  const { handle, svg } = mount({ occurrence: { config: SERIES_BAR, columns: SERIES_COLUMNS } });
+  await handle.renderData({ name: "sales" }, 6, seriesRows(["Online", "Retail", "Store"]));
+  assert.deepEqual([...drawnSeries(svg)].sort(), ["string:Online", "string:Retail", "string:Store"]);
+  const entry = descendants(svg).find((e) => e.getAttribute("data-legend") === "string:Retail");
+  assert.equal(entry.getAttribute("role"), "button");
+  assert.equal(entry.getAttribute("aria-pressed"), "true");
+  // A click on the entry's place (the layer finds the entry through the draw's primitives).
+  const R2 = globalThis.JsRendered;
+  const out = R2.render({ type: "bar", document: { display_name: "Sales", config: SERIES_BAR }, columns: seriesRows(["Online", "Retail", "Store"]), types: SERIES_COLUMNS, frame: { w: 600, h: 400 }, theme: "light", measure: null, hidden: [] });
+  const box = layer._internal.modelOf(R2, out, R2.measure.measurer(null).fn).entries.find((e) => e.id === "string:Retail").box;
+  svg.dispatch("click", { clientX: box.x + box.w / 2, clientY: box.y + box.h / 2 });
+  assert.deepEqual(handle.hidden(), ["string:Retail"]);
+  assert.ok(!drawnSeries(svg).has("string:Retail"), "redrawn at once, Retail off");
+  const struck = descendants(svg).find((e) => e.getAttribute("data-legend") === "string:Retail");
+  assert.equal(struck.getAttribute("aria-pressed"), "false");
+  // A refresh that removes Retail keeps the id on the list; the one that brings it back hides it again.
+  await handle.renderData({ name: "sales" }, 4, seriesRows(["Online", "Store"]));
+  assert.deepEqual(handle.hidden(), ["string:Retail"]);
+  await handle.renderData({ name: "sales" }, 6, seriesRows(["Online", "Retail", "Store"]));
+  assert.deepEqual(handle.hidden(), ["string:Retail"]);
+  assert.ok(!drawnSeries(svg).has("string:Retail"), "hidden again when it returns");
+  // Enter on the entry by the keys alone brings it back.
+  svg.dispatch("keydown", { key: "ArrowRight" });
+  svg.dispatch("keydown", { key: "End" });
+  svg.dispatch("keydown", { key: "ArrowRight" });
+  const order = descendants(svg).filter((e) => e.getAttribute("data-legend")).map((e) => e.getAttribute("data-legend"));
+  for (let i = order.indexOf("string:Online"); i < order.indexOf("string:Retail"); i++) svg.dispatch("keydown", { key: "ArrowRight" });
+  svg.dispatch("keydown", { key: "Enter" });
+  assert.deepEqual(handle.hidden(), [], "brought back without a pointer");
+  assert.ok(drawnSeries(svg).has("string:Retail"));
+  assert.equal(svg.listeners.length, 6, "the same listeners through every redraw");
+  handle.dispose();
+  assert.deepEqual(handle.hidden(), []);
+  assert.equal(svg.listeners.length, 0, "dispose detached the layer: no listener left");
+  assert.equal(descendants(svg).filter((e) => /dp-tooltip|dp-focus/.test(e.getAttribute("class") || "")).length, 0);
+});
+
+test("D1: a chart mounted where the interaction layer's global is missing is refused with a sentence naming the file", async () => {
+  const saved = globalThis.DatapipelinesChartInteractions;
+  delete globalThis.DatapipelinesChartInteractions;
+  try {
+    const { handle } = mount();
+    await assert.rejects(handle.renderData({ name: "sales" }, 2, ROWS), (e) => e.message.includes("datapipelines-chart-interactions.js"));
+  } finally {
+    globalThis.DatapipelinesChartInteractions = saved;
+  }
 });
 
 test("redraws are local, from the kept columns, one per animation frame: resize, the ResizeObserver, a theme change and the fonts", async () => {
@@ -215,7 +289,7 @@ test("hostile text is text: every string reaches the DOM as a text node, never m
   const all = descendants(svg);
   assert.ok(all.length > 20, "the walk saw the picture: " + all.length);
   const tags = new Set(all.map((e) => e.tagName));
-  for (const tag of tags) assert.ok(["g", "rect", "path", "line", "text", "circle"].includes(tag), "an element the writer makes: " + tag);
+  for (const tag of tags) assert.ok(["g", "rect", "path", "line", "text", "circle", "title", "desc"].includes(tag), "an element the writer makes: " + tag);
   for (const e of all) for (const name of Object.keys(e.attrs)) assert.ok(/^[a-z][a-z0-9-]*$/.test(name) && !/^on|^href$|^style$/.test(name), "attribute " + name);
   const shown = texts(svg).join("\n");
   assert.ok(trio.some((t) => shown.includes(t.slice(0, 8))), "the hostile texts are THERE, as text: " + shown.slice(0, 200));

@@ -328,8 +328,9 @@ test("every Datapipelines asset in index.html resolves to the one Datapipelines 
   const dpAssets = urls
     .map((u) => new URL(u, HOST_ORIGIN))
     .filter((u) => /^\/(vendor|css|js)\//.test(u.pathname));
-  // Non-vacuity: the example loads 6 stylesheets + 4 scripts + the engine's files.
-  const expected = 10 + engineFiles().length;
+  // Non-vacuity: the example loads 6 stylesheets + 5 scripts (the runtime, the interaction layer, three adapters)
+  // + the engine's files.
+  const expected = 11 + engineFiles().length;
   assert.equal(dpAssets.length, expected, `non-vacuity: expected ${expected} Datapipelines assets, found ${dpAssets.length}`);
   for (const asset of dpAssets) {
     assert.equal(
@@ -355,6 +356,7 @@ test("every Datapipelines asset in index.html resolves to the one Datapipelines 
   assert.deepEqual(scripts, [
     ...engineFiles().map((n) => "/js/js-rendered/" + n),
     "/js/datapipelines-dashboard.js",
+    "/js/datapipelines-chart-interactions.js",
     "/js/datapipelines-dashboard-chart.js",
     "/js/datapipelines-dashboard-table.js",
     "/js/datapipelines-dashboard-kpi.js",
