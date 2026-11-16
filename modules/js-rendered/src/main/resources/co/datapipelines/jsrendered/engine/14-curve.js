@@ -29,12 +29,13 @@
 
   /**
    * The commands after a run's first point, as segments: {c: "L", x, y} or {c: "C", x1, y1, x2, y2, x, y}. A run of one
-   * point has none (nothing is drawn between nulls for it); two points are one straight segment whatever the curve.
+   * point has none (nothing is drawn between nulls for it); two smooth points are one straight segment.
+   * A step run always holds to the next point's x before moving to its y, including a run of only two points.
    */
   function segments(run, kind) {
     var out = [], n = run.length, i;
     if (n < 2) return out;
-    if (kind === "linear" || n === 2) {
+    if (kind === "linear" || (kind === "smooth" && n === 2)) {
       for (i = 1; i < n; i++) out.push({ c: "L", x: run[i].x, y: run[i].y });
       return out;
     }

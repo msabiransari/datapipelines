@@ -208,15 +208,46 @@ test("G5: the smooth curve never leaves the range of the two points it joins (th
   assert.ok(segments > 1000, "segments checked: " + segments);
 });
 
-test("the curve module: a run of one point draws nothing, two points one straight segment, step holds then moves", () => {
+test("the curve module: one point draws nothing, two smooth points join straight, step holds then moves", () => {
   const C = R.curve;
   const run = [{ x: 0, y: 10 }, { x: 10, y: 0 }, { x: 20, y: 5 }];
   same(C.segments([run[0]], "smooth"), []);
   same(C.segments(run.slice(0, 2), "smooth"), [{ c: "L", x: 10, y: 0 }]);
+  same(C.segments(run.slice(0, 2), "step"), [{ c: "L", x: 10, y: 10 }, { c: "L", x: 10, y: 0 }]);
   same(C.segments(run, "step"), [{ c: "L", x: 10, y: 10 }, { c: "L", x: 10, y: 0 }, { c: "L", x: 20, y: 0 }, { c: "L", x: 20, y: 5 }]);
   same(C.segments(run, "linear"), [{ c: "L", x: 10, y: 0 }, { c: "L", x: 20, y: 5 }]);
   assert.throws(() => C.segments(run, "basis"), /unknown curve/);
 });
+
+for (const wire of ["line", "area"]) {
+  for (const values of [[2, 4], [2, 4, null, 3, 6]]) {
+    test(wire + ": two-point step runs hold then move, including across null gaps (" + values.length + " rows)", () => {
+      const fixture = structuredClone(fx("line", "curve-step"));
+      fixture.document.config.mark.type = wire;
+      fixture.columns.x = fixture.columns.x.slice(0, values.length);
+      fixture.columns.v = values;
+      const result = R.render(inputOf(fixture, 960, 540));
+      assert.equal(result.state, "rendered");
+      assert.equal(result.summary.marks, values.filter((v) => v !== null).length);
+      const paths = [...seriesLines(result.primitives).values()];
+      assert.equal(paths.length, 1);
+      const drawn = commands(paths[0].d), runs = values.length === 2 ? 1 : 2;
+      same(drawn.map((c) => c.c), Array.from({ length: runs }, () => ["M", "L", "L"]).flat());
+      for (let i = 0; i < drawn.length; i += 3) {
+        const [start, held, next] = drawn.slice(i, i + 3).map((c) => c.args);
+        assert.ok(held[0] > start[0], "hold until the next x");
+        assert.equal(held[1], start[1], "horizontal hold");
+        assert.equal(next[0], held[0], "vertical move at the next x");
+        assert.notEqual(next[1], held[1], "the fixture changes value");
+      }
+      if (wire === "area") {
+        const fills = result.primitives.filter((p) => p.k === "path" && p.role === "mark" && p.fill !== null && p.fill !== undefined);
+        assert.equal(fills.length, runs, "one closed fill per non-null run");
+        fills.forEach((fill, i) => same(commands(fill.d).slice(0, 3), JSON.parse(JSON.stringify(drawn.slice(i * 3, i * 3 + 3)))));
+      }
+    });
+  }
+}
 
 // ---------------------------------------------------------------- thinning (D8, G4 of the brief's gates)
 
