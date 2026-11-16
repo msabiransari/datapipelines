@@ -15,7 +15,7 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-11-15
+**Last updated:** 2026-11-16
 
 A dashboard presents pipeline results. Draft development admits draft dependencies; published boards require released dependencies. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin exact pipeline versions as sources, map their results onto visualization inputs, and arrange visualizations, groups, actions and
@@ -907,18 +907,20 @@ renderer shows the resolved value" for this case only).
   - **Hover.** The pointer over a mark highlights that mark's series and dims every other series to `--chart-dim`;
     a card beside the pointer shows the mark's heading (its category or x value), its value row with the series key,
     and its detail fields. On a grouped or stacked bar the card lists every series at that category (a stack top
-    segment first) with the hovered row in bold. A stacked bar's card heads with the category and the stack's total
-    (`Q1 · 90`): the sum of its visible segments, written in the chart's own format and unit as a row's value is; when
-    that heading is wider than the card, the card heads with the category alone. On line and area the layer draws a
-    crosshair at the nearest x — one vertical guide and one dot per visible series — and the card lists every series'
+    segment first) with the hovered row in bold. A bar stacked at zero heads its card with the category and the
+    stack's total (`Q1 · 90`): the sum of its visible segments, written in the chart's own format and unit as a row's value is; when
+    that heading is wider than the card's content width, the card heads with the category alone. A normalized stack
+    heads its card with the category alone. On line and area the layer draws a crosshair at the nearest x — one
+    vertical guide and one dot per visible series — and the card lists every series'
     value there; a series with no value at that x is left out. A null keeps its gap: the crosshair never invents a
     point.
   - **The card shows what fits (look contract L8).** The card is drawn inside the picture, beside the pointer
     (right and above, flipped to the other side when it would cross the frame, else clamped to it). When the whole
     card does not fit, it keeps the hovered series first, then as many rows as fit, and ends with "+n more"; when
-    even that does not fit, one line; when one line does not fit, no card — the highlight stays. A text cut short by
-    the engine (a title, an axis label, a legend entry ending in "…") opens a card with the whole text, wrapped to
-    the frame.
+    only two lines fit, the heading and the hovered row; when one line fits, that row alone; when one line does not
+    fit, no card — the highlight stays. A text cut short by the engine (a title, an axis label, a legend entry ending
+    in "…") opens a card with the whole text, wrapped to the frame, where it fits; otherwise the card shows the
+    text's beginning ending in "…", or no card when even that does not fit. The primitive keeps the full text.
   - **The legend switch.** A legend entry is a button (`role="button"`, `aria-pressed`): a click, or Enter or Space
     on the keyboard target, switches its series off — the series leaves the picture and the scales, and its entry is
     drawn as off — and a second press brings it back. The adapter keeps the list of switched-off series while the
