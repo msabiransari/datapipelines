@@ -1,6 +1,6 @@
 # The Managed Lake: Definitions, Deliveries, Publication and Reads
 
-**Status:** v1.38 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown; #969, compaction; #994, a streamed scan that ended short; #997, the read test after compaction)
+**Status:** v1.39 (#798, dp-lake P3; #810, #811, #812; #799, delivery and append; #818, managed reads and reader leases; #845, the reads' egress proxy; #851, the abandoned metadata read's bound; #824, the managed retire ceiling; #858, the settlement tick's socket bound; #866, the abandoned read's derived end; #822, the apply returns an outcome on every path; #814, discard and purge-draft audited; #878, the catalog connection's socket bound; #939, the protection window from configuration; #935, the sort columns; #967, the truncate partition refusal; #958, the remover; #957, maintenance runs; #956, profiles; #961, lateness per feed; #960, keep rules; #968, ordered appends; #959, the maintenance planner; #963, the manifest rewrite; #962, the cleanup and purge deletion parts; #964, the storage breakdown; #969, compaction; #994, a streamed scan that ended short; #997, the read test after compaction)
 **Owner:** datapipelines.co core
 **Purpose:** What a managed lake table's definition is, how it moves through its lifecycle, how an environment brings
 its Iceberg table to the released definition, which schema changes are applied, and how a pipeline publishes an
@@ -324,6 +324,23 @@ one `lease-wait-seconds` wait budget; exhaustion is retryable `lake.capacity.bus
 from the listing. The database closes at execution cleanup; a quarantined native lease keeps its scratch and
 ingestion slot until physical finalization. The PostgreSQL admission clock fixes the job deadline once;
 later lease acquisition and heartbeat do not extend it.
+
+**The shipped largest delivery and its scratch** (#997; owner ruling 2026-11-16). `max-delivery-bytes` ships at 1GB
+(2GB before). A delivery reserves `max-delivery-bytes × staging-expansion-factor` whatever its real size, so at the
+shipped values each delivery holds 10 GiB and two deliveries hold the whole shipped `scratch-bytes` (20GB).
+Compaction declares at most `scratch-bytes` less one delivery's reservation (§11, *Compaction*): 10 GiB at the
+shipped values, where 2GB left it 0. While two deliveries hold their reservations, a due compaction is refused
+`capacity` / `scratch_refused` and is planned again: in #997's control at the shipped values, six runs a minute apart
+were refused during two concurrent 1 GB deliveries, and the first run after both published committed its group. A
+delivery above the limit is refused `lake.delivery.too_large` (HTTP 413, "Delivery exceeds the configured byte
+limit.") by the listing when the execution opens, before any node runs: #997's 1,998,764,149-byte delivery failed
+19 ms after its execution started, with no ledger row and no new snapshot, and the table's row count unchanged. A
+deployment that needs larger deliveries raises `max-delivery-bytes` and `scratch-bytes` together (the reservation
+must not exceed `scratch-bytes`, [Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)). The one
+measured example is 2 GiB deliveries: two of them (20 GiB each) beside a compaction declaring 14 GiB (7 × a 2 GiB
+per-run cap) need 54 GiB of scratch, which #997's third round admitted at a 13 GiB container. At those values the
+shipped time limits do not publish two concurrent 2 GiB deliveries into one table (#1013, #1021). Reserving scratch by
+a delivery's real size instead of by the limit is #1024.
 
 The permanent ledger key is `(table, feed, delivery-id)`. The same fingerprint after PUBLISHED skips that
 table's append and reports **already published**. A different fingerprint under the same key always refuses
@@ -1232,6 +1249,7 @@ aggregate deliveries reserve from) and the part's scratch database.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-16 | v1.39 | 997 (#997, dp-lake P6 evidence, round 4) | **§6 Deliveries** gains *The shipped largest delivery and its scratch*: `max-delivery-bytes` 2GB → 1GB (owner ruling 2026-11-16), what a delivery reserves whatever its size, the compaction ceiling at the shipped values (10 GiB, 0 before) and what #997's control observed beside two deliveries, the refusal of a delivery above the limit (code, stage, timing), raising `max-delivery-bytes` with `scratch-bytes` (the measured 2 GiB example, #1013, #1021), and #1024. |
 | 2026-11-16 | v1.38 | 997 (#997, dp-lake P6 evidence) | **§11 Compaction** gains *What compaction did to reads, measured once*: the object-store read test's files read before and after compaction on two synthetic tables, with its limits. |
 | 2026-11-15 | v1.37 | 994 (#994) | §7, *Files are written in the table's order*: one sentence — a managed append whose scan ended short reports `lake.append.failed` with the staging cause `pipeline.staging.result_incomplete` (TEMPORARY, with #994's guard). |
 | 2026-11-14 | v1.36 | #969 merge review F1 | **§11 Compaction:** due work is decided by its positive declaration and current candidates; a refused scratch reservation is `capacity` / `scratch_refused`, with nothing opened or rewritten. |
