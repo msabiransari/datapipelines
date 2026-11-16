@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.100 (operator reference; source-traced configuration authority)
+**Status:** v1.101 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-16
 
 ---
 
@@ -758,8 +758,8 @@ neither is a LAKE datasource other than the managed one; leave room for them in 
 | `datapipelines.lake.storage.reader-secret-key` | (empty) | **Secret.** See `reader-access-key` |
 | `datapipelines.lake.admission.max-concurrent-ingestions` | `2` | Executions holding a delivery at once, from landing to the last append (P1/P4). ≥ 1 |
 | `datapipelines.lake.admission.max-concurrent-maintenance` | `1` | Maintenance runs at once (P6). ≥ 1 |
-| `datapipelines.lake.admission.max-delivery-bytes` | `2GB` | The largest delivery, summed over its objects (P4). `max-delivery-bytes × staging-expansion-factor` must not exceed `scratch-bytes` |
-| `datapipelines.lake.admission.staging-expansion-factor` | `10` | Scratch reserved per ingestion = delivery bytes × this factor (P1). ≥ 1. 10 is the largest scratch peak ÷ delivery bytes #997 measured, 7.84 (a 2 GiB mixed ordered append), × 1.25 rounded up: measured on mixed and incompressible data, it does not cover highly compressible data (highly compressible data, measured by #997's second round: 34.55–35.32 over twelve 100 MB deliveries at the shipped `staging-memory-limit` 1GB, which would need 45 (41.43 at 256MB, which would need 52); a 1 GB compressible delivery outgrew its 12 GiB reservation at 15 × or more, and a 2 GB one hit the 60 s statement budget in staging first). At the shipped `max-delivery-bytes` (2GB) a delivery's reservation is the whole shipped `scratch-bytes` (20GB), and one default staging reservation is 10GB. Consumed by DuckDB staging with or without a lake (#804): validated always as a whole number in 1..2147483647 (its binding is an `Int`), and it sizes the staging reservation `scratch-bytes` must hold |
+| `datapipelines.lake.admission.max-delivery-bytes` | `1GB` | The largest delivery, summed over its objects (P4). `max-delivery-bytes × staging-expansion-factor` must not exceed `scratch-bytes` |
+| `datapipelines.lake.admission.staging-expansion-factor` | `10` | Scratch reserved per ingestion = delivery bytes × this factor (P1). ≥ 1. 10 is the largest scratch peak ÷ delivery bytes #997 measured, 7.84 (a 2 GiB mixed ordered append), × 1.25 rounded up: measured on mixed and incompressible data, it does not cover highly compressible data (highly compressible data, measured by #997's second round: 34.55–35.32 over twelve 100 MB deliveries at the shipped `staging-memory-limit` 1GB, which would need 45 (41.43 at 256MB, which would need 52); a 1 GB compressible delivery outgrew its 12 GiB reservation at 15 × or more, and a 2 GB one hit the 60 s statement budget in staging first). At the shipped `max-delivery-bytes` (1GB) a delivery's reservation is 10GB, so two deliveries hold the whole shipped `scratch-bytes` (20GB), and one default staging reservation is 10GB. Consumed by DuckDB staging with or without a lake (#804): validated always as a whole number in 1..2147483647 (its binding is an `Int`), and it sizes the staging reservation `scratch-bytes` must hold |
 | `datapipelines.lake.admission.scratch-bytes` | `20GB` | Scratch space across every staging database, writer and compaction (P1/P6). At least one default staging reservation, `staging-memory-limit × staging-expansion-factor` — validated with or without a lake (#804) |
 | `datapipelines.lake.admission.staging-memory-limit` | `1GB` | DuckDB `memory_limit` per staging database (P1; provisional until E10b measures the profile). At least 1 MiB, DuckDB's floor — consumed and validated with or without a lake (#804) |
 | `datapipelines.lake.admission.process-reserve` | `1GB` | (#819) The process's memory outside the heap and the counted engine budgets — metaspace, code cache, thread stacks, direct and native buffers — as one term of the process memory admission (above, §7). A positive size. Judged at every boot, with or without a lake |
@@ -1157,7 +1157,7 @@ datapipelines:
     admission:
       max-concurrent-ingestions: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_INGESTIONS:2}
       max-concurrent-maintenance: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_MAINTENANCE:1}
-      max-delivery-bytes: ${DATAPIPELINES_LAKE_ADMISSION_MAX_DELIVERY_BYTES:2GB}
+      max-delivery-bytes: ${DATAPIPELINES_LAKE_ADMISSION_MAX_DELIVERY_BYTES:1GB}
       staging-expansion-factor: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_EXPANSION_FACTOR:10}
       scratch-bytes: ${DATAPIPELINES_LAKE_ADMISSION_SCRATCH_BYTES:20GB}
       staging-memory-limit: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_MEMORY_LIMIT:1GB}
@@ -1501,6 +1501,7 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-16 | v1.101 | 997 (#997, dp-lake P6 evidence, round 4) | **§3.36** `admission.max-delivery-bytes` 2GB → 1GB (owner ruling 2026-11-16): a delivery reserves `max-delivery-bytes × staging-expansion-factor` whatever its size, so at 2GB one delivery held the whole shipped 20GB `scratch-bytes`; at 1GB two deliveries fit and compaction gets a 10GB ceiling. `scratch-bytes` stays 20GB. **§5** the template line. |
 | 2026-11-16 | v1.100 | 997 (#997, dp-lake P6 evidence) | **§3.36** three defaults from #997's measurements, each measured on mixed and incompressible data and not covering highly compressible data (measured in round 2: it would need 45 / 32 / at most 806,546 bytes a second): `staging-expansion-factor` 3 → 10, `compaction-scratch-factor` 3 → 7, `compaction-bytes-per-second` 4MB → 2MB. **§5** the three template lines. |
 | 2026-11-15 | v1.99 | 819 (#819) | **§3.36** two new keys, `datapipelines.lake.admission.process-reserve` (1GB) and `.memory-headroom` (0.10), and `reads.max-retired-generations` (1, owner ruling 2026-11-15: the retired managed reader generations that may still hold an engine); the process memory admission paragraph, with what it does not count (#1006). **§5** the three template lines. **§7** the process memory admission rule and its breakdown line; `reads.max-retired-generations` a whole number ≥ 1. **§8** their consumers. Round 3 (lander review): the limit is the cgroup's *effective* one, the smallest over the own cgroup and every ancestor (an unreadable level is unavailable, never unlimited); above K a lease first closes the idle retired generations and waits, bounded, before it is refused. |
 | 2026-11-14 | v1.98 | #969 merge review F1 | **§8** the lake consumer register also names orphan grace, landing prefix and the remaining admission consumers already present in the shipped code; removes the stale no-consumer claims. |

@@ -71,6 +71,12 @@ class LakeProperties(
     class Admission(
         val maxConcurrentIngestions: Int = DEFAULT_MAX_CONCURRENT_INGESTIONS,
         val maxConcurrentMaintenance: Int = 1,
+        /**
+         * The largest delivery, summed over its objects. 1 GB (owner ruling 2026-11-16, #997; 2 GB before): a delivery
+         * reserves this × [stagingExpansionFactor] of scratch whatever its real size, so at 2 GB one delivery held the
+         * whole default [scratchBytes] and compaction's declaration ceiling was 0; at 1 GB two deliveries fit and the
+         * ceiling is 10 GB (`CompactionSettings.ceiling`).
+         */
         val maxDeliveryBytes: DataSize = DataSize.ofGigabytes(DEFAULT_MAX_DELIVERY_GB),
         /**
          * Scratch reserved per ingestion = delivery bytes × this factor. 10 = ⌈7.84 × 1.25⌉: the largest scratch peak ÷
@@ -211,7 +217,7 @@ class LakeProperties(
         const val DEFAULT_PREFIX = "lake/"
         const val DEFAULT_LANDING_PREFIX = "landing/"
         const val DEFAULT_MAX_CONCURRENT_INGESTIONS = 2
-        const val DEFAULT_MAX_DELIVERY_GB = 2L
+        const val DEFAULT_MAX_DELIVERY_GB = 1L
         const val DEFAULT_STAGING_EXPANSION_FACTOR = 10
         const val DEFAULT_SCRATCH_GB = 20L
         const val DEFAULT_MEMORY_HEADROOM = "0.10"
