@@ -566,6 +566,75 @@ rc=0; run_fixture "$X" --continue-on-failure || rc=$?
 guard_cmd="$(sed -n '/co.datapipelines.integration.ArchitectureGuardTest/p' "$X/pregate-argv.log")"
 [[ "$guard_cmd" == *co.datapipelines.auth.ScopeMatrixSpecDriftTest* ]] || fail 'guard accounting failure still omitted guards'
 ok 'failed covering-record write retains guards in diagnostics and refuses PASS'
+
+# ---- #1004: buildSrc's tests in the lane check, preview and run ------------------------------
+# The always-run classes are read from the registry the fixtures run with, never typed here.
+read -r -a bs_classes <<< "$(source "$ROOT/scripts/pregate-plan-lib.sh"; printf '%s' "${GUARDS[":buildSrc"]-}")"
+[ "${#bs_classes[@]}" -ge 3 ] || fail "#1004: buildSrc registry read vacuous: [${bs_classes[*]}]"
+bs_filtered=":buildSrc:cleanTest :buildSrc:test$(printf ' --tests %s' "${bs_classes[@]}") "
+bs_unfiltered=' :buildSrc:cleanTest :buildSrc:test --continue '
+bs_plan() { (cd "$1" && bash scripts/pregate.sh --plan HEAD) > "$2" || fail "#1004: plan exit in $1"; }
+bs_stage() { sed -n "s/^stage=$2 command=//p" "$1"; }
+# (a) A diff that touches no trigger path: stage 3 carries the filtered classes, stage 2 no buildSrc.
+X="$T/bs-plan-none"; pgres::_fixture "$X"
+bs_plan "$X" "$T/bs-plan-none.txt"
+[[ "$(bs_stage "$T/bs-plan-none.txt" 3)" == "./gradlew $bs_filtered"* ]] || fail "#1004: stage 3 lacks the filtered buildSrc classes: $(bs_stage "$T/bs-plan-none.txt" 3 | cut -c1-200)"
+[[ "$(bs_stage "$T/bs-plan-none.txt" 2)" != *':buildSrc:'* ]] || fail '#1004: a diff with no trigger path planned buildSrc in stage 2'
+grep -qx 'buildsrc-tests: always-run classes only (stage 3) — no buildSrc/, gradle/libs.versions.toml or gradle/verification-metadata.xml change' \
+  "$T/bs-plan-none.txt" || fail '#1004: no-trigger decision line'
+# Paths beside the triggers trigger nothing.
+for near in docs/buildSrc/notes.md gradle/other.txt buildSrcX/a.kt; do
+  mkdir -p "$X/$(dirname "$near")"; printf 'x\n' > "$X/$near"
+done
+bs_plan "$X" "$T/bs-plan-near.txt"
+[[ "$(bs_stage "$T/bs-plan-near.txt" 2)" != *':buildSrc:'* ]] || fail '#1004: a path beside a trigger planned the unfiltered buildSrc run'
+ok '#1004 preview, no trigger: stage 3 runs the always-run buildSrc classes, stage 2 none (near paths included)'
+# (b) Each trigger path alone: stage 2 runs buildSrc unfiltered; stage 3 still lists the classes,
+# under the conditional heading, because the preview never decides coverage.
+for trigger in buildSrc/src/main/kotlin/CommonConventionsPlugin.kt gradle/libs.versions.toml gradle/verification-metadata.xml; do
+  X="$T/bs-plan-${trigger//\//-}"; pgres::_fixture "$X"
+  printf '\n' >> "$X/$trigger"
+  bs_plan "$X" "$T/bs-plan-trigger.txt"
+  [[ " $(bs_stage "$T/bs-plan-trigger.txt" 2) " == *"$bs_unfiltered"* ]] || fail "#1004: $trigger: stage 2 lacks the unfiltered buildSrc run: $(bs_stage "$T/bs-plan-trigger.txt" 2)"
+  [[ "$(bs_stage "$T/bs-plan-trigger.txt" 3)" == "./gradlew $bs_filtered"* ]] || fail "#1004: $trigger: stage 3 dropped the buildSrc classes in the preview"
+  sed -n '/^guards (omission conditional/,/^deps-scan:/p' "$T/bs-plan-trigger.txt" | grep -qx ":buildSrc ${bs_classes[*]}" \
+    || fail "#1004: $trigger: the buildSrc classes are not under the conditional heading"
+  grep -qx "buildsrc-tests: full (stage 2, unfiltered) — $trigger" "$T/bs-plan-trigger.txt" || fail "#1004: $trigger: decision line"
+done
+ok '#1004 preview, each trigger path alone: unfiltered buildSrc in stage 2, classes still listed for stage 3'
+
+# (c) The run, covered: the unfiltered run exited 0 in THIS run and its retained XML holds every class.
+X="$T/bs-run-covered"; pgres::_fixture "$X"
+printf '\n' >> "$X/buildSrc/src/main/kotlin/CommonConventionsPlugin.kt"
+run_fixture "$X" || fail "#1004: covered run red: $(tail -n 3 "$X/pregate.out")"
+rd="$(run_dir "$X")"
+grep -qF -- "$bs_unfiltered" "$X/pregate-quoted.log" || fail '#1004: stage 2 did not run buildSrc unfiltered'
+stage3="$(sed -n '/co.datapipelines.integration.ArchitectureGuardTest/p' "$X/pregate-argv.log")"
+[ -n "$stage3" ] || fail '#1004: covered run: the remaining guards were lost'
+[[ "$stage3" != *':buildSrc:'* ]] || fail '#1004: covered run: stage 3 repeated buildSrc'
+for c in "${bs_classes[@]}"; do [[ " $stage3 " != *" $c "* ]] || fail "#1004: covered run: stage 3 repeated $c"; done
+grep -qx "covered module=:buildSrc classes=${bs_classes[*]} stage=2 evidence=2/buildSrc/build/test-results/test" "$rd/GUARD-COVERAGE.txt" \
+  || fail "#1004: covered run: no buildSrc covered line: $(cat "$rd/GUARD-COVERAGE.txt" 2>/dev/null)"
+[ "$(grep -c 'module=:buildSrc' "$rd/GUARD-COVERAGE.txt")" -eq 1 ] || fail '#1004: covered run: not exactly one buildSrc line'
+ok '#1004 run, covered: stage 3 carries no buildSrc class and GUARD-COVERAGE names the classes and the stage-2 evidence'
+
+# (d) The run, not covered: stage 2 failed (a diagnostic run that continues), the retained XML lacks
+# one class, or the status line is FROM-CACHE. Stage 3 runs the filtered command; no buildSrc line.
+for mode in buildsrc-fail buildsrc-missing buildsrc-cached; do
+  X="$T/bs-run-$mode"; pgres::_fixture "$X" "$mode"
+  printf '\n' >> "$X/buildSrc/src/main/kotlin/CommonConventionsPlugin.kt"
+  rc=0; run_fixture "$X" --continue-on-failure || rc=$?
+  rd="$(run_dir "$X")"
+  case "$mode" in
+    buildsrc-fail) [ "$rc" -eq 1 ] && grep -q '^PRE-GATE FAIL.*mod=1 .*diagnostic=1' "$X/.pregate-logs/0-verdict.log" \
+                     || fail "#1004: $mode: expected a FAIL with mod=1, rc=$rc" ;;
+    *) [ "$rc" -eq 0 ] || fail "#1004: $mode: run red: $(tail -n 3 "$X/pregate.out")" ;;
+  esac
+  stage3="$(sed -n '/co.datapipelines.integration.ArchitectureGuardTest/p' "$X/pregate-quoted.log")"
+  [[ "$stage3" == "./gradlew $bs_filtered"* ]] || fail "#1004: $mode: stage 3 did not run the filtered buildSrc command"
+  ! grep -q 'module=:buildSrc' "$rd/GUARD-COVERAGE.txt" 2>/dev/null || fail "#1004: $mode: unsafe buildSrc covered line"
+  ok "#1004 run, not covered ($mode): stage 3 runs the filtered buildSrc command and records no coverage"
+done
 echo '  pregate efficiency self-test: PASS'
 
 # ---- #797: stage 0, the dependency scan, in both directions --------------------------------

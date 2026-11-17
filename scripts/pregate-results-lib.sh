@@ -22,6 +22,8 @@
 #     2b/tests/<m>/build/test-results/<task>/TEST-*.xml
 #     3/modules/<m>/build/test-results/<task>/TEST-*.xml
 #     3/tests/<m>/build/test-results/<task>/TEST-*.xml
+#     2/buildSrc/build/test-results/test/TEST-*.xml   (#1004: a diff touching buildSrc/ or the catalog)
+#     3/buildSrc/build/test-results/test/TEST-*.xml   (#1004: the always-run buildSrc classes)
 #     <stage>/PROVENANCE.txt       the stage log's test-task status lines (UP-TO-DATE…)
 #
 # Each test-producing stage (2, 2b, 3) is snapshotted IMMEDIATELY after it returns,
@@ -67,7 +69,7 @@
 #   pgres::is_run_id <id>                         — exit 0 iff id matches the emitted grammar
 #   pgres::run_pid <id>                           — the PID embedded in a run id
 #   pgres::prune_runs <logdir> <current-run-id>   — bounded retention of run dirs (#447)
-#   pgres::allowed_root <rel>                     — exit 0 iff rel is modules/<m> or tests/<m>
+#   pgres::allowed_root <rel>                     — exit 0 iff rel is modules/<m>, tests/<m> or buildSrc
 #   pgres::snapshot <root> <stage-dir> <log> <roots...>  — copy XML, print file count
 #   pgres::write_provenance <log> <dest>          — record status lines + NO-STATUS-LINE marks
 #   pgres::manifest_init <manifest> <run-id> <base> <mb> <head>
@@ -193,9 +195,11 @@ pgres::prune_runs() {
 }
 
 # A snapshot root is exactly `modules/<name>` or `tests/<name>`, `<name>` a plain
-# lowercase directory name. Refuses absolute paths, `..`, `.claude`, sibling worktrees
-# and every other traversal before a single file is read.
+# lowercase directory name, or the single literal `buildSrc` (#1004: buildSrc's own build,
+# whose tests the lane check runs). Refuses absolute paths, `..`, `.claude`, sibling worktrees,
+# anything below or beside `buildSrc` and every other traversal before a single file is read.
 pgres::allowed_root() {
+  [ "$1" != buildSrc ] || return 0
   case "$1" in
     modules/*|tests/*) ;;
     *) return 1 ;;
@@ -219,7 +223,7 @@ pgres::snapshot() {
   local rel f dst copied=0
   for rel in "$@"; do
     if ! pgres::allowed_root "$rel"; then
-      echo "pgres::snapshot: refusing root '$rel' (not modules/<m> or tests/<m>)" >&2
+      echo "pgres::snapshot: refusing root '$rel' (not modules/<m>, tests/<m> or buildSrc)" >&2
       return 1
     fi
     [ -d "$root/$rel/build/test-results" ] || continue
@@ -236,12 +240,13 @@ pgres::snapshot() {
 }
 
 # The Gradle task path a copied task directory corresponds to: `modules/auth/build/test-results/test`
-# → `:modules:auth:test`. Prints nothing and returns non-zero if the shape is not
-# `<modules|tests>/<m>/build/test-results/<task>`.
+# → `:modules:auth:test`, `buildSrc/build/test-results/test` → `:buildSrc:test` (#1004). Prints
+# nothing and returns non-zero if the shape is not `<modules|tests>/<m>/build/test-results/<task>`
+# or `buildSrc/build/test-results/<task>`.
 pgres::_task_path() {
   local rel="$1" prefix task
   case "$rel" in
-    modules/*/build/test-results/*|tests/*/build/test-results/*) ;;
+    modules/*/build/test-results/*|tests/*/build/test-results/*|buildSrc/build/test-results/*) ;;
     *) return 1 ;;
   esac
   prefix="${rel%/build/test-results/*}"
@@ -299,7 +304,7 @@ pgres::write_provenance() {
   {
     printf '# provenance for %s — test-task status lines from the stage log\n' "$(basename "$stage_dir")"
     if [ -f "$log" ]; then
-      grep -E '^> Task :(modules|tests):[a-z-]+:(test|breachSuite|editorJsTest|securityAssuranceTest|jsRenderedTest)([[:space:]]|$)' "$log" \
+      grep -E '^> Task (:(modules|tests):[a-z-]+:(test|breachSuite|editorJsTest|securityAssuranceTest|jsRenderedTest)|:buildSrc:test)([[:space:]]|$)' "$log" \
         | sort -u || true
     else
       printf '# (stage log %s is absent)\n' "$log"
@@ -349,7 +354,8 @@ pgres::capture() {
     echo "pgres::capture: snapshot failed for stage $stage" >&2
     return 1
   fi
-  counts="$(bash "$root/scripts/test-recount.sh" "$sdir" 2>&1)" || rc=$?
+  # --with-buildsrc (#1004): a stage that ran buildSrc's tests beside module tests counts both.
+  counts="$(bash "$root/scripts/test-recount.sh" --with-buildsrc "$sdir" 2>&1)" || rc=$?
   printf '%s\n' "$counts" > "$sdir/RECOUNT.log" || return 1
   first="$(printf '%s\n' "$counts" | head -n 1)"
   pgres::manifest_stage "$mf" "stage-$stage" "$status" "$stage_exit" \
@@ -460,6 +466,40 @@ write_tests() { # write_tests <path> <name> <tests> <failures>
 <testsuite name="$2" tests="$3" failures="$4" errors="0" skipped="0"></testsuite>
 XML
 }
+# #1004: buildSrc's test task, addressed by task path in any invocation (stage 2 unfiltered on a
+# build edit, stage 3 filtered). cleanTest empties its results as Gradle's does. The unfiltered run
+# writes every class of the fixture's own GUARDS[":buildSrc"] (never typed here) plus one
+# nested-build class; the filtered run only the classes its --tests name. Real testcase identity.
+# Modes: buildsrc-missing (the unfiltered run omits the first registered class), buildsrc-cached
+# (the status line is FROM-CACHE), buildsrc-fail (the unfiltered run exits 1).
+bs_state=none; bs_prev=; bs_unfiltered=0; bs_classes=()
+for a in "$@"; do
+  case "$bs_state" in
+    none) [ "$a" != :buildSrc:test ] || bs_state=args ;;
+    args) if [ "$bs_prev" = --tests ]; then bs_classes+=("$a"); elif [[ "$a" == :* ]]; then bs_state=done; fi ;;
+  esac
+  bs_prev="$a"
+done
+if [ "$bs_state" != none ]; then
+  [[ " $args " != *' :buildSrc:cleanTest '* ]] || rm -rf "$ROOT/buildSrc/build/test-results/test"
+  if [ "${#bs_classes[@]}" -eq 0 ]; then
+    bs_unfiltered=1
+    read -r -a bs_classes <<< "$(source "$ROOT/scripts/pregate-plan-lib.sh" && printf '%s' "${GUARDS[":buildSrc"]-}")"
+    if [ "${#bs_classes[@]}" -eq 0 ]; then
+      echo "stand-in refused: no :buildSrc guards in the registry" >> "$ROOT/pregate-argv.log"
+      exit 65
+    fi
+    [ "$mode" != buildsrc-missing ] || bs_classes=("${bs_classes[@]:1}")
+    bs_classes+=(NestedBuildFixtureTest)
+  fi
+  mkdir -p "$ROOT/buildSrc/build/test-results/test"
+  for c in "${bs_classes[@]}"; do
+    printf '<testsuite name="%s" tests="1" failures="0" errors="0"><testcase classname="%s" name="case"/></testsuite>' \
+      "$c" "$c" > "$ROOT/buildSrc/build/test-results/test/TEST-$c.xml"
+  done
+  if [ "$mode" = buildsrc-cached ]; then echo '> Task :buildSrc:test FROM-CACHE'; else echo '> Task :buildSrc:test'; fi
+  if [ "$mode" = buildsrc-fail ] && [ "$bs_unfiltered" -eq 1 ]; then exit 1; fi
+fi
 case "$args" in
   *ktlintCheck*) [ "$mode" != fail-1 ] || exit 81; exit 0 ;;
   *compileTestKotlin*) [ "$mode" != fail-4 ] || exit 84; exit 0 ;;
@@ -747,6 +787,18 @@ pgres::self_test() {
     s3_files=$((s3_files + 1)); s3_tests=$((s3_tests + s3_n))
   done
   ck_eq "stage3-counts" "files=$s3_files tests=$s3_tests failures=0 errors=0 skipped=0 unreadable=0" "$c3"
+  # #1004: stage 3 also ran the always-run buildSrc classes (the fixture's own registry), each one
+  # result file of one test; the capture's recount (--with-buildsrc) counts them beside the modules.
+  local s3_bs=() s3_c
+  read -r -a s3_bs <<< "$(source "$F/scripts/pregate-plan-lib.sh" && printf '%s' "${GUARDS[":buildSrc"]-}")"
+  ck_ok "stage3-buildsrc-registry-not-vacuous" test "${#s3_bs[@]}" -ge 3
+  for s3_c in "${s3_bs[@]}"; do
+    ck_ok "stage3-buildsrc-present-$s3_c" test -f "$rd/3/buildSrc/build/test-results/test/TEST-$s3_c.xml"
+  done
+  ck_eq "stage3-capture-recount-counts-buildsrc" \
+    "files=$((s3_files + ${#s3_bs[@]})) tests=$((s3_tests + ${#s3_bs[@]})) failures=0 errors=0 skipped=0 unreadable=0" \
+    "$(head -n 1 "$rd/3/RECOUNT.log")"
+  ck_ok "stage3-provenance-buildsrc-line" grep -qxF '> Task :buildSrc:test' "$rd/3/PROVENANCE.txt"
   ck_ok "verdict-pass" grep -q 'PRE-GATE PASS' "$F/.pregate-logs/0-verdict.log"
   ck_ok "verdict-run-id" grep -q "run=$run_id" "$F/.pregate-logs/0-verdict.log"
   ck_ok "verdict-snap-zero" grep -q 'snap=0' "$F/.pregate-logs/0-verdict.log"
@@ -1046,6 +1098,61 @@ pgres::self_test() {
   ck_ok "wiring-bad-verdict-fail" grep -q 'PRE-GATE FAIL' "$W2/.pregate-logs/0-verdict.log"
   ck_ok "wiring-bad-prune-flag" grep -q 'prune=1' "$W2/.pregate-logs/0-verdict.log"
   ck_ok "temp-hygiene-bases-in-fixtures" pgres::_check_hygiene_bases "$T"
+
+  # ---- 8. #1004: buildSrc as an evidence root --------------------------------------
+  # The single literal is accepted; everything below, beside or around it is refused.
+  ck_ok "allowed-root-buildsrc" pgres::allowed_root buildSrc
+  local bad_root
+  for bad_root in buildSrc/x buildSrc/.. buildSrc/ ./buildSrc buildsrc BuildSrc buildSrcX /buildSrc \
+    "$T/buildSrc" '' ../buildSrc 'buildSrc ' modules/buildSrc; do
+    if pgres::allowed_root "$bad_root"; then
+      echo "  FAIL allowed-root-refuses-'$bad_root' (accepted)"; fails=$((fails + 1))
+    else echo "  ok   allowed-root-refuses-'$bad_root'"; fi
+  done
+  if pgres::snapshot "$T/empty" "$T/refused-buildsrc-stage" /dev/null buildSrc/.. >/dev/null 2>&1; then
+    echo "  FAIL snapshot-refuses-buildsrc-traversal (exit was 0)"; fails=$((fails + 1))
+  else echo "  ok   snapshot-refuses-buildsrc-traversal"; fi
+
+  # The provenance line for :buildSrc:test, and its task directory is not annotated.
+  local BR="$T/bs-root" BL="$T/bs.log"
+  mkdir -p "$BR/buildSrc/build/test-results/test" "$BR/modules/auth/build/test-results/test" \
+           "$BR/tests/integration-tests/build/test-results/test"
+  printf '<testsuite name="B1" tests="3" failures="0" errors="0" skipped="0"/>' > "$BR/buildSrc/build/test-results/test/TEST-B1.xml"
+  printf '<testsuite name="B2" tests="2" failures="0" errors="0" skipped="0"/>' > "$BR/buildSrc/build/test-results/test/TEST-B2.xml"
+  printf '<testsuite name="M" tests="4" failures="0" errors="0" skipped="0"/>' > "$BR/modules/auth/build/test-results/test/TEST-M.xml"
+  printf '<testsuite name="I" tests="5" failures="0" errors="0" skipped="0"/>' > "$BR/tests/integration-tests/build/test-results/test/TEST-I.xml"
+  printf '> Task :buildSrc:cleanTest\n> Task :buildSrc:test\n> Task :buildSrc:testClasses UP-TO-DATE\n' > "$BL"
+  # pgres::capture runs the root's own recount script, as pregate.sh's does: the real one.
+  mkdir -p "$BR/scripts" && cp "$PGRES_LIB_DIR/test-recount.sh" "$BR/scripts/"
+  pgres::snapshot "$BR" "$T/bs-prov" "$BL" buildSrc >/dev/null
+  ck_ok "prov-buildsrc-test-line" grep -qxF '> Task :buildSrc:test' "$T/bs-prov/PROVENANCE.txt"
+  ck_eq "prov-buildsrc-helpers-not-recorded" "0" "$(grep -c -e cleanTest -e testClasses "$T/bs-prov/PROVENANCE.txt")"
+  ck_eq "prov-buildsrc-logged-not-annotated" "0" "$(grep -c 'NO-STATUS-LINE' "$T/bs-prov/PROVENANCE.txt")"
+  pgres::snapshot "$BR" "$T/bs-prov-nolog" "$T/no-such.log" buildSrc >/dev/null
+  ck_ok "prov-buildsrc-unlogged-annotated" grep -qxF '# NO-STATUS-LINE buildSrc/build/test-results/test' "$T/bs-prov-nolog/PROVENANCE.txt"
+
+  # The recount (D6): three stage snapshots through the REAL capture, which passes the opt-in;
+  # then the same three roots through the script directly, with and without it. Without it the
+  # script prints what it printed before #1004 (a mixed root leaves buildSrc out, a buildSrc-only
+  # root reaches it through the fallback), the repository, gate and CI contract.
+  local bs_case bs_name bs_roots bs_with bs_without bs_run
+  for bs_case in \
+    "only buildSrc|files=2 tests=5|files=2 tests=5" \
+    "with-modules buildSrc modules/auth|files=3 tests=9|files=1 tests=4" \
+    "with-tests buildSrc tests/integration-tests|files=3 tests=10|files=1 tests=5"; do
+    IFS='|' read -r bs_roots bs_with bs_without <<< "$bs_case"
+    read -r bs_name bs_roots <<< "$bs_roots"
+    bs_run="$T/bs-capture-$bs_name"
+    # shellcheck disable=SC2086 # the roots are fixed words
+    ck_ok "recount-$bs_name-capture-ok" pgres::capture "$BR" "$bs_run" 3 executed 0 "$BL" $bs_roots
+    ck_eq "recount-$bs_name-capture-total" "$bs_with failures=0 errors=0 skipped=0 unreadable=0" \
+      "$(head -n 1 "$bs_run/3/RECOUNT.log" 2>/dev/null)"
+    ck_contains "recount-$bs_name-manifest-total" "$(cat "$bs_run/MANIFEST.txt" 2>/dev/null)" "$bs_with failures=0"
+    ck_eq "recount-$bs_name-opt-in" "$bs_with failures=0 errors=0 skipped=0 unreadable=0" \
+      "$(bash "$PGRES_LIB_DIR/test-recount.sh" --with-buildsrc "$bs_run/3" | head -n 1)"
+    ck_eq "recount-$bs_name-without-opt-in" "$bs_without failures=0 errors=0 skipped=0 unreadable=0" \
+      "$(bash "$PGRES_LIB_DIR/test-recount.sh" "$bs_run/3" | head -n 1)"
+  done
 
   if [ "$fails" -eq 0 ]; then
     echo "  results self-test: PASS"

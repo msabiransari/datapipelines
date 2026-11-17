@@ -45,8 +45,14 @@ class DuckDbMemoryFormParityTest {
                 .command()
                 .orElseThrow { IllegalStateException("no java command") }
         val process =
-            ProcessBuilder(java, "-cp", System.getProperty("java.class.path"), Probe::class.java.name, url)
-                .directory(workDir.toFile())
+            ProcessBuilder(
+                java,
+                "-Djava.io.tmpdir=${childTempDirectory()}",
+                "-cp",
+                System.getProperty("java.class.path"),
+                Probe::class.java.name,
+                url,
+            ).directory(workDir.toFile())
                 .redirectErrorStream(true)
                 .start()
         check(process.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -67,6 +73,25 @@ class DuckDbMemoryFormParityTest {
             .map { it.name }
             .sorted()
 
+    // Another test worker's JVM attach request can appear or disappear during the probes (#1032).
+    private fun parentNames(directory: Path): List<String> = names(directory).filterNot { JVM_ATTACH_MARKER.matches(it) }
+
+    @Test
+    fun `parent snapshots ignore only numeric JVM attach markers and keep probe observations exact`() {
+        val ordinary = listOf(".attach_pid", ".attach_pid-notes", ".attach_pid123.db", ":Memory:", "rel941.db")
+        ordinary.forEach { Files.createFile(dir.resolve(it)) }
+        val before = parentNames(dir)
+        val marker = Files.createFile(dir.resolve(".attach_pid103210321"))
+
+        parentNames(dir) shouldBe before
+        names(dir) shouldBe (ordinary + marker.fileName.toString()).sorted()
+
+        Files.delete(marker)
+        parentNames(dir) shouldBe before
+        Files.createFile(dir.resolve("unexpected.db"))
+        parentNames(dir) shouldBe (ordinary + "unexpected.db").sorted()
+    }
+
     @Test
     fun `the classifier's memory-or-file verdict equals what the pinned driver opens, for every case variant`() {
         val forms =
@@ -78,7 +103,7 @@ class DuckDbMemoryFormParityTest {
                 "memory, mixed case with a tail" to "jdbc:duckdb::Memory:x941",
                 "relative file" to "jdbc:duckdb:rel941.db",
             )
-        val workingDirBefore = names(Path.of("").toAbsolutePath())
+        val workingDirBefore = parentNames(Path.of("").toAbsolutePath())
 
         val driver = forms.mapValues { (label, url) -> observe(label, url) }
         driver.forEach { (form, seen) -> println("#941 observed for $form: files=${seen.files} catalog=${seen.catalog}") }
@@ -96,7 +121,7 @@ class DuckDbMemoryFormParityTest {
         classifier shouldBe driver.mapValues { (_, seen) -> seen.files }
 
         // The probe wrote only under the JUnit temporary directory, never into the test's own working directory.
-        names(Path.of("").toAbsolutePath()) shouldBe workingDirBefore
+        parentNames(Path.of("").toAbsolutePath()) shouldBe workingDirBefore
     }
 
     @Test
@@ -135,5 +160,9 @@ class DuckDbMemoryFormParityTest {
     private companion object {
         const val PROBE_TIMEOUT_SECONDS = 60L
         const val CATALOG_PREFIX = "CATALOG="
+        val JVM_ATTACH_MARKER = Regex("\\.attach_pid[0-9]+")
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "memory-form-probe"))
 }

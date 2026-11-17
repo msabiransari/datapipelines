@@ -1121,15 +1121,21 @@ used to read only the guards and under-report the bulk of the tests. Every run n
 directory, `.pregate-logs/runs/<run-id>/` (run-id = UTC stamp + short HEAD + PID), holding a
 `MANIFEST.txt` (base, merge-base, HEAD, timestamp, each stage's executed/skipped status and its
 original exit) and one `<stage>/` mirror of that stage's XML (`2/modules/<m>/build/test-results/…`,
-`2b/tests/<m>/…`, `3/modules|tests/…`). Each test-producing stage is snapshotted immediately after
+`2b/tests/<m>/…`, `3/modules|tests/…`, and `2|3/buildSrc/build/test-results/test/…`). buildSrc's
+tests that read the repository run in every stage 3 (`:buildSrc:test --tests <class>…`, the
+`:buildSrc` row of the registry, #1004); a diff that touches `buildSrc/`, `gradle/libs.versions.toml`
+or `gradle/verification-metadata.xml` runs the whole buildSrc test task unfiltered in stage 2, and
+stage 3 then skips the classes that run covered. Each test-producing stage is snapshotted immediately after
 it returns — before the next stage can overwrite it, and even when the stage failed, because the
 failing XML is the evidence. `2b` snapshots only the modules its own invocation actually ran.
 Other task directories copied from those modules retain explicit provenance, including
-missing-status annotations. Read one stage at a time:
+missing-status annotations. Read one stage at a time; `--with-buildsrc` says the root is a stage
+snapshot, so its `buildSrc/` mirror is counted beside the modules (without it, a stage that also
+holds `modules/` or `tests/` trees leaves buildSrc's XML out of the count):
 
 ```bash
-./scripts/test-recount.sh .pregate-logs/runs/<run-id>/2   # that stage's inventory only
-./scripts/test-recount.sh .pregate-logs/runs/<run-id>/3
+./scripts/test-recount.sh --with-buildsrc .pregate-logs/runs/<run-id>/2   # that stage's inventory only
+./scripts/test-recount.sh --with-buildsrc .pregate-logs/runs/<run-id>/3
 ```
 
 **Covered guards (#479, exact provenance #468).** Stage 3 omits a product module's guards
@@ -1378,7 +1384,7 @@ of them can still log is a `ConcurrentModificationException` or a torn read on a
 the sole writer between attach and the last read, and it then says so on its construction line, or
 alone on the line directly above it when the construction line would pass 120 columns:
 `// raw-list-appender: synchronous — <the fact that makes it safe>`. `RawListAppenderGuardTest`
-(buildSrc, run by the gate and CI's cold job) refuses any other raw construction, naming it
+(buildSrc, run by the gate, CI's cold job and every lane check's stage 3) refuses any other raw construction, naming it
 `path:line` (#484), and refuses a `SnapshotListAppender.kt` or `SnapshotListAppenderTest.kt`
 outside `modules/log-capture` (#756).
 
@@ -1422,6 +1428,20 @@ plugin's root.
   atomically and lives outside the root.
 - The path is passed through a JVM argument provider. It is not a task input, so a moved base never
   makes a test task out of date or misses the build cache.
+
+**Child JVMs that tests start (#998).** A JVM that a test starts with `ProcessBuilder` does not
+inherit the rule: a system property is not inherited, and a JVM ignores `$TMPDIR`. Without its own
+flag a child extracts `libduckdb_java*.so` and makes its Tomcat folders in the JVM's default temp
+directory (`/tmp` on Linux), outside every root, where the sweep may not look. So every child JVM is
+started with `-Djava.io.tmpdir=<the parent's java.io.tmpdir>/<child name>` as the FIRST argument after
+the `java` executable. An option after `-jar <file>`, after the main class or after a source file is a
+program argument and configures nothing. The child name is a fixed literal per launch site
+(`[a-z0-9-]+`, unique within its test class), and the launch site creates the directory before the
+launch; a directory that cannot be made fails the test. No child gets the parent's own directory: a
+file that parent and child both use travels as an explicit path. `JAVA_TOOL_OPTIONS` is not used: the
+JVM announces it on stderr, which tests read, and some tests clear the child's environment.
+`ChildJvmTempDirectoryGuardTest` (`modules/app`, run by every lane check) reads every tracked test
+source and fails a JVM launch without the flag in that position, naming its `path:line`.
 
 **What the step removes.** `gate.sh` and `pregate.sh` call the step right after
 `verification::lock` succeeds, so no gate or pregate of this checkout is running at that point. The

@@ -67,6 +67,12 @@ val probeJdk21 = extensions.getByType(JavaToolchainService::class.java)
 
 tasks.test {
     useJUnitPlatform()
+    // #1004: a lane check runs `:buildSrc:cleanTest :buildSrc:test` with --build-cache, and a second
+    // check on an unchanged tree was served FROM-CACHE: the classes reported a result without
+    // executing. A guard's verdict is its execution, so this task's results never come from the cache.
+    outputs.cacheIf("buildSrc's tests are guards: a lane check must execute them, never restore their results (#1004)") {
+        false
+    }
     // The probe projects the tests drive must see the repo's real version
     // catalog — the plugin resolves catalog aliases at apply time. buildSrc's
     // project dir is <repo>/buildSrc, so ../gradle is the main build's.

@@ -9,6 +9,8 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
 /**
@@ -101,6 +103,7 @@ class NormalBootOutputTest {
             val process =
                 ProcessBuilder(
                     "${System.getProperty("java.home")}/bin/java",
+                    "-Djava.io.tmpdir=${childTempDirectory()}",
                     "-D${ObservabilityLoggingFormatPostProcessor.SWITCH_KEY}=$format",
                     *extraJvmArgs.toTypedArray(),
                     "-cp",
@@ -119,4 +122,7 @@ class NormalBootOutputTest {
             errFile.delete()
         }
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "plant-boot-child"))
 }
