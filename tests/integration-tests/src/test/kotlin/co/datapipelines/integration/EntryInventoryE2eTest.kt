@@ -317,8 +317,7 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
             private const val STOP_WAIT_S = 30L
 
             fun boot(): PackagedApp {
-                val appPort = freePort()
-                val managementPort = freePort()
+                val (appPort, managementPort) = freePorts()
                 val log = Files.createTempFile("entry-inventory-app", ".log").toFile()
                 val builder =
                     ProcessBuilder(
@@ -351,7 +350,11 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
                 return app
             }
 
-            private fun freePort(): Int = ServerSocket(0).use { it.localPort }
+            // Keep both sockets bound until both ports are chosen: a released port can be chosen again (#1027).
+            private fun freePorts(): Pair<Int, Int> =
+                ServerSocket(0).use { app ->
+                    ServerSocket(0).use { management -> app.localPort to management.localPort }
+                }
 
             /** The packaged app's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
             private fun childTempDirectory(): Path =

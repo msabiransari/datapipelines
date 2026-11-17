@@ -35,9 +35,9 @@ import java.time.Duration
  *   reaper delay is a code constant, not a key: [ReaperDelay.SECONDS] (the scheduling layer) derived and pinned where
  *   it is produced.
  *
- * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` and the cgroup memory
- * sum to P1/P6 (the sum's amendment adds keys that do not exist yet, and E10b is its acceptance — owner
- * 2026-11-02); the sum's `reads.memory-limit` term is a filed follow-up of #818 (owner 2026-11-04).
+ * Deferred, with the lane that consumes the input: `scratch-bytes ≤ the pod's /tmp limit` to P1/P6 (owner
+ * 2026-11-02). The cgroup memory sum, with its `reads.memory-limit` term, is `ProcessMemoryAdmission` (#819); its
+ * two keys, [PROCESS_RESERVE] and [MEMORY_HEADROOM], are named here and judged there.
  */
 internal object LakeRules {
     private const val PREFIX = "datapipelines.lake"
@@ -61,6 +61,8 @@ internal object LakeRules {
     const val STAGING_EXPANSION_FACTOR = "$PREFIX.admission.staging-expansion-factor"
     const val SCRATCH_BYTES = "$PREFIX.admission.scratch-bytes"
     const val STAGING_MEMORY_LIMIT = "$PREFIX.admission.staging-memory-limit"
+    const val PROCESS_RESERVE = "$PREFIX.admission.process-reserve"
+    const val MEMORY_HEADROOM = "$PREFIX.admission.memory-headroom"
     const val MAX_OPEN_PARTITIONS = "$PREFIX.admission.max-open-partitions-per-append"
     const val JOB_TIMEOUT = "$PREFIX.admission.job-timeout"
     const val LEASE_WAIT_SECONDS = "$PREFIX.admission.lease-wait-seconds"
@@ -69,6 +71,7 @@ internal object LakeRules {
     const val MAX_GENERATION_AGE_SECONDS = "$PREFIX.reads.max-generation-age-seconds"
     const val FRESHNESS_TICK_SECONDS = "$PREFIX.reads.freshness-tick-seconds"
     const val READS_MEMORY_LIMIT = "$PREFIX.reads.memory-limit"
+    const val MAX_RETIRED_GENERATIONS = "$PREFIX.reads.max-retired-generations"
     const val EGRESS_PROXY = "$PREFIX.reads.egress-proxy"
     const val EGRESS_MAX_AGE_SECONDS = "$PREFIX.reads.egress-max-age-seconds"
     const val MAINTENANCE_WINDOW = "$PREFIX.maintenance.window"
@@ -104,6 +107,8 @@ internal object LakeRules {
             STAGING_EXPANSION_FACTOR,
             SCRATCH_BYTES,
             STAGING_MEMORY_LIMIT,
+            PROCESS_RESERVE,
+            MEMORY_HEADROOM,
             MAX_OPEN_PARTITIONS,
             JOB_TIMEOUT,
             LEASE_WAIT_SECONDS,
@@ -112,6 +117,7 @@ internal object LakeRules {
             MAX_GENERATION_AGE_SECONDS,
             FRESHNESS_TICK_SECONDS,
             READS_MEMORY_LIMIT,
+            MAX_RETIRED_GENERATIONS,
             EGRESS_PROXY,
             EGRESS_MAX_AGE_SECONDS,
             MAINTENANCE_WINDOW,
@@ -135,6 +141,12 @@ internal object LakeRules {
      * enabled-gated. `DomainConfiguration.stagingFactoryFor` binds exactly these for `DuckDbStagingFactory`.
      */
     val STAGING_ADMISSION_KEYS: Set<String> = setOf(STAGING_MEMORY_LIMIT, STAGING_EXPANSION_FACTOR, SCRATCH_BYTES)
+
+    /**
+     * #819 — the process memory admission's two keys, judged at every boot whether or not the lake is enabled
+     * (`ProcessMemoryAdmission`, configuration.md §7).
+     */
+    val PROCESS_ADMISSION_KEYS: Set<String> = setOf(PROCESS_RESERVE, MEMORY_HEADROOM)
 
     /** What `ConfigSnapshot.lake` carries for [key]: the raw value, or for a credential only [PRESENT] / empty. */
     fun carried(
@@ -362,6 +374,10 @@ internal object LakeRules {
      * and hard-closes it within one more of its ceiling. The delay is [ReaperDelay.SECONDS], never typed here.
      *
      * #818e: this bounds staleness; live reader leases independently pin snapshot expiry.
+     *
+     * #819 (owner ruling 2026-11-15) — [MAX_RETIRED_GENERATIONS] is K, the retired generations still holding an
+     * engine above which no replacement is built: a whole number from 1, because with 0 no rotation could keep a
+     * running query. It does not enter the staleness inequality: the age bound retires regardless of the cap.
      */
     fun checkLakeReads(
         snapshot: ConfigSnapshot,
@@ -369,6 +385,7 @@ internal object LakeRules {
     ) {
         if (!enabled(snapshot)) return
         dataSize(snapshot, READS_MEMORY_LIMIT, violations)
+        positiveInt(snapshot, MAX_RETIRED_GENERATIONS, violations)
         readsEgressTerm(snapshot, violations)
         val age = positiveLong(snapshot, MAX_GENERATION_AGE_SECONDS, violations)
         val tick = positiveLong(snapshot, FRESHNESS_TICK_SECONDS, violations)

@@ -47,6 +47,21 @@ duckdb:
   # (DATAPIPELINES_DUCKDB_MEMORY_LIMIT). An invalid value fails the pod's boot by design.
   memoryLimit: ""
 
+# configuration.md §7 / §3.36 (#819) — the process memory admission. At boot the app refuses to
+# start unless staging + reader + heap + processReserve < the container memory limit ×
+# (1 − memoryHeadroom); the limit is this pod's resources.limits.memory as its cgroup reports it.
+# With no memory limit the boot logs the breakdown with result=not_compared and starts.
+# All three EMPTY by default, and an empty value renders NO env entry, so the application's own
+# defaults apply (1GB, 0.10, 1). 0 is a value, not "empty": memoryHeadroom: 0 is rendered.
+memoryAdmission:
+  # A size such as 1GB (DATAPIPELINES_LAKE_ADMISSION_PROCESS_RESERVE).
+  processReserve: ""
+  # A decimal 0 <= h < 1 such as 0.10 (DATAPIPELINES_LAKE_ADMISSION_MEMORY_HEADROOM).
+  memoryHeadroom: ""
+  # K, a whole number >= 1: the reader term is (1 + K) × reads.memory-limit
+  # (DATAPIPELINES_LAKE_READS_MAX_RETIRED_GENERATIONS).
+  maxRetiredGenerations: ""
+
 # configuration.md §3.28 — the nine JavaScript runtime keys (#8 lane 8b, #688). All NINE empty
 # by default, and an empty value renders NO env entry — the same rule as the duckdb block above.
 # The image carries the isolate and sets its own directory (the Dockerfile's

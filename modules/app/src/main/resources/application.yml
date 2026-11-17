@@ -679,10 +679,14 @@ datapipelines:
     admission:
       max-concurrent-ingestions: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_INGESTIONS:2}
       max-concurrent-maintenance: ${DATAPIPELINES_LAKE_ADMISSION_MAX_CONCURRENT_MAINTENANCE:1}
-      max-delivery-bytes: ${DATAPIPELINES_LAKE_ADMISSION_MAX_DELIVERY_BYTES:2GB}
-      staging-expansion-factor: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_EXPANSION_FACTOR:3}
+      max-delivery-bytes: ${DATAPIPELINES_LAKE_ADMISSION_MAX_DELIVERY_BYTES:1GB}
+      staging-expansion-factor: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_EXPANSION_FACTOR:10}
       scratch-bytes: ${DATAPIPELINES_LAKE_ADMISSION_SCRATCH_BYTES:20GB}
       staging-memory-limit: ${DATAPIPELINES_LAKE_ADMISSION_STAGING_MEMORY_LIMIT:1GB}
+      # #819: the process memory admission (configuration.md §7), judged at every boot whether or not the lake is
+      # enabled: staging + reader + heap + process-reserve < the container limit × (1 − memory-headroom).
+      process-reserve: ${DATAPIPELINES_LAKE_ADMISSION_PROCESS_RESERVE:1GB}
+      memory-headroom: ${DATAPIPELINES_LAKE_ADMISSION_MEMORY_HEADROOM:0.10}
       max-open-partitions-per-append: ${DATAPIPELINES_LAKE_ADMISSION_MAX_OPEN_PARTITIONS_PER_APPEND:64}
       job-timeout: ${DATAPIPELINES_LAKE_ADMISSION_JOB_TIMEOUT:2h}
       lease-wait-seconds: ${DATAPIPELINES_LAKE_ADMISSION_LEASE_WAIT_SECONDS:60}
@@ -693,6 +697,9 @@ datapipelines:
       max-generation-age-seconds: ${DATAPIPELINES_LAKE_READS_MAX_GENERATION_AGE_SECONDS:900}
       freshness-tick-seconds: ${DATAPIPELINES_LAKE_READS_FRESHNESS_TICK_SECONDS:60}
       memory-limit: ${DATAPIPELINES_LAKE_READS_MEMORY_LIMIT:512MB}
+      # #819: K, the retired reader generations still holding an engine above which no replacement is built (a whole
+      # number from 1); the freshness tick waits at K, and a lease is refused lake.unavailable above it (§3.36).
+      max-retired-generations: ${DATAPIPELINES_LAKE_READS_MAX_RETIRED_GENERATIONS:1}
       # #845: the egress proxy (host:port) the managed datasource's object-store traffic leaves through; empty = none.
       # Compose and Helm ship one ON; its max-age is declared at /dp-egress and checked at boot (lake.boot.egress_proxy).
       egress-proxy: ${DATAPIPELINES_LAKE_READS_EGRESS_PROXY:}
@@ -707,8 +714,8 @@ datapipelines:
       plan-max-abandoned-reads: ${DATAPIPELINES_LAKE_MAINTENANCE_PLAN_MAX_ABANDONED_READS:4}
       # #969: compaction's two deployment values (configuration.md §3.36): scratch per byte of a group's input, and the
       # input bytes a group is assumed to get through per second (MB = MiB in Spring's DataSize).
-      compaction-scratch-factor: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_SCRATCH_FACTOR:3}
-      compaction-bytes-per-second: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_BYTES_PER_SECOND:4MB}
+      compaction-scratch-factor: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_SCRATCH_FACTOR:7}
+      compaction-bytes-per-second: ${DATAPIPELINES_LAKE_MAINTENANCE_COMPACTION_BYTES_PER_SECOND:2MB}
     retention:
       protection-days: ${DATAPIPELINES_LAKE_RETENTION_PROTECTION_DAYS:7}
       orphan-grace-hours: ${DATAPIPELINES_LAKE_RETENTION_ORPHAN_GRACE_HOURS:72}

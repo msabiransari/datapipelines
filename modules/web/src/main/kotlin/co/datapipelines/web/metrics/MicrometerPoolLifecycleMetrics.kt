@@ -44,10 +44,16 @@ class MicrometerPoolLifecycleMetrics(
         registry.counter(REAPER_PASS_SLOW).increment()
     }
 
+    /** #819 — the freshness tick did not retire a stale managed generation at the retired-generation cap. */
+    override fun freshnessTickCapped(datasourceName: String) {
+        registry.counter(FRESHNESS_TICK_CAPPED, "datasource_name", datasourceName).increment()
+    }
+
     companion object {
         const val POOL_RETIRED = "datapipelines.datasource.pool.retired"
         const val POOL_HARD_CLOSED = "datapipelines.datasource.pool.hard_closed"
         const val POOL_CLOSE_STUCK = "datapipelines.datasource.pool.close_stuck"
         const val REAPER_PASS_SLOW = "datapipelines.datasource.pool.reaper_pass_slow"
+        const val FRESHNESS_TICK_CAPPED = "datapipelines.lake.freshness_tick.capped"
     }
 }

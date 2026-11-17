@@ -31,8 +31,12 @@ class LakeRulesTest {
         violations(emptyMap()) shouldContainExactly emptyList()
         // Disabled with nonsense everywhere: still nothing — a deployment without a lake is not refused for its
         // keys. The three DuckDB staging inputs are the #804 exception (staging consumes them with or without a
-        // lake), so they keep their shipped defaults here and have their own cases below.
-        val unconsumed = LakeRules.KEYS.filter { it !in LakeRules.STAGING_ADMISSION_KEYS && it != LakeRules.ENABLED }
+        // lake), so they keep their shipped defaults here and have their own cases below; so are the two #819 process
+        // memory admission keys, judged at every boot (ProcessMemoryAdmissionTest).
+        val unconsumed =
+            LakeRules.KEYS.filter {
+                it !in LakeRules.STAGING_ADMISSION_KEYS && it !in LakeRules.PROCESS_ADMISSION_KEYS && it != LakeRules.ENABLED
+            }
         violations(unconsumed.associateWith { "nonsense" }) shouldContainExactly emptyList()
     }
 
@@ -109,9 +113,9 @@ class LakeRulesTest {
     fun `the lease wait stays under the node query ceiling and a delivery's staging fits the scratch budget`() {
         enabled(LakeRules.LEASE_WAIT_SECONDS to "900").single() shouldStartWith LakeRules.LEASE_WAIT_SECONDS
         enabled(LakeRules.LEASE_WAIT_SECONDS to "899") shouldContainExactly emptyList()
-        // Shipped 2GB × 3 = 6GB ≤ 20GB; 7GB × 3 = 21GB > 20GB refuses; 6GB × 3 = 18GB passes.
-        enabled(LakeRules.MAX_DELIVERY_BYTES to "7GB").single() shouldStartWith LakeRules.MAX_DELIVERY_BYTES
-        enabled(LakeRules.MAX_DELIVERY_BYTES to "6GB") shouldContainExactly emptyList()
+        // Shipped 1GB × 10 = 10GB ≤ 20GB; an override of 2GB reaches equality, and one byte more refuses.
+        enabled(LakeRules.MAX_DELIVERY_BYTES to "2147483649B").single() shouldStartWith LakeRules.MAX_DELIVERY_BYTES
+        enabled(LakeRules.MAX_DELIVERY_BYTES to "2GB") shouldContainExactly emptyList()
         enabled(LakeRules.SCRATCH_BYTES to "lots").single() shouldStartWith LakeRules.SCRATCH_BYTES
     }
 
@@ -197,9 +201,9 @@ class LakeRulesTest {
             it shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
             it shouldContain "at least 1 MiB"
         }
-        // One default reservation, shipped 1GB × 3 = 3GB: exactly one reservation in, one byte below out.
-        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225472B")) shouldContainExactly emptyList()
-        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225471B")).single().let {
+        // One default reservation, shipped 1GB × 10 = 10GB (#997): exactly one reservation in, one byte below out.
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "10737418240B")) shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "10737418239B")).single().let {
             it shouldStartWith LakeRules.SCRATCH_BYTES
             it shouldContain "one DuckDB staging reservation"
         }
@@ -330,6 +334,19 @@ class LakeRulesTest {
         enabled(LakeRules.READS_MEMORY_LIMIT to "0MB").single() shouldStartWith LakeRules.READS_MEMORY_LIMIT
         enabled(LakeRules.READS_MEMORY_LIMIT to "plenty").single() shouldStartWith LakeRules.READS_MEMORY_LIMIT
         enabled(LakeRules.READS_MEMORY_LIMIT to "2GB") shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `819 - the retired generation cap is a whole number from 1, refused by its key name outside it`() {
+        val key = LakeRules.MAX_RETIRED_GENERATIONS
+        key shouldBe "datapipelines.lake.reads.max-retired-generations"
+        shipped[key] shouldBe "1"
+        listOf("0", "-1", "abc", "", "1.5", "2147483648").forEach { bad ->
+            enabled(key to bad).single() shouldStartWith key
+        }
+        listOf("1", "2", " 3 ", "2147483647").forEach { good -> enabled(key to good) shouldContainExactly emptyList() }
+        // Disabled, nothing reads K: no violation, as for every reads key.
+        violations(mapOf(key to "0")) shouldContainExactly emptyList()
     }
 
     @Test
