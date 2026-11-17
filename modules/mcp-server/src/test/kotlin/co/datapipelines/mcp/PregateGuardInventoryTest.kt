@@ -24,13 +24,20 @@ import java.util.concurrent.TimeUnit
  *  - `own-module`: the class reaches the repository root but reads only its own module (one line,
  *    the reason). No coverage is given up.
  *  - `waived-for-cost`: the class IS such a guard and starts a container or an application context,
- *    or takes more than 120 s by itself in stage 3. The line names the evidence, and this check
- *    verifies it: the reason must name a container/context marker the class reaches, or
- *    `measured <N> s` with N > 120. The merge gate and CI still run these classes.
+ *    or takes more than 120 s by itself in stage 3, or (#1004, owner ruling 2026-11-15) starts a
+ *    nested Gradle build. The line names the evidence, and this check verifies it: the reason must
+ *    name a container/context or nested-build marker the class reaches, or `measured <N> s` with
+ *    N > 120. The merge gate and CI still run these classes.
+ *
+ * buildSrc (#1004): its tests are one more project, `:buildSrc`, registered as `GUARDS[":buildSrc"]`.
+ * Its own directory is `buildSrc/`, so a class that reads the catalog, the Dockerfile or the module
+ * sources reads beyond it. The lane check runs the registered buildSrc classes in every stage 3, and
+ * buildSrc's whole test task in stage 2 when a diff touches `buildSrc/`, the catalog or the
+ * verification metadata; a buildSrc class that starts a nested build is waived with `GradleRunner`.
  *
  * THE METHOD (one implementation; the printed table is the inventory). The scan reads every tracked
- * Kotlin/Java file under `modules/<m>/src/test/` and `tests/<m>/src/test/` (`git ls-files`) — the
- * projects stage 3 can run — strips comments and backtick names, and takes the string
+ * Kotlin/Java file under `modules/<m>/src/test/`, `tests/<m>/src/test/` and `buildSrc/src/test/`
+ * (`git ls-files`) — the projects stage 3 can run — strips comments and backtick names, and takes the string
  * literals and the member declarations (top level, and members of classes and objects; a local
  * inside a function body belongs to its function). A declaration REACHES THE ROOT when its text
  * holds one of the idioms the 2026-11-15 test tree uses:
@@ -40,7 +47,10 @@ import java.util.concurrent.TimeUnit
  *  - `cwd` — the working directory as an empty or `.` path handed straight to `File(`,
  *    `Paths.get(` or `Path.of(` (the other spelling of a walk-up's start);
  *  - `relative` — a literal starting `../` that, resolved from the module directory, is a tracked
- *    path (the test task's working directory is the module).
+ *    path (the test task's working directory is the module);
+ *  - `repo.catalog` / `repo.verification` — the system properties buildSrc's test task hands its
+ *    tests (#1004): the catalog's path, whose grandparent is the repository root, and the
+ *    dependency checksums' path (`gradle/verification-metadata.xml`, outside buildSrc).
  * A helper is not a class Gradle can run, so it never becomes a row: references are resolved inside
  * the module (a top-level function, value or class by its name; an object's or companion's member
  * as `Owner.member`, so a test that uses only an object's constants does not inherit the object's
@@ -52,15 +62,16 @@ import java.util.concurrent.TimeUnit
  * UNCLASSIFIED (it may read only its own module, or build its paths at run time where the scan
  * cannot see them) and needs a line or a registration all the same.
  *
- * LIMITS, stated: `buildSrc` is a separate build the lane check runs no test of, and its results
- * directory is no root the lane check's evidence snapshot accepts, so its tests (which read the
- * repository through `repo.catalog`) are not scanned (follow-up #1004). A
+ * LIMITS, stated: buildSrc's tests are scanned through the two properties above; a buildSrc test
+ * that reaches the checkout only through the `DP_TEST_TMP_OWNER_CHECKOUT` environment variable
+ * (`TestTempRoot.OWNER_ENV`, a main-source constant) is invisible here unless it also names one. A
  * test that reaches the root in a way not listed above (a new system property, a
  * path assembled from pieces none of which is a top-level entry, a classpath resource the build
  * copied from outside the module) is invisible here; a reference through an instance of an object
  * passed around, or through `with(Owner)`, is not followed; a literal naming a top-level entry in a
  * root-reaching class counts as a read even when it is a fixture path (an `own-module` line says
- * so). The container/context markers are the ones the 2026-11-15 tree uses ([CONTAINER_MARKERS]).
+ * so). The container/context markers are the ones the 2026-11-15 tree uses ([CONTAINER_MARKERS]);
+ * the nested-build marker is TestKit's `GradleRunner` ([NESTED_BUILD_MARKERS]).
  * The row floor ([ROW_FLOOR]) catches a broken walk, never a narrowed one.
  *
  * Why it lives here: `:modules:mcp-server` is already in the registry and its tests start no
@@ -112,6 +123,13 @@ class PregateGuardInventoryTest {
             val row = rows[name] ?: fail("$name is no longer an inventory row — the scan lost an idiom")
             if (idiom !in row.idioms || !row.crossModule) fail("$name: expected a cross-module row via $idiom, got $row")
         }
+        // #1004: buildSrc's tests are rows of their own project, reaching the root through repo.catalog.
+        val notices = rows["ThirdPartyNoticesTest"] ?: fail("buildSrc's ThirdPartyNoticesTest is not a row — buildSrc is not scanned")
+        if (notices.module.path != ":buildSrc" || "repo.catalog" !in notices.idioms || !notices.crossModule) {
+            fail("ThirdPartyNoticesTest: expected a cross-module :buildSrc row via repo.catalog, got $notices")
+        }
+        val nested = rows["CommonConventionsPluginTest"] ?: fail("buildSrc's CommonConventionsPluginTest is not a row")
+        if ("GradleRunner" !in nested.markers) fail("CommonConventionsPluginTest's nested build is not seen: $nested")
         // A helper is resolved to the classes that use it (auth's RepoFiles, the brief's example).
         val viaHelper = rows["co.datapipelines.auth.AuthErrorSpecDriftTest"] ?: fail("AuthErrorSpecDriftTest is not a row")
         if (viaHelper.helpers.none { it.startsWith("RepoFiles.") }) fail("AuthErrorSpecDriftTest's helper is not seen: $viaHelper")
@@ -210,6 +228,95 @@ class PregateGuardInventoryTest {
         }
         if (problemsFor("starts PostgreSQLContainer").none { it.startsWith("WAIVER WITHOUT EVIDENCE") }) {
             fail("a marker the class does not reach is no evidence")
+        }
+    }
+
+    @Test
+    fun `a buildSrc test that reads the repository is a guard of its own project, and a nested build is waivable`() {
+        val tree = BuildSrcProbeTree(scratch)
+        val inventory = GuardInventory.scan(scratch, tree.files())
+        val bare = GuardInventory.judge(inventory, GuardRegistry(emptyMap()), GuardExemptions(emptyList())).problems
+        val text = bare.joinToString("\n")
+        val missing = bare.singleOrNull { BuildSrcProbeTree.READS in it } ?: fail("${BuildSrcProbeTree.READS} is not named once:\n$text")
+        if (!missing.startsWith("MISSING GUARD") || "(:buildSrc)" !in missing) fail("expected a missing :buildSrc guard:\n$missing")
+        if (bare.none { it.startsWith("MISSING GUARD") && BuildSrcProbeTree.NESTED in it }) fail("the nested build is no row:\n$text")
+        if (bare.any { BuildSrcProbeTree.PURE in it }) fail("a buildSrc test that reads nothing outside buildSrc is no row:\n$text")
+        if (bare.size != 2) fail("expected exactly the two buildSrc probe rows:\n$text")
+
+        val nestedWaiver = "waived-for-cost ${BuildSrcProbeTree.NESTED} starts a nested build: GradleRunner"
+        val green =
+            GuardInventory.judge(
+                inventory,
+                GuardRegistry(mapOf(":buildSrc" to listOf(BuildSrcProbeTree.READS))),
+                GuardExemptions.parse(listOf(nestedWaiver)),
+            )
+        if (green.problems.isNotEmpty()) fail("registered + waived must be green:\n${green.problems.joinToString("\n")}")
+
+        val elsewhere =
+            GuardInventory.judge(
+                inventory,
+                GuardRegistry(mapOf(":modules:alpha" to listOf(BuildSrcProbeTree.READS))),
+                GuardExemptions.parse(listOf(nestedWaiver)),
+            )
+        if (elsewhere.problems.none { it.startsWith("REGISTERED IN THE WRONG MODULE") && BuildSrcProbeTree.READS in it }) {
+            fail("a buildSrc class registered under a module must be refused:\n${elsewhere.problems.joinToString("\n")}")
+        }
+        val unevidenced =
+            GuardInventory.judge(
+                inventory,
+                GuardRegistry(mapOf(":buildSrc" to listOf(BuildSrcProbeTree.READS))),
+                GuardExemptions.parse(listOf("waived-for-cost ${BuildSrcProbeTree.NESTED} it is slow, trust me")),
+            )
+        if (unevidenced.problems.none { it.startsWith("WAIVER WITHOUT EVIDENCE") && BuildSrcProbeTree.NESTED in it }) {
+            fail("a nested-build waiver that names no marker must be refused:\n${unevidenced.problems.joinToString("\n")}")
+        }
+    }
+
+    /** A temporary repository with a buildSrc: a repository reader, a nested build and a pure test. */
+    private class BuildSrcProbeTree(
+        private val root: File,
+    ) {
+        init {
+            write("settings.gradle.kts", "rootProject.name = \"probe\"\n")
+            write("Dockerfile", "FROM scratch\n")
+            write("modules/web/build.gradle.kts", "// probe module\n")
+            write("buildSrc/src/main/kotlin/Plugin.kt", "class Plugin\n")
+            val locate = "File(requireNotNull(System.getProperty(\"repo.catalog\"))).parentFile.parentFile"
+            write(
+                "buildSrc/src/test/kotlin/RepoReaderProbeTest.kt",
+                "class RepoReaderProbeTest {\n    @Test\n    fun reads() {\n" +
+                    "        $locate.resolve(\"Dockerfile\").readText()\n    }\n}\n",
+            )
+            write(
+                "buildSrc/src/test/kotlin/NestedBuildProbeTest.kt",
+                "class NestedBuildProbeTest {\n    @Test\n    fun builds() {\n" +
+                    "        GradleRunner.create().withProjectDir($locate.resolve(\"modules/web\")).build()\n    }\n}\n",
+            )
+            write(
+                "buildSrc/src/test/kotlin/PureProbeTest.kt",
+                "class PureProbeTest {\n    @Test\n    fun adds() {\n        check(1 + 1 == 2)\n    }\n}\n",
+            )
+        }
+
+        private fun write(
+            path: String,
+            text: String,
+        ) {
+            File(root, path).apply { parentFile.mkdirs() }.writeText(text)
+        }
+
+        fun files(): List<String> =
+            root
+                .walkTopDown()
+                .filter { it.isFile }
+                .map { it.relativeTo(root).invariantSeparatorsPath }
+                .sorted()
+                .toList()
+
+        companion object {
+            const val READS = "RepoReaderProbeTest"
+            const val NESTED = "NestedBuildProbeTest"
+            const val PURE = "PureProbeTest"
         }
     }
 
@@ -330,6 +437,9 @@ internal val CONTAINER_MARKERS: Regex =
             "MSSQLServerContainer|SpringApplicationBuilder|ApplicationContextRunner|WebApplicationContextRunner|" +
             "AnnotationConfigApplicationContext|runApplication)\\b",
     )
+
+/** The nested-build marker (#1004): a TestKit build started from a test, buildSrc's expensive kind (a waiver's evidence). */
+internal val NESTED_BUILD_MARKERS: Regex = Regex("\\bGradleRunner\\b")
 
 /** A Gradle module that owns test sources: its directory and its project path. */
 internal data class GradleModule(
@@ -461,12 +571,16 @@ internal data class Verdict(
 /** The scanner and the judge. Pure functions over (root, tracked paths), so a temporary tree tests them. */
 internal object GuardInventory {
     private const val WALK_IDIOM = "git-ls-files"
+    private const val BUILD_SRC = "buildSrc"
     private const val WAIVER_SECONDS = 120
     private val IDIOM_LITERALS =
         mapOf(
             "settings.gradle.kts" to "marker",
             "ls-files" to WALK_IDIOM,
             "user.dir" to "user.dir",
+            // #1004: the paths buildSrc's test task hands its tests.
+            "repo.catalog" to "repo.catalog",
+            "repo.verification" to "repo.verification",
         )
     private val MEASURED = Regex("""measured (\d+) s""")
 
@@ -657,6 +771,11 @@ internal object GuardInventory {
                 GradleModule("${parts[0]}/${parts[1]}", ":${parts[0]}:${parts[1]}")
             }
 
+            // #1004: buildSrc is its own build; the lane check addresses its tests as :buildSrc:test.
+            parts.size > 3 && parts[0] == BUILD_SRC && parts[1] == "src" && parts[2] == "test" -> {
+                GradleModule(BUILD_SRC, ":$BUILD_SRC")
+            }
+
             else -> {
                 null
             }
@@ -690,13 +809,10 @@ internal object GuardInventory {
                         ?.let { decl.file.literalAt[it] } in CWD_VALUES
                 }
         if (cwd) idioms += "cwd"
-        val markers =
-            CONTAINER_MARKERS
-                .findAll(
-                    decl.file.lexed.code
-                        .substring(decl.start, decl.end),
-                ).map { it.value }
-                .toSet()
+        val text =
+            decl.file.lexed.code
+                .substring(decl.start, decl.end)
+        val markers = (CONTAINER_MARKERS.findAll(text) + NESTED_BUILD_MARKERS.findAll(text)).map { it.value }.toSet()
         return Facts(idioms, cross, markers)
     }
 

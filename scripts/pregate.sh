@@ -103,8 +103,9 @@ for stage in "${PG_STAGES[@]}"; do
   before="$(pgres::now_ms)" || { snap=1; before="$start"; }
   args=(); roots=(); status=executed; rc=0
   if [ "$stage" = 3 ]; then
-    # Only this invocation's successful unfiltered module checks can cover guards.
-    for m in "${PG_MODULES[@]}"; do
+    # Only this invocation's successful unfiltered module checks can cover guards; buildSrc's
+    # unfiltered stage-2 run counts as one (#1004), PG_BUILDSRC being `:buildSrc` only then.
+    for m in "${PG_MODULES[@]}" "${PG_BUILDSRC[@]}"; do
       if [ "${exits[2]}" -eq 0 ] && [ "$snap" -eq 0 ] && [ -n "${GUARDS[$m]+x}" ]; then
         classes=(); read -r -a classes <<< "${GUARDS[$m]}"
         if pgres::guards_covered "$RUN_DIR/2" "$m" "${classes[@]}"; then

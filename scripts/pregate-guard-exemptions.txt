@@ -5,14 +5,15 @@
 # (scripts/pregate-plan-lib.sh, stage 3 of every lane check) or carries ONE line here:
 #
 #   own-module      <class>  <why: it reaches the repository root but reads only its own module>
-#   waived-for-cost <class>  <evidence: a container/context marker it reaches, or "measured <N> s" over 120>
+#   waived-for-cost <class>  <evidence: a container/context or nested-build marker it reaches, or "measured <N> s" over 120>
 #
 # The two kinds are never mixed and a class is never both registered and listed. own-module
 # gives up no coverage. waived-for-cost is the owner's ruling of 2026-11-14 (#995, comment
 # issuecomment-6885432370): the lane check leaves out a cross-module guard that starts a
 # container or an application context, or takes more than 120 s by itself in stage 3, and only
-# those; the merge gate and CI still run every one. The check verifies a waiver's evidence and
-# fails on a stale line (the class is gone, or no longer reaches the root).
+# those; the merge gate and CI still run every one. The owner's ruling of 2026-11-15 on #1004 adds a
+# third reason: a buildSrc test that starts a nested Gradle build (GradleRunner). The check verifies
+# a waiver's evidence and fails on a stale line (the class is gone, or no longer reaches the root).
 
 # own-module: each reaches the repository root (a settings.gradle.kts marker, user.dir) only to
 # resolve a path inside its own module, so the module's own stage-2 check already covers it.
@@ -68,6 +69,15 @@ own-module      co.datapipelines.mcp.McpToolKdocPermissionTest  walks up from Fi
 own-module      co.datapipelines.templates.AdversarialBoundsTest  reaches the root only to read modules/templates/src/main/kotlin/.../ForbiddenConstructScanner.kt
 own-module      co.datapipelines.web.ui.VersionReasonEchoGuardTest  walks up from File("") to read only modules/web/src/main
 own-module      co.datapipelines.web.ui.site.SiteCapabilitiesContentTest  walks up from File("") to read only modules/web/src/main/kotlin/co/datapipelines/web/ui/site
+
+# waived-for-cost: each is a buildSrc test that starts a nested Gradle build (#1004, owner ruling
+# 2026-11-15, "Fast always, full on build edits"). buildSrc's classes live in the default package.
+# The lane check runs them only in stage 2's unfiltered buildSrc run, when the diff touches buildSrc/,
+# gradle/libs.versions.toml or gradle/verification-metadata.xml; the merge gate and CI run them always.
+waived-for-cost CommonConventionsPluginTest  starts a nested build: GradleRunner (108.3 s in the gate on 5a4195c0a); runs in the lane check on build edits only; deferred coverage tracked by #1003
+waived-for-cost KtlintCacheBoundaryTest  starts a nested build: GradleRunner (34.3 s in the gate on 5a4195c0a); runs in the lane check on build edits only; deferred coverage tracked by #1003
+waived-for-cost KtlintRemovedOnlyTest  starts a nested build: GradleRunner (60.7 s in the gate on 5a4195c0a); runs in the lane check on build edits only; deferred coverage tracked by #1003
+waived-for-cost ProbeVerificationTest  starts a nested build: GradleRunner (1.3 s in the gate on 5a4195c0a); runs in the lane check on build edits only; deferred coverage tracked by #1003
 
 # waived-for-cost by time: a class measured over 120 s by itself in a stage-3 run (no container).
 waived-for-cost co.datapipelines.config.DriverVersionSpecDriftTest  measured 271 s alone (276 s in the full stage-3 run, 2026-11-15; its bump rehearsals walk the tree per case)

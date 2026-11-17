@@ -28,7 +28,7 @@ pgplan::build() {
       PG_MAIN_ONLY="$(LC_ALL=C comm -13 <(printf '%s\n' "$PG_FILES") <(printf '%s\n' "$main_files"))"
     fi
   fi
-  PG_MODULES=(); PG_TEST_MODULES=(); PG_DEFERRED=(); PG_ROOTS2=(); PG_ROOTS2B=()
+  PG_MODULES=(); PG_TEST_MODULES=(); PG_DEFERRED=(); PG_ROOTS2=(); PG_ROOTS2B=(); PG_BUILDSRC=()
   # Stage 0 (#797): a diff that changes the resolved dependency set — any gradle.lockfile, the
   # version catalog or the verification metadata — runs Gate A's OSV scan before lint, so a
   # vulnerable transitive the lane introduced fails here and not at the batch gate. The scan
@@ -67,6 +67,20 @@ pgplan::build() {
     PG_2+=("$m:check" "$m:koverXmlReport")
     PG_ROOTS2+=("modules/${m##*:}")
   done
+  # buildSrc (#1004, owner ruling 2026-11-15 "Fast always, full on build edits"): a diff that
+  # touches buildSrc/, the version catalog or the verification metadata runs buildSrc's WHOLE
+  # test task here, unfiltered, as a touched module runs its own tests. By task path from the
+  # root (the root's dependency verification applies, as in stage 1); cleanTest as in the gate,
+  # so a PASS never reports an UP-TO-DATE task. buildSrc has no verifyTestsExecuted and no Kover
+  # floor; it is not a PG_MODULES entry. PG_BUILDSRC holds `:buildSrc` when it ran, so the run can
+  # let this stage's retained XML cover stage 3's always-run buildSrc classes.
+  mapfile -t PG_BUILDSRC_FILES < <(printf '%s\n' "$PG_FILES" \
+    | sed -nE '/^buildSrc\/|^gradle\/libs\.versions\.toml$|^gradle\/verification-metadata\.xml$/p')
+  if [ "${#PG_BUILDSRC_FILES[@]}" -gt 0 ]; then
+    PG_2+=(:buildSrc:cleanTest :buildSrc:test)
+    PG_ROOTS2+=(buildSrc)
+    PG_BUILDSRC=(:buildSrc)
+  fi
   [ "${#PG_2[@]}" -eq 0 ] || PG_2+=(--continue)
   for m in "${PG_TEST_MODULES[@]}"; do
     local -a files=() words=() args=()
@@ -244,6 +258,13 @@ GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteEngineFactsGuardTest"
 GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteFaqCitationTest"  # inventory 995: reads docs docs/[A-Za-z0-9._/-]+\.md
 GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.OrderedTestAnnotationGuardTest"  # inventory 995: reads modules modules/pipeline-contract
 GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.ScratchDatabaseOnceGuardTest"  # inventory 995: reads modules modules/pipeline-contract
+# buildSrc (#1004, owner ruling 2026-11-15): each buildSrc test class that reads the repository
+# beyond buildSrc and starts no nested build runs in EVERY lane check. Found by reading each class
+# (lane 1004's evidence, A.1) and by PregateGuardInventoryTest, which scans buildSrc's tests too.
+# A buildSrc class that starts a nested build (GradleRunner) carries a waived-for-cost line in
+# scripts/pregate-guard-exemptions.txt instead: it runs here only in stage 2's unfiltered buildSrc
+# run, and always in the gate and CI. buildSrc's classes live in the default package.
+GUARDS[":buildSrc"]="RepoTestInputsTest RawListAppenderGuardTest ThirdPartyNoticesTest"  # reads .gitignore, the modules' and integration tests' test sources, Dockerfile, deploy/duckdb-extensions.sha256, deploy/duckdb-extension-ports, gradle/libs.versions.toml
 
 # Only runtime retained evidence can populate PG_COVERED; preview passes none.
 pgplan::guard_args() {
@@ -252,6 +273,14 @@ pgplan::guard_args() {
   mapfile -t PG_GUARD_MODULES < <(printf '%s\n' "${!GUARDS[@]}" | LC_ALL=C sort)
   for m in "${PG_GUARD_MODULES[@]}"; do
     [ -z "${PG_COVERED[$m]+x}" ] || continue
+    if [ "$m" = :buildSrc ]; then
+      # Its own command shape (#1004): cleanTest as in the gate, and no verifyTestsExecuted,
+      # which buildSrc does not have.
+      PG_3+=(:buildSrc:cleanTest :buildSrc:test)
+      for c in ${GUARDS[$m]}; do PG_3+=(--tests "$c"); done
+      PG_ROOTS3+=(buildSrc)
+      continue
+    fi
     PG_3+=("$m:test")
     for c in ${GUARDS[$m]}; do PG_3+=(--tests "$c"); done
     PG_3+=(-x "$m:verifyTestsExecuted")
@@ -279,6 +308,15 @@ pgplan::command() {
   else printf '%q ' ./gradlew "$@"; fi
   printf '\n'
 }
+# The buildSrc decision (#1004), one line, shared by --plan and the run's PLAN.txt.
+pgplan::buildsrc_decision() {
+  if [ "${#PG_BUILDSRC_FILES[@]}" -eq 0 ]; then
+    printf 'buildsrc-tests: always-run classes only (stage 3) — no buildSrc/, gradle/libs.versions.toml or gradle/verification-metadata.xml change\n'
+  else
+    local joined; joined="$(printf '%s, ' "${PG_BUILDSRC_FILES[@]}")"
+    printf 'buildsrc-tests: full (stage 2, unfiltered) — %s\n' "${joined%, }"
+  fi
+}
 # The stage-0 trigger decision, one line, shared by --plan and the run's PLAN.txt.
 pgplan::deps_decision() {
   if [ "${#PG_DEPS_FILES[@]}" -eq 0 ]; then
@@ -299,6 +337,7 @@ pgplan::print() {
   printf 'guards (omission conditional on successful fresh unfiltered stage-2 retained XML):\n'
   for m in "${PG_GUARD_MODULES[@]}"; do printf '%s %s\n' "$m" "${GUARDS[$m]}"; done
   pgplan::deps_decision
+  pgplan::buildsrc_decision
   printf 'stage order: %s\n' "${PG_STAGES[*]}"
   for stage in "${PG_STAGES[@]}"; do pgplan::args "$stage" args; pgplan::command "$stage" "${args[@]}"; done
 }
