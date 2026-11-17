@@ -27,6 +27,15 @@
 #     An explicit root that is not a directory is refused (exit 2) rather than reported
 #     as an empty success.
 #
+#   ./scripts/test-recount.sh --with-buildsrc <root> …
+#   → #1004: the caller says "this root is a lane-check stage snapshot": each root's
+#     buildSrc/build/test-results tree is read too, beside its modules/ and tests/ trees.
+#     The pre-gate's stage capture passes it (pgres::capture), because a stage that ran
+#     buildSrc's tests next to module tests would otherwise lose buildSrc's XML from the
+#     count. Without the option nothing changes: the repository recount, the gate's and
+#     CI's artifact roots read exactly what they read before. A file is counted once even
+#     when the fallback below already reaches it (a buildSrc-only snapshot).
+#
 #   ./scripts/test-recount.sh <root> <root> …
 #   → ONE counts line over every root (#669): CI's `gate-reports` plus one
 #     `browser-reports-<i>` per browser shard, each downloaded into its own directory
@@ -73,6 +82,12 @@
 # the very total this script exists to keep honest.
 
 set -u
+# #1004: the stage-snapshot opt-in, leading, once. It adds a read; it never removes one.
+with_buildsrc=0
+if [ "${1-}" = --with-buildsrc ]; then
+  with_buildsrc=1
+  shift
+fi
 # #441: optional results roots (the saved pre-gate stage directory; #669: several, summed). No
 # argument keeps today's repo-root behavior exactly; an argument that is missing or not a
 # directory is refused rather than reported as an empty success.
@@ -88,12 +103,13 @@ else
   set -- "$(pwd)"
 fi
 
-python3 - "$@" <<'PY'
+python3 - "$with_buildsrc" "$@" <<'PY'
 import glob
 import os
 import sys
 import xml.etree.ElementTree as ET
-roots = sys.argv[1:]
+with_buildsrc = sys.argv[1] == "1"
+roots = sys.argv[2:]
 t=f=e=s=n=0
 unreadable: list[tuple[str, str]] = []
 per_root: list[tuple[str, list[str]]] = []
@@ -104,6 +120,10 @@ for root in roots:
            glob.glob("TEST-*.xml", root_dir=root))
     if not any(os.path.isdir(os.path.join(root, tree)) for tree in ("modules", "tests")):
         rel += glob.glob("*/build/test-results/**/*.xml", root_dir=root, recursive=True)
+    if with_buildsrc:
+        rel += glob.glob("buildSrc/build/test-results/**/*.xml", root_dir=root, recursive=True)
+    # One path is one file: the fallback above and the opt-in can name the same buildSrc file.
+    rel = list(dict.fromkeys(rel))
     per_root.append((root, rel))
 # #669: one class's result file under two roots would be counted twice — refuse, count nothing.
 if len(roots) > 1:

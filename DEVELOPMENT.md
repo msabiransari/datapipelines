@@ -1121,15 +1121,21 @@ used to read only the guards and under-report the bulk of the tests. Every run n
 directory, `.pregate-logs/runs/<run-id>/` (run-id = UTC stamp + short HEAD + PID), holding a
 `MANIFEST.txt` (base, merge-base, HEAD, timestamp, each stage's executed/skipped status and its
 original exit) and one `<stage>/` mirror of that stage's XML (`2/modules/<m>/build/test-results/…`,
-`2b/tests/<m>/…`, `3/modules|tests/…`). Each test-producing stage is snapshotted immediately after
+`2b/tests/<m>/…`, `3/modules|tests/…`, and `2|3/buildSrc/build/test-results/test/…`). buildSrc's
+tests that read the repository run in every stage 3 (`:buildSrc:test --tests <class>…`, the
+`:buildSrc` row of the registry, #1004); a diff that touches `buildSrc/`, `gradle/libs.versions.toml`
+or `gradle/verification-metadata.xml` runs the whole buildSrc test task unfiltered in stage 2, and
+stage 3 then skips the classes that run covered. Each test-producing stage is snapshotted immediately after
 it returns — before the next stage can overwrite it, and even when the stage failed, because the
 failing XML is the evidence. `2b` snapshots only the modules its own invocation actually ran.
 Other task directories copied from those modules retain explicit provenance, including
-missing-status annotations. Read one stage at a time:
+missing-status annotations. Read one stage at a time; `--with-buildsrc` says the root is a stage
+snapshot, so its `buildSrc/` mirror is counted beside the modules (without it, a stage that also
+holds `modules/` or `tests/` trees leaves buildSrc's XML out of the count):
 
 ```bash
-./scripts/test-recount.sh .pregate-logs/runs/<run-id>/2   # that stage's inventory only
-./scripts/test-recount.sh .pregate-logs/runs/<run-id>/3
+./scripts/test-recount.sh --with-buildsrc .pregate-logs/runs/<run-id>/2   # that stage's inventory only
+./scripts/test-recount.sh --with-buildsrc .pregate-logs/runs/<run-id>/3
 ```
 
 **Covered guards (#479, exact provenance #468).** Stage 3 omits a product module's guards
@@ -1378,7 +1384,7 @@ of them can still log is a `ConcurrentModificationException` or a torn read on a
 the sole writer between attach and the last read, and it then says so on its construction line, or
 alone on the line directly above it when the construction line would pass 120 columns:
 `// raw-list-appender: synchronous — <the fact that makes it safe>`. `RawListAppenderGuardTest`
-(buildSrc, run by the gate and CI's cold job) refuses any other raw construction, naming it
+(buildSrc, run by the gate, CI's cold job and every lane check's stage 3) refuses any other raw construction, naming it
 `path:line` (#484), and refuses a `SnapshotListAppender.kt` or `SnapshotListAppenderTest.kt`
 outside `modules/log-capture` (#756).
 
