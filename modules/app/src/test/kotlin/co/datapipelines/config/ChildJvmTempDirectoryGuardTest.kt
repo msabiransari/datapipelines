@@ -17,10 +17,10 @@ import java.util.concurrent.TimeUnit
  * extracts `libduckdb_java*.so` and makes Tomcat work folders in the shared default temp directory.
  *
  * The walk: every tracked `.kt` and `.java` file under `modules/<m>/src/test`, `tests/<m>/src/test` and
- * `buildSrc/src/test` (`git ls-files`). Comments, string literals, char literals and backticked names are masked
- * first, so a `ProcessBuilder(` or a flag spelled there is text, not code (a Kotlin string template's code stays
- * code). A file the masking cannot read to its end (an unclosed comment, string or name) is not trusted: each
- * `ProcessBuilder(` spelled anywhere in it counts as a JVM launch that fails.
+ * `buildSrc/src/test` (`git ls-files`). Comments and literal text are masked first; a Kotlin string template's code
+ * stays code. A quoted constructor name still counts as a launch, and quoting a local identifier still counts as a
+ * use of that identifier. A file the masking cannot read to its end (an unclosed comment, string or name) is not
+ * trusted: every constructor match in it counts as a JVM launch that fails.
  *
  * How the command of one launch is found — per launch, from that launch alone, never from its function. The admitted
  * forms are a closed list; every other form is unreadable:
@@ -231,6 +231,27 @@ class ChildJvmTempDirectoryGuardTest {
     }
 
     @Test
+    fun `control - backticks do not hide a constructor or a local command change`(
+        @TempDir dir: Path,
+    ) {
+        val builder =
+            fn(
+                """val builder = ProcessBuilder(java, "-Djava.io.tmpdir=/t/child")""",
+                """`builder`.command(java, "-cp", cp, "Main")""",
+                """builder.start()""",
+            )
+        offenders(dir, builder) shouldContainExactly listOf("$PROBE:4")
+        val command =
+            fn(
+                """val command = mutableListOf(java, "-Djava.io.tmpdir=/t/child", "Main")""",
+                """`command`.removeAt(1)""",
+                LAUNCH,
+            )
+        offenders(dir, command) shouldContainExactly listOf("$PROBE:6")
+        offenders(dir, fn("""`ProcessBuilder`(java, "-cp", cp, "Main").start()""")) shouldContainExactly listOf("$PROBE:4")
+    }
+
+    @Test
     fun `control - a spread before the flag's position leaves the position unknown`(
         @TempDir dir: Path,
     ) {
@@ -349,7 +370,7 @@ private object ChildJvmLaunches {
     private val LEAVING_CALLS = setOf("start", "environment")
     private const val FLAG = "-Djava.io.tmpdir="
     private val SCANNED = Regex("""^(?:modules/[^/]+/src/test/|tests/[^/]+/src/test/|buildSrc/src/test/).*\.(?:kt|java)$""")
-    private val LAUNCH = Regex("""(?<![\w$])ProcessBuilder\s*\(""")
+    private val LAUNCH = Regex("""(?<![\w$])(?:`ProcessBuilder`|ProcessBuilder)\s*\(""")
     private val LIST =
         Regex("""\G\s*(?:listOf|mutableListOf|arrayListOf|arrayOf|(?:java\.util\.)?List\.of|(?:java\.util\.)?Arrays\.asList)\s*\(""")
     private val NAME = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
@@ -743,9 +764,10 @@ private object ChildJvmLaunches {
 }
 
 /**
- * A source text with comments, string and char literals and backticked names masked (offsets and newlines kept; a
- * string's text becomes `#`, so an argument's range keeps its literal whole; a Kotlin template's code stays code),
- * plus the range of every string literal. [of] answers null for a text it cannot read to its end.
+ * Source with comments, literal text and names that need backticks masked. Names that can be written without
+ * backticks keep their letters and delimiters so constructor and local-use scans can see them. Offsets and
+ * newlines are preserved; literal text becomes `#` and Kotlin template code stays visible. [of] returns null for
+ * a text it cannot read to its end.
  */
 private class SourceMask private constructor(
     val code: String,
@@ -871,7 +893,9 @@ private class SourceMask private constructor(
         private fun name(start: Int): Int {
             val end = src.indexOf('`', start + 1)
             if (end < 0 || src.substring(start, end).contains('\n')) throw Unreadable()
-            for (index in start + 1 until end) out[index] = 'x'
+            if (!BARE_NAME.matches(src.substring(start + 1, end))) {
+                for (index in start + 1 until end) out[index] = 'x'
+            }
             return end + 1
         }
 
@@ -889,6 +913,7 @@ private class SourceMask private constructor(
         /** A string literal's text, masked: not whitespace (an argument's range keeps its literal whole), not code. */
         private const val TEXT = '#'
         private const val RAW_QUOTES = 3
+        private val BARE_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
 
         fun of(
             source: String,
