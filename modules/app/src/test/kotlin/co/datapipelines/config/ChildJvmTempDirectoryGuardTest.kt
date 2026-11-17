@@ -131,6 +131,99 @@ class ChildJvmTempDirectoryGuardTest {
     }
 
     @Test
+    fun `control - a list declaration that goes on past the admitted forms is unreadable`(
+        @TempDir dir: Path,
+    ) {
+        val source =
+            fn(
+                """val command = listOf(java, "-Djava.io.tmpdir=/t/child", "Main")""",
+                """    .filterNot { it.startsWith("-Djava.io.tmpdir=") }""",
+                LAUNCH,
+            )
+        offenders(dir, source) shouldContainExactly listOf("$PROBE:6")
+    }
+
+    @Test
+    fun `control - a list argument that goes on past the admitted forms is unreadable`(
+        @TempDir dir: Path,
+    ) {
+        val list = """listOf(java, "-Djava.io.tmpdir=/t/child", "Main").filterNot { it.startsWith("-Djava.io.tmpdir=") }"""
+        val source = fn("ProcessBuilder($list).start()")
+        offenders(dir, source) shouldContainExactly listOf("$PROBE:4")
+    }
+
+    @Test
+    fun `control - a command replaced in the launch's chain keeps no credit for the discarded flag`(
+        @TempDir dir: Path,
+    ) {
+        val source = fn("""ProcessBuilder(java, "-Djava.io.tmpdir=/t/child")""", """    .command(java, "-cp", cp, "Main").start()""")
+        offenders(dir, source) shouldContainExactly listOf("$PROBE:4")
+    }
+
+    @Test
+    fun `control - a builder kept in a local is followed to its start`(
+        @TempDir dir: Path,
+    ) {
+        val kept = """val pb = ProcessBuilder(java, "-Djava.io.tmpdir=/t/child", "-jar", jar).redirectErrorStream(true)"""
+        val green = fn(kept, """pb.environment()["A"] = "b"""", """pb.environment().remove("C")""", """val p = pb.start()""")
+        offenders(dir, green).shouldBeEmpty()
+        offenders(dir, fn(kept, """pb.command(java, "-jar", jar)""", """pb.start()""")) shouldContainExactly listOf("$PROBE:4")
+        offenders(dir, fn(kept, """pb.redirectErrorStream(true).command().removeAt(1)""", """pb.start()""")) shouldContainExactly
+            listOf("$PROBE:4")
+        offenders(dir, fn(kept, """launch(pb)""")) shouldContainExactly listOf("$PROBE:4")
+        val replacedGit = fn("""val git = ProcessBuilder("git", "status")""", """git.command(java, "-jar", jar).start()""")
+        offenders(dir, replacedGit) shouldContainExactly listOf("$PROBE:4")
+        offenders(dir, fn("""launch(ProcessBuilder(java, "-Djava.io.tmpdir=/t/child", "-jar", jar))""")) shouldContainExactly
+            listOf("$PROBE:4")
+    }
+
+    @Test
+    fun `control - ordinary chains and an environment-only apply stay green`(
+        @TempDir dir: Path,
+    ) {
+        val green =
+            fn(
+                """val p = ProcessBuilder(java, "-Djava.io.tmpdir=/t/a", "-cp", cp, "A")""",
+                """    .directory(dir).redirectErrorStream(true).redirectOutput(log).start().also { children += it }""",
+                """ProcessBuilder("node", script)""",
+                """    .apply {""",
+                """        environment()["PORT"] = "0"""",
+                """    }.redirectErrorStream(true)""",
+                """    .start()""",
+            )
+        offenders(dir, green).shouldBeEmpty()
+        val replacing = fn("""ProcessBuilder("node", script).apply { command(java, "-jar", jar) }.start()""")
+        offenders(dir, replacing) shouldContainExactly listOf("$PROBE:4")
+        val handedOn = fn("""ProcessBuilder("node", script).apply { configure(this) }.start()""")
+        offenders(dir, handedOn) shouldContainExactly listOf("$PROBE:4")
+    }
+
+    @Test
+    fun `control - a spread before the flag's position leaves the position unknown`(
+        @TempDir dir: Path,
+    ) {
+        offenders(dir, fn("""ProcessBuilder(*prefix, "-Djava.io.tmpdir=/t/a", "Main").start()""")) shouldContainExactly listOf("$PROBE:4")
+        val listed = fn("""val command = listOf(*prefix) + listOf("-Djava.io.tmpdir=/t/a", "Main")""", LAUNCH)
+        offenders(dir, listed) shouldContainExactly listOf("$PROBE:5")
+    }
+
+    @Test
+    fun `control - a list removed from or rearranged after its read elements is unreadable`(
+        @TempDir dir: Path,
+    ) {
+        val minus = fn("""val command = listOf(java, "-Djava.io.tmpdir=/t/a", "Main") - "-Djava.io.tmpdir=/t/a"""", LAUNCH)
+        offenders(dir, minus) shouldContainExactly listOf("$PROBE:5")
+        val inner = fn("""val command = listOf(java) + listOf("-Djava.io.tmpdir=/t/a", "Main").drop(1)""", LAUNCH)
+        offenders(dir, inner) shouldContainExactly listOf("$PROBE:5")
+        val nextLine = fn("""val command = listOf(java, "-Djava.io.tmpdir=/t/a", "Main") + rest""", """    .reversed()""", LAUNCH)
+        offenders(dir, nextLine).shouldBeEmpty()
+        val wholeReversed = fn("""val command = (listOf(java, "-Djava.io.tmpdir=/t/a") + rest).reversed()""", LAUNCH)
+        offenders(dir, wholeReversed) shouldContainExactly listOf("$PROBE:5")
+        val infix = fn("""val command = listOf(java, "-Djava.io.tmpdir=/t/a") + rest zip other""", LAUNCH)
+        offenders(dir, infix) shouldContainExactly listOf("$PROBE:5")
+    }
+
+    @Test
     fun `control - comments and strings are text, not code`(
         @TempDir dir: Path,
     ) {
