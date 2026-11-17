@@ -11,6 +11,7 @@ import com.microsoft.playwright.options.WaitUntilState
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldBeIn
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
@@ -122,11 +123,12 @@ class ChartFontTimingBrowserTest : ChartPageSuite() {
     }
 
     /**
-     * The repeat visit, in a context with NO route (a route turns the HTTP cache off). The cache class of each font file
-     * of visit 2 is evidence, printed; it is not asserted (#1023 turns it into an assertion).
+     * The repeat visit, in a context with NO route (a route turns the HTTP cache off). Every font file of visit 2 is
+     * "from the cache" or "revalidated"; one "fetched again" is red, its clue naming the file and its two sizes. The
+     * font responses' `Cache-Control` and `Pragma`, both visits' timings and every class stay printed.
      */
     @Test
-    fun `warm - a repeat visit measures in the drawn font, and its font files' cache class is printed`() {
+    fun `warm - a repeat visit measures in the drawn font, and takes every font file from the browser's cache`() {
         startTrace()
         val root = ready("cftwarm")
         situation("warm") {
@@ -137,7 +139,9 @@ class ChartFontTimingBrowserTest : ChartPageSuite() {
                     val id = createCase(root, name, "warm")
                     val headers = mutableListOf<String>()
                     agent.onResponse { r ->
-                        if (FONT_PATH in r.url()) headers += "${r.url()} cache-control=${r.headerValue("cache-control")}"
+                        if (FONT_PATH in r.url()) {
+                            headers += "${r.url()} cache-control=${r.headerValue("cache-control")} pragma=${r.headerValue("pragma")}"
+                        }
                     }
                     val first = openPreview(agent, session(id))
                     first.evaluate(FONTS_READY)
@@ -149,10 +153,19 @@ class ChartFontTimingBrowserTest : ChartPageSuite() {
                     lines += "$name font responses of both visits: ${headers.ifEmpty { listOf("(none)") }}"
                     lines += "$name visit 1 font timings: $visit1"
                     lines += "$name visit 2 font timings: $visit2"
-                    lines += "$name visit 2 classes: ${visit2.map { classOf(it) }}"
+                    val kinds = visit2.map { it to kindOf(it) }
+                    lines += "$name visit 2 classes: ${kinds.map { (entry, kind) -> "${fileOf(entry)}=$kind" }}"
+                    lines += "$name visit 2 counts: from the cache=${kinds.count { it.second == FROM_CACHE }}" +
+                        " revalidated=${kinds.count { it.second == REVALIDATED }}"
                     withClue("$name: a font file on each visit") {
                         visit1.size shouldBeGreaterThan 0
                         visit2.size shouldBeGreaterThan 0
+                    }
+                    kinds.forEach { (entry, kind) ->
+                        withClue(
+                            "$name: visit 2 took ${fileOf(entry)} from the browser's cache or revalidated it, never fetched again" +
+                                " (transferSize=${entry["transferSize"]} encodedBodySize=${entry["encodedBodySize"]})",
+                        ) { kind shouldBeIn listOf(FROM_CACHE, REVALIDATED) }
                     }
                     judge(read(second, PREVIEW_SVG, 0, "$name visit 2 read"), PREVIEW_FLOOR)
                 } finally {
@@ -423,18 +436,18 @@ class ChartFontTimingBrowserTest : ChartPageSuite() {
     /** Every resource-timing entry under the font path: `{name, transferSize, encodedBodySize}`. */
     private fun timings(page: Page): List<Map<*, *>> = (page.evaluate(FONT_TIMINGS, FONT_PATH) as List<*>).map { it as Map<*, *> }
 
-    /** "from the cache", "revalidated" or "fetched again" (the brief's rule over the two sizes). */
-    private fun classOf(entry: Map<*, *>): String {
+    /** [FROM_CACHE], [REVALIDATED] or [FETCHED_AGAIN] (the brief's rule over the two sizes). */
+    private fun kindOf(entry: Map<*, *>): String {
         val transfer = (entry["transferSize"] as Number).toDouble()
         val encoded = (entry["encodedBodySize"] as Number).toDouble()
-        val kind =
-            when {
-                transfer == 0.0 -> "from the cache"
-                transfer < encoded -> "revalidated"
-                else -> "fetched again"
-            }
-        return "${entry["name"].toString().substringAfterLast('/')}=$kind"
+        return when {
+            transfer == 0.0 -> FROM_CACHE
+            transfer < encoded -> REVALIDATED
+            else -> FETCHED_AGAIN
+        }
     }
+
+    private fun fileOf(entry: Map<*, *>): String = entry["name"].toString().substringAfterLast('/')
 
     /** The console collector on every page of [context]. */
     private fun listening(context: BrowserContext): BrowserContext {
@@ -501,6 +514,9 @@ class ChartFontTimingBrowserTest : ChartPageSuite() {
         const val LATE_REDRAW_MS = 10_000.0
         const val FONT_GLOB = "**/vendor/fonts/**"
         const val FONT_PATH = "/vendor/fonts/"
+        const val FROM_CACHE = "from the cache"
+        const val REVALIDATED = "revalidated"
+        const val FETCHED_AGAIN = "fetched again"
         const val PREVIEW_SVG = "$CASE svg.dp-chart"
         const val BOARD_SVG = "#dp-board svg.dp-chart"
         val PREVIEW_FLOOR = JsRenderedPageBrowserTest.G2_TEXT_FLOOR
