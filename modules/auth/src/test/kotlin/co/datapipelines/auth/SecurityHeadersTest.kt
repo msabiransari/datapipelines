@@ -238,7 +238,7 @@ class SecurityHeadersTest {
                 val response = get(row)
                 val shown = CACHE_HEADERS.joinToString(" | ") { "$it: ${response.header(it) ?: "(absent)"}" }
                 println("1023|chain|${row.label}|${row.method} ${row.path}|status=${response.statusCode()}|$shown")
-                withClue("${row.label}: GET ${row.path}") {
+                withClue("${row.label}: ${row.method} ${row.path}") {
                     response.statusCode() shouldBe row.status
                     when (row.cache) {
                         Cache.CHAIN -> CHAIN_CACHE_HEADERS.forEach { (name, value) -> response.header(name) shouldBe value }
