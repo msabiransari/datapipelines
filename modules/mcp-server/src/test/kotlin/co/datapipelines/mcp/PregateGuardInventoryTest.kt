@@ -257,18 +257,18 @@ class PregateGuardInventoryTest {
                 inventory,
                 GuardRegistry(mapOf(":modules:alpha" to listOf(BuildSrcProbeTree.READS))),
                 GuardExemptions.parse(listOf(nestedWaiver)),
-            ).problems
-        if (elsewhere.none { it.startsWith("REGISTERED IN THE WRONG MODULE") && BuildSrcProbeTree.READS in it }) {
-            fail("a buildSrc class registered under a module must be refused:\n${elsewhere.joinToString("\n")}")
+            )
+        if (elsewhere.problems.none { it.startsWith("REGISTERED IN THE WRONG MODULE") && BuildSrcProbeTree.READS in it }) {
+            fail("a buildSrc class registered under a module must be refused:\n${elsewhere.problems.joinToString("\n")}")
         }
         val unevidenced =
             GuardInventory.judge(
                 inventory,
                 GuardRegistry(mapOf(":buildSrc" to listOf(BuildSrcProbeTree.READS))),
                 GuardExemptions.parse(listOf("waived-for-cost ${BuildSrcProbeTree.NESTED} it is slow, trust me")),
-            ).problems
-        if (unevidenced.none { it.startsWith("WAIVER WITHOUT EVIDENCE") && BuildSrcProbeTree.NESTED in it }) {
-            fail("a nested-build waiver that names no marker must be refused:\n${unevidenced.joinToString("\n")}")
+            )
+        if (unevidenced.problems.none { it.startsWith("WAIVER WITHOUT EVIDENCE") && BuildSrcProbeTree.NESTED in it }) {
+            fail("a nested-build waiver that names no marker must be refused:\n${unevidenced.problems.joinToString("\n")}")
         }
     }
 
