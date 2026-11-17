@@ -126,6 +126,7 @@ class StaticCacheHeadersE2eTest {
             }
         }
         println("1023|font-header|${get(fonts.first()).header("Cache-Control")}")
+        printCacheHeaders("font", fonts.first())
     }
 
     @Test
@@ -155,6 +156,7 @@ class StaticCacheHeadersE2eTest {
             }
         }
         println("1023|recheck-header|${get(rechecked.first()).header("Cache-Control")}")
+        printCacheHeaders("recheck", rechecked.first())
     }
 
     @Test
@@ -249,6 +251,19 @@ class StaticCacheHeadersE2eTest {
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray())
     }
 
+    /** The caching headers of one answer and of its 304, as the browser receives them (the handback's tables). */
+    private fun printCacheHeaders(
+        label: String,
+        path: String,
+    ) {
+        val first = get(path)
+        val again = get(path, "If-None-Match" to first.header("ETag"))
+        for ((kind, response) in listOf("200" to first, "304" to again)) {
+            val shown = CACHE_HEADERS.joinToString(" | ") { "$it: ${response.header(it).ifEmpty { "(absent)" }}" }
+            println("1023|headers|$label|$path|${response.statusCode()} (asked for $kind)|$shown")
+        }
+    }
+
     private fun HttpResponse<*>.header(name: String): String = headers().allValues(name).joinToString(", ")
 
     /** Every readable file under `classpath*:<root>/<sub>`, as paths relative to [root]; sorted, no duplicates. */
@@ -317,6 +332,7 @@ class StaticCacheHeadersE2eTest {
         val FONT_DIRECTIVES = setOf("max-age=31536000", "public", "immutable")
         val STATIC_PREFIXES = listOf("/css/", "/js/", "/vendor/")
         val OTHER_STATIC_ROOTS = listOf("META-INF/resources", "resources", "public")
+        val CACHE_HEADERS = listOf("Cache-Control", "Pragma", "Expires", "ETag", "Last-Modified", "Vary")
 
         /** `PublicPage` and the docs controller: `CacheControl.maxAge(5, MINUTES).cachePublic()`. */
         const val PUBLIC_PAGE_WINDOW = "max-age=300, public"
