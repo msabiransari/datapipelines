@@ -293,7 +293,10 @@ class FontPathLedgerTest {
                 if (entry.isNotEmpty()) blobs.putIfAbsent(entry.split(Regex("\\s+"))[2], commit)
             }
             if (commits.isNotEmpty()) commands += "git ls-tree <commit> -- $ledger (x${commits.size})"
-            val versions = blobs.map { (blob, commit) -> LedgerVersion(commit, entries(git(root, listOf("cat-file", "blob", blob), isolated))) }
+            val versions =
+                blobs.map { (blob, commit) ->
+                    LedgerVersion(commit, entries(git(root, listOf("cat-file", "blob", blob), isolated)))
+                }
             if (blobs.isNotEmpty()) commands += "git cat-file blob <blob> (x${blobs.size})"
             return History(versions, inHead, commands)
         }

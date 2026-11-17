@@ -99,7 +99,7 @@ class StaticCacheHeadersE2eTest {
         // handlers of #1023 serve only `static/`, so a file there would stop being served. There is none.
         val hidden =
             OTHER_STATIC_ROOTS.flatMap { root ->
-                STATIC_PREFIXES.flatMap { prefix -> resolver.getResources("classpath*:$root${prefix}**").filter(::isFile) }
+                STATIC_PREFIXES.flatMap { prefix -> resolver.getResources("classpath*:$root$prefix**").filter(::isFile) }
             }
         withClue("files under another default static location that the #1023 handlers would hide") {
             hidden.map { it.url.toString() }.shouldBeEmpty()
@@ -343,7 +343,7 @@ class StaticCacheHeadersE2eTest {
         // Row 6's values the brief leaves to the base, read on base 01ec928b0 before the code change (2026-11-17):
         // a signed-out page request is redirected to the login page; the icon and robots.txt carry the default.
         const val DASHBOARD_SIGNED_OUT_STATUS = 302
-        val DASHBOARD_SIGNED_OUT_LOCATION: String? = "/login"
+        const val DASHBOARD_SIGNED_OUT_LOCATION = "/login"
         const val FAVICON_STATUS = 200
         const val FAVICON_CACHE_CONTROL = DEFAULT_NO_STORE
         const val ROBOTS_STATUS = 200
