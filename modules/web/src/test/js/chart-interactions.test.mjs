@@ -829,7 +829,9 @@ test("N5: a press on an entry, or inside one, switches it once; a pointer click 
     m.svg.dispatch("click", { target: text });
     assert.deepEqual(m.toggles, expected, "a press on the entry's text, no coordinates: once, the entry's value");
     m = described(out, frame);
-    m.svg.dispatch("click", { target: text, ...centre(e) });
+    const pointerText = descendants(el(m.svg)).find((k) => tagOf(k) === "text");
+    assert.ok(pointerText, "the current entry holds its text");
+    m.svg.dispatch("click", { target: pointerText, ...centre(e) });
     assert.deepEqual(m.toggles, expected, "a pointer click on the entry: once");
   }
   const m = described(out, frame);
