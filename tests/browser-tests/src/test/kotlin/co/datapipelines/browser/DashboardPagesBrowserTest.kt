@@ -16,10 +16,9 @@ import org.junit.jupiter.api.TestMethodOrder
  * rendering, roles, the pane, the disposal story, and the light/dark handback screens.
  *
  * ## The CSP measurement is POSITIVE here too
- * The pages load the vendored `plotly.css` from the layout head and never an inline script; the
- * collector's zero on both pages is asserted with the same empty-element-hash set-aside the
- * conformance host suite states (the one Playwright's own screenshot path produces, which the
- * computed-style checks cannot be fooled by).
+ * The pages load the chart engine's files (#987) and never an inline script; the collector's zero
+ * on both pages is asserted with the same empty-element-hash set-aside the conformance host suite
+ * states (the one Playwright's own screenshot path produces).
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class DashboardPagesBrowserTest : DashboardBrowserSuite() {
@@ -33,7 +32,8 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
     fun `the catalog lists rows - not folders - and a row navigates un-boosted into the workspace`() {
         startTrace()
         val root = ready("dpageto")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
         openCatalog()
 
         // #400: the catalog is a FLAT list of the dashboards the caller may read — folders
@@ -45,11 +45,11 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         page.locator("#dash-list-wrapper .tpl-summary").count() shouldBe 0
 
         // A row NAVIGATES — the URL moves to the workspace and the document is a FULL
-        // navigation (the one-bundle rule: the workspace loads a Plotly bundle).
+        // navigation (the workspace loads the chart engine's files, #987).
         page.click("#dash-list-wrapper a[data-leaf-id='$board']")
         page.waitForURL("**/dashboards/$board")
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
     }
 
     @Test
@@ -96,13 +96,14 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
     fun `the board page boots, the events pane shows the completed refresh with its execution link, and no CSP violation`() {
         startTrace()
         val root = ready("dpboard")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
         page.navigate("$baseUrl/dashboards/$board")
 
         // The glue boots the vendored runtime on the real page; the initial action renders.
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
         page.waitForFunction("() => window.__dpPage.notifications.some(function (n) { return n.code === 'refresh.completed'; })")
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
         page.locator("#dp-board .dp-dashboard-kpi-number").first().waitFor()
 
         // The refreshes listing moved (#473) into the activity dock's History tab — the same
@@ -114,10 +115,8 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         pane shouldContain "COMPLETED"
         page.locator(".dp-refreshes-executions a[href*='/executions/']").first().waitFor()
 
-        // Zero CSP refusals across the tree page, the board page and the reload — but the
-        // empty-element hash Playwright's own screenshot path produces.
-        val refusals = drainCspViolations()
-        refusals.filter { !it.contains("'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='") }.shouldBeEmpty()
+        // Zero CSP refusals across the tree page, the board page and the reload.
+        drainCspViolations().shouldBeEmpty()
     }
 
     @Test
@@ -168,7 +167,8 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
     fun `a viewer executes the board - a promoter without a promotion target sees no boards at all`() {
         startTrace()
         val root = ready("dproles")
-        val board = seedBoard(root)
+        // #987: the charts draw only in a frame large enough for them; the auto-placed 1/12 cell is too small (pinGrid).
+        val board = seedBoardWithGrid(root)
 
         // --- viewer: holds dashboard.read (D50: every reader an executor) and the board runs.
         val viewerEmail = uniqueEmail("dproles-v-" + generatedPassword("u").take(8))
@@ -184,7 +184,7 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         switchWorkspace(vpage, rootWorkspaceName())
         vpage.navigate("$baseUrl/dashboards/$board")
         vpage.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
-        vpage.locator("#dp-board .plotly .main-svg").first().waitFor()
+        vpage.locator("#dp-board svg.dp-chart").first().waitFor()
 
         // --- promoter: the lens fails closed without a promotion target — the tree is the
         // lens's own sentence, not a lie about emptiness, and the board is the family's 404.
@@ -229,7 +229,6 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
                 dashboard: { id: '$board', version: 'released' },
                 container: second,
                 adapter: window.DatapipelinesDashboard.adapters(second),
-                charts: { library: 'plotly', instance: window.Plotly },
               });
               window.__dpPage2.instance = instance;
               instance.ready.then(function () { window.__dpPage2.ready = true; }, function () {});
@@ -240,10 +239,10 @@ class DashboardPagesBrowserTest : DashboardBrowserSuite() {
         // Independent refreshes; disposing the page's instance leaves the second working.
         page.evaluate("() => window.__dpPage.instance.refresh({ scope: 'targets', targets: ['revenue'] })")
         page.evaluate("() => window.__dpPage2.instance.refresh({ scope: 'targets', targets: ['revenue'] })")
-        page.waitForFunction("() => document.querySelectorAll('#dp-board .plotly, #dp-board-2 .plotly').length >= 2")
+        page.waitForFunction("() => document.querySelectorAll('#dp-board svg.dp-chart, #dp-board-2 svg.dp-chart').length >= 2")
         page.evaluate("() => window.__dpPage.instance.dispose()")
         page.evaluate("() => window.__dpPage2.instance.refresh({ scope: 'all' })")
-        page.waitForFunction("() => document.querySelectorAll('#dp-board-2 .plotly .main-svg').length > 0")
+        page.waitForFunction("() => document.querySelectorAll('#dp-board-2 svg.dp-chart').length > 0")
     }
 
     @Test

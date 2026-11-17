@@ -144,6 +144,10 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // datasource/API/schedule identities never get a permanent pipeline-specific home. An entry here is the change
     // a reviewer must refuse; DependencyContractBoundaryTest fences the import side.
     ":modules:dependency-contract" to emptySet(),
+    // #985 (js-rendered charts record §5.1, F1) — layer 0: the chart engine, plain JavaScript resources run in
+    // Node (its own suite) and in the GraalJS sandbox, plus the one Kotlin object that lists them. No internal edge:
+    // the engine is a pure function of its input (record §4.3, R-PURE); an entry here is a reason to stop and ask.
+    ":modules:js-rendered" to emptySet(),
     // #756 — layer 0, TEST-ONLY: the shared Logback snapshot capture (module-structure §5.23). Logback only; every
     // edge INTO it is a `testImplementation`, which verifyModuleDependencies enforces (testOnlyModules below).
     ":modules:log-capture" to emptySet(),
@@ -261,6 +265,9 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         // #868 G1 (record §3.1 [R31; F7]) — the schedule family's provider adapter (G2/#786) reads the scheduler's
         // model; acyclic because `scheduler` depends only on typesystem and pipeline-contract. Allowed ahead, undeclared.
         ":modules:scheduler",
+        // #985/#986 (js-rendered record §5.1, §5.3) — the ChartEngine port's implementation loads the engine files as
+        // the scripting entry's program (F2, a main edge); the JVM guards run through the same entry.
+        ":modules:js-rendered",
     ),
     ":modules:mcp-server" to setOf(
         ":modules:typesystem",
@@ -301,13 +308,17 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         // #868 G1 — the release wiring assembles the production family registry, the GraphLimits object and the
         // ReleasePlanningDeadline seam (web/release/ReleaseConfiguration).
         ":modules:dependency-contract",
+        // #987 (js-rendered F3) — the page loads the chart engine's files from the engine module (ui/JsRenderedAssetConfig).
+        ":modules:js-rendered",
         // #756 — test-only: the shared log capture (module-structure §5.23).
         ":modules:log-capture",
     ),
     // #756 — test-only `log-capture` on both (module-structure §5.23).
     ":modules:app" to setOf(":modules:web", ":modules:log-capture"),
     ":tests:integration-tests" to setOf(":modules:app", ":modules:log-capture"),
-    ":tests:browser-tests" to setOf(":modules:app", ":modules:web"),
+    // #987 — test-only `js-rendered` (module-structure §5.12): the page's engine files compared with the module's own bytes,
+    // and Node's emitted results for the identity guard on the page (its `jsRenderedTestData` configuration).
+    ":tests:browser-tests" to setOf(":modules:app", ":modules:web", ":modules:js-rendered"),
 )
 
 // Kover wires a per-module SELF-edge through its `kover` aggregation bucket —

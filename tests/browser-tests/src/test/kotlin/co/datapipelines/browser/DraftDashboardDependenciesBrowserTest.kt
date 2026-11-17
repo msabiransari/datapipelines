@@ -167,7 +167,7 @@ class DraftDashboardDependenciesBrowserTest : DashboardBrowserSuite() {
         val config = request("GET", "/api/v1/dashboards/$board/runtime/config?version=1", null, 200)["configuration_id"]
         page.navigate("$baseUrl/dashboards/$board?version=1&tab=board")
         awaitCell("EU-1-lib-script")
-        page.locator("#dp-board .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board svg.dp-chart").first().waitFor()
         page.locator("#dp-board .dp-dashboard-kpi-number").innerText() shouldBe "42"
         page.locator("#dp-board .dp-dashboard-kpi-comparison-value").innerText() shouldBe "10"
         page.locator("[data-dp-parameter='kind'] select").selectOption("1")

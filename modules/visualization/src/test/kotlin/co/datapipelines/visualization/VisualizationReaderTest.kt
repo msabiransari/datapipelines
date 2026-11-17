@@ -58,14 +58,13 @@ class VisualizationReaderTest {
     }
 
     @Test
-    fun `the retired plotly kind is refused at read with a message that names the chart kind - never bound`() {
+    fun `the retired renderer kind is refused at read as any unknown kind - never bound`() {
+        // O-14: no special branch; the ordinary unknown-kind path answers a body that still names the retired kind.
         val tree = DocumentFixtures.visualization().also { it.obj("renderer").put("kind", "plotly").put("version", "4") }
         val failure = refused(tree).single()
         failure.code shouldBe VisualizationErrorCodes.RENDERER_UNSUPPORTED
         failure.path shouldBe "renderer.kind"
-        failure.message shouldBe VisualizationReader.PLOTLY_RETIRED_MESSAGE
         failure.details["reason"] shouldBe "unknown_kind"
-        failure.message.contains("chart") shouldBe true
     }
 
     @Test

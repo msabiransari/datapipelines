@@ -23,10 +23,10 @@
    *    runtime instance's OWN resize (`window.__dpPage.instance.resize()` — the page's
    *    seam, the resize the runtime documents; no init option, no glue change).
    *
-   * Version state does NOT live here, deliberately: every version switch is a FULL
-   * navigation (hx-boost="false", dashboards.md §6.4's one-bundle rule — a draft's Plotly
-   * bundle can differ from the release's), so the board's version pin stays where the
-   * server wrote it, in `data-dp-dashboard-version` (dashboards-page.js reads it, unchanged).
+   * Version state does NOT live here, deliberately: a link that names a version is a prepared
+   * main-content navigation (hx-boost) that keeps the shell, and the board's version pin stays
+   * where the server wrote it, in `data-dp-dashboard-version` (dashboards-page.js reads it,
+   * unchanged).
    *
    * The decision core is pure and exported for `node --test`; the DOM wiring is guarded
    * (a restored document re-runs this file — the marker makes the second pass inert).

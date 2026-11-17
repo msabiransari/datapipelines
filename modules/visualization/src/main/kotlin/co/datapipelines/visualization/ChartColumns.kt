@@ -32,8 +32,7 @@ class ChartColumns(
             } else {
                 (templates.pinOf(workspaceId, transform.template) as? TemplatePin.Transform)?.let(::output)
             } ?: return emptyMap()
-        val channels = BarChannels.of(body.config)
-        val encoded = setOfNotNull(channels.band.field, channels.value.field, channels.color?.field)
+        val encoded = ChartPositions.of(body.config).map { it.field }.toSet()
         return columns
             .filter { it.name in encoded }
             .sortedBy { it.name }

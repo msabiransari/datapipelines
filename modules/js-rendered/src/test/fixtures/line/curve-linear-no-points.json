@@ -1,0 +1,152 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "a linear curve with no points: the reach is half the line's width",
+ "document": {
+  "display_name": "curve-linear-no-points",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line",
+    "curve": "linear",
+    "points": "none"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series",
+     "legend": {
+      "orient": "bottom"
+     }
+    }
+   },
+   "title": {
+    "text": "Linear"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-01-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-07-01",
+   "2024-07-01",
+   "2024-08-01",
+   "2024-08-01",
+   "2024-09-01",
+   "2024-09-01",
+   "2024-10-01",
+   "2024-10-01",
+   "2024-11-01",
+   "2024-11-01",
+   "2024-12-01",
+   "2024-12-01"
+  ],
+  "s": [
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two",
+   "One",
+   "Two"
+  ],
+  "v": [
+   5,
+   5,
+   7,
+   8,
+   9,
+   5,
+   5,
+   8,
+   7,
+   5,
+   9,
+   8,
+   5,
+   5,
+   7,
+   8,
+   9,
+   5,
+   5,
+   8,
+   7,
+   5,
+   9,
+   8
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "s": "STRING",
+  "v": "DECIMAL"
+ }
+}

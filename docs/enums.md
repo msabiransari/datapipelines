@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.57 (living document — updated as enums evolve)
+**Status:** v1.61 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -882,7 +882,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `html` | RESERVED — authored HTML (D13, D46); refused in round one |
 | `svg` | RESERVED — authored SVG (D13, D46); refused in round one |
 
-**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`. The `plotly` kind is **retired** (#860): a body naming it is refused the same way, with a message that names `chart`.
+**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`; an unknown value carries `details.reason` `unknown_kind` and the message lists the allowed kinds. A kind retired earlier (#860) is refused the same way, as any unknown kind.
 
 ---
 
@@ -893,10 +893,10 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 
 | Value | Argument | Meaning |
 |---|---|---|
-| `rendered` | — | The renderer reported completion |
-| `mark_count` | `equals` (≥ 0) | A chart's drawn marks — the distinct category × series cells with a non-null value; the mechanical check judges it over the case's rows |
+| `rendered` | — | The renderer reported completion; on a chart the mechanical check judges it from the chart engine's canonical render (`state` `rendered` with at least one mark, or `no-data` over zero rows) |
+| `mark_count` | `equals` (≥ 0) | A chart's drawn marks — for a bar, the distinct category × series cells with a non-null value; the mechanical check judges it from the chart engine's canonical render of the case's rows at 640 × 400 (a `refused` or `too-small` render fails it) |
 | `no_console_errors` | — | No console error while rendering |
-| `text_visible` | `text` | A title, legend or cell string is visible; on a chart the mechanical check proves it from the document and the model or leaves it unjudged for the browser, never refusing it |
+| `text_visible` | `text` | A title, legend or cell string is visible; on a chart the mechanical check judges it against the texts the canonical render SHOWS (a cut label shows its cut text) and fails it when none contains the string — unjudged only on a host without the JavaScript runtime |
 | `no_data` | — | The case expects the empty state (a chart: no mark to draw) |
 | `value_visible` | `text` | A KPI value is visible |
 
@@ -1092,6 +1092,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these four and NULL. V3
 | `StorageRow` | [lake.md](lake.md#10-removal-and-cleanup) (`lake` declares it in `maintenance/inventory`; §62 here is the wire table) | metadata-db (the V64 CHECK), the storage breakdown's read for P8 |
 | `LakeDeliveryState`, `LakeDeliveryFailurePhase`, `LakeDeliveryAttemptOutcome` | metadata-db §4.53–§4.54 (`lake` declares them; §49–§51 here are the wire tables) | delivery landing, publication and settlement (the V55 CHECKs) |
 | `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
+| `ChartType` | the js-rendered charts design record (2026-11-14, §4.2; `visualization` declares it; §63 here is the wire table) | the `js-rendered` engine module (its templates register the same names and descriptors), the save path from lane F2 |
 
 ---
 
@@ -1404,10 +1405,29 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 ---
 
+## 63. `ChartType` — the chart types the engine draws (#985)
+
+**Source:** the js-rendered charts design record (2026-11-14, §4.2 and §4.5; issue #985, lane F1); the Kotlin enum is `ChartType` (`visualization`, `ChartType.kt`), the wire value is a chart document's `config.mark.type`. Each entry carries its channel descriptor as data (the record's O-12) and derives by name its schema file `schemas/chart/1/<wire>.schema.json`, its engine template `types/<wire>.js` (module `js-rendered`) and its fixtures directory.
+**Used by:** the registry guard `ChartTypeRegistryTest` (`application` tests), which holds this table, the enum, the schema files' `mark.type` constants, the skeleton's `familyConfig`, the engine's template files and the names the engine registers to one set; `ChartTypeTest` holds the table to the enum. The save path judges a document by the schema file of the entry its `config.mark.type` names (#989), and its column rules walk the entry's descriptor (lane F2).
+
+| Value | Meaning |
+|---|---|
+| `bar` | Bars over categories or time bands, vertical or horizontal (the quantitative channel decides), grouped or stacked by a colour channel; channels `x`, `y` (each a band or a value), `color` (series or shade), `tooltip` (up to six details) |
+| `line` | A line per series over categories (a band) or a continuous axis (a position: time or a number), smooth by default, a dot on each line's last point, the series' names at the lines' ends for 2 to 4 series (#989); channels `x` (a band or a position; a temporal `x` is always a position), `y` (a value: one field or 2 to 8 `fields`, linear or log), `color` (series), `tooltip` (up to six details) |
+| `area` | As `line`, each series filled down to zero, or stacked on the series below it (zero or normalized), with a fade from the line down (#989); the value axis always holds zero and has no log scale; channels as `line` |
+
+**Closed.** Each later type lane adds its row with its enum entry, its schema file, its template and at least five fixtures (one of them the empty case) in the same commit; the registry guard is red on any one of them alone.
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.61 | 989 (#989, js-rendered F5) | **§63 `ChartType`:** rows `line` and `area`, each with its enum entry, schema file, template and fixtures; their `x` is a band or a position (a temporal `x` has the one form `position`). |
+| 2026-11-15 | v1.60 | 988 (#988, js-rendered F4) | **§31 `RendererKind`:** the closing paragraph no longer names the kind retired by #860; it is refused as any unknown kind, as before. Text only: the closed set and its refusal are unchanged. |
+| 2026-11-15 | v1.59 | 986 (#986, js-rendered F2) | **§31 `RendererKind`:** the retired `plotly` is refused as any unknown kind (`details.reason` `unknown_kind`, the message listing the allowed kinds). **§32 `AssertionKind`:** on a chart, `rendered`, `mark_count` and `text_visible` are judged by the mechanical check from the chart engine's canonical render at 640 × 400 (`text_visible`: a text the chart shows), unjudged only on a host without the JavaScript runtime. No value added or removed. |
+| 2026-11-14 | v1.58 | 985 (#985, js-rendered F1) | New **§63 `ChartType`**: the chart types the engine draws, `bar` alone in this lane, each entry carrying its channel descriptor; held to the Kotlin enum by `ChartTypeTest` and, with the schema files, the engine's templates and its registered names, by `ChartTypeRegistryTest`. |
 | 2026-11-14 | v1.57 | 964 (#964, dp-lake P6) | New **§62 `StorageRow`**: the six rows of a table's storage breakdown in their first-fit order (`dp_records`, `table_metadata`, `current`, `history`, `keep_held`, `not_referenced`; V64's CHECK), held to the Kotlin enum by `InventoryGuardsTest`. |
 | 2026-11-14 | v1.56 | 962 (#962, dp-lake P6) | New **§58 `IncompleteReason`** (`mode`, `delete_failed`: `lake.maintenance.cleanup_incomplete`'s reason), **§59 `ObserverOutcome`** (`ok`, `failed`, `not_called`), **§60 `ObservedRefType`** (`tag`, `branch`) and **§61** the expiry floor's spelling (an instant or `not_applicable`), held to the Kotlin values by `CleanupEnumsSpecDriftTest`. |
 | 2026-11-14 | v1.55 | 959 (#959) — renumbered at the spec merge after #960's §55 and v1.54 | New **§56 `FiguresState`** (current, stale, never measured: the planner figures' read state, D3a) and **§57** the planner's error codes and not-due reasons, held to the Kotlin values by `PlanEnumsSpecDriftTest`. |

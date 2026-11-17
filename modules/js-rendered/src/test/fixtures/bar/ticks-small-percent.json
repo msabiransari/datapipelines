@@ -1,0 +1,64 @@
+{
+ "source": [
+  "lane 985 make-r2-fixtures.mjs"
+ ],
+ "note": "#985 R2: a percent axis whose ticks need more than 3 fraction digits of a percent",
+ "document": {
+  "display_name": "Small shares",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "format": "percent"
+    }
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "b",
+   "c"
+  ],
+  "v": [
+   0.000012,
+   0.00003,
+   0.000021
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE"
+ }
+}

@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.103 (revised — see Change Log)
+**Status:** v1.104 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-15
+**Last updated:** 2026-11-16
 
 ---
 
@@ -1637,7 +1637,7 @@ The visualization artifact's refusals (#10; the [dashboard implementation spec](
 | `visualization.validation.renderer_unsupported` | 400 | `renderer.kind` is a reserved kind round one does not render (`html`, `svg` — D13, D46), or a `renderer.version` the kind does not accept |
 | `visualization.validation.input_contract_invalid` | 400 | an input contract that cannot be satisfied: no inputs, an input name outside `[a-z][a-z0-9_]{0,63}`, an input with no columns, a column name outside the column grammar, or two columns of one input sharing a name |
 | `visualization.validation.transform_binding_invalid` | 400 | `transform` does not bind: the pinned template is missing or DISCARDED at that version (`details.reason` `template_not_found` / `template_version_not_found`), not a transform (`not_a_transform`), its contract's input names differ from `transform.inputs`' keys, a `transform.inputs` value names no visualization input, or a declared input column differs from the named input's column by name, type or nullability (`details.column`); a transform-less visualization with more than one input (`transform_required`) |
-| `visualization.validation.config_schema_invalid` | 400 | `config` fails the renderer's schema: for `chart` the v1 JSON Schema served at `/schemas/chart/1/` (`details.reason` `schema`, with the failing `keyword` and its JSON `pointer`), then the chart save rules and the declared library's support table (`details.reason` the `chart.*` code, [Dashboards §2.1.2](dashboards.md)); for `table` and `kpi` their own schemas ([Dashboards §2.1](dashboards.md)); `details.renderer` names the kind, and the failure's `path` names the offending path inside the document |
+| `visualization.validation.config_schema_invalid` | 400 | `config` fails the renderer's schema: for `chart` the v1 JSON Schema served at `/schemas/chart/1/` (`details.reason` `schema`, with the failing `keyword` and its JSON `pointer`), then the chart save rules (`details.reason` the `chart.*` code, [Dashboards §2.1.2](dashboards.md)); for `table` and `kpi` their own schemas ([Dashboards §2.1](dashboards.md)); `details.renderer` names the kind, and the failure's `path` names the offending path inside the document |
 | `visualization.validation.binding_unbound` | 400 | a `bindings` entry does not bind: its path is not the binding grammar or does not resolve inside `config` (`details.reason` `path_invalid` / `path_unresolved`), or its column is not in the transform's OUTPUT contract (or, with no transform, the one input's columns) — `details.column` |
 | `visualization.validation.test_case_invalid` | 400 | a `tests.cases[]` entry that is not runnable: a missing or duplicate case name, fixtures missing an input or naming an unknown one, a fixture row with a column outside the input's contract or a value outside its type, an assertion kind outside the closed vocabulary or missing its argument |
 | `visualization.not_found` | 404 | no such visualization (or version) in the workspace, hidden by the promoter lens, or discarded on a read/mutate path — indistinguishable by design |
@@ -2049,6 +2049,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-15 | v1.104 | 986 (#986, js-rendered F2) — renumbered at the spec sync after #994’s v1.103 | §13.22 `visualization.validation.config_schema_invalid`: for a `chart` the v1 schema, then the chart save rules — the declared library's support table (`chart.unsupported.<field>`) is gone (js-rendered record O-13). No code added or removed (§13 row count unchanged). |
 | 2026-11-15 | v1.103 | 994 (#994) | §13.5 gains `pipeline.staging.result_incomplete` (500, the `pipeline.staging.` family default — no explicit `ApiErrorCatalog` row), TEMPORARY until the pinned DuckDB driver throws mid-stream: a staging read that ended after a different number of rows than the engine counted for it in the same snapshot (details `rows_read`, `rows_expected`, `reader`). Landed with the constants in `StagingErrorCodes` and `PipelineErrorCodes.Staging`. §13 row count 519 → 520. |
 | 2026-11-14 | v1.102 | 962 (#962) | §13.25 gains `lake.maintenance.cleanup_incomplete` (HTTP `—`): a cleanup or purge deletion that did not finish its removal (`details.reason` `mode` or `delete_failed`), the maintenance run's error, never a route's. Landed with the constant in `PipelineErrorCodes.Lake` and its `ApiErrorCatalog.NEVER_RETURNED_LIVE` entry (§13 row count 518 → 519). |
 | 2026-11-14 | v1.101 | 956 (#956) — renumbered at the spec merge after #957's v1.100 | §13.25 gains `lake.profile.invalid` and `lake.profile.not_found` (HTTP `—`: the profile and pause services have no route before P8). Landed with their constants in `PipelineErrorCodes.Lake` and their `ApiErrorCatalog.NEVER_RETURNED_LIVE` entries (§13 row count 514 → 516). |

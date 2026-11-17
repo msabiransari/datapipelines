@@ -1,0 +1,77 @@
+{
+ "display_name": "Stacked bars on a log axis",
+ "description": "G4: a stacked value has no log axis.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "bar"
+  },
+  "encoding": {
+   "x": {
+    "field": "region",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Region"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "format": "compact",
+    "stack": "zero",
+    "scale": {
+     "type": "log"
+    }
+   },
+   "color": {
+    "field": "channel",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Channel"
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

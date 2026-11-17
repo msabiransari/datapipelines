@@ -11,8 +11,11 @@ import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.doubles.plusOrMinus
+import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -24,15 +27,20 @@ import java.nio.file.Paths
  * reviews), under the product's live CSP (the suite's collector, asserted in `closePage`). Each fixture of
  * [ChartBrowserFixtures] is created through the REST route as a DRAFT with its one test case, a session is started, and
  * the preview is opened in a cookie-less context whose clock is `America/New_York` — so a formatter that read the local
- * zone would print a UTC-midnight DATE as the previous day. Everything asserted is read off the DOM Plotly drew (the
- * drawn bar paths, the tick and hover text, the value labels' boxes), never off the option the converter produced.
+ * zone would print a UTC-midnight DATE as the previous day.
+ *
+ * Since #987 (js-rendered F3) the page draws with the product's own chart engine. Everything asserted is read off what
+ * the engine drew on the page — the `svg.dp-chart` it wrote (marks by `g.dp-mark[data-series]`, ticks `text.dp-tick`,
+ * value labels `text.dp-guide`, the title `text.dp-title`, the legend `g.dp-legend`) — or off the data index of that
+ * same draw (`index()` of the occurrence's chart handle, record §4.3): the index carries each bar's tooltip lines, and
+ * since #990 the interaction layer's card shows them under the pointer (the pointer case below).
  *
  * The record (2026-11-06 §4.4, R11) lets `<` and `>` into a title and requires them escaped at render: the markup
  * fixture and the `markup-title` example are rendered as TEXT, nothing executes and no element is injected.
  */
 class BarChartBrowserTest : VisualizationBrowserSuite() {
     @Test
-    fun `every bar fixture draws its marks, band ticks, hover text and value labels - read off the DOM in New York`() {
+    fun `every bar fixture draws its marks, band ticks, tooltip lines and value labels - read off the page in New York`() {
         startTrace()
         val root = ready("vbar")
         val agent = newYorkContext()
@@ -69,35 +77,37 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
             val example = ChartBrowserFixtures.fixture("bar-vertical").withTitle(MARKUP_TITLE)
             val titled = open(agent, "$root/charts/markup_title", example)
             withClue("the markup-title example's in-chart title is its literal text") {
-                titled.evaluate("sel => document.querySelector(sel + ' .gtitle').textContent", CASE) shouldBe MARKUP_TITLE
-                titled.evaluate("sel => document.querySelectorAll(sel + ' .gtitle tspan[style*=\"bold\"]').length", CASE) shouldBe 0
+                titled.evaluate("sel => document.querySelector(sel + ' svg.dp-chart text.dp-title').textContent", CASE) shouldBe
+                    MARKUP_TITLE
+                ((titled.evaluate(INJECTED, CASE) as Map<*, *>)["bold"] as Number).toInt() shouldBe 0
             }
             shoot(titled, "markup-title")
-            // The control: the same title written RAW into Plotly's sink (what an unescaped converter would hand it) becomes a
-            // bold element, and the probe below sees it — so its zero over the product's chart is a measurement.
+            // The control: the same title written RAW into the drawn title (what a writer that parsed its text would do) becomes
+            // a bold element, and the probe below sees it — so its zero over the product's chart is a measurement.
             titled.evaluate(
-                "([sel, t]) => window.Plotly.relayout(document.querySelector(sel + ' .js-plotly-plot'), {'title.text': t})" +
-                    ".then(() => true)",
+                "([sel, t]) => { document.querySelector(sel + ' svg.dp-chart text.dp-title').innerHTML = t; return true; }",
                 listOf(CASE, MARKUP_TITLE),
             )
             withClue("the control: a raw title write is found by the probe") {
                 ((titled.evaluate(INJECTED, CASE) as Map<*, *>)["bold"] as Number).toInt() shouldBeGreaterThan 0
             }
-            // The raw write's bold run is an inline style, which the product's CSP also refuses: a second witness. It is the
-            // control's own, so it is drained here and the test's closing collector still sees the product page alone.
-            val refused = awaitCspViolations(titled)
-            withClue("the control's raw markup is also refused by the page's CSP") { refused.shouldNotBeEmpty() }
             titled.close()
 
             val markup = ChartBrowserFixtures.fixture("bar-markup")
             val preview = open(agent, "$root/charts/markup", markup)
             assertDrawn(preview, markup)
-            val legend = preview.evaluate("sel => document.querySelector(sel + ' .legend').textContent", CASE) as String
+            val legend =
+                preview.evaluate(
+                    "sel => Array.from(document.querySelectorAll(sel + ' svg.dp-chart g.dp-legend text'))" +
+                        ".map(t => t.textContent).join('\\n')",
+                    CASE,
+                ) as String
             withClue("the series names are text in the legend") { legend shouldContain "<b>bold</b>" }
             val read = preview.evaluate(INJECTED, CASE) as Map<*, *>
             withClue("no markup became an element and nothing ran: $read") {
                 read["images"] shouldBe 0
                 read["bold"] shouldBe 0
+                read["foreign"] shouldBe 0
                 read["xss"] shouldBe "undefined"
             }
         } finally {
@@ -106,23 +116,21 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
     }
 
     /**
-     * Q-L4 with the two `quirks.md:64` fixtures at the corpus's 900 px render and a 480 px phone column. The control plants
-     * the reference converter's layout — the product's but for the right margin (20 px, record O-2) — by `relayout`. On
-     * the product page the value axis draws a tick label at its range end, and Plotly's automargin reserves half its width
-     * on the right, so the reference keeps `bar-horizontal`'s label (its bar ends short of the range) inside the box; its
-     * reference geometry is printed, not asserted. `bar-long-labels`' longest bar reaches the range end and its label is
-     * wider than that half tick, so the reference puts it outside at both widths: that control is asserted red.
+     * Q-L4 with the two `quirks.md:64` fixtures at the corpus's 900 px render and a 480 px phone column: the longest bar's
+     * value label is inside the chart box. The control of the library era (the reference converter's layout planted
+     * through the old library's own relayout call) left with it; the control is now the probe's own: the same label
+     * moved past the box's right edge must read as outside, so the product's "inside" is a measurement.
      */
     @Test
-    fun `Q-L4 - the longest bar's value label stays inside the chart box, and the reference layout puts it outside`() {
+    fun `Q-L4 - the longest bar's value label stays inside the chart box, and a label moved past the box reads outside`() {
         startTrace()
         val root = ready("vbarql4")
         for (width in listOf(QL4_WIDE, QL4_NARROW)) {
             val agent = newBrowserContext(Browser.NewContextOptions().setTimezoneId(ZONE).setViewportSize(width, QL4_HEIGHT))
             try {
-                for ((name, control) in listOf("bar-horizontal" to false, "bar-long-labels" to true)) {
+                for (name in listOf("bar-horizontal", "bar-long-labels")) {
                     val preview = open(agent, "$root/charts/${name.replace('-', '_')}_$width", ChartBrowserFixtures.fixture(name))
-                    assertLabelInside(preview, name, width, control)
+                    assertLabelInside(preview, name, width)
                     preview.close()
                 }
             } finally {
@@ -131,15 +139,11 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         }
     }
 
-    /**
-     * The product's longest value label is inside the chart box at [width]; the reference layout is then planted and
-     * measured, and with [control] its label must be outside the box.
-     */
+    /** The product's longest value label is inside the chart box at [width]; the same label moved past the box is not. */
     private fun assertLabelInside(
         preview: Page,
         name: String,
         width: Int,
-        control: Boolean,
     ) {
         val product = preview.evaluate(LONGEST_LABEL, CASE) as Map<*, *>
         println("Q-L4 $name at $width product: $product")
@@ -149,161 +153,21 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         Files.createDirectories(SHOTS)
         Files.write(SHOTS.resolve("ql4-$name-$width-product.png"), preview.locator(CASE).screenshot())
         preview.evaluate(
-            "sel => window.Plotly.relayout(document.querySelector(sel + ' .js-plotly-plot'), {'margin.r': 20}).then(() => true)",
+            "sel => { const t = document.querySelector(sel + ' svg.dp-chart text.dp-guide[data-ql4-longest]');" +
+                " t.setAttribute('x', String(t.ownerSVGElement.viewBox.baseVal.width));" +
+                " t.setAttribute('text-anchor', 'start'); return true; }",
             CASE,
         )
-        val reference = preview.evaluate(LONGEST_LABEL, CASE) as Map<*, *>
-        println("Q-L4 $name at $width reference: $reference")
-        Files.write(SHOTS.resolve("ql4-$name-$width-reference.png"), preview.locator(CASE).screenshot())
-        if (!control) return
-        withClue("$name at $width px: the reference layout puts the label outside (the control): $reference") {
-            reference["inside"] shouldBe false
-        }
-    }
-
-    /** The CSP violations a planted write caused, drained once they arrive (the collector hears them asynchronously). */
-    private fun awaitCspViolations(page: Page): List<String> {
-        val seen = mutableListOf<String>()
-        var waited = 0.0
-        while (seen.isEmpty() && waited < CSP_WAIT_MS) {
-            page.waitForTimeout(CSP_POLL_MS)
-            waited += CSP_POLL_MS
-            seen += drainCspViolations()
-        }
-        return seen
-    }
-
-    /** #456, moved from `VisualizationPreviewBrowserTest` (#860): the preview host's Plotly marker, over a bar chart. */
-    @Test
-    fun `the head marker precedes Plotly's first lookup and the linked rules apply in both themes`() {
-        startTrace()
-        val root = ready("vmarker")
-        val created =
-            api(
-                "POST",
-                "/api/v1/visualizations",
-                ChartBrowserFixtures.document("$root/charts/marker", ChartBrowserFixtures.fixture("bar-vertical")),
-            )
-        val id = created.at("data", "id") as String
-        val started = api("POST", "/api/v1/visualizations/$id/tests/sessions", "")
-        val previewUrl = started.at("data", "preview_url") as String
-        val agent = newBrowserContext()
-        recordMarkerAtLoad(agent)
-        try {
-            val preview = agent.newPage()
-            preview.setDefaultTimeout(FIRST_RENDER_TIMEOUT_MS)
-            for (theme in listOf("light", "dark")) {
-                preview.navigate("$baseUrl$previewUrl&theme=$theme")
-                preview.waitForSelector("section[data-dp-case-index='0'][data-dp-ready='true']")
-                val observation =
-                    preview.evaluate(
-                        """() => {
-                          const marker = document.getElementById('plotly.js-style-global');
-                          return { atLoad: window.__plotlyMarkerAtLoad,
-                            rules: marker && marker.sheet ? marker.sheet.cssRules.length : 0,
-                            cssLoaded: Array.from(document.styleSheets).some(s => s.href && s.href.endsWith('/vendor/plotly/plotly.css')),
-                            font: getComputedStyle(document.querySelector('.js-plotly-plot .plotly')).fontFamily };
-                        }""",
-                    ) as Map<*, *>
-                println("Plotly marker ($theme): $observation")
-                val atLoad = observation["atLoad"] as Map<*, *>
-                withClue("parser-placed marker at the bundle's first lookup ($theme): $observation") {
-                    atLoad["marked"] shouldBe true
-                    atLoad["inHead"] shouldBe true
-                    atLoad["beforeScript"] shouldBe true
-                    atLoad["tag"] shouldBe "TEMPLATE"
-                    atLoad["children"] shouldBe 0
-                    atLoad["hasSheet"] shouldBe false
-                    atLoad["rules"] shouldBe 0
-                }
-                observation["rules"] shouldBe 0
-                observation["cssLoaded"] shouldBe true
-                // Reuse DashboardConformanceBrowserTest's positive stylesheet probe.
-                (observation["font"] as String).contains("Open Sans") shouldBe true
-            }
-        } finally {
-            agent.close()
-        }
-    }
-
-    /**
-     * #526 — a host that does NOT pre-place the marker gets it from the runtime's fallback
-     * (`_ensureStyleElement`), so the fallback's marker must be CSP-compliant too. Chromium
-     * refuses EVERY script-created `<style>` element at insertion as an inline style under
-     * `style-src 'self'` (with a text child, with an empty comment, or childless — each with the
-     * empty-text hash; measured, the #526 lane's probe), so the fallback creates the marker as a
-     * TEMPLATE — the same shape every first-party host pre-places (#456): found by id, matching
-     * the class, no children, never processed as a stylesheet (no sheet — the host marker's own
-     * shape), and ZERO `Applying inline style` refusals from the application's own scripts —
-     * the narrowed collector fails the test on any of the latter in `closePage`. Plotly's
-     * opt-out did not disable the vendored stylesheet: the positive probe of the conformance
-     * case (`getComputedStyle('.js-plotly-plot .plotly').fontFamily`) still reads Open Sans.
-     * The instance is reached through `window.DatapipelinesPreview.instances` — the preview's
-     * own registry (`visualization-preview.js`), the same path the #456 probe used.
-     */
-    @Test
-    fun `the missing-marker fallback creates a CSP-compliant marker in both themes`() {
-        startTrace()
-        val root = ready("vfallback")
-        val created =
-            api(
-                "POST",
-                "/api/v1/visualizations",
-                ChartBrowserFixtures.document("$root/charts/fallback", ChartBrowserFixtures.fixture("bar-vertical")),
-            )
-        val id = created.at("data", "id") as String
-        val started = api("POST", "/api/v1/visualizations/$id/tests/sessions", "")
-        val previewUrl = started.at("data", "preview_url") as String
-        val agent = newBrowserContext()
-        try {
-            val preview = agent.newPage()
-            preview.setDefaultTimeout(FIRST_RENDER_TIMEOUT_MS)
-            for (theme in listOf("light", "dark")) {
-                preview.navigate("$baseUrl$previewUrl&theme=$theme")
-                preview.waitForSelector("section[data-dp-case-index='0'][data-dp-ready='true']")
-                val observation =
-                    preview.evaluate(
-                        """() => {
-                          const host = document.getElementById('plotly.js-style-global');
-                          if (host) host.remove();
-                          window.DatapipelinesPreview.instances[0]._ensureStyleElement();
-                          const el = document.getElementById('plotly.js-style-global');
-                          return { exists: !!el,
-                            inHead: !!el && el.parentElement === document.head,
-                            tag: el ? el.tagName : null,
-                            className: el ? el.className : null,
-                            children: el ? el.childNodes.length : null,
-                            hasSheet: !!el && !!el.sheet,
-                            matches: !!el && el.matches('.no-inline-styles') };
-                        }""",
-                    ) as Map<*, *>
-                println("Fallback marker ($theme): $observation")
-                withClue("the fallback-created marker is CSP-compliant ($theme): $observation") {
-                    observation["exists"] shouldBe true
-                    observation["inHead"] shouldBe true
-                    observation["tag"] shouldBe "TEMPLATE"
-                    (observation["className"] as String).contains("no-inline-styles") shouldBe true
-                    observation["children"] shouldBe 0
-                    observation["matches"] shouldBe true
-                    observation["hasSheet"] shouldBe false
-                }
-                // Falsification 4: the opt-out did not disable plotly.css (the conformance case's probe).
-                val font =
-                    preview.evaluate(
-                        "() => getComputedStyle(document.querySelector('.js-plotly-plot .plotly')).fontFamily",
-                    ) as String
-                withClue("the vendored stylesheet still applies with the fallback-created marker ($theme)") {
-                    font.contains("Open Sans") shouldBe true
-                }
-            }
-        } finally {
-            agent.close()
+        val control = preview.evaluate(LONGEST_LABEL, CASE) as Map<*, *>
+        println("Q-L4 $name at $width control: $control")
+        withClue("$name at $width px: the label moved past the box reads outside (the control): $control") {
+            control["inside"] shouldBe false
         }
     }
 
     /**
      * #860b R1 — an aggregate float64 cannot carry (1e308 + 1e308) draws as a GAP in a real browser: three bars drawn
-     * where four rows exist, the band ticks intact, and the value axis's ticks all finite. Read off the DOM Plotly drew,
+     * where four rows exist, the band ticks intact, and the value axis's ticks all finite. Read off the engine's drawing,
      * like every case above.
      */
     @Test
@@ -315,12 +179,9 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
             val fixture = overflowFixture()
             val preview = open(agent, "$root/charts/overflow", fixture)
             try {
-                assertDrawn(preview, fixture)
-                val ticks =
-                    preview.evaluate(
-                        "sel => Array.from(document.querySelectorAll(sel + ' .yaxislayer-above g.ytick text')).map(t => t.textContent)",
-                        CASE,
-                    ) as List<*>
+                val read = assertDrawn(preview, fixture)
+                val ticks = read["values"] as List<*>
+                withClue("the value axis draws ticks") { ticks.shouldNotBeEmpty() }
                 withClue("the value axis's ticks are all finite: $ticks") {
                     ticks.forEach { t -> (t as String) shouldNotContain "Infinity" }
                     ticks.forEach { t -> (t as String) shouldNotContain "NaN" }
@@ -333,6 +194,11 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         }
     }
 
+    /**
+     * Two shares of 1e308 each: the absolute total overflows, the shares do not. The engine draws no value label on a
+     * normalized bar (look contract §4.3: a share is 100 % and carries no label), so the 50 % each share must show is read
+     * off its tooltip lines, and the two bars are equal and nonzero on the page.
+     */
     @Test
     fun `two finite bars whose absolute total overflows draw equal nonzero shares`() {
         startTrace()
@@ -346,21 +212,94 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         val expected =
             JsonParser
                 .parseString(
-                    """{"bars":2,"categories":["A"],"vertical":true,"hover":[],
-                       "label_texts":[{"si":0,"ci":0,"text":"50%"},{"si":1,"ci":0,"text":"50%"}]}""",
+                    """{"bars":2,"categories":["A"],"vertical":true,
+                       "hover":[{"si":0,"ci":0,"contains":["50%"]},{"si":1,"ci":0,"contains":["50%"]}],"label_texts":[]}""",
                 ).asJsonObject
         val fixture = ChartBrowserFixtures.Fixture("normalized-overflow", source.spec, rows, expected)
         val agent = newYorkContext()
         try {
             val preview = open(agent, "$root/charts/normalized_overflow", fixture)
             try {
-                assertDrawn(preview, fixture)
+                val lengths = (assertDrawn(preview, fixture)["lengths"] as List<*>).map { (it as Number).toDouble() }
+                val gap =
+                    (
+                        preview.evaluate(
+                            "sel => getComputedStyle(document.querySelector(sel)).getPropertyValue('--chart-gap')",
+                            CASE,
+                        ) as String
+                    ).trim()
+                        .removeSuffix("px")
+                        .toDouble()
+                withClue("the two shares are drawn equal and nonzero, the upper one less the stack's gap ($gap px): $lengths") {
+                    lengths.size shouldBe 2
+                    lengths[1] shouldBeGreaterThan 0.0
+                    (lengths[0] - lengths[1]) shouldBe (gap plusOrMinus SHARE_TOLERANCE)
+                }
             } finally {
                 preview.close()
             }
         } finally {
             agent.close()
         }
+    }
+
+    /**
+     * Treatment 4 of #987 D7, un-parked by #990 (D9): the pointer moves onto the bar, and the tooltip card the page then
+     * shows (the interaction layer's `g.dp-tooltip`, read from the DOM) carries every expected part of the fixture's
+     * `expect.hover`, for all five expectations of the five bar fixtures that carry one. The text half ([assertDrawn],
+     * off the draw's data index) is unchanged.
+     */
+    @Test
+    fun `moving the pointer over a bar shows its tooltip lines on the page`() {
+        startTrace()
+        val root = ready("vbarpointer")
+        val agent = newYorkContext()
+        var read = 0
+        try {
+            for (name in ChartBrowserFixtures.NAMES) read += readHovers(agent, root, name)
+        } finally {
+            agent.close()
+        }
+        withClue("the five hover expectations were read from the shown card (non-vacuity floor)") { read shouldBe HOVER_EXPECTATIONS }
+    }
+
+    /** Opens fixture [name]'s preview when it carries `expect.hover` entries and reads each one; returns how many were read. */
+    private fun readHovers(
+        agent: BrowserContext,
+        root: String,
+        name: String,
+    ): Int {
+        val fixture = ChartBrowserFixtures.fixture(name)
+        val hovers = fixture.expect.getAsJsonArray("hover").map { it.asJsonObject }
+        if (hovers.isEmpty()) return 0
+        val preview = open(agent, "$root/charts/pointer_${name.replace('-', '_')}", fixture)
+        try {
+            return hovers.sumOf { e -> hoverAndRead(preview, fixture.name, e) }
+        } finally {
+            preview.close()
+        }
+    }
+
+    /** Moves the pointer onto the bar of one `expect.hover` entry and asserts the shown card holds each expected part; returns 1. */
+    private fun hoverAndRead(
+        preview: Page,
+        fixture: String,
+        e: JsonObject,
+    ): Int {
+        val (si, ci) = e.get("si").asInt to e.get("ci").asInt
+        val at =
+            requireNotNull(preview.evaluate(BAR_CENTRE, mapOf("sel" to CASE, "si" to si, "ci" to ci)) as Map<*, *>?) {
+                "$fixture: series $si, category $ci has no drawn bar"
+            }
+        preview.mouse().move((at["x"] as Number).toDouble(), (at["y"] as Number).toDouble())
+        preview.waitForFunction("sel => !!document.querySelector(sel + ' svg.dp-chart g.dp-tooltip')", CASE)
+        val shown = preview.evaluate(SHOWN_CARD, CASE) as String
+        println("$fixture: series $si, category $ci: the shown card reads $shown")
+        e.getAsJsonArray("contains").map { it.asString }.forEach { part ->
+            withClue("$fixture: the card shown over series $si, category $ci: $shown") { shown shouldContain part }
+        }
+        preview.mouse().move(0.0, 0.0)
+        return 1
     }
 
     private fun overflowFixture(): ChartBrowserFixtures.Fixture {
@@ -416,53 +355,34 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         return ChartBrowserFixtures.Fixture("bar-aggregate-overflow", spec, rows, expect)
     }
 
-    private fun recordMarkerAtLoad(agent: BrowserContext) {
-        // Record the marker at Plotly's FIRST opt-out lookup, before it can create one itself.
-        // Final DOM order alone cannot distinguish a parser-placed marker from Plotly's late insertion.
-        agent.addInitScript(
-            """(() => {
-              const original = document.getElementById.bind(document);
-              document.getElementById = function (id) {
-                const marker = original(id);
-                if (id === 'plotly.js-style-global' && !window.__plotlyMarkerAtLoad) {
-                  const script = document.querySelector('script');
-                  window.__plotlyMarkerAtLoad = {
-                    marked: !!marker && marker.classList.contains('no-inline-styles'),
-                    inHead: !!marker && marker.parentElement === document.head,
-                    beforeScript: !!marker && !!script && !!(marker.compareDocumentPosition(script) & Node.DOCUMENT_POSITION_FOLLOWING),
-                    tag: marker ? marker.tagName : null,
-                    children: marker ? (marker.content || marker).childNodes.length : null,
-                    hasSheet: !!marker && !!marker.sheet,
-                    rules: marker && marker.sheet ? marker.sheet.cssRules.length : 0
-                  };
-                }
-                return marker;
-              };
-            })();""",
-        )
-    }
-
-    /** Draws [fixture]'s expectations off the DOM: bars, the band ticks in reading order, the value labels, the hover. */
+    /**
+     * Draws [fixture]'s expectations off the engine's drawing: bars, the band ticks in reading order, the value labels,
+     * the tooltip lines; answers the read for a caller's own checks.
+     */
     private fun assertDrawn(
         preview: Page,
         fixture: ChartBrowserFixtures.Fixture,
-    ) {
-        val read = preview.evaluate(DRAWN, mapOf("sel" to CASE, "axis" to if (fixture.vertical) "x" else "y")) as Map<*, *>
-        withClue("${fixture.name}: the drawn bars ${read["paths"]}") { (read["bars"] as Number).toInt() shouldBe fixture.bars }
-        if (fixture.bars == 0) return
-        withClue("${fixture.name}: the band axis's ticks show the categories, in order") { read["ticks"] shouldBe fixture.categories }
+    ): Map<*, *> {
+        val read = preview.evaluate(DRAWN, mapOf("sel" to CASE, "vertical" to fixture.vertical)) as Map<*, *>
+        println("${fixture.name}: $read")
+        withClue("${fixture.name}: the drawn bars $read") { (read["bars"] as Number).toInt() shouldBe fixture.bars }
+        if (fixture.bars == 0) return read
+        withClue("${fixture.name}: the band axis's ticks show the categories, in order: $read") {
+            bandTicksMatch(read["ticks"] as List<*>, fixture) shouldBe true
+        }
         val labels = read["labels"] as List<*>
         fixture.expect.getAsJsonArray("label_texts").map { it.asJsonObject }.forEach { e ->
             val (si, ci) = e.get("si").asInt to e.get("ci").asInt
-            withClue("${fixture.name}: the value label of series $si, category $ci") {
-                (labels[si] as List<*>)[ci] shouldBe e.get("text").asString
+            withClue("${fixture.name}: the value label of series $si, category $ci: $labels") {
+                (labels[si] as Map<*, *>)[ci.toString()] shouldBe e.get("text").asString
             }
         }
         fixture.expect.getAsJsonArray("hover").map { it.asJsonObject }.forEach { e ->
-            val text = hover(preview, e.get("si").asInt, e.get("ci").asInt)
-            val shown = text.joinToString("\n")
+            val lines = tooltipLines(preview, e.get("si").asInt, e.get("ci").asInt)
+            withClue("${fixture.name}: series ${e.get("si")}, category ${e.get("ci")} has tooltip lines") { lines shouldNotBe null }
+            val shown = lines.orEmpty().joinToString("\n")
             e.getAsJsonArray("contains").map { it.asString }.forEach { part ->
-                withClue("${fixture.name}: the hover text of series ${e.get("si")}, category ${e.get("ci")}: $text") {
+                withClue("${fixture.name}: the tooltip lines of series ${e.get("si")}, category ${e.get("ci")}: $lines") {
                     shown shouldContain part
                 }
             }
@@ -475,31 +395,78 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         withClue("${fixture.name}: the title and subtitle sit above the plot area and its value labels $framed") {
             (framed["overlapping"] as List<*>).shouldBeEmpty()
         }
+        return read
     }
 
-    /** Moves the mouse onto one drawn bar (Plotly's drag layer is on top, so a hover on the path itself is intercepted). */
-    private fun hover(
+    /**
+     * The band ticks show the categories in reading order: every category when the engine drew them all, else (the axis
+     * thinned its labels, contract §4.6) a strictly increasing run of them. A tick the engine cut to its room is the
+     * category's own leading text and an ellipsis.
+     */
+    private fun bandTicksMatch(
+        ticks: List<*>,
+        fixture: ChartBrowserFixtures.Fixture,
+    ): Boolean {
+        if (ticks.isEmpty()) return false
+        val full = fixture.expect.getAsJsonArray("categories_full")?.map { it.asString } ?: fixture.categories
+        temporalFormat(fixture)?.let { return ticks == g9Labels(full, it) }
+        val shows = { tick: String, category: String -> tick == category || (tick.endsWith("…") && category.startsWith(tick.dropLast(1))) }
+        var at = -1
+        for (tick in ticks.map { it as String }) {
+            at = (at + 1 until full.size).firstOrNull { shows(tick, full[it]) } ?: return false
+        }
+        return true
+    }
+
+    /** The band field's temporal format (`month`, `date`, `datetime`), or null for a band that is not temporal. */
+    private fun temporalFormat(fixture: ChartBrowserFixtures.Fixture): String? {
+        val encoding = fixture.spec.getAsJsonObject("config").getAsJsonObject("encoding")
+        val band = encoding.getAsJsonObject(if (fixture.vertical) "x" else "y")
+        return if (band.get("type")?.asString == "temporal") band.get("format").asString else null
+    }
+
+    /**
+     * #987 D8 (formatted text): the band labels G9 writes for the corpus's UTC category texts, every one drawn — the
+     * library printed `2024-01`; the engine prints `Jan` with the year under the first label and wherever it changes
+     * (month), `Mar 1` with the year (date), `02:30` with the date (datetime). Computed here from the categories' own
+     * text, never from the engine, so a clock that shifted a UTC-midnight date to the previous evening is red.
+     */
+    private fun g9Labels(
+        full: List<String>,
+        format: String,
+    ): List<String> {
+        var previous: String? = null
+        return full.map { category ->
+            val year = category.substring(0, YEAR_END)
+            val month = MONTHS[category.substring(YEAR_END + 1, MONTH_END).toInt() - 1]
+            val (text, under) =
+                when (format) {
+                    "month" -> {
+                        month to year
+                    }
+
+                    "date" -> {
+                        "$month ${category.substring(MONTH_END + 1, DAY_END).toInt()}" to year
+                    }
+
+                    else -> {
+                        category.substring(DAY_END + 1, TIME_END) to
+                            "$month ${category.substring(MONTH_END + 1, DAY_END).toInt()}, $year"
+                    }
+                }
+            val label = if (under != previous) "$text\n$under" else text
+            previous = under
+            label
+        }
+    }
+
+    /** The tooltip lines of series [series] at category [category], off the data index of the occurrence's last draw. */
+    @Suppress("UNCHECKED_CAST")
+    private fun tooltipLines(
         preview: Page,
         series: Int,
         category: Int,
-    ): List<String> {
-        val bar =
-            preview
-                .locator("$CASE .barlayer .trace")
-                .nth(series)
-                .locator(".point")
-                .nth(category)
-                .locator("path")
-        bar.scrollIntoViewIfNeeded()
-        val box = checkNotNull(bar.boundingBox()) { "series $series, category $category has no drawn bar" }
-        preview.mouse().move(box.x + box.width / 2, box.y + box.height / 2)
-        preview.waitForFunction("sel => !!document.querySelector(sel + ' .hoverlayer .hovertext')", CASE)
-        @Suppress("UNCHECKED_CAST")
-        return preview.evaluate(
-            "sel => Array.from(document.querySelectorAll(sel + ' .hoverlayer .hovertext')).map(h => h.textContent)",
-            CASE,
-        ) as List<String>
-    }
+    ): List<String>? = preview.evaluate(TOOLTIP, mapOf("si" to series, "ci" to category)) as List<String>?
 
     /** Creates [fixture] at [name], starts its test session and opens the preview in [agent]; waits for the case's state. */
     private fun open(
@@ -552,80 +519,158 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         const val QL4_WIDE = 900
         const val QL4_NARROW = 480
         const val QL4_HEIGHT = 700
-        const val CSP_WAIT_MS = 5_000.0
-        const val CSP_POLL_MS = 100.0
+        const val SHARE_TOLERANCE = 0.05
         val SHOTS = Paths.get("build", "reports", "chart-bar")
+        val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        const val YEAR_END = 4
+        const val MONTH_END = 7
+        const val DAY_END = 10
+        const val TIME_END = 16
 
         /**
-         * The drawn bars (a path Plotly leaves as `M0,0Z` is a gap), the band axis's tick texts sorted by their position on
-         * screen (what a reader sees, left to right or top to bottom), and each trace's value labels by point.
+         * The data index of the one case's chart: the preview's registry (`window.DatapipelinesPreview`, the same path the
+         * #456 probe used) holds the case's instance; its one occurrence's chart handle answers `index()` (record §4.3).
+         */
+        const val INDEX =
+            """const occurrences = window.DatapipelinesPreview.instances[0]._occurrences;
+              const ix = occurrences[Object.keys(occurrences)[0]].renderer.index();"""
+
+        /**
+         * The drawn bars (a mark with an area; a gap draws nothing), the band axis's tick texts sorted by their position
+         * (what a reader sees, left to right or top to bottom; a second line under a label, G9, joins it after a
+         * newline), the value axis's tick texts, each series' value labels by
+         * category (a label belongs to the bar whose centre along the band axis is nearest it), and each bar's length
+         * across the band axis.
          */
         const val DRAWN =
             """args => {
-              const s = document.querySelector(args.sel);
-              // A drawn bar has an area: Plotly leaves a null cell's path in place with no width or no height.
-              const bars = Array.from(s.querySelectorAll('.barlayer .trace .point path'))
-                .filter(p => { const r = p.getBoundingClientRect(); return r.width > 0 && r.height > 0; }).length;
-              const ticks = Array.from(s.querySelectorAll('.' + args.axis + 'tick text'))
-                .map(t => ({ text: t.textContent, at: t.getBoundingClientRect()[args.axis === 'x' ? 'left' : 'top'] }))
-                .sort((a, b) => a.at - b.at).map(t => t.text);
-              const labels = Array.from(s.querySelectorAll('.barlayer .trace')).map(tr =>
-                Array.from(tr.querySelectorAll('.point')).map(p => { const t = p.querySelector('text'); return t ? t.textContent : null; }));
-              const paths = Array.from(s.querySelectorAll('.barlayer .trace')).map(tr =>
-                Array.from(tr.querySelectorAll('.point path')).map(p => (p.getAttribute('d') || '').slice(0, 40)));
-              return { bars: bars, ticks: ticks, labels: labels, paths: paths };
+              $INDEX
+              const svg = document.querySelector(args.sel + ' svg.dp-chart');
+              const num = (el, a) => parseFloat(el.getAttribute(a));
+              const p = ix.plot;
+              const bars = Array.from(svg.querySelectorAll('g.dp-mark[data-series] > .dp-mark'))
+                .filter(m => { const b = m.getBBox(); return b.width > 0 && b.height > 0; });
+              const isBand = t => args.vertical ? num(t, 'x') >= p.x : num(t, 'y') <= p.y + p.h;
+              const ticks = Array.from(svg.querySelectorAll('text.dp-tick'));
+              const band = ticks.filter(isBand).map(t => ({ text: t.textContent, at: num(t, args.vertical ? 'x' : 'y') }))
+                .sort((a, b) => a.at - b.at)
+                .reduce((out, t) => { const last = out[out.length - 1];
+                  if (last && Math.abs(last.at - t.at) < 0.5) last.text += '\n' + t.text; else out.push({ text: t.text, at: t.at });
+                  return out; }, []).map(t => t.text);
+              const values = ticks.filter(t => !isBand(t)).map(t => t.textContent);
+              const labels = ix.series.map(() => ({}));
+              svg.querySelectorAll('text.dp-guide').forEach(t => {
+                const at = num(t, args.vertical ? 'x' : 'y');
+                let best = null;
+                ix.series.forEach((e, si) => e.at.forEach((c, k) => {
+                  const d = Math.abs(c - at);
+                  if (best === null || d < best.d) best = { d: d, si: si, ci: e.datum[k] };
+                }));
+                if (best !== null) labels[best.si][String(best.ci)] = t.textContent;
+              });
+              const lengths = bars.map(m => { const b = m.getBBox(); return args.vertical ? b.height : b.width; });
+              return { bars: bars.length, ticks: band, values: values, labels: labels, lengths: lengths,
+                plot: p, series: ix.series.map(e => e.id) };
             }"""
 
-        /** What markup would leave behind had it been parsed: an image, a bold run, the payload's global. */
+        /** One bar's tooltip lines off the data index: series by position, category by the datum the index records. */
+        const val TOOLTIP =
+            """args => {
+              $INDEX
+              const e = ix.series[args.si];
+              const k = e ? e.datum.indexOf(args.ci) : -1;
+              return k < 0 ? null : e.tip[k];
+            }"""
+
+        /** The expectations of `expect.hover` over the bar fixtures (5, in 5 of the 14; #987's count). */
+        const val HOVER_EXPECTATIONS = 5
+
+        /**
+         * The client centre of series [si]'s bar at category [ci]: the data index names its place along the band axis, the
+         * drawn bar of that series nearest it is the one (scrolled into view first).
+         */
+        const val BAR_CENTRE =
+            """args => {
+              $INDEX
+              const svg = document.querySelector(args.sel + ' svg.dp-chart');
+              const e = ix.series[args.si];
+              if (!e) return null;
+              const k = e.datum.indexOf(args.ci);
+              if (k < 0) return null;
+              const vertical = ix.axis === 'x';
+              let best = null;
+              svg.querySelectorAll('g.dp-mark[data-series="' + CSS.escape(e.id) + '"] > .dp-mark').forEach(b => {
+                const bb = b.getBBox();
+                if (bb.width <= 0 || bb.height <= 0) return;
+                const d = Math.abs((vertical ? bb.x + bb.width / 2 : bb.y + bb.height / 2) - e.at[k]);
+                if (best === null || d < best.d) best = { d: d, b: b };
+              });
+              if (best === null) return null;
+              best.b.scrollIntoView({ block: 'center', inline: 'center' });
+              const r = best.b.getBoundingClientRect();
+              return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+            }"""
+
+        /** The texts of the tooltip card the page shows, one per line. */
+        const val SHOWN_CARD =
+            """sel => Array.from(document.querySelectorAll(sel + ' svg.dp-chart g.dp-tooltip text')).map(t => t.textContent).join('\n')"""
+
+        /** What markup would leave behind had it been parsed: an image, a bold run, a foreign object, the payload's global. */
         const val INJECTED =
             """sel => {
               const s = document.querySelector(sel);
-              return { images: s.querySelectorAll('img, image').length, bold: s.querySelectorAll('tspan[style*="bold"], b').length, xss: typeof window.__xss };
+              return { images: s.querySelectorAll('img, image').length, bold: s.querySelectorAll('svg.dp-chart b, svg.dp-chart tspan').length,
+                foreign: s.querySelectorAll('svg.dp-chart foreignObject, svg.dp-chart script').length, xss: typeof window.__xss };
             }"""
 
         /**
-         * The size frame's evidence: every drawn text (value labels, ticks, axis and legend titles, legend entries, the
-         * title and subtitle) outside the chart container's box, and every title line whose bottom passes the plot area's
-         * top or a value label's top. One pixel of rounding is allowed on each edge.
+         * The size frame's evidence: every drawn text (value labels, ticks, axis titles, legend entries, the title) outside
+         * the chart's box, and every title line whose bottom passes the plot area's top or a value label's top. One pixel
+         * of rounding is allowed on each edge.
          */
         const val FRAMED =
             """sel => {
-              const s = document.querySelector(sel);
-              const box = s.querySelector('.js-plotly-plot').getBoundingClientRect();
+              $INDEX
+              const svg = document.querySelector(sel + ' svg.dp-chart');
+              const box = svg.getBoundingClientRect();
+              const scale = box.height / svg.viewBox.baseVal.height;
               const edge = el => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom].map(Math.round); };
               const inBox = b => b[0] >= Math.floor(box.left) - 1 && b[1] >= Math.floor(box.top) - 1
                 && b[2] <= Math.ceil(box.right) + 1 && b[3] <= Math.ceil(box.bottom) + 1;
               const shown = t => { const b = t.getBoundingClientRect(); return !!t.textContent && (b.width > 0 || b.height > 0); };
-              const drawn = sel => Array.from(s.querySelectorAll(sel)).filter(shown)
-                .map(t => ({ text: t.textContent, at: edge(t) }));
-              const texts = drawn('.barlayer .point text, .xtick text, .ytick text, .g-xtitle text, .g-ytitle text, .legend text, .gtitle, .gtitle-subtitle');
-              const drag = s.querySelector('.nsewdrag');
-              const labels = drawn('.barlayer .point text');
-              const floor = Math.min.apply(null, [drag ? edge(drag)[1] : Infinity].concat(labels.map(l => l.at[1])));
-              const titles = drawn('.gtitle, .gtitle-subtitle');
+              const drawn = q => Array.from(svg.querySelectorAll(q)).filter(shown).map(t => ({ text: t.textContent, at: edge(t) }));
+              const texts = drawn('text');
+              const labels = drawn('text.dp-guide');
+              const plotTop = Math.round(box.top + ix.plot.y * scale);
+              const floor = Math.min.apply(null, [plotTop].concat(labels.map(l => l.at[1])));
+              const titles = drawn('text.dp-title');
               return { outside: texts.filter(t => !inBox(t.at)), overlapping: titles.filter(t => t.at[3] > floor + 1),
-                box: [box.left, box.top, box.right, box.bottom].map(Math.round), plot: drag ? edge(drag) : null, titles: titles };
+                box: [box.left, box.top, box.right, box.bottom].map(Math.round), plotTop: plotTop, titles: titles };
             }"""
 
-        /** The longest bar's value label against the chart container: both boxes and whether the first is inside. */
+        /**
+         * The longest bar's value label against the chart's box: both boxes and whether the first is inside. The label is
+         * marked (`data-ql4-longest`) so the control can move the same element.
+         */
         const val LONGEST_LABEL =
             """sel => {
-              const s = document.querySelector(sel);
-              const box = s.querySelector('.js-plotly-plot').getBoundingClientRect();
+              const svg = document.querySelector(sel + ' svg.dp-chart');
+              const box = svg.getBoundingClientRect();
+              const bars = Array.from(svg.querySelectorAll('g.dp-mark[data-series] > .dp-mark')).map(m => m.getBoundingClientRect());
+              const mid = r => (r.top + r.bottom) / 2;
               let longest = null;
-              s.querySelectorAll('.barlayer .point').forEach(p => {
-                const path = p.querySelector('path');
-                const w = path ? path.getBoundingClientRect().width : 0;
-                if (p.querySelector('text') && (!longest || w > longest.w)) longest = { w: w, path: path, text: p.querySelector('text') };
+              svg.querySelectorAll('text.dp-guide').forEach(t => {
+                const r = t.getBoundingClientRect();
+                let bar = null;
+                bars.forEach(b => { if (bar === null || Math.abs(mid(b) - mid(r)) < Math.abs(mid(bar) - mid(r))) bar = b; });
+                if (bar !== null && (longest === null || bar.width > longest.bar.width)) longest = { bar: bar, text: t };
               });
+              svg.querySelectorAll('[data-ql4-longest]').forEach(t => t.removeAttribute('data-ql4-longest'));
+              longest.text.setAttribute('data-ql4-longest', '');
               const r = longest.text.getBoundingClientRect();
-              const bar = longest.path.getBoundingClientRect();
-              const drag = s.querySelector('.nsewdrag');
-              const plot = drag ? drag.getBoundingClientRect() : null;
               const inside = r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom;
-              const edge = rect => rect ? [rect.left, rect.top, rect.right, rect.bottom].map(Math.round) : null;
-              return { inside: inside, label: edge(r), box: edge(box), bar: edge(bar), plot: edge(plot),
-                text: longest.text.textContent };
+              const edge = rect => [rect.left, rect.top, rect.right, rect.bottom].map(Math.round);
+              return { inside: inside, label: edge(r), box: edge(box), bar: edge(longest.bar), text: longest.text.textContent };
             }"""
     }
 }

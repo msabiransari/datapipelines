@@ -1,0 +1,100 @@
+{
+ "source": [
+  "modules/web/src/test/resources/chart-parity/numeric/numeric-normalized-overflow.json"
+ ],
+ "note": "Independently expected equal shares; the unscaled sum overflows float64.",
+ "document": {
+  "display_name": "Channel share by region",
+  "description": "Each region's amount split by channel, as a share of the region.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "month",
+      "type": "DATE"
+     },
+     {
+      "name": "channel",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "units",
+      "type": "INTEGER"
+     },
+     {
+      "name": "payload",
+      "type": "BINARY",
+      "nullable": true
+     },
+     {
+      "name": "segment",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar",
+    "labels": "values"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": "ascending"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "stack": "normalize",
+     "format": "percent"
+    },
+    "color": {
+     "field": "channel",
+     "type": "nominal",
+     "sort": "ascending",
+     "legend": null
+    }
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A",
+   "A"
+  ],
+  "channel": [
+   "one",
+   "two"
+  ],
+  "amount": [
+   1e+308,
+   1e+308
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "month": "DATE",
+  "channel": "STRING",
+  "amount": "DECIMAL",
+  "units": "INTEGER",
+  "payload": "BINARY",
+  "segment": "STRING"
+ }
+}

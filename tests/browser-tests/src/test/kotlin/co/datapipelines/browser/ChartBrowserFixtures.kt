@@ -136,7 +136,7 @@ object ChartBrowserFixtures {
      * A board seed's chart body (seeded RELEASED by SQL, so it is the document the runtime reads): a vertical bar over
      * the [band] column of [bandType], the sum of the INTEGER [value] column — or, with no [value], the count of rows
      * per category (the seeds whose pipeline returns one text column). [axisTitles] `false` authors both axis titles
-     * `null` (no title line), the figure main's Plotly seeds drew; the default draws the record's defaults (field name,
+     * `null` (no title line), the figure main's seeds drew before the record's defaults; the default draws those (field name,
      * "Sum of …").
      */
     fun barBody(

@@ -1,6 +1,7 @@
 package co.datapipelines.web.visualizations
 
 import co.datapipelines.visualization.ChartSchemas
+import co.datapipelines.visualization.ChartType
 import co.datapipelines.web.api.ApiExceptionHandler
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
@@ -56,7 +57,7 @@ class ChartSchemaControllerTest {
 
     @Test
     fun `every v1 file is served byte for byte as the classpath resource the validator loads, under its own id`() {
-        ChartSchemas.FILES.size shouldBe 2
+        ChartSchemas.FILES.size shouldBe ChartType.entries.size + 1
         for (file in ChartSchemas.FILES) {
             val path = "/schemas/chart/1/$file"
             val served =
@@ -80,7 +81,7 @@ class ChartSchemaControllerTest {
 
     @Test
     fun `a name outside the v1 files is the 404 envelope, so nothing else on the classpath is reachable`() {
-        for (name in listOf("plotly", "chart-support", "skeleton.schema", "BAR")) {
+        for (name in listOf("kpi", "chart-support", "skeleton.schema", "BAR")) {
             mvc
                 .perform(get("/schemas/chart/1/$name.schema.json"))
                 .andExpect(status().isNotFound)

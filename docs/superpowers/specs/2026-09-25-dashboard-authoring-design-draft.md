@@ -1,5 +1,6 @@
 # Draft: Dashboard authoring and rendering for Datapipelines
 
+**Superseded by** [Dashboards](../../dashboards.md) and the js-rendered charts design (#849, 2026-11-14) for every chart and rendering rule: the product draws its charts with its own engine and vendors no chart library (#988). The text below stays as history.
 **Status:** discussion draft for review; not a normative contract or implementation spec.
 **Date:** 2026-09-25; records the dashboard discussion of September 24–25, the owner's
 corrections of September 26–28 (D1–D49, R1–R28) and the runtime revision of September 28.

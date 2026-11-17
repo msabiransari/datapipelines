@@ -1,0 +1,220 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "four series ending at nearly the same value: their names are pushed apart inside the frame",
+ "document": {
+  "display_name": "colliding-labels",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line",
+    "labels": "last"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "Colliding names"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-01-01",
+   "2024-01-01",
+   "2024-01-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-07-01",
+   "2024-07-01",
+   "2024-07-01",
+   "2024-07-01",
+   "2024-08-01",
+   "2024-08-01",
+   "2024-08-01",
+   "2024-08-01",
+   "2024-09-01",
+   "2024-09-01",
+   "2024-09-01",
+   "2024-09-01",
+   "2024-10-01",
+   "2024-10-01",
+   "2024-10-01",
+   "2024-10-01",
+   "2024-11-01",
+   "2024-11-01",
+   "2024-11-01",
+   "2024-11-01",
+   "2024-12-01",
+   "2024-12-01",
+   "2024-12-01",
+   "2024-12-01"
+  ],
+  "s": [
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South",
+   "East",
+   "West"
+  ],
+  "v": [
+   20,
+   28,
+   36,
+   44,
+   21,
+   29,
+   37,
+   45,
+   22,
+   30,
+   38,
+   46,
+   23,
+   31,
+   39,
+   47,
+   24,
+   32,
+   40,
+   48,
+   25,
+   33,
+   41,
+   49,
+   26,
+   34,
+   42,
+   50,
+   27,
+   35,
+   43,
+   51,
+   28,
+   36,
+   44,
+   52,
+   29,
+   37,
+   45,
+   53,
+   30,
+   38,
+   46,
+   54,
+   50,
+   50.2,
+   50.4,
+   50.6
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "s": "STRING",
+  "v": "DECIMAL"
+ }
+}

@@ -1,0 +1,114 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "a unit on the value (G6) and two tooltip detail lines (G7)",
+ "document": {
+  "display_name": "tooltip-unit",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "port",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "share",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "area"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "unit": "t",
+     "format": "integer"
+    },
+    "tooltip": [
+     {
+      "field": "port",
+      "title": "Port"
+     },
+     {
+      "field": "share",
+      "format": "percent",
+      "title": "Share"
+     }
+    ]
+   },
+   "title": {
+    "text": "Units"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-06-01"
+  ],
+  "v": [
+   120,
+   130,
+   125,
+   140,
+   150,
+   160
+  ],
+  "port": [
+   "Rotterdam",
+   "Antwerp",
+   "Hamburg",
+   "Rotterdam",
+   "Le Havre",
+   "Antwerp"
+  ],
+  "share": [
+   0.1,
+   0.2,
+   0.15,
+   0.3,
+   0.25,
+   0.2
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "v": "DECIMAL",
+  "port": "STRING",
+  "share": "DECIMAL"
+ }
+}

@@ -12,9 +12,9 @@ import java.nio.file.Paths
 import java.nio.file.StandardOpenOption
 
 /**
- * #371 — the dashboard grid has a ROW UNIT, so a Plotly figure has a height on every page that
- * mounts the first-party composite adapter; #386 — a figure in a 2-row slot keeps a PLOT AREA
- * (compact margins with `automargin`, not Plotly's ≈100/80 px defaults, which ate the whole 176 px
+ * #371 — the dashboard grid has a ROW UNIT, so a chart has a height on every page that
+ * mounts the first-party composite adapter; #386 — a chart in a 2-row slot keeps a PLOT AREA
+ * (compact margins, not the library's ≈100/80 px defaults of the time, which ate the whole 176 px
  * slot); #412 — below `layout.breakpoint_px` (640 when absent) every item spans the full width in
  * grid order, the row unit unchanged (the implementation spec §3.2, dashboards.md §2.2).
  *
@@ -27,7 +27,8 @@ import java.nio.file.StandardOpenOption
  * follows the row unit. The unit and the gap being positive lengths are asserted FIRST: with neither
  * every bound below is vacuous. A slot's COLUMN count is derived from its width against the board's
  * track geometry, so "full width" is a number (12), not an inline style read back. The plot area is
- * Plotly's own `_fullLayout._size.h` (the `nsewdrag` rect beside it in the record).
+ * the chart engine's own (#987): the `plot` box of the draw's data index (record §4.3), scaled from
+ * the drawing's view box to the page — the occurrence's chart handle answers `index()`.
  *
  * The 640 px breakpoint is measured on the board: the 728 px board at the 760 px phone viewport holds
  * its 6/6/3/9 grid, while the ~710 px board at 1280 px beside the 202 px menu and the resource browser
@@ -68,15 +69,17 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     /**
-     * #870 — the 2-row chart drawn with the record's DEFAULT axis titles (`x`, `Sum of y`): each title is a
-     * second line beside its ticks, so this chart is held to [TITLED_PLOT_AREA_FLOOR], not #386's half. The
-     * seed's `slowchart` is re-authored with both titles (the suite seeds it `title: null`), and the titles
-     * are asserted EXACTLY, in the resolved layout and in the drawn text nodes: for a `null` title Plotly fills
-     * `_fullLayout` with its non-blank placeholder, so a non-blank check would pass on the untitled chart.
-     * Each theme is recorded on its own, so one red run shows both themes' outcomes.
+     * #870, re-expressed for the engine (#987) — the 2-row chart authored with the record's DEFAULT axis titles (`x`,
+     * `Sum of y`). The library drew each title as a second line beside its ticks and the case held the plot to a
+     * lower floor; the engine draws axis titles at the FULL level only (record §4.6: a frame of at least 360 × 240 at
+     * the default text sizes), and a 2-row slot is shorter than that, so the chart draws at the COMPACT level with no
+     * title line, and the plot keeps #386's half. The level is the engine's own reading of the drawn frame
+     * (`JsRendered.chrome.level` over the theme the adapter resolved), asserted compact, so the case cannot pass on a
+     * frame that drew at another level. The seed's `slowchart` is re-authored with both titles (the suite seeds it
+     * `title: null`). Each theme is recorded on its own, so one red run shows both themes' outcomes.
      */
     @Test
-    fun `a default chart with both axis titles keeps the titled plot-area floor in a 2-row slot, in both themes`() {
+    fun `a default chart with both axis titles draws compact in a 2-row slot - no title line, the plot keeps half, in both themes`() {
         startTrace()
         val root = ready("dprowt")
         val board = seedBoardWithGrid(root)
@@ -93,10 +96,10 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
                 val measured = measure(page, BOARD_SCOPE, BOARD_SLOTS_ALL.keys, "titled/$theme")
                 val titles = page.evaluate(TITLES_JS, mapOf("scope" to BOARD_SCOPE, "slot" to SMALL_SLOT)) as Map<*, *>
                 record("titled/$theme titles[$SMALL_SLOT]=$titles")
-                withClue("the '$SMALL_SLOT' chart resolves and draws the default axis titles: $titles") {
-                    titles shouldBe EXPECTED_TITLES
+                withClue("the '$SMALL_SLOT' chart draws at the compact level, with no axis title line: $titles") {
+                    titles shouldBe EXPECTED_COMPACT_TITLES
                 }
-                assertPlotAreaFloor(measured, SMALL_SLOT, TITLED_PLOT_AREA_FLOOR)
+                assertPlotAreaFloor(measured, SMALL_SLOT)
             }.onFailure { failures += "$theme: ${it.message}" }
         }
         failures shouldBe emptyList()
@@ -317,14 +320,14 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => window.__dpPage && window.__dpPage.ready === true")
     }
 
-    /** Waits for Plotly's own render of every figure, measures, records the line and shoots the page. */
+    /** Waits for the engine's drawing of every chart, measures, records the line and shoots the page. */
     private fun measure(
         target: Page,
         scope: String,
         slots: Collection<String>,
         label: String,
     ): Measured {
-        val figures = slots.filter { it in PLOTLY_SLOTS }
+        val figures = slots.filter { it in CHART_SLOTS }
         target.waitForFunction(RENDERED_JS, mapOf("scope" to scope, "slots" to figures))
         val measured = Measured(label, target.evaluate(MEASURE_JS, mapOf("scope" to scope, "slots" to slots.toList())) as Map<*, *>)
         record(measured.toString())
@@ -409,7 +412,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     }
 
     /**
-     * The figure follows its slot's WIDTH too: after a collapse (or a crossing) Plotly re-measured to
+     * The figure follows its slot's WIDTH too: after a collapse (or a crossing) the chart re-drew to
      * its card's chart area, which is the slot less the card's border and padding ([CARD_INSET_MAX_PX]).
      */
     private fun assertFiguresSpanTheirSlots(
@@ -443,8 +446,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
      * #386's floor: the 2-row figure's PLOT AREA is at least [PLOT_AREA_FLOOR] of its slot. Half,
      * because what a compact frame leaves outside the plot — one line of x tick labels below (an axis
      * title adds a second), a title line above when the figure has one — fits in the other half of a
-     * 176 px slot at the default font; Plotly's own margins (≈100 top + 80 bottom) left a sliver.
-     * A chart with both axis titles passes [TITLED_PLOT_AREA_FLOOR] as [floor] (#870).
+     * 176 px slot at the default font; the library's default margins (≈100 top + 80 bottom) left a sliver.
      */
     private fun assertPlotAreaFloor(
         m: Measured,
@@ -453,7 +455,9 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
     ) {
         val slotHeight = m.slot(name, "height")
         val plot = m.slot(name, "plot")
-        record("${m.label} plotArea[$name]=${plot}px of slot ${slotHeight}px ratio=${plot / slotHeight} (drag ${m.slot(name, "drag")}px)")
+        record(
+            "${m.label} plotArea[$name]=${plot}px of slot ${slotHeight}px ratio=${plot / slotHeight} (figure ${m.slot(name, "figure")}px)",
+        )
         withClue("the '$name' plot area ($plot px) is at least ${floor * slotHeight} px ($floor of the slot): $m") {
             (plot >= floor * slotHeight) shouldBe true
         }
@@ -550,11 +554,11 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         /** The seeded grid's last row: total and slowchart sit at y 4 with h 2. */
         const val BOARD_ROWS = 6
 
-        /** The 2-row Plotly slot #386 is about. */
+        /** The 2-row chart slot #386 is about. */
         const val SMALL_SLOT = "slowchart"
 
-        /** The slots whose content is a Plotly figure (cells is a table, total a KPI). */
-        val PLOTLY_SLOTS = setOf("revenue", "slowchart", "preview")
+        /** The slots whose content is a chart (cells is a table, total a KPI). */
+        val CHART_SLOTS = setOf("revenue", "slowchart", "preview")
 
         /** The preview's first case: ONE occurrence named `preview`, 12 wide, 4 rows. */
         const val PREVIEW_SCOPE = "section[data-dp-case-index='0']"
@@ -576,56 +580,74 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
         const val WIDTH_TOLERANCE_PX = 3.0
 
         /**
-         * #501's compact card around a figure with no description: its border (2 × 1) and padding
-         * (2 × `--gap-sm`, 16), one heading line (`--space-6`, 24, the chip on it) and one gap
-         * (`--gap-sm`, 8) — 50 px, plus [TOLERANCE_PX]. A reserved status row (#473's foot, 24 px
-         * plus a gap) or the old `--gap-md` padding exceeds it.
+         * #501's compact card around a figure with no description: its border (2 × 1) and padding, one heading line
+         * (`--space-6`, 24, the chip on it) and one gap (`--gap-sm`, 8), plus [TOLERANCE_PX]. #987: a card that holds a
+         * chart pads by the look contract's `var(--chart-pad, 16px)` (§5.1/§5.2), not `--gap-sm`, so 2 + 2 × 16 + 24 + 8
+         * = 66 px (measured 66 at 639 and 1280 px, both themes). A reserved status row (#473's foot, 24 px plus a gap)
+         * still exceeds it.
          */
-        const val CARD_CHROME_MAX_PX = 53.0
+        const val CARD_CHROME_MAX_PX = 69.0
 
-        /** The card's border and padding across the width: 2 × (1 + 8) = 18 px, plus [WIDTH_TOLERANCE_PX]. */
-        const val CARD_INSET_MAX_PX = 21.0
+        /** A chart card's border and padding across the width: 2 × (1 + 16) = 34 px (#987), plus [WIDTH_TOLERANCE_PX]. */
+        const val CARD_INSET_MAX_PX = 37.0
         const val HALF_LOW = 0.35
         const val HALF_HIGH = 0.65
         const val PLOT_AREA_FLOOR = 0.5
 
         /**
-         * #870's floor for a 2-row chart with BOTH default axis titles, each a second line beside its ticks.
-         * Measured 2026-11-12 at 1280 px: plot 79 px of the 176 px slot in both themes, r = 0.449; the floor is
-         * the largest multiple of 0.05 at or under r - 0.03 (70.4 px), so a few pixels of font drift pass and a
-         * frame that takes another line does not.
+         * A 2-row chart's reading: the compact level and no axis title, though the document authors the record's
+         * defaults (`x`, `Sum of y`, drawn at the full level only, record §4.6).
          */
-        const val TITLED_PLOT_AREA_FLOOR = 0.40
+        val EXPECTED_COMPACT_TITLES = mapOf("level" to "compact", "xDrawn" to null, "yDrawn" to null)
 
         /**
-         * The default titles `titles()` derives for `barBody("x", "INTEGER", "y")` (datapipelines-dashboard-chart.js):
-         * the band's field name and `Sum of` the value's — resolved (`xResolved`/`yResolved`) and drawn (the svg's text).
+         * One chart's level and drawn axis titles (absent: null): the level is the engine's reading of the drawn frame
+         * (the viewBox) under the theme the adapter resolves; the band title is written level under the plot, the
+         * value title turned on the left (a vertical bar). Turned is read off the drawn matrix (`getCTM()`'s rotation
+         * terms), so the case reads what the browser drew, not how the writer spelled it.
          */
-        val EXPECTED_TITLES = mapOf("xResolved" to "x", "yResolved" to "Sum of y", "xDrawn" to "x", "yDrawn" to "Sum of y")
-
-        /** One graph's resolved axis titles and the text of Plotly's drawn `.xtitle` / `.ytitle` nodes (absent: null). */
         const val TITLES_JS =
             """(args) => {
-              var graph = document.querySelector(args.scope + " [data-dp-slot='" + args.slot + "'] .js-plotly-plot");
-              var layout = graph && graph._fullLayout;
-              function resolved(axis) { return layout && layout[axis] && layout[axis].title ? layout[axis].title.text : null; }
-              function drawn(cls) { var node = graph && graph.querySelector('text.' + cls); return node ? node.textContent : null; }
-              return { xResolved: resolved('xaxis'), yResolved: resolved('yaxis'), xDrawn: drawn('xtitle'), yDrawn: drawn('ytitle') };
+              var svg = document.querySelector(args.scope + " [data-dp-slot='" + args.slot + "'] svg.dp-chart");
+              if (!svg) return { level: null, xDrawn: null, yDrawn: null };
+              var box = svg.viewBox.baseVal;
+              var resolved = window.DatapipelinesDashboardChart._internal.resolveTheme(svg).theme;
+              var lvl = window.JsRendered.chrome.level(box.width, box.height, window.JsRendered.theme.resolve(resolved));
+              var titles = Array.from(svg.querySelectorAll('text.dp-axis'));
+              var isTurned = function (t) { var m = t.getCTM(); return !!m && Math.abs(m.b) > 0.5; };
+              var flat = titles.filter(function (t) { return !isTurned(t); })[0];
+              var turned = titles.filter(isTurned)[0];
+              return { level: lvl, xDrawn: flat ? flat.textContent : null, yDrawn: turned ? turned.textContent : null };
             }"""
         const val EXCERPT = 600
         val HTTP_OK_RANGE = 200..299
         val REPORT: Path = Paths.get("build", "reports", "dashboard-grid-row-unit", "measurements.txt")
 
-        /** Plotly's own completion: every figure's graph div carries its resolved layout. */
+        /**
+         * The chart handle of the occurrence [name] under the scope (#987): the board page's instance
+         * (`window.__dpPage`) or the preview's first case (`window.DatapipelinesPreview`, the preview's registry).
+         */
+        const val HANDLE_JS =
+            """function handle(scope, name) {
+                var instance = scope === '#dp-board' ? (window.__dpPage && window.__dpPage.instance)
+                  : (window.DatapipelinesPreview && window.DatapipelinesPreview.instances[0]);
+                var occurrence = instance && instance._occurrences ? instance._occurrences[name] : null;
+                return occurrence ? occurrence.renderer : null;
+              }"""
+
+        /** The engine's completion: every chart's slot holds its drawing and its handle the draw's data index. */
         const val RENDERED_JS =
-            """(args) => args.slots.every(function (name) {
-              var g = document.querySelector(args.scope + " [data-dp-slot='" + name + "'] .js-plotly-plot");
-              return !!(g && g._fullLayout && g.querySelector('.main-svg'));
-            })"""
+            """(args) => { $HANDLE_JS
+              return args.slots.every(function (name) {
+                var svg = document.querySelector(args.scope + " [data-dp-slot='" + name + "'] svg.dp-chart");
+                var h = handle(args.scope, name);
+                return !!(svg && h && h.index());
+              });
+            }"""
 
         /**
          * After a board-width crossing: every figure's slot is (full) or is not (stored) the board's width,
-         * AND Plotly's svg has caught up with its card's chart-area width — the re-measure, not just the
+         * AND the chart's svg has caught up with its card's chart-area width — the re-draw, not just the
          * re-place.
          */
         const val SETTLED_JS =
@@ -635,7 +657,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
               var width = board.getBoundingClientRect().width;
               return args.slots.every(function (name) {
                 var slot = board.querySelector("[data-dp-slot='" + name + "']");
-                var svg = slot && slot.querySelector('.plotly .main-svg');
+                var svg = slot && slot.querySelector('svg.dp-chart');
                 var chart = slot && slot.querySelector('.dp-dashboard-viz');
                 if (!svg || !chart) return false;
                 var slotWidth = slot.getBoundingClientRect().width;
@@ -649,7 +671,7 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
          * area's and figure's geometry.
          */
         const val MEASURE_JS =
-            """(args) => {
+            """(args) => { $HANDLE_JS
               var root = document.querySelector(args.scope);
               var board = root.querySelector('.dp-dashboard');
               var probe = document.createElement('div');
@@ -679,15 +701,16 @@ class DashboardGridRowUnitBrowserTest : DashboardBrowserSuite() {
                   entry.chartWidth = chart.getBoundingClientRect().width;
                   entry.chartHeight = chart.getBoundingClientRect().height;
                 }
-                var svg = slot.querySelector('.plotly .main-svg');
+                var svg = slot.querySelector('svg.dp-chart');
                 if (svg) {
-                  var graph = slot.querySelector('.js-plotly-plot');
-                  var drag = slot.querySelector('.nsewdrag');
-                  entry.figure = svg.getBoundingClientRect().height;
-                  entry.figureWidth = svg.getBoundingClientRect().width;
-                  entry.plot = graph && graph._fullLayout && graph._fullLayout._size ? graph._fullLayout._size.h : 0;
-                  entry.drag = drag ? drag.getBoundingClientRect().height : 0;
-                  entry.margin = graph && graph._fullLayout && graph._fullLayout._size ? graph._fullLayout._size : null;
+                  var h = handle(args.scope, name);
+                  var index = h ? h.index() : null;
+                  var drawn = svg.getBoundingClientRect();
+                  var scale = svg.viewBox.baseVal.height > 0 ? drawn.height / svg.viewBox.baseVal.height : 0;
+                  entry.figure = drawn.height;
+                  entry.figureWidth = drawn.width;
+                  entry.plot = index ? index.plot.h * scale : 0;
+                  entry.margin = index ? index.plot : null;
                 }
                 out.slots[name] = entry;
               });

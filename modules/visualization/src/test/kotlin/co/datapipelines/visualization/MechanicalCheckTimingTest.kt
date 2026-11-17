@@ -30,7 +30,8 @@ class MechanicalCheckTimingTest {
                 fixtures = evaluator,
                 templates = facts,
             )
-        // 1,000 distinct categories: the chart model draws 1,000 marks, and the case asserts exactly that.
+        // 1,000 distinct categories, and the case asserts 1,000 marks: judged by the engine where the runtime runs
+        // (application's ChartJudgeEngineTest); here, without it, the chart assertions are listed as unjudged.
         val tree = DocumentFixtures.visualization().also { it.obj("tests.cases[0].assertions[1]").put("equals", 1_000) }
         val body = ValidatorFakes.visualizationDocument(tree).body
 
@@ -39,7 +40,7 @@ class MechanicalCheckTimingTest {
         val elapsed = Duration.ofNanos(System.nanoTime() - started)
 
         report.ok shouldBe true
-        report.unjudged shouldBe emptyList()
+        report.unjudged.map { it.kind } shouldBe listOf("rendered", "mark_count")
         report.cases.values
             .single()
             .rows shouldBe 1_000

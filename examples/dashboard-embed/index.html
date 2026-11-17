@@ -29,12 +29,6 @@
     <link rel="stylesheet" href="https://dp.example.co/vendor/design-system/primitives.css" />
     <link rel="stylesheet" href="https://dp.example.co/css/app.css" />
     <link rel="stylesheet" href="https://dp.example.co/css/dashboards.css" />
-    <link rel="stylesheet" href="https://dp.example.co/vendor/plotly/plotly.css" />
-
-    <!-- CSP-safe Plotly styling: Plotly checks for this empty template before it
-         injects inline styles; with it placed the chart rules come from plotly.css.
-         It must stand in <head> BEFORE any script. -->
-    <template id="plotly.js-style-global" class="no-inline-styles"></template>
   </head>
 
   <body>
@@ -49,16 +43,38 @@
     ></div>
     <div id="parameters"></div>
 
-    <!-- Exactly one Plotly bundle, the "2d": every chart family the chart kind
-         ships is a 2D trace. The attribute is the declaration the runtime reads. -->
-    <script src="https://dp.example.co/vendor/plotly/plotly-2d.min.js" data-dp-plotly-bundle="2d"></script>
+    <!-- The chart engine's files, in the engine's load order (the order the server
+         loads them in): the datapipelines client library draws every chart itself. -->
+    <script src="https://dp.example.co/js/js-rendered/00-namespace.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/01-text.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/02-widths-noto-sans.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/03-measure.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/04-srgb.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/05-theme.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/06-tables.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/07-scales.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/08-prim.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/09-data.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/10-chrome.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/11-axes.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/12-cartesian.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/13-time.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/14-curve.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/15-thin.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/16-lines.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/20-render.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/30-write-dom.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/31-write-string.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/types/bar.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/types/line.js"></script>
+    <script src="https://dp.example.co/js/js-rendered/types/area.js"></script>
 
-    <!-- The runtime, then the chart kind's adapter and its Plotly converter, then
-         the table and KPI renderers, then the boot glue. The adapters and the
-         converter register themselves at script load, before init. -->
+    <!-- The runtime, then the chart interaction layer and the chart kind's
+         adapter, then the table and KPI renderers, then the boot glue. The
+         adapters register themselves at script load, before init. -->
     <script src="https://dp.example.co/js/datapipelines-dashboard.js"></script>
+    <script src="https://dp.example.co/js/datapipelines-chart-interactions.js"></script>
     <script src="https://dp.example.co/js/datapipelines-dashboard-chart.js"></script>
-    <script src="https://dp.example.co/js/datapipelines-dashboard-plotly.js"></script>
     <script src="https://dp.example.co/js/datapipelines-dashboard-table.js"></script>
     <script src="https://dp.example.co/js/datapipelines-dashboard-kpi.js"></script>
     <script src="embed.js"></script>

@@ -1,0 +1,105 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "a nominal x: evenly spaced in the band's order (sorted by name)",
+ "document": {
+  "display_name": "nominal-x",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Stage"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "Stages"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Plan",
+   "Plan",
+   "Build",
+   "Build",
+   "Test",
+   "Test",
+   "Ship",
+   "Ship",
+   "Run",
+   "Run"
+  ],
+  "s": [
+   "Team A",
+   "Team B",
+   "Team A",
+   "Team B",
+   "Team A",
+   "Team B",
+   "Team A",
+   "Team B",
+   "Team A",
+   "Team B"
+  ],
+  "v": [
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "s": "STRING",
+  "v": "DECIMAL"
+ }
+}

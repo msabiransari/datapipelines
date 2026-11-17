@@ -64,11 +64,10 @@ Build in this order — each step's refusal names the path to fix.
 
 ## Charts — one document for every host
 
-A chart is ONE library-neutral document. The runtime converts it into the configuration of whichever charting
-library the host page draws with (the product's own pages draw with Plotly), so you never write a library's
-configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/bar.schema.json` (it includes `/schemas/chart/1/skeleton.schema.json`): check your document
-against it before you write. Where this page and the schema disagree, the schema wins.
+A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
+same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line` or `area` (each includes
+`/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
 {
@@ -113,6 +112,44 @@ output of its pinned script template), and every `field` names one of its column
 - **Count bars with `mark_count`:** the distinct band × series cells with a value. The example with 2 regions ×
   2 products in its fixture has `mark_count` 4.
 
+**Line or area?** A `line` shows how values move along an ordered axis (time, a number, an ordered category) and
+compares a few series; an `area` shows the same where the amount itself matters — filled down to zero, or stacked
+to show how the parts add up to a total (`"normalize"`: shares of it). Prefer a bar for unordered categories.
+
+```json
+"config": {
+  "mark": { "type": "line" },
+  "encoding": {
+    "x": { "field": "day", "type": "temporal", "format": "date" },
+    "y": { "field": "amount", "type": "quantitative", "aggregate": "sum", "format": "compact", "unit": "kWh" },
+    "color": { "field": "site", "type": "nominal", "sort": "ascending" }
+  }
+}
+```
+
+- **A time `x` is a position, never a band**, on a line or an area: `{field, type: "temporal", format?}` — a
+  continuous UTC axis (`format` `date`, `month`, `year` or `datetime`), no `sort`. A number `x` is a position too
+  (`type: "quantitative"`, a number format, optional `unit` and `scale`). A category `x` is a band, as on a bar
+  (`nominal` or `ordinal`, `sort` required).
+- **The look is fixed:** a smooth line that never overshoots its points, a dot on each line's last point, and with
+  2 to 4 series their names at the lines' ends. You may write `mark.curve` (`smooth`, `step`, `linear`),
+  `mark.points` (`end`, `markers`, `none`), `mark.labels: "last"` (the last value at the line's end) and a legend
+  place (`color.legend.orient` `top`, `bottom`, `left`, `right`; `null` for none) — nothing else. A null value is a
+  gap in the line.
+- **A line never stacks** (leave `stack` out). An area may: with `color` or `fields`, `stack` is `"zero"`,
+  `"normalize"` (format `percent`) or `null`; without them, leave it out.
+
+**On every type:**
+- **`fields` instead of `color`:** `"y": {"fields": [{"field": "plan"}, {"field": "actual", "title": "Actual"}],
+  "type": "quantitative", "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
+  `field` and `color` are then left out).
+- **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
+  tooltip detail.
+- **`encoding.tooltip`:** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
+- **`scale`:** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
+  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar or a line only, with no
+  `zero`; a value at or below zero is then not drawn.
+
 A chart refusal is `visualization.validation.config_schema_invalid` with `details.renderer: "chart"`; each
 failure's `path` names the field. Its `details.reason` says what to fix:
 
@@ -121,27 +158,27 @@ failure's `path` names the field. Its `details.reason` says what to fix:
 | `schema` | the document breaks the schema at `details.pointer` (`details.keyword` says how) — often a missing `sort`, `aggregate` or `stack`, or an unknown key |
 | `chart.inputs.cardinality` / `chart.transform.output_unknown` | several inputs and no script template, so the chart cannot know its columns: keep one input, or pin a script template that combines them |
 | `chart.field.unknown` / `chart.field.binary` / `chart.field.null_type` | name a column that exists and is neither BINARY nor NULL-typed |
-| `chart.measure.not_numeric` | put a numeric column on the value |
-| `chart.category.type_mismatch` | a `temporal` band needs a DATE or TIMESTAMP column — or make it `nominal` |
+| `chart.measure.not_numeric` | put a numeric column on the value, or on a `quantitative` `x` |
+| `chart.category.type_mismatch` | a `temporal` band or `x` needs a DATE or TIMESTAMP column — or make it `nominal` |
 | `chart.category.nullable` / `chart.color.nullable` | use a non-nullable band or series column |
-| `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | drop `scale.domain` on a normalized stack; else make it increasing and include zero |
+| `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | drop `scale.domain` on a normalized stack; else make it increasing, and include zero on a bar, an area or beside `zero: true` |
+| `chart.scale.log_unsupported` | use a linear scale — a log scale is refused on an area, on a stacked or normalized value and beside `scale.zero` |
+| `chart.scale.domain_log` | a log `domain` must be greater than 0 and increasing |
 | `chart.format.normalize_percent` / `chart.format.currency_unknown` | format a normalized value `percent`; use a known currency code |
 | `chart.bindings.mismatch` | delete `bindings` — the save derives them |
-| `chart.unsupported.<field>` | the library cannot draw that field: drop it |
-
-A write answers `warnings` beside the version — `[]` when clean, else `{code: "chart.degraded.<field>", path,
-library}` for a field the library draws only approximately. A warning does not refuse the save; read it, and
-check that field in the preview.
 
 ## Proving a visualization — the test loop
 
 A visualization's `tests.cases` are its proof: fixture rows for every input and the assertions a
 reader checks (`rendered`, `mark_count` — a chart's bars, `no_console_errors`, `text_visible`, `no_data`,
-`value_visible`). The server's mechanical feasibility check scans configuration strings and bound
-strings or INTEGER/DECIMAL scalar numeric text (for example, `42` and `10.5`) by substring, without
-numeric normalization. Locale, currency, percent and rounded display text still need your visual
-check in the preview; the mechanical rendered state is `not_available`. Run the cases against the
-real renderer before you hand the work over:
+`value_visible`). For a `chart` the server draws each case with the same chart engine the browser
+runs, at 640 × 400, and judges `rendered`, `mark_count`, `no_data` and `text_visible` from that
+drawing: a `text_visible` string must be in a text the chart shows. A server without the JavaScript
+runtime lists those four as `unjudged` instead. For a `table` or `kpi` the mechanical feasibility
+check scans configuration strings and bound strings or INTEGER/DECIMAL scalar numeric text (for
+example, `42` and `10.5`) by substring, without numeric normalization. Locale, currency, percent and
+rounded display text still need your visual check in the preview. Run the cases against the real
+renderer before you hand the work over:
 
 1. **Start** with `visualizations_test_start` (`id`). It tests the WORKING version (the draft) and
    answers `preview_url`, the case names and `expires_at`. Any edit afterwards voids the session —

@@ -579,6 +579,19 @@ class ScriptVocabularyGuardTest {
                     "the SVG `transform` attribute is layout geometry (kept sense 1)",
                 ),
                 Triple(
+                    Regex(
+                        "^modules/js-rendered/src/(?:main/resources/co/datapipelines/jsrendered/engine/30-write-dom\\.js|" +
+                            "test/js/(?:geometry\\.js|writers\\.test\\.mjs))$",
+                    ),
+                    Regex("\\[\"transform\", \"rotate\\(|\"font-weight\", \"transform\"|the writer's transform does"),
+                    "the chart engine's SVG `transform` attribute (a rotated label) and its tests (kept sense 1; #985)",
+                ),
+                Triple(
+                    Regex("^modules/application/src/test/kotlin/co/datapipelines/application/charts/ChartJudgeEngineTest\\.kt$"),
+                    Regex("TemplatePin\\.Transform|\"transform\":\\{\"template\""),
+                    "the judge's engine suite (#986): a chart document's block pin and its wire key — a node noun stays red here",
+                ),
+                Triple(
                     Regex("static/js/shell\\.js$"),
                     Regex("transform and opacity only"),
                     "the swap's CSS motion (kept sense 1)",

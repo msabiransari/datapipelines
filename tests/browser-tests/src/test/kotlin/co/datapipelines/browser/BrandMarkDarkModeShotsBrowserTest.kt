@@ -58,7 +58,7 @@ class BrandMarkDarkModeShotsBrowserTest : DashboardBrowserSuite() {
         page.setViewportSize(1440, 900)
         page.navigate("$baseUrl/dashboards/$board")
         awaitBoardReady()
-        page.locator("#dp-board [data-dp-viz='slowchart'] .plotly .main-svg").first().waitFor()
+        page.locator("#dp-board [data-dp-viz='slowchart'] svg.dp-chart").first().waitFor()
         page.waitForFunction(
             """
             () => {

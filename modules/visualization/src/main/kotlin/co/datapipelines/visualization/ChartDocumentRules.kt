@@ -17,13 +17,11 @@ enum class BindingsPresence {
 
 /**
  * A `chart` document's save layers (design record 2026-11-06 §4.4) over the body AS STORED: (1) the v1 JSON Schema
- * ([ChartSchemaValidator]), (2) the save rules ([ChartSaveRules]), (3) the D-A authority ([ChartLibrarySupport] —
- * the server library's table). [VisualizationValidator] runs them with the product's own rules in layer 2 and stops
- * at the first layer that refuses, so a document fails at exactly one layer.
+ * ([ChartSchemaValidator]), (2) the save rules ([ChartSaveRules]). [VisualizationValidator] runs them with the
+ * product's own rules in layer 2 and stops at the first layer that refuses, so a document fails at exactly one layer.
  */
 class ChartDocumentRules(
     private val schema: ChartSchemaValidator = ChartSchemaValidator(),
-    val support: ChartLibrarySupport = ChartLibrarySupport.load(),
 ) {
     /** The schema's input: the body as [ArtifactJson.writeBody] stores it, `bindings` as the author sent it. */
     fun storedForm(document: VisualizationDocument): ObjectNode {
@@ -44,12 +42,6 @@ class ChartDocumentRules(
         tree: JsonNode,
         columns: List<InputColumn>?,
     ): ChartSaveVerdict = ChartSaveRules.check(tree, columns)
-
-    /** Layer 3. */
-    fun libraryRules(
-        tree: JsonNode,
-        columns: List<InputColumn>,
-    ): ChartLibrarySupport.Verdict = support.judge(BarFieldSet.of(tree, columns), BarChannels.of(tree.path("config")))
 
     companion object {
         /** The production rules — the schema compiles once per JVM. */

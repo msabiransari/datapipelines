@@ -1,0 +1,152 @@
+{
+ "source": [
+  "lane 989 make-fixtures.mjs"
+ ],
+ "note": "labels: last with two series: one label per line, the name first, then the last value",
+ "document": {
+  "display_name": "labels-last",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line",
+    "labels": "last",
+    "curve": "smooth",
+    "points": "end"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Month",
+     "format": "month"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "format": "compact",
+     "unit": "USD"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "Last values"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-01-01",
+   "2024-02-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-06-01",
+   "2024-07-01",
+   "2024-07-01",
+   "2024-08-01",
+   "2024-08-01",
+   "2024-09-01",
+   "2024-09-01",
+   "2024-10-01",
+   "2024-10-01",
+   "2024-11-01",
+   "2024-11-01",
+   "2024-12-01",
+   "2024-12-01"
+  ],
+  "s": [
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports",
+   "Imports",
+   "Exports"
+  ],
+  "v": [
+   3200000000,
+   1400000000,
+   3300000000,
+   1600000000,
+   3400000000,
+   1800000000,
+   3500000000,
+   2000000000,
+   3600000000,
+   2200000000,
+   3700000000,
+   2400000000,
+   3800000000,
+   2600000000,
+   3900000000,
+   2800000000,
+   4000000000,
+   3000000000,
+   4100000000,
+   3200000000,
+   4200000000,
+   3400000000,
+   4300000000,
+   3600000000
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "s": "STRING",
+  "v": "DECIMAL"
+ }
+}

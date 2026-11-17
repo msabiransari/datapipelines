@@ -293,9 +293,21 @@ old "$gone_root/a" "$gone_root/b" "$gone_root" "$live_root/a" "$live_root"
 mkdir -p "$parent/0123456789abcdef"; payload "$parent/0123456789abcdef/f"; old "$parent/0123456789abcdef"
 printf '%s\n' "$FX/never-existed" > "$parent/fedcba9876543210.checkout"
 mkroot "$CO" > /dev/null
-pass c14a real real 'th::_remover_extra_args() { [ "$1" != gone ] || echo --stop-after 1; }'
+# Visit the gone root first: filesystem enumeration order must not decide this proof.
+pass c14a real real 'th::_remover_extra_args() { [ "$1" != gone ] || echo --stop-after 1; }
+  eval "$(declare -f th::_entries | sed "1s/th::_entries/th::_real_entries/")"
+  th::_entries() {
+    th::_real_entries "$@" || return $?
+    [ "$1" = "$parent" ] || return 0
+    local entry; local first=() rest=()
+    for entry in "${TH_ENTRIES[@]}"; do
+      if [[ "$entry" == *$'"'"'\t'"'"'"${gone_root##*/}" ]]; then first+=("$entry"); else rest+=("$entry"); fi
+    done
+    TH_ENTRIES=("${first[@]}" "${rest[@]}")
+  }'
 exists "$gone_root" 'the part-way root'; exists "$gone_root.checkout" 'the part-way root'"'"'s record'
-expect roots-unrecorded 1
+expect partial 1
+grep -q ' stopped at budget' "$OUT" || fail "no stopped at budget: $(cat "$OUT")"
 exists "$live_root/a"; exists "$live_root.checkout"
 exists "$parent/0123456789abcdef/f" 'the unrecorded root'
 # The part-way removal touched the root: the next pass finishes it once it is old again.

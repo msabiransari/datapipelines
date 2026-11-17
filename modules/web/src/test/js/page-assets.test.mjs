@@ -41,6 +41,7 @@ globalThis.document = {
 globalThis.fetch = async source => { fetched.push(source); return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) }; };
 
 const assets = await import("../../main/resources/static/js/page-assets.mjs");
+const { engineFiles } = await import("./support/js-rendered.mjs");
 
 const MOUNT_ATTRIBUTE = "data-page-mount";
 function script(src, mount = false) {
@@ -75,7 +76,10 @@ const count = (list, source) => list.filter(entry => entry === source).length;
 
 test("the script-URL gate admits first-party js/vendor paths only", () => {
   assert.equal(assets.assetPath("/js/lifecycle-dialog.js"), "/js/lifecycle-dialog.js");
-  assert.equal(assets.assetPath("/vendor/plotly/plotly-3d.min.js"), "/vendor/plotly/plotly-3d.min.js");
+  assert.equal(assets.assetPath("/vendor/alpinejs/alpine.min.js"), "/vendor/alpinejs/alpine.min.js");
+  // The chart engine's files, served under /js/js-rendered/ (one of them in a sub-directory).
+  assert.equal(assets.assetPath("/js/js-rendered/00-namespace.js"), "/js/js-rendered/00-namespace.js");
+  assert.equal(assets.assetPath("/js/js-rendered/types/bar.js"), "/js/js-rendered/types/bar.js");
   for (const hostile of ["https://evil.example/x.js", "//evil.example/x.js", "/js/../admin.js", "/js/./x.js", "/js/x.js?y=1",
     "javascript:alert(1)", "/static/x.js", "/js/x.css", "", null, 7]) {
     assert.throws(() => assets.assetPath(hostile), /Invalid page dependency/, String(hostile));
@@ -282,4 +286,21 @@ test("the Dependencies mount is a named page mount: once per catalog node, after
   await assets.mountPage(mainWith(catalogOf(DEPENDENCIES))); await settle();
   assert.equal(dependencyMounts.length, 2, "a second workspace (or a history restore) mounts again");
   assert.equal(executed.length, before, "and executes nothing again");
+});
+
+test("the chart engine's files, a run of a board's catalog before the chart kind, execute once each in load order; a second page's catalog executes none again", async () => {
+  const engine = engineFiles().map(name => "/js/js-rendered/" + name);
+  // The engine's own list ends with its chart templates (`types/`), the last one whichever type was added last.
+  assert.ok(engine.length >= 10 && /^\/js\/js-rendered\/types\/[a-z]+\.js$/.test(engine.at(-1)), JSON.stringify(engine));
+  const board = [...engine, "/js/datapipelines-dashboard.js", "/js/datapipelines-chart-interactions.js", "/js/datapipelines-dashboard-chart.js"];
+  const main = mainWith(catalogOf(board));
+  await assets.preparePage(main); await settle();
+  assert.equal(main.notices.length, 0);
+  const seen = executed.filter(source => engine.includes(source));
+  assert.deepEqual(seen, engine, "every engine file executed once, in the engine's load order");
+  assert.ok(executed.indexOf("/js/datapipelines-dashboard-chart.js") > executed.indexOf(engine.at(-1)), "the chart kind after the engine");
+  assert.ok(executed.indexOf("/js/datapipelines-chart-interactions.js") === executed.indexOf("/js/datapipelines-dashboard-chart.js") - 1, "the interaction layer directly before the chart kind (#990 D1)");
+  const before = executed.length;
+  await assets.preparePage(mainWith(catalogOf(board))); await settle();
+  assert.equal(executed.length, before, "a later page in the same document executes no engine file again");
 });

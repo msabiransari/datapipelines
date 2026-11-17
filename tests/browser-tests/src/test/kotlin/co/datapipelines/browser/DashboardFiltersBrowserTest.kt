@@ -465,8 +465,7 @@ class DashboardFiltersBrowserTest : DashboardBrowserSuite() {
               window.__dp2 = { ready: false, instance: null };
               const instance = window.DatapipelinesDashboard.init({ server: { baseUrl: '', credentials: 'session' },
                 dashboard: { id: id, version: 'released' }, container: second,
-                adapter: window.DatapipelinesDashboard.adapters(second),
-                charts: { library: 'plotly', instance: window.Plotly } });
+                adapter: window.DatapipelinesDashboard.adapters(second) });
               window.__dp2.instance = instance;
               instance.ready.then(function () { window.__dp2.ready = true; }, function () {}); }""",
             board,

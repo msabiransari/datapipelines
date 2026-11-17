@@ -8,7 +8,7 @@
      route's, never a second copy). A refresh's execution links are shown only to a principal
      who reads executions — a promoter's refresh names none (rest-api §23.3, dashboards.md
      §5.7). An execution link is an ORDINAL app link (boosting is fine here: an execution page
-     carries no Plotly bundle).
+     loads no chart script).
 
      UPDATES are a BOUNDED POLL, deliberately, and not the runtime's notification hooks: the
      pane's source of truth is the DURABLE refresh record (the caller's history, including the

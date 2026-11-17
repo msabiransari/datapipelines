@@ -3,7 +3,7 @@
   "$id": "https://datapipelines.co/schemas/chart/1/skeleton.schema.json",
   "$comment": "Product copy of the 854 lane schema, amended by lane #860 per design record 2026-11-06-neutral-chart-grammar: §4.2 (display_name 1-120, description <= 2000, presentation refused on a chart document) and R11 (plain text refuses control characters only; < and > are allowed and escaped at render). Served unchanged at /schemas/chart/1/skeleton.schema.json.",
   "title": "datapipelines chart document, renderer.kind = chart, renderer.version = 1 (skeleton)",
-  "description": "The document shape shared by every chart family (spec/skeleton.md). config is one family's configuration, chosen from the family registry ($defs/familyConfig); each family schema (bar.schema.json) defines its config and narrows this document to it. Every object is closed (additionalProperties: false). Version 1 is the path segment of every $id: an incompatible change is version 2 at a new path, never an edit here.",
+  "description": "The document shape shared by every chart family (spec/skeleton.md). config is one family's configuration, chosen from the family registry ($defs/familyConfig); each family schema (bar.schema.json, line.schema.json, area.schema.json) defines its config and narrows this document to it. The channel shapes the families share (band, value, position, series, scale, detail; design record 2026-11-14-js-rendered-charts §4.4) are defined here once. Every object is closed (additionalProperties: false). Version 1 is the path segment of every $id: an incompatible change is version 2 at a new path, never an edit here.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -100,10 +100,16 @@
       }
     },
     "familyConfig": {
-      "description": "The family registry: one entry per v1 family schema. Version 1 of this lane registers bar only.",
+      "description": "The family registry: one entry per v1 family schema (enums.md §63, ChartType): bar, line, area.",
       "oneOf": [
         {
           "$ref": "bar.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "line.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "area.schema.json#/$defs/config"
         }
       ]
     },
@@ -418,7 +424,7 @@
       ]
     },
     "domain": {
-      "description": "[min, max] of the value axis; the save check refuses min >= max or a range without zero (chart.scale.domain_invalid).",
+      "description": "[min, max] of an axis. The save check refuses min >= max, a linear range without zero where the axis always holds zero (bar, area, or scale.zero true; chart.scale.domain_invalid), and on a log scale min <= 0 (chart.scale.domain_log).",
       "type": "array",
       "prefixItems": [
         {
@@ -430,6 +436,350 @@
       ],
       "minItems": 2,
       "maxItems": 2
+    },
+    "legendDirect": {
+      "description": "null = no legend. direct = the series names written after the lines' last points (line and area only; the default with 2 to 4 series).",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "orient": {
+              "enum": [
+                "top",
+                "bottom",
+                "left",
+                "right",
+                "direct"
+              ]
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "unit": {
+      "description": "G6: a unit written after the number in tooltips, value labels and the value axis's title, never on a tick: plain text of 1 to 16 characters.",
+      "type": "string",
+      "allOf": [
+        {
+          "$ref": "#/$defs/plainTextRequired"
+        }
+      ],
+      "maxLength": 16
+    },
+    "scale": {
+      "description": "G4, G8: the axis's range, its type (linear default, or log: no zero, ticks on 1, 2, 5 × 10^k) and whether it holds zero (line: default false; bar and area: always true). The save check refuses log on an area, on a stacked or normalized value and beside zero (chart.scale.log_unsupported).",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "domain": {
+          "$ref": "#/$defs/domain"
+        },
+        "type": {
+          "enum": [
+            "linear",
+            "log"
+          ]
+        },
+        "zero": {
+          "type": "boolean"
+        }
+      }
+    },
+    "band": {
+      "description": "A category axis (record §4.4 band): nominal, ordinal or temporal values, evenly spaced in the sort's order; format only on temporal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "type",
+        "sort"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/channelTitle"
+        },
+        "type": {
+          "$ref": "#/$defs/bandType"
+        },
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "sort": true,
+        "format": {
+          "$ref": "#/$defs/temporalFormat"
+        },
+        "axis": {
+          "$ref": "#/$defs/axis"
+        }
+      },
+      "if": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "const": "temporal"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "type": "object",
+          "required": [
+            "format"
+          ]
+        }
+      }
+    },
+    "value": {
+      "description": "A measure (record §4.4 value): an aggregate of field, of each entry of fields (G1), or a count; G4's scale and G6's unit.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "aggregate"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/channelTitle"
+        },
+        "type": {
+          "const": "quantitative"
+        },
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "fields": {
+          "description": "G1: series from columns, 2 to 8, instead of field: the fields ARE the series, in the list's order (a colour channel is then refused); title is the legend text, unit G6's per entry.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/fieldEntry"
+          }
+        },
+        "aggregate": {
+          "$ref": "#/$defs/aggregate"
+        },
+        "stack": {
+          "description": "zero = stacked, normalize = stacked to 100 % of each category, null = side by side (bar) or overlapping (area). Where a family admits it is its own rule (bar: required with color, forbidden otherwise; area: only with color or fields; line: never).",
+          "enum": [
+            "zero",
+            "normalize",
+            null
+          ]
+        },
+        "format": {
+          "$ref": "#/$defs/numberFormat"
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "scale": {
+          "$ref": "#/$defs/scale"
+        },
+        "axis": {
+          "$ref": "#/$defs/axis"
+        }
+      },
+      "if": {
+        "type": "object",
+        "properties": {
+          "aggregate": {
+            "const": "count"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "field"
+              ]
+            },
+            {
+              "type": "object",
+              "required": [
+                "fields"
+              ]
+            }
+          ]
+        }
+      },
+      "else": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "field"
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "fields"
+            ]
+          }
+        ]
+      }
+    },
+    "fieldEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "title": {
+          "$ref": "#/$defs/plainTextRequired"
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        }
+      }
+    },
+    "series": {
+      "description": "Series by a column's values (record §4.4 series). Each family narrows legend: bar to $defs/legend, line and area to $defs/legendDirect.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "type",
+        "sort"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/channelTitle"
+        },
+        "type": {
+          "$ref": "#/$defs/seriesType"
+        },
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "sort": {
+          "$ref": "#/$defs/orderSort"
+        },
+        "legend": true
+      }
+    },
+    "position": {
+      "description": "A continuous axis (record §4.4 position) with no aggregation: quantitative (a number axis, linear or log) or temporal (a continuous UTC time axis; its format is G9's granularity, no scale and no unit).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "type"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/channelTitle"
+        },
+        "type": {
+          "enum": [
+            "quantitative",
+            "temporal"
+          ]
+        },
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "format": true,
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "scale": {
+          "$ref": "#/$defs/scale"
+        },
+        "axis": {
+          "$ref": "#/$defs/axis"
+        }
+      },
+      "if": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "const": "temporal"
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "$ref": "#/$defs/temporalFormat"
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "scale"
+              ]
+            },
+            {
+              "type": "object",
+              "required": [
+                "unit"
+              ]
+            }
+          ]
+        }
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "$ref": "#/$defs/numberFormat"
+          }
+        }
+      }
+    },
+    "detail": {
+      "description": "G7: one extra tooltip line, \"title: value\", of any column of the input.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "title": {
+          "$ref": "#/$defs/plainTextRequired"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/numberFormat"
+            },
+            {
+              "$ref": "#/$defs/temporalFormat"
+            }
+          ]
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        }
+      }
+    },
+    "tooltip": {
+      "description": "G7: at most 6 detail lines, carried on each mark.",
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "$ref": "#/$defs/detail"
+      }
     }
   }
 }
