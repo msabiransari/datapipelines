@@ -111,27 +111,27 @@ class ProcessMemoryAdmissionTest {
     @Test
     fun `the three lines are pinned - admitted, refused and not compared, lake disabled`() {
         val disabledTail =
-            "staging=6x1073741824B=6442450944B(datapipelines.lake.admission.staging-memory-limit) reader=absent(lake_disabled) " +
+            "staging=2x1073741824B=2147483648B(datapipelines.lake.admission.staging-memory-limit) reader=absent(lake_disabled) " +
                 "heap=2147483648B reserve=1073741824B(datapipelines.lake.admission.process-reserve) " +
                 "headroom=0.10(datapipelines.lake.admission.memory-headroom)"
         check(snapshot()).second shouldContainExactly
             listOf(
                 "process_memory_admission result=admitted $disabledTail limit=17179869184B limit_source=test " +
-                    "total=9663676416B right_side=15461882265.60B",
+                    "total=5368709120B right_side=15461882265.60B",
             )
-        val (refused, noNotice) = check(snapshot(limit = finite(8L * GIB)))
+        val (refused, noNotice) = check(snapshot(limit = finite(4L * GIB)))
         noNotice.shouldBeEmpty()
         refused shouldContainExactly
             listOf(
                 "process memory admission refused: staging + reader + heap + reserve must be below the container limit × " +
                     "(1 − datapipelines.lake.admission.memory-headroom) (configuration.md §7, §3.36). " +
-                    "process_memory_admission result=refused $disabledTail limit=8589934592B limit_source=test " +
-                    "total=9663676416B right_side=7730941132.80B",
+                    "process_memory_admission result=refused $disabledTail limit=4294967296B limit_source=test " +
+                    "total=5368709120B right_side=3865470566.40B",
             )
         check(snapshot(limit = ContainerMemoryLimit.Unlimited("cgroup_v2:/x/memory.max"))).second shouldContainExactly
             listOf(
                 "process_memory_admission result=not_compared $disabledTail limit=unlimited " +
-                    "limit_source=cgroup_v2:/x/memory.max total=9663676416B right_side=none",
+                    "limit_source=cgroup_v2:/x/memory.max total=5368709120B right_side=none",
             )
     }
 
@@ -148,7 +148,7 @@ class ProcessMemoryAdmissionTest {
     fun `lake enabled - the reader term is 1 + K generations and the staging count includes the compaction`() {
         val enabled = mapOf(LakeRules.ENABLED to "true")
         check(snapshot(enabled)).second.single() shouldContain
-            "staging=7x1073741824B=7516192768B(datapipelines.lake.admission.staging-memory-limit) " +
+            "staging=2x1073741824B=2147483648B(datapipelines.lake.admission.staging-memory-limit) " +
             "reader=2x536870912B=1073741824B(1+datapipelines.lake.reads.max-retired-generations) " +
             "heap=2147483648B reserve=1073741824B"
         check(snapshot(enabled + (LakeRules.MAX_RETIRED_GENERATIONS to "2"))).second.single() shouldContain
@@ -161,8 +161,8 @@ class ProcessMemoryAdmissionTest {
     @Test
     fun `lake disabled - standalone staging only, floor of scratch over one reservation`() {
         ProcessMemoryAdmission.stagingDatabases(20 * GIB, 3 * GIB, 0, ingestions = 0, maintenance = 0) shouldBe 6
-        check(snapshot()).second.single() shouldContain "staging=6x"
-        check(snapshot(mapOf(LakeRules.SCRATCH_BYTES to "21GB"))).second.single() shouldContain "staging=7x"
+        check(snapshot()).second.single() shouldContain "staging=2x"
+        check(snapshot(mapOf(LakeRules.SCRATCH_BYTES to "30GB"))).second.single() shouldContain "staging=3x"
     }
 
     @Test
@@ -246,7 +246,7 @@ class ProcessMemoryAdmissionTest {
 
     @Test
     fun `the validator carries the refusal as a violation and the admitted line as a notice`() {
-        val refused = ConfigValidator.validate(snapshot(limit = finite(8L * GIB)))
+        val refused = ConfigValidator.validate(snapshot(limit = finite(4L * GIB)))
         refused.violations.filter { it.startsWith("process memory admission refused") } shouldHaveSize 1
         val admitted = ConfigValidator.validate(snapshot())
         admitted.violations.shouldBeEmpty()

@@ -113,9 +113,9 @@ class LakeRulesTest {
     fun `the lease wait stays under the node query ceiling and a delivery's staging fits the scratch budget`() {
         enabled(LakeRules.LEASE_WAIT_SECONDS to "900").single() shouldStartWith LakeRules.LEASE_WAIT_SECONDS
         enabled(LakeRules.LEASE_WAIT_SECONDS to "899") shouldContainExactly emptyList()
-        // Shipped 2GB × 3 = 6GB ≤ 20GB; 7GB × 3 = 21GB > 20GB refuses; 6GB × 3 = 18GB passes.
-        enabled(LakeRules.MAX_DELIVERY_BYTES to "7GB").single() shouldStartWith LakeRules.MAX_DELIVERY_BYTES
-        enabled(LakeRules.MAX_DELIVERY_BYTES to "6GB") shouldContainExactly emptyList()
+        // Shipped 2GB × 10 = 20GB ≤ 20GB, at equality (#997's factor); one byte more refuses.
+        enabled(LakeRules.MAX_DELIVERY_BYTES to "2147483649B").single() shouldStartWith LakeRules.MAX_DELIVERY_BYTES
+        enabled(LakeRules.MAX_DELIVERY_BYTES to "2GB") shouldContainExactly emptyList()
         enabled(LakeRules.SCRATCH_BYTES to "lots").single() shouldStartWith LakeRules.SCRATCH_BYTES
     }
 
@@ -201,9 +201,9 @@ class LakeRulesTest {
             it shouldStartWith LakeRules.STAGING_MEMORY_LIMIT
             it shouldContain "at least 1 MiB"
         }
-        // One default reservation, shipped 1GB × 3 = 3GB: exactly one reservation in, one byte below out.
-        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225472B")) shouldContainExactly emptyList()
-        violations(mapOf(LakeRules.SCRATCH_BYTES to "3221225471B")).single().let {
+        // One default reservation, shipped 1GB × 10 = 10GB (#997): exactly one reservation in, one byte below out.
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "10737418240B")) shouldContainExactly emptyList()
+        violations(mapOf(LakeRules.SCRATCH_BYTES to "10737418239B")).single().let {
             it shouldStartWith LakeRules.SCRATCH_BYTES
             it shouldContain "one DuckDB staging reservation"
         }

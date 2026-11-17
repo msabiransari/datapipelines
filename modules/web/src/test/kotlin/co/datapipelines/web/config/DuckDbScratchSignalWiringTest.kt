@@ -140,7 +140,7 @@ class DuckDbScratchSignalWiringTest {
         const val RESERVATION = 5L shl 20
         const val LEFTOVER = 1234
 
-        /** `staging-memory-limit × staging-expansion-factor` at the shipped defaults (1 GiB × 3). */
-        const val DEFAULT_RESERVATION = 3L shl 30
+        /** `staging-memory-limit × staging-expansion-factor` at the shipped defaults (1 GiB × 10, #997). */
+        const val DEFAULT_RESERVATION = 10L shl 30
     }
 }

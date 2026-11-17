@@ -40,9 +40,9 @@ class StagingDuckDbWiringTest {
         val factory = bean(emptyMap())
         val duck = factory.duckDb.properties
         duck.memoryLimitBytes shouldBe GIB
-        duck.expansionFactor shouldBe 3
+        duck.expansionFactor shouldBe 10
         duck.scratchCapacityBytes shouldBe 20 * GIB
-        duck.defaultReservationBytes shouldBe 3 * GIB
+        duck.defaultReservationBytes shouldBe 10 * GIB
         duck.scratchDir shouldBe Path.of(System.getProperty("java.io.tmpdir"), "dp-staging").toAbsolutePath()
         duck.threads shouldBe DuckDbStagingProperties.boundedThreads()
         factory.duckDb.budget.capacityBytes shouldBe 20 * GIB
@@ -132,7 +132,7 @@ class StagingDuckDbWiringTest {
         h2.close()
         val duck = factory.create(UUID.randomUUID(), StagingEngine.DUCKDB)
         duck.shouldBeInstanceOf<DuckDbStaging>()
-        duck.reservationBytes shouldBe 3 * GIB
+        duck.reservationBytes shouldBe 10 * GIB
         duck.close()
         // Nothing of the database is left; the factory's owner lock file stays for the process's life (#803).
         Files.list(scratch).use { s -> s.filter { !it.fileName.toString().startsWith("dp-owner_") }.toList() }.shouldBeEmpty()
