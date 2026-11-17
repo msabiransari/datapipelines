@@ -232,6 +232,24 @@ class PregateGuardInventoryTest {
     }
 
     @Test
+    fun `a nested Gradle build outside buildSrc is not waiver evidence`() {
+        val tree = ProbeTree(scratch, expensiveCall = "GradleRunner.create()")
+        val inventory = GuardInventory.scan(scratch, tree.files())
+        val registry = GuardRegistry(mapOf(":modules:alpha" to listOf(ProbeTree.WALK, ProbeTree.FIXED, ProbeTree.HELPER)))
+        val exemptions =
+            GuardExemptions.parse(
+                listOf(
+                    "own-module ${ProbeTree.CONTROL} reads only its own test resource",
+                    "waived-for-cost ${ProbeTree.CONTAINER} starts a nested build: GradleRunner",
+                ),
+            )
+        val problems = GuardInventory.judge(inventory, registry, exemptions).problems
+        if (problems.none { it.startsWith("WAIVER WITHOUT EVIDENCE") && ProbeTree.CONTAINER in it }) {
+            fail("only buildSrc can use nested Gradle as waiver evidence: $problems")
+        }
+    }
+
+    @Test
     fun `a buildSrc test that reads the repository is a guard of its own project, and a nested build is waivable`() {
         val tree = BuildSrcProbeTree(scratch)
         val inventory = GuardInventory.scan(scratch, tree.files())
@@ -323,6 +341,7 @@ class PregateGuardInventoryTest {
     /** A temporary repository: the four cases of #995's never-seen gate, plus a container probe and a plain test. */
     private class ProbeTree(
         private val root: File,
+        expensiveCall: String = "GenericContainer(\"img\")",
     ) {
         init {
             write("settings.gradle.kts", "rootProject.name = \"probe\"\n")
@@ -370,7 +389,7 @@ class PregateGuardInventoryTest {
             )
             write(
                 "modules/alpha/src/test/kotlin/probe/ContainerProbeTest.kt",
-                "package probe\n\nclass ContainerProbeTest {\n    private val box = GenericContainer(\"img\")\n\n" +
+                "package probe\n\nclass ContainerProbeTest {\n    private val box = $expensiveCall\n\n" +
                     "    @Test\n    fun reads() {\n        ProbeFiles.read(\"docs/spec.md\")\n    }\n}\n",
             )
         }
@@ -812,7 +831,8 @@ internal object GuardInventory {
         val text =
             decl.file.lexed.code
                 .substring(decl.start, decl.end)
-        val markers = (CONTAINER_MARKERS.findAll(text) + NESTED_BUILD_MARKERS.findAll(text)).map { it.value }.toSet()
+        val markers = CONTAINER_MARKERS.findAll(text).map { it.value }.toMutableSet()
+        if (decl.file.module.path == ":buildSrc") NESTED_BUILD_MARKERS.findAll(text).mapTo(markers) { it.value }
         return Facts(idioms, cross, markers)
     }
 
