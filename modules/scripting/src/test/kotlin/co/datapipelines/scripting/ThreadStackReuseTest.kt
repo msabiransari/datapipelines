@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -57,6 +58,7 @@ class ThreadStackReuseTest {
         val builder =
             ProcessBuilder(
                 java,
+                "-Djava.io.tmpdir=${childTempDirectory()}",
                 "-Xmx256m",
                 "-XX:ErrorFile=" + dir.resolve("hs_err_pid%p.log"),
                 "-cp",
@@ -93,6 +95,9 @@ class ThreadStackReuseTest {
         const val CHILD_TIMEOUT_SECONDS = 75L
         const val CLEANUP_TIMEOUT_SECONDS = 5L
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "stack-reuse-probe"))
 }
 
 /**

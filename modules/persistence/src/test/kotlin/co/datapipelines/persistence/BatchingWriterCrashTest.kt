@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.nio.channels.FileChannel
+import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.util.concurrent.CountDownLatch
@@ -43,8 +44,14 @@ class BatchingWriterCrashTest {
     ) {
         val java = File(System.getProperty("java.home"), "bin/java").path
         val process =
-            ProcessBuilder(java, "-cp", System.getProperty("java.class.path"), CrashHarness::class.java.name, dir.toString())
-                .redirectErrorStream(true)
+            ProcessBuilder(
+                java,
+                "-Djava.io.tmpdir=${childTempDirectory()}",
+                "-cp",
+                System.getProperty("java.class.path"),
+                CrashHarness::class.java.name,
+                dir.toString(),
+            ).redirectErrorStream(true)
                 .redirectOutput(dir.resolve("child.log").toFile())
                 .start()
         process.waitFor(90, TimeUnit.SECONDS) shouldBe true
@@ -79,6 +86,9 @@ class BatchingWriterCrashTest {
             ?.readLines()
             ?.filter { it.isNotBlank() }
             ?.toSet() ?: emptySet()
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "crash-harness"))
 }
 
 /**

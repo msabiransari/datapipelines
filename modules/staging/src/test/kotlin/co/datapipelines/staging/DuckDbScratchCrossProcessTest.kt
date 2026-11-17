@@ -119,6 +119,7 @@ class DuckDbScratchCrossProcessTest {
             ProcessBuilder(
                 listOf(
                     Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "-Djava.io.tmpdir=${childTempDirectory()}",
                     "-Xmx256m",
                     "-cp",
                     System.getProperty("java.class.path"),
@@ -161,4 +162,7 @@ class DuckDbScratchCrossProcessTest {
                 "handed-out-with-table" to listOf("dp-owner_", "dp-marker_", "exec_"),
             )
     }
+
+    /** The child's own temp directory, below this test JVM's (DEVELOPMENT.md §9.7, #998). */
+    private fun childTempDirectory(): Path = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir"), "scratch-child"))
 }
