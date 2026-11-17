@@ -69,8 +69,8 @@ class ChartPointerBrowserTest : ChartInteractionSuite() {
         at: Int,
     ) {
         val first = read(page)
-        withClue("$kind D6: the picture is one image named by the chart's title, its description the summary: $first") {
-            first["role"] shouldBe "img"
+        withClue("$kind D6: the picture is one group named by the chart's title, its description the summary: $first") {
+            first["role"] shouldBe "group"
             first["title"] shouldBe chart.name
             (first["desc"] as String) shouldStartWith "$kind chart; series: A, B;"
         }

@@ -873,7 +873,23 @@
       return x !== name;
     });
     if (on) list.push(name);
-    el.setAttribute("class", list.join(" "));
+    // An emptied list removes the attribute, so detach leaves a picture without a class as the writer wrote it.
+    if (list.length === 0) el.removeAttribute("class");
+    else el.setAttribute("class", list.join(" "));
+  }
+
+  /** A legend entry's element: the writer's switch, the group that carries `data-legend` (record §4.8, brief 990 D4). */
+  function isEntry(el) {
+    return el.nodeType === 1 && el.getAttribute("data-legend") !== null;
+  }
+
+  /**
+   * In a picture that is a group (brief 1010 D2), what assistive technology skips: every top-level child that is not
+   * the picture's title, its description or a legend switch.
+   */
+  function presentational(el) {
+    var tag = el.localName || el.tagName;
+    return el.nodeType === 1 && tag !== "title" && tag !== "desc" && !isEntry(el);
   }
 
   /** The elements the writer made for the primitives, in their order (A4): description and gradient nodes skipped. */
@@ -902,6 +918,7 @@
     var st = { draw: null, model: null, m: null, width: null, target: null, last: null, hit: null, pointer: null };
     var made = [];
     var marked = [];
+    var hidden = []; // the writer's elements this layer gave aria-hidden (brief 1010 D2), for detach to give back
     var listeners = [];
     var detached = false;
 
@@ -911,6 +928,47 @@
       st.m = measures(R, next.theme);
       st.model = modelOf(R, next.output, st.width);
       st.model.theme = st.m.theme;
+    }
+
+    /** aria-hidden="true" on each of [els] that D2 hides, when the picture is a group; [keep] records it for detach. */
+    function hide(els, keep) {
+      if (svg.getAttribute("role") !== "group") return;
+      els.forEach(function (el) {
+        if (el.parentNode !== svg || !presentational(el) || el.getAttribute("aria-hidden") !== null) return;
+        el.setAttribute("aria-hidden", "true");
+        if (keep) hidden.push(el);
+      });
+    }
+
+    function unhide() {
+      hidden.splice(0).forEach(function (el) {
+        el.removeAttribute("aria-hidden");
+      });
+    }
+
+    /**
+     * After every draw the layer is given (brief 1010 D1, owner ruling 2026-11-16): a picture with a legend switch is a
+     * group, so its switches are buttons for a screen reader; without one the writer's image stays. Name and
+     * description stay the picture's title and desc (D2).
+     */
+    function dress() {
+      unhide();
+      if (st.model.entries.length > 0) svg.setAttribute("role", "group");
+      else if (svg.getAttribute("role") === "group") svg.setAttribute("role", "img");
+      var children = [];
+      for (var c = svg.firstChild; c !== null; c = c.nextSibling) children.push(c);
+      hide(children, true);
+    }
+
+    /** The legend entry a press landed on or inside (brief 1010 D3): its series id as a pointer click finds it, or null. */
+    function pressed(node) {
+      for (var el = node; el && el !== svg; el = el.parentNode) {
+        if (el.nodeType !== 1 || !isEntry(el)) continue;
+        var id = el.getAttribute("data-legend");
+        for (var e = 0; e < st.model.entries.length; e++) if (String(st.model.entries[e].id) === id) return st.model.entries[e].id;
+        return null;
+      }
+      return null;
     }
 
     function clear() {
@@ -943,6 +1001,7 @@
         setClass(svg, "dp-dimmed", true);
       }
       if (sc.prims.length > 0) made = R.write.append(sc.prims, svg, st.draw.theme);
+      hide(made, false); // the card, guide and ring leave with clear; nothing to give back
     }
 
     function position(event) {
@@ -975,6 +1034,13 @@
       paint();
     });
     on("click", function (event) {
+      // A press on a switch (a screen reader's, or a click whose target is the entry or its text) answers by its
+      // target, once; any other click by the pointer's position, as before (brief 1010 D3).
+      var entry = st.model === null ? null : pressed(event.target);
+      if (entry !== null) {
+        toggle(entry);
+        return;
+      }
       var pos = position(event);
       if (pos === null) return;
       var hit = lookup(R, st.model, pos);
@@ -1008,6 +1074,7 @@
 
     svg.setAttribute("tabindex", "0");
     load(draw);
+    dress();
     paint();
 
     return {
@@ -1017,14 +1084,17 @@
         made = []; // the writer emptied the svg: the old card went with the old picture
         marked = [];
         load(next);
+        dress();
         st.target = findAgain(st.model, st.target);
         if (st.last === "key" && st.target === null) st.last = null;
         paint();
       },
-      /** Every listener removed, the card, the guide and the ring gone, the picture's own state untouched. */
+      /** Every listener removed, the card, the guide and the ring gone, the picture as the writer wrote it (an image). */
       detach: function () {
         if (detached) return;
         clear();
+        unhide();
+        if (svg.getAttribute("role") === "group") svg.setAttribute("role", "img");
         detached = true;
         listeners.splice(0).forEach(function (l) {
           svg.removeEventListener(l[0], l[1]);
