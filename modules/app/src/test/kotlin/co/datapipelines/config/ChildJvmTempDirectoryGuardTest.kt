@@ -22,14 +22,36 @@ import java.util.concurrent.TimeUnit
  * code). A file the masking cannot read to its end (an unclosed comment, string or name) is not trusted: each
  * `ProcessBuilder(` spelled anywhere in it counts as a JVM launch that fails.
  *
- * How the command of one launch is found — per launch, from that launch alone, never from its function:
+ * How the command of one launch is found — per launch, from that launch alone, never from its function. The admitted
+ * forms are a closed list; every other form is unreadable:
  * - two or more arguments to `ProcessBuilder(`: they are the command (the varargs form);
- * - one argument that is a list built in place (`listOf(…)`, `mutableListOf(…)`, `arrayListOf(…)`, `arrayOf(…)`,
- *   `List.of(…)`, `Arrays.asList(…)`, also joined by `+` to further such lists): its leading elements;
- * - one argument that is one local name: the expression that declares that name in the innermost enclosing function
- *   with a block body, read as above. A parameter, a property, a name declared more than once or assigned again,
- *   a destructured name, and any other expression is unreadable;
- * - anything else (no argument, `.command(…)` after the call, a spread, a call) is unreadable.
+ * - one argument that is an admitted list expression (below) and nothing more: its leading elements;
+ * - one argument that is one local name: the expression that declares that name in the innermost enclosing Kotlin
+ *   `fun` with a block body. That expression must be an admitted list expression that ends the statement: the line
+ *   ends after it (or `;` or `}` follows) and the next line does not go on with it (it starts with a letter, `_`, `@`
+ *   or `}`, and not with `as`). The name may appear in that function only in its declaration and in this launch's
+ *   argument. A parameter, a property, a name declared more than once, assigned again or used anywhere else, a
+ *   destructured name, and a declaration in a Java file (no enclosing `fun`) are unreadable.
+ *
+ * An admitted list expression is `L + L + … + T + T + …`, nothing else: each L is an in-place list call (`listOf(…)`,
+ * `mutableListOf(…)`, `arrayListOf(…)`, `arrayOf(…)`, `List.of(…)`, `Arrays.asList(…)`) whose elements are read in
+ * order; each T is one postfix term (a name, a string, a call or a parenthesised expression, with its member calls,
+ * arguments, indexes, lambdas and `!!`). A `+` only appends, so a T cannot move the elements read before it; the first
+ * T ends the reading. The expression starts with an L. An L followed by anything but `+` or the end of the expression
+ * (a member call such as `.filterNot { … }`, a `-`, an infix call) leaves the admitted form, and the end check fails
+ * the launch (#998 round 2, C1). In a declaration a `+` must stand on the line its left side ends on: Kotlin ends a
+ * statement at a line break before `+`. A spread (`*x`) as the first element leaves the program and the flag's position
+ * unknown: unreadable (a spread as the second element is no string literal, so a JVM launch fails on it anyway).
+ *
+ * The builder keeps the command it was built with, or the launch fails (#998 round 2, C2). The chain after
+ * `ProcessBuilder(…)` may call only `directory`, `redirectErrorStream`, `redirectOutput`, `redirectError`,
+ * `redirectInput` and `inheritIO`, and `apply` with a lambda that calls nothing on its receiver but `environment()`
+ * and spells neither `this` nor `command`; `start()` or `environment()` may end it (the chain then holds a process or
+ * the environment, no longer the builder). A chain that still holds the builder at its end must be the whole value of
+ * a local `val`/`var` in a Kotlin `fun`, and every later use of that name in the function must be such a chain ending
+ * in `start()` or `environment()`. Any other call (`.command(…)`, `.also`, `.let`), a builder handed to anything, and
+ * a builder kept in a property or a Java local make the launch a failing JVM launch, whatever its program: a replaced
+ * command keeps no credit for a flag it discarded, and a replaced `git` command may start a JVM.
  *
  * The verdict per launch: a first element that is exactly one string literal from [NON_JVM_PROGRAMS] is not a JVM.
  * Every other launch is a JVM launch and passes only when its SECOND element is exactly one string literal whose
@@ -38,10 +60,10 @@ import java.util.concurrent.TimeUnit
  *
  * Limits, read before trusting a green run: the guard does not check that the directory is BELOW the parent's
  * `java.io.tmpdir` (the launch sites derive it in two lines; review reads that); a launch through a helper in another
- * file, a `ProcessBuilder` reached through an aliased import, a constructor reference, reflection or
- * `Runtime.exec` is not seen; a list mutated after its declaration (`command.add(0, …)`), and a name shadowed by
- * a lambda parameter, are read from the declaration alone. A source text the masking mis-reads in some way it does
- * not detect is read as code. The floors fail a walk that found too little.
+ * file, a `ProcessBuilder` reached through an aliased import or a subclass, a constructor reference, reflection or
+ * `Runtime.exec` is not seen; an extension function declared with the name of an admitted builder call is read as
+ * that call. A source text the masking mis-reads in some way it does not detect is read as code. The floors fail a
+ * walk that found too little.
  */
 class ChildJvmTempDirectoryGuardTest {
     @Test
@@ -302,17 +324,32 @@ private object ChildJvmLaunches {
     /** Measured at birth (2026-11-16): 14 JVM launches in 12 files. */
     const val JVM_FLOOR = 14
 
-    /** Measured at birth (2026-11-16): 14 non-JVM launches (`git` 10, `bash` 2, `node` 2). */
+    /**
+     * Brief A.3's floor. Measured 2026-11-17 at #998 round 2: 15 non-JVM launches (`git` 11, `bash` 2, `node` 2); two
+     * of the `git` launches are this guard's own.
+     */
     const val NON_JVM_FLOOR = 11
 
     private val NON_JVM_PROGRAMS = setOf("git", "bash", "node")
+
+    /** Builder calls that answer the same builder and leave its command alone. */
+    private val BUILDER_CALLS = setOf("directory", "redirectErrorStream", "redirectOutput", "redirectError", "redirectInput", "inheritIO")
+
+    /** Builder calls after which the chain holds a process or the environment map, no longer the builder. */
+    private val LEAVING_CALLS = setOf("start", "environment")
     private const val FLAG = "-Djava.io.tmpdir="
     private val SCANNED = Regex("""^(?:modules/[^/]+/src/test/|tests/[^/]+/src/test/|buildSrc/src/test/).*\.(?:kt|java)$""")
     private val LAUNCH = Regex("""(?<![\w$])ProcessBuilder\s*\(""")
     private val LIST =
         Regex("""\G\s*(?:listOf|mutableListOf|arrayListOf|arrayOf|(?:java\.util\.)?List\.of|(?:java\.util\.)?Arrays\.asList)\s*\(""")
-    private val JOIN = Regex("""\G\s*\+""")
     private val NAME = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
+    private val NAME_AT = Regex("""\G[A-Za-z_][A-Za-z0-9_]*""")
+    private val MEMBER = Regex("""\G\s*\??\.\s*([A-Za-z_][A-Za-z0-9_]*)""")
+    private val KEPT = Regex("""\b(?:val|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=\n]*)?=\s*$""")
+    private val IMPLICIT_CALL = Regex("""(?<![\w$.])([A-Za-z_][A-Za-z0-9_]*)\s*[({]""")
+    private val ESCAPE = Regex("""\b(?:this|command)\b""")
+    private val CONTINUATION = Regex("""\Gas\b""")
+    private val BRACKETS = setOf('(', '[', '{')
     private val FUN = Regex("""\bfun\b""")
     private const val GIT_SECONDS = 60L
 
@@ -337,7 +374,7 @@ private object ChildJvmLaunches {
         start: Int,
         open: Int,
     ): Launch {
-        val elements = command(lexed, start, open)
+        val elements = if (builderKept(lexed.code, start, open)) command(lexed, start, open) else emptyList()
         val program = elements.getOrNull(0)?.let { lexed.literal(source, it) }
         if (program != null && program in NON_JVM_PROGRAMS) return Launch(path, line(source, start), jvm = false, flagged = false)
         val flag = elements.getOrNull(1)?.let { lexed.literal(source, it) }
@@ -353,30 +390,205 @@ private object ChildJvmLaunches {
     ): List<IntRange> {
         val code = lexed.code
         val arguments = arguments(code, open)
-        if (arguments.size != 1) return arguments
-        val only = arguments.single()
-        val text = code.substring(only.first, only.last + 1)
-        if (!NAME.matches(text)) return listElements(code, only.first)
-        val initializer = declaration(code, start, text) ?: return emptyList()
-        return listElements(code, initializer)
+        val only = arguments.singleOrNull()
+        val elements =
+            when {
+                only == null -> {
+                    arguments
+                }
+
+                NAME.matches(code.substring(only)) -> {
+                    declaration(code, start, code.substring(only))
+                        ?.let { value -> listElements(lexed, value, newlines = false) }
+                        ?.takeIf { (_, end) -> ends(code, end) }
+                        ?.first
+                }
+
+                else -> {
+                    listElements(lexed, only.first, newlines = true)
+                        ?.takeIf { (_, end) -> end <= only.last + 1 && code.substring(end, only.last + 1).isBlank() }
+                        ?.first
+                }
+            }.orEmpty()
+        return elements.takeUnless { read -> read.firstOrNull()?.let { code[it.first] == '*' } == true }.orEmpty()
     }
 
-    /** The leading elements of in-place lists joined by `+`, from [at]; the first other term ends the read. */
+    /**
+     * The leading elements of the admitted list expression at [at] (see the class KDoc) and the index where the
+     * expression ends; null when [at] does not start one. [newlines]: whether a line break may stand before a `+`
+     * (inside a call's parentheses it may; in a Kotlin statement it ends the statement).
+     */
     private fun listElements(
-        code: String,
+        lexed: SourceMask,
         at: Int,
-    ): List<IntRange> {
+        newlines: Boolean,
+    ): Pair<List<IntRange>, Int>? {
+        val code = lexed.code
         val elements = mutableListOf<IntRange>()
         var cursor = at
+        var reading = true
         while (true) {
-            val list = LIST.find(code, cursor)?.takeIf { it.range.first == cursor } ?: return elements
-            elements += arguments(code, list.range.last)
-            cursor = closing(code, list.range.last) + 1
-            cursor = JOIN.find(code, cursor)?.takeIf { it.range.first == cursor }?.let { it.range.last + 1 } ?: return elements
+            val list = LIST.find(code, cursor)?.takeIf { reading && it.range.first == cursor }
+            reading = list != null
+            if (list == null && cursor == at) return null
+            cursor =
+                if (list == null) {
+                    term(lexed, cursor, newlines) ?: return null
+                } else {
+                    elements += arguments(code, list.range.last)
+                    closing(code, list.range.last) + 1
+                }
+            cursor = plus(code, cursor, newlines) ?: return elements to cursor
         }
     }
 
-    /** Where the single declaration of [name] in the function enclosing [at] starts its value; null when unreadable. */
+    /** The index after one postfix term that starts at [at]; null when none starts there. */
+    private fun term(
+        lexed: SourceMask,
+        at: Int,
+        newlines: Boolean,
+    ): Int? {
+        val code = lexed.code
+        var cursor =
+            if (code.getOrNull(at) == '(') {
+                closing(code, at) + 1
+            } else {
+                lexed.literalEnd(at) ?: NAME_AT.find(code, at)?.takeIf { it.range.first == at }?.let { it.range.last + 1 }
+            } ?: return null
+        while (true) {
+            val member = MEMBER.find(code, cursor)?.takeIf { it.range.first == cursor }
+            val next = skip(code, cursor, newlines)
+            cursor =
+                when {
+                    member != null -> member.range.last + 1
+                    code.getOrNull(next) in BRACKETS -> closing(code, next) + 1
+                    code.startsWith("!!", next) -> next + 2
+                    else -> return cursor
+                }
+        }
+    }
+
+    /** The index after a `+` that follows [at] and the whitespace after it; null when no `+` follows. */
+    private fun plus(
+        code: String,
+        at: Int,
+        newlines: Boolean,
+    ): Int? {
+        val sign = skip(code, at, newlines)
+        val single = code.getOrNull(sign) == '+' && code.getOrNull(sign + 1) != '+' && code.getOrNull(sign + 1) != '='
+        return if (single) skip(code, sign + 1, newlines = true) else null
+    }
+
+    /** The index of the first character at or after [at] that is not a space or a tab (nor a line break, with [newlines]). */
+    private fun skip(
+        code: String,
+        at: Int,
+        newlines: Boolean,
+    ): Int {
+        var index = at
+        while (index < code.length && isBlank(code[index], newlines)) index++
+        return index
+    }
+
+    private fun isBlank(
+        char: Char,
+        newlines: Boolean,
+    ): Boolean = char == ' ' || char == '\t' || (newlines && char.isWhitespace())
+
+    /** Whether a Kotlin statement ends at [at]: `;`, `}` or the end follows on the line, or a line that does not go on with it. */
+    private fun ends(
+        code: String,
+        at: Int,
+    ): Boolean {
+        val eol = skip(code, at, newlines = false)
+        val next = skip(code, eol, newlines = true)
+        return when (code.getOrNull(eol)) {
+            null, ';', '}' -> true
+            '\n', '\r' -> next >= code.length || code[next] == '}' || startsStatement(code, next)
+            else -> false
+        }
+    }
+
+    private fun startsStatement(
+        code: String,
+        at: Int,
+    ): Boolean = (code[at].isLetter() || code[at] == '_' || code[at] == '@') && CONTINUATION.find(code, at)?.range?.first != at
+
+    /** Whether the launch's builder keeps its command to the end: see the class KDoc (#998 round 2, C2). */
+    private fun builderKept(
+        code: String,
+        start: Int,
+        open: Int,
+    ): Boolean {
+        val chain = chain(code, closing(code, open) + 1) ?: return false
+        if (!chain.holdsBuilder) return true
+        val name = KEPT.find(code.substring(0, start))?.groupValues?.get(1)
+        val body = enclosingFunction(code, start)?.second
+        if (name == null || body == null || !ends(code, chain.end)) return false
+        return Regex("""(?<![\w$.])$name(?![\w$])""")
+            .findAll(code, chain.end)
+            .takeWhile { it.range.first <= body.last }
+            .all { use -> chain(code, use.range.last + 1)?.holdsBuilder == false }
+    }
+
+    /** The member calls from [at] on a builder; null for a call that may change the command or hand the builder on. */
+    private fun chain(
+        code: String,
+        at: Int,
+    ): Chain? {
+        var cursor = at
+        while (true) {
+            val member = MEMBER.find(code, cursor)?.takeIf { it.range.first == cursor } ?: return Chain(cursor, holdsBuilder = true)
+            val call = call(code, member)
+            cursor = call.end
+            when {
+                call.isPlainCallOf(LEAVING_CALLS) -> return Chain(cursor, holdsBuilder = false)
+                call.isPlainCallOf(BUILDER_CALLS) -> Unit
+                call.name == "apply" && call.arguments.isNullOrBlank() && call.lambda?.let(::plain) == true -> Unit
+                else -> return null
+            }
+        }
+    }
+
+    /** One member call: its name, the text of its parentheses and of its trailing lambda (null when absent), its end. */
+    private fun call(
+        code: String,
+        member: MatchResult,
+    ): Call {
+        val parens = skip(code, member.range.last + 1, newlines = false).takeIf { code.getOrNull(it) == '(' }
+        val afterParens = parens?.let { closing(code, it) + 1 } ?: (member.range.last + 1)
+        val brace = skip(code, afterParens, newlines = false).takeIf { code.getOrNull(it) == '{' }
+        return Call(
+            name = member.groupValues[1],
+            arguments = parens?.let { code.substring(it + 1, closing(code, it)) },
+            lambda = brace?.let { code.substring(it + 1, closing(code, it)) },
+            end = brace?.let { closing(code, it) + 1 } ?: afterParens,
+        )
+    }
+
+    /** An `apply` body that calls nothing on its receiver but `environment()` and spells neither `this` nor `command`. */
+    private fun plain(body: String): Boolean =
+        !ESCAPE.containsMatchIn(body) && IMPLICIT_CALL.findAll(body).all { it.groupValues[1] == "environment" }
+
+    private class Chain(
+        val end: Int,
+        val holdsBuilder: Boolean,
+    )
+
+    private class Call(
+        val name: String,
+        val arguments: String?,
+        val lambda: String?,
+        val end: Int,
+    ) {
+        /** A call with parentheses and no trailing lambda, named in [names]. */
+        fun isPlainCallOf(names: Set<String>): Boolean = lambda == null && arguments != null && name in names
+    }
+
+    /**
+     * Where the single declaration of [name] in the function enclosing [at] starts its value; null when unreadable,
+     * and when the function spells the name anywhere but its declaration and the launch's argument.
+     */
     private fun declaration(
         code: String,
         at: Int,
@@ -397,7 +609,8 @@ private object ChildJvmLaunches {
                 .filterNot { hit -> Regex("""(?:\b(?:val|var)\s+|[\w$>\]]\s+)$""").containsMatchIn(text.substring(0, hit.range.first)) }
                 .toList()
         val all = declarations.map { it.range.last + 1 } + javaDeclarations.map { it.range.last + 1 }
-        if (all.size != 1 || writes.isNotEmpty()) return null
+        val mentions = Regex("""(?<![\w$.])$name(?![\w$])""").findAll(text).count()
+        if (all.size != 1 || writes.isNotEmpty() || mentions != 2) return null
         val value = body.first + all.single()
         return value.takeIf { it < at }?.let { cursor -> cursor + code.substring(cursor).indexOfFirst { !it.isWhitespace() } }
     }
@@ -411,7 +624,7 @@ private object ChildJvmLaunches {
             .findAll(code.substring(0, at))
             .mapNotNull { keyword ->
                 val open = code.indexOf('(', keyword.range.last)
-                if (open < 0 || !Regex("""[\w\s.<>,?*]*""").matches(code.substring(keyword.range.last + 1, open))) return@mapNotNull null
+                if (open < 0 || !Regex("""[\w\s.<>,?*`]*""").matches(code.substring(keyword.range.last + 1, open))) return@mapNotNull null
                 val close = closing(code, open)
                 val brace = code.indexOf('{', close)
                 if (brace < 0 || !Regex("""\s*(?::[^{}=]*)?""").matches(code.substring(close + 1, brace))) return@mapNotNull null
@@ -461,7 +674,12 @@ private object ChildJvmLaunches {
         code: String,
         open: Int,
     ): Int {
-        val pair = if (code[open] == '(') '(' to ')' else '{' to '}'
+        val pair =
+            when (code[open]) {
+                '(' -> '(' to ')'
+                '[' -> '[' to ']'
+                else -> '{' to '}'
+            }
         var depth = 0
         for (index in open until code.length) {
             if (code[index] == pair.first) depth++
@@ -523,6 +741,9 @@ private class SourceMask private constructor(
     val code: String,
     private val literals: Map<Int, Int>,
 ) {
+    /** The index after the string literal that starts at [at]; null when none starts there. */
+    fun literalEnd(at: Int): Int? = literals[at]
+
     /** The text of the single string literal that is exactly [range]; null for anything else. */
     fun literal(
         source: String,
