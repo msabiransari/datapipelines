@@ -447,7 +447,7 @@ class ConnectionPoolManagerRetiredCapTest {
         val manager = manager(cap = 1, closer = closer)
         val busy = holdOneRetired(manager)
         val idle = lease(manager)!!
-        val paused = AtStepPausingMap.installIn(manager, LEASE_THREAD)
+        val paused = installLiveMap(manager, AtStepPausingMap(LEASE_THREAD))
         var outcome: Result<ConnectionPool>? = null
         val leaser = thread(name = LEASE_THREAD) { outcome = runCatching { manager.poolFor(LAKE) } }
         try {
@@ -491,22 +491,58 @@ class ConnectionPoolManagerRetiredCapTest {
             }
             return super.computeIfAbsent(key, mappingFunction)
         }
+    }
 
-        companion object {
-            fun installIn(
-                manager: ConnectionPoolManager,
-                leaseThread: String,
-            ): AtStepPausingMap {
-                val field = ConnectionPoolManager::class.java.getDeclaredField("pools").apply { isAccessible = true }
-
-                @Suppress("UNCHECKED_CAST")
-                val original = field.get(manager) as ConcurrentHashMap<String, Any>
-                return AtStepPausingMap(leaseThread).also {
-                    it.putAll(original)
-                    field.set(manager, it)
-                }
-            }
+    @Test
+    fun `the reaper leaves a pool alone until its removal from the live map`() {
+        val manager = manager(closer = PoolCloser.SYNCHRONOUS)
+        val live = lease(manager)!!
+        val paused = installLiveMap(manager, PausingRemovalMap())
+        val retire = thread(isDaemon = true) { manager.retire(LAKE.name) }
+        try {
+            paused.beforeRemoval.await(GATE_SECONDS, TimeUnit.SECONDS) shouldBe true
+            manager.reapRetiring().drained shouldBe 0
+            manager.poolFor(LAKE) shouldBeSameInstanceAs live
+            live.holdsPhysicalHandles shouldBe true
+        } finally {
+            paused.resume.countDown()
+            retire.join(TimeUnit.SECONDS.toMillis(GATE_SECONDS))
         }
+        retire.isAlive shouldBe false
+        manager.hasPool(LAKE.name) shouldBe false
+        manager.reapRetiring().drained shouldBe 1
+        live.holdsPhysicalHandles shouldBe false
+    }
+
+    private class PausingRemovalMap : ConcurrentHashMap<String, Any>() {
+        val beforeRemoval = CountDownLatch(1)
+        val resume = CountDownLatch(1)
+
+        override fun computeIfPresent(
+            key: String,
+            remappingFunction: java.util.function.BiFunction<in String, in Any, out Any?>,
+        ): Any? =
+            super.computeIfPresent(key) { name, live ->
+                val next = remappingFunction.apply(name, live)
+                if (next == null) {
+                    beforeRemoval.countDown()
+                    check(resume.await(GATE_SECONDS, TimeUnit.SECONDS)) { "the test never resumed the retirement" }
+                }
+                next
+            }
+    }
+
+    private fun <T : ConcurrentHashMap<String, Any>> installLiveMap(
+        manager: ConnectionPoolManager,
+        replacement: T,
+    ): T {
+        val field = ConnectionPoolManager::class.java.getDeclaredField("pools").apply { isAccessible = true }
+
+        @Suppress("UNCHECKED_CAST")
+        val original = field.get(manager) as ConcurrentHashMap<String, Any>
+        replacement.putAll(original)
+        field.set(manager, replacement)
+        return replacement
     }
 
     @Test

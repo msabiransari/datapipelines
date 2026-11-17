@@ -532,9 +532,9 @@ class ConnectionPoolManager(
     private val pools = ConcurrentHashMap<String, LivePool>()
 
     /**
-     * Pools that have left [pools] and are draining. A QUEUE rather than a map keyed by name:
-     * a datasource saved twice in quick succession, with a lease in between, legitimately has
-     * two pools retiring at once, and a name-keyed map would drop the first one un-closed.
+     * Pools queued for draining. A caller may close an entry only after it leaves [pools].
+     * A datasource saved twice, with a lease in between, can have two retiring pools at once.
+     * A name-keyed map would lose the first pool before closing it.
      */
     private val retiring = ConcurrentLinkedQueue<RetiringPool>()
 
@@ -693,7 +693,7 @@ class ConnectionPoolManager(
     ) {
         val holding = retainedHolding(name)
         holding
-            .filter { it.handOff.get() == HandOff.NONE && it.pool.activeConnections == 0 }
+            .filter { it.handOff.get() == HandOff.NONE && pools[it.name] !== it.live && it.pool.activeConnections == 0 }
             .forEach { entry ->
                 retiring.remove(entry)
                 handOff(entry, drained = true)
@@ -886,8 +886,10 @@ class ConnectionPoolManager(
      * Retirement step 1, shared by every path that takes a pool out of the map: removes [name]'s live entry when
      * [judge] accepts it and queues it on [retiring] (and, for a managed generation under a cap, on [retained])
      * INSIDE the map's remapping, so no caller holding [name]'s bin lock ever sees the entry gone from the map and
-     * not yet counted (#819 D6). The soft evict and the metric run after, outside the lock, still after the
-     * removal. Returns the entry taken out, or null when none was live or [judge] refused it.
+     * not yet counted (#819 D6). The reaper and settlement compare the entry's identity with the live map before
+     * handing it off. A lookup can still return the live entry until the remapping returns. The soft evict and
+     * metric run outside the lock, after removal. Returns the entry taken out, or null when none was live or
+     * [judge] refused it.
      */
     private fun takeOut(
         name: String,
@@ -899,7 +901,7 @@ class ConnectionPoolManager(
             taken = current
             val pool = current.pool
             val ceiling = if (pool.managedGeneration != null) managedRetireCeiling else retireCeiling
-            val entry = RetiringPool(name, pool, deadline = clock().plus(ceiling), ceiling = ceiling)
+            val entry = RetiringPool(name, current, deadline = clock().plus(ceiling), ceiling = ceiling)
             if (maxRetiredGenerations != null && pool.managedGeneration != null) retained += entry
             retiring += entry
             null
@@ -965,8 +967,12 @@ class ConnectionPoolManager(
         val entries = retiring.iterator()
         while (entries.hasNext()) {
             val entry = entries.next()
-            val active = entry.pool.activeConnections
+            val active = if (pools[entry.name] === entry.live) null else entry.pool.activeConnections
             when {
+                active == null -> {
+                    // The remapping has queued the entry and still owns the live slot.
+                }
+
                 active == 0 -> {
                     entries.remove()
                     if (handOff(entry, drained = true)) drained++
@@ -1031,15 +1037,17 @@ class ConnectionPoolManager(
     )
 
     /**
-     * A pool out of the map, draining, with the instant after which it is closed regardless and the [ceiling] that
-     * instant was stamped from (#824: the managed one for a managed generation), which the hard-close line reports.
+     * A pool queued for draining, with the instant after which it is closed regardless of active connections and
+     * the [ceiling] used to stamp it (#824: the managed one for a managed generation).
      */
     private class RetiringPool(
         val name: String,
-        val pool: ConnectionPool,
+        val live: LivePool,
         val deadline: Instant,
         val ceiling: Duration,
     ) {
+        val pool: ConnectionPool get() = live.pool
+
         /**
          * Won by the ONE caller that hands this pool to the closer ([handOff]), and whether it had no connection out
          * then ([HandOff.DRAINED]: only such a close is waited for, [settleIdleRetired]). One atomic, so no reader can
