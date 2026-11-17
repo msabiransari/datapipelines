@@ -45,10 +45,10 @@ import java.util.concurrent.TimeUnit
  *
  * The builder keeps the command it was built with, or the launch fails (#998 round 2, C2). The chain after
  * `ProcessBuilder(…)` may call only `directory`, `redirectErrorStream`, `redirectOutput`, `redirectError`,
- * `redirectInput` and `inheritIO`, and `apply` with a lambda that calls nothing on its receiver but `environment()`
- * and spells neither `this` nor `command`; `start()` or `environment()` may end it (the chain then holds a process or
- * the environment, no longer the builder). A chain that still holds the builder at its end must be the whole value of
- * a local `val`/`var` in a Kotlin `fun`, and every later use of that name in the function must be such a chain ending
+ * `redirectInput` and `inheritIO`, and `apply` with a lambda that calls nothing on its receiver but `environment()`,
+ * contains no backticked names and spells neither `this` nor `command`; `start()` or `environment()` may end it (the
+ * chain then holds a process or the environment, no longer the builder). A chain that still holds the builder at its
+ * end must be the whole value of a local `val`/`var` in a Kotlin `fun`, and every later use of that name must be a chain ending
  * in `start()` or `environment()`. Any other call (`.command(…)`, `.also`, `.let`), a builder handed to anything, and
  * a builder kept in a property or a Java local make the launch a failing JVM launch, whatever its program: a replaced
  * command keeps no credit for a flag it discarded, and a replaced `git` command may start a JVM.
@@ -218,6 +218,16 @@ class ChildJvmTempDirectoryGuardTest {
         offenders(dir, replacing) shouldContainExactly listOf("$PROBE:4")
         val handedOn = fn("""ProcessBuilder("node", script).apply { configure(this) }.start()""")
         offenders(dir, handedOn) shouldContainExactly listOf("$PROBE:4")
+    }
+
+    @Test
+    fun `control - a backticked command replacement inside apply is unreadable`(
+        @TempDir dir: Path,
+    ) {
+        val source = fn("""ProcessBuilder(java, "-Djava.io.tmpdir=/t/child").apply { `command`(java, "-cp", cp, "Main") }.start()""")
+        offenders(dir, source) shouldContainExactly listOf("$PROBE:4")
+        val replacedNode = fn("""ProcessBuilder("node", script).apply { `command`(java, "-cp", cp, "Main") }.start()""")
+        offenders(dir, replacedNode) shouldContainExactly listOf("$PROBE:4")
     }
 
     @Test
@@ -566,9 +576,9 @@ private object ChildJvmLaunches {
         )
     }
 
-    /** An `apply` body that calls nothing on its receiver but `environment()` and spells neither `this` nor `command`. */
+    /** An `apply` body with no backticked names, no receiver call but `environment()`, and neither `this` nor `command`. */
     private fun plain(body: String): Boolean =
-        !ESCAPE.containsMatchIn(body) && IMPLICIT_CALL.findAll(body).all { it.groupValues[1] == "environment" }
+        '`' !in body && !ESCAPE.containsMatchIn(body) && IMPLICIT_CALL.findAll(body).all { it.groupValues[1] == "environment" }
 
     private class Chain(
         val end: Int,
