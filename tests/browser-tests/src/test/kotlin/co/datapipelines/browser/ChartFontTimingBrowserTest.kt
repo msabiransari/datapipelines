@@ -128,7 +128,7 @@ class ChartFontTimingBrowserTest : ChartPageSuite() {
      * font responses' `Cache-Control` and `Pragma`, both visits' timings and every class stay printed.
      */
     @Test
-    fun `warm - a repeat visit measures in the drawn font, and takes every font file from the browser's cache`() {
+    fun `warm - a repeat visit measures in the drawn font, and takes every font file from the browser cache`() {
         startTrace()
         val root = ready("cftwarm")
         situation("warm") {
