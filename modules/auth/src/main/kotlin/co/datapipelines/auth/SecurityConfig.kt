@@ -122,9 +122,15 @@ class SecurityConfig(
                 csrf.sessionAuthenticationStrategy(NullAuthenticatedSessionStrategy())
             }.headers { headers ->
                 // 188 (#188): the app STATES its headers — the values and the reasoning
-                // live in [SecurityHeaders]; this block only wires them. `nosniff`,
-                // `Cache-Control` and `X-XSS-Protection: 0` keep Spring's defaults, now
-                // pinned by SecurityHeadersTest rather than assumed.
+                // live in [SecurityHeaders]; this block only wires them. `nosniff` and
+                // `X-XSS-Protection: 0` keep Spring's defaults, now pinned by
+                // SecurityHeadersTest rather than assumed.
+                // #1023: the default cache writer is replaced by the same framework writer
+                // behind a matcher that leaves a font file out (SecurityHeaders' KDoc: the
+                // eager writing below would otherwise keep `Pragma: no-cache` on the fonts a
+                // browser may keep for a year); every other answer keeps all three headers.
+                headers.cacheControl { it.disable() }
+                headers.addHeaderWriter(SecurityHeaders.cacheControlWriter())
                 headers.frameOptions { it.sameOrigin() }
                 headers.referrerPolicy { it.policy(ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN) }
                 headers.permissionsPolicyHeader { it.policy(SecurityHeaders.PERMISSIONS_POLICY) }

@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.SecurityHeaders
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.io.Resource
 import org.springframework.http.CacheControl
@@ -31,22 +32,27 @@ import java.util.function.Function
  * for good, silently; a hash of the bytes cannot. `Last-Modified` is therefore off, so there is ONE validator.
  *
  * The pattern is [SiteAssetConfig]'s: a resource handler over a classpath location, its header replacing the security
- * chain's default `Cache-Control` (`Pragma` and `Expires` stay beside it; a browser reads `Cache-Control` first). No
- * public path is added: the three prefixes are public already. No configuration key: the durations are the ruling.
+ * chain's default `Cache-Control`. The chain's `Pragma: no-cache` and `Expires: 0` stay beside it on every file but a
+ * font: Chromium reads that `Pragma` as `no-cache`, so the chain leaves all three off a font file
+ * (`SecurityHeaders.cacheControlWriter`). The font prefix is ONE value, [SecurityHeaders.FONT_PATH_PREFIX], which
+ * both the chain's matcher and the font handler here use. No public path is added: the three prefixes are public
+ * already. No configuration key: the durations are the ruling.
  * The more specific pattern wins (the fonts over the vendor prefix, the engine over the scripts prefix):
  * `StaticCacheHeadersE2eTest` proves both on every file.
  */
 @Configuration
 class StaticAssetCacheConfig : WebMvcConfigurer {
     override fun addResourceHandlers(registry: ResourceHandlerRegistry) {
-        withCacheRule(registry.addResourceHandler(FONTS).addResourceLocations("classpath:/static/vendor/fonts/"), FONT_RULE)
+        withCacheRule(registry.addResourceHandler(FONTS).addResourceLocations(FONTS_LOCATION), FONT_RULE)
         withCacheRule(registry.addResourceHandler(CSS).addResourceLocations("classpath:/static/css/"), RECHECK_RULE)
         withCacheRule(registry.addResourceHandler(JS).addResourceLocations("classpath:/static/js/"), RECHECK_RULE)
         withCacheRule(registry.addResourceHandler(VENDOR).addResourceLocations("classpath:/static/vendor/"), RECHECK_RULE)
     }
 
     companion object {
-        private const val FONTS = "/vendor/fonts/**"
+        /** The font handler's pattern and location, from the one prefix the security chain's matcher also uses. */
+        private const val FONTS = SecurityHeaders.FONT_PATH_PREFIX + "**"
+        private const val FONTS_LOCATION = "classpath:/static" + SecurityHeaders.FONT_PATH_PREFIX
         private const val CSS = "/css/**"
         private const val JS = "/js/**"
         private const val VENDOR = "/vendor/**"

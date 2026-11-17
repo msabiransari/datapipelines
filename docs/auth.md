@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.81 (revised — see Change Log)
+**Status:** v3.82 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-11-15
+**Last updated:** 2026-11-17
 
 ---
 
@@ -1112,7 +1112,7 @@ Rotation, which the config value never had: mint a second `server` key, set it o
 
 ### 8.1 Filter chain
 
-Security headers are written before the downstream filter chain starts. An SSE worker may write the response while the original servlet thread unwinds; deferred security-header inspection at that point would race the container's mutable headers. `HeaderWriterFilter` therefore uses eager writing. The default security and private-cache headers remain enabled; an explicit application `Cache-Control` value (including public page/asset TTLs) overrides that header afterward. This changes header timing, not authentication, authorization or CSRF rules.
+Security headers are written before the downstream filter chain starts. An SSE worker may write the response while the original servlet thread unwinds; deferred security-header inspection at that point would race the container's mutable headers. `HeaderWriterFilter` therefore uses eager writing. The default security and private-cache headers remain enabled, except that since #1023 the cache headers are not written on a font file under `/vendor/fonts/` (`SecurityHeaders.cacheControlWriter`, deployment §6.2); an explicit application `Cache-Control` value (including public page/asset TTLs) overrides that header afterward. This changes header timing, not authentication, authorization or CSRF rules.
 
 The sketch below is the shape of `SecurityConfig.securityFilterChain` as it is actually
 assembled, not a simplification: the three `addFilterBefore` calls read in the REVERSE of
@@ -1381,7 +1381,7 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | security-chain | `chain 1 #20` | `ExceptionTranslationFilter` | `any request` | Turns an access refusal into the entry point's 401/302 or the 403 handler (§8.2). | yes | Constant per request; key and session checks read the §11.4 cache. |
 | security-chain | `chain 1 #21` | `AuthorizationFilter` | `any request` | The §8.3 allowlist, then `authenticated()` for everything else. | yes | Constant per request; key and session checks read the §11.4 cache. |
 | handler-mapping | `requestMappingHandlerMapping` | `RequestMappingHandlerMapping` | `handler methods — auth.md §7.6 and §8.6.2` | Every `@RequestMapping` handler. Its routes are placed on §7.6's rows (governed) or in the public contract below. | yes | The handlers'. |
-| handler-mapping | `resourceHandlerMapping` | `SimpleUrlHandlerMapping` | `/**, /js/js-rendered/**, /site/**, /webjars/**` | Static resources from the packaged classpath locations; since #987 `/js/js-rendered/**` serves the chart engine's files from the js-rendered module's resources (`JsRenderedAssetConfig`), only the names of the engine's load order — any other name under the prefix answers 404. Only the §8.3 globs (`/site/**`, `/vendor/**`, `/css/**`, `/js/**`, `/favicon.ico`, `/schemas/**`, `/robots.txt`) are anonymous; every other static path needs a credential. | yes | A file read; the container bounds the response. |
+| handler-mapping | `resourceHandlerMapping` | `SimpleUrlHandlerMapping` | `/**, /css/**, /js/**, /js/js-rendered/**, /site/**, /vendor/**, /vendor/fonts/**, /webjars/**` | Static resources from the packaged classpath locations; since #987 `/js/js-rendered/**` serves the chart engine's files from the js-rendered module's resources (`JsRenderedAssetConfig`), only the names of the engine's load order — any other name under the prefix answers 404; since #1023 `/css/**`, `/js/**`, `/vendor/**` and `/vendor/fonts/**` serve the same files as before from `classpath:/static/` only, each with its cache rule (`StaticAssetCacheConfig`). Only the §8.3 globs (`/site/**`, `/vendor/**`, `/css/**`, `/js/**`, `/favicon.ico`, `/schemas/**`, `/robots.txt`) are anonymous; every other static path needs a credential. | yes | A file read; the container bounds the response. |
 | handler-mapping | `welcomePageHandlerMapping` | `WelcomePageHandlerMapping` | `no URL` | Spring Boot's welcome page: no `index.html` is packaged, so it maps nothing. | no | Maps nothing. |
 | handler-mapping | `welcomePageNotAcceptableHandlerMapping` | `WelcomePageNotAcceptableHandlerMapping` | `no URL` | The welcome page's 406 companion; maps nothing for the same reason. | no | Maps nothing. |
 | handler-mapping | `beanNameHandlerMapping` | `BeanNameUrlHandlerMapping` | `no URL` | Maps a bean named like a URL; no bean is. | no | Maps nothing. |
@@ -1940,6 +1940,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-17 | v3.82 | 1023 (#1023, static file cache) | **§7.6: no row added or removed, no cell changed.** **§8.6.1: the `resourceHandlerMapping` row's patterns gain `/css/**`, `/js/**`, `/vendor/**` and `/vendor/fonts/**`** — `StaticAssetCacheConfig` serves the files the framework's default handler served before, from `classpath:/static/` only, with their cache rule (font files kept a year; the other static files re-checked by a content `ETag`); under the §8.3 `/css/**`, `/js/**` and `/vendor/**` globs, so anonymous as before. **§8.1:** the chain's default cache headers are written on every response except a font file under `/vendor/fonts/` (`SecurityHeaders.cacheControlWriter`; deployment §6.2's header table says why). No route, tool, action, permission or role cell. |
 | 2026-11-15 | v3.81 | 987 (#987, js-rendered F3) | **§7.6: no row added or removed, no cell changed** — one phrase of the `dashboard.read` row's text: the board page resolves the runtime configuration server-side to decide whether it loads the chart engine's files, no longer to declare a chart library bundle. **§8.6.1: the `resourceHandlerMapping` row's patterns gain `/js/js-rendered/**`** — the chart engine's files, served from the engine module's resources and only by the names of its load order; under the §8.3 `/js/**` glob, so anonymous like every other page script. No route, tool, action, permission or role cell. |
 | 2026-11-14 | v3.80 | 959 (#959) | **§8.6.1: the conditional entry inventory gains the `lake-maintenance-planner` recurring scheduler task** (`datapipelines.lake.enabled=true`, every `plan-interval`, 15 minutes by default): it measures, decides and enqueues `lake-maintenance` instances; no route, tool, action, permission or role cell. |
 | 2026-11-14 | v3.79 | 957 (#957) | **§7.6 + §4.5 + §8.6.1: lake maintenance.** New routeless, system-only row `lake.maintain` (✗ in every member and key-role cell, super admin included; not fenced): the lake maintenance worker's service check. `RolePermissions.SYSTEM_ONLY` holds it; the system actor's fixed set gains it (five permissions); the super admin's column is every permission minus the fenced and the system-only rows. `SystemActorPrincipals.forInstance` builds the workspace-less system principal that asks it. The conditional entry inventory gains the `lake-maintenance` scheduler task. The permission count moves 103 → 104. |

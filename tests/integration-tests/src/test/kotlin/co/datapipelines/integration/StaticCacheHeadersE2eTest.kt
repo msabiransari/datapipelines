@@ -115,6 +115,9 @@ class StaticCacheHeadersE2eTest {
                     first.statusCode() shouldBe 200
                     val cacheControl = first.header("Cache-Control")
                     cacheControl.split(", ").toSet() shouldBe FONT_DIRECTIVES
+                    // #1023 round 2: the security chain writes none of its cache headers on a font file.
+                    first.header("Pragma") shouldBe ""
+                    first.header("Expires") shouldBe ""
                 }
                 val etag = first.header("ETag")
                 withClue("$path ETag") { etag shouldNotBe "" }
@@ -122,6 +125,8 @@ class StaticCacheHeadersE2eTest {
                 withClue("$path asked with its own validator") {
                     again.statusCode() shouldBe 304
                     again.body().size shouldBe 0
+                    again.header("Pragma") shouldBe ""
+                    again.header("Expires") shouldBe ""
                 }
             }
         }
@@ -141,12 +146,17 @@ class StaticCacheHeadersE2eTest {
                     etag shouldNotBe ""
                     // D2.4: the validator IS the content served.
                     etag shouldBe "\"${sha256(first.body())}\""
+                    // The chain's two legacy headers stay beside the handler's rule (round 2 changes fonts only).
+                    first.header("Pragma") shouldBe CHAIN_PRAGMA
+                    first.header("Expires") shouldBe CHAIN_EXPIRES
                 }
                 val same = get(path, "If-None-Match" to etag)
                 withClue("$path asked with its own validator") {
                     same.statusCode() shouldBe 304
                     same.body().size shouldBe 0
                     same.header("Cache-Control") shouldBe RECHECK_HEADER
+                    same.header("Pragma") shouldBe CHAIN_PRAGMA
+                    same.header("Expires") shouldBe CHAIN_EXPIRES
                 }
                 val other = get(path, "If-None-Match" to "\"${"0".repeat(SHA256_HEX_LENGTH)}\"")
                 withClue("$path asked with a different validator") {
@@ -191,7 +201,12 @@ class StaticCacheHeadersE2eTest {
                 val response = get(row.path, *row.headers.toTypedArray())
                 val cacheControl = response.header("Cache-Control")
                 val location = response.header("Location")
-                println("1023|unchanged|${row.label}|status=${response.statusCode()} location=$location cache-control=$cacheControl")
+                val pragma = response.header("Pragma")
+                val expires = response.header("Expires")
+                println(
+                    "1023|unchanged|${row.label}|status=${response.statusCode()} location=$location cache-control=$cacheControl " +
+                        "pragma=$pragma expires=$expires",
+                )
                 withClue(row.label) {
                     response.statusCode() shouldBe row.status
                     if (row.location != null) location.removePrefix("http://localhost:$port") shouldBe row.location
@@ -199,6 +214,45 @@ class StaticCacheHeadersE2eTest {
                         is Expect.Exactly -> cacheControl shouldBe expect.value
                         is Expect.Contains -> cacheControl shouldContain expect.value
                     }
+                    // Round 2: every row outside the font rule keeps the chain's two legacy headers, as on the base.
+                    pragma shouldBe CHAIN_PRAGMA
+                    expires shouldBe CHAIN_EXPIRES
+                }
+            }
+        }
+    }
+
+    /**
+     * The security chain leaves its cache headers off a request the font handler answers, and only there (round 2).
+     * A name under the font prefix that does not exist is answered 404 by the application's not-found envelope; the
+     * row pins what that answer carries, and that it is never the year and never `public`. The near misses keep the
+     * chain's headers; the encoded and dot-segment forms are refused by the firewall before any handler runs.
+     */
+    @Test
+    fun `the font rule reaches only the font files - a missing name, the near misses and refused forms`() {
+        val rows =
+            listOf(
+                Near("a missing font name", "/vendor/fonts/no-such-font-1023.woff2", 404, MISSING_FONT_CACHE),
+                Near("a missing name in a family", "/vendor/fonts/noto-sans/no-such-font-1023.woff2", 404, MISSING_FONT_CACHE),
+                Near("a family directory", "/vendor/fonts/noto-sans", 404, MISSING_FONT_CACHE),
+                Near("a longer segment", "/vendor/fontsX/noto-sans/noto-sans-latin-wght-normal.woff2", 404, CHAIN_CACHE),
+                Near("the prefix under the api", "/api/vendor/fonts/noto-sans/noto-sans-latin-wght-normal.woff2", 401, CHAIN_CACHE),
+                Near("the prefix without a file", "/vendor/fonts", 404, CHAIN_CACHE),
+                Near("the prefix's directory", "/vendor/fonts/", 404, CHAIN_CACHE),
+                Near("an encoded dot segment", "/vendor/fonts/%2e%2e/css/app.css", 400, REFUSED_CACHE),
+                Near("a dot segment", "/vendor/fonts/../css/app.css", 400, REFUSED_CACHE),
+                Near("an encoded slash", "/vendor/fonts/noto-sans%2fnoto-sans-latin-wght-normal.woff2", 400, REFUSED_CACHE),
+            )
+        assertSoftly {
+            for (row in rows) {
+                val response = get(row.path)
+                val seen = CHAIN_HEADER_NAMES.map { response.header(it) }
+                println("1023|font-rule-reach|${row.label}|${row.path}|status=${response.statusCode()}|${CHAIN_HEADER_NAMES.zip(seen)}")
+                withClue("${row.label}: GET ${row.path}") {
+                    response.statusCode() shouldBe row.status
+                    seen shouldBe row.cache
+                    response.header("Cache-Control") shouldNotContain "max-age=31536000"
+                    response.header("Cache-Control") shouldNotContain "public"
                 }
             }
         }
@@ -312,6 +366,13 @@ class StaticCacheHeadersE2eTest {
         val cacheControl: Expect,
     )
 
+    private data class Near(
+        val label: String,
+        val path: String,
+        val status: Int,
+        val cache: List<String>,
+    )
+
     private sealed interface Expect {
         data class Exactly(
             val value: String,
@@ -339,6 +400,24 @@ class StaticCacheHeadersE2eTest {
 
         /** The security chain's default, which every answer outside the ruling keeps. */
         private const val DEFAULT_NO_STORE = "no-cache, no-store, max-age=0, must-revalidate"
+
+        /** The chain's two legacy cache headers, read on the base before round 2; kept on every answer but a font's. */
+        const val CHAIN_PRAGMA = "no-cache"
+        const val CHAIN_EXPIRES = "0"
+
+        /** `Cache-Control`, `Pragma`, `Expires` of one answer, in that order ("" = absent). */
+        val CHAIN_HEADER_NAMES = listOf("Cache-Control", "Pragma", "Expires")
+        val CHAIN_CACHE = listOf(DEFAULT_NO_STORE, CHAIN_PRAGMA, CHAIN_EXPIRES)
+
+        /**
+         * A missing name under the font prefix (read 2026-11-17 on the changed product; the base carried the chain's
+         * three): none of the three. The chain's matcher judges the path, not the file, and the not-found envelope sets
+         * no cache header of its own. Never the year, never `public`; the body is the same for every caller.
+         */
+        val MISSING_FONT_CACHE = listOf("", "", "")
+
+        /** A request the firewall refuses (read on the base and unchanged): none of the three, before any writer runs. */
+        val REFUSED_CACHE = listOf("", "", "")
 
         // Row 6's values the brief leaves to the base, read on base 01ec928b0 before the code change (2026-11-17):
         // a signed-out page request is redirected to the login page; the icon and robots.txt carry the default.
