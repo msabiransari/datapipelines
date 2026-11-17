@@ -113,7 +113,7 @@ class LakeRulesTest {
     fun `the lease wait stays under the node query ceiling and a delivery's staging fits the scratch budget`() {
         enabled(LakeRules.LEASE_WAIT_SECONDS to "900").single() shouldStartWith LakeRules.LEASE_WAIT_SECONDS
         enabled(LakeRules.LEASE_WAIT_SECONDS to "899") shouldContainExactly emptyList()
-        // Shipped 2GB × 10 = 20GB ≤ 20GB, at equality (#997's factor); one byte more refuses.
+        // Shipped 1GB × 10 = 10GB ≤ 20GB; an override of 2GB reaches equality, and one byte more refuses.
         enabled(LakeRules.MAX_DELIVERY_BYTES to "2147483649B").single() shouldStartWith LakeRules.MAX_DELIVERY_BYTES
         enabled(LakeRules.MAX_DELIVERY_BYTES to "2GB") shouldContainExactly emptyList()
         enabled(LakeRules.SCRATCH_BYTES to "lots").single() shouldStartWith LakeRules.SCRATCH_BYTES
