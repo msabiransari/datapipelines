@@ -759,13 +759,14 @@ drawn by the datapipelines client library"; the message never echoes the host's 
 While drawing, a chart publishes render warnings — `{ scope: "render", severity: "warning", code, name, refreshId }`,
 each code once per occurrence per refresh, superseded by the next refresh's frame: `chart.rule.null-category` (rows
 with a null category or series were left out), `chart.rule.non-finite` (a value too large to draw was left out),
-`chart.rule.null-position` (rows of a line or an area with a null position were left out),
-`chart.rule.log-nonpositive` (on a log axis a value at or below zero was not drawn) — these two with the page's
-general sentence "the chart was drawn with a warning" until the adapter names them —
-`chart.frame-too-small`, `chart.text.width-missing`, and `chart.token-refused` — once per refused token, naming it —
-when the page's value of a `--chart-*` token is not one that token may hold and its default was drawn (§6.3). No rows
-is not a warning: the chart draws its no-data picture and the card shows its empty state. A warning carries its code
-and a fixed sentence, never document text or a bound value.
+`chart.rule.null-position` (rows of a line or an area whose position is null, is a time that cannot be read or is not
+a finite number were left out), `chart.rule.log-nonpositive` (on a log axis of any chart type a value at or below
+zero was not drawn), `chart.frame-too-small`, `chart.text.width-missing`, and `chart.token-refused` — once per
+refused token, naming it — when the page's value of a `--chart-*` token is not one that token may hold and its
+default was drawn (§6.3). No rows is not a warning: the chart draws its no-data picture and the card shows its empty
+state. A warning carries its code and a fixed sentence, never document text or a bound value: each code the engine
+warns with has its own sentence, and a code the page's adapter does not know (an engine newer than the adapter)
+shows the general sentence "the chart was drawn with a warning".
 
 Bootstrap is the four-step barrier, each step awaited: validate the adapter → fetch the configuration → mount the layout → fetch and render the parameter state (an explicit
 no-op without a set) → mount the occurrences → invoke the `initial` actions. Any failure rejects
@@ -1281,6 +1282,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-16 | v0.79 | 1008 (#1008) | **§6.1:** every render warning code the chart engine has carries its own fixed sentence on the page — `chart.rule.null-position` and `chart.rule.log-nonpositive` gain theirs and `chart.rule.non-finite`'s no longer names the bar; `chart.rule.null-position` also covers a position that cannot be read, `chart.rule.log-nonpositive` every type with a log axis, and a code the adapter does not know shows the general sentence. No code, route, tool or permission row changes. |
 | 2026-11-15 | v0.78 | 990 (#990, js-rendered F6) | **§6.3:** the picture describes itself — `role="img"`, a `title` (the chart's name) and a `desc` (type, series, mark count, then the occurrence's `description`), the card body without a role or label; the new sub-section on what a chart does on the pointer, a click and the keyboard: one interaction layer for every type, hover highlight and dimming, the bar group and stack card (a stack's card heads with the category and the stack's total), the line and area crosshair, the card that shows what fits (look contract L8), the cut-text card, the legend switch kept by the adapter, one tab stop with a focus ring, motion. **§6.4:** the layer loads directly before the chart adapter; the stylesheet applies `--chart-tip-shadow` to the tooltip card and styles the layer's classes. **§6.6:** the layer needs nothing from the page policy. Decided by the js-rendered charts record (§5.3) and the look contract (L7, L8). |
 | 2026-11-15 | v0.77 | 989 (#989, js-rendered F5) | **§2.1.2:** the chart document's line and area families (their schema files served beside bar's; the save judges a document by the file its `mark.type` names); the position shape (a continuous `x`; a temporal `x` on line and area has the one form position); `curve`, `points`, `labels: last`, the names at the lines' ends (`legend.orient` `direct`); the area's stack and its zero baseline; on every family `fields` (2 to 8), `unit` (16 characters), `encoding.tooltip` (6 details), `scale.type: "log"` and `scale.zero`; save codes `chart.scale.log_unsupported` and `chart.scale.domain_log`, and `chart.measure.not_numeric` / `chart.category.type_mismatch` on a position. **§6.1:** render warnings `chart.rule.null-position` and `chart.rule.log-nonpositive`. No route, tool or permission row. |
 | 2026-11-15 | v0.76 | 988 (#988, js-rendered F4) | **§2.1:** the worked example drops its note on the retired kind, and the `renderer.kind` row says any other kind is refused as an unknown kind. **§2.1.2:** the chart paragraph keeps only its pointer to the engine. **§6.6:** the paragraph on the vendored bundles' two source patches (the colorbar reset and the heatmap hint) is removed with the bundles; nothing in the product draws through them. **Status line:** the earlier entries name no chart library. Text only: no rule, code or error code changes. |
