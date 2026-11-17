@@ -1,3 +1,4 @@
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 // module-structure.md §5.9 — the aggregation layer. Lists every module it touches
@@ -408,4 +409,55 @@ tasks.register<JavaExec>("websiteExport") {
     // Resolved in doFirst: a Provider passed through vararg `args` stringifies instead of unwrapping.
     val outDir = layout.buildDirectory.dir("website-export")
     doFirst { args(outDir.get().asFile.absolutePath) }
+}
+
+// #1023 D4 — the font ledger's guard re-runs when only git history changes. Every test task takes the
+// repository's FILES as an input, never git's own directory (RepoTestInputs.EXCLUDES), so a commit that edits or
+// deletes a landed ledger line and a second commit that puts the working tree back would leave this task
+// UP-TO-DATE and report FontPathLedgerTest's old green over a history it refuses. This input is the ledger's
+// history itself: the commits of HEAD's history that changed it, in order, and whether the checkout is shallow.
+// A ValueSource (the exemplar is buildSrc's ExistingRepoPaths): obtained only when this task's inputs are
+// fingerprinted, so a build that does not run module web's tests runs no git; a git failure becomes the value
+// and the test reports it, never the build's configuration.
+abstract class FontLedgerHistory : ValueSource<String, FontLedgerHistory.Parameters> {
+    interface Parameters : ValueSourceParameters {
+        val root: DirectoryProperty
+        val ledger: Property<String>
+    }
+
+    @get:javax.inject.Inject
+    abstract val execOperations: org.gradle.process.ExecOperations
+
+    override fun obtain(): String =
+        listOf(
+            listOf("rev-parse", "--is-shallow-repository"),
+            listOf("rev-list", "--full-history", "HEAD", "--", parameters.ledger.get()),
+        ).joinToString("\n") { args -> "git ${args.joinToString(" ")} → ${git(args)}" }
+
+    private fun git(args: List<String>): String {
+        val out = ByteArrayOutputStream()
+        return try {
+            val result =
+                execOperations.exec {
+                    workingDir = parameters.root.get().asFile
+                    commandLine(listOf("git") + args)
+                    isIgnoreExitValue = true
+                    standardOutput = out
+                    errorOutput = out
+                }
+            "exit ${result.exitValue}\n$out"
+        } catch (e: GradleException) {
+            "could not run git: ${e.message}"
+        }
+    }
+}
+
+tasks.named<Test>("test") {
+    inputs.property(
+        "fontLedgerHistory",
+        providers.of(FontLedgerHistory::class.java) {
+            parameters.root.set(rootProject.layout.projectDirectory)
+            parameters.ledger.set("modules/web/src/test/resources/fonts/font-path-ledger.txt")
+        },
+    )
 }

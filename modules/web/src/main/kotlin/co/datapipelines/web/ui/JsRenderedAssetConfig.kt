@@ -15,16 +15,18 @@ import org.springframework.web.servlet.resource.PathResourceResolver
  * `PublicPaths` (the engine is the product's own JavaScript, the same as every other page script).
  *
  * Only the engine's listed files are served ([EngineFilesOnly]): the order file and any other name under the engine's
- * directory answer 404, so the page can reach exactly what [scripts] names. No cache header of its own: the same
- * default every other page script gets.
+ * directory answer 404, so the page can reach exactly what [scripts] names. Its cache rule, content validator and
+ * last-modified setting are every other page script's (#1023): kept and re-checked on every use, from
+ * [StaticAssetCacheConfig.withCacheRule].
  */
 @Configuration
 class JsRenderedAssetConfig : WebMvcConfigurer {
     override fun addResourceHandlers(registry: ResourceHandlerRegistry) {
-        registry
-            .addResourceHandler("$PREFIX**")
-            .addResourceLocations("classpath:/${JsRenderedEngineFiles.ROOT}/")
-            .resourceChain(false)
+        StaticAssetCacheConfig
+            .withCacheRule(
+                registry.addResourceHandler("$PREFIX**").addResourceLocations("classpath:/${JsRenderedEngineFiles.ROOT}/"),
+                StaticAssetCacheConfig.RECHECK_RULE,
+            ).resourceChain(false)
             .addResolver(EngineFilesOnly())
     }
 

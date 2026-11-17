@@ -1,9 +1,9 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.74
+**Status:** v1.75
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-11-15
+**Last updated:** 2026-11-17
 
 ---
 
@@ -400,7 +400,7 @@ in `AuthHttpBoundaryTest`, `ApplicationSmokeTest`). What it sends:
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | The product uses none of these. |
 | `X-XSS-Protection` | `0` | The legacy filter off, as every current guide recommends; the CSP is the control. |
-| `Cache-Control` | `no-cache, no-store, max-age=0, must-revalidate` on authenticated responses; the public site and docs set their own public windows | |
+| `Cache-Control` | `no-cache, no-store, max-age=0, must-revalidate` on authenticated responses; the public site and docs set their own public windows; font files under `/vendor/fonts/`: `max-age=31536000, public, immutable` (kept a year, never re-checked inside it); every other file under `/css/`, `/js/` and `/vendor/`: `no-cache` with an `ETag` that is the SHA-256 of the file's bytes (kept, re-checked on every use, answered `304` when unchanged) | #1023. **A font upgrade gets a new file name**: a browser that holds a font never asks for it again within the year, so new bytes under an old name would not reach it. Add the new file's line to `modules/web/src/test/resources/fonts/font-path-ledger.txt` and never edit or delete a line; `FontPathLedgerTest` fails otherwise, and it needs the repository's git history to do so (a shallow checkout fails it, so CI's `gate` job checks out with `fetch-depth: 0`). **The security chain's own cache headers are not written on a font file** (`SecurityHeaders.cacheControlWriter`): everywhere else, the other static files included, it still writes `no-cache, no-store, max-age=0, must-revalidate` (or the answer's own rule replaces it) with `Pragma: no-cache` and `Expires: 0`, but Chromium reads that `Pragma` as `no-cache` and re-checked every font on every page load, so a font file answers with its one-year `Cache-Control` alone. An error answer under `/vendor/fonts/` (a missing name or a family directory: `404`; a `Range` a font file cannot satisfy: `416`; a dot-segment path the security firewall refuses: `400`) is not storable all the same: it carries `no-cache, no-store, max-age=0, must-revalidate`, `Pragma: no-cache` and `Expires: 0`, never the font rule (`FontErrorCacheFilter`). |
 
 **The app deliberately sends no `Strict-Transport-Security`.** It cannot know it is
 behind TLS — it sees plain HTTP from the edge — and an HSTS header on a plain-HTTP
@@ -1686,6 +1686,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-17 | v1.75 | 1023 (#1023, static file cache) | **What the edge sets:** the `Cache-Control` row gains the static files' two rules (the owner's ruling of 2026-11-16): font files kept a year (`max-age=31536000, public, immutable`), every other file under `/css/`, `/js/` and `/vendor/` kept and re-checked by a content `ETag` (`no-cache`); the font rule's consequence for an operator (a new file name and ledger line per font upgrade, guarded by `FontPathLedgerTest` with the repository's history). The security chain writes no `Cache-Control`, `Pragma` or `Expires` of its own on a font file (Chromium treats `Pragma: no-cache` as `no-cache` and would re-check each font on every page); every other answer keeps all three, and an error answer on a font path (404, 416) carries all three as before. §6.7 needed no edit: `/`, `/site/**` and the docs keep their windows. |
 | 2026-11-15 | v1.74 | 988 (#988, js-rendered F4) | **§6.2A:** the vendored chart library leaves the product with its directory, its manifest block, its licence in the generated notices, its rebuild recipe and its rebuild-and-compare script; the section keeps its number and heading and names the vendored set that remains. No chart library is vendored: the charts are drawn by the product's own engine. |
 | 2026-11-15 | v1.73 | 986 (#986, js-rendered F2) | **§6.2A:** `VendoredPlotlyAuditTest` no longer pins the manifest's trace lists: the server's Plotly trace constants left with the chart library layer, so the lists are the manifest's record of each bundle's build, guarded by nothing on the server. Hashes, sizes and the gzip method stay guarded. |
 | 2026-11-13 | v1.72 | #936 DuckDB patch bump to duckdb_jdbc 1.5.6.0 (core 1.5.6) | **§3.1:** the image's core and extension bundle move to v1.5.6 (httpfs, aws, iceberg and avro at the commits the build stage reads). The runbook records what the bump taught: step 1 names the check that refuses a raised catalog version left without regenerated locks (the first task that resolves the configuration; the `dependencies` report exits 0); step 2's cold command runs after steps 3–5, because `generateThirdPartyNotices` refuses a catalog core that is not the Dockerfile `ARG`, and the metadata writer keeps the old driver's component, which is removed by hand; step 6's rehearsal derives the next patch from the catalog, and the notices fixtures, the docs golden and the extension-loaded function catalog move with the bump; step 7 runs a copy of the posture harness and compares its case lines. |
