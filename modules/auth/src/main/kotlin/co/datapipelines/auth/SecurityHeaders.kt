@@ -73,8 +73,8 @@ import java.util.Base64
  * Why a font file may lose them: the files are public, the same for every visitor, carry no user data, and never
  * change under a name already served (the web module's `FontPathLedgerTest`). The matcher is the risk: one wider than
  * the font handler would make another answer storable. It is the handler's own path, by the chain's own path rule
- * (the path inside the application, after the firewall refused encoded and dot-segment forms): the prefix followed
- * by a name that is not a directory. A path that only starts with similar text keeps all three headers;
+ * (the path inside the application, after the firewall refused encoded and dot-segment forms): a GET or HEAD of the
+ * prefix followed by a name that is not a directory. A path that only starts with similar text keeps all three headers;
  * `SecurityHeadersTest` pins both sides. A name under the prefix that does not exist is answered 404 by the web
  * module's not-found envelope with none of the three (the same answer for every caller, no user data;
  * `StaticCacheHeadersE2eTest` pins it).
@@ -159,14 +159,20 @@ object SecurityHeaders {
     /** True for the one route that gets no policy (the sitemap — class KDoc). */
     fun isUnpolicedRoute(request: HttpServletRequest): Boolean = request.appPath() == SITEMAP_PATH
 
+    /** The methods a resource handler answers; any other method on a font path is refused, and keeps the headers. */
+    private val FONT_FILE_METHODS = setOf("GET", "HEAD")
+
     /**
-     * True for a request the font handler answers: [FONT_PATH_PREFIX] followed by a name, and not a directory (a path
-     * ending in a slash). `/vendor/fonts` itself, the prefix's own directory, a longer segment and the prefix under
-     * another path are false.
+     * True for a request the font handler answers: a GET or HEAD of [FONT_PATH_PREFIX] followed by a name that is not a
+     * directory (a path ending in a slash). `/vendor/fonts` itself, the prefix's own directory, a longer segment, the
+     * prefix under another path and any other method are false.
      */
     fun isFontFile(request: HttpServletRequest): Boolean {
         val path = request.appPath()
-        return path.startsWith(FONT_PATH_PREFIX) && path.length > FONT_PATH_PREFIX.length && !path.endsWith("/")
+        return request.method in FONT_FILE_METHODS &&
+            path.startsWith(FONT_PATH_PREFIX) &&
+            path.length > FONT_PATH_PREFIX.length &&
+            !path.endsWith("/")
     }
 
     /**

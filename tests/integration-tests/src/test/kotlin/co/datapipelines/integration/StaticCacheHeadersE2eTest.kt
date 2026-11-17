@@ -243,6 +243,21 @@ class StaticCacheHeadersE2eTest {
                 Near("a dot segment", "/vendor/fonts/../css/app.css", 400, REFUSED_CACHE),
                 Near("an encoded slash", "/vendor/fonts/noto-sans%2fnoto-sans-latin-wght-normal.woff2", 400, REFUSED_CACHE),
             )
+        val head =
+            client.send(
+                HttpRequest
+                    .newBuilder(URI.create("http://localhost:$port${fonts.first()}"))
+                    .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                    .build(),
+                HttpResponse.BodyHandlers.discarding(),
+            )
+        println("1023|font-rule-reach|HEAD ${fonts.first()}|status=${head.statusCode()}|${CHAIN_HEADER_NAMES.map { head.header(it) }}")
+        withClue("HEAD of a font file: the year alone") {
+            head.statusCode() shouldBe 200
+            head.header("Cache-Control").split(", ").toSet() shouldBe FONT_DIRECTIVES
+            head.header("Pragma") shouldBe ""
+            head.header("Expires") shouldBe ""
+        }
         assertSoftly {
             for (row in rows) {
                 val response = get(row.path)

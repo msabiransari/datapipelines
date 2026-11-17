@@ -222,6 +222,7 @@ class SecurityHeadersTest {
                 Row("near miss: the prefix without a file", "/vendor/fonts", signedIn = false, 404, Cache.CHAIN),
                 Row("near miss: the prefix's directory", "/vendor/fonts/", signedIn = false, 404, Cache.CHAIN),
                 Row("near miss: a directory under it", "$FONT_PREFIX_PROBE/", signedIn = false, 404, Cache.CHAIN),
+                Row("near miss: a POST to a font file", "$FONT_PREFIX_PROBE/probe-1023.woff2", signedIn = false, 403, Cache.CHAIN, method = "POST"),
                 Row("a stylesheet", "/css/probe-1023.css", signedIn = false, 200, Cache.CHAIN),
                 Row("a script", "/js/probe-1023.js", signedIn = false, 200, Cache.CHAIN),
                 Row("a vendored file outside fonts", "/vendor/probe/probe-1023.js", signedIn = false, 200, Cache.CHAIN),
@@ -236,7 +237,7 @@ class SecurityHeadersTest {
             for (row in rows) {
                 val response = get(row)
                 val shown = CACHE_HEADERS.joinToString(" | ") { "$it: ${response.header(it) ?: "(absent)"}" }
-                println("1023|chain|${row.label}|${row.path}|status=${response.statusCode()}|$shown")
+                println("1023|chain|${row.label}|${row.method} ${row.path}|status=${response.statusCode()}|$shown")
                 withClue("${row.label}: GET ${row.path}") {
                     response.statusCode() shouldBe row.status
                     when (row.cache) {
@@ -305,6 +306,12 @@ class SecurityHeadersTest {
             withClue("a context path that looks like the prefix") { cacheHeadersFor(contextLooksLikeFonts) shouldBe CHAIN_CACHE_HEADERS }
             val noContext = MockHttpServletRequest("GET", "/dp/vendor/fonts/x.woff2")
             withClue("the prefix below an unknown first segment") { cacheHeadersFor(noContext) shouldBe CHAIN_CACHE_HEADERS }
+            // The handler answers GET and HEAD only: any other method on a font path is refused and keeps the headers.
+            val fontPath = "/vendor/fonts/noto-sans/noto-sans-latin-wght-normal.woff2"
+            withClue("HEAD of a font file") { cacheHeadersFor(MockHttpServletRequest("HEAD", fontPath)) shouldBe NO_CACHE_HEADERS }
+            listOf("POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE").forEach { method ->
+                withClue("$method of a font file") { cacheHeadersFor(MockHttpServletRequest(method, fontPath)) shouldBe CHAIN_CACHE_HEADERS }
+            }
         }
         println("1023|matcher|font-files=$fontFiles")
         println("1023|matcher|near-misses=$nearMisses")
@@ -335,7 +342,11 @@ class SecurityHeadersTest {
     }
 
     private fun get(row: Row): HttpResponse<String> {
-        val builder = HttpRequest.newBuilder(URI.create("http://localhost:$port${row.path}")).GET().timeout(Duration.ofSeconds(30))
+        val builder =
+            HttpRequest
+                .newBuilder(URI.create("http://localhost:$port${row.path}"))
+                .method(row.method, HttpRequest.BodyPublishers.noBody())
+                .timeout(Duration.ofSeconds(30))
         if (row.signedIn) builder.header("Cookie", "${OidcSuccessHandler.SESSION_COOKIE}=$session")
         row.accept?.let { builder.header("Accept", it) }
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
@@ -352,6 +363,7 @@ class SecurityHeadersTest {
         val status: Int,
         val cache: Cache,
         val accept: String? = null,
+        val method: String = "GET",
     )
 
     /**
