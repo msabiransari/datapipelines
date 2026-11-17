@@ -2,6 +2,7 @@ package co.datapipelines.auth
 
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.web.header.HeaderWriter
+import org.springframework.security.web.header.writers.CacheControlHeadersWriter
 import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter
 import org.springframework.security.web.header.writers.StaticHeadersWriter
 import org.springframework.security.web.util.matcher.RequestMatcher
@@ -57,6 +58,32 @@ import java.util.Base64
  * style of its own, and the only inline style that ever touches it is the browser's own
  * XML viewer, which a policy can only break.
  *
+ * ## The cache headers, and the one path that does not get them (#1023)
+ * The framework's cache writer (`Cache-Control: no-cache, no-store, max-age=0, must-revalidate`, `Pragma: no-cache`,
+ * `Expires: 0`) stays on every answer — pages, API answers, partials, errors, every static file — except a font file:
+ * a request the web module's font handler answers, under [FONT_PATH_PREFIX]. The owner's ruling of 2026-11-16 lets a
+ * browser keep a font file for one year, and the handler states that rule in its own `Cache-Control`. That is not
+ * enough on its own: [SecurityConfig] writes these headers EAGERLY (before the handler runs, so an SSE worker cannot
+ * race the container's header map), so the writer's own skip ("the answer already has a `Cache-Control`") never sees
+ * the handler's value, and its `Pragma: no-cache` stays beside it. Chromium reads `Pragma: no-cache` as
+ * `Cache-Control: no-cache` (its `immutable` override is behind a feature that is off by default), so it re-checked
+ * every font on every page load. Hence [cacheControlWriter]: the same framework writer, behind a matcher that is
+ * false on a font file and true everywhere else.
+ *
+ * Why a font file may lose them: the files are public, the same for every visitor, carry no user data, and never
+ * change under a name already served (the web module's `FontPathLedgerTest`). The matcher is the risk: one wider than
+ * the font handler would make another answer storable. It is the handler's own path, by the chain's own path rule
+ * (the path inside the application, after the firewall refused encoded and dot-segment forms): a GET or HEAD of the
+ * prefix followed by a name that is not a directory. A path that only starts with similar text keeps all three headers;
+ * `SecurityHeadersTest` pins both sides.
+ *
+ * The matcher judges the path, not the outcome, so an ERROR answer on the font path is not storable by another means
+ * (#1023 round 3, #1028): the web module's `FontErrorCacheFilter` wraps the response of exactly the requests
+ * [isFontFile] admits, and the moment a status of 400 or above is set or sent it sets these three headers, replacing
+ * whatever the handler wrote. That covers a name under the prefix that does not exist (404), a range a font file cannot
+ * satisfy (416, sent after the handler wrote its one-year rule) and an error the chain itself answers there;
+ * `StaticCacheHeadersE2eTest` pins each on the wire.
+ *
  * ## What the app deliberately does NOT send
  * No HSTS: the app cannot know it is behind TLS (it sees plain HTTP from the edge), and an
  * HSTS header on a plain-HTTP deployment locks a browser out of it. The edge sets it —
@@ -76,6 +103,12 @@ object SecurityHeaders {
     const val PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
 
     private const val SCRIPT_SRC_SELF = "script-src 'self'"
+
+    /**
+     * The font files' path inside the application (#1023, class KDoc): the ONE spelling, which the web module's font
+     * handler also maps and serves (`StaticAssetCacheConfig`), so the chain's matcher and the handler cannot drift.
+     */
+    const val FONT_PATH_PREFIX = "/vendor/fonts/"
 
     /** The XML data document the browser's own viewer styles — no policy (class KDoc). */
     private const val SITEMAP_PATH = "/sitemap.xml"
@@ -130,6 +163,29 @@ object SecurityHeaders {
 
     /** True for the one route that gets no policy (the sitemap — class KDoc). */
     fun isUnpolicedRoute(request: HttpServletRequest): Boolean = request.appPath() == SITEMAP_PATH
+
+    /** The methods a resource handler answers; any other method on a font path is refused, and keeps the headers. */
+    private val FONT_FILE_METHODS = setOf("GET", "HEAD")
+
+    /**
+     * True for a request the font handler answers: a GET or HEAD of [FONT_PATH_PREFIX] followed by a name that is not a
+     * directory (a path ending in a slash). `/vendor/fonts` itself, the prefix's own directory, a longer segment, the
+     * prefix under another path and any other method are false.
+     */
+    fun isFontFile(request: HttpServletRequest): Boolean {
+        val path = request.appPath()
+        return request.method in FONT_FILE_METHODS &&
+            path.startsWith(FONT_PATH_PREFIX) &&
+            path.length > FONT_PATH_PREFIX.length &&
+            !path.endsWith("/")
+    }
+
+    /**
+     * The chain's cache writer: the framework's own (it writes the three headers unless the answer already has one of
+     * them, or is a 304), on every request except a font file (class KDoc).
+     */
+    fun cacheControlWriter(): HeaderWriter =
+        DelegatingRequestMatcherHeaderWriter(RequestMatcher { !isFontFile(it) }, CacheControlHeadersWriter())
 
     /** The CSP header writer, in the order [SecurityConfig] registers them. */
     fun cspWriters(): List<HeaderWriter> {

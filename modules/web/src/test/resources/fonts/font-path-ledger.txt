@@ -1,0 +1,25 @@
+# The font path ledger (#1023 D4): one line per font file ever served, "<path under static/> <sha256>".
+# Browsers keep a font file for a year without asking again, so a name must never be served with other bytes.
+# A font upgrade gets a NEW file name and ADDS its line here. Never edit or delete a line, even for a retired file:
+# FontPathLedgerTest compares this file with every earlier version of it in the git history.
+# Lines starting with "#" and blank lines are not entries.
+vendor/fonts/ibm-plex-mono/OFL.txt 7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da
+vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-500-normal.woff2 01d285447409c8a588692162439a038b8cbd7871309ee20267b0d2d91c6e8e22
+vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-600-normal.woff2 0d1f0b8d0722224e32e9f28261bdc86c79115be73444ae5eceb73976a1bcdf83
+vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-700-normal.woff2 4f84d86cfd060f4ded334358ff8a4c81d4db2ed5addd568359d693f44a87765a
+vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-500-normal.woff2 6bb06407c97584b0867a959e05e8874693bfeb8c317de190811c51598f2d99ea
+vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-600-normal.woff2 32057cf50dd14bdb21a2c93766c4a2c43e4abe688ea3922df3203cac7751a98b
+vendor/fonts/ibm-plex-mono/ibm-plex-mono-latin-ext-700-normal.woff2 5b9b81f54dd69635c7adcaacd4c4545a73fe4809c528e22734b238a83a74135f
+vendor/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2 086c48dfbea9ddaff1320f7e09399b8e2924e88ce67453721255db3bdbb5a353
+vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2 a9cb1cd82332b23a47e3a1239d25d13c86d16c4220695e34b243effa999f45f2
+vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Medium.woff2 4a752d6e3a3edb4615952b4a813cae005c600fd17f810fec2217fd81cd34db43
+vendor/fonts/jetbrains-mono/JetBrainsMonoSite-Regular.woff2 80e093820f466580395458bb33dcf744df49585cf93acd6f74520a60387d53a6
+vendor/fonts/jetbrains-mono/OFL.txt 30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad
+vendor/fonts/manrope/OFL.txt d826ab6583b12c26807d8716a545bdbbb672df04f48608a364ba9efdbe501c30
+vendor/fonts/manrope/manrope-latin-ext-wght-normal.woff2 3911b66d9f2e005a4b989223405d0e5032619c668597ba467cc76a23c8fffcfb
+vendor/fonts/manrope/manrope-latin-wght-normal.woff2 a30ddcd349703aff7464c34bef3fffdff405ee50c113440d7c8693c02d210972
+vendor/fonts/noto-sans/OFL.txt 54ec7b5a35310ad66f9f3091426f7028484cbf9ae1ab5da30122ee412a3009e1
+vendor/fonts/noto-sans/noto-sans-latin-ext-wght-italic.woff2 7eccdb25aca0edb020461eff7ce779debc787c08b1e7d2abbd7d1c4ee18ff816
+vendor/fonts/noto-sans/noto-sans-latin-ext-wght-normal.woff2 6d5a79315528df191b9d86f97b0c4272a8b588fcb166773fe6588ac795de0613
+vendor/fonts/noto-sans/noto-sans-latin-wght-italic.woff2 b21ff49befe2af5b88a3b622b3446e83199229f15ea7571a9313b15ed706298b
+vendor/fonts/noto-sans/noto-sans-latin-wght-normal.woff2 51ca196f49a33e79e7870ff88ebd2829a3f627a51e7d690986618f0e7ad2b52d

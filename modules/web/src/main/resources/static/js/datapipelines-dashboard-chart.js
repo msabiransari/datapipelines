@@ -48,7 +48,9 @@
   /** The runtime's warnings: a code and a fixed sentence per code, never document text (record §4.3). */
   var WARNING_TEXT = {
     "chart.rule.null-category": "rows with a null category or series were not drawn",
-    "chart.rule.non-finite": "a bar's value is too large to draw and was not drawn",
+    "chart.rule.null-position": "rows with a null or unreadable position were not drawn",
+    "chart.rule.log-nonpositive": "a value at or below zero was not drawn on a log axis",
+    "chart.rule.non-finite": "a value is too large to draw and was not drawn",
     "chart.frame-too-small": "the chart's frame is too small to draw it",
     "chart.text.width-missing": "a text was measured with an average width",
   };

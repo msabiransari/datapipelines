@@ -702,6 +702,143 @@ test("attach: --chart-text 32 at 80 × 24: no card, no error, the focus ring sti
   assert.ok(descendants(svg).some((e) => /dp-focus/.test(e.getAttribute("class") || "")));
 });
 
+// ------------------------------------------------- a picture with a legend switch is a group (brief 1010)
+
+const ROWS2 = [["a", "P", 1], ["a", "Q", 2], ["b", "P", 3], ["b", "Q", 4]];
+const DOC = { display_name: "Interactions", config: { mark: { type: "bar" }, encoding: ENC } };
+const kids = (svg) => svg.childNodes.filter((c) => c.nodeType === 1);
+const tagOf = (e) => e.localName || e.tagName;
+const isEntryEl = (e) => e.getAttribute("data-legend") !== null;
+/** D2's set, computed here from the tree: every top-level child that is not title, desc or a legend entry. */
+const shouldHide = (svg) => kids(svg).filter((e) => tagOf(e) !== "title" && tagOf(e) !== "desc" && !isEntryEl(e));
+const hiddenEls = (svg) => descendants(svg).filter((e) => e.getAttribute("aria-hidden") !== null);
+const attrsOf = (e) => ({ ...e.attrs });
+
+/** A picture written as the adapter writes it (title and desc from describe), the layer attached over it. */
+function described(out, frame, options = {}) {
+  const browser = fakeBrowser();
+  const svg = browser.doc.createElementNS(R.write.NS, "svg");
+  browser.host.appendChild(svg);
+  R.writeDom(out.primitives, svg, "light", R.write.describe(out, DOC));
+  const toggles = [];
+  const handle = layer.attach(svg, { output: out, theme: "light", measure: null, frame }, { toggle: (id) => toggles.push(id), ...options });
+  return { browser, svg, handle, toggles };
+}
+
+function redraw(svg, handle, out, frame) {
+  R.writeDom(out.primitives, svg, "light", R.write.describe(out, DOC));
+  handle.update({ output: out, theme: "light", measure: null, frame });
+}
+
+/** D2's hidden set exactly: each child it names carries aria-hidden="true", nothing else carries aria-hidden. */
+function assertGroup(svg, why) {
+  assert.equal(svg.getAttribute("role"), "group", why + ": the picture is a group");
+  const expected = shouldHide(svg);
+  assert.ok(expected.length > 0, why + ": a non-vacuous set");
+  for (const e of expected) assert.equal(e.getAttribute("aria-hidden"), "true", why + ": " + tagOf(e) + " " + (e.getAttribute("class") || ""));
+  assert.equal(hiddenEls(svg).length, expected.length, why + ": aria-hidden on exactly D2's children");
+  const entries = kids(svg).filter(isEntryEl);
+  assert.ok(entries.length > 0, why + ": the switches are top-level children");
+  assert.equal(descendants(svg).filter(isEntryEl).length, entries.length, why + ": no switch nested inside a hidden child");
+  for (const t of ["title", "desc"]) assert.equal(kids(svg).find((e) => tagOf(e) === t).getAttribute("aria-hidden"), null, why + ": " + t + " stays read");
+  return expected.length;
+}
+
+test("N1: a draw with a legend is a group; D2's children are hidden, the card and the ring too; a redraw holds it", () => {
+  const frame = { w: 600, h: 400 };
+  const out = chart("bar", ROWS2, frame);
+  const { svg, handle } = described(out, frame);
+  assertGroup(svg, "attach");
+  svg.dispatch("keydown", { key: "ArrowRight" });
+  const made = kids(svg).filter((e) => /dp-tooltip|dp-focus/.test(e.getAttribute("class") || ""));
+  assert.ok(made.some((e) => /dp-tooltip/.test(e.getAttribute("class"))), "the card is drawn");
+  assert.ok(made.some((e) => /dp-focus/.test(e.getAttribute("class"))), "the ring is drawn");
+  for (const e of made) assert.equal(e.getAttribute("aria-hidden"), "true", "the layer's own " + e.getAttribute("class"));
+  assertGroup(svg, "after a key");
+  redraw(svg, handle, chart("bar", ROWS2, frame, { input: { hidden: ["string:Q"] } }), frame);
+  assertGroup(svg, "after a fresh writeDom and update");
+});
+
+test("N1: the largest count of top-level children the aria-hidden pass meets over the bar, line and area fixtures", () => {
+  const frame = { w: 600, h: 400 };
+  const counts = {};
+  for (const type of ["bar", "line", "area"]) {
+    const { svg } = described(chart(type, ROWS2, frame), frame);
+    counts[type] = { children: kids(svg).length, hidden: assertGroup(svg, type) };
+  }
+  console.log("1010 aria-hidden pass: " + JSON.stringify(counts) + " largest children=" + Math.max(...Object.values(counts).map((c) => c.children)));
+});
+
+test("N2: a draw without a legend entry stays an image and carries no aria-hidden", () => {
+  const frame = { w: 600, h: 400 };
+  const out = chart("bar", [["a", "Q", 2], ["b", "Q", 4]], frame);
+  assert.equal(model(out).entries.length, 0, "one series draws no legend");
+  const { svg } = described(out, frame);
+  assert.equal(svg.getAttribute("role"), "img");
+  svg.dispatch("keydown", { key: "ArrowRight" });
+  assert.equal(svg.getAttribute("role"), "img");
+  assert.equal(hiddenEls(svg).length, 0, "nothing hidden, the card and the ring included");
+});
+
+test("N3: through update, a picture that gains and loses its legend follows D1 both ways", () => {
+  const frame = { w: 600, h: 400 };
+  const one = chart("bar", [["a", "Q", 2], ["b", "Q", 4]], frame);
+  const { svg, handle } = described(one, frame);
+  assert.equal(svg.getAttribute("role"), "img");
+  redraw(svg, handle, chart("bar", ROWS2, frame), frame);
+  assertGroup(svg, "gained a legend");
+  redraw(svg, handle, one, frame);
+  assert.equal(svg.getAttribute("role"), "img", "lost its legend");
+  assert.equal(hiddenEls(svg).length, 0);
+});
+
+test("N4: detach gives back the picture the writer wrote, attribute for attribute", () => {
+  const frame = { w: 600, h: 400 };
+  const out = chart("bar", ROWS2, frame);
+  const { svg, handle } = described(out, frame);
+  svg.dispatch("keydown", { key: "ArrowRight" });
+  handle.detach();
+  assert.equal(svg.getAttribute("role"), "img");
+  assert.equal(hiddenEls(svg).length, 0);
+  const fresh = fakeBrowser().doc.createElementNS(R.write.NS, "svg");
+  R.writeDom(out.primitives, fresh, "light", R.write.describe(out, DOC));
+  assert.deepEqual(attrsOf(svg), attrsOf(fresh), "the svg's attributes");
+  assert.deepEqual(kids(svg).map(attrsOf), kids(fresh).map(attrsOf), "its top-level children's attributes");
+});
+
+test("N5: a press on an entry, or inside one, switches it once; a pointer click switches once either way", () => {
+  const frame = { w: 600, h: 400 };
+  const out = chart("bar", ROWS2, frame);
+  const entries = model(out).entries;
+  const centre = (e) => ({ clientX: e.box.x + e.box.w / 2, clientY: e.box.y + e.box.h / 2 });
+  const byCoordinates = (e) => {
+    const { svg, toggles } = described(out, frame);
+    svg.dispatch("click", { target: svg, ...centre(e) });
+    return toggles;
+  };
+  for (const e of entries) {
+    const expected = byCoordinates(e);
+    assert.equal(expected.length, 1, "a coordinate click with the svg as target: once");
+    const el = (svg) => kids(svg).find((k) => k.getAttribute("data-legend") === e.id);
+    let m = described(out, frame);
+    m.svg.dispatch("click", { target: el(m.svg) });
+    assert.deepEqual(m.toggles, expected, "a press on the entry, no coordinates: once, the same value");
+    m = described(out, frame);
+    const text = descendants(el(m.svg)).find((k) => tagOf(k) === "text");
+    assert.ok(text, "the entry holds its text");
+    m.svg.dispatch("click", { target: text });
+    assert.deepEqual(m.toggles, expected, "a press on the entry's text, no coordinates: once, the entry's value");
+    m = described(out, frame);
+    const pointerText = descendants(el(m.svg)).find((k) => tagOf(k) === "text");
+    assert.ok(pointerText, "the current entry holds its text");
+    m.svg.dispatch("click", { target: pointerText, ...centre(e) });
+    assert.deepEqual(m.toggles, expected, "a pointer click on the entry: once");
+  }
+  const m = described(out, frame);
+  m.svg.dispatch("click", { target: m.svg });
+  assert.deepEqual(m.toggles, [], "a press on nothing switches nothing");
+});
+
 test("the layer's file: 0 getComputedStyle, 0 colour literals, 0 markup sinks (D1, Security)", () => {
   const src = readFileSync(path.join(STATIC_JS, "datapipelines-chart-interactions.js"), "utf8");
   const counts = {

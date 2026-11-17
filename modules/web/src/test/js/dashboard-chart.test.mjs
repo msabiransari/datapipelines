@@ -8,7 +8,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { loadEngine, fakeBrowser, descendants, supports, STATIC_JS } from "./support/js-rendered.mjs";
+import { readdirSync, readFileSync } from "node:fs";
+import { loadEngine, fakeBrowser, descendants, supports, STATIC_JS, ENGINE_DIR } from "./support/js-rendered.mjs";
 
 const require = createRequire(import.meta.url);
 const R = loadEngine();
@@ -381,6 +382,72 @@ test("warnings: codes and fixed sentences, one per code, and one chart.token-ref
   assert.deepEqual(warnings.slice(3).map((w) => w.token), ["--chart-grid", "--chart-dim"]);
   assert.ok(warnings.slice(3).every((w, i) => w.message.includes(["--chart-grid", "--chart-dim"][i])));
   assert.ok(warnings.every((w) => typeof w.message === "string" && !/\d/.test(w.message)), "no count, no document text");
+});
+
+// --------------------------------------------------- every engine warning code has its own sentence (brief 1008 D2)
+
+const GENERAL = "the chart was drawn with a warning";
+
+/**
+ * The engine's codes, read from its sources: every `.js` file under the engine's folder, `types/` included, found by
+ * listing the folder (not LOAD-ORDER.txt, so a file the load order misses is still read); every quoted string (either
+ * quote kind) that starts with `chart.`. A code is a refusal code when the engine's `sentence` answers it; otherwise a
+ * warning code.
+ */
+function engineCodes() {
+  const files = [];
+  (function walk(dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(path.join(dir, entry.name));
+      else if (entry.name.endsWith(".js")) files.push(path.join(dir, entry.name));
+    }
+  })(ENGINE_DIR);
+  const codes = new Set();
+  for (const file of files) {
+    for (const m of readFileSync(file, "utf8").matchAll(/(["'])(chart\.[^"'\\\s]*)\1/g)) codes.add(m[2]);
+  }
+  const refusals = [];
+  const warnings = [];
+  for (const code of [...codes].sort()) {
+    let refusal = true;
+    try {
+      R.sentence({ code, details: {} });
+    } catch {
+      refusal = false;
+    }
+    (refusal ? refusals : warnings).push(code);
+  }
+  return { files: files.length, refusals, warnings };
+}
+
+test("every warning code the engine has carries its own fixed sentence, and every sentence a code the engine has", () => {
+  const { files, refusals, warnings } = engineCodes();
+  console.log(`engine codes: ${warnings.length} warning codes, ${refusals.length} refusal codes, ${files} files read`);
+  assert.ok(files >= 20, `at least 20 engine files read, got ${files}`);
+  assert.ok(warnings.length >= 6, `at least 6 warning codes, got ${warnings.length}: ${warnings.join(", ")}`);
+  assert.ok(refusals.length >= 4, `at least 4 refusal codes, got ${refusals.length}: ${refusals.join(", ")}`);
+  const keys = Object.keys(WARNING_TEXT);
+  assert.deepEqual(warnings.filter((code) => !keys.includes(code)), [], "engine warning codes without a sentence");
+  assert.deepEqual(keys.filter((code) => !warnings.includes(code)), [], "sentences for a code the engine does not warn with");
+  const values = Object.values(WARNING_TEXT);
+  for (const [code, text] of Object.entries(WARNING_TEXT)) {
+    assert.ok(typeof text === "string" && text.trim() !== "", `${code}: a non-empty sentence`);
+    assert.notEqual(text, GENERAL, `${code}: its own sentence, not the general one`);
+    assert.equal(values.filter((v) => v === text).length, 1, `${code}: a sentence no other code has`);
+  }
+  assert.equal(WARNING_TEXT["chart.rule.null-position"], "rows with a null or unreadable position were not drawn");
+  assert.equal(WARNING_TEXT["chart.rule.log-nonpositive"], "a value at or below zero was not drawn on a log axis");
+  assert.equal(WARNING_TEXT["chart.rule.non-finite"], "a value is too large to draw and was not drawn");
+});
+
+test("a warning publishes its code and its fixed sentence, no other field of the engine's warning", () => {
+  const MARKER = "zq-marker-1008";
+  for (const sentence of [...Object.values(WARNING_TEXT), GENERAL]) assert.ok(!sentence.includes(MARKER), "the marker occurs in no sentence");
+  const unknown = "chart.rule.not-known-to-the-adapter";
+  for (const code of [...engineCodes().warnings, unknown]) {
+    const hostile = { code, message: MARKER, text: MARKER, name: MARKER, details: { value: MARKER } };
+    assert.deepEqual(warningsOf({ warnings: [hostile] }, []), [{ code, message: code === unknown ? GENERAL : WARNING_TEXT[code] }], code);
+  }
 });
 
 test("a refused token reaches the draw's acknowledgement: the chart draws with the default, the warning names the token", async () => {

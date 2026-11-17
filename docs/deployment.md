@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.76
+**Status:** v1.77
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-17
@@ -400,7 +400,7 @@ in `AuthHttpBoundaryTest`, `ApplicationSmokeTest`). What it sends:
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | The product uses none of these. |
 | `X-XSS-Protection` | `0` | The legacy filter off, as every current guide recommends; the CSP is the control. |
-| `Cache-Control` | `no-cache, no-store, max-age=0, must-revalidate` on authenticated responses; the public site and docs set their own public windows | |
+| `Cache-Control` | `no-cache, no-store, max-age=0, must-revalidate` on authenticated responses; the public site and docs set their own public windows; font files under `/vendor/fonts/`: `max-age=31536000, public, immutable` (kept a year, never re-checked inside it); every other file under `/css/`, `/js/` and `/vendor/`: `no-cache` with an `ETag` that is the SHA-256 of the file's bytes (kept, re-checked on every use, answered `304` when unchanged) | #1023. **A font upgrade gets a new file name**: a browser that holds a font never asks for it again within the year, so new bytes under an old name would not reach it. Add the new file's line to `modules/web/src/test/resources/fonts/font-path-ledger.txt` and never edit or delete a line; `FontPathLedgerTest` fails otherwise, and it needs the repository's git history to do so (a shallow checkout fails it, so CI's `gate` job checks out with `fetch-depth: 0`). **The security chain's own cache headers are not written on a font file** (`SecurityHeaders.cacheControlWriter`): everywhere else, the other static files included, it still writes `no-cache, no-store, max-age=0, must-revalidate` (or the answer's own rule replaces it) with `Pragma: no-cache` and `Expires: 0`, but Chromium reads that `Pragma` as `no-cache` and re-checked every font on every page load, so a font file answers with its one-year `Cache-Control` alone. An error the application answers under `/vendor/fonts/` (a missing name or a family directory: `404`; a `Range` a font file cannot satisfy: `416`; a dot-segment path the security firewall refuses: `400`) is not storable all the same: it carries `no-cache, no-store, max-age=0, must-revalidate`, `Pragma: no-cache` and `Expires: 0`, never the font rule (`FontErrorCacheFilter`). |
 
 **The app deliberately sends no `Strict-Transport-Security`.** It cannot know it is
 behind TLS — it sees plain HTTP from the edge — and an HSTS header on a plain-HTTP
@@ -1689,6 +1689,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-17 | v1.77 | 1023 (#1023, static file cache). Renumbered after #997's v1.76 | **What the edge sets:** the `Cache-Control` row gains the static files' two rules (the owner's ruling of 2026-11-16): font files kept a year (`max-age=31536000, public, immutable`), every other file under `/css/`, `/js/` and `/vendor/` kept and re-checked by a content `ETag` (`no-cache`); the font rule's consequence for an operator (a new file name and ledger line per font upgrade, guarded by `FontPathLedgerTest` with the repository's history). The security chain writes no `Cache-Control`, `Pragma` or `Expires` of its own on a font file (Chromium treats `Pragma: no-cache` as `no-cache` and would re-check each font on every page); every other answer keeps all three, and an error answer on a font path (404, 416) carries all three as before. §6.7 needed no edit: `/`, `/site/**` and the docs keep their windows. |
 | 2026-11-17 | v1.76 | #997 final review F1 | **§6.6:** the process memory admission example follows the measured defaults: two staging databases with the lake on or off, after `staging-expansion-factor` became 10. The enabled non-heap terms total 4 GiB (staging 2, readers 1, reserve 1); this corrects the earlier seven-database example, not a measured capacity profile. |
 | 2026-11-15 | v1.75 | 819 (#819) — renumbered at final sync after #988's v1.74 | **§6.6:** the process memory admission — the boot-time sum of the counted engine budgets, the heap and a process reserve against the container limit less a headroom; its breakdown line; the chart's `memoryAdmission` values (chart 0.5.0); what it does not count; the limit is the cgroup's effective one, the smallest over the process's cgroup and its ancestors (round 3). |
 | 2026-11-15 | v1.74 | 988 (#988, js-rendered F4) | **§6.2A:** the vendored chart library leaves the product with its directory, its manifest block, its licence in the generated notices, its rebuild recipe and its rebuild-and-compare script; the section keeps its number and heading and names the vendored set that remains. No chart library is vendored: the charts are drawn by the product's own engine. |
