@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.SecurityHeaders
+import org.springframework.boot.web.servlet.FilterRegistrationBean
+import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.io.Resource
 import org.springframework.http.CacheControl
@@ -35,7 +37,9 @@ import java.util.function.Function
  * chain's default `Cache-Control`. The chain's `Pragma: no-cache` and `Expires: 0` stay beside it on every file but a
  * font: Chromium reads that `Pragma` as `no-cache`, so the chain leaves all three off a font file
  * (`SecurityHeaders.cacheControlWriter`). The font prefix is ONE value, [SecurityHeaders.FONT_PATH_PREFIX], which
- * both the chain's matcher and the font handler here use. No public path is added: the three prefixes are public
+ * both the chain's matcher and the font handler here use. An error answer on the font path (a missing name: 404; a
+ * range the file cannot satisfy: 416) keeps the chain's three not-storable headers all the same, never the font rule:
+ * [FontErrorCacheFilter], registered here, sets them when the status is an error. No public path is added: the three prefixes are public
  * already. No configuration key: the durations are the ruling.
  * The more specific pattern wins (the fonts over the vendor prefix, the engine over the scripts prefix):
  * `StaticCacheHeadersE2eTest` proves both on every file.
@@ -48,6 +52,17 @@ class StaticAssetCacheConfig : WebMvcConfigurer {
         withCacheRule(registry.addResourceHandler(JS).addResourceLocations("classpath:/static/js/"), RECHECK_RULE)
         withCacheRule(registry.addResourceHandler(VENDOR).addResourceLocations("classpath:/static/vendor/"), RECHECK_RULE)
     }
+
+    /**
+     * The font path's error answers stay not storable ([FontErrorCacheFilter]): container-wide, at its order, just
+     * ahead of the security chain; async-capable like every filter on the chain, so an SSE request passes it.
+     */
+    @Bean
+    fun fontErrorCacheFilterRegistration(): FilterRegistrationBean<FontErrorCacheFilter> =
+        FilterRegistrationBean(FontErrorCacheFilter()).apply {
+            order = FontErrorCacheFilter.ORDER
+            isAsyncSupported = true
+        }
 
     companion object {
         /** The font handler's pattern and location, from the one prefix the security chain's matcher also uses. */

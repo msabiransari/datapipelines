@@ -75,9 +75,14 @@ import java.util.Base64
  * the font handler would make another answer storable. It is the handler's own path, by the chain's own path rule
  * (the path inside the application, after the firewall refused encoded and dot-segment forms): a GET or HEAD of the
  * prefix followed by a name that is not a directory. A path that only starts with similar text keeps all three headers;
- * `SecurityHeadersTest` pins both sides. A name under the prefix that does not exist is answered 404 by the web
- * module's not-found envelope with none of the three (the same answer for every caller, no user data;
- * `StaticCacheHeadersE2eTest` pins it).
+ * `SecurityHeadersTest` pins both sides.
+ *
+ * The matcher judges the path, not the outcome, so an ERROR answer on the font path is not storable by another means
+ * (#1023 round 3, #1028): the web module's `FontErrorCacheFilter` wraps the response of exactly the requests
+ * [isFontFile] admits, and the moment a status of 400 or above is set or sent it sets these three headers, replacing
+ * whatever the handler wrote. That covers a name under the prefix that does not exist (404), a range a font file cannot
+ * satisfy (416, sent after the handler wrote its one-year rule) and an error the chain itself answers there;
+ * `StaticCacheHeadersE2eTest` pins each on the wire.
  *
  * ## What the app deliberately does NOT send
  * No HSTS: the app cannot know it is behind TLS (it sees plain HTTP from the edge), and an

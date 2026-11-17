@@ -26,8 +26,10 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.sql.DriverManager
 import java.time.Duration
 import java.util.Base64
+import java.util.UUID
 
 /**
  * **Static files' cache headers, every file, over HTTP** (#1023 D2; the owner's ruling of 2026-11-16, D1).
@@ -224,23 +226,37 @@ class StaticCacheHeadersE2eTest {
 
     /**
      * The security chain leaves its cache headers off a request the font handler answers, and only there (round 2).
-     * A name under the font prefix that does not exist is answered 404 by the application's not-found envelope; the
-     * row pins what that answer carries, and that it is never the year and never `public`. The near misses keep the
-     * chain's headers; the encoded and dot-segment forms are refused by the firewall before any handler runs.
+     * An ERROR answer on the font path is not storable all the same (round 3, #1028): a name under the font prefix that
+     * does not exist (404, the application's not-found envelope), GET and HEAD, and a `Range` an existing font file
+     * cannot satisfy (416, sent after the handler wrote the font rule) carry the chain's three headers, set by
+     * `FontErrorCacheFilter`. The near misses keep the chain's headers. The encoded and dot-segment forms are refused
+     * by the firewall before any handler runs, and since round 3 that 400 carries the three too (the filter wraps the
+     * response ahead of the chain); the encoded slash is the container's own 400, before any filter, and carries none,
+     * as on the base. Every row here is an error: never the year, never `public`.
      */
     @Test
     fun `the font rule reaches only the font files - a missing name, the near misses and refused forms`() {
+        val woff2 = fonts.first { it.endsWith(".woff2") }
+        val unsatisfiable = listOf("Range" to UNSATISFIABLE_RANGE)
+        val missingInFamily = "/vendor/fonts/noto-sans/no-such-font-1023.woff2"
         val rows =
             listOf(
                 Near("a missing font name", "/vendor/fonts/no-such-font-1023.woff2", 404, MISSING_FONT_CACHE),
-                Near("a missing name in a family", "/vendor/fonts/noto-sans/no-such-font-1023.woff2", 404, MISSING_FONT_CACHE),
+                Near("a missing name in a family", missingInFamily, 404, MISSING_FONT_CACHE),
                 Near("a family directory", "/vendor/fonts/noto-sans", 404, MISSING_FONT_CACHE),
+                Near("HEAD of a missing font name", "/vendor/fonts/no-such-font-1023.woff2", 404, MISSING_FONT_CACHE, "HEAD"),
+                Near("HEAD of a missing name in a family", missingInFamily, 404, MISSING_FONT_CACHE, "HEAD"),
+                Near("HEAD of a family directory", "/vendor/fonts/noto-sans", 404, MISSING_FONT_CACHE, "HEAD"),
+                Near("an unsatisfiable range of a font file", woff2, 416, MISSING_FONT_CACHE, "GET", unsatisfiable),
+                Near("HEAD, an unsatisfiable range of a font file", woff2, 416, MISSING_FONT_CACHE, "HEAD", unsatisfiable),
+                Near("a missing stylesheet (off the font path)", "/css/no-such-file-1023.css", 404, CHAIN_CACHE),
+                Near("a missing API route (off the font path)", "/api/v1/no-such-route-1023", 401, CHAIN_CACHE),
                 Near("a longer segment", "/vendor/fontsX/noto-sans/noto-sans-latin-wght-normal.woff2", 404, CHAIN_CACHE),
                 Near("the prefix under the api", "/api/vendor/fonts/noto-sans/noto-sans-latin-wght-normal.woff2", 401, CHAIN_CACHE),
                 Near("the prefix without a file", "/vendor/fonts", 404, CHAIN_CACHE),
                 Near("the prefix's directory", "/vendor/fonts/", 404, CHAIN_CACHE),
-                Near("an encoded dot segment", "/vendor/fonts/%2e%2e/css/app.css", 400, REFUSED_CACHE),
-                Near("a dot segment", "/vendor/fonts/../css/app.css", 400, REFUSED_CACHE),
+                Near("an encoded dot segment", "/vendor/fonts/%2e%2e/css/app.css", 400, FIREWALL_ON_FONT_PATH_CACHE),
+                Near("a dot segment", "/vendor/fonts/../css/app.css", 400, FIREWALL_ON_FONT_PATH_CACHE),
                 Near("an encoded slash", "/vendor/fonts/noto-sans%2fnoto-sans-latin-wght-normal.woff2", 400, REFUSED_CACHE),
             )
         val head =
@@ -260,16 +276,89 @@ class StaticCacheHeadersE2eTest {
         }
         assertSoftly {
             for (row in rows) {
-                val response = get(row.path)
+                val response = send(row.method, row.path, *row.headers.toTypedArray())
                 val seen = CHAIN_HEADER_NAMES.map { response.header(it) }
-                println("1023|font-rule-reach|${row.label}|${row.path}|status=${response.statusCode()}|${CHAIN_HEADER_NAMES.zip(seen)}")
-                withClue("${row.label}: GET ${row.path}") {
+                println(
+                    "1023|font-rule-reach|${row.label}|${row.method} ${row.path} ${row.headers}|status=${response.statusCode()}|" +
+                        "${CHAIN_HEADER_NAMES.zip(seen)}",
+                )
+                withClue("${row.label}: ${row.method} ${row.path} (an error answer: the chain's no-store policy, never the year)") {
                     response.statusCode() shouldBe row.status
                     seen shouldBe row.cache
                     response.header("Cache-Control") shouldNotContain "max-age=31536000"
                     response.header("Cache-Control") shouldNotContain "public"
                 }
             }
+        }
+    }
+
+    /**
+     * The other outcomes of the font handler for a GET or HEAD of an existing file (round 3's outcome list): a range it
+     * can satisfy is a success (206) and keeps the font rule alone; an `If-Match` that does not match is ignored for a
+     * safe method (the framework's precondition check never answers 412 to GET or HEAD), so it is the 200 and the font
+     * rule. And an error the security chain itself answers on a font path, an MCP key used off its surface (403), is
+     * not storable either: the filter wraps the response ahead of the chain.
+     */
+    @Test
+    fun `the font handler's other outcomes - a range, a precondition and the chain's own refusal`() {
+        val woff2 = fonts.first { it.endsWith(".woff2") }
+        val successes =
+            listOf(
+                Triple("a satisfiable range", listOf("Range" to "bytes=0-9"), 206),
+                Triple("a non-matching If-Match", listOf("If-Match" to "\"no-such-etag-1023\""), 200),
+            )
+        assertSoftly {
+            for ((label, headers, status) in successes) {
+                for (method in listOf("GET", "HEAD")) {
+                    val response = send(method, woff2, *headers.toTypedArray())
+                    val seen = CHAIN_HEADER_NAMES.map { response.header(it) }
+                    println("1023|font-outcome|$label|$method $woff2|status=${response.statusCode()}|$seen")
+                    withClue("$label: $method $woff2 (a success: the year alone)") {
+                        response.statusCode() shouldBe status
+                        response.header("Cache-Control").split(", ").toSet() shouldBe FONT_DIRECTIVES
+                        response.header("Pragma") shouldBe ""
+                        response.header("Expires") shouldBe ""
+                    }
+                }
+            }
+        }
+        val key = seedMcpKey()
+        val refused = send("GET", woff2, API_KEY_HEADER to key.plaintext)
+        val seen = CHAIN_HEADER_NAMES.map { refused.header(it) }
+        println("1023|font-outcome|an MCP key off its surface|GET $woff2|status=${refused.statusCode()}|${CHAIN_HEADER_NAMES.zip(seen)}")
+        withClue("an MCP key off its surface: GET $woff2 (the chain's own error answer: no-store, never the year)") {
+            refused.statusCode() shouldBe 403
+            seen shouldBe MISSING_FONT_CACHE
+        }
+    }
+
+    /** An MCP key in a workspace of its own, in the shape the key suites seed (`DependencyGuardsE2eTest`). */
+    private fun seedMcpKey(): E2eAuth.SeededKey {
+        val workspace = UUID.randomUUID().toString()
+        val admin = UUID.randomUUID().toString()
+        val identity = UUID.randomUUID().toString()
+        val key = E2eAuth.generateKey("scache-mcp-1023")
+        sql("INSERT INTO workspaces (id, name, display_name) VALUES ('$workspace', 'scache-${workspace.take(8)}', 'Static cache E2E')")
+        sql(
+            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
+                "('$admin', 'scache-$admin@e2e.test', 'SC Admin', 'test', 'scache-$admin', TRUE, FALSE)",
+        )
+        sql("INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$workspace', '$admin', 'workspace_admin')")
+        sql(
+            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                "('$identity', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}', TRUE, FALSE, 'service')",
+        )
+        sql(
+            "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) VALUES " +
+                "('${key.id}', '$identity', '$admin', '${key.name}', '${key.hash}', '$workspace', 'mcp', 'workspace_admin')",
+        )
+        return key
+    }
+
+    private fun sql(statement: String) {
+        val postgres = SharedE2e.postgres
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { it.execute(statement) }
         }
     }
 
@@ -314,8 +403,18 @@ class StaticCacheHeadersE2eTest {
     private fun get(
         path: String,
         vararg headers: Pair<String, String>,
+    ): HttpResponse<ByteArray> = send("GET", path, *headers)
+
+    private fun send(
+        method: String,
+        path: String,
+        vararg headers: Pair<String, String>,
     ): HttpResponse<ByteArray> {
-        val builder = HttpRequest.newBuilder(URI.create("http://localhost:$port$path")).GET().timeout(Duration.ofSeconds(30))
+        val builder =
+            HttpRequest
+                .newBuilder(URI.create("http://localhost:$port$path"))
+                .method(method, HttpRequest.BodyPublishers.noBody())
+                .timeout(Duration.ofSeconds(30))
         headers.forEach { (name, value) -> builder.header(name, value) }
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray())
     }
@@ -386,6 +485,8 @@ class StaticCacheHeadersE2eTest {
         val path: String,
         val status: Int,
         val cache: List<String>,
+        val method: String = "GET",
+        val headers: List<Pair<String, String>> = emptyList(),
     )
 
     private sealed interface Expect {
@@ -425,14 +526,26 @@ class StaticCacheHeadersE2eTest {
         val CHAIN_CACHE = listOf(DEFAULT_NO_STORE, CHAIN_PRAGMA, CHAIN_EXPIRES)
 
         /**
-         * A missing name under the font prefix (read 2026-11-17 on the changed product; the base carried the chain's
-         * three): none of the three. The chain's matcher judges the path, not the file, and the not-found envelope sets
-         * no cache header of its own. Never the year, never `public`; the body is the same for every caller.
+         * An error answer under the font prefix (a missing name, an unsatisfiable range): the chain's three, byte for
+         * byte what the base answered before round 2 (`base-before.log`). The chain's matcher judges the path, not the
+         * file, so `FontErrorCacheFilter` sets them when the status is an error (round 3, #1028).
          */
-        val MISSING_FONT_CACHE = listOf("", "", "")
+        val MISSING_FONT_CACHE = CHAIN_CACHE
 
-        /** A request the firewall refuses (read on the base and unchanged): none of the three, before any writer runs. */
+        /** A first byte past the end of every font file: the handler answers 416 after writing its font rule. */
+        const val UNSATISFIABLE_RANGE = "bytes=999999999-"
+
+        const val API_KEY_HEADER = "DP-API-Key"
+
+        /** A request the container refuses before any filter (an encoded slash; read on the base and unchanged): none. */
         val REFUSED_CACHE = listOf("", "", "")
+
+        /**
+         * A request the security chain's firewall refuses under the font prefix: none of the three on the base and in
+         * round 2 (the firewall answers before the chain's writer), the three since round 3, because
+         * `FontErrorCacheFilter` wraps the response ahead of the chain and the 400 is an error answer.
+         */
+        val FIREWALL_ON_FONT_PATH_CACHE = CHAIN_CACHE
 
         // Row 6's values the brief leaves to the base, read on base 01ec928b0 before the code change (2026-11-17):
         // a signed-out page request is redirected to the login page; the icon and robots.txt carry the default.
