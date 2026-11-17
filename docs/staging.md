@@ -1,9 +1,9 @@
 # Staging (H2) Specification
 
-**Status:** v1.31 (frozen contract — additive-only changes after this point)
+**Status:** v1.32 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration spec](configuration.md)
-**Last updated:** 2026-11-15
+**Last updated:** 2026-11-17
 
 ---
 
@@ -501,7 +501,7 @@ Keys consumed by this spec:
 | `datapipelines.lake.admission.staging-expansion-factor` | The default scratch reservation: `staging-memory-limit × staging-expansion-factor` (§8.5) |
 | `datapipelines.lake.admission.scratch-bytes` | The aggregate every DuckDB staging database's reservation shares (§8.5) |
 
-**The process memory admission (#819, [Configuration §7](configuration.md#7-config-validation)).** These three keys are also the staging term of the boot-time sum `staging + reader + heap + process-reserve < limit × (1 − memory-headroom)`: the most DuckDB staging databases `scratch-bytes` can hold open at once (standalone, delivery and compaction databases together; 7 at the shipped defaults, 6 with the lake off) × `staging-memory-limit`. It counts the staging engines DP owns. An author's embedded DuckDB datasource is not staging, has no memory limit of its own and is not counted, nor is a LAKE datasource other than the managed one ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)).
+**The process memory admission (#819, [Configuration §7](configuration.md#7-config-validation)).** These three keys are also the staging term of the boot-time sum `staging + reader + heap + process-reserve < limit × (1 − memory-headroom)`: the most DuckDB staging databases `scratch-bytes` can hold open at once (standalone, delivery and compaction databases together; 2 at the shipped defaults, also 2 with the lake off) × `staging-memory-limit`. It counts the staging engines DP owns. An author's embedded DuckDB datasource is not staging, has no memory limit of its own and is not counted, nor is a LAKE datasource other than the managed one ([Configuration §3.36](configuration.md#336-managed-lake-dp-lake-785)).
 
 `insert-batch-size`, `result-batch-size`, `query-timeout-seconds` and `max-connections` above apply to both engines, and so does `max-memory-mb` as the executor's threshold (§8.5). `mode` is H2's only. The DuckDB files live in `<java.io.tmpdir>/dp-staging`; no key moves them.
 
@@ -883,6 +883,7 @@ Out of scope for v1:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-17 | v1.32 | #997 final review F1 | **§7.1:** the process memory admission example follows the measured defaults: two staging databases with the lake on or off, after `staging-expansion-factor` became 10. The enabled non-heap terms total 4 GiB (staging 2, readers 1, reserve 1); this corrects the earlier seven-database example, not a measured capacity profile. |
 | 2026-11-16 | v1.31 | 997 (#997) | §8.5 **Scratch**: the default reservation at the shipped values is 10 GB (`staging-expansion-factor` 10, measured on mixed and incompressible data; highly compressible data would need 45), so the shipped `scratch-bytes` holds two. |
 | 2026-11-15 | v1.30 | 819 (#819) | §7.1 gains **The process memory admission**: the three DuckDB keys are the staging term of the boot-time memory sum, and what it does not count (embedded DuckDB and non-managed LAKE datasources). §8.5 **Memory** no longer says combined admission is not implemented: startup checks the budgets' sum against the container limit; buffer limit and process memory kept apart. |
 | 2026-11-15 | v1.29 | 994 (#994) | TEMPORARY until the pinned DuckDB driver throws mid-stream. §7.2 gains `pipeline.staging.result_incomplete`; §8.3 gains **A streamed read that ended early**; §8.5 gains **Streamed reads**: stored-relation cursors are compared with a `count(*)` in the same snapshot (`withQuery`, the managed append's scans); one-row reads require their row; an author's tempdb read takes one of two forms the engine's parse decides: written into a `dp_guard_` relation and read back, else read plain and logged (`SHOW …`, `SHOW TABLES`, `DESCRIBE`, `SUMMARIZE`, a `PIVOT` without an `IN` list — not protected —, `PRAGMA`, `EXPLAIN`, several statements; the measured first streamed chunk; #1000; owner rulings 2026-11-15); a catalog SELECT through the written form can list the guard's relation (#1002), compaction unchanged; the tripwire `StreamedResultTripwireTest` names the removal. |

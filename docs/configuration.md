@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.101 (operator reference; source-traced configuration authority)
+**Status:** v1.102 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-11-16
+**Last updated:** 2026-11-17
 
 ---
 
@@ -727,7 +727,7 @@ the lanes named in their rows, so that one key set is documented and validated f
 the product owns, plus the JVM's maximum heap and `admission.process-reserve`, must stay strictly below the container's
 memory limit less `admission.memory-headroom` of it: `staging + reader + heap + reserve < limit × (1 − headroom)`.
 *staging* is the most DuckDB staging databases the one `scratch-bytes` budget can hold open at once (deliveries,
-compactions and standalone databases together: 7 at the shipped defaults, 6 with the lake off) × `staging-memory-limit`;
+compactions and standalone databases together: 2 at the shipped defaults, also 2 with the lake off) × `staging-memory-limit`;
 *reader* is `(1 + reads.max-retired-generations) × reads.memory-limit` with the lake on, and nothing with it off. The
 limit is the cgroup's effective limit (v1 or v2), read from files — the smallest finite limit over the process's own
 cgroup and every ancestor up to the mount root, since a parent's limit binds the process too; never host RAM, never
@@ -1501,6 +1501,7 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-17 | v1.102 | #997 final review F1 | **§3.36:** the process memory admission example follows the measured defaults: two staging databases with the lake on or off, after `staging-expansion-factor` became 10. The enabled non-heap terms total 4 GiB (staging 2, readers 1, reserve 1); this corrects the earlier seven-database example, not a measured capacity profile. |
 | 2026-11-16 | v1.101 | 997 (#997, dp-lake P6 evidence, round 4) | **§3.36** `admission.max-delivery-bytes` 2GB → 1GB (owner ruling 2026-11-16): a delivery reserves `max-delivery-bytes × staging-expansion-factor` whatever its size, so at 2GB one delivery held the whole shipped 20GB `scratch-bytes`; at 1GB two deliveries fit and compaction gets a 10GB ceiling. `scratch-bytes` stays 20GB. The row says why, what a delivery above the limit gets and what a deployment needing larger deliveries does ([Lake §6](lake.md#6-deliveries)). **§5** the template line. |
 | 2026-11-16 | v1.100 | 997 (#997, dp-lake P6 evidence) | **§3.36** three defaults from #997's measurements, each measured on mixed and incompressible data and not covering highly compressible data (measured in round 2: it would need 45 / 32 / at most 806,546 bytes a second): `staging-expansion-factor` 3 → 10, `compaction-scratch-factor` 3 → 7, `compaction-bytes-per-second` 4MB → 2MB. **§5** the three template lines. |
 | 2026-11-15 | v1.99 | 819 (#819) | **§3.36** two new keys, `datapipelines.lake.admission.process-reserve` (1GB) and `.memory-headroom` (0.10), and `reads.max-retired-generations` (1, owner ruling 2026-11-15: the retired managed reader generations that may still hold an engine); the process memory admission paragraph, with what it does not count (#1006). **§5** the three template lines. **§7** the process memory admission rule and its breakdown line; `reads.max-retired-generations` a whole number ≥ 1. **§8** their consumers. Round 3 (lander review): the limit is the cgroup's *effective* one, the smallest over the own cgroup and every ancestor (an unreadable level is unavailable, never unlimited); above K a lease first closes the idle retired generations and waits, bounded, before it is refused. |

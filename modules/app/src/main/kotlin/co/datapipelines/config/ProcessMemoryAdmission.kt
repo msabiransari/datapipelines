@@ -14,7 +14,7 @@ import java.nio.file.Path
  *     staging + reader + heap + reserve < limit × (1 − headroom)
  *
  * - **staging** = the most DuckDB staging databases the one scratch budget admits at once × `staging-memory-limit`
- *   ([stagingDatabases]; 7 at the shipped defaults). Counted with the lake disabled too: standalone staging runs
+ *   ([stagingDatabases]; 2 at the shipped defaults). Counted with the lake disabled too: standalone staging runs
  *   on every deployment.
  * - **reader** = `(1 + reads.max-retired-generations) × reads.memory-limit`: the live or building managed reader
  *   generation plus at most K retired ones still holding an engine (the pool manager's cap, owner ruling

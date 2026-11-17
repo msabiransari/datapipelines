@@ -90,7 +90,7 @@ class ProcessMemoryAdmissionTest {
 
     @Test
     fun `heap and limit come from their own inputs - each used in its own place`() {
-        // Lake disabled: 6 GiB staging + 2 GiB heap + 1 GiB reserve = 9 GiB < 16 GiB × 0.9. Swapped (heap 16 GiB,
+        // Lake disabled: 2 GiB staging + 2 GiB heap + 1 GiB reserve = 5 GiB < 16 GiB × 0.9. Swapped (heap 16 GiB,
         // limit 2 GiB) it would be refused, so a swap anywhere in the wiring turns this red.
         val (violations, notices) = check(snapshot(heap = TWO_GIB, limit = finite(SIXTEEN_GIB)))
         violations.shouldBeEmpty()
@@ -380,7 +380,7 @@ class ProcessMemoryAdmissionTest {
     ) {
         val (parent, self) = v1Hierarchy(root, parentLimit = "4294967296", childLimit = "$SIXTEEN_GIB")
         val effective = CgroupMemoryLimitSource(root, self).read()
-        // Lake disabled: 9 GiB total. Below 16 GiB × 0.9 (the child alone admits it); above 4 GiB × 0.9.
+        // Lake disabled: 5 GiB total. Below 16 GiB × 0.9 (the child alone admits it); above 4 GiB × 0.9.
         check(snapshot(limit = finite(SIXTEEN_GIB))).first.shouldBeEmpty()
         val (violations, notices) = check(snapshot(limit = effective))
         notices.shouldBeEmpty()
