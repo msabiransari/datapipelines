@@ -34,6 +34,8 @@ class ExecutorHarness(
     /** The SCRIPT-node collaborators (7c, #7) — wired by tests that exercise a SCRIPT node. */
     scripts: ScriptSupport? = null,
     lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
+    /** The preflight write-set planner (#1033) — null keeps the executor on the pre-feature gate-off. */
+    localWritePlanner: LocalWritePlanner? = null,
 ) : Closeable {
     val emitter = RecordingEmitter()
     val flags = InMemoryCancellationFlags()
@@ -66,6 +68,7 @@ class ExecutorHarness(
             calculatorKinds = calculatorKinds,
             scripts = scripts,
             lakeAppendPort = lakeAppendPort,
+            localWritePlanner = localWritePlanner,
         )
 
     override fun close() {

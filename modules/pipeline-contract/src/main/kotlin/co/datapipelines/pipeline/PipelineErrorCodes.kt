@@ -535,6 +535,25 @@ object PipelineErrorCodes {
         const val DATASOURCE_UNREACHABLE = "pipeline.execution.datasource_unreachable"
 
         /**
+         * (write-transactions §4 row 1) — run admission refused this plan's durable write set:
+         * an eligible writer participates but the plan holds a second durable destination
+         * (eligible, excluded or external DDL — two registrations for one server count as
+         * two), an external DDL node, or a child whose body could not be read. `details.reason`
+         * names which (`second_durable_destination` / `external_ddl` / `unknown_child_writes`
+         * / `registration_ineligible` for a repoint discovered at enlist). Refused BEFORE any
+         * business write; a run already accepted ends FAILED.
+         */
+        const val LOCAL_WRITE_REFUSED = "pipeline.execution.local_write_refused"
+
+        /**
+         * (write-transactions §4/§5) — the single local write transaction's commit refused
+         * after every required node succeeded. The root attempts rollback; the run ends
+         * FAILED. Telemetry records the outcome honestly (a lost acknowledgement is
+         * `unknown`), because "a blocked database cannot justify claiming rollback".
+         */
+        const val LOCAL_WRITE_COMMIT_FAILED = "pipeline.execution.local_write_commit_failed"
+
+        /**
          * §13.3 (139) — an AGENT executed a DRAFT pipeline version over MCP while one of its
          * pinned template versions is a DRAFT that was written AFTER this key's last
          * `templates_render` of it. `details.templates` carries each `{id, version, updated_at,

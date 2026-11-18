@@ -67,8 +67,11 @@ import kotlin.time.Duration.Companion.seconds
  * concurrency, pending nodes never start, and the execution reports `FAILED` with per-node stats.
  * Cancellation (§8.3) is a separate, first-class path that reports `ABORTED` and carries no error
  * code.
+ *
+ * `LargeClass` is suppressed: #1033's root-only plan/settle seam belongs to the executor that
+ * owns the run's lifetime — commit and rollback ride the five terminal handlers already here.
  */
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "LargeClass")
 class PipelineExecutor(
     private val nodeRunner: NodeRunner,
     private val stagingFactory: StagingFactory,
@@ -104,6 +107,14 @@ class PipelineExecutor(
      */
     private val calculatorKinds: (String) -> co.datapipelines.calculators.CalculatorKind? =
         co.datapipelines.calculators.CalculatorRegistry::find,
+    /**
+     * (write-transactions §3.1) The preflight write-set planner. Wired, a ROOT execution plans
+     * its write set before any business SQL and enrolls one local write transaction when every
+     * eligible write targets a single registration; the root alone commits/rolls it back and
+     * hands it to children through [ExecuteRequest.localWriteTransaction]. Null (tests, or a
+     * runtime without a pipeline resolver) keeps today's per-statement autocommit behaviour.
+     */
+    private val localWritePlanner: LocalWritePlanner? = null,
 ) {
     /**
      * Runs one execution end to end (§5.1).
@@ -181,8 +192,45 @@ class PipelineExecutor(
 
         var staging: Staging? = null
         var lakeSession: co.datapipelines.pipeline.LakeAppendSession? = null
+        var localWrite: LocalWriteTransaction? = null
         val handle = cancellationRegistry.register(executionId)
         try {
+            // (write-transactions §3.1/§3.4) Run admission's write-set gate — ROOT executions of
+            // writable runs only. `rootExecutionId == null` marks a root structurally (a child
+            // carries it even when the family enrolled nothing), so a planner wired into a child
+            // executor by mistake can never make a child plan its own transaction — the root's
+            // verdict covers the whole family, children and all, and only the root settles.
+            // Read-only runs (dashboards, GET endpoints) have no durable writes to cover and keep
+            // today's path. A refusal is a catalogued setup failure on an execution that has
+            // already emitted `execution_started` (F9): the run ends FAILED before any business
+            // write or staging allocation.
+            val planner = localWritePlanner
+            if (planner != null && request.rootExecutionId == null && !request.readOnly) {
+                // §15.2: the plan walks children and reads the registry — blocking I/O, so it
+                // belongs on the executor's own pool, not a caller thread.
+                when (val verdict = withContext(dispatcher.context) { planner.plan(request.pipeline, request.workspaceId) }) {
+                    is LocalWriteVerdict.Refuse -> {
+                        throw DatapipelinesException(
+                            code = PipelineErrorCodes.Execution.LOCAL_WRITE_REFUSED,
+                            message =
+                                "Run refused: this pipeline's durable writes span more than one " +
+                                    "destination, so they cannot share one transaction (${verdict.reason.replace('_', ' ')})",
+                            details = verdict.details + ("reason" to verdict.reason),
+                        )
+                    }
+
+                    is LocalWriteVerdict.Enroll -> {
+                        val transaction =
+                            planner.open(verdict, executionId, request.workspaceId, metrics, dispatcher)
+                        run.localWriteTransaction = transaction
+                        localWrite = transaction
+                    }
+
+                    LocalWriteVerdict.Ordinary -> {
+                        // No transaction: every node leases from its own pool, §16's ordinary seam.
+                    }
+                }
+            }
             // §15.2: staging creation opens JDBC connections — blocking work, so it belongs on the
             // executor's own pool, never on whatever thread the caller happened to arrive on.
             // The opened database is recorded INSIDE the block, for `finally` to close: withContext
@@ -241,7 +289,7 @@ class PipelineExecutor(
             // [abortStructurally].
             abortStructurally(run, e)
         } finally {
-            cleanup(executionId, staging, lakeSession)
+            cleanup(executionId, staging, lakeSession, localWrite)
         }
     }
 
@@ -637,6 +685,15 @@ class PipelineExecutor(
         val resultRef = run.plan.callerNodeId?.let { results.getValue(it).callerResultRef }
         val view = resultRef?.let { resolveStoredResult(run, it) }
 
+        // (write-transactions §3.5) The family's writes become durable HERE — after every
+        // required node (children included) succeeded and the caller result was prepared,
+        // before the terminal event claims SUCCESS. Root-owned by construction: only the root's
+        // planning gate ever sets `run.localWriteTransaction` (a child inherits the family's
+        // transaction through its request and settles nothing). A commit refusal throws the
+        // catalogued `local_write_commit_failed` and lands in this run's FAILED path — the
+        // terminal ordering below has not run yet, so the row can still say FAILED honestly.
+        run.localWriteTransaction?.commit()
+
         val completedAt = Instant.now()
         val stats = run.stats.snapshot(run.plan.dag.nodeIds)
         run.emitTerminal {
@@ -705,6 +762,9 @@ class PipelineExecutor(
         // recording site — rebuilt from code/details only on the one path that never passed
         // through failNode (the vanished-result throw in resolveStoredResult carries its own).
         val record = e.errorRecord ?: MappedError(e.errorCode, e.message.orEmpty(), e.errorDetails)
+        // §4 row 3: a failed node rolls the family's writes back — root-owned (see [succeed]),
+        // best-effort, BEFORE the terminal event reports FAILED.
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal { emit(pipelineFailed(run, failedAt, e.nodeId, record)) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
         throw PipelineExecutionFailed(e.nodeId, e.errorCode, e.errorDetails, e.errorRecord)
@@ -722,6 +782,7 @@ class PipelineExecutor(
         val error =
             MappedError(timeout.code, timeout.message.orEmpty(), timeout.details)
                 .let { if (config.errorDetail == ErrorDetail.FULL) it.copy(exception = ExceptionDetail.of(cause)) else it }
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal { emit(pipelineFailed(run, failedAt, timeout.timedOutNodeId, error)) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
         throw timeout.also { it.addSuppressed(cause) }
@@ -745,6 +806,7 @@ class PipelineExecutor(
         val error =
             MappedError(e.code, e.message.orEmpty(), e.details)
                 .let { if (config.errorDetail == ErrorDetail.FULL) it.copy(exception = ExceptionDetail.of(e)) else it }
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal { emit(pipelineFailed(run, failedAt, failedNodeId = null, error = error)) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
         throw e
@@ -755,6 +817,7 @@ class PipelineExecutor(
         e: ExecutionAbortedException,
     ): Nothing {
         val abortedAt = Instant.now()
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal {
             emit(
                 ExecutionAborted(
@@ -813,6 +876,9 @@ class PipelineExecutor(
     ): Nothing {
         val reason = familyAbortReason(cancellation)
         val abortedAt = Instant.now()
+        // Outside the `emitTerminal` block on purpose as well as inside it: this path runs on an
+        // already-cancelled scope, and rollbackQuietly carries its own NonCancellable hop (§3.3).
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal {
             emit(
                 ExecutionAborted(
@@ -883,6 +949,7 @@ class PipelineExecutor(
         executionId: UUID,
         staging: Staging?,
         lakeSession: co.datapipelines.pipeline.LakeAppendSession?,
+        localWrite: LocalWriteTransaction?,
     ) {
         cancellationRegistry.deregister(executionId)
         // The one path every execution takes, which is why the progress sink's per-execution state
@@ -893,6 +960,10 @@ class PipelineExecutor(
         // complete even when we got here by cancellation.
         withContext(dispatcher.context + NonCancellable) {
             try {
+                // The local write transaction's connection goes back to the pool on every path —
+                // after the terminal settle (commit/rollback) the handlers already performed, and
+                // as the last resort before the pool's own reset (§3.3).
+                localWrite?.close()
                 cancellationFlags.clear(executionId)
             } finally {
                 try {
@@ -1081,6 +1152,9 @@ class PipelineExecutor(
             lakeDeliveryNodeId = resources.deliveryNodeId,
             readOnly = request.readOnly,
             pipelineAdmission = request.pipelineAdmission,
+            // §3.3: the family's transaction — a child inherits the root's through its request;
+            // a root uses the one its planning gate enrolled. Null on ordinary runs.
+            localWriteTransaction = request.localWriteTransaction ?: run.localWriteTransaction,
             // 108 §D: the staging drain's per-batch count lands in the stats collector and, at
             // most once per `progress-write-interval-seconds`, in the row. The snapshot is built
             // inside the lambda so a throttled tick that decides not to write does not build it.
@@ -1127,6 +1201,14 @@ internal class ExecutionRun(
 ) {
     val stats = NodeStatsCollector()
     val warnings = WarningSink()
+
+    /**
+     * (write-transactions §3.3) The family's local write transaction — set by the ROOT's
+     * planning gate only, after `execution_started` and before any node runs. Null on children
+     * (they carry the family's through [ExecuteRequest.localWriteTransaction]) and on ordinary
+     * runs. Mutability is the point: the run is constructed before the verdict exists.
+     */
+    var localWriteTransaction: LocalWriteTransaction? = null
 
     /**
      * Set once the execution scope is unwinding with an outcome already decided, and the in-flight
@@ -1241,6 +1323,12 @@ fun pipelineExecutor(
      * composition port.
      */
     scripts: ScriptSupport? = null,
+    /**
+     * (write-transactions §3.1) The write-set planner — see the class parameter of the same
+     * name. The assembling layer wires it with the repository pipeline resolver, the
+     * datasource registry and `max-composition-depth`; left null, no run enrolls.
+     */
+    localWritePlanner: LocalWritePlanner? = null,
 ): PipelineExecutor =
     PipelineExecutor(
         nodeRunner =
@@ -1269,4 +1357,5 @@ fun pipelineExecutor(
         resultUrls = resultUrls,
         lakeAppendPort = lakeAppendPort,
         calculatorKinds = calculatorKinds,
+        localWritePlanner = localWritePlanner,
     )

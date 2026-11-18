@@ -1582,6 +1582,10 @@ nowhere:
 > **Each node is atomic on its own database; the pipeline as a whole is not, and a node that fails
 > does not undo the committed work of the nodes before it.**
 
+Since #1033 (2026-11-18) there is one deliberate exception, stated in §16.4: when a run's durable
+writes all name a single registration, they share one local transaction and the run settles as a
+whole. Everything else in this section — and every multi-destination run — is unchanged.
+
 ### 16.1 One transaction, one database
 
 There is exactly **one** Spring transaction manager in this application — `metadataTransactionManager`,
@@ -1597,7 +1601,7 @@ and every mechanism in the table below already exists in the code.
 |---|---|---|
 | metadata ↔ metadata, multi-statement | `@Transactional("metadataTransactionManager")` on the service method | the service layer (`PipelineService` and its siblings) |
 | customer DB, within one node | per-connection `autoCommit=false` + commit/rollback, savepoint for `REPLACE` | `WritebackRunner` (§6.4.3) |
-| customer DB ↔ customer DB, across nodes | **none — each node is atomic, the pipeline is not** | §16.2 below |
+| customer DB ↔ customer DB, across nodes | **one local transaction when the run's durable writes name ONE registration** (#1033, §16.4); otherwise **none — each node is atomic, the pipeline is not** | §16.2, §16.4 |
 | metadata ↔ customer DB (status vs. work) | the terminal status write runs in `NonCancellable`; the stale sweeper reconciles what a dead instance left | §5.1, §8.3 |
 | metadata ↔ Redis (idempotency) | claim-before-work via `SET NX` | §11 |
 | sender ↔ receiver (promotion) | the receiver applies a batch in ONE metadata transaction; the sender stores nothing and re-derives from inventory; `body_hash` makes a retry a no-op | `PromotionReceiveService` |
@@ -1619,7 +1623,9 @@ Two rules make this mechanical rather than remembered:
 A pipeline is a DAG of nodes, each running against whatever database its `source` names. A node
 that writes back (`output.target: "datasource"`, §6.4.3) commits on ITS OWN connection when it
 finishes. If a later node then fails, that commit stands: there is no transaction spanning the two,
-by the design above, and there cannot be one when the two nodes write to different databases.
+by the design above, and there cannot be one when the two nodes write to different databases. When
+they name the same registration, there now is one — §16.4 — and the run is planned onto it
+automatically.
 
 So a failed execution can leave a target table populated by the nodes that ran before the failure.
 That is not a defect and there is no rollback coming. Design for it the way any at-least-once
@@ -1633,7 +1639,8 @@ pipeline is designed:
 
 The parts that ARE atomic: each node's own write-back against its own database (§6.4.3); each
 metadata service method that carries `@Transactional` (§16.1); the tempdb, which is per-execution
-and discarded whole (§9).
+and discarded whole (§9); and, since #1033, a single-registration run's local write transaction
+(§16.4).
 
 ### 16.3 Why not "just" wrap the pipeline
 
@@ -1651,12 +1658,68 @@ Every alternative was considered and rejected in the same ruling:
 The honest position is the one stated: node-level atomicity, an explicit consistency model, and a
 document a customer can read before they need it.
 
+### 16.4 The single-registration local write transaction (#1033)
+
+**Ratified by the design record `pipeline-write-transactions.md`; implemented in #1033 (v1.82 of the
+[pipeline contract](pipeline-contract.md)).** This is the one exception §16 above now carries: a run
+whose durable writes all name ONE datasource registration executes inside ONE local transaction on
+that registration, committed or rolled back by the root as a whole. Everything it does not cover
+keeps §16.2's model exactly — no XA appeared, and §16.3's rejections all stand.
+
+**Planning — every run, automatic.** A root executor — and only a root; children inherit a
+transaction, they never plan one — walks the pinned graph and its children after
+`execution_started` and before the first business write. The durable writes it counts: DML nodes
+whose source is a registered datasource, DQL/PIPELINE nodes with `output.target: "datasource"`
+(§6.4.3), and DDL nodes against an external database (external DDL, counted separately). The
+execution-private tempdb is never a durable target. Registrations are unique **by name** — two
+names for the same server are two destinations. Eligible engines are the transactional JDBC
+dialects: PostgreSQL, MySQL, SQL Server, Oracle. H2, SQLite, DuckDB and LAKE are excluded from the
+feature and keep node-level atomicity.
+
+**Ordinary and refused plans.** A plan with no participating writer — pure reads, staging, excluded
+engines only — is an ordinary run: nothing changes, §16.2 governs. A plan whose participating
+writers name one eligible registration PLUS a second durable destination (eligible, excluded, or
+external DDL), or an external DDL node, or a pinned child whose plan cannot be read, is refused
+BEFORE any business write: the run ends FAILED with `pipeline.execution.local_write_refused`
+(400), its details naming the `reason` (`second_durable_destination`, `external_ddl`,
+`unknown_child_writes`) and the counted destinations. A read from another datasource is allowed —
+only writes are counted.
+
+**The lease.** The first write to the participating registration leases ONE connection from its
+ordinary pool, `autoCommit=false`, and holds it for the rest of the run — lazily, so a run that
+only reads never takes it, and a pool-wait timeout fails the run before any business write. The
+isolation level is whatever the customer's database supplies on that connection; the product adds
+no setting and overrides nothing. Every enrolled write — node DML, write-back rows, and the
+engine-generated `REPLACE`, which clears rows with a transactional DELETE inside the transaction
+and never an implicit-commit TRUNCATE — runs on that connection as a **participant**: statements
+report finished, but committed evidence is withheld and the rows are invisible to other
+connections until the root settles. Children run on the same lease through their execute request;
+the planner is wired only into root executor factories, so no second transaction can open
+mid-family. Independent reads on other registrations use ordinary leases; metadata writes stay
+separate (§16.1's rule 2 is unchanged).
+
+**Settle.** The root commits ONCE, after every required node — children included — has succeeded
+and the caller result is materialized; terminal success (`data_ready` included) is emitted after
+the commit. Every other terminal path — a failing node, the execution deadline, an explicit abort,
+a structural abort, a setup failure — rolls the lease back, and with it every enrolled write. A
+commit that is refused or loses its acknowledgement ends the run FAILED with
+`pipeline.execution.local_write_commit_failed` (502) and the transaction outcome **unknown**: the
+database may have committed, the engine never re-runs business SQL to settle the question, and the
+operator checks the target before any deliberate re-run (the stale-run surface carrying
+`OUTCOME_UNKNOWN` is #1035's).
+
+**Telemetry.** One counter, `datapipelines.executions.local_write_transactions` (tags `outcome`
+`started`/`committed`/`rolled_back`/`unknown`, and `dialect`), catalogued in
+[observability §4.1](observability.md): at most one `started` per run (the first enlist) and at
+most one terminal outcome. An `unknown` is alertable on its own.
+
 ---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-18 | v1.44 | 1033 (#1033) | §16 gains the exception the blockquote now carries and **§16.4: the single-registration local write transaction** — automatic root-only planning of the durable write set (DML-with-datasource source, DQL/PIPELINE `output.target: "datasource"`, external DDL counted separately; registrations unique by name; POSTGRES/MYSQL/MSSQL/ORACLE eligible), refusal with `pipeline.execution.local_write_refused` before any business write, the lazy one-connection lease with participant writes withholding committed evidence, root-only single commit after result materialization (terminal success after it), rollback on every other terminal path, the unknown-outcome honesty on a refused/lost commit ack (`pipeline.execution.local_write_commit_failed`, no re-run), and the §4.1 meter `datapipelines.executions.local_write_transactions`. The §16.1 seam table row and §16.2's atomic-parts paragraph carry the pointer; §16.3's rejections stand. |
 | 2026-11-12 | v1.43 | #905 review F1 | §10.1 shutdown and crash: the result-history write deferred behind an unconfirmed insert is also an in-memory continuation that can remain pending after the execution finishes and be lost on process exit. |
 | 2026-11-12 | v1.42 | #905 result columns survive write ordering | §10.1 "lifecycle writes are bounded too" paragraph: the result-history write (`recordResult`) is ordered behind an unconfirmed RUNNING insert like the terminal UPDATE, and the terminal UPDATE keeps recorded result columns (writes them only when given values); a result write matching no row is one WARN. |
 | 2026-11-12 | v1.41 | #821 invariants count a table caller output | §6.3.4 invariants paragraph: the recorded gap is closed — a `table` caller output's gated rows count with its inputs toward `max-input-rows` (refused as `pipeline.script.invariants_too_large`), a tempdb output's gated rows are not counted twice, and nothing changes when no invariant is declared (record §5.4: rows + rejects + table inputs). |

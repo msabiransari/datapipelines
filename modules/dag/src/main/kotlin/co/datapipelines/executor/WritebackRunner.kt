@@ -32,8 +32,14 @@ interface WritebackRunner {
      * @param workspaceId the execution's workspace (025 A5): the target resolves through
      *   §5.3 visibility — a datasource the workspace cannot see is `datasource_not_found`,
      *   not a silent write.
+     * @param transaction the execution family's local write transaction
+     *   (pipeline-write-transactions §3.3). When the TARGET is its registration, the write runs
+     *   as a participant span on that transaction's one connection — no own lease, no own commit,
+     *   no own rollback: the ROOT executor settles the family's writes once. Any other target
+     *   (or null) takes today's self-committing path unchanged. Suspend because a participant
+     *   span serializes on the transaction's mutex.
      */
-    fun writeback(
+    suspend fun writeback(
         resultSet: ResultSet,
         output: NodeOutput.Datasource,
         sourceDialect: Dialect,
@@ -43,6 +49,7 @@ interface WritebackRunner {
          * and insert, the commit, and a rollback. [OperationObserver.NONE] by default.
          */
         observer: OperationObserver = OperationObserver.NONE,
+        transaction: LocalWriteTransaction? = null,
     ): Long
 
     /**
@@ -57,14 +64,18 @@ interface WritebackRunner {
      * `ResultStore.materializeRows` has to `materialize`.
      *
      * @param workspaceId as [writeback]: the execution's workspace, scoping target resolution.
+     * @param transaction as [writeback]: the participant span when the target is the family's
+     *   registration (the child-sink case — the span is reentrant with the child's own participant
+     *   span on the same connection).
      */
-    fun writebackRows(
+    suspend fun writebackRows(
         schema: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         output: NodeOutput.Datasource,
         workspaceId: UUID,
         /** As [writeback]; the "fetch" is the pull from [rows]. */
         observer: OperationObserver = OperationObserver.NONE,
+        transaction: LocalWriteTransaction? = null,
     ): Long
 }
 
@@ -87,27 +98,29 @@ class JdbcWritebackRunner(
      */
     private val batchSize: Int = DEFAULT_BATCH_ROWS,
 ) : WritebackRunner {
-    override fun writeback(
+    override suspend fun writeback(
         resultSet: ResultSet,
         output: NodeOutput.Datasource,
         sourceDialect: Dialect,
         workspaceId: UUID,
         observer: OperationObserver,
+        transaction: LocalWriteTransaction?,
     ): Long {
         val columns = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect).columns
-        return writeAll(output, workspaceId, columns, observer) { connection, table, dialect ->
+        return writeAll(output, workspaceId, columns, observer, transaction) { connection, table, dialect ->
             streamInsert(connection, table, columns, resultSet, dialect, observer)
         }
     }
 
-    override fun writebackRows(
+    override suspend fun writebackRows(
         schema: List<ColumnSchema>,
         rows: Sequence<List<Any?>>,
         output: NodeOutput.Datasource,
         workspaceId: UUID,
         observer: OperationObserver,
+        transaction: LocalWriteTransaction?,
     ): Long =
-        writeAll(output, workspaceId, schema, observer) { connection, table, dialect ->
+        writeAll(output, workspaceId, schema, observer, transaction) { connection, table, dialect ->
             insertRows(connection, table, schema, rows, dialect, observer)
         }
 
@@ -119,12 +132,27 @@ class JdbcWritebackRunner(
      * Resolution is workspace-scoped (025 A5, design §5.3): the target must be VISIBLE to the
      * execution's workspace, else `datasource_not_found` — a write into a row the workspace
      * cannot see was the execution-path twin of the save-time gap.
+     *
+     * ## The participant branch (write-transactions §3.3/§3.5)
+     *
+     * When [transaction] names THIS target as its registration, the write runs as a participant
+     * span on the family's one connection: no own lease, `autoCommit` untouched (it is already
+     * off), no commit and no rollback — the ROOT settles the family's writes once, after every
+     * required node succeeds. `REPLACE` clears with a plain `DELETE`, never `TRUNCATE` (§5: an
+     * implicit-commit TRUNCATE would end the transaction mid-run; the transactional DELETE is
+     * the only legal clear there). No `observer.committed()` either: until the root confirms,
+     * committed evidence stays withheld (#1035 publishes it after confirmation).
+     *
+     * `ThrowsCount` is suppressed for this function: each throw is its own catalogued refusal
+     * (not-found, readonly, identifier, target) — the count is the contract.
      */
-    private fun writeAll(
+    @Suppress("ThrowsCount")
+    private suspend fun writeAll(
         output: NodeOutput.Datasource,
         workspaceId: UUID,
         columns: List<ColumnSchema>,
         observer: OperationObserver,
+        transaction: LocalWriteTransaction?,
         insert: (Connection, String, Dialect) -> Long,
     ): Long {
         val datasource =
@@ -136,6 +164,29 @@ class JdbcWritebackRunner(
         // which is an HTTP-400 code and must not surface mid-execution (§8.2).
         val table = SqlIdentifiers.requireValidTable(output.table, PipelineErrorCodes.Node.WRITEBACK_FAILED)
         SqlIdentifiers.validateColumnNames(columns.map { it.name }, PipelineErrorCodes.Node.WRITEBACK_FAILED)
+
+        val participant = transaction?.takeIf { it.registration == output.datasource }
+        if (participant != null) {
+            return participant.withParticipant { connection ->
+                // §6.4.3 (087) still applies on the participant path: identifiers are quoted in the
+                // vocabulary of the connection the write lands on — the transaction's snapshot,
+                // not a freshly resolved entry.
+                val dialect = participant.dialect ?: datasource.dialect
+                try {
+                    if (output.mode == WriteMode.REPLACE) {
+                        observer.phase(OperationPhase.WRITING)
+                        clearTarget(connection, table, dialect, transactionalOnly = true)
+                    }
+                    val written = insert(connection, table, dialect)
+                    observer.phase(OperationPhase.FINALIZING)
+                    written
+                } catch (e: SQLException) {
+                    // No rollback attempt and no rolledBack report: the ROOT decides the family's
+                    // outcome, and a failed node is a rollback the root performs (§4 row 3).
+                    throw mapWriteFailure(e, output)
+                }
+            }
+        }
 
         // §6.4.3 (087): identifiers are quoted in the TARGET dialect's vocabulary, not the SQL
         // standard's — MySQL needs backticks unless the server runs with ANSI_QUOTES, which the
@@ -152,7 +203,7 @@ class JdbcWritebackRunner(
             try {
                 if (output.mode == WriteMode.REPLACE) {
                     observer.phase(OperationPhase.WRITING)
-                    clearTarget(connection, table, dialect)
+                    clearTarget(connection, table, dialect, transactionalOnly = false)
                 }
                 val written = insert(connection, table, dialect)
                 observer.phase(OperationPhase.FINALIZING)
@@ -199,12 +250,22 @@ class JdbcWritebackRunner(
      * The attempt is wrapped in a savepoint: on Postgres a failed statement poisons the whole
      * transaction, so a bare try/catch fallback would commit nothing and report a confusing
      * "current transaction is aborted" instead of the real outcome.
+     *
+     * [transactionalOnly] is the participant path (write-transactions §5): the clear runs inside
+     * the family's still-open local transaction, where an implicit-commit `TRUNCATE` would END
+     * that transaction mid-run — so it is a plain `DELETE` there, always, with no savepoint
+     * dance around an attempt that must never be made.
      */
     private fun clearTarget(
         connection: Connection,
         table: String,
         dialect: Dialect,
+        transactionalOnly: Boolean,
     ) {
+        if (transactionalOnly) {
+            connection.createStatement().use { it.execute("DELETE FROM ${SqlIdentifiers.quote(table, dialect)}") }
+            return
+        }
         val savepoint = connection.setSavepoint("dp_writeback_replace")
         try {
             connection.createStatement().use { it.execute("TRUNCATE TABLE ${SqlIdentifiers.quote(table, dialect)}") }

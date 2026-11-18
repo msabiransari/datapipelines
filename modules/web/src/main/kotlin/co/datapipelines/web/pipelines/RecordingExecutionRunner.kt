@@ -115,6 +115,12 @@ class RecordingExecutionRunner(
     private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
     private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
+     * (write-transactions §3.1) The write-set planner for the per-run executor — this runner
+     * serves the writable roots the stream does not (MCP, published endpoints, the scheduler).
+     * Null only in module-slice wiring and unit tests.
+     */
+    private val localWritePlanner: co.datapipelines.executor.LocalWritePlanner? = null,
+    /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
      */
@@ -221,5 +227,6 @@ class RecordingExecutionRunner(
             subPipelineRunner = subPipelineRunner,
             scripts = scriptSupport,
             lakeAppendPort = lakeAppendPort,
+            localWritePlanner = localWritePlanner,
         )
 }

@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.77 (frozen contract — additive-only changes after this point)
+**Status:** v2.78 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-11-15
@@ -1832,6 +1832,7 @@ checks only that every path they name still exists.
 | `modules/datasources/src/main/kotlin/co/datapipelines/datasources/SqlProbeExceptions.kt` | the permission SQLSTATE / vendor-code table behind `datasource.table_forbidden` (§7A's third state — 123): which error means "exists, no grant" on this engine |
 | `modules/datasources/src/main/kotlin/co/datapipelines/datasources/TableResolver.kt` | nothing per dialect — it reads `introspectionCatalogIsComplete` from the adapter (declare THAT on `DialectAdapter`: true when the driver's catalog lists every table regardless of grants) |
 | `modules/datasources/src/main/kotlin/co/datapipelines/datasources/ReadOnlyConnectionMode.kt` | the read-only mechanism of the read-only paths (#463): an exhaustive `when` — a new dialect is a compile error until it gets a row — that is `DATABASE` only after `ReadOnlyConnectionModeIntegrationTest`/`ReadOnlyConnectionModeEmbeddedTest` measure the database refusing a write, otherwise `DECLARATIVE_ONLY`; plus its row in [DAG Executor §8.2](dag-executor.md#82-error-code-mapping)'s table (`ReadOnlyEnforcementSpecDriftTest`) |
+| `modules/dag/src/main/kotlin/co/datapipelines/executor/LocalWritePlanner.kt` | the single-database transaction's eligibility allowlist (#1033): `ELIGIBLE_DIALECTS` names the engines whose drivers the one-transaction family is qualified for (§3.2 — PostgreSQL, MySQL, SQL Server, Oracle). A new dialect is INELIGIBLE by absence and never enrolls; it joins only after #1036's real-driver qualification (commit, rollback and read-only behaviour measured) adds it |
 | `modules/web/src/main/kotlin/co/datapipelines/web/ui/site/SitePages.kt` | the engine list derives from `Dialect.entries`; a new dialect needs its `EngineFacts` entry and page — `SiteEngineFactsGuardTest` refuses the build without it |
 
 Also code, but guarded by the compiler rather than by this list: every exhaustive `when (dialect)`
@@ -1870,6 +1871,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-18 | v2.78 | #1033 local write transaction | §15.1 gains the `LocalWritePlanner.kt` row: its `ELIGIBLE_DIALECTS` allowlist names the four engines the single-registration transaction family is qualified for; a new dialect is ineligible by absence until #1036's real-driver qualification adds it. Additive. |
 | 2026-11-15 | v2.77 | 994 (#994) | §5.6 gains a fifth kind, TEMPORARY: `jdbc_stream_results` is refused on DUCKDB and LAKE in both carriers (`DialectRefusalSets.DUCKDB`), a correctness exception — the pinned driver ends a streamed cursor silently when the engine fails mid-stream — removed with staging's guard (`StreamedResultTripwireTest`); §2 principle 8 unchanged. |
 | 2026-11-13 | v2.76 | #881 merge review | Narrow the demo seeder timing claim in §8C.10: the grant is installed during startup before the first freshness tick, not atomically with the demo workspace INSERT. Ordinary workspace creation keeps its separate #823 transaction guarantee. Text only. |
 | 2026-11-13 | v2.75 | #941 DuckDB `:memory:` is case-sensitive | §3.3's in-process paragraph: DuckDB's `:memory:` is matched exactly as its driver reads it, case-sensitively (duckdb_jdbc 1.5.5.1, measured in a forked JVM by `DuckDbMemoryFormParityTest`), no longer case-insensitively. A mixed-case variant (`:MEMORY:`, `:Memory:`) is the literal file the driver opens, so it is classified `InProcessFile` and passes the file-roots rule at save and at pool build like any other file form. The super-admin gate is unchanged (both forms are in-process). No wire change. |

@@ -16,6 +16,7 @@ import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.IdempotencyStore
 import co.datapipelines.executor.InMemoryCancellationRegistry
 import co.datapipelines.executor.JdbcWritebackRunner
+import co.datapipelines.executor.LocalWritePlanner
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.RedisCancellationFlags
 import co.datapipelines.executor.RedisIdempotencyStore
@@ -179,6 +180,22 @@ class EngineConfiguration {
     fun writebackRunner(registry: DatasourceRegistry): WritebackRunner = JdbcWritebackRunner(registry)
 
     /**
+     * (write-transactions §3.1) The run-admission write-set planner: a ROOT execution of a
+     * writable run walks its pinned graph — children resolved through the same repository
+     * [co.datapipelines.pipeline.PipelineResolver] composition validation uses — and enrolls one
+     * local write transaction when every eligible write targets a single registration. The
+     * depth bound is the executor's own `max-composition-depth`, the same limit
+     * [co.datapipelines.web.pipelines.SubPipelineExecutionRunner] enforces at runtime, so the
+     * walk admits exactly the shapes the family can actually run.
+     */
+    @Bean
+    fun localWritePlanner(
+        pipelineResolver: co.datapipelines.pipeline.PipelineResolver,
+        datasourceRegistry: DatasourceRegistry,
+        config: ExecutorConfig,
+    ): LocalWritePlanner = LocalWritePlanner(pipelineResolver, datasourceRegistry, config.maxCompositionDepth)
+
+    /**
      * **Carry-forward #3 — the absolute `result_url` builder.**
      *
      * rest-api §6.4.7 requires `data_ready.result_url` to be absolute, and `PipelineExecutor` takes
@@ -230,6 +247,7 @@ class EngineConfiguration {
         subPipelineRunner: SubPipelineRunner,
         progress: ExecutionProgress,
         scriptSupport: co.datapipelines.executor.ScriptSupport,
+        localWritePlanner: LocalWritePlanner,
     ): PipelineExecutor =
         pipelineExecutor(
             // The shared bean is a bean-of-record (mcp-server's @ConditionalOnBean); no
@@ -261,6 +279,7 @@ class EngineConfiguration {
             progress = progress,
             scripts = scriptSupport,
             lakeAppendPort = lakeAppendPort,
+            localWritePlanner = localWritePlanner,
         )
 
     /**

@@ -238,6 +238,16 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Execution.CONCURRENCY_LIMIT to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Execution.NOT_RUNNING to HttpStatus.CONFLICT,
             PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE to HttpStatus.BAD_GATEWAY,
+            // §13.3 / #1033 — the write-set plan's refusal of a run whose durable writes cannot
+            // share one local transaction: deterministic and author-side (one durable
+            // destination, or one registration for the aliased server), so 400 against the
+            // family's 500 default — the run ends FAILED before the first business write.
+            PipelineErrorCodes.Execution.LOCAL_WRITE_REFUSED to HttpStatus.BAD_REQUEST,
+            // §13.3 / #1033 — the root's settle of the family's shared local write transaction
+            // was refused after the last node succeeded: the party behind us refused the
+            // finalize, 502 like node commit_failed (and ERROR with the stack, not WARN —
+            // the rendered writes can be the defect).
+            PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED to HttpStatus.BAD_GATEWAY,
             // §13.4 (#336) — the streamed read's finalizing commit was refused: the source

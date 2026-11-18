@@ -142,6 +142,14 @@ data class ExecuteRequest(
     val readOnly: Boolean = false,
     /** Internal admission check inherited by children and applied to their exact loaded bodies. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
+    /**
+     * (write-transactions §3.3) The execution FAMILY's local write transaction — non-null only
+     * on a CHILD request, which inherits the root's so every participant in the family (the
+     * root's nodes, pinned children, write-back) shares one connection and one settle point.
+     * The ROOT request leaves it null; the root executor plans, creates and settles the
+     * transaction itself. Inherited by a PIPELINE node's child request like [readOnly].
+     */
+    val localWriteTransaction: LocalWriteTransaction? = null,
 )
 
 /**

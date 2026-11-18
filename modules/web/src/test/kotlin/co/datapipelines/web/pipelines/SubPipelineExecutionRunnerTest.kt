@@ -824,7 +824,7 @@ class SubPipelineExecutionRunnerTest {
                 }
 
             thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
-            verify(exactly = 0) { writebackRunner.writebackRows(any(), any(), any(), any()) }
+            coVerify(exactly = 0) { writebackRunner.writebackRows(any(), any(), any(), any(), any(), any()) }
         }
 
     @Test
@@ -897,7 +897,7 @@ class SubPipelineExecutionRunnerTest {
             val ctx = context()
             val tracker = ctx.operations.begin("revenue", OperationKind.CHILD, OperationDestination.datasource("wb", "tgt"))
             val observers = mutableListOf<OperationObserver>()
-            every { writebackRunner.writebackRows(any(), any(), any(), any(), capture(observers)) } returns 1L
+            coEvery { writebackRunner.writebackRows(any(), any(), any(), any(), capture(observers), any()) } returns 1L
 
             runner(stub).run(pipelineNode(output = NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND)), ctx)
 
@@ -970,7 +970,7 @@ class SubPipelineExecutionRunnerTest {
         runTest {
             stubRegistry()
             val output = NodeOutput.Datasource("warehouse", "revenue", WriteMode.APPEND)
-            every { writebackRunner.writebackRows(any(), any(), output, any()) } answers
+            coEvery { writebackRunner.writebackRows(any(), any(), output, any(), any(), any()) } answers
                 {
                     secondArg<Sequence<List<Any?>>>().count().toLong()
                 }
@@ -983,7 +983,7 @@ class SubPipelineExecutionRunnerTest {
             val result = runner(stub).run(pipelineNode(output = output), context())
 
             result.rowsOut shouldBe 2
-            verify(exactly = 1) { writebackRunner.writebackRows(schema, any(), output, parentWorkspaceId) }
+            coVerify(exactly = 1) { writebackRunner.writebackRows(schema, any(), output, parentWorkspaceId, any(), any()) }
         }
 
     @Test
