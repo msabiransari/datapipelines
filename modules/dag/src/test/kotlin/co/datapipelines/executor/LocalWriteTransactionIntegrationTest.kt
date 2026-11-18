@@ -157,7 +157,8 @@ class LocalWriteTransactionIntegrationTest {
                 output = NodeOutput.Datasource(REGISTRATION_A, "order_lines", WriteMode.APPEND),
                 dependsOn = listOf("read_b"),
             ),
-            Fixtures.node("child_ref", type = NodeType.PIPELINE, source = "", dependsOn = listOf("write_root"))
+            Fixtures
+                .node("child_ref", type = NodeType.PIPELINE, source = "", dependsOn = listOf("write_root"))
                 .copy(pipeline = CHILD_REF),
         ) + if (boom) listOf(Fixtures.node("boom", source = "tempdb", dependsOn = listOf("child_ref"))) else emptyList()
 
@@ -280,7 +281,10 @@ class LocalWriteTransactionIntegrationTest {
     private fun seenCountFromSecondConnection(): Int =
         DriverManager.getConnection(dbA.jdbcUrl, dbA.username, dbA.password).use { connection ->
             connection.createStatement().use { statement ->
-                statement.executeQuery("SELECT seen_count FROM seen").use { rs -> rs.next(); rs.getInt(1) }
+                statement.executeQuery("SELECT seen_count FROM seen").use { rs ->
+                    rs.next()
+                    rs.getInt(1)
+                }
             }
         }
 
