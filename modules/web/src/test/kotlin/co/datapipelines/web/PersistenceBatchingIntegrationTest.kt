@@ -388,13 +388,15 @@ class PersistenceBatchingIntegrationTest {
     @Test
     fun `D6 - with the store still held, the drain gives up at shutdown-drain-ms and reports what it lost`() {
         val jdbc = NamedParameterJdbcTemplate(shared())
-        val writer = BatchingWriter("audit", BatchingConfig(shutdownDrainMillis = HUNG_DRAIN_MS), AuditRowSink(jdbc))
+        // One blocked batch can take at most 200 rows. The rest must still be queued at the deadline.
+        val config = BatchingConfig(writers = 1, shutdownDrainMillis = HUNG_DRAIN_MS)
+        val writer = BatchingWriter("audit", config, AuditRowSink(jdbc))
         val marker = UUID.randomUUID().toString()
         val context = drainContext(writer)
         var closedInMs = 0L
         context.use {
             holdingLock(SharedPostgres.postgres.jdbcUrl, "audit_log") { release ->
-                repeat(QUEUED) { n -> writer.submit(auditRow("persistence.it.hung", "k_hung_$n", marker)) }
+                repeat(QUEUED) { n -> writer.submit(auditRow("persistence.it.hung", "k_hung_$n", marker)) shouldBe true }
                 val t0 = System.nanoTime()
                 context.close()
                 closedInMs = (System.nanoTime() - t0) / NANOS_PER_MS
