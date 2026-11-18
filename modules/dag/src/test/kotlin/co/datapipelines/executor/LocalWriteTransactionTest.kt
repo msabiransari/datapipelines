@@ -3,9 +3,13 @@ package co.datapipelines.executor
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.pooling.ConnectionPool
+import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.WriteMode
+import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -157,6 +161,88 @@ class LocalWriteTransactionTest {
     }
 
     @Test
+    fun `a participant REPLACE clears transactionally and the family rollback restores the replaced rows`() {
+        runTest {
+            val datasource =
+                postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)", "INSERT INTO tgt VALUES (100)"))
+            val registry = FakeDatasourceRegistry(mapOf("pg_main" to datasource))
+            val transaction = transaction(registry)
+            val idSchema = listOf(ColumnSchema("id", LogicalType.INTEGER))
+
+            JdbcWritebackRunner(registry).writebackRows(
+                idSchema,
+                sequenceOf(listOf(1)),
+                NodeOutput.Datasource("pg_main", "tgt", WriteMode.REPLACE),
+                workspaceId,
+                transaction = transaction,
+            ) shouldBe 1L
+
+            // Mid-transaction the independent client still sees the pre-replace row: the
+            // participant's DELETE+INSERT happened only inside the family's uncommitted span.
+            countFromOtherConnection(datasource, "SELECT COUNT(*) FROM tgt WHERE id = 100") shouldBe 1L
+            countFromOtherConnection(datasource, "SELECT COUNT(*) FROM tgt WHERE id = 1") shouldBe 0L
+
+            transaction.rollbackQuietly()
+
+            // §5/§9: the replace's clear was a transactional DELETE, so it rolls back with the
+            // family — the replaced row survives, the replacement does not.
+            countFromOtherConnection(datasource, "SELECT COUNT(*) FROM tgt WHERE id = 100") shouldBe 1L
+            countFromOtherConnection(datasource, "SELECT COUNT(*) FROM tgt WHERE id = 1") shouldBe 0L
+            outcomes() shouldBe mapOf("started" to 1.0, "rolled_back" to 1.0)
+        }
+    }
+
+    @Test
+    fun `a participant REPLACE that commits replaces the rows durably`() {
+        runTest {
+            val datasource =
+                postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)", "INSERT INTO tgt VALUES (100)"))
+            val registry = FakeDatasourceRegistry(mapOf("pg_main" to datasource))
+            val transaction = transaction(registry)
+            val idSchema = listOf(ColumnSchema("id", LogicalType.INTEGER))
+
+            JdbcWritebackRunner(registry).writebackRows(
+                idSchema,
+                sequenceOf(listOf(1)),
+                NodeOutput.Datasource("pg_main", "tgt", WriteMode.REPLACE),
+                workspaceId,
+                transaction = transaction,
+            ) shouldBe 1L
+
+            transaction.commit()
+
+            countFromOtherConnection(datasource, "SELECT COUNT(*) FROM tgt WHERE id = 100") shouldBe 0L
+            countFromOtherConnection(datasource, "SELECT COUNT(*) FROM tgt WHERE id = 1") shouldBe 1L
+            outcomes() shouldBe mapOf("started" to 1.0, "committed" to 1.0)
+        }
+    }
+
+    @Test
+    fun `a pool that refuses to lease leaves the transaction un-enlisted - nothing to settle`() {
+        runTest {
+            val datasource = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
+            val base = FakeDatasourceRegistry(mapOf("pg_main" to datasource))
+            val registry = PoolExhaustedRegistry(base)
+            val transaction = transaction(registry)
+
+            shouldThrow<SQLException> {
+                transaction.withParticipant { connection ->
+                    connection.createStatement().use { it.execute("SELECT 1") }
+                }
+            }
+
+            // §4 row 2: enlist failed before the first span ran, so the run wrote nothing and the
+            // transaction has no lease to settle — commit/rollback/close are all no-ops.
+            transaction.enlisted shouldBe false
+            transaction.commit()
+            transaction.rollbackQuietly()
+            transaction.close()
+            base.leased.get() shouldBe 0
+            outcomes() shouldBe emptyMap()
+        }
+    }
+
+    @Test
     fun `commit with nothing enlisted is a no-op with zero outcomes and zero leases`() {
         runTest {
             val registry = FakeDatasourceRegistry(mapOf("pg_main" to postgresH2("pg_main")))
@@ -255,6 +341,24 @@ class LocalWriteTransactionTest {
                         override fun commit(): Unit = throw SQLException("commit refused (test)")
                     }
                 }
+
+                override fun close() = Unit
+            }
+    }
+
+    /**
+     * `poolFor` refuses to lease — the pool-wait-exhausted seam (§4 row 2): Hikari's
+     * `SQLTransientConnectionException` after `connectionTimeout`, modelled as a plain refusal.
+     */
+    private class PoolExhaustedRegistry(
+        private val base: DatasourceRegistry,
+    ) : DatasourceRegistry by base {
+        override fun poolFor(datasource: Datasource): ConnectionPool =
+            object : ConnectionPool {
+                override val name get() = datasource.name
+
+                override fun leaseConnection(): Connection =
+                    throw SQLException("Connection is not available, request timed out after 30000ms (test)")
 
                 override fun close() = Unit
             }

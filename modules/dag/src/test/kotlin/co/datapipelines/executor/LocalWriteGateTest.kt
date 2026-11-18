@@ -1,5 +1,6 @@
 package co.datapipelines.executor
 
+import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.SseEventType
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeType
@@ -11,7 +12,10 @@ import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 
@@ -162,5 +166,54 @@ class LocalWriteGateTest {
             countFromOtherConnection(pgMain) shouldBe 0L
             outcomes(meterRegistry) shouldBe mapOf("started" to 1.0, "rolled_back" to 1.0)
         }
+    }
+
+    @Test
+    fun `cancelling the run rolls back the family write`() {
+        runBlocking {
+            val pgMain = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
+            val slow = h2Datasource("slow_src", listOf("CREATE TABLE unused (n INT)"))
+            val registry = FakeDatasourceRegistry(mapOf("pg_main" to pgMain, "slow_src" to slow))
+            val meterRegistry = SimpleMeterRegistry()
+
+            harness(
+                registry,
+                ExecutorMetrics(meterRegistry),
+                mapOf(
+                    "w" to "INSERT INTO tgt VALUES (7)",
+                    "slow" to Fixtures.SLOW_SQL,
+                ),
+            ).use { h ->
+                val nodes =
+                    listOf(
+                        Fixtures.node("w", type = NodeType.DML, source = "pg_main"),
+                        Fixtures.node("slow", source = "slow_src", dependsOn = listOf("w")),
+                    )
+                withTimeout(HARNESS_BUDGET_MS) {
+                    val run =
+                        async { shouldThrow<ExecutionAbortedException> { h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))) } }
+                    // "slow" starts only after the write finished, so reaching it proves the write
+                    // executed — then cancel while the slow statement holds the OTHER connection.
+                    while (h.emitter.allOf<NodeStarted>().none { it.nodeId == "slow" }) delay(POLL_MS)
+                    h.cancellations.cancel(
+                        h.emitter
+                            .allOf<NodeStarted>()
+                            .first { it.nodeId == "slow" }
+                            .executionId,
+                        AbortReason.CANCELLED,
+                    )
+                    run.await()
+                }
+            }
+
+            // §4 row 4: explicit cancellation before commit rolls the family's write back.
+            countFromOtherConnection(pgMain) shouldBe 0L
+            outcomes(meterRegistry) shouldBe mapOf("started" to 1.0, "rolled_back" to 1.0)
+        }
+    }
+
+    private companion object {
+        const val POLL_MS = 5L
+        const val HARNESS_BUDGET_MS = 60_000L
     }
 }
