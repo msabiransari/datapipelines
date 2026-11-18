@@ -138,6 +138,7 @@ waived-for-cost co.datapipelines.datasources.DatasourceIdentityIntegrationTest  
 waived-for-cost co.datapipelines.executor.BoundedJdbcPostgresIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ExecutionEventRetentionTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ExecutionRepositoriesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.LocalWriteTransactionIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ParameterBindingIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.PostgresSourceIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ReadOnlyPostgresSourceIntegrationTest  starts a container or context: PostgreSQLContainer
