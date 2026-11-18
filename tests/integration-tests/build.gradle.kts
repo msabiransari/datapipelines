@@ -78,7 +78,7 @@ tasks.withType<Test>().configureEach {
 // file is missing (never silently skips — a guard that can skip is not a guard).
 tasks.named<Test>("test") {
     dependsOn(":modules:app:bootJar")
-    // CI runs the whole module in one forked JVM. After #934, Spring's TestContext cache
+    // CI runs one forked JVM at a time. After #934, Spring's TestContext cache
     // retains at most one entry per test JVM; eviction closes cached contexts and
     // their resources. Manually booted contexts remain their callers' responsibility.
     // The default heap (a quarter of the host's RAM — 4 GB on a 16 GB box) ran OUT in
@@ -105,10 +105,11 @@ tasks.named<Test>("test") {
     // ordinary dp.test.forks — DEVELOPMENT.md §9.5 has the RAM arithmetic.
     maxParallelForks =
         project.providers.gradleProperty("dp.test.forks.e2e").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
-    // #139: ONE class order for CI and the box. These suites share containers and Spring
-    // contexts per fork, so the class order decides which suites cohabit a JVM (the
-    // memory-limit note above is one measured consequence) — it must not depend on the
-    // filesystem's scan order. Pinned to alphabetical UNLESS the property is passed: a passed
+    // #934 recurred with a one-entry context cache. Recycle each test worker after 64 classes
+    // to bound the number of suites sharing its heap, while preserving the staging budget.
+    forkEvery = 64
+    // #139: pin the class order within each worker to alphabetical unless the property is passed.
+    // These suites share containers and Spring contexts per worker. A passed
     // -Pjunit.jupiter.testclass.order.default is forwarded by the conventions plugin, and this
     // default then stays out of its way (the round-060 shuffle override keeps winning).
     if (project.providers.gradleProperty("junit.jupiter.testclass.order.default").orNull == null) {
