@@ -27,6 +27,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.security.SecureRandom
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.time.Duration
 import java.util.Base64
 import java.util.UUID
@@ -289,7 +290,9 @@ class LocalWriteOrdinaryEntryE2eTest {
                 var withdrawn = false
                 for (line in reader.lines()) {
                     when {
-                        line.startsWith("event:") -> currentEvent = line.removePrefix("event:").trim()
+                        line.startsWith("event:") -> {
+                            currentEvent = line.removePrefix("event:").trim()
+                        }
 
                         line.startsWith("data:") -> {
                             val payload = mapper.readTree(line.removePrefix("data:").trim())
@@ -380,11 +383,10 @@ class LocalWriteOrdinaryEntryE2eTest {
     private fun seedScratch() {
         DriverManager.getConnection(db.jdbcUrl, db.username, db.password).use { connection ->
             connection.createStatement().use { statement ->
-                statement.execute("CREATE TABLE IF NOT EXISTS lw_src (id INT PRIMARY KEY)")
-                for (table in listOf("lw_tgt_append", "lw_tgt_child", "lw_replace_tgt", "lw_replace2_tgt", "lw_slow_tgt", "lw_family", "lw_family2", "lw_family3")) {
+                for (table in SCRATCH_TABLES) {
                     statement.execute("CREATE TABLE IF NOT EXISTS $table (id INT PRIMARY KEY)")
                 }
-                statement.execute("TRUNCATE lw_src, lw_tgt_append, lw_tgt_child, lw_replace_tgt, lw_replace2_tgt, lw_slow_tgt, lw_family, lw_family2, lw_family3")
+                statement.execute("TRUNCATE " + SCRATCH_TABLES.joinToString(", "))
                 statement.execute("INSERT INTO lw_src SELECT generate_series(1, 2500)")
                 statement.execute("INSERT INTO lw_replace_tgt VALUES (90), (91)")
                 statement.execute("INSERT INTO lw_replace2_tgt VALUES (90), (91)")
@@ -621,22 +623,27 @@ class LocalWriteOrdinaryEntryE2eTest {
 
     // ------------------------------------------------------------ reads
 
-    private fun scratchCount(table: String): Long =
-        scratchIds(table).size.toLong()
+    private fun scratchCount(table: String): Long = scratchIds(table).size.toLong()
 
     /** The target's ids, in order, read out-of-band on a connection of this test's own. */
-    private fun scratchIds(table: String): List<Int> =
-        DriverManager
-            .getConnection(db.jdbcUrl, db.username, db.password)
-            .use { connection ->
-                connection.createStatement().use { statement ->
-                    statement.executeQuery("SELECT id FROM $table ORDER BY id").use { rows ->
-                        val ids = mutableListOf<Int>()
-                        while (rows.next()) ids += rows.getInt(1)
-                        ids
-                    }
-                }
+    private fun scratchIds(table: String): List<Int> {
+        val ids = mutableListOf<Int>()
+        DriverManager.getConnection(db.jdbcUrl, db.username, db.password).use { connection ->
+            connection.createStatement().use { statement ->
+                readIds(statement.executeQuery("SELECT id FROM $table ORDER BY id"), ids)
             }
+        }
+        return ids
+    }
+
+    private fun readIds(
+        rows: ResultSet,
+        into: MutableList<Int>,
+    ) {
+        rows.use { r ->
+            while (r.next()) into += r.getInt(1)
+        }
+    }
 
     /**
      * The `local_write_transactions` outcome counters, read off the running application's
@@ -703,6 +710,20 @@ class LocalWriteOrdinaryEntryE2eTest {
         /** The child's in-flight window: pg_sleep seconds, and the budget to see its execution row. */
         private const val SLEEP_SECONDS = 3
         private const val CHILD_POLL_BUDGET_MS = 30_000L
+
+        /** The suite's scratch tables, created and truncated together by [seedScratch]. */
+        private val SCRATCH_TABLES =
+            listOf(
+                "lw_src",
+                "lw_tgt_append",
+                "lw_tgt_child",
+                "lw_replace_tgt",
+                "lw_replace2_tgt",
+                "lw_slow_tgt",
+                "lw_family",
+                "lw_family2",
+                "lw_family3",
+            )
 
         private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
 
