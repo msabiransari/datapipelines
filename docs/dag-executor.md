@@ -1685,9 +1685,10 @@ BEFORE any business write: the run ends FAILED with `pipeline.execution.local_wr
 `unknown_child_writes`) and the counted destinations. A read from another datasource is allowed —
 only writes are counted.
 
-**The lease.** The first write to the participating registration leases ONE connection from its
-ordinary pool, `autoCommit=false`, and holds it for the rest of the run — lazily, so a run that
-only reads never takes it, and a pool-wait timeout fails the run before any business write. The
+**The lease.** The first access to the participating registration — read or write — leases ONE
+connection from its ordinary pool, `autoCommit=false`, and holds it for the rest of the run.
+A plan without an eligible writer never enrolls; an enrolled plan leases lazily on first access.
+A pool-wait timeout fails the run before any business write. The
 isolation level is whatever the customer's database supplies on that connection; the product adds
 no setting and overrides nothing. Every enrolled write — node DML, write-back rows, and the
 engine-generated `REPLACE`, which clears rows with a transactional DELETE inside the transaction
