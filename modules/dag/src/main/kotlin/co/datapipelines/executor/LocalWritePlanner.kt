@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineNodeRef
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.typesystem.Dialect
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -214,7 +215,8 @@ class LocalWritePlanner(
      * Opens the [Enroll][LocalWriteVerdict.Enroll] verdict's transaction (§3.3): the lease
      * bound to this root, this workspace and the planned registration. Born here — the
      * write-set authority is the transaction's factory — so the executor never has to hold
-     * the registry just to construct one.
+     * the registry just to construct one. [deadline] is the execution's wall-clock bound (R7):
+     * the transaction refuses an acquisition that would begin or return past it.
      */
     fun open(
         verdict: LocalWriteVerdict.Enroll,
@@ -222,6 +224,7 @@ class LocalWritePlanner(
         workspaceId: UUID,
         metrics: ExecutorMetrics,
         dispatcher: ExecutorDispatcher,
+        deadline: Instant? = null,
     ): LocalWriteTransaction =
         LocalWriteTransaction(
             rootExecutionId = executionId,
@@ -230,6 +233,7 @@ class LocalWritePlanner(
             registry = datasources,
             metrics = metrics,
             dispatcher = dispatcher,
+            deadline = deadline,
         )
 
     private fun eligibleIn(datasource: co.datapipelines.datasources.Datasource?): Boolean =

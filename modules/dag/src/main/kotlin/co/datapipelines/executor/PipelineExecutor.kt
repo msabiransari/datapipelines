@@ -220,8 +220,19 @@ class PipelineExecutor(
                     }
 
                     is LocalWriteVerdict.Enroll -> {
+                        // R7: the lease must be bounded by the execution's own deadline — the
+                        // `withTimeout` below starts just after planning, so `startedAt + timeout`
+                        // is a close, conservative lower bound. A detached node body that acquires
+                        // past it returns its lease instead of enlisting behind the settlement.
                         val transaction =
-                            planner.open(verdict, executionId, request.workspaceId, metrics, dispatcher)
+                            planner.open(
+                                verdict,
+                                executionId,
+                                request.workspaceId,
+                                metrics,
+                                dispatcher,
+                                startedAt.plusSeconds(config.executionTimeoutSeconds),
+                            )
                         run.localWriteTransaction = transaction
                         localWrite = transaction
                     }

@@ -219,9 +219,12 @@ class JdbcWritebackRunner(
      * single-transaction write (`REPLACE` truncates and inserts together, so a failure never
      * leaves the target table empty) around whichever row source [insert] drains.
      *
-     * Resolution is workspace-scoped (025 A5, design §5.3): the target must be VISIBLE to the
-     * execution's workspace, else `datasource_not_found` — a write into a row the workspace
-     * cannot see was the execution-path twin of the save-time gap.
+     * Resolution is workspace-scoped and LIVE (025 A5, design §5.3/§6): the target must be
+     * VISIBLE to the execution's workspace at write time, else `datasource_not_found`. The live
+     * read (`getVisibleLive`, past the §6.3 cache) is what makes a grant revoked mid-run — after
+     * the family already enlisted on an earlier write — refuse HERE rather than sail through on a
+     * stale cached entry: "if authorization is withdrawn and a required write is refused, fail and
+     * roll back" (§6). Distinct from [refuseIfReadonly]'s readonly-flag/soft-delete live read.
      *
      * ## The participant branch (write-transactions §3.3/§3.5)
      *
@@ -246,7 +249,7 @@ class JdbcWritebackRunner(
         insert: (Connection, String, Dialect) -> Long,
     ): Long {
         val datasource =
-            registry.getVisible(output.datasource, workspaceId)
+            registry.getVisibleLive(output.datasource, workspaceId)
                 ?: throw datasourceNotFound(output.datasource)
         refuseIfReadonly(output)
         // Both identifier guards report the WRITE-BACK phase code: a bad generated identifier here
