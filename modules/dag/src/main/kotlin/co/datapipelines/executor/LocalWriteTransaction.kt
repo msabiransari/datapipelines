@@ -147,12 +147,16 @@ class LocalWriteTransaction(
                 // settling) so `rollbackQuietly`'s ENLISTED branch can never run after this.
                 synchronized(stateLock) { state = State.SETTLED }
                 metrics.localWriteTransaction(OUTCOME_UNKNOWN, dialectForTelemetry())
-                LOG.error("Local write transaction {} on '{}' refused at commit; outcome unknown", rootExecutionId, registration, e)
+                LOG.error(
+                    "Local write transaction {} on '{}' refused at commit; outcome unknown (SQLState {}, vendor code {})",
+                    rootExecutionId,
+                    registration,
+                    e.sqlState,
+                    e.errorCode,
+                )
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED,
-                    message =
-                        "The pipeline's local write transaction could not be committed: " +
-                            "${e.message?.take(COMMIT_ERROR_MESSAGE_LIMIT)}",
+                    message = "The pipeline's local write transaction could not be committed; its outcome is unknown",
                     details = mapOf("registration" to registration, "execution_id" to rootExecutionId.toString()),
                     cause = e,
                 )
@@ -179,10 +183,11 @@ class LocalWriteTransaction(
                 synchronized(stateLock) { state = State.SETTLED }
                 metrics.localWriteTransaction(OUTCOME_UNKNOWN, dialectForTelemetry())
                 LOG.error(
-                    "Local write transaction {} on '{}' refused at rollback; outcome unknown",
+                    "Local write transaction {} on '{}' refused at rollback; outcome unknown (SQLState {}, vendor code {})",
                     rootExecutionId,
                     registration,
-                    e,
+                    e.sqlState,
+                    e.errorCode,
                 )
             }
         }
@@ -221,7 +226,7 @@ class LocalWriteTransaction(
             try {
                 conn.close()
             } catch (e: SQLException) {
-                LOG.warn("Returning local write transaction {} connection for '{}' to the pool refused", rootExecutionId, registration, e)
+                logReturnFailure(e)
             } finally {
                 synchronized(stateLock) { state = State.CLOSED }
             }
@@ -359,8 +364,19 @@ class LocalWriteTransaction(
         try {
             conn.close()
         } catch (e: SQLException) {
-            LOG.warn("Returning late local write transaction {} connection for '{}' to the pool refused", rootExecutionId, registration, e)
+            logReturnFailure(e)
         }
+    }
+
+    /** Transaction diagnostics carry JDBC metadata, never the driver's text or exception chain. */
+    private fun logReturnFailure(failure: SQLException) {
+        LOG.warn(
+            "Returning local write transaction {} connection for '{}' to the pool refused (SQLState {}, vendor code {})",
+            rootExecutionId,
+            registration,
+            failure.sqlState,
+            failure.errorCode,
+        )
     }
 
     private fun dialectForTelemetry(): String = synchronized(stateLock) { snapshot?.dialect?.wire ?: "unknown" }
@@ -386,8 +402,5 @@ class LocalWriteTransaction(
         const val OUTCOME_COMMITTED = "committed"
         const val OUTCOME_ROLLED_BACK = "rolled_back"
         const val OUTCOME_UNKNOWN = "unknown"
-
-        /** Driver text carried into the commit-failure message — bounded, and a named constant. */
-        const val COMMIT_ERROR_MESSAGE_LIMIT = 200
     }
 }
