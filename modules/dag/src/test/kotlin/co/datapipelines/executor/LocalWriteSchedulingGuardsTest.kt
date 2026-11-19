@@ -44,35 +44,38 @@ class LocalWriteSchedulingGuardsTest {
     @Test
     fun `parallel dag siblings serialize on the family transaction while overlapping in flight`() {
         runBlocking {
-            val source = h2Datasource("parallel_family", listOf("CREATE TABLE tgt (id INT)"))
-                .copy(dialect = Dialect.POSTGRES)
+            val source =
+                h2Datasource("parallel_family", listOf("CREATE TABLE tgt (id INT)"))
+                    .copy(dialect = Dialect.POSTGRES)
             val base = FakeDatasourceRegistry(mapOf(source.name to source))
             val active = AtomicInteger()
             val highWater = AtomicInteger()
             val statementOrder = CopyOnWriteArrayList<String>()
-            val registry = object : DatasourceRegistry by base {
-                override fun poolFor(datasource: Datasource): ConnectionPool {
-                    val pool = base.poolFor(datasource)
-                    return object : ConnectionPool by pool {
-                        override fun leaseConnection(): Connection {
-                            val connection = pool.leaseConnection()
-                            return object : Connection by connection {
-                                override fun prepareStatement(sql: String): PreparedStatement {
-                                    val statement = connection.prepareStatement(sql)
-                                    return object : PreparedStatement by statement {
-                                        override fun executeUpdate(): Int {
-                                            statementOrder += sql
-                                            val nowActive = active.incrementAndGet()
-                                            highWater.updateAndGet { current -> maxOf(current, nowActive) }
-                                            try {
-                                                // Hold each sibling's statement so the other sibling's
-                                                // NODE provably overlaps in flight.
-                                                if (sql.contains("VALUES (1)") || sql.contains("VALUES (2)")) {
-                                                    Thread.sleep(SIBLING_HOLD_MS)
+            val registry =
+                object : DatasourceRegistry by base {
+                    override fun poolFor(datasource: Datasource): ConnectionPool {
+                        val pool = base.poolFor(datasource)
+                        return object : ConnectionPool by pool {
+                            override fun leaseConnection(): Connection {
+                                val connection = pool.leaseConnection()
+                                return object : Connection by connection {
+                                    override fun prepareStatement(sql: String): PreparedStatement {
+                                        val statement = connection.prepareStatement(sql)
+                                        return object : PreparedStatement by statement {
+                                            override fun executeUpdate(): Int {
+                                                statementOrder += sql
+                                                val nowActive = active.incrementAndGet()
+                                                highWater.updateAndGet { current -> maxOf(current, nowActive) }
+                                                try {
+                                                    // Hold each sibling's statement so the other sibling's
+                                                    // NODE provably overlaps in flight.
+                                                    if (sql.contains("VALUES (1)") || sql.contains("VALUES (2)")) {
+                                                        Thread.sleep(SIBLING_HOLD_MS)
+                                                    }
+                                                    return statement.executeUpdate()
+                                                } finally {
+                                                    active.decrementAndGet()
                                                 }
-                                                return statement.executeUpdate()
-                                            } finally {
-                                                active.decrementAndGet()
                                             }
                                         }
                                     }
@@ -81,16 +84,16 @@ class LocalWriteSchedulingGuardsTest {
                         }
                     }
                 }
-            }
             val meters = SimpleMeterRegistry()
             ExecutorHarness(
-                templateEngine = Fixtures.templateEngine(
-                    mapOf(
-                        "w1" to "INSERT INTO tgt VALUES (1)",
-                        "w2" to "INSERT INTO tgt VALUES (2)",
-                        "w3" to "INSERT INTO tgt VALUES (3)",
+                templateEngine =
+                    Fixtures.templateEngine(
+                        mapOf(
+                            "w1" to "INSERT INTO tgt VALUES (1)",
+                            "w2" to "INSERT INTO tgt VALUES (2)",
+                            "w3" to "INSERT INTO tgt VALUES (3)",
+                        ),
                     ),
-                ),
                 registry = registry,
                 metrics = ExecutorMetrics(meters),
                 localWritePlanner = LocalWritePlanner(PipelineResolver { _, _, _ -> null }, registry, 8),
@@ -107,6 +110,7 @@ class LocalWriteSchedulingGuardsTest {
                 // sibling's `node_completed` — compared on the emitter's ONE ordered stream, so
                 // the indexes are positions in the same sequence, not offsets of two lists.
                 val events = harness.emitter.events
+
                 fun globalIndexOf(match: (co.datapipelines.events.ExecutionEvent) -> Boolean): Int =
                     events.indexOfFirst(match).also { if (it < 0) error("event not found in stream") }
                 val w1Start = globalIndexOf { it is NodeStarted && it.nodeId == "w1" }
@@ -149,12 +153,19 @@ class LocalWriteSchedulingGuardsTest {
                     )
             // The pool is built from the H2-dialect copy (the driver must match the URL); the
             // registry keeps the POSTGRES-dialect registration the planner admits.
-            val poolSource = source.copy(dialect = Dialect.H2, properties = DatasourceProperties(hikari = mapOf("maximumPoolSize" to 1, "minimumIdle" to 0, "connectionTimeout" to 8000)))
+            val hikari =
+                mapOf(
+                    "maximumPoolSize" to 1,
+                    "minimumIdle" to 0,
+                    "connectionTimeout" to 8000,
+                )
+            val poolSource = source.copy(dialect = Dialect.H2, properties = DatasourceProperties(hikari = hikari))
             ConnectionPoolManager.buildHikariPool(poolSource).use { pool ->
                 val base = FakeDatasourceRegistry(mapOf(source.name to source))
-                val registry = object : DatasourceRegistry by base {
-                    override fun poolFor(datasource: Datasource): ConnectionPool = pool
-                }
+                val registry =
+                    object : DatasourceRegistry by base {
+                        override fun poolFor(datasource: Datasource): ConnectionPool = pool
+                    }
                 val meters = SimpleMeterRegistry()
                 // The sole connection stays HELD through the assertions: released any earlier, the
                 // executor's still-pending lease would grab it, enlist (`started`), and turn the
@@ -189,7 +200,10 @@ class LocalWriteSchedulingGuardsTest {
         }
     }
 
-    private fun count(source: Datasource, table: String): Long =
+    private fun count(
+        source: Datasource,
+        table: String,
+    ): Long =
         DriverManager.getConnection(source.jdbcUrl, source.username, source.secret ?: "").use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeQuery("SELECT COUNT(*) FROM $table").use { rows ->
@@ -200,7 +214,9 @@ class LocalWriteSchedulingGuardsTest {
         }
 
     private fun outcomes(meters: SimpleMeterRegistry): Map<String?, Double> =
-        meters.find(ExecutorMetrics.LOCAL_WRITE_TRANSACTIONS).counters()
+        meters
+            .find(ExecutorMetrics.LOCAL_WRITE_TRANSACTIONS)
+            .counters()
             .associate { it.id.getTag("outcome") to it.count() }
 
     private companion object {

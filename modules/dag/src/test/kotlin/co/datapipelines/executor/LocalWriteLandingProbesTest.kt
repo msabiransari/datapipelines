@@ -32,7 +32,10 @@ class LocalWriteLandingProbesTest {
     private fun planner(registry: DatasourceRegistry): LocalWritePlanner =
         LocalWritePlanner(PipelineResolver { _, _, _ -> null }, registry, 8)
 
-    private fun count(source: Datasource, table: String): Long =
+    private fun count(
+        source: Datasource,
+        table: String,
+    ): Long =
         DriverManager.getConnection(source.jdbcUrl, source.username, source.secret ?: "").use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeQuery("SELECT COUNT(*) FROM $table").use { rows ->
@@ -52,9 +55,10 @@ class LocalWriteLandingProbesTest {
                 registry = registry,
                 localWritePlanner = planner(registry),
             ).use { harness ->
-                harness.executor.execute(
-                    Fixtures.request(Fixtures.pipeline(listOf(Fixtures.node("ddl", NodeType.DDL, source.name)))),
-                ).status shouldBe ExecutionStatus.SUCCESS
+                harness.executor
+                    .execute(
+                        Fixtures.request(Fixtures.pipeline(listOf(Fixtures.node("ddl", NodeType.DDL, source.name)))),
+                    ).status shouldBe ExecutionStatus.SUCCESS
             }
             count(source, "ddl_survives") shouldBe 0L
         }
@@ -67,32 +71,37 @@ class LocalWriteLandingProbesTest {
             val base = FakeDatasourceRegistry(mapOf(source.name to source))
             val closes = AtomicInteger()
             lateinit var raw: Connection
-            val registry = object : DatasourceRegistry by base {
-                override fun poolFor(datasource: Datasource): ConnectionPool =
-                    object : ConnectionPool {
-                        override val name = source.name
+            val registry =
+                object : DatasourceRegistry by base {
+                    override fun poolFor(datasource: Datasource): ConnectionPool =
+                        object : ConnectionPool {
+                            override val name = source.name
 
-                        override fun leaseConnection(): Connection {
-                            raw = DriverManager.getConnection(source.jdbcUrl, source.username, "")
-                            return object : Connection by raw {
-                                override fun setAutoCommit(autoCommit: Boolean) {
-                                    throw SQLException("setup refused")
-                                }
+                            override fun leaseConnection(): Connection {
+                                raw = DriverManager.getConnection(source.jdbcUrl, source.username, "")
+                                return object : Connection by raw {
+                                    override fun setAutoCommit(autoCommit: Boolean): Unit = throw SQLException("setup refused")
 
-                                override fun close() {
-                                    closes.incrementAndGet()
-                                    raw.close()
+                                    override fun close() {
+                                        closes.incrementAndGet()
+                                        raw.close()
+                                    }
                                 }
                             }
-                        }
 
-                        override fun close() = Unit
-                    }
-            }
+                            override fun close() = Unit
+                        }
+                }
             ExecutorDispatcher.forConfig(ExecutorConfig(), maxThreads = 2).use { dispatcher ->
-                val transaction = LocalWriteTransaction(
-                    UUID.randomUUID(), UUID.randomUUID(), source.name, registry, ExecutorMetrics.inMemory(), dispatcher,
-                )
+                val transaction =
+                    LocalWriteTransaction(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        source.name,
+                        registry,
+                        ExecutorMetrics.inMemory(),
+                        dispatcher,
+                    )
                 try {
                     shouldThrow<SQLException> { transaction.withParticipant { error("setup must refuse before work") } }
                     transaction.rollbackQuietly()
@@ -110,22 +119,23 @@ class LocalWriteLandingProbesTest {
         runBlocking {
             val source = h2Datasource("lost_ack", listOf("CREATE TABLE tgt (id INT)")).copy(dialect = Dialect.POSTGRES)
             val base = FakeDatasourceRegistry(mapOf(source.name to source))
-            val registry = object : DatasourceRegistry by base {
-                override fun poolFor(datasource: Datasource): ConnectionPool {
-                    val pool = base.poolFor(datasource)
-                    return object : ConnectionPool by pool {
-                        override fun leaseConnection(): Connection {
-                            val delegate = pool.leaseConnection()
-                            return object : Connection by delegate {
-                                override fun commit() {
-                                    delegate.commit()
-                                    throw SQLException("acknowledgement lost after commit")
+            val registry =
+                object : DatasourceRegistry by base {
+                    override fun poolFor(datasource: Datasource): ConnectionPool {
+                        val pool = base.poolFor(datasource)
+                        return object : ConnectionPool by pool {
+                            override fun leaseConnection(): Connection {
+                                val delegate = pool.leaseConnection()
+                                return object : Connection by delegate {
+                                    override fun commit() {
+                                        delegate.commit()
+                                        throw SQLException("acknowledgement lost after commit")
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
             val meters = SimpleMeterRegistry()
             ExecutorHarness(
                 templateEngine = Fixtures.templateEngine(mapOf("write" to "INSERT INTO tgt VALUES (1)")),
@@ -141,8 +151,11 @@ class LocalWriteLandingProbesTest {
             }
             // The second client proves rollback after commit cannot undo the durable write.
             count(source, "tgt") shouldBe 1L
-            val outcomes = meters.find(ExecutorMetrics.LOCAL_WRITE_TRANSACTIONS).counters()
-                .associate { it.id.getTag("outcome") to it.count() }
+            val outcomes =
+                meters
+                    .find(ExecutorMetrics.LOCAL_WRITE_TRANSACTIONS)
+                    .counters()
+                    .associate { it.id.getTag("outcome") to it.count() }
             outcomes shouldBe mapOf("started" to 1.0, "unknown" to 1.0)
         }
     }
@@ -150,12 +163,20 @@ class LocalWriteLandingProbesTest {
     private fun mysqlSource(): Datasource {
         val mysql = SharedMysql.mysql
         return Datasource(
-            name = "landing_mysql", displayName = "landing_mysql", dialect = Dialect.MYSQL,
-            jdbcUrl = mysql.jdbcUrl, username = mysql.username, secret = mysql.password,
+            name = "landing_mysql",
+            displayName = "landing_mysql",
+            dialect = Dialect.MYSQL,
+            jdbcUrl = mysql.jdbcUrl,
+            username = mysql.username,
+            secret = mysql.password,
         )
     }
 
-    private fun mysqlWriteback(mode: WriteMode, sameRegistration: Boolean, rows: Int) {
+    private fun mysqlWriteback(
+        mode: WriteMode,
+        sameRegistration: Boolean,
+        rows: Int,
+    ) {
         runBlocking {
             val target = mysqlSource()
             val source = if (sameRegistration) target else target.copy(name = "landing_mysql_read")
@@ -174,14 +195,20 @@ class LocalWriteLandingProbesTest {
                 registry = registry,
                 localWritePlanner = planner(registry),
             ).use { harness ->
-                harness.executor.execute(
-                    Fixtures.request(
-                        Fixtures.pipeline(
-                            listOf(Fixtures.node("copy", source = source.name,
-                                output = NodeOutput.Datasource(target.name, "landing1033_target", mode))),
+                harness.executor
+                    .execute(
+                        Fixtures.request(
+                            Fixtures.pipeline(
+                                listOf(
+                                    Fixtures.node(
+                                        "copy",
+                                        source = source.name,
+                                        output = NodeOutput.Datasource(target.name, "landing1033_target", mode),
+                                    ),
+                                ),
+                            ),
                         ),
-                    ),
-                ).status shouldBe ExecutionStatus.SUCCESS
+                    ).status shouldBe ExecutionStatus.SUCCESS
             }
             count(target, "landing1033_target") shouldBe rows.toLong()
         }
@@ -202,37 +229,46 @@ class LocalWriteLandingProbesTest {
         mysqlWriteback(WriteMode.APPEND, sameRegistration = false, rows = 1001)
     }
 
-    private fun configuredDrainRun(limit: Long): Pair<ExecutionStatus?, Long> {
-        return runBlocking {
-            val source = h2Datasource(
-                "configured_drain",
-                listOf(
-                    "CREATE TABLE src (payload VARCHAR(200))",
-                    "CREATE TABLE tgt (payload VARCHAR(200))",
-                    "INSERT INTO src VALUES (REPEAT('x', 128))",
-                ),
-            ).copy(dialect = Dialect.POSTGRES)
+    private fun configuredDrainRun(limit: Long): Pair<ExecutionStatus?, Long> =
+        runBlocking {
+            val source =
+                h2Datasource(
+                    "configured_drain",
+                    listOf(
+                        "CREATE TABLE src (payload VARCHAR(200))",
+                        "CREATE TABLE tgt (payload VARCHAR(200))",
+                        "INSERT INTO src VALUES (REPEAT('x', 128))",
+                    ),
+                ).copy(dialect = Dialect.POSTGRES)
             val registry = FakeDatasourceRegistry(mapOf(source.name to source))
             val config = ExecutorConfig(result = ResultConfig(maxSizeBytes = limit))
-            val status = ExecutorHarness(
-                templateEngine = Fixtures.templateEngine(mapOf("copy" to "SELECT payload FROM src")),
-                registry = registry,
-                config = config,
-                resultStore = InMemoryResultStore(config.result),
-                localWritePlanner = planner(registry),
-            ).use { harness ->
-                runCatching {
-                    harness.executor.execute(
-                        Fixtures.request(Fixtures.pipeline(listOf(
-                            Fixtures.node("copy", source = source.name,
-                                output = NodeOutput.Datasource(source.name, "tgt", WriteMode.APPEND)),
-                        ))),
-                    ).status
-                }.getOrNull()
-            }
+            val status =
+                ExecutorHarness(
+                    templateEngine = Fixtures.templateEngine(mapOf("copy" to "SELECT payload FROM src")),
+                    registry = registry,
+                    config = config,
+                    resultStore = InMemoryResultStore(config.result),
+                    localWritePlanner = planner(registry),
+                ).use { harness ->
+                    runCatching {
+                        harness.executor
+                            .execute(
+                                Fixtures.request(
+                                    Fixtures.pipeline(
+                                        listOf(
+                                            Fixtures.node(
+                                                "copy",
+                                                source = source.name,
+                                                output = NodeOutput.Datasource(source.name, "tgt", WriteMode.APPEND),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ).status
+                    }.getOrNull()
+                }
             status to count(source, "tgt")
         }
-    }
 
     @Test
     fun `same registration drain respects a lower configured byte limit before durable writes`() {

@@ -608,7 +608,10 @@ class LocalWriteGateTest {
                             override fun leaseConnection(): Connection {
                                 val connection = pool.leaseConnection()
                                 return object : Connection by connection {
-                                    override fun createStatement(resultSetType: Int, resultSetConcurrency: Int): Statement {
+                                    override fun createStatement(
+                                        resultSetType: Int,
+                                        resultSetConcurrency: Int,
+                                    ): Statement {
                                         val statement = connection.createStatement(resultSetType, resultSetConcurrency)
                                         return object : Statement by statement {
                                             override fun executeQuery(sql: String): ResultSet {
@@ -634,12 +637,13 @@ class LocalWriteGateTest {
                 }
 
             ExecutorHarness(
-                templateEngine = Fixtures.templateEngine(
-                    mapOf(
-                        "w" to "INSERT INTO tgt VALUES (7)",
-                        "slow" to Fixtures.SLOW_SQL,
+                templateEngine =
+                    Fixtures.templateEngine(
+                        mapOf(
+                            "w" to "INSERT INTO tgt VALUES (7)",
+                            "slow" to Fixtures.SLOW_SQL,
+                        ),
                     ),
-                ),
                 registry = registry,
                 metrics = ExecutorMetrics(meterRegistry),
                 localWritePlanner =

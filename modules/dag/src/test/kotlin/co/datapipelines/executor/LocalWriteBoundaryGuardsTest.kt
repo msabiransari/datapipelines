@@ -37,14 +37,7 @@ class LocalWriteBoundaryGuardsTest {
     @Test
     fun `an exhausted real pool fails executor acquisition without a direct Hikari dependency`() {
         runBlocking {
-            val mysql = SharedMysql.mysql
-            val source = Datasource(
-                name = "real_pool_review", displayName = "real_pool_review", dialect = Dialect.MYSQL,
-                jdbcUrl = mysql.jdbcUrl, username = mysql.username, secret = mysql.password,
-                properties = DatasourceProperties(hikari = mapOf(
-                    "maximumPoolSize" to 1, "minimumIdle" to 0, "connectionTimeout" to 250,
-                )),
-            )
+            val source = exhaustedPoolSource()
             DriverManager.getConnection(source.jdbcUrl, source.username, source.secret).use { connection ->
                 connection.createStatement().use { statement ->
                     statement.execute("DROP TABLE IF EXISTS landing1033_pool")
@@ -53,9 +46,10 @@ class LocalWriteBoundaryGuardsTest {
             }
             ConnectionPoolManager.buildHikariPool(source).use { pool ->
                 val base = FakeDatasourceRegistry(mapOf(source.name to source))
-                val registry = object : DatasourceRegistry by base {
-                    override fun poolFor(datasource: Datasource): ConnectionPool = pool
-                }
+                val registry =
+                    object : DatasourceRegistry by base {
+                        override fun poolFor(datasource: Datasource): ConnectionPool = pool
+                    }
                 val meters = SimpleMeterRegistry()
                 pool.leaseConnection().use {
                     ExecutorHarness(
@@ -65,11 +59,18 @@ class LocalWriteBoundaryGuardsTest {
                         localWritePlanner = LocalWritePlanner(PipelineResolver { _, _, _ -> null }, registry, 8),
                     ).use { harness ->
                         val started = System.nanoTime()
-                        val failure = shouldThrow<PipelineExecutionFailed> {
-                            harness.executor.execute(Fixtures.request(Fixtures.pipeline(listOf(
-                                Fixtures.node("write", NodeType.DML, source.name),
-                            ))))
-                        }
+                        val failure =
+                            shouldThrow<PipelineExecutionFailed> {
+                                harness.executor.execute(
+                                    Fixtures.request(
+                                        Fixtures.pipeline(
+                                            listOf(
+                                                Fixtures.node("write", NodeType.DML, source.name),
+                                            ),
+                                        ),
+                                    ),
+                                )
+                            }
                         failure.errorCode shouldBe PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED
                         val elapsedMillis = (System.nanoTime() - started) / 1_000_000
                         (elapsedMillis >= pool.connectionTimeout.toMillis()) shouldBe true
@@ -84,35 +85,41 @@ class LocalWriteBoundaryGuardsTest {
     @Test
     fun `node wall clock deadline cancels an active participant query and rolls back prior write`() {
         runBlocking {
-            val source = h2Datasource("deadline_review", listOf("CREATE TABLE tgt (id INT)"))
-                .copy(dialect = Dialect.POSTGRES)
+            val source =
+                h2Datasource("deadline_review", listOf("CREATE TABLE tgt (id INT)"))
+                    .copy(dialect = Dialect.POSTGRES)
             val base = FakeDatasourceRegistry(mapOf(source.name to source))
             val queryEntered = AtomicBoolean()
             val active = AtomicBoolean()
             val cancelsWhileActive = AtomicInteger()
-            val registry = object : DatasourceRegistry by base {
-                override fun poolFor(datasource: Datasource): ConnectionPool {
-                    val pool = base.poolFor(datasource)
-                    return object : ConnectionPool by pool {
-                        override fun leaseConnection(): Connection {
-                            val connection = pool.leaseConnection()
-                            return object : Connection by connection {
-                                override fun createStatement(resultSetType: Int, resultSetConcurrency: Int): Statement {
-                                    val statement = connection.createStatement(resultSetType, resultSetConcurrency)
-                                    return object : Statement by statement {
-                                        override fun executeQuery(sql: String): ResultSet {
-                                            queryEntered.set(true)
-                                            active.set(true)
-                                            try {
-                                                return statement.executeQuery(sql)
-                                            } finally {
-                                                active.set(false)
+            val registry =
+                object : DatasourceRegistry by base {
+                    override fun poolFor(datasource: Datasource): ConnectionPool {
+                        val pool = base.poolFor(datasource)
+                        return object : ConnectionPool by pool {
+                            override fun leaseConnection(): Connection {
+                                val connection = pool.leaseConnection()
+                                return object : Connection by connection {
+                                    override fun createStatement(
+                                        resultSetType: Int,
+                                        resultSetConcurrency: Int,
+                                    ): Statement {
+                                        val statement = connection.createStatement(resultSetType, resultSetConcurrency)
+                                        return object : Statement by statement {
+                                            override fun executeQuery(sql: String): ResultSet {
+                                                queryEntered.set(true)
+                                                active.set(true)
+                                                try {
+                                                    return statement.executeQuery(sql)
+                                                } finally {
+                                                    active.set(false)
+                                                }
                                             }
-                                        }
 
-                                        override fun cancel() {
-                                            if (active.get()) cancelsWhileActive.incrementAndGet()
-                                            statement.cancel()
+                                            override fun cancel() {
+                                                if (active.get()) cancelsWhileActive.incrementAndGet()
+                                                statement.cancel()
+                                            }
                                         }
                                     }
                                 }
@@ -120,7 +127,6 @@ class LocalWriteBoundaryGuardsTest {
                         }
                     }
                 }
-            }
             val meters = SimpleMeterRegistry()
             ExecutorHarness(
                 templateEngine = Fixtures.templateEngine(mapOf("write" to "INSERT INTO tgt VALUES (1)", "slow" to Fixtures.SLOW_SQL)),
@@ -128,13 +134,15 @@ class LocalWriteBoundaryGuardsTest {
                 metrics = ExecutorMetrics(meters),
                 localWritePlanner = LocalWritePlanner(PipelineResolver { _, _, _ -> null }, registry, 8),
             ).use { harness ->
-                val nodes = listOf(
-                    Fixtures.node("write", NodeType.DML, source.name),
-                    Fixtures.node("slow", source = source.name, dependsOn = listOf("write"), timeoutSeconds = 1),
-                )
-                val failure = shouldThrow<PipelineExecutionFailed> {
-                    harness.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
-                }
+                val nodes =
+                    listOf(
+                        Fixtures.node("write", NodeType.DML, source.name),
+                        Fixtures.node("slow", source = source.name, dependsOn = listOf("write"), timeoutSeconds = 1),
+                    )
+                val failure =
+                    shouldThrow<PipelineExecutionFailed> {
+                        harness.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                    }
                 failure.errorCode shouldBe PipelineErrorCodes.Node.TIMEOUT
             }
             queryEntered.get() shouldBe true
@@ -147,26 +155,29 @@ class LocalWriteBoundaryGuardsTest {
     @Test
     fun `live readonly change before writeback refuses and rolls back earlier family write`() {
         runBlocking {
-            val source = h2Datasource("readonly_review", listOf("CREATE TABLE tgt (id INT)", "CREATE TABLE wb (id INT)"))
-                .copy(dialect = Dialect.POSTGRES)
+            val source =
+                h2Datasource("readonly_review", listOf("CREATE TABLE tgt (id INT)", "CREATE TABLE wb (id INT)"))
+                    .copy(dialect = Dialect.POSTGRES)
             val base = FakeDatasourceRegistry(mapOf(source.name to source))
             val revoked = AtomicBoolean()
-            val registry = object : DatasourceRegistry by base {
-                override fun isReadonlyLive(name: String): Boolean? = revoked.get()
+            val registry =
+                object : DatasourceRegistry by base {
+                    override fun isReadonlyLive(name: String): Boolean? = revoked.get()
 
-                override fun poolFor(datasource: Datasource): ConnectionPool {
-                    val pool = base.poolFor(datasource)
-                    return object : ConnectionPool by pool {
-                        override fun leaseConnection(): Connection {
-                            val connection = pool.leaseConnection()
-                            return object : Connection by connection {
-                                override fun prepareStatement(sql: String): PreparedStatement {
-                                    val statement = connection.prepareStatement(sql)
-                                    return object : PreparedStatement by statement {
-                                        override fun executeUpdate(): Int {
-                                            val result = statement.executeUpdate()
-                                            revoked.set(true)
-                                            return result
+                    override fun poolFor(datasource: Datasource): ConnectionPool {
+                        val pool = base.poolFor(datasource)
+                        return object : ConnectionPool by pool {
+                            override fun leaseConnection(): Connection {
+                                val connection = pool.leaseConnection()
+                                return object : Connection by connection {
+                                    override fun prepareStatement(sql: String): PreparedStatement {
+                                        val statement = connection.prepareStatement(sql)
+                                        return object : PreparedStatement by statement {
+                                            override fun executeUpdate(): Int {
+                                                val result = statement.executeUpdate()
+                                                revoked.set(true)
+                                                return result
+                                            }
                                         }
                                     }
                                 }
@@ -174,7 +185,6 @@ class LocalWriteBoundaryGuardsTest {
                         }
                     }
                 }
-            }
             val meters = SimpleMeterRegistry()
             ExecutorHarness(
                 templateEngine = Fixtures.templateEngine(mapOf("write" to "INSERT INTO tgt VALUES (1)", "copy" to "SELECT id FROM tgt")),
@@ -182,14 +192,20 @@ class LocalWriteBoundaryGuardsTest {
                 metrics = ExecutorMetrics(meters),
                 localWritePlanner = LocalWritePlanner(PipelineResolver { _, _, _ -> null }, registry, 8),
             ).use { harness ->
-                val nodes = listOf(
-                    Fixtures.node("write", NodeType.DML, source.name),
-                    Fixtures.node("copy", source = source.name, dependsOn = listOf("write"),
-                        output = NodeOutput.Datasource(source.name, "wb", WriteMode.APPEND)),
-                )
-                val failure = shouldThrow<PipelineExecutionFailed> {
-                    harness.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
-                }
+                val nodes =
+                    listOf(
+                        Fixtures.node("write", NodeType.DML, source.name),
+                        Fixtures.node(
+                            "copy",
+                            source = source.name,
+                            dependsOn = listOf("write"),
+                            output = NodeOutput.Datasource(source.name, "wb", WriteMode.APPEND),
+                        ),
+                    )
+                val failure =
+                    shouldThrow<PipelineExecutionFailed> {
+                        harness.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                    }
                 failure.errorCode shouldBe PipelineErrorCodes.Node.DATASOURCE_READONLY
             }
             revoked.get() shouldBe true
@@ -214,8 +230,12 @@ class LocalWriteBoundaryGuardsTest {
             val mysql = SharedMysql.mysql
             val source =
                 Datasource(
-                    name = "implicit_commit_replace", displayName = "implicit_commit_replace", dialect = Dialect.MYSQL,
-                    jdbcUrl = mysql.jdbcUrl, username = mysql.username, secret = mysql.password,
+                    name = "implicit_commit_replace",
+                    displayName = "implicit_commit_replace",
+                    dialect = Dialect.MYSQL,
+                    jdbcUrl = mysql.jdbcUrl,
+                    username = mysql.username,
+                    secret = mysql.password,
                 )
             DriverManager.getConnection(source.jdbcUrl, source.username, source.secret).use { connection ->
                 connection.createStatement().use { statement ->
@@ -230,12 +250,13 @@ class LocalWriteBoundaryGuardsTest {
             val registry = FakeDatasourceRegistry(mapOf(source.name to source))
             val meters = SimpleMeterRegistry()
             ExecutorHarness(
-                templateEngine = Fixtures.templateEngine(
-                    mapOf(
-                        "copy" to "SELECT id FROM r5_replace_src ORDER BY id",
-                        "boom" to "INSERT INTO r5_no_such_table VALUES (1)",
+                templateEngine =
+                    Fixtures.templateEngine(
+                        mapOf(
+                            "copy" to "SELECT id FROM r5_replace_src ORDER BY id",
+                            "boom" to "INSERT INTO r5_no_such_table VALUES (1)",
+                        ),
                     ),
-                ),
                 registry = registry,
                 metrics = ExecutorMetrics(meters),
                 localWritePlanner = LocalWritePlanner(PipelineResolver { _, _, _ -> null }, registry, 8),
@@ -259,7 +280,32 @@ class LocalWriteBoundaryGuardsTest {
         }
     }
 
-    private fun count(source: Datasource, table: String): Long =
+    /** The single-connection MySQL registration whose pool the exhausted-pool case exhausts. */
+    private fun exhaustedPoolSource(): Datasource {
+        val mysql = SharedMysql.mysql
+        return Datasource(
+            name = "real_pool_review",
+            displayName = "real_pool_review",
+            dialect = Dialect.MYSQL,
+            jdbcUrl = mysql.jdbcUrl,
+            username = mysql.username,
+            secret = mysql.password,
+            properties =
+                DatasourceProperties(
+                    hikari =
+                        mapOf(
+                            "maximumPoolSize" to 1,
+                            "minimumIdle" to 0,
+                            "connectionTimeout" to 250,
+                        ),
+                ),
+        )
+    }
+
+    private fun count(
+        source: Datasource,
+        table: String,
+    ): Long =
         DriverManager.getConnection(source.jdbcUrl, source.username, source.secret ?: "").use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeQuery("SELECT COUNT(*) FROM $table").use { rows ->
@@ -269,7 +315,10 @@ class LocalWriteBoundaryGuardsTest {
             }
         }
 
-    private fun ids(source: Datasource, table: String): List<Long> =
+    private fun ids(
+        source: Datasource,
+        table: String,
+    ): List<Long> =
         DriverManager.getConnection(source.jdbcUrl, source.username, source.secret ?: "").use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeQuery("SELECT id FROM $table ORDER BY id").use { rows ->
@@ -279,6 +328,8 @@ class LocalWriteBoundaryGuardsTest {
         }
 
     private fun outcomes(meters: SimpleMeterRegistry): Map<String?, Double> =
-        meters.find(ExecutorMetrics.LOCAL_WRITE_TRANSACTIONS).counters()
+        meters
+            .find(ExecutorMetrics.LOCAL_WRITE_TRANSACTIONS)
+            .counters()
             .associate { it.id.getTag("outcome") to it.count() }
 }
