@@ -51,7 +51,7 @@ class ExecutorHarness(
             templateEngine = templateEngine,
             datasourceRegistry = registry,
             stagingFactory = stagingFactory,
-            writebackRunner = JdbcWritebackRunner(registry),
+            writebackRunner = JdbcWritebackRunner(registry, drainMaxBytes = config.result.maxSizeBytes),
             resultStore = resultStore,
             eventEmitter = emitter,
             cancellationRegistry = cancellations,

@@ -15,6 +15,10 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -23,8 +27,10 @@ import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
+import java.sql.SQLTransientConnectionException
 import java.sql.Statement
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -283,6 +289,32 @@ class LocalWriteTransactionTest {
     }
 
     @Test
+    fun `a bounded pool wait that exhausts its timeout writes nothing and fails with the connection reason (R5)`() {
+        runBlocking {
+            val datasource = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
+            val base = FakeDatasourceRegistry(mapOf("pg_main" to datasource))
+            val registry = BoundedWaitRegistry(base, waitMillis = 150)
+            val transaction = transaction(registry)
+
+            val started = System.nanoTime()
+            shouldThrow<SQLException> {
+                transaction.withParticipant { connection ->
+                    connection.createStatement().use { it.execute("SELECT 1") }
+                }
+            }
+            val elapsedMillis = (System.nanoTime() - started) / 1_000_000
+
+            // The lease actually blocked for its bounded timeout before refusing — not an
+            // immediate synthetic refusal — and the run wrote nothing.
+            (elapsedMillis >= 150L) shouldBe true
+            transaction.enlisted shouldBe false
+            base.leased.get() shouldBe 0
+            countFromOtherConnection(datasource) shouldBe 0L
+            outcomes() shouldBe emptyMap()
+        }
+    }
+
+    @Test
     fun `a registration repointed to an excluded dialect after planning refuses at enlist`() {
         runTest {
             val registry = FakeDatasourceRegistry(mapOf("pg_main" to h2Datasource("pg_main", emptyList())))
@@ -299,6 +331,60 @@ class LocalWriteTransactionTest {
             thrown.details["reason"] shouldBe "registration_ineligible"
             thrown.message shouldContain Dialect.H2.wire
             registry.leased.get() shouldBe 0
+        }
+    }
+
+    @Test
+    fun `a registration repointed mid-run keeps the original lease - the replacement receives nothing (R5)`() {
+        runTest {
+            val original = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
+            val replacement = postgresH2("replacement", listOf("CREATE TABLE tgt (id INT)"))
+            val base = FakeDatasourceRegistry(mapOf("pg_main" to original))
+            val repointed = RepointableRegistry(base, original, replacement)
+            val transaction = transaction(repointed)
+
+            transaction.withParticipant { conn ->
+                conn.createStatement().use { it.execute("INSERT INTO tgt VALUES (1)") }
+            }
+            // The registration is repointed to a different physical connection mid-run.
+            repointed.repoint()
+            transaction.withParticipant { conn ->
+                conn.createStatement().use { it.execute("INSERT INTO tgt VALUES (2)") }
+            }
+            transaction.commit()
+
+            // §6: the lease belongs to the snapshot taken at enlist — every later span still writes
+            // the ORIGINAL connection, and the replacement destination receives zero writes.
+            countFromOtherConnection(original) shouldBe 2L
+            countFromOtherConnection(replacement) shouldBe 0L
+            outcomes() shouldBe mapOf("started" to 1.0, "committed" to 1.0)
+        }
+    }
+
+    @Test
+    fun `concurrent spans serialize on the participant connection - never two statements in flight (R5)`() {
+        runBlocking {
+            val datasource = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
+            val active = AtomicInteger()
+            val maxActive = AtomicInteger()
+            val registry = ConcurrentGuardRegistry(FakeDatasourceRegistry(mapOf("pg_main" to datasource)), datasource, active, maxActive)
+            val transaction = transaction(registry)
+
+            (1..4)
+                .map {
+                    async(dispatcher.context) {
+                        transaction.withParticipant { conn ->
+                            conn.createStatement().use {
+                                it.execute("SELECT 1")
+                                // Hold the open statement long enough that, without the transaction's
+                                // mutex, the four spans would overlap and maxActive would read > 1.
+                                delay(50)
+                            }
+                        }
+                    }
+                }.awaitAll()
+
+            maxActive.get() shouldBe 1
         }
     }
 
@@ -459,6 +545,37 @@ class LocalWriteTransactionTest {
         }
     }
 
+    @Test
+    fun `the composition-path drain refuses a lazy child sequence over the configured budget (R2)`() {
+        runTest {
+            val datasource = postgresH2("pg_main", listOf("CREATE TABLE tgt (v TEXT)"))
+            val registry = FakeDatasourceRegistry(mapOf("pg_main" to datasource))
+            val transaction = transaction(registry)
+            // The configured budget is the drain ceiling: 32 bytes, while one 128-byte value
+            // JSON-encodes to 132 bytes.
+            val runner = JdbcWritebackRunner(registry, drainMaxBytes = 32)
+            val idSchema = listOf(ColumnSchema("v", LogicalType.STRING))
+
+            transaction.withParticipant { conn ->
+                conn.createStatement().use { it.execute("SELECT 1") }
+                val thrown =
+                    shouldThrow<DatapipelinesException> {
+                        runner.writebackRows(
+                            idSchema,
+                            sequenceOf(listOf<Any?>("x".repeat(128))),
+                            NodeOutput.Datasource("pg_main", "tgt", WriteMode.APPEND),
+                            workspaceId,
+                            transaction = transaction,
+                        )
+                    }
+                thrown.code shouldBe PipelineErrorCodes.Node.WRITEBACK_FAILED
+            }
+
+            // The drain refused before any write: the target is untouched.
+            countFromOtherConnection(datasource) shouldBe 0L
+        }
+    }
+
     /**
      * A connection that refuses any new statement while a "streaming" source cursor is still open —
      * the Connector/J restriction the review reproduced on MySQL ("No statements may be issued when
@@ -612,5 +729,127 @@ class LocalWriteTransactionTest {
 
                 override fun close() = Unit
             }
+    }
+
+    /**
+     * `poolFor` blocks for its bounded [waitMillis] and then refuses with Hikari's
+     * `SQLTransientConnectionException` — the ACTUAL bounded pool wait (§4 row 2), as distinct from
+     * the immediate refusal [PoolExhaustedRegistry] models. The caller observes both the elapsed
+     * wait and the connection-failure exception type.
+     */
+    private class BoundedWaitRegistry(
+        private val base: DatasourceRegistry,
+        private val waitMillis: Long,
+    ) : DatasourceRegistry by base {
+        override fun poolFor(datasource: Datasource): ConnectionPool =
+            object : ConnectionPool {
+                override val name get() = datasource.name
+
+                override fun leaseConnection(): Connection {
+                    Thread.sleep(waitMillis)
+                    throw SQLTransientConnectionException("Connection is not available, request timed out after ${waitMillis}ms (test)")
+                }
+
+                override fun close() = Unit
+            }
+    }
+
+    /**
+     * A registration that can be repointed mid-run: after [repoint], `getVisible` for [original]
+     * answers [replacement] (a different physical connection under the same name). The transaction
+     * snapshots at enlist, so later spans must keep writing the original.
+     */
+    private class RepointableRegistry(
+        private val base: DatasourceRegistry,
+        private val original: Datasource,
+        private val replacement: Datasource,
+    ) : DatasourceRegistry by base {
+        private val repointed = AtomicBoolean()
+
+        fun repoint() {
+            repointed.set(true)
+        }
+
+        override fun getVisible(
+            name: String,
+            workspaceId: UUID,
+        ): Datasource? =
+            if (repointed.get() && name == original.name) {
+                replacement
+            } else {
+                base.getVisible(name, workspaceId)
+            }
+    }
+
+    /**
+     * A registry whose participant connection is a [ConcurrentGuardConnection] (the serialization
+     * seam): it records the highest number of statements ever in flight at once, so a span that
+     * did not serialize on the transaction's mutex would read > 1.
+     */
+    private class ConcurrentGuardRegistry(
+        private val base: FakeDatasourceRegistry,
+        private val datasource: Datasource,
+        private val active: AtomicInteger,
+        private val maxActive: AtomicInteger,
+    ) : DatasourceRegistry by base {
+        override fun poolFor(datasource: Datasource): ConnectionPool {
+            val delegatePool = base.poolFor(datasource)
+            return object : ConnectionPool by delegatePool {
+                override fun leaseConnection(): Connection = ConcurrentGuardConnection(delegatePool.leaseConnection(), active, maxActive)
+            }
+        }
+    }
+
+    /** Counts statements in flight: `createStatement`/`prepareStatement` increment, close decrements. */
+    private class ConcurrentGuardConnection(
+        private val delegate: Connection,
+        private val active: AtomicInteger,
+        private val maxActive: AtomicInteger,
+    ) : Connection by delegate {
+        override fun createStatement(): Statement = GuardedStatement(delegate.createStatement(), ::enter)
+
+        override fun createStatement(
+            resultSetType: Int,
+            resultSetConcurrency: Int,
+        ): Statement = GuardedStatement(delegate.createStatement(resultSetType, resultSetConcurrency), ::enter)
+
+        override fun prepareStatement(sql: String): PreparedStatement = GuardedPrepared(delegate.prepareStatement(sql), ::enter)
+
+        private fun enter() {
+            active.incrementAndGet()
+            maxActive.updateAndGet { maxOf(it, active.get()) }
+        }
+
+        private fun leave() {
+            active.decrementAndGet()
+        }
+
+        private inner class GuardedStatement(
+            private val delegate: Statement,
+            private val onOpen: () -> Unit,
+        ) : Statement by delegate {
+            init {
+                onOpen()
+            }
+
+            override fun close() {
+                leave()
+                delegate.close()
+            }
+        }
+
+        private inner class GuardedPrepared(
+            private val delegate: PreparedStatement,
+            private val onOpen: () -> Unit,
+        ) : PreparedStatement by delegate {
+            init {
+                onOpen()
+            }
+
+            override fun close() {
+                leave()
+                delegate.close()
+            }
+        }
     }
 }

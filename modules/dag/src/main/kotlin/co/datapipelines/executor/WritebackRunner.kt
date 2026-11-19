@@ -100,9 +100,12 @@ class JdbcWritebackRunner(
     /**
      * The byte ceiling for the same-registration source drain (§3.3): when a participant write-back
      * must drain its source cursor before reusing the connection, the drained rows are capped at
-     * this many UTF-8 JSON bytes — the same number `datapipelines.result.max-size-bytes` defaults
-     * to — so a source too large to retain refuses the write before anything is written (§5's
-     * "roll back before commit if required rows cannot be retained").
+     * this many UTF-8 JSON bytes. It is the configured result budget
+     * (`datapipelines.result.max-size-bytes`, via [co.datapipelines.executor.ResultConfig]) —
+     * wired in [co.datapipelines.web.config.EngineConfiguration] — so the drain and the result
+     * store cap are the SAME number for the same rows, and a source too large to retain refuses
+     * the write before anything is written (§5's "roll back before commit if required rows cannot
+     * be retained"). The default here mirrors `ResultConfig`'s own default for test convenience.
      */
     private val drainMaxBytes: Long = DEFAULT_DRAIN_MAX_BYTES,
 ) : WritebackRunner {
