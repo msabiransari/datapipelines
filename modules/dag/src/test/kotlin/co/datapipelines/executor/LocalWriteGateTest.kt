@@ -1,5 +1,7 @@
 package co.datapipelines.executor
 
+import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.SseEventType
 import co.datapipelines.pipeline.Node
@@ -21,9 +23,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Test
+import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.ResultSet
+import java.sql.Statement
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -584,16 +591,63 @@ class LocalWriteGateTest {
     fun `cancelling during a held participant statement rolls the family write back (R5)`() {
         runBlocking {
             val pgMain = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
-            val registry = FakeDatasourceRegistry(mapOf("pg_main" to pgMain))
+            val base = FakeDatasourceRegistry(mapOf("pg_main" to pgMain))
             val meterRegistry = SimpleMeterRegistry()
+            // r5: the synchronization point is the JDBC statement itself, not `node_started`
+            // (emitted before JDBC entry — cancelling then proves nothing about an in-flight
+            // statement). The wrapper latches when the slow query ENTERS the driver and counts
+            // the `Statement.cancel()` calls that land while it is active.
+            val queryEntered = AtomicBoolean()
+            val statementActive = AtomicBoolean()
+            val cancelsWhileActive = AtomicInteger()
+            val registry =
+                object : DatasourceRegistry by base {
+                    override fun poolFor(datasource: co.datapipelines.datasources.Datasource): ConnectionPool {
+                        val pool = base.poolFor(datasource)
+                        return object : ConnectionPool by pool {
+                            override fun leaseConnection(): Connection {
+                                val connection = pool.leaseConnection()
+                                return object : Connection by connection {
+                                    override fun createStatement(resultSetType: Int, resultSetConcurrency: Int): Statement {
+                                        val statement = connection.createStatement(resultSetType, resultSetConcurrency)
+                                        return object : Statement by statement {
+                                            override fun executeQuery(sql: String): ResultSet {
+                                                queryEntered.set(true)
+                                                statementActive.set(true)
+                                                try {
+                                                    return statement.executeQuery(sql)
+                                                } finally {
+                                                    statementActive.set(false)
+                                                }
+                                            }
 
-            harness(
-                registry,
-                ExecutorMetrics(meterRegistry),
-                mapOf(
-                    "w" to "INSERT INTO tgt VALUES (7)",
-                    "slow" to Fixtures.SLOW_SQL,
+                                            override fun cancel() {
+                                                if (statementActive.get()) cancelsWhileActive.incrementAndGet()
+                                                statement.cancel()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+            ExecutorHarness(
+                templateEngine = Fixtures.templateEngine(
+                    mapOf(
+                        "w" to "INSERT INTO tgt VALUES (7)",
+                        "slow" to Fixtures.SLOW_SQL,
+                    ),
                 ),
+                registry = registry,
+                metrics = ExecutorMetrics(meterRegistry),
+                localWritePlanner =
+                    LocalWritePlanner(
+                        pipelines = PipelineResolver { _, _, _ -> null },
+                        datasources = registry,
+                        maxCompositionDepth = 8,
+                    ),
             ).use { h ->
                 val nodes =
                     listOf(
@@ -606,7 +660,10 @@ class LocalWriteGateTest {
                 withTimeout(HARNESS_BUDGET_MS) {
                     val run =
                         async { shouldThrow<ExecutionAbortedException> { h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))) } }
+                    // The execution id is learned from `node_started`, but the cancel is only
+                    // issued once the statement has ENTERED the driver.
                     while (h.emitter.allOf<NodeStarted>().none { it.nodeId == "slow" }) delay(POLL_MS)
+                    while (!queryEntered.get()) delay(POLL_MS)
                     h.cancellations.cancel(
                         h.emitter
                             .allOf<NodeStarted>()
@@ -616,6 +673,8 @@ class LocalWriteGateTest {
                     )
                     run.await()
                 }
+                queryEntered.get() shouldBe true
+                (cancelsWhileActive.get() > 0) shouldBe true
             }
 
             // §4 row 4: cancellation while the participant statement is held rolls the write back.
