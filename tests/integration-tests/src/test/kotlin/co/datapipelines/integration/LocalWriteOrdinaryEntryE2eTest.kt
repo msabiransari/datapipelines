@@ -343,6 +343,131 @@ class LocalWriteOrdinaryEntryE2eTest {
                     }
             }
 
+    // ---------------------------------------------------------------- Test 6: mid-run grant revocation
+
+    @Test
+    fun `withdrawing the workspace grant mid-run refuses the write-back and rolls the family back`() {
+        ensureAuthSeeded()
+        registerLocalWriteDatasource()
+        seedScratch()
+        createReadChildren()
+
+        val pipelineId =
+            createPipeline(
+                "test/lw_parent_grant",
+                "LocalWrite Parent Grant",
+                listOf(
+                    dmlNode("mark", "test/lw_mark3.sql"),
+                    pipelineNodeToDatasource("run_child", "test/lw_child_slow", "lw_grant_tgt", "append", dependsOn = listOf("mark")),
+                ),
+            )
+
+        val before = localWriteOutcomes()
+        try {
+            val events = revokeGrantThenDrain(pipelineId)
+
+            withClue(describe(events)) {
+                events.last().first shouldBe "pipeline_failed"
+                // The refusal lands inside the child's streaming sink (DirectResultSink →
+                // JdbcWritebackRunner resolves the write-back target VISIBILITY live): the grant
+                // is gone, so the target is not-found — the visibility-grant refusal, not the
+                // readonly flag (Test 5) and not a soft delete.
+                events.last().second["error"]["code"].asText("") shouldBe "pipeline.node.child_execution_failed"
+                events.last().second["error"]["details"]["child_error_code"].asText("") shouldBe
+                    "pipeline.node.datasource_not_found"
+            }
+            scratchCount("lw_grant_tgt") shouldBe 0L
+            scratchCount("lw_family3") shouldBe 0L
+            val after = localWriteOutcomes()
+            withClue("meters before=$before after=$after") {
+                delta(before, after, "started") shouldBe 1.0
+                delta(before, after, "rolled_back") shouldBe 1.0
+            }
+        } finally {
+            // The grant is this suite's own row on the shared metadata DB: restore it whatever
+            // this test's outcome, or every later datasource read in the context sees nothing.
+            regrant()
+        }
+    }
+
+    /**
+     * Starts the execution on a stream read INCREMENTALLY: `execution_started` yields the root
+     * id, then — while the child's `pg_sleep(3)` query still holds the family in flight — the
+     * workspace's visibility grant is revoked through the product's own grant surface
+     * (`DELETE /datasources/{name}/grants/{workspace}`, super admin). The rest is drained to the
+     * terminal event the refusal produces.
+     */
+    private fun revokeGrantThenDrain(pipelineId: String): List<Pair<String, JsonNode>> =
+        assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
+            val request =
+                HttpRequest
+                    .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
+                    .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                    .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
+                    .header("DP-Correlation-Id", UUID.randomUUID().toString())
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "text/event-stream")
+                    .POST(HttpRequest.BodyPublishers.ofString("""{"parameters": {}}"""))
+                    .build()
+            val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream())
+            response.statusCode() shouldBe 200
+
+            val events = mutableListOf<Pair<String, JsonNode>>()
+            BufferedReader(InputStreamReader(response.body())).use { reader ->
+                var currentEvent: String? = null
+                var rootId: String? = null
+                var revoked = false
+                for (line in reader.lines()) {
+                    when {
+                        line.startsWith("event:") -> {
+                            currentEvent = line.removePrefix("event:").trim()
+                        }
+
+                        line.startsWith("data:") -> {
+                            val payload = mapper.readTree(line.removePrefix("data:").trim())
+                            events += (currentEvent ?: "unknown") to payload
+                        }
+                    }
+                    if (rootId == null && events.any { it.first == "execution_started" }) {
+                        rootId = events.first { it.first == "execution_started" }.second["execution_id"].asText()
+                        awaitChildExecution(rootId!!)
+                    }
+                    // Revoke exactly once, while the child's 3s sleep still holds the family in
+                    // flight — the sink's refusal runs only after that sleep ends.
+                    if (rootId != null && !revoked && childExecutionPresent(rootId)) {
+                        revokeGrant()
+                        revoked = true
+                    }
+                }
+                withClue("grant was never revoked (rootId=$rootId): ${describe(events)}") {
+                    revoked shouldBe true
+                }
+            }
+            events
+        }
+
+    /** The product's own grant revocation surface (super admin): removes the visibility grant. */
+    private fun revokeGrant() {
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .delete("/api/v1/datasources/$DATASOURCE/grants/$WORKSPACE_NAME")
+            .then()
+            .statusCode(204)
+    }
+
+    /** Restores the grant the test revoked — the same product surface, idempotent. */
+    private fun regrant() {
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .post("/api/v1/datasources/$DATASOURCE/grants/$WORKSPACE_NAME")
+            .then()
+            .statusCode(200)
+    }
+
     /** The out-of-band grant channel: [DefaultDatasourceRegistry.isReadonlyLive] reads this row live. */
     private fun setDatasourceReadonly(readonly: Boolean) {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
@@ -720,12 +845,14 @@ class LocalWriteOrdinaryEntryE2eTest {
                 "lw_replace_tgt",
                 "lw_replace2_tgt",
                 "lw_slow_tgt",
+                "lw_grant_tgt",
                 "lw_family",
                 "lw_family2",
                 "lw_family3",
             )
 
         private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
+        private const val WORKSPACE_NAME = "default"
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private const val ADMIN_EMAIL = "e2e-lw1033@datapipelines.test"

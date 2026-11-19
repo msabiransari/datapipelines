@@ -21,6 +21,7 @@ import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.Statement
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -207,6 +208,81 @@ class LocalWriteBoundaryGuardsTest {
                         harness.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
                     }
                 failure.errorCode shouldBe PipelineErrorCodes.Node.DATASOURCE_READONLY
+            }
+            revoked.get() shouldBe true
+            count(source, "tgt") shouldBe 0L
+            count(source, "wb") shouldBe 0L
+            outcomes(meters) shouldBe mapOf("started" to 1.0, "rolled_back" to 1.0)
+        }
+    }
+
+    /**
+     * R8 (dag seam) — a VISIBILITY grant revoked mid-run refuses the write-back as
+     * `datasource_not_found`, distinct from the readonly flag (above) and soft deletion. The
+     * CACHED read ([DatasourceRegistry.getVisible], the planner + enlist path) still answers the
+     * entry, while the LIVE read ([DatasourceRegistry.getVisibleLive], the write-back shell's
+     * write-time check) is gone — exactly what a `datasource_workspaces` row deleted after enlist
+     * produces. The refusal lands before any write to the target, and the first write rolls back.
+     */
+    @Test
+    fun `a visibility grant revoked mid-run refuses the write-back and rolls the family back`() {
+        runBlocking {
+            val source =
+                h2Datasource("grant_review", listOf("CREATE TABLE tgt (id INT)", "CREATE TABLE wb (id INT)"))
+                    .copy(dialect = Dialect.POSTGRES)
+            val base = FakeDatasourceRegistry(mapOf(source.name to source))
+            val revoked = AtomicBoolean()
+            val registry =
+                object : DatasourceRegistry by base {
+                    override fun getVisibleLive(
+                        name: String,
+                        workspaceId: UUID,
+                    ): Datasource? = if (revoked.get()) null else base.getVisible(name, workspaceId)
+
+                    override fun poolFor(datasource: Datasource): ConnectionPool {
+                        val pool = base.poolFor(datasource)
+                        return object : ConnectionPool by pool {
+                            override fun leaseConnection(): Connection {
+                                val connection = pool.leaseConnection()
+                                return object : Connection by connection {
+                                    override fun prepareStatement(sql: String): PreparedStatement {
+                                        val statement = connection.prepareStatement(sql)
+                                        return object : PreparedStatement by statement {
+                                            override fun executeUpdate(): Int {
+                                                val result = statement.executeUpdate()
+                                                // Revoke the grant after the FIRST family write.
+                                                revoked.set(true)
+                                                return result
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            val meters = SimpleMeterRegistry()
+            ExecutorHarness(
+                templateEngine = Fixtures.templateEngine(mapOf("write" to "INSERT INTO tgt VALUES (1)", "copy" to "SELECT id FROM tgt")),
+                registry = registry,
+                metrics = ExecutorMetrics(meters),
+                localWritePlanner = LocalWritePlanner(PipelineResolver { _, _, _ -> null }, registry, 8),
+            ).use { harness ->
+                val nodes =
+                    listOf(
+                        Fixtures.node("write", NodeType.DML, source.name),
+                        Fixtures.node(
+                            "copy",
+                            source = source.name,
+                            dependsOn = listOf("write"),
+                            output = NodeOutput.Datasource(source.name, "wb", WriteMode.APPEND),
+                        ),
+                    )
+                val failure =
+                    shouldThrow<PipelineExecutionFailed> {
+                        harness.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                    }
+                failure.errorCode shouldBe PipelineErrorCodes.Node.DATASOURCE_NOT_FOUND
             }
             revoked.get() shouldBe true
             count(source, "tgt") shouldBe 0L
