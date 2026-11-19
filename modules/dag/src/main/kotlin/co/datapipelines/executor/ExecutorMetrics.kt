@@ -85,6 +85,20 @@ class ExecutorMetrics(
     }
 
     /**
+     * `datapipelines.executions.local_write_transactions{outcome,dialect}` (write-transactions
+     * §7) — one tick per recorded boundary of a local write transaction: `started` at enlist,
+     * `committed`/`rolled_back` on confirmation, `unknown` when a commit or rollback could not
+     * be confirmed (alert on each unknown). Counted by dialect and outcome, and carrying
+     * nothing else — no SQL, no business ids, no credentials (§6).
+     */
+    fun localWriteTransaction(
+        outcome: String,
+        dialect: String,
+    ) {
+        registry.counter(LOCAL_WRITE_TRANSACTIONS, "outcome", outcome, "dialect", dialect).increment()
+    }
+
+    /**
      * `datapipelines.executions.lifecycle_write_failed` (#311) — the terminal UPDATE of
      * `pipeline_executions` failed or outlived its bound, so the row is left RUNNING for the
      * stale sweep and this counter is how an operator tells that apart from silence. No tags:
@@ -134,6 +148,7 @@ class ExecutorMetrics(
         const val EXECUTIONS_ABORTED = "datapipelines.executions.aborted"
         const val EXECUTIONS_LIFECYCLE_WRITE_FAILED = "datapipelines.executions.lifecycle_write_failed"
         const val EXECUTIONS_PROGRESS_WRITE_FAILED = "datapipelines.executions.progress_write_failed"
+        const val LOCAL_WRITE_TRANSACTIONS = "datapipelines.executions.local_write_transactions"
         const val NODES_DURATION = "datapipelines.nodes.duration"
         const val NODES_ROWS_OUT = "datapipelines.nodes.rows_out"
         const val STAGING_ROWS = "datapipelines.staging.rows"

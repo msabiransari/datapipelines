@@ -408,8 +408,14 @@ class ApiErrorCatalogSpecDriftTest {
          * `NEVER_RETURNED_LIVE` entry.
          * 519 → 520 with #994: §13.5 gains `pipeline.staging.result_incomplete` (500, the staging family default; no
          * `ApiErrorCatalog` row), TEMPORARY, landed in the SAME commit as its constants.
+         *
+         * 520 → 522 with #1033 (recounted with [STATUS_ROW_REGEX]): §13.3 gains
+         * `pipeline.execution.local_write_refused` (400, an explicit catalog row against the
+         * family's 500 default) and `pipeline.execution.local_write_commit_failed` (502, an
+         * explicit catalog row beside node commit_failed), landed in the SAME commit as their
+         * constants, the §4.1 meter row and the gateway-partition classification.
          */
-        const val SECTION_13_ROW_COUNT = 520
+        const val SECTION_13_ROW_COUNT = 522
 
         /**
          * §12's distinct validation codes.

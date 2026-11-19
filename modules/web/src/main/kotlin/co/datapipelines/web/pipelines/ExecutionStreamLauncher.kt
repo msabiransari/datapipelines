@@ -172,6 +172,12 @@ class ExecutionStreamLauncher(
     private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
     private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /**
+     * (write-transactions §3.1) The write-set planner handed to each per-run executor — this
+     * launcher serves INTERACTIVE roots, the runs a person or key starts. Null only in
+     * module-slice wiring, where no run enrolls a local write transaction.
+     */
+    private val localWritePlanner: co.datapipelines.executor.LocalWritePlanner? = null,
+    /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
      */
@@ -459,6 +465,7 @@ class ExecutionStreamLauncher(
             subPipelineRunner = subPipelineRunner,
             scripts = scriptSupport,
             lakeAppendPort = lakeAppendPort,
+            localWritePlanner = localWritePlanner,
         )
 
     private companion object {

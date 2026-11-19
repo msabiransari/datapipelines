@@ -112,6 +112,15 @@ data class NodeExecutionContext(
      */
     val directSink: DirectResultSink? = null,
     /**
+     * (write-transactions §3.3) The family's local write transaction — the root's plan created
+     * it (or a child inherited it via [ExecuteRequest.localWriteTransaction]). A node whose
+     * resolved datasource IS [LocalWriteTransaction.registration] runs as a PARTICIPANT: its
+     * statements and cursors take that one connection inside serialized spans, and its writes
+     * settle only at the root's commit. Null on ordinary executions (no eligible writer) and
+     * read-only runs — today's per-lease autocommit behaviour, untouched.
+     */
+    val localWriteTransaction: LocalWriteTransaction? = null,
+    /**
      * The id of the REQUEST that started this execution ([ExecuteRequest.correlationId]) — the one
      * field designed to join everything one request caused (rest-api §3.4, observability §3.3).
      *
@@ -218,8 +227,12 @@ fun interface NodeProgressSink {
  * Session state (`SET SCHEMA`, `SET @var`, local temporary tables, an open transaction) is
  * reset when the lease returns and must not be relied on across nodes — a node's data reaches
  * another node through ordinary tables and `depends_on` (staging §9.2).
+ *
+ * `LargeClass` is suppressed: #1033's participant routing is one more seam this dispatcher
+ * already owned — the per-datasource dispatch centre cannot shed it without fragmenting the
+ * CONNECT-phase ordering.
  */
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "LargeClass")
 class NodeRunner(
     private val templateEngine: TemplateEngine,
     private val datasourceRegistry: DatasourceRegistry,
@@ -470,7 +483,17 @@ class NodeRunner(
                     } else {
                         tempdbCursor(node, bound, ctx, resolved) { rs ->
                             val op = ctx.operations.observerFor(node.id)
-                            val written = writebackRunner.writeback(rs, output, ctx.tempdbDialect, ctx.workspaceId, op)
+                            // Participant write-back when the target is the family's registration
+                            // (§3.3) — the tempdb READ side is untouched; only the write joins.
+                            val written =
+                                writebackRunner.writeback(
+                                    rs,
+                                    output,
+                                    ctx.tempdbDialect,
+                                    ctx.workspaceId,
+                                    op,
+                                    ctx.localWriteTransaction,
+                                )
                             NodeResult.of(node.id, written, startedAt)
                         }
                     }
@@ -789,6 +812,12 @@ class NodeRunner(
                 pipelineQueryTimeoutSecondsOverride = ctx.pipelineQueryTimeoutSeconds,
             )
         ctx.operations.observerFor(node.id).phase(OperationPhase.CONNECTING)
+        // (write-transactions §3.3) A node whose resolved datasource IS the family's registration
+        // runs as a participant — see [runAsParticipant].
+        val participant = ctx.localWriteTransaction?.takeIf { it.registration == datasource.name }
+        if (participant != null) {
+            return runAsParticipant(participant, node, bound, ctx, startedAt, resolved, datasource)
+        }
         val connection =
             phase(ctx, NodePhase.CONNECT, node.id) {
                 // B5: `poolFor` must be INSIDE `withCause`. `pool_build` is emitted from inside
@@ -832,6 +861,51 @@ class NodeRunner(
             }
         }
     }
+
+    /**
+     * (write-transactions §3.3) A node whose resolved datasource IS the family's registration
+     * runs as a PARTICIPANT: one span on the transaction's single connection — no pool lease,
+     * and deliberately NO ReadOnlyConnectionMode wrapper. The wrapper would set a
+     * session-readonly flag on a connection the family still writes through (poisoning every
+     * later span), and it can never be wanted here: read-only runs never enroll a transaction
+     * (the root planner skips them), so a participant run is writable by construction.
+     *
+     * The span wraps the whole node body, so its CONNECT-phase mapping mirrors the ordinary
+     * lease: an enlist failure (pool exhausted, registration repointed ineligible mid-run —
+     * §3.4's late-repoint refuse) maps as CONNECT, while inner EXECUTE/STAGE failures are
+     * already NodeFailedSignals by the time this phase sees them and pass through untouched.
+     * The connection is NOT closed here — the transaction owns its lifetime; the root settles.
+     */
+    private suspend fun runAsParticipant(
+        participant: LocalWriteTransaction,
+        node: ExecutableNode,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+        resolved: ResolvedQueryTimeout,
+        datasource: Datasource,
+    ): NodeResult =
+        phase(ctx, NodePhase.CONNECT, node.id) {
+            participant.withParticipant { conn ->
+                when (node.type) {
+                    NodeType.DQL -> {
+                        datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect)
+                    }
+
+                    NodeType.DML -> {
+                        datasourceUpdate(node, conn, bound, ctx, startedAt, resolved, participant = true)
+                    }
+
+                    NodeType.DDL -> {
+                        datasourceDdl(node, conn, bound, ctx, startedAt, resolved, participant = true)
+                    }
+
+                    NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.SCRIPT -> {
+                        error("unreachable: ${node.type.wire} dispatched before source resolution")
+                    }
+                }
+            }
+        }
 
     /** The DML/DDL source leg of the layer-2a backstop — see [ReadonlyBackstop] for the semantics. */
     private fun enforceSourceReadonly(
@@ -952,7 +1026,14 @@ class NodeRunner(
 
             is NodeOutput.Datasource -> {
                 phase(ctx, NodePhase.WRITEBACK, node.id) {
-                    NodeResult.of(node.id, writebackRunner.writeback(rs, output, dialect, ctx.workspaceId, op), startedAt)
+                    // The trailing transaction engages the write-back as a participant span when
+                    // the target is the family's registration (§3.3); reentrant with this node's
+                    // own read span when the source is the same connection.
+                    NodeResult.of(
+                        node.id,
+                        writebackRunner.writeback(rs, output, dialect, ctx.workspaceId, op, ctx.localWriteTransaction),
+                        startedAt,
+                    )
                 }
             }
         }
@@ -1034,6 +1115,10 @@ class NodeRunner(
         )
     }
 
+    /**
+     * @param participant true when [conn] is the family's local write transaction connection
+     *   (§3.3): the statement's effects stay uncommitted when it returns — the root settles.
+     */
     private suspend fun datasourceUpdate(
         node: ExecutableNode,
         conn: Connection,
@@ -1041,6 +1126,7 @@ class NodeRunner(
         ctx: NodeExecutionContext,
         startedAt: Instant,
         resolved: ResolvedQueryTimeout,
+        participant: Boolean = false,
     ): NodeResult =
         conn.prepareStatement(bound.sql).use { statement ->
             statement.queryTimeout = resolved.seconds
@@ -1056,7 +1142,7 @@ class NodeRunner(
                             ctx.handle.whileExecuting(node.id, statement) { statement.executeUpdate().toLong() }
                         }
                     }
-                recordStatement(op, node, affected)
+                recordStatement(op, node, affected, participant)
                 NodeResult.of(node.id, affected, startedAt)
             }
         }
@@ -1068,6 +1154,7 @@ class NodeRunner(
         ctx: NodeExecutionContext,
         startedAt: Instant,
         resolved: ResolvedQueryTimeout,
+        participant: Boolean = false,
     ): NodeResult =
         BoundStatements.statementFor(conn, bound).use { statement ->
             statement.queryTimeout = resolved.seconds
@@ -1079,7 +1166,7 @@ class NodeRunner(
                         ctx.handle.whileExecuting(node.id, statement) { BoundStatements.executeDdl(statement, bound) }
                     }
                 }
-                recordStatement(op, node, affected = 0L)
+                recordStatement(op, node, affected = 0L, participant = participant)
                 NodeResult.of(node.id, 0L, startedAt)
             }
         }
@@ -1087,14 +1174,19 @@ class NodeRunner(
     /**
      * 149: a DML statement's update count is what its destination accepted (autocommitted by
      * the driver on return); DDL invents no row write — its destination is `none`.
+     *
+     * A PARTICIPANT statement (§3.5) is not committed when it returns — the root's settle is
+     * the family's only commit — so its `committed` evidence is withheld until the root
+     * confirms (#1035 owns what publishes after that); `written` still reports the count now.
      */
     private fun recordStatement(
         op: OperationObserver,
         node: ExecutableNode,
         affected: Long,
+        participant: Boolean = false,
     ) {
         if (node.type == NodeType.DML) op.written(affected)
-        op.committed()
+        if (!participant) op.committed()
     }
 
     /** DQL always has a concrete output by deserialization time (§4.1). */

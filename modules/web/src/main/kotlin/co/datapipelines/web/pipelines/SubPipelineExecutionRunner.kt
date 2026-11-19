@@ -318,6 +318,9 @@ class SubPipelineExecutionRunner(
         // #463: a read-only parent's children read only too; a writable parent's stay writable.
         readOnly = ctx.readOnly,
         pipelineAdmission = ctx.pipelineAdmission,
+        // (write-transactions §3.3) The family's local write transaction is inherited, never
+        // created: the root's plan already walked THIS child's nodes, and only the root settles.
+        localWriteTransaction = ctx.localWriteTransaction,
     )
 
     /**
@@ -629,7 +632,11 @@ class SubPipelineExecutionRunner(
             is NodeOutput.Datasource -> {
                 DirectResultSink { schema, rows ->
                     val op = ctx.operations.observerFor(node.id)
-                    outcome.rowsOut = writebackRunner.writebackRows(schema, rows, output, ctx.workspaceId, op)
+                    // (write-transactions §3.3) When the target is the family's registration the
+                    // rows land as a participant span — the root settles; the span is reentrant
+                    // with the child's own read span on the same connection.
+                    outcome.rowsOut =
+                        writebackRunner.writebackRows(schema, rows, output, ctx.workspaceId, op, ctx.localWriteTransaction)
                     outcome.delivered = true
                 }
             }

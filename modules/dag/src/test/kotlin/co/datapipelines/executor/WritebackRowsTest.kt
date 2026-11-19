@@ -17,6 +17,8 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
@@ -52,12 +54,14 @@ class WritebackRowsTest {
         val runner = JdbcWritebackRunner(FakeDatasourceRegistry(mapOf("wb" to datasource)))
 
         val written =
-            runner.writebackRows(
-                schema,
-                sequenceOf(listOf(1, "a"), listOf(2, "b"), listOf(3, null)),
-                NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
-                workspaceId,
-            )
+            runBlocking {
+                runner.writebackRows(
+                    schema,
+                    sequenceOf(listOf(1, "a"), listOf(2, "b"), listOf(3, null)),
+                    NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                    workspaceId,
+                )
+            }
 
         written shouldBe 3L
         DriverManager.getConnection(datasource.jdbcUrl, datasource.username, "").use { connection ->
@@ -81,12 +85,14 @@ class WritebackRowsTest {
         val runner = JdbcWritebackRunner(FakeDatasourceRegistry(mapOf("wb" to datasource)))
         val idSchema = listOf(ColumnSchema("id", LogicalType.INTEGER))
 
-        runner.writebackRows(
-            idSchema,
-            sequenceOf(listOf(1)),
-            NodeOutput.Datasource("wb", "tgt", WriteMode.REPLACE),
-            workspaceId,
-        ) shouldBe 1L
+        runBlocking {
+            runner.writebackRows(
+                idSchema,
+                sequenceOf(listOf(1)),
+                NodeOutput.Datasource("wb", "tgt", WriteMode.REPLACE),
+                workspaceId,
+            )
+        } shouldBe 1L
 
         DriverManager.getConnection(datasource.jdbcUrl, datasource.username, "").use { connection ->
             connection.createStatement().use { statement ->
@@ -104,12 +110,14 @@ class WritebackRowsTest {
         val runner = JdbcWritebackRunner(FakeDatasourceRegistry(mapOf("wb" to datasource)))
         val thrown =
             shouldThrow<DatapipelinesException> {
-                runner.writebackRows(
-                    listOf(ColumnSchema("id", LogicalType.INTEGER)),
-                    sequenceOf(listOf(1)),
-                    NodeOutput.Datasource("wb", "nope", WriteMode.APPEND),
-                    workspaceId,
-                )
+                runTest {
+                    runner.writebackRows(
+                        listOf(ColumnSchema("id", LogicalType.INTEGER)),
+                        sequenceOf(listOf(1)),
+                        NodeOutput.Datasource("wb", "nope", WriteMode.APPEND),
+                        workspaceId,
+                    )
+                }
             }
 
         thrown.code shouldBe PipelineErrorCodes.Node.WRITEBACK_TARGET_MISSING
@@ -125,12 +133,14 @@ class WritebackRowsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                runner.writebackRows(
-                    listOf(ColumnSchema("id", LogicalType.INTEGER)),
-                    sequenceOf(listOf(1)),
-                    NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
-                    workspaceId,
-                )
+                runTest {
+                    runner.writebackRows(
+                        listOf(ColumnSchema("id", LogicalType.INTEGER)),
+                        sequenceOf(listOf(1)),
+                        NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                        workspaceId,
+                    )
+                }
             }
 
         thrown.code shouldBe PipelineErrorCodes.Node.DATASOURCE_READONLY
@@ -148,12 +158,14 @@ class WritebackRowsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                runner.writebackRows(
-                    listOf(ColumnSchema("id", LogicalType.INTEGER)),
-                    sequenceOf(listOf(1)),
-                    NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
-                    workspaceId,
-                )
+                runTest {
+                    runner.writebackRows(
+                        listOf(ColumnSchema("id", LogicalType.INTEGER)),
+                        sequenceOf(listOf(1)),
+                        NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                        workspaceId,
+                    )
+                }
             }
 
         thrown.code shouldBe PipelineErrorCodes.Node.DATASOURCE_NOT_FOUND
@@ -175,12 +187,14 @@ class WritebackRowsTest {
 
         val thrown =
             shouldThrow<DatapipelinesException> {
-                runner.writebackRows(
-                    listOf(ColumnSchema("id", LogicalType.INTEGER)),
-                    sequenceOf(listOf(1)),
-                    NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
-                    workspaceId,
-                )
+                runTest {
+                    runner.writebackRows(
+                        listOf(ColumnSchema("id", LogicalType.INTEGER)),
+                        sequenceOf(listOf(1)),
+                        NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                        workspaceId,
+                    )
+                }
             }
 
         thrown.code shouldBe PipelineErrorCodes.Execution.ABORTED
@@ -198,12 +212,14 @@ class WritebackRowsTest {
             }
 
         shouldThrow<ChildCursorDied> {
-            runner.writebackRows(
-                listOf(ColumnSchema("id", LogicalType.INTEGER)),
-                failing,
-                NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
-                workspaceId,
-            )
+            runTest {
+                runner.writebackRows(
+                    listOf(ColumnSchema("id", LogicalType.INTEGER)),
+                    failing,
+                    NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                    workspaceId,
+                )
+            }
         }
 
         DriverManager.getConnection(datasource.jdbcUrl, datasource.username, "").use { connection ->
@@ -337,13 +353,15 @@ class WritebackRowsTest {
         registry: DatasourceRegistry,
         evidence: CommitEvidence,
     ) = shouldThrow<DatapipelinesException> {
-        JdbcWritebackRunner(registry).writebackRows(
-            listOf(ColumnSchema("id", LogicalType.INTEGER)),
-            (1..3).map { listOf<Any?>(it) }.asSequence(),
-            NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
-            workspaceId,
-            evidence,
-        )
+        runTest {
+            JdbcWritebackRunner(registry).writebackRows(
+                listOf(ColumnSchema("id", LogicalType.INTEGER)),
+                (1..3).map { listOf<Any?>(it) }.asSequence(),
+                NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND),
+                workspaceId,
+                evidence,
+            )
+        }
     }
 
     @Test
