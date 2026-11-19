@@ -44,10 +44,13 @@ import java.util.UUID
  * The families deliberately reuse ONE datasource (`lw1033`) for read and write so the planner
  * classifies them as local-write families: a write-back-only stored version (enrollment), a
  * child APPEND above one drain batch through the production child sink, a child REPLACE, a
- * later required failure that must roll the whole family back onto pre-existing rows, and a
+ * later required failure that must roll the whole family back onto pre-existing rows, a
  * mid-run workspace-grant withdrawal (`datasources.is_readonly = TRUE` out of band) that must
- * refuse the write-back and roll the family back.
+ * refuse the write-back and roll the family back, and (R8) the ACTUAL visibility-grant
+ * revocation (`datasource_workspaces` deleted through the product's own grant surface) that
+ * must refuse the write-back as `datasource_not_found` and roll the family back.
  */
+@Suppress("LargeClass") // one production-seam contract over one shared fixture family; a split would duplicate the whole set
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
