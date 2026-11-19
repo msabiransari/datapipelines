@@ -169,6 +169,120 @@ class LocalWriteGateTest {
     }
 
     @Test
+    fun `a DDL-only plan executes ordinarily with zero transaction leases (R1)`() {
+        runBlocking {
+            val pgMain = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
+            val registry = FakeDatasourceRegistry(mapOf("pg_main" to pgMain))
+            val meterRegistry = SimpleMeterRegistry()
+
+            harness(
+                registry,
+                ExecutorMetrics(meterRegistry),
+                mapOf("mk" to """CREATE TABLE "new_t" (n INT)"""),
+            ).use { h ->
+                val nodes = listOf(Fixtures.node("mk", type = NodeType.DDL, source = "pg_main"))
+                h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))).status shouldBe ExecutionStatus.SUCCESS
+            }
+
+            // The DDL landed on the eligible engine, and the plan took zero transaction leases.
+            DriverManager.getConnection(pgMain.jdbcUrl, pgMain.username, pgMain.secret ?: "").use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeQuery("SELECT COUNT(*) FROM new_t").use { rs ->
+                        rs.next()
+                        rs.getLong(1) shouldBe 0L
+                    }
+                }
+            }
+            outcomes(meterRegistry) shouldBe emptyMap()
+        }
+    }
+
+    @Test
+    fun `an eligible writer plus external DDL refuses before either target changes (R1)`() {
+        runBlocking {
+            val pgMain = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
+            val registry = FakeDatasourceRegistry(mapOf("pg_main" to pgMain))
+            val meterRegistry = SimpleMeterRegistry()
+
+            harness(
+                registry,
+                ExecutorMetrics(meterRegistry),
+                mapOf(
+                    "w" to "INSERT INTO tgt VALUES (1)",
+                    "mk" to """CREATE TABLE "new_t" (n INT)""",
+                ),
+            ).use { h ->
+                val nodes =
+                    listOf(
+                        Fixtures.node("w", type = NodeType.DML, source = "pg_main"),
+                        Fixtures.node("mk", type = NodeType.DDL, source = "pg_main", dependsOn = listOf("w")),
+                    )
+                val thrown =
+                    shouldThrow<DatapipelinesException> {
+                        h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+                    }
+                thrown.code shouldBe PipelineErrorCodes.Execution.LOCAL_WRITE_REFUSED
+                thrown.details["reason"] shouldBe "external_ddl"
+            }
+
+            // Refused before the writer ran: the eligible target changed nowhere.
+            countFromOtherConnection(pgMain) shouldBe 0L
+            outcomes(meterRegistry) shouldBe emptyMap()
+        }
+    }
+
+    @Test
+    fun `an excluded-only writer keeps its ordinary path with zero transaction leases (R5)`() {
+        runBlocking {
+            val warehouse = h2Datasource("warehouse", listOf("CREATE TABLE tgt (id INT)"))
+            val registry = FakeDatasourceRegistry(mapOf("warehouse" to warehouse))
+            val meterRegistry = SimpleMeterRegistry()
+
+            harness(
+                registry,
+                ExecutorMetrics(meterRegistry),
+                mapOf("w" to "INSERT INTO tgt VALUES (7)"),
+            ).use { h ->
+                val nodes = listOf(Fixtures.node("w", type = NodeType.DML, source = "warehouse"))
+                h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))).status shouldBe ExecutionStatus.SUCCESS
+            }
+
+            // §3.2: the excluded engine never enrolls — its effect is preserved on the ordinary
+            // path (committed independently), and the plan took zero transaction leases.
+            countFromOtherConnection(warehouse) shouldBe 1L
+            outcomes(meterRegistry) shouldBe emptyMap()
+        }
+    }
+
+    @Test
+    fun `an eligible DQL write-back-only plan enrolls one transaction (R5)`() {
+        runBlocking {
+            val pgMain =
+                postgresH2(
+                    "pg_main",
+                    listOf("CREATE TABLE src (id INT)", "CREATE TABLE tgt (id INT)", "INSERT INTO src VALUES (1)"),
+                )
+            val registry = FakeDatasourceRegistry(mapOf("pg_main" to pgMain))
+            val meterRegistry = SimpleMeterRegistry()
+
+            harness(
+                registry,
+                ExecutorMetrics(meterRegistry),
+                mapOf("wb" to "SELECT id FROM src"),
+            ).use { h ->
+                val nodes =
+                    listOf(Fixtures.node("wb", source = "pg_main", output = NodeOutput.Datasource("pg_main", "tgt", WriteMode.APPEND)))
+                h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))).status shouldBe ExecutionStatus.SUCCESS
+            }
+
+            // The write-back-only plan discovered its durable destination and enrolled ONE
+            // transaction, committed at the root (the same-registration source is drained first).
+            countFromOtherConnection(pgMain) shouldBe 1L
+            outcomes(meterRegistry) shouldBe mapOf("started" to 1.0, "committed" to 1.0)
+        }
+    }
+
+    @Test
     fun `cancelling the run rolls back the family write`() {
         runBlocking {
             val pgMain = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))

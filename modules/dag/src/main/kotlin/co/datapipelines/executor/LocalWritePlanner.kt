@@ -139,7 +139,12 @@ class LocalWritePlanner(
         eligibility: Map<String, Boolean>,
     ): LocalWriteVerdict {
         val everyName = (writers + rowWrites + externalDdl).map { it.registration }.toSet()
-        if (everyName.none { eligibility[it] == true }) return LocalWriteVerdict.Ordinary
+        // R1: eligibility is decided by ROW writers alone. External DDL never enrolls a
+        // transaction (§3.2: "DDL never enrolls"), so a DDL-only plan — however eligible its
+        // engine — must stay ordinary rather than trip the `external_ddl` refusal below. The DDL
+        // refusal fires only when an eligible row writer is already participating.
+        val hasEligibleRowWriter = (writers + rowWrites).map { it.registration }.toSet().any { eligibility[it] == true }
+        if (!hasEligibleRowWriter) return LocalWriteVerdict.Ordinary
 
         // Every distinct name here is a counted registration (§3.1: "two names for the same
         // server are two registrations"), whatever its engine — an excluded or unresolvable

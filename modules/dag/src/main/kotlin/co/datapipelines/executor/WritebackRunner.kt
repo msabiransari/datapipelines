@@ -97,6 +97,14 @@ class JdbcWritebackRunner(
      * authority (D8).
      */
     private val batchSize: Int = DEFAULT_BATCH_ROWS,
+    /**
+     * The byte ceiling for the same-registration source drain (§3.3): when a participant write-back
+     * must drain its source cursor before reusing the connection, the drained rows are capped at
+     * this many UTF-8 JSON bytes — the same number `datapipelines.result.max-size-bytes` defaults
+     * to — so a source too large to retain refuses the write before anything is written (§5's
+     * "roll back before commit if required rows cannot be retained").
+     */
+    private val drainMaxBytes: Long = DEFAULT_DRAIN_MAX_BYTES,
 ) : WritebackRunner {
     override suspend fun writeback(
         resultSet: ResultSet,
@@ -107,6 +115,12 @@ class JdbcWritebackRunner(
         transaction: LocalWriteTransaction?,
     ): Long {
         val columns = ResultRowReader.schemaOf(resultSet.metaData, sourceDialect).columns
+        if (drainOnParticipantConnection(transaction, output)) {
+            val drained = drainResultSet(resultSet, columns, observer)
+            return writeAll(output, workspaceId, columns, observer, transaction) { connection, table, dialect ->
+                insertRows(connection, table, columns, drained.asSequence(), dialect, observer)
+            }
+        }
         return writeAll(output, workspaceId, columns, observer, transaction) { connection, table, dialect ->
             streamInsert(connection, table, columns, resultSet, dialect, observer)
         }
@@ -119,10 +133,83 @@ class JdbcWritebackRunner(
         workspaceId: UUID,
         observer: OperationObserver,
         transaction: LocalWriteTransaction?,
-    ): Long =
-        writeAll(output, workspaceId, schema, observer, transaction) { connection, table, dialect ->
+    ): Long {
+        if (drainOnParticipantConnection(transaction, output)) {
+            val drained = drainSequence(rows, schema, observer)
+            return writeAll(output, workspaceId, schema, observer, transaction) { connection, table, dialect ->
+                insertRows(connection, table, schema, drained.asSequence(), dialect, observer)
+            }
+        }
+        return writeAll(output, workspaceId, schema, observer, transaction) { connection, table, dialect ->
             insertRows(connection, table, schema, rows, dialect, observer)
         }
+    }
+
+    /**
+     * §3.3: "when source and destination are the same registration, stage or drain input under
+     * existing limits before reusing the connection." True exactly when the write-back's TARGET is
+     * the family's registration AND the calling coroutine already holds that registration's span —
+     * which is the one way the source cursor can be on the same physical connection as the target
+     * write. A tempdb source (or a source on another datasource) reaches [writeback] from OUTSIDE
+     * any span, so it stays on the streaming path and needs no drain.
+     */
+    private suspend fun drainOnParticipantConnection(
+        transaction: LocalWriteTransaction?,
+        output: NodeOutput.Datasource,
+    ): Boolean = transaction?.takeIf { it.registration == output.datasource }?.inParticipantSpan() == true
+
+    /**
+     * Drains [resultSet] into canonical rows under the [drainMaxBytes] ceiling, closing the cursor
+     * once exhausted — so the caller can write on that same connection with no open cursor. Reads
+     * through [ResultRowReader] exactly as [streamInsert]'s [bindRow] does, so the drained values
+     * and the streamed values are identical byte-for-byte on the target.
+     */
+    private fun drainResultSet(
+        resultSet: ResultSet,
+        columns: List<ColumnSchema>,
+        observer: OperationObserver,
+    ): List<List<Any?>> {
+        val drained = ArrayList<List<Any?>>()
+        var bytes = 0L
+        observer.phase(OperationPhase.FETCHING)
+        while (resultSet.next()) {
+            val row = columns.mapIndexed { index, column -> ResultRowReader.readValue(resultSet, index + 1, column) }
+            bytes += ResultBytes.rowBytes(row, columns)
+            if (bytes > drainMaxBytes) throw drainTooLarge()
+            drained += row
+        }
+        resultSet.close()
+        observer.fetched(drained.size.toLong())
+        return drained
+    }
+
+    /** [drainResultSet]'s already-decoded twin for the composition path's lazy child sequence. */
+    private fun drainSequence(
+        rows: Sequence<List<Any?>>,
+        columns: List<ColumnSchema>,
+        observer: OperationObserver,
+    ): List<List<Any?>> {
+        val drained = ArrayList<List<Any?>>()
+        var bytes = 0L
+        observer.phase(OperationPhase.FETCHING)
+        for (row in rows) {
+            bytes += ResultBytes.rowBytes(row, columns)
+            if (bytes > drainMaxBytes) throw drainTooLarge()
+            drained += row
+        }
+        observer.fetched(drained.size.toLong())
+        return drained
+    }
+
+    /** The drain ceiling refusal — raised before any write, so the target is untouched. */
+    private fun drainTooLarge(): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Node.WRITEBACK_FAILED,
+            message =
+                "The same-registration write-back source exceeds $drainMaxBytes bytes and cannot " +
+                    "be retained before writing; split it or stage it through tempdb",
+            details = mapOf("max_bytes" to drainMaxBytes),
+        )
 
     /**
      * The shared write-back shell (§6.4.3): datasource resolution, the identifier guards, and the
@@ -493,6 +580,9 @@ class JdbcWritebackRunner(
 
     private companion object {
         const val DEFAULT_BATCH_ROWS = 1000
+
+        /** The same-registration drain ceiling, matching `datapipelines.result.max-size-bytes` default. */
+        const val DEFAULT_DRAIN_MAX_BYTES = 104_857_600L
 
         /** Sanity bound on a driver's self-reported per-statement count. */
         const val MAX_ROWS_PER_STATEMENT = 1_000_000L

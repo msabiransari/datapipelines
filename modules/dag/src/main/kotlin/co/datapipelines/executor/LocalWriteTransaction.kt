@@ -93,6 +93,16 @@ class LocalWriteTransaction(
     }
 
     /**
+     * True when the calling coroutine is already inside a participant span — i.e. the cursor a
+     * caller is about to hand us was opened on THIS transaction's one connection. That is the
+     * §3.3 signal the write-back runner uses to decide whether a same-registration source must
+     * be drained (closed) before any write statement reuses the connection: a fresh span means
+     * the source lives on a different connection (tempdb, or another datasource) and no drain is
+     * needed; a reentrant span means the source cursor and the target write share one connection.
+     */
+    suspend fun inParticipantSpan(): Boolean = coroutineContext[Span] != null
+
+    /**
      * The root's commit (§3.5): called only after every required node — including children —
      * succeeded and the caller result was prepared. No-op when nothing ever enlisted: a plan
      * that enrolled but never touched the registration held no transaction, so there is
@@ -100,7 +110,9 @@ class LocalWriteTransaction(
      *
      * @throws DatapipelinesException `pipeline.execution.local_write_commit_failed` when the
      *   driver refuses the commit. A refusal here may or may not have committed — §4's lost-ack
-     *   rows — so telemetry records `unknown` and the root's rollback attempt stays best-effort.
+     *   rows — so telemetry records `unknown` and the transaction is SETTLED terminal-unknown:
+     *   the root's later rollback attempt is a no-op (no `rolled_back` evidence may follow an
+     *   outcome that may have landed).
      */
     suspend fun commit() {
         val conn = enlistedOrNull() ?: return
@@ -110,6 +122,11 @@ class LocalWriteTransaction(
                 state = State.SETTLED
                 metrics.localWriteTransaction(OUTCOME_COMMITTED, dialectForTelemetry())
             } catch (e: SQLException) {
+                // R4: a refused commit is TERMINAL and its outcome unknown — the write may have
+                // landed, so the root's subsequent rollback attempt must not record `rolled_back`
+                // evidence that implies the committed write was undone. Settle here (no more
+                // settling) so `rollbackQuietly`'s ENLISTED branch can never run after this.
+                state = State.SETTLED
                 metrics.localWriteTransaction(OUTCOME_UNKNOWN, dialectForTelemetry())
                 LOG.error("Local write transaction {} on '{}' refused at commit; outcome unknown", rootExecutionId, registration, e)
                 throw DatapipelinesException(
@@ -210,12 +227,32 @@ class LocalWriteTransaction(
             )
         }
         val conn = registry.poolFor(resolved).leaseConnection()
-        conn.autoCommit = false
+        beginTransaction(conn)
         connection = conn
         snapshot = resolved
         state = State.ENLISTED
         metrics.localWriteTransaction(OUTCOME_STARTED, resolved.dialect.wire)
         return conn
+    }
+
+    /**
+     * R3: own the lease through setup. `autoCommit` is a setup step (§4 row 2), not part of the
+     * span; a driver that refuses the setter must still see its connection returned exactly once,
+     * with no started/committed outcome recorded — otherwise the connection is leaked (state IDLE,
+     * nothing records it, neither rollback nor close can reach it). Kept in its own function so
+     * [enlistedConnection]'s refusal throws stay within the ThrowsCount bound.
+     */
+    private fun beginTransaction(conn: Connection) {
+        try {
+            conn.autoCommit = false
+        } catch (e: SQLException) {
+            try {
+                conn.close()
+            } catch (closeFailure: SQLException) {
+                e.addSuppressed(closeFailure)
+            }
+            throw e
+        }
     }
 
     private fun refused(

@@ -129,6 +129,36 @@ class LocalWritePlannerVerdictTest {
     }
 
     @Test
+    fun `a DDL-only plan on an eligible engine stays ordinary (R1)`() {
+        // DDL never enrolls (§3.2): however eligible its engine, a plan with no ROW writer must
+        // keep today's ordinary path rather than trip the `external_ddl` refusal.
+        val verdict =
+            planner.verdict(
+                writers = emptyList(),
+                rowWrites = emptyList(),
+                externalDdl = listOf(destination("pg_main", nodeId = "ddl")),
+                unreadableChildren = emptyList(),
+                eligibility = mapOf("pg_main" to true),
+            )
+        verdict shouldBe LocalWriteVerdict.Ordinary
+    }
+
+    @Test
+    fun `DDL beside excluded-only writers stays ordinary (R1)`() {
+        // The excluded H2 writer never participates, so the eligible-engine DDL cannot refuse a
+        // plan that has no eligible row writer.
+        val verdict =
+            planner.verdict(
+                writers = listOf(destination("warehouse", nodeId = "dml")),
+                rowWrites = emptyList(),
+                externalDdl = listOf(destination("pg_main", nodeId = "ddl")),
+                unreadableChildren = emptyList(),
+                eligibility = mapOf("warehouse" to false, "pg_main" to true),
+            )
+        verdict shouldBe LocalWriteVerdict.Ordinary
+    }
+
+    @Test
     fun `an unreadable child on an otherwise single-destination plan refuses as unknown_child_writes`() {
         val verdict =
             planner.verdict(

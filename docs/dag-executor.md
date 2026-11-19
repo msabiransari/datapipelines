@@ -1660,7 +1660,7 @@ document a customer can read before they need it.
 
 ### 16.4 The single-registration local write transaction (#1033)
 
-**Ratified by the design record `pipeline-write-transactions.md`; implemented in #1033 (v1.82 of the
+**Ratified by the design record `pipeline-write-transactions.md`; implemented in #1033 (v1.105 of the
 [pipeline contract](pipeline-contract.md)).** This is the one exception §16 above now carries: a run
 whose durable writes all name ONE datasource registration executes inside ONE local transaction on
 that registration, committed or rolled back by the root as a whole. Everything it does not cover

@@ -20,7 +20,10 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.PreparedStatement
+import java.sql.ResultSet
 import java.sql.SQLException
+import java.sql.Statement
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -324,6 +327,202 @@ class LocalWriteTransactionTest {
         }
     }
 
+    @Test
+    fun `a driver that refuses the autocommit setter returns the connection once and records nothing (R3)`() {
+        runTest {
+            val datasource = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
+            val leased = AtomicInteger()
+            val closed = AtomicInteger()
+            val registry =
+                SetAutocommitRefusingRegistry(
+                    base = FakeDatasourceRegistry(mapOf("pg_main" to datasource)),
+                    datasource = datasource,
+                    leased = leased,
+                    closed = closed,
+                )
+            val transaction = transaction(registry)
+
+            shouldThrow<SQLException> {
+                transaction.withParticipant { connection ->
+                    connection.createStatement().use { it.execute("SELECT 1") }
+                }
+            }
+
+            // R3: the setup failure wrote nothing, but the acquired connection is returned/discarded
+            // EXACTLY once — no leak — and no started/committed outcome was invented.
+            leased.get() shouldBe 1
+            closed.get() shouldBe 1
+            transaction.enlisted shouldBe false
+            outcomes() shouldBe emptyMap()
+        }
+    }
+
+    @Test
+    fun `a commit that landed but lost its ack records unknown only - no rollback evidence (R4)`() {
+        runTest {
+            val datasource = postgresH2("pg_main", listOf("CREATE TABLE tgt (id INT)"))
+            val registry =
+                CommitThenThrowRegistry(
+                    base = FakeDatasourceRegistry(mapOf("pg_main" to datasource)),
+                    datasource = datasource,
+                )
+            val transaction = transaction(registry)
+            transaction.withParticipant { connection ->
+                connection.createStatement().use { it.execute("INSERT INTO tgt VALUES (1)") }
+            }
+
+            shouldThrow<DatapipelinesException> { transaction.commit() }
+            // The root's cleanup still runs rollbackQuietly — and must NOT record rolled_back
+            // evidence that would imply the (possibly durable) write was undone.
+            transaction.rollbackQuietly()
+            transaction.close()
+
+            countFromOtherConnection(datasource) shouldBe 1L
+            outcomes() shouldBe mapOf("started" to 1.0, "unknown" to 1.0)
+        }
+    }
+
+    @Test
+    fun `a same-registration write-back drains the source cursor before writing, above one batch (R2)`() {
+        runTest {
+            val datasource =
+                postgresH2(
+                    "pg_main",
+                    listOf(
+                        "CREATE TABLE src (id INT)",
+                        "CREATE TABLE tgt (id INT)",
+                        "INSERT INTO src SELECT \"X\" FROM SYSTEM_RANGE(1, 1001)",
+                    ),
+                )
+            val registry = CursorOverlapRegistry(FakeDatasourceRegistry(mapOf("pg_main" to datasource)), datasource)
+            val transaction = transaction(registry)
+            val runner = JdbcWritebackRunner(registry)
+
+            transaction.withParticipant { conn ->
+                val guard = conn as StreamingGuardConnection
+                conn.createStatement().use { stmt ->
+                    stmt.executeQuery("SELECT id FROM src").use { rs ->
+                        val tracked = TrackedCursor(rs)
+                        guard.activeSource = tracked
+                        runner.writeback(
+                            tracked,
+                            NodeOutput.Datasource("pg_main", "tgt", WriteMode.APPEND),
+                            Dialect.POSTGRES,
+                            workspaceId,
+                            transaction = transaction,
+                        ) shouldBe 1001L
+                        tracked.exhausted shouldBe true
+                    }
+                }
+            }
+            registry.baseLeased() shouldBe 1
+        }
+    }
+
+    @Test
+    fun `a same-registration REPLACE write-back drains before the transactional clear (R2)`() {
+        runTest {
+            val datasource =
+                postgresH2(
+                    "pg_main",
+                    listOf(
+                        "CREATE TABLE src (id INT)",
+                        "CREATE TABLE tgt (id INT)",
+                        "INSERT INTO src SELECT \"X\" FROM SYSTEM_RANGE(1, 1)",
+                        "INSERT INTO tgt VALUES (100)",
+                    ),
+                )
+            val registry = CursorOverlapRegistry(FakeDatasourceRegistry(mapOf("pg_main" to datasource)), datasource)
+            val transaction = transaction(registry)
+            val runner = JdbcWritebackRunner(registry)
+
+            transaction.withParticipant { conn ->
+                val guard = conn as StreamingGuardConnection
+                conn.createStatement().use { stmt ->
+                    stmt.executeQuery("SELECT id FROM src").use { rs ->
+                        val tracked = TrackedCursor(rs)
+                        guard.activeSource = tracked
+                        runner.writeback(
+                            tracked,
+                            NodeOutput.Datasource("pg_main", "tgt", WriteMode.REPLACE),
+                            Dialect.POSTGRES,
+                            workspaceId,
+                            transaction = transaction,
+                        ) shouldBe 1L
+                        tracked.exhausted shouldBe true
+                    }
+                }
+            }
+            transaction.commit()
+            countFromOtherConnection(datasource, "SELECT COUNT(*) FROM tgt WHERE id = 1") shouldBe 1L
+            countFromOtherConnection(datasource, "SELECT COUNT(*) FROM tgt WHERE id = 100") shouldBe 0L
+        }
+    }
+
+    /**
+     * A connection that refuses any new statement while a "streaming" source cursor is still open —
+     * the Connector/J restriction the review reproduced on MySQL ("No statements may be issued when
+     * any streaming result sets are open and in use on a given connection"). The source cursor the
+     * write-back is handed registers here via [activeSource]; the drain must exhaust and close it
+     * before the write's own `prepareStatement`/`createStatement` runs.
+     */
+    private class StreamingGuardConnection(
+        private val delegate: Connection,
+    ) : Connection by delegate {
+        var activeSource: TrackedCursor? = null
+
+        override fun createStatement(): Statement = guard { delegate.createStatement() }
+
+        override fun createStatement(
+            resultSetType: Int,
+            resultSetConcurrency: Int,
+        ): Statement = guard { delegate.createStatement(resultSetType, resultSetConcurrency) }
+
+        override fun prepareStatement(sql: String): PreparedStatement = guard { delegate.prepareStatement(sql) }
+
+        private fun <T> guard(block: () -> T): T {
+            val source = activeSource
+            if (source != null && !source.exhausted && !source.closed) {
+                throw SQLException("streaming result set still open (test)")
+            }
+            return block()
+        }
+    }
+
+    /** A cursor that records when it is exhausted and closed — the drain's two observable edges. */
+    private class TrackedCursor(
+        private val delegate: ResultSet,
+    ) : ResultSet by delegate {
+        var exhausted = false
+        var closed = false
+
+        override fun next(): Boolean {
+            val has = delegate.next()
+            if (!has) exhausted = true
+            return has
+        }
+
+        override fun close() {
+            closed = true
+            delegate.close()
+        }
+    }
+
+    /** A registry whose participant connection is a [StreamingGuardConnection] (the overlap seam). */
+    private class CursorOverlapRegistry(
+        private val base: FakeDatasourceRegistry,
+        private val datasource: Datasource,
+    ) : DatasourceRegistry by base {
+        override fun poolFor(datasource: Datasource): ConnectionPool {
+            val delegatePool = base.poolFor(datasource)
+            return object : ConnectionPool by delegatePool {
+                override fun leaseConnection(): Connection = StreamingGuardConnection(delegatePool.leaseConnection())
+            }
+        }
+
+        fun baseLeased(): Int = base.leased.get()
+    }
+
     /** `poolFor` hands out a real connection whose `commit` refuses — the lost-ack seam. */
     private class CommitRefusingRegistry(
         private val base: DatasourceRegistry,
@@ -339,6 +538,57 @@ class LocalWriteTransactionTest {
                     val delegate = DriverManager.getConnection(datasource.jdbcUrl, datasource.username, datasource.secret ?: "")
                     return object : Connection by delegate {
                         override fun commit(): Unit = throw SQLException("commit refused (test)")
+                    }
+                }
+
+                override fun close() = Unit
+            }
+    }
+
+    /** `poolFor` hands out a real connection whose `setAutoCommit` refuses — the setup seam (R3). */
+    private class SetAutocommitRefusingRegistry(
+        private val base: DatasourceRegistry,
+        private val datasource: Datasource,
+        private val leased: AtomicInteger,
+        private val closed: AtomicInteger,
+    ) : DatasourceRegistry by base {
+        override fun poolFor(datasource: Datasource): ConnectionPool =
+            object : ConnectionPool {
+                override val name get() = datasource.name
+
+                override fun leaseConnection(): Connection {
+                    leased.incrementAndGet()
+                    val delegate = DriverManager.getConnection(datasource.jdbcUrl, datasource.username, datasource.secret ?: "")
+                    return object : Connection by delegate {
+                        override fun setAutoCommit(autoCommit: Boolean): Unit = throw SQLException("autocommit setter refused (test)")
+
+                        override fun close() {
+                            closed.incrementAndGet()
+                            delegate.close()
+                        }
+                    }
+                }
+
+                override fun close() = Unit
+            }
+    }
+
+    /** `poolFor` hands out a connection whose `commit` commits then throws — the lost-ack seam (R4). */
+    private class CommitThenThrowRegistry(
+        private val base: DatasourceRegistry,
+        private val datasource: Datasource,
+    ) : DatasourceRegistry by base {
+        override fun poolFor(datasource: Datasource): ConnectionPool =
+            object : ConnectionPool {
+                override val name get() = datasource.name
+
+                override fun leaseConnection(): Connection {
+                    val delegate = DriverManager.getConnection(datasource.jdbcUrl, datasource.username, datasource.secret ?: "")
+                    return object : Connection by delegate {
+                        override fun commit() {
+                            delegate.commit()
+                            throw SQLException("commit ack lost (test)")
+                        }
                     }
                 }
 

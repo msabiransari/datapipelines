@@ -58,6 +58,9 @@ class LocalWriteTransactionIntegrationTest {
             statement.execute("CREATE TABLE orders (id bigint PRIMARY KEY, note text NOT NULL)")
             statement.execute("CREATE TABLE order_lines (order_id text NOT NULL, note text NOT NULL)")
             statement.execute("CREATE TABLE seen (seen_count int NOT NULL)")
+            statement.execute("CREATE TABLE wb_src (id bigint NOT NULL)")
+            statement.execute("CREATE TABLE wb_target (id bigint NOT NULL)")
+            statement.execute("INSERT INTO wb_src SELECT g FROM generate_series(1, $WB_ROWS) AS g")
         }
         withSecondConnection(dbB) { statement ->
             statement.execute("CREATE TABLE inventory (sku text PRIMARY KEY, qty int NOT NULL)")
@@ -71,6 +74,7 @@ class LocalWriteTransactionIntegrationTest {
             statement.execute("DELETE FROM orders")
             statement.execute("DELETE FROM order_lines")
             statement.execute("DELETE FROM seen")
+            statement.execute("DELETE FROM wb_target")
         }
 
     @Test
@@ -144,6 +148,44 @@ class LocalWriteTransactionIntegrationTest {
         }
     }
 
+    @Test
+    fun `a same-registration write-back drains its streaming source and commits (R2)`() {
+        runBlocking {
+            val counter = RegistrationLeaseCounter(baseRegistry(), REGISTRATION_A)
+            val meterRegistry = SimpleMeterRegistry()
+
+            harness(counter, ExecutorMetrics(meterRegistry), boom = false).use { h ->
+                h.executor.execute(Fixtures.request(Fixtures.pipeline(sameRegGraph(boom = false)))).status shouldBe
+                    ExecutionStatus.SUCCESS
+            }
+
+            // The same-registration source (a streaming portal on the participant connection) was
+            // drained and closed before the write reused the connection: every row landed, on ONE
+            // participant lease, committed at the root.
+            countFromSecondConnection("wb_target") shouldBe WB_ROWS
+            counter.leased.get() shouldBe 1
+            outcomes(meterRegistry) shouldBe mapOf("started" to 1.0, "committed" to 1.0)
+        }
+    }
+
+    @Test
+    fun `a same-registration write-back rolls back on a later failure (R2)`() {
+        runBlocking {
+            val counter = RegistrationLeaseCounter(baseRegistry(), REGISTRATION_A)
+            val meterRegistry = SimpleMeterRegistry()
+
+            harness(counter, ExecutorMetrics(meterRegistry), boom = true).use { h ->
+                shouldThrow<PipelineExecutionFailed> {
+                    h.executor.execute(Fixtures.request(Fixtures.pipeline(sameRegGraph(boom = true))))
+                }
+            }
+
+            countFromSecondConnection("wb_target") shouldBe 0L
+            counter.leased.get() shouldBe 1
+            outcomes(meterRegistry) shouldBe mapOf("started" to 1.0, "rolled_back" to 1.0)
+        }
+    }
+
     // -- the family ------------------------------------------------------------------
 
     /** Reads on B beside two-plus writes on A (root DML, same-registration write-back, child DMLs). */
@@ -171,6 +213,16 @@ class LocalWriteTransactionIntegrationTest {
             ),
         )
 
+    /** A single DQL node whose SOURCE and write-back TARGET are the same registration (R2). */
+    private fun sameRegGraph(boom: Boolean): List<Node> =
+        listOf(
+            Fixtures.node(
+                "same_reg_wb",
+                source = REGISTRATION_A,
+                output = NodeOutput.Datasource(REGISTRATION_A, "wb_target", WriteMode.APPEND),
+            ),
+        ) + if (boom) listOf(Fixtures.node("boom", source = "tempdb", dependsOn = listOf("same_reg_wb"))) else emptyList()
+
     private fun sql(boom: Boolean): Map<String, String> =
         buildMap {
             put("read_b", "SELECT sku, qty FROM inventory ORDER BY sku")
@@ -178,6 +230,7 @@ class LocalWriteTransactionIntegrationTest {
             put("wb", "SELECT sku AS order_id, 'from-b' AS note FROM stg_b ORDER BY order_id")
             put("child_seen", "INSERT INTO seen (seen_count) SELECT COUNT(*) FROM orders")
             put("child_write", "INSERT INTO order_lines (order_id, note) VALUES ('1', 'child')")
+            put("same_reg_wb", "SELECT id FROM wb_src ORDER BY id")
             if (boom) put("boom", "SELECT * FROM table_that_does_not_exist")
         }
 
@@ -348,5 +401,6 @@ class LocalWriteTransactionIntegrationTest {
         const val REGISTRATION_B = "pg_reads_b"
         val CHILD_REF = PipelineNodeRef(name = "test/child_writer", version = 2)
         const val DEPTH = 8
+        const val WB_ROWS = 1001L
     }
 }
