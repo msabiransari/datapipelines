@@ -1193,11 +1193,17 @@ class PublishedMethodIdentityIntegrationTest {
         saveDraft(getId, READ_PIPELINE, expectedHash = versionHash(getId, 2)).statusCode(200)
         postRelease(postId, versionHash(postId, 2)).statusCode(409).body("error.code", equalTo("endpoint.version.not_draft"))
         versionStatus(getId, 3) shouldBe "DRAFT"
-        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$postId/versions/3").then().statusCode(404)
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/endpoints/$postId/versions/3")
+            .then()
+            .statusCode(404)
     }
 
     @Test
     @Order(22)
+    @Suppress("LongMethod") // one case per role and key cell, each asserted against both siblings
     fun `the same-path lifecycle and tree surfaces keep their role and key cells`() {
         val postId = endpointId(SHARED_PATH, "POST")
         val hash = versionHash(postId, 1)
@@ -1230,20 +1236,52 @@ class PublishedMethodIdentityIntegrationTest {
         // endpoint.version.manage / endpoint.release: viewer and promoter are refused on the sibling's routes, and the
         // key is refused by kind; nothing moved.
         for (session in listOf(VIEWER_SESSION, PROMOTER_SESSION)) {
-            given().port(port).contentType(ContentType.JSON).asSession(session).body("""{"version": 1}""")
-                .post("/api/v1/endpoints/$postId/current").then().statusCode(403)
-            given().port(port).asSession(session).post("/api/v1/endpoints/$postId/versions/2/discard").then().statusCode(403)
-            given().port(port).asSession(session).post("/api/v1/endpoints/$postId/versions/2/restore").then().statusCode(403)
-            given().port(port).asSession(session).header("If-Match", hash).post("/api/v1/endpoints/$postId/release")
-                .then().statusCode(403)
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(session)
+                .body("""{"version": 1}""")
+                .post("/api/v1/endpoints/$postId/current")
+                .then()
+                .statusCode(403)
+            given()
+                .port(port)
+                .asSession(session)
+                .post("/api/v1/endpoints/$postId/versions/2/discard")
+                .then()
+                .statusCode(403)
+            given()
+                .port(port)
+                .asSession(session)
+                .post("/api/v1/endpoints/$postId/versions/2/restore")
+                .then()
+                .statusCode(403)
+            given()
+                .port(port)
+                .asSession(session)
+                .header("If-Match", hash)
+                .post("/api/v1/endpoints/$postId/release")
+                .then()
+                .statusCode(403)
         }
-        given().port(port).header(API_KEY_HEADER, rootKey).header("If-Match", hash)
-            .post("/api/v1/endpoints/$postId/release").then().statusCode(403)
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, rootKey)
+            .header("If-Match", hash)
+            .post("/api/v1/endpoints/$postId/release")
+            .then()
+            .statusCode(403)
         currentVersion(postId) shouldBe 2
         versionStatus(postId, 2) shouldBe "RELEASED"
         // The author may switch (endpoint.version.manage ✓), proving the refusals above were the role and not the route.
-        given().port(port).contentType(ContentType.JSON).asSession(AUTHOR_SESSION).body("""{"version": 1}""")
-            .post("/api/v1/endpoints/$postId/current").then().statusCode(200)
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(AUTHOR_SESSION)
+            .body("""{"version": 1}""")
+            .post("/api/v1/endpoints/$postId/current")
+            .then()
+            .statusCode(200)
         currentVersion(postId) shouldBe 1
         currentVersion(endpointId(SHARED_PATH, "GET")) shouldBe 2
     }
@@ -1259,39 +1297,81 @@ class PublishedMethodIdentityIntegrationTest {
         path: String,
         method: String,
     ): String =
-        given().port(port).asSession(ADMIN_SESSION)
-            .queryParam("path", path).queryParam("method", method)
-            .get("/api/v1/endpoints").then().statusCode(200)
-            .extract().jsonPath().getString("data.id")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .queryParam("path", path)
+            .queryParam("method", method)
+            .get("/api/v1/endpoints")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getString("data.id")
 
     private fun versionStatus(
         entityId: String,
         version: Int,
     ): String =
-        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions/$version")
-            .then().statusCode(200).extract().jsonPath().getString("data.status")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/endpoints/$entityId/versions/$version")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getString("data.status")
 
     private fun versionHash(
         entityId: String,
         version: Int,
     ): String =
-        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions/$version")
-            .then().statusCode(200).extract().jsonPath().getString("data.body_hash")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/endpoints/$entityId/versions/$version")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getString("data.body_hash")
 
     private fun versionBody(
         entityId: String,
         version: Int,
     ): String =
-        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions/$version")
-            .then().statusCode(200).extract().jsonPath().getString("data.pipeline")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/endpoints/$entityId/versions/$version")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getString("data.pipeline")
 
     private fun versionIds(entityId: String): List<Int> =
-        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions")
-            .then().statusCode(200).extract().jsonPath().getList("data.version")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/endpoints/$entityId/versions")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getList("data.version")
 
     private fun currentVersion(entityId: String): Int =
-        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions")
-            .then().statusCode(200).extract().jsonPath().getInt("data.find { it.is_current }.version")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .get("/api/v1/endpoints/$entityId/versions")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getInt("data.find { it.is_current }.version")
 
     /** Releases the entity's v1 draft at its own body hash through the shared planner; 200 is the assertion. */
     private fun releaseDraft(
@@ -1307,23 +1387,40 @@ class PublishedMethodIdentityIntegrationTest {
     private fun postRelease(
         entityId: String,
         hash: String,
-    ) = given().port(port).asSession(ADMIN_SESSION).header("If-Match", hash).post("/api/v1/endpoints/$entityId/release").then()
+    ) = given()
+        .port(port)
+        .asSession(ADMIN_SESSION)
+        .header("If-Match", hash)
+        .post("/api/v1/endpoints/$entityId/release")
+        .then()
 
     private fun saveDraft(
         entityId: String,
         pipeline: String,
         expectedHash: String,
-    ) = given().port(port).contentType(ContentType.JSON).asSession(ADMIN_SESSION).header("If-Match", expectedHash)
+    ) = given()
+        .port(port)
+        .contentType(ContentType.JSON)
+        .asSession(ADMIN_SESSION)
+        .header("If-Match", expectedHash)
         .body("""{"pipeline": "$pipeline", "pipeline_version": 1, "timeout_seconds": 60}""")
-        .put("/api/v1/endpoints/$entityId/draft").then()
+        .put("/api/v1/endpoints/$entityId/draft")
+        .then()
 
     /** Saves a draft pinning [pipeline] on the entity's current version, then releases it. */
     private fun saveAndRelease(
         entityId: String,
         pipeline: String,
     ) {
-        val current = given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions")
-            .then().statusCode(200).extract().jsonPath()
+        val current =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .get("/api/v1/endpoints/$entityId/versions")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
         val currentHash = current.getString("data.find { it.is_current }.body_hash")
         val saved = saveDraft(entityId, pipeline, currentHash).statusCode(200).extract().jsonPath()
         postRelease(entityId, saved.getString("data.body_hash")).statusCode(200).body("data.pipeline", equalTo(pipeline))
@@ -1333,27 +1430,41 @@ class PublishedMethodIdentityIntegrationTest {
         entityId: String,
         version: Int,
     ) {
-        given().port(port).contentType(ContentType.JSON).asSession(ADMIN_SESSION).body("""{"version": $version}""")
-            .post("/api/v1/endpoints/$entityId/current").then().statusCode(200)
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"version": $version}""")
+            .post("/api/v1/endpoints/$entityId/current")
+            .then()
+            .statusCode(200)
     }
 
     private fun postVersion(
         entityId: String,
         version: Int,
         verb: String,
-    ) = given().port(port).asSession(ADMIN_SESSION).post("/api/v1/endpoints/$entityId/versions/$version/$verb").then()
+    ) = given()
+        .port(port)
+        .asSession(ADMIN_SESSION)
+        .post("/api/v1/endpoints/$entityId/versions/$version/$verb")
+        .then()
 
     private fun treeRequest(
         routeKey: String,
         version: Int,
-    ) = given().port(port).asSession(ADMIN_SESSION).queryParam("name", routeKey).queryParam("version", version)
-        .get("/api/v1/dependencies/api_endpoint").then()
+    ) = given()
+        .port(port)
+        .asSession(ADMIN_SESSION)
+        .queryParam("name", routeKey)
+        .queryParam("version", version)
+        .get("/api/v1/dependencies/api_endpoint")
+        .then()
 
     private fun treeOf(
         routeKey: String,
         version: Int,
-    ): io.restassured.path.json.JsonPath =
-        treeRequest(routeKey, version).statusCode(200).extract().jsonPath()
+    ): io.restassured.path.json.JsonPath = treeRequest(routeKey, version).statusCode(200).extract().jsonPath()
 
     private fun io.restassured.path.json.JsonPath.pipelineNames(): List<String> =
         getList<String>("data.nodes.findAll { it.family == 'pipeline' }.name")
@@ -1369,9 +1480,16 @@ class PublishedMethodIdentityIntegrationTest {
         pipelineId: String,
         version: Int,
     ): List<String> =
-        given().port(port).asSession(ADMIN_SESSION).post("/api/v1/pipelines/$pipelineId/versions/$version/discard")
-            .then().statusCode(409).body("error.code", equalTo("pipeline.version.pinned"))
-            .extract().jsonPath().getList("error.details.referencing_api_versions.path")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .post("/api/v1/pipelines/$pipelineId/versions/$version/discard")
+            .then()
+            .statusCode(409)
+            .body("error.code", equalTo("pipeline.version.pinned"))
+            .extract()
+            .jsonPath()
+            .getList("error.details.referencing_api_versions.path")
 
     // -----------------------------------------------------------------------------------------
     // Fixture

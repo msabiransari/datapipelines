@@ -88,8 +88,7 @@ class DependenciesRequestTest {
      */
     @Test
     fun `an API root names a route - a bare path is GET and a mutation method precedes the path`() {
-        fun key(query: String) =
-            parse(FamilyKey.API_ENDPOINT, query).shouldBeInstanceOf<Parsed.Accepted>().request.lookupKey
+        fun key(query: String) = parse(FamilyKey.API_ENDPOINT, query).shouldBeInstanceOf<Parsed.Accepted>().request.lookupKey
         key("name=${enc("/nyc/v1/trips")}&version=1") shouldBe "/nyc/v1/trips"
         key("name=${enc("POST /nyc/v1/trips")}&version=1") shouldBe "POST /nyc/v1/trips"
         key("name=POST+/nyc/v1/trips&version=2") shouldBe "POST /nyc/v1/trips"

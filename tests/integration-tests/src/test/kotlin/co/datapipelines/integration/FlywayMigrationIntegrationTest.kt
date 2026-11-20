@@ -50,7 +50,7 @@ class FlywayMigrationIntegrationTest {
     fun `every shipped migration is recorded as applied and successful`() {
         val rows =
             query(
-                "SELECT version || '|' || description || '|' || success FROM flyway_schema_history ORDER BY installed_rank",
+                "SELECT COALESCE(version, 'R') || '|' || description || '|' || success FROM flyway_schema_history ORDER BY installed_rank",
             ) { it.getString(1) }
 
         rows shouldContainExactly
@@ -206,6 +206,9 @@ class FlywayMigrationIntegrationTest {
                 "64|lake storage inventory|true",
                 // #1037 (V65) — method identity for published endpoints, exact mutation grants for bindings (§4.13/§4.14).
                 "65|published endpoint methods|true",
+                // #1037 — the repeatable downgrade barrier (version column NULL, shown as R): a binary that does not resolve it
+                // refuses to start on V65 metadata (metadata-db §7.4; PublishedMethodDowngradeBarrierIntegrationTest).
+                "R|published endpoint method downgrade barrier|true",
             )
     }
 

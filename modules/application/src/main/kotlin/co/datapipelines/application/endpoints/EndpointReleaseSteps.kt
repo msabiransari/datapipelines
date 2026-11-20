@@ -47,7 +47,12 @@ class EndpointReleaseSteps(
     ): ReleaseNodeIdentity? {
         val endpoint = endpoints.findById(endpointId)?.takeIf { it.workspaceId == workspaceId } ?: return null
         val draft = versions.findDraft(endpoint.id) ?: throw noDraft(endpoint)
-        return ReleaseNodeIdentity(workspaceId, ReleaseFamily.ENDPOINT, EndpointRouteKey.of(endpoint.method, endpoint.pathPattern), draft.version)
+        return ReleaseNodeIdentity(
+            workspaceId,
+            ReleaseFamily.ENDPOINT,
+            EndpointRouteKey.of(endpoint.method, endpoint.pathPattern),
+            draft.version,
+        )
     }
 
     /** Step 4: the native checks of the API draft at [identity], against [expectedHash] (the root's `If-Match`). */

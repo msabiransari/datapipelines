@@ -27,17 +27,12 @@
 -- binding-grant written without its entity (or a GET row half-describing a mutation) is a state no code
 -- path produces and none should ever read.
 --
--- Down path (documented, not shipped — Flyway runs forward only):
---   DELETE FROM endpoint_key_bindings WHERE method <> 'GET';
---   ALTER TABLE endpoint_key_bindings DROP CONSTRAINT pk_endpoint_key_bindings;
---   ALTER TABLE endpoint_key_bindings DROP CONSTRAINT chk_endpoint_key_bindings_shape,
---     DROP CONSTRAINT chk_endpoint_key_bindings_method, DROP COLUMN endpoint_id, DROP COLUMN method;
---   ALTER TABLE endpoint_key_bindings ADD PRIMARY KEY (path_prefix, api_key_id);
---   ALTER TABLE published_endpoints DROP CONSTRAINT chk_published_endpoints_method,
---     DROP CONSTRAINT uq_published_endpoints_path_method, DROP COLUMN method;
---   ALTER TABLE published_endpoints ADD CONSTRAINT published_endpoints_path_pattern_key UNIQUE (path_pattern);
--- (Rows published with a non-GET method must be deleted first on the way down; that is the documented cost
---  of an identity column, the same one V58's versions carry.)
+-- Down path (documented, not shipped — Flyway runs forward only): docs/metadata-db.md §7.4 "Rolling back V65"
+-- is the ONLY text; PublishedMethodDowngradeBarrierIntegrationTest extracts and executes it. It deletes every
+-- non-GET route (versions and grants cascade), restores V11's constraints and removes V65's and the
+-- barrier's flyway_schema_history rows. A binary older than V65 does NOT refuse to start on this schema by
+-- itself (Flyway ignores a future versioned migration) and would serve non-GET metadata as GET — the
+-- repeatable R__published_endpoint_method_downgrade_barrier.sql is what makes it refuse; read its header.
 
 ALTER TABLE published_endpoints ADD COLUMN method TEXT NOT NULL DEFAULT 'GET';
 ALTER TABLE published_endpoints ADD CONSTRAINT chk_published_endpoints_method

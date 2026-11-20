@@ -191,7 +191,12 @@ class EndpointVersionService(
                 if (found.status != PipelineVersionStatus.DISCARDED) {
                     throw wrongStatus(PipelineErrorCodes.Endpoint.VERSION_NOT_DISCARDED, found)
                 }
-                restorePins.recheck(endpoint.workspaceId, EndpointRouteKey.of(endpoint.method, endpoint.pathPattern), found, principal.userId)
+                restorePins.recheck(
+                    endpoint.workspaceId,
+                    EndpointRouteKey.of(endpoint.method, endpoint.pathPattern),
+                    found,
+                    principal.userId,
+                )
                 versions.restore(endpoint.id, version)
                 endpoint to Moved(version, endpoint.current?.version, pointerOf(endpoint.id))
             }

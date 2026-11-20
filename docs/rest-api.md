@@ -447,7 +447,7 @@ pinning the exact draft, and live dashboard versions pinning it. A sole-draft pu
 entity and checks stored dashboard pins to any version (DISCARDED included for a dashboard with
 a live version); parent scope remains live/exact. `details.pinned_by` names `{pipeline, version, node}`;
 `details.referencing_dashboards` names `{dashboard, version, status}` when non-empty; since #786
-`details.referencing_api_versions` (`{path, version, status, pipeline_version}`) and
+`details.referencing_api_versions` (`{path, version, status, pipeline_version}`, where `path` is the API's route key — the bare path for GET, `METHOD path` for a mutation route, #1037) and
 `details.referencing_schedules` (`{schedule, pipeline_version}`) name the live API versions and schedules the
 same way (any version for a sole-draft purge). Refusal
 precedes all deletion and preserves executions, hash and pointer.
@@ -3010,7 +3010,7 @@ ignored, as is any field the table does not name. Values are form-encoded (`+` i
 | Query field | Rule |
 |---|---|
 | any value | at most 200 characters and valid UTF-8, checked before any grammar; otherwise `details.reason = value_too_long` |
-| `name` | required for `pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint` and `datasource`; forbidden for `schedule`. The family's own native name grammar decides it, never a repository lookup: pipeline and template names follow [pipeline-contract §3.2](pipeline-contract.md) and [Templates §3.2](templates.md), which parameter sets, visualizations and dashboards share. An API's name is its immutable path ([§19.1](#19-published-endpoints)), and a datasource name is `[a-z0-9_-]{1,63}` ([Datasources §3.3](datasources.md)). Slashes stay in the value. A refused name is `name_invalid` |
+| `name` | required for `pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint` and `datasource`; forbidden for `schedule`. The family's own native name grammar decides it, never a repository lookup: pipeline and template names follow [pipeline-contract §3.2](pipeline-contract.md) and [Templates §3.2](templates.md), which parameter sets, visualizations and dashboards share. An API's name is its immutable ROUTE KEY ([§19.1](#19-published-endpoints); #1037): a GET route's name is its path, a mutation route's is `METHOD path` with ONE space (`POST /shop/v1/orders`; in a query string the space may travel as `+`, which the strict decoder maps back), so GET and POST at one path are two roots with their own trees. A bare path is a GET (the pre-#1037 spelling, byte-identical to every stored link); `GET /x`, an unknown or lower-case method, or a doubled space is `name_invalid`. A datasource name is `[a-z0-9_-]{1,63}` ([Datasources §3.3](datasources.md)). Slashes stay in the value. A refused name is `name_invalid` |
 | `id` | required instead of `name` for `schedule`, in the canonical 36-character lower-case UUID form, otherwise `id_invalid`. `id` on any other family is `selector_incompatible` |
 | `version` | required for the six artifact families; forbidden for `schedule` and `datasource` (`selector_incompatible`). Decimal digits only, no sign or leading zeros, `1 ≤ n ≤ 2147483647`. An absent, non-integer, `current` or out-of-range value is `version_invalid` |
 

@@ -335,7 +335,8 @@ class PublishedEndpointVersionRepository(
      * #877 §B — the bounded inverse arm pipeline ← API: one page of the API versions of [InverseRequest.workspaceId] whose
      * stored `pipeline_name` is [InverseRequest.targetKey] (and `pipeline_version` the target version when given), ONE
      * occurrence per version at [PIN_PATH], in the inverse total order (the entity id, the version), `limit + 1`
-     * rows. The dependent is named by its route key (`path_pattern` for GET, `METHOD path_pattern` otherwise, [EndpointRouteKey]). The API family's history rule makes ANY the LIVE set: a
+     * rows. The dependent is named by its route key (`path_pattern` for GET, `METHOD path_pattern` otherwise,
+     * [EndpointRouteKey]). The API family's history rule makes ANY the LIVE set: a
      * DISCARDED API version protects nothing, because its restore revalidates its pin (record §14, A39) — so the
      * entity purge (`EndpointVersionPipelineConsumers.anyVersionPins`) reads this arm at LIVE. WORKING is the draft, else
      * the pointer.

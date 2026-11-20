@@ -22,7 +22,10 @@ enum class SelectorShape(
     val keyField: RequestField,
     val versioned: Boolean,
 ) {
-    /** `name` + `version` — pipeline, template, parameter_set, visualization, dashboard, api_endpoint (the route key: path, or `METHOD path`). */
+    /**
+     * `name` + `version` — pipeline, template, parameter_set, visualization, dashboard, api_endpoint (the route key:
+     * path, or `METHOD path`).
+     */
     NAME_AT_VERSION(RequestField.NAME, versioned = true),
 
     /** `name` alone — datasource. */

@@ -24,7 +24,10 @@ class EndpointRouteKeyTest {
 
     @Test
     fun `the four methods at one path are four distinct keys`() {
-        EndpointMethod.ALL.map { EndpointRouteKey.of(it, path) }.toSet().size shouldBe EndpointMethod.ALL.size
+        EndpointMethod.ALL
+            .map { EndpointRouteKey.of(it, path) }
+            .toSet()
+            .size shouldBe EndpointMethod.ALL.size
     }
 
     @Test

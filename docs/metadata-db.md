@@ -2728,6 +2728,45 @@ Flyway uses Postgres advisory locks (`pg_advisory_lock`). Multiple instances sta
 2. Instance B waits for the lock, finds the migration already applied, skips.
 3. No corruption, no double-execution.
 
+### 7.4 Rolling back V65 (published method identities, #1037)
+
+**The boundary.** A binary built before V65 reads `published_endpoints` and `endpoint_key_bindings` with no method predicate. Measured against the previous jar on a V65 copy (#1037 round 2): it STARTS (Flyway ignores a future *versioned* migration by default), serves a POST-only route's entity on `GET`, and honors a POST grant as a GET prefix grant — a key that holds only `POST /x` could read `GET /x`, the very reinterpretation the design forbids. A shipped jar cannot be changed, so the refusal is in the schema's history: `R__published_endpoint_method_downgrade_barrier.sql` is a **repeatable** migration (a harmless `COMMENT ON COLUMN published_endpoints.method`). A Flyway that has applied a repeatable it cannot resolve fails validation — default `ignoreMigrationPatterns` is `*:future`, which never covers a missing repeatable — so every binary without it **refuses to start** with `Detected applied migration not resolved locally: published endpoint method downgrade barrier`. The current binary resolves it and starts. `PublishedMethodDowngradeBarrierIntegrationTest` pins both halves, and the same measurement was taken against the real previous jar (store evidence `1037-published-method-identities/`, `r2-dg-*`).
+
+**Rollback is therefore deliberate, never an accident of redeploying an older image.** Order matters:
+
+1. Take a backup (`pg_dump`) — the procedure deletes every non-GET route, its versions and every mutation grant; that is the documented cost of an identity column (the same one V58's versions carry) and it is not recoverable from the schema afterwards.
+2. Drain writes: set `datapipelines.endpoints.mutations-enabled=false` on every instance, let admitted executions settle ([Deployment §8.3.1](deployment.md)), then stop **every** instance running a V65-aware binary — a V65-aware instance left running writes method-bearing rows after the cleanup.
+3. Run this block on the metadata database, as one transaction. It is the single source: the integration test extracts and executes THIS text.
+
+<!-- v65-rollback:start -->
+```sql
+BEGIN;
+-- Non-GET routes go; their versions and every grant that names them cascade (ON DELETE CASCADE).
+DELETE FROM published_endpoints WHERE method <> 'GET';
+ALTER TABLE endpoint_key_bindings DROP CONSTRAINT pk_endpoint_key_bindings;
+ALTER TABLE endpoint_key_bindings
+    DROP CONSTRAINT chk_endpoint_key_bindings_shape,
+    DROP CONSTRAINT chk_endpoint_key_bindings_method,
+    DROP COLUMN endpoint_id,
+    DROP COLUMN method;
+ALTER TABLE endpoint_key_bindings ADD PRIMARY KEY (path_prefix, api_key_id);
+ALTER TABLE published_endpoints
+    DROP CONSTRAINT chk_published_endpoints_method,
+    DROP CONSTRAINT uq_published_endpoints_path_method,
+    DROP COLUMN method;
+ALTER TABLE published_endpoints ADD CONSTRAINT published_endpoints_path_pattern_key UNIQUE (path_pattern);
+-- Forget V65 and its barrier, so a later upgrade re-applies both.
+DELETE FROM flyway_schema_history
+ WHERE version = '65'
+    OR (version IS NULL AND description = 'published endpoint method downgrade barrier');
+COMMIT;
+```
+<!-- v65-rollback:end -->
+
+4. Start the previous binary. It validates cleanly and answers GET routes only.
+
+A rollback that skips step 3 is refused by the previous binary at startup; do not "repair" the history instead — `flyway repair` or `spring.flyway.ignore-migration-patterns=*:missing` removes exactly the refusal that keeps non-GET metadata away from a binary that would misread it.
+
 ---
 
 ## 8. Operational Jobs
@@ -2880,7 +2919,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-19 | v1.70 | V65 (#1037, published method identities) | **V65 — method identity for `published_endpoints` (§4.13), exact mutation grants for `endpoint_key_bindings` (§4.14).** `published_endpoints` gains `method` (`GET`/`POST`/`PUT`/`DELETE`, CHECK'd, `DEFAULT 'GET'` is the backfill) and `UNIQUE (path_pattern)` narrows to `uq_published_endpoints_path_method (path_pattern, method)` — V11's table-level constraint was dropped by its Postgres name `published_endpoints_path_pattern_key`. `endpoint_key_bindings` gains `method`, `endpoint_id` (NULL for GET rows, `ON DELETE CASCADE`, shape CHECK'd) and the partial `idx_endpoint_key_bindings_endpoint`; the PK widens to `(path_prefix, api_key_id, method)`. §5's three rows updated. Down path documented in the migration header, not shipped. |
+| 2026-11-19 | v1.70 | V65 (#1037, published method identities) | **V65 — method identity for `published_endpoints` (§4.13), exact mutation grants for `endpoint_key_bindings` (§4.14).** `published_endpoints` gains `method` (`GET`/`POST`/`PUT`/`DELETE`, CHECK'd, `DEFAULT 'GET'` is the backfill) and `UNIQUE (path_pattern)` narrows to `uq_published_endpoints_path_method (path_pattern, method)` — V11's table-level constraint was dropped by its Postgres name `published_endpoints_path_pattern_key`. `endpoint_key_bindings` gains `method`, `endpoint_id` (NULL for GET rows, `ON DELETE CASCADE`, shape CHECK'd) and the partial `idx_endpoint_key_bindings_endpoint`; the PK widens to `(path_prefix, api_key_id, method)`. §5's three rows updated. Down path documented in §7.4 (the one text the integration test executes), not shipped. **§7.4 Rolling back V65** and the repeatable `R__published_endpoint_method_downgrade_barrier.sql`: a binary older than V65 would START on this schema (Flyway ignores a future versioned migration) and serve non-GET metadata as GET, so a repeatable it cannot resolve makes every such binary refuse to start; rollback is the documented block, then the previous binary. |
 | 2026-11-14 | v1.69 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.67 and #964's v1.68 | **§4.55 `lake_maintenance_runs`**: compaction's own keys in its `parts_json` entry (`committed`, `left_for_fresh_run`, `blocked`, `largest_need_bytes`, `limit_bytes`, `limit_source`, and `groups`, one flat object per committed group). No DDL change, no migration. |
 | 2026-11-14 | v1.68 | V64 (#964, dp-lake P6) | **V64 — the lake storage breakdown.** New **§4.60 `lake_storage_inventory`**: the latest inventory per table, six rows (one per `StorageRow`, V64's CHECK) with their object count, bytes, one time and the run id, replaced by each cleanup in one transaction. §3 ERD, §5 (its primary key) and §5A (derived) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-14 | v1.67 | 962 (#962, dp-lake P6) | **§4.55 `lake_maintenance_runs`**: the cleanup and purge deletion parts add their counts to their `parts_json` entries (scalars; a count by reason as one `<field>_<reason>` key per reason that occurred). No DDL change, no migration. |

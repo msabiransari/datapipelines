@@ -32,7 +32,7 @@ import java.util.UUID
  * | parameter_set | `LensedView.parameterSets.admits(name)` | `ParameterSetService.findVersion(ws, lens, id, v)` |
  * | visualization | `LensedView.visualizations.admits(name)` | `VisualizationService.findVersion(ws, lens, id, v)` |
  * | dashboard | `LensedView.dashboards.admits(name)` | `DashboardService.findVersion(ws, lens, id, v)` |
- * | api_endpoint | `EndpointPublishService.get(principal, path, method)` (the route key split) | `EndpointVersionService.version(principal, id, v)` |
+ * | api_endpoint | `EndpointPublishService.get(principal, path, method)` (key split) | `EndpointVersionService.version(principal, id, v)` |
  * | schedule | `ScheduleService.get(ws, id, PrincipalTargetViewer(principal))` (its target admitted) | Same read and captured revision |
  *
  * The id-keyed version reads run after the walk because these families' version detail reads are keyed by the entity
