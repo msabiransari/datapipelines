@@ -11,7 +11,7 @@
   <div class="app-page-h">
     <div>
       <h1 class="ds-headline">
-        <span class="app-method">GET</span>
+        <span class="app-method" th:text="${page.method}" data-api-method>GET</span>
         <span class="ds-mono" th:text="${page.url}" data-api-url>/api/finance/v1/revenue</span>
       </h1>
       <p class="app-page-sub">Every version of this API, newest first. Each version pins one exact pipeline version;
@@ -131,7 +131,7 @@
           </summary>
           <div class="app-card-b">
             <div class="dp-deps" data-dp-deps data-family="api_endpoint" data-dp-deps-state="idle"
-                 th:attr="data-name=${#strings.substringAfter(page.url, '/api')},data-version=${page.selected.version}">
+                 th:attr="data-name=${page.routeKey},data-version=${page.selected.version}">
               <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this section is opened.</p>
             </div>
           </div>

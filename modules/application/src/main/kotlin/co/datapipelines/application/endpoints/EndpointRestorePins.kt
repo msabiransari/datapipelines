@@ -35,16 +35,19 @@ class EndpointRestorePins(
     private val planning: ReleasePlanningWalk?,
     private val maxBlockers: Int,
 ) {
-    /** Refuses the restore of [restored] at [pathPattern] when its pin dangles (400) or reaches a draft (409). */
+    /**
+     * Refuses the restore of [restored] at the route [routeKey] (an [EndpointRouteKey]: the bare path for GET, `METHOD path`
+     * for a mutation method) when its pin dangles (400) or reaches a draft (409).
+     */
     @Suppress("ThrowsCount") // each refusal is its own catalogued code and field path, in record §25.4's order
     fun recheck(
         workspaceId: UUID,
-        pathPattern: String,
+        routeKey: String,
         restored: PublishedEndpointVersion,
         actor: UUID,
     ) {
         val body = restored.body
-        val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.ENDPOINT, pathPattern, restored.version)
+        val root = ReleaseNodeIdentity(workspaceId, ReleaseFamily.ENDPOINT, routeKey, restored.version)
         val record = pipelines.findByNameAnyStatus(workspaceId, body.pipelineName) ?: throw dangling(body, PIN_PATH)
         val detail = pipelines.findVersionDetail(workspaceId, record.id, body.pipelineVersion)
         if (detail == null || detail.status == PipelineVersionStatus.DISCARDED) throw dangling(body, PIN_PATH)
@@ -52,18 +55,18 @@ class EndpointRestorePins(
         if (detail.status == PipelineVersionStatus.DRAFT) {
             throw ReleaseRefusals.restoreDependencyNotReleased(
                 root,
-                pathPattern,
+                routeKey,
                 listOf(RestoreBlocker(pinned, body.pipelineName, ReleaseNodeStatus.DRAFT, PIN_PATH)),
                 maxBlockers,
             )
         }
-        transitive(root, pathPattern, pinned, body, actor)
+        transitive(root, routeKey, pinned, body, actor)
     }
 
     @Suppress("ThrowsCount") // the walk's dangling node (400) and its drafts (409) are two catalogued refusals
     private fun transitive(
         root: ReleaseNodeIdentity,
-        pathPattern: String,
+        routeKey: String,
         pinned: ReleaseNodeIdentity,
         body: EndpointVersionBody,
         actor: UUID,
@@ -78,7 +81,7 @@ class EndpointRestorePins(
             below.filter { it.status == ReleaseNodeStatus.DRAFT }.flatMap { node ->
                 closure.pathsTo(node.identity).map { path -> RestoreBlocker(node.identity, node.name, node.status, "$PIN_PATH.$path") }
             }
-        if (drafts.isNotEmpty()) throw ReleaseRefusals.restoreDependencyNotReleased(root, pathPattern, drafts, maxBlockers)
+        if (drafts.isNotEmpty()) throw ReleaseRefusals.restoreDependencyNotReleased(root, routeKey, drafts, maxBlockers)
     }
 
     /** The walk's cycle/limit refusals carry the PIPELINE root's prefix; the API restore answers its own family's. */

@@ -16,8 +16,8 @@ import java.util.UUID
 /**
  * One parsed tree request (dependency-graph record §11.1, as amended by erratum (8)(a)): the family is the ROUTE, so
  * only `name`, `id` and `version` are read from the query; a `family` field, or any other field, supplied anyway is
- * ignored. [lookupKey] is the family's own lookup key as its native validator canonicalised it (an API path without its
- * one `/api` prefix; every other family the value verbatim).
+ * ignored. [lookupKey] is the family's own lookup key as its native validator canonicalised it (an API route key — its path without
+ * the one `/api` prefix, preceded by `METHOD ` for a mutation method; every other family the value verbatim).
  */
 data class DependenciesRequest(
     val family: FamilyKey,

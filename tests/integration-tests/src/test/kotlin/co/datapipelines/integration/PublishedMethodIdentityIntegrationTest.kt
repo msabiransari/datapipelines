@@ -72,6 +72,10 @@ class PublishedMethodIdentityIntegrationTest {
     private lateinit var rootKey: String
     private lateinit var rootKeyId: String
 
+    /** The ids of the second-generation pipelines, for the discard-refusal (incoming) reads. */
+    private lateinit var readBId: String
+    private lateinit var writeBId: String
+
     @BeforeAll
     fun seed() {
         E2eClean.beforeSeeding()
@@ -1075,6 +1079,301 @@ class PublishedMethodIdentityIntegrationTest {
     }
 
     // -----------------------------------------------------------------------------------------
+    // Same-path lifecycle — the release graph, the dependency tree and the version verbs carry the method
+    // -----------------------------------------------------------------------------------------
+
+    /** The route the reviewer's shared-path release cases run on: GET and POST both live, both still at v1. */
+    @Test
+    @Order(18)
+    fun `GET releases while a POST shares its path and POST releases while a GET shares its`() {
+        // Both siblings are v1 DRAFT with different pins; before the method rode the graph key, the walk read one
+        // path and found two version-1 rows (a missing node), so the release answered 409 snapshot_changed.
+        val get = releaseDraft("/mix/v1/notes", "GET")
+        val post = releaseDraft("/mix/v1/notes", "POST")
+        get.pipeline shouldBe READ_PIPELINE
+        post.pipeline shouldBe WRITE_PIPELINE
+        // Each release flipped only its own entity: the sibling's version row is the one that was released for it.
+        versionStatus(get.entityId, 1) shouldBe "RELEASED"
+        versionStatus(post.entityId, 1) shouldBe "RELEASED"
+        get.entityId shouldNotBe post.entityId
+    }
+
+    @Test
+    @Order(19)
+    fun `a same-path sibling's release never touches the other method's versions`() {
+        // PUT and DELETE at /mix/v1/notes are still drafts, though their GET and POST siblings were just released.
+        for (method in listOf("PUT", "DELETE")) {
+            versionStatus(endpointId("/mix/v1/notes", method), 1) shouldBe "DRAFT"
+        }
+        // And the released siblings are current at v1 — the pointer moved on the entity that released.
+        for (method in listOf("GET", "POST")) {
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .get("/api/v1/endpoints?path=/mix/v1/notes&method=$method")
+                .then()
+                .statusCode(200)
+                .body("data.current_version", equalTo(1))
+        }
+    }
+
+    @Test
+    @Order(20)
+    @Suppress("LongMethod") // one scenario: each sibling's tree, release, pins and refusals read side by side
+    fun `GET and POST at one path resolve their own dependency trees, release and pin independently`() {
+        publish(path = SHARED_PATH, method = null, pipeline = READ_PIPELINE)
+        publish(path = SHARED_PATH, method = "POST", pipeline = WRITE_PIPELINE)
+        val getId = endpointId(SHARED_PATH, "GET")
+        val postId = endpointId(SHARED_PATH, "POST")
+
+        // The tree of each sibling is its OWN: its route key names it, and its one pipeline edge is its own pin.
+        treeOf(SHARED_PATH, 1).pipelineNames() shouldBe listOf(READ_PIPELINE)
+        treeOf("POST $SHARED_PATH", 1).pipelineNames() shouldBe listOf(WRITE_PIPELINE)
+        treeOf(SHARED_PATH, 1).rootName() shouldBe SHARED_PATH
+        treeOf("POST $SHARED_PATH", 1).rootName() shouldBe "POST $SHARED_PATH"
+        treeOf("POST $SHARED_PATH", 1).rootEntityId() shouldBe postId
+        treeOf(SHARED_PATH, 1).rootEntityId() shouldBe getId
+        // A method with no route at the path has no tree: the sibling's is not substituted for it.
+        treeRequest("PUT $SHARED_PATH", 1).statusCode(404).body("error.code", equalTo("endpoint.not_found"))
+
+        // Release each; both succeed at version 1, and neither answers for the other.
+        releaseDraft(SHARED_PATH, "GET").entityId shouldBe getId
+        releaseDraft(SHARED_PATH, "POST").entityId shouldBe postId
+        treeOf(SHARED_PATH, 1).rootLifecycle() shouldBe "RELEASED"
+        treeOf("POST $SHARED_PATH", 1).rootLifecycle() shouldBe "RELEASED"
+
+        // Overlapping version numbers on distinct pins: each saves a v2 draft on its own entity and releases it.
+        saveAndRelease(postId, WRITE_PIPELINE_B)
+        versionIds(getId) shouldBe listOf(1)
+        saveAndRelease(getId, READ_PIPELINE_B)
+        versionIds(postId) shouldBe listOf(2, 1)
+        versionIds(getId) shouldBe listOf(2, 1)
+        treeOf(SHARED_PATH, 2).pipelineNames() shouldBe listOf(READ_PIPELINE_B)
+        treeOf("POST $SHARED_PATH", 2).pipelineNames() shouldBe listOf(WRITE_PIPELINE_B)
+        treeOf(SHARED_PATH, 1).pipelineNames() shouldBe listOf(READ_PIPELINE)
+        treeOf("POST $SHARED_PATH", 1).pipelineNames() shouldBe listOf(WRITE_PIPELINE)
+
+        // The pipeline side names the route that pins it: a POST route is `POST /path`, never a bare path that a
+        // GET at the same path would also be called.
+        referencingApiPaths(writeBId, 1) shouldBe listOf("POST $SHARED_PATH")
+        referencingApiPaths(readBId, 1) shouldBe listOf(SHARED_PATH)
+    }
+
+    @Test
+    @Order(21)
+    @Suppress("LongMethod") // switch, discard, restore and purge-guard of two siblings, asserted against each other
+    fun `save, switch, discard and restore on one same-path sibling never operate on the other`() {
+        val getId = endpointId(SHARED_PATH, "GET")
+        val postId = endpointId(SHARED_PATH, "POST")
+        currentVersion(getId) shouldBe 2
+        currentVersion(postId) shouldBe 2
+
+        // switch: POST back to v1 — GET keeps v2.
+        switchTo(postId, 1)
+        currentVersion(postId) shouldBe 1
+        currentVersion(getId) shouldBe 2
+
+        // discard POST v2 (not current) — GET's v2 is a different row and stays RELEASED.
+        postVersion(postId, 2, "discard").statusCode(200).body("data.version", equalTo(2))
+        versionStatus(postId, 2) shouldBe "DISCARDED"
+        versionStatus(getId, 2) shouldBe "RELEASED"
+        treeOf("POST $SHARED_PATH", 2).rootLifecycle() shouldBe "DISCARDED"
+        treeOf(SHARED_PATH, 2).rootLifecycle() shouldBe "RELEASED"
+
+        // restore POST v2: the restore recheck walks the POST pin; GET's v2 is untouched, still pinning its own pipeline.
+        postVersion(postId, 2, "restore").statusCode(200).body("data.version", equalTo(2))
+        versionStatus(postId, 2) shouldBe "RELEASED"
+        // A restore moves the pointer only upward: POST is current at 2 again, and GET never left 2.
+        currentVersion(postId) shouldBe 2
+        currentVersion(getId) shouldBe 2
+        versionBody(getId, 2) shouldBe READ_PIPELINE_B
+        versionBody(postId, 2) shouldBe WRITE_PIPELINE_B
+
+        // a draft saved on GET is GET's alone: POST has no draft, so releasing POST's draft is refused, not GET's.
+        saveDraft(getId, READ_PIPELINE, expectedHash = versionHash(getId, 2)).statusCode(200)
+        postRelease(postId, versionHash(postId, 2)).statusCode(409).body("error.code", equalTo("endpoint.version.not_draft"))
+        versionStatus(getId, 3) shouldBe "DRAFT"
+        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$postId/versions/3").then().statusCode(404)
+    }
+
+    @Test
+    @Order(22)
+    fun `the same-path lifecycle and tree surfaces keep their role and key cells`() {
+        val postId = endpointId(SHARED_PATH, "POST")
+        val hash = versionHash(postId, 1)
+        // endpoint.read: every member role reads a mutation route's tree; an endpoint KEY is refused by kind.
+        for (session in listOf(VIEWER_SESSION, AUTHOR_SESSION, WS_ADMIN_SESSION)) {
+            given()
+                .port(port)
+                .asSession(session)
+                .queryParam("name", "POST $SHARED_PATH")
+                .queryParam("version", 1)
+                .get("/api/v1/dependencies/api_endpoint")
+                .then()
+                .statusCode(200)
+        }
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, rootKey)
+            .queryParam("name", "POST $SHARED_PATH")
+            .queryParam("version", 1)
+            .get("/api/v1/dependencies/api_endpoint")
+            .then()
+            .statusCode(403)
+        given()
+            .port(port)
+            .queryParam("name", "POST $SHARED_PATH")
+            .queryParam("version", 1)
+            .get("/api/v1/dependencies/api_endpoint")
+            .then()
+            .statusCode(401)
+        // endpoint.version.manage / endpoint.release: viewer and promoter are refused on the sibling's routes, and the
+        // key is refused by kind; nothing moved.
+        for (session in listOf(VIEWER_SESSION, PROMOTER_SESSION)) {
+            given().port(port).contentType(ContentType.JSON).asSession(session).body("""{"version": 1}""")
+                .post("/api/v1/endpoints/$postId/current").then().statusCode(403)
+            given().port(port).asSession(session).post("/api/v1/endpoints/$postId/versions/2/discard").then().statusCode(403)
+            given().port(port).asSession(session).post("/api/v1/endpoints/$postId/versions/2/restore").then().statusCode(403)
+            given().port(port).asSession(session).header("If-Match", hash).post("/api/v1/endpoints/$postId/release")
+                .then().statusCode(403)
+        }
+        given().port(port).header(API_KEY_HEADER, rootKey).header("If-Match", hash)
+            .post("/api/v1/endpoints/$postId/release").then().statusCode(403)
+        currentVersion(postId) shouldBe 2
+        versionStatus(postId, 2) shouldBe "RELEASED"
+        // The author may switch (endpoint.version.manage ✓), proving the refusals above were the role and not the route.
+        given().port(port).contentType(ContentType.JSON).asSession(AUTHOR_SESSION).body("""{"version": 1}""")
+            .post("/api/v1/endpoints/$postId/current").then().statusCode(200)
+        currentVersion(postId) shouldBe 1
+        currentVersion(endpointId(SHARED_PATH, "GET")) shouldBe 2
+    }
+
+    // -- same-path lifecycle helpers ----------------------------------------------------------
+
+    private class Released(
+        val entityId: String,
+        val pipeline: String,
+    )
+
+    private fun endpointId(
+        path: String,
+        method: String,
+    ): String =
+        given().port(port).asSession(ADMIN_SESSION)
+            .queryParam("path", path).queryParam("method", method)
+            .get("/api/v1/endpoints").then().statusCode(200)
+            .extract().jsonPath().getString("data.id")
+
+    private fun versionStatus(
+        entityId: String,
+        version: Int,
+    ): String =
+        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions/$version")
+            .then().statusCode(200).extract().jsonPath().getString("data.status")
+
+    private fun versionHash(
+        entityId: String,
+        version: Int,
+    ): String =
+        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions/$version")
+            .then().statusCode(200).extract().jsonPath().getString("data.body_hash")
+
+    private fun versionBody(
+        entityId: String,
+        version: Int,
+    ): String =
+        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions/$version")
+            .then().statusCode(200).extract().jsonPath().getString("data.pipeline")
+
+    private fun versionIds(entityId: String): List<Int> =
+        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions")
+            .then().statusCode(200).extract().jsonPath().getList("data.version")
+
+    private fun currentVersion(entityId: String): Int =
+        given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions")
+            .then().statusCode(200).extract().jsonPath().getInt("data.find { it.is_current }.version")
+
+    /** Releases the entity's v1 draft at its own body hash through the shared planner; 200 is the assertion. */
+    private fun releaseDraft(
+        path: String,
+        method: String,
+    ): Released {
+        val entityId = endpointId(path, method)
+        val response = postRelease(entityId, versionHash(entityId, 1))
+        response.statusCode(200).body("data.status", equalTo("RELEASED"))
+        return Released(entityId, response.extract().jsonPath().getString("data.pipeline"))
+    }
+
+    private fun postRelease(
+        entityId: String,
+        hash: String,
+    ) = given().port(port).asSession(ADMIN_SESSION).header("If-Match", hash).post("/api/v1/endpoints/$entityId/release").then()
+
+    private fun saveDraft(
+        entityId: String,
+        pipeline: String,
+        expectedHash: String,
+    ) = given().port(port).contentType(ContentType.JSON).asSession(ADMIN_SESSION).header("If-Match", expectedHash)
+        .body("""{"pipeline": "$pipeline", "pipeline_version": 1, "timeout_seconds": 60}""")
+        .put("/api/v1/endpoints/$entityId/draft").then()
+
+    /** Saves a draft pinning [pipeline] on the entity's current version, then releases it. */
+    private fun saveAndRelease(
+        entityId: String,
+        pipeline: String,
+    ) {
+        val current = given().port(port).asSession(ADMIN_SESSION).get("/api/v1/endpoints/$entityId/versions")
+            .then().statusCode(200).extract().jsonPath()
+        val currentHash = current.getString("data.find { it.is_current }.body_hash")
+        val saved = saveDraft(entityId, pipeline, currentHash).statusCode(200).extract().jsonPath()
+        postRelease(entityId, saved.getString("data.body_hash")).statusCode(200).body("data.pipeline", equalTo(pipeline))
+    }
+
+    private fun switchTo(
+        entityId: String,
+        version: Int,
+    ) {
+        given().port(port).contentType(ContentType.JSON).asSession(ADMIN_SESSION).body("""{"version": $version}""")
+            .post("/api/v1/endpoints/$entityId/current").then().statusCode(200)
+    }
+
+    private fun postVersion(
+        entityId: String,
+        version: Int,
+        verb: String,
+    ) = given().port(port).asSession(ADMIN_SESSION).post("/api/v1/endpoints/$entityId/versions/$version/$verb").then()
+
+    private fun treeRequest(
+        routeKey: String,
+        version: Int,
+    ) = given().port(port).asSession(ADMIN_SESSION).queryParam("name", routeKey).queryParam("version", version)
+        .get("/api/v1/dependencies/api_endpoint").then()
+
+    private fun treeOf(
+        routeKey: String,
+        version: Int,
+    ): io.restassured.path.json.JsonPath =
+        treeRequest(routeKey, version).statusCode(200).extract().jsonPath()
+
+    private fun io.restassured.path.json.JsonPath.pipelineNames(): List<String> =
+        getList<String>("data.nodes.findAll { it.family == 'pipeline' }.name")
+
+    private fun io.restassured.path.json.JsonPath.rootName(): String = getString("data.nodes.find { it.node_id == 'n0' }.name")
+
+    private fun io.restassured.path.json.JsonPath.rootEntityId(): String = getString("data.nodes.find { it.node_id == 'n0' }.entity_id")
+
+    private fun io.restassured.path.json.JsonPath.rootLifecycle(): String = getString("data.nodes.find { it.node_id == 'n0' }.lifecycle")
+
+    /** The API routes still pinning [pipelineId]@[version], as the discard refusal names them. */
+    private fun referencingApiPaths(
+        pipelineId: String,
+        version: Int,
+    ): List<String> =
+        given().port(port).asSession(ADMIN_SESSION).post("/api/v1/pipelines/$pipelineId/versions/$version/discard")
+            .then().statusCode(409).body("error.code", equalTo("pipeline.version.pinned"))
+            .extract().jsonPath().getList("error.details.referencing_api_versions.path")
+
+    // -----------------------------------------------------------------------------------------
     // Fixture
     // -----------------------------------------------------------------------------------------
 
@@ -1224,10 +1523,31 @@ class PublishedMethodIdentityIntegrationTest {
                         "depends_on": []}]}
             """.trimIndent(),
         )
+        // The same-path lifecycle's second generation: distinct pipelines (so distinct pins) over the same templates.
+        readBId =
+            pipeline(
+                """
+                {"schema_version": 1, "name": "$READ_PIPELINE_B", "display_name": "MI read B",
+                 "description": "1037 E2E — the GET identity's v2 pin.", "parameters": {},
+                 "nodes": [{"id": "read", "description": "All rows", "type": "DQL",
+                            "source": "ep-source-mi", "template": {"id": "test/mi_read.sql", "version": 1},
+                            "depends_on": []}]}
+                """.trimIndent(),
+            )
+        writeBId =
+            pipeline(
+                """
+                {"schema_version": 1, "name": "$WRITE_PIPELINE_B", "display_name": "MI write B",
+                 "description": "1037 E2E — the POST identity's v2 pin.", "parameters": {},
+                 "nodes": [{"id": "write", "description": "A write", "type": "DML",
+                            "source": "ep-source-mi", "template": {"id": "test/mi_write.sql", "version": 1},
+                            "depends_on": []}]}
+                """.trimIndent(),
+            )
     }
 
     /** Creates the pipeline and RELEASES it — an API pins an exact version, and only a released one is eligible. */
-    private fun pipeline(body: String) {
+    private fun pipeline(body: String): String {
         val created =
             given()
                 .port(port)
@@ -1249,6 +1569,7 @@ class PublishedMethodIdentityIntegrationTest {
             .then()
             .statusCode(200)
             .body("data.status", equalTo("RELEASED"))
+        return created.jsonPath().getString("data.id")
     }
 
     /** The rows the GET identity serves. */
@@ -1374,6 +1695,11 @@ class PublishedMethodIdentityIntegrationTest {
         private const val OTHER_WORKSPACE = "mi-other"
         private const val READ_PIPELINE = "test/mi_read"
         private const val WRITE_PIPELINE = "test/mi_write"
+        private const val READ_PIPELINE_B = "test/mi_read_b"
+        private const val WRITE_PIPELINE_B = "test/mi_write_b"
+
+        /** The path the same-path lifecycle cases publish a GET and a POST at (both start at v1). */
+        private const val SHARED_PATH = "/mix/v1/shared"
         private const val OTHER_WRITE_PIPELINE = "test/mi_other_write"
         private const val OTHER_READ_PIPELINE = "test/mi_other_read"
         private const val SEEDED_ROWS = 2

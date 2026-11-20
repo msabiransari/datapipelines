@@ -47,7 +47,7 @@ class EndpointReleaseSteps(
     ): ReleaseNodeIdentity? {
         val endpoint = endpoints.findById(endpointId)?.takeIf { it.workspaceId == workspaceId } ?: return null
         val draft = versions.findDraft(endpoint.id) ?: throw noDraft(endpoint)
-        return ReleaseNodeIdentity(workspaceId, ReleaseFamily.ENDPOINT, endpoint.pathPattern, draft.version)
+        return ReleaseNodeIdentity(workspaceId, ReleaseFamily.ENDPOINT, EndpointRouteKey.of(endpoint.method, endpoint.pathPattern), draft.version)
     }
 
     /** Step 4: the native checks of the API draft at [identity], against [expectedHash] (the root's `If-Match`). */
@@ -61,7 +61,7 @@ class EndpointReleaseSteps(
         EndpointWrites.requireAuthoring(authoring)
         val endpoint =
             entityUuid?.let(endpoints::findById)?.takeIf {
-                it.workspaceId == identity.workspaceId && it.pathPattern == identity.entityId
+                it.workspaceId == identity.workspaceId && EndpointRouteKey.of(it.method, it.pathPattern) == identity.entityId
             } ?: throw ReleaseRefusals.planConflict(ReleaseFamily.ENDPOINT)
         val version = versions.find(endpoint.id, identity.version) ?: throw ReleaseRefusals.planConflict(ReleaseFamily.ENDPOINT)
         if (version.status != PipelineVersionStatus.DRAFT) throw noDraft(endpoint)
