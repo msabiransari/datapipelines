@@ -124,14 +124,21 @@ class ApiKeyRows(
      */
     private fun boundPaths(key: ApiKey): List<String> =
         when (key.kind) {
-            ApiKeyKind.ENDPOINT ->
+            ApiKeyKind.ENDPOINT -> {
                 bindings
                     .findByKey(key.id)
                     .map { binding ->
                         if (binding.method == EndpointMethod.GET) binding.pathPrefix else "${binding.method.name} ${binding.pathPrefix}"
                     }.sorted()
-            ApiKeyKind.DASHBOARD -> dashboardBindings.findByKey(key.id).map { it.namePrefix }.sorted()
-            else -> emptyList()
+            }
+
+            ApiKeyKind.DASHBOARD -> {
+                dashboardBindings.findByKey(key.id).map { it.namePrefix }.sorted()
+            }
+
+            else -> {
+                emptyList()
+            }
         }
 
     companion object {

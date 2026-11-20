@@ -103,6 +103,7 @@ internal class EndpointWrites(
         }
 
         /** Parses and reserves [pathPattern] (§4.1, R-EP5), refusing with the catalogued path codes. */
+        @Suppress("ThrowsCount") // grammar, reserved category and reserved polling suffix are each their own refusal
         fun parsePath(pathPattern: String): EndpointPath.Parsed {
             val parsed =
                 EndpointPath.parse(pathPattern).getOrElse {

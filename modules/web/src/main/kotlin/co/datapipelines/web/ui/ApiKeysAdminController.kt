@@ -182,7 +182,12 @@ class ApiKeysAdminController(
         // set-delta would either strip it on an unrelated save or re-bind it as a GET node
         // grant, the exact widening the method identity exists to prevent. The REST and MCP
         // bind surfaces carry the method until #1040's authoring UI.
-        val current = bindings.findByKey(key.id).filter { it.method == EndpointMethod.GET }.map { it.pathPrefix }.toSet()
+        val current =
+            bindings
+                .findByKey(key.id)
+                .filter { it.method == EndpointMethod.GET }
+                .map { it.pathPrefix }
+                .toSet()
         wanted.filter { it !in current }.forEach { endpointKeys.bind(principal, key.id, it) }
         current.filter { it !in wanted }.forEach { endpointKeys.unbind(principal, key.id, it) }
         model.addAttribute("keys", rows(principal))

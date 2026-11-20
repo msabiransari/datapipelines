@@ -47,7 +47,8 @@ class EndpointMatcherTest {
 
     @Test
     fun `several variables bind in one path`() {
-        matcher("/nyc/v1/{a}/x/{b}").match("/nyc/v1/one/x/two", EndpointMethod.GET)?.pathVariables shouldBe mapOf("a" to "one", "b" to "two")
+        matcher("/nyc/v1/{a}/x/{b}").match("/nyc/v1/one/x/two", EndpointMethod.GET)?.pathVariables shouldBe
+            mapOf("a" to "one", "b" to "two")
     }
 
     @Test
@@ -176,18 +177,17 @@ class EndpointMatcherTest {
     private fun endpoint(
         pattern: String,
         method: EndpointMethod = EndpointMethod.GET,
-    ) =
-        PublishedEndpoint.of(
-            id = UUID.randomUUID(),
-            workspaceId = WORKSPACE,
-            pathPattern = pattern,
-            isEnabled = true,
-            createdBy = ACTOR,
-            createdAt = Instant.EPOCH,
-            updatedAt = Instant.EPOCH,
-            current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody("test/pipeline", 1, 30, "")),
-            method = method,
-        )
+    ) = PublishedEndpoint.of(
+        id = UUID.randomUUID(),
+        workspaceId = WORKSPACE,
+        pathPattern = pattern,
+        isEnabled = true,
+        createdBy = ACTOR,
+        createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH,
+        current = CurrentVersion(1, PipelineVersionStatus.RELEASED, EndpointVersionBody("test/pipeline", 1, 30, "")),
+        method = method,
+    )
 
     /**
      * A request path drawn so a meaningful share of them hit: half the draws instantiate a

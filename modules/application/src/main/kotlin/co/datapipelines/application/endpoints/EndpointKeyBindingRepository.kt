@@ -142,7 +142,8 @@ class EndpointKeyBindingRepository(
         method: EndpointMethod = EndpointMethod.GET,
     ): Boolean =
         jdbc.update(
-            "DELETE FROM endpoint_key_bindings WHERE path_prefix = :prefix AND api_key_id = :keyId AND workspace_id = :workspaceId AND method = :method",
+            "DELETE FROM endpoint_key_bindings " +
+                "WHERE path_prefix = :prefix AND api_key_id = :keyId AND workspace_id = :workspaceId AND method = :method",
             mapOf("prefix" to pathPrefix, "keyId" to apiKeyId, "workspaceId" to workspaceId, "method" to method.name),
         ) > 0
 

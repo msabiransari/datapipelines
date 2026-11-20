@@ -113,7 +113,8 @@ class ApiConsoleController(
                     // are its GET node bindings; a mutation row's are its exact entity grants —
                     // never the sibling method's, which is a different route's authorization.
                     boundKeyNames =
-                        boundByPath[endpoint.pathPattern].orEmpty()
+                        boundByPath[endpoint.pathPattern]
+                            .orEmpty()
                             .filter { it.method == endpoint.method }
                             .mapNotNull { keyNames[it.apiKeyId] }
                             .sorted(),

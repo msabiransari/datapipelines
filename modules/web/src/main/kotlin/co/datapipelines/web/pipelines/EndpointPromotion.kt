@@ -102,13 +102,21 @@ class EndpointPromotion(
             )
         }
         val candidates = endpoints.findByWorkspace(workspaceId)
-        val travelling = candidates.mapNotNull { endpoint -> endpoint.current?.body?.takeIf { it.pipelineName in promoted }?.let { endpoint } }
+        val travelling =
+            candidates.mapNotNull { endpoint ->
+                endpoint.current
+                    ?.body
+                    ?.takeIf { it.pipelineName in promoted }
+                    ?.let { endpoint }
+            }
         val mutations = travelling.filter { it.method != EndpointMethod.GET }
         if (mutations.isNotEmpty()) {
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED,
                 message =
-                    "This batch would promote non-GET API route(s) ${mutations.sortedBy { it.pathPattern }.joinToString(", ") { "${it.method.name} ${it.pathPattern}" }}. " +
+                    "This batch would promote non-GET API route(s) ${mutations.sortedBy { it.pathPattern }.joinToString(
+                        ", ",
+                    ) { "${it.method.name} ${it.pathPattern}" }}. " +
                         "Method-aware transfer needs exact-pin promotion (#879) and a receiver that advertises " +
                         "method support; until then a mutation route cannot travel — unpublish it first, or promote " +
                         "when #1040 lands.",

@@ -216,8 +216,10 @@ object EndpointPath {
         val segments = parsed.segments
         // A paging URL carries at least a two-segment business path before its suffix, so a
         // pattern shorter than suffix + two segments cannot collide with one.
-        if (segments.size >= 5 && matchesPaging(segments, segments.size - 3, withResult = true)) return RESULT_SUFFIX
-        if (segments.size >= 4 && matchesPaging(segments, segments.size - 2, withResult = false)) return EXECUTION_SUFFIX
+        val resultStart = segments.size - RESULT_TAIL_SEGMENTS
+        if (resultStart >= MIN_BUSINESS_SEGMENTS && matchesPaging(segments, resultStart, withResult = true)) return RESULT_SUFFIX
+        val executionStart = segments.size - EXECUTION_TAIL_SEGMENTS
+        if (executionStart >= MIN_BUSINESS_SEGMENTS && matchesPaging(segments, executionStart, withResult = false)) return EXECUTION_SUFFIX
         return null
     }
 
@@ -252,6 +254,13 @@ object EndpointPath {
 
     /** [EXECUTION_SUFFIX]'s result read. */
     const val RESULT_SUFFIX = "executions/{id}/result"
+
+    /** The paging tail's segment counts: `executions/{id}` and `executions/{id}/result`. */
+    private const val EXECUTION_TAIL_SEGMENTS = 2
+    private const val RESULT_TAIL_SEGMENTS = 3
+
+    /** A paging URL's business path is at least `<category>/<version>` (the paging regex's own floor). */
+    private const val MIN_BUSINESS_SEGMENTS = 2
 
     private const val EXECUTIONS_SEGMENT = "executions"
 

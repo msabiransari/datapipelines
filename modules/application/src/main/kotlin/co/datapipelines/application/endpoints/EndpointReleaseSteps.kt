@@ -74,7 +74,13 @@ class EndpointReleaseSteps(
     fun commit(prepared: Prepared): PublishedEndpointVersion {
         val endpoint = prepared.endpoint
         versions.lockEntity(endpoint.id) ?: throw ReleaseRefusals.planConflict(ReleaseFamily.ENDPOINT)
-        pins.check(endpoint.workspaceId, endpoint.parsed, prepared.version.body, EndpointPinValidator.Admission.RELEASED_ONLY, endpoint.method)
+        pins.check(
+            endpoint.workspaceId,
+            endpoint.parsed,
+            prepared.version.body,
+            EndpointPinValidator.Admission.RELEASED_ONLY,
+            endpoint.method,
+        )
         val released =
             versions.release(endpoint.id, prepared.version.version, prepared.expectedHash, prepared.actor)
                 ?: throw ReleaseRefusals.planConflict(ReleaseFamily.ENDPOINT)

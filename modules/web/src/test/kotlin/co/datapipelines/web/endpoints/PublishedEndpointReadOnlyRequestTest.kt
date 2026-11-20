@@ -1,10 +1,10 @@
 package co.datapipelines.web.endpoints
 
-import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointMatcher
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.EndpointVersionBody

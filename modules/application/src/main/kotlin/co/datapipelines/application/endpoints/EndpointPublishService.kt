@@ -93,7 +93,15 @@ class EndpointPublishService(
                 // #841: workspace guard → the pin's checks under it → registry key → overlap check + inserts.
                 writes.writeGuard.workspaces(listOf(workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
                 val resolved = pins.check(workspaceId, parsed, body, EndpointPinValidator.Admission.ELIGIBLE, method)
-                writes.createWithFirstVersion(workspaceId, parsed, method, resolved.record.id, body, PipelineVersionStatus.DRAFT, principal.userId)
+                writes.createWithFirstVersion(
+                    workspaceId,
+                    parsed,
+                    method,
+                    resolved.record.id,
+                    body,
+                    PipelineVersionStatus.DRAFT,
+                    principal.userId,
+                )
             }
         audit.log(
             event = AUDIT_DRAFT_SAVED,

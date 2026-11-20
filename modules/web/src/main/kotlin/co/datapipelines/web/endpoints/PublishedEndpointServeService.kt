@@ -298,7 +298,7 @@ class PublishedEndpointServeService(
         // catalogued 503 with distinct messages until #1039 replaces this gate with the real
         // admission path (flag off: the operator withheld it; flag on: this build cannot serve it).
         return when {
-            !endpointsProperties.mutationsEnabled ->
+            !endpointsProperties.mutationsEnabled -> {
                 Outcome.Refused(
                     HTTP_SERVICE_UNAVAILABLE,
                     PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED,
@@ -306,8 +306,9 @@ class PublishedEndpointServeService(
                         "The route and the grant are valid; ask the operator to enable them.",
                     mapOf("method" to requested.name),
                 )
+            }
 
-            else ->
+            else -> {
                 Outcome.Refused(
                     HTTP_SERVICE_UNAVAILABLE,
                     PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED,
@@ -315,6 +316,7 @@ class PublishedEndpointServeService(
                         "nothing was written.",
                     mapOf("method" to requested.name),
                 )
+            }
         }
     }
 
@@ -330,11 +332,12 @@ class PublishedEndpointServeService(
         principal: AuthenticatedPrincipal,
     ): Map<EndpointMethod, PublishedEndpoint> {
         val matcher = registry.matcher()
-        val live = buildMap {
-            EndpointMethod.entries.forEach { method ->
-                matcher.match(path, method)?.let { match -> put(method, match.endpoint) }
+        val live =
+            buildMap {
+                EndpointMethod.entries.forEach { method ->
+                    matcher.match(path, method)?.let { match -> put(method, match.endpoint) }
+                }
             }
-        }
         if (live.isEmpty()) return emptyMap()
         val workspaceId = live.values.first().workspaceId
         // §5.6 / D15 — one liveness answer covers the map (see KDoc); a dead workspace's path is

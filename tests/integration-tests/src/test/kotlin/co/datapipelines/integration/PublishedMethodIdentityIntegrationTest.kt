@@ -363,6 +363,7 @@ class PublishedMethodIdentityIntegrationTest {
 
     @Test
     @Order(8)
+    @Suppress("LongMethod") // every method's redacted refusal is one ordered cross-tenant walk
     fun `a cross-workspace publish conflicts for every method and reveals nothing`() {
         // The other workspace needs its OWN template, datasource and pipeline to publish at all —
         // all three are workspace-scoped (V4 re-key), so the conflict below is the registry's,
@@ -563,6 +564,7 @@ class PublishedMethodIdentityIntegrationTest {
 
     @Test
     @Order(10)
+    @Suppress("LongMethod") // discard, refusal and restore are one ordered route lifecycle
     fun `the pin refusal precedes the mutations gate - and restore puts the route back`() {
         val order =
             given()
@@ -750,6 +752,7 @@ class PublishedMethodIdentityIntegrationTest {
 
     @Test
     @Order(13)
+    @Suppress("LongMethod") // every role x route cell is one matrix row; splitting it orphans a cell
     fun `the method-aware management routes keep their role cells - viewer reads, author publishes, only admins grant`() {
         // endpoint.read — every member role reads a mutation route by path AND method.
         given()
@@ -927,6 +930,7 @@ class PublishedMethodIdentityIntegrationTest {
 
     @Test
     @Order(16)
+    @Suppress("LongMethod") // the upgrade-shaped row, its GET and the grant are one ordered scenario
     fun `a pre-V65 root binding serves its GET and gains a mutation only by an exact grant`() {
         val minted =
             given()
@@ -1000,6 +1004,7 @@ class PublishedMethodIdentityIntegrationTest {
 
     @Test
     @Order(17)
+    @Suppress("LongMethod") // both keys' answers at one path are compared in one scenario
     fun `a write-only key and a root-bound key are judged independently at one path`() {
         val minted =
             given()
@@ -1263,6 +1268,7 @@ class PublishedMethodIdentityIntegrationTest {
     }
 
     /** Users, the second workspace and its key — the cross-tenant fixtures. */
+    @Suppress("LongMethod") // the seed IS the fixture: identities, memberships and keys in one spelled-out block
     private fun seedRows() {
         DriverManager
             .getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password)

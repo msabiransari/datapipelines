@@ -103,12 +103,13 @@ class PublishedEndpointController(
                     .body(outcome.body)
             }
 
-            is PublishedEndpointServeService.Outcome.Refused ->
+            is PublishedEndpointServeService.Outcome.Refused -> {
                 ResponseEntity
                     .status(outcome.status)
                     .headers(baseHeaders())
                     .apply { outcome.allow?.let { allow -> header(HttpHeaders.ALLOW, allow.joinToString(", ")) } }
                     .body(ApiErrorResponse.of(outcome.code, outcome.message, outcome.details))
+            }
         }
     }
 

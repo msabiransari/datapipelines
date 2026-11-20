@@ -146,6 +146,7 @@ class PublishedEndpointRepository(
      * @throws DatapipelinesException `endpoint.path_conflict` — named for a same-workspace
      *   same-method conflict, redacted for a cross-workspace one.
      */
+    @Suppress("ThrowsCount") // the named, the redacted and the lock-bypass conflict are each their own refusal
     fun insert(
         endpoint: PublishedEndpoint,
         legacy: LegacyEndpointColumns,
@@ -192,10 +193,12 @@ class PublishedEndpointRepository(
         val foreign = overlapping.firstOrNull { it.workspaceId != workspaceId }
         return when {
             sameWorkspaceSameMethod != null -> PathConflict.Named(sameWorkspaceSameMethod.pathPattern)
+
             // A cross-workspace overlap conflicts for EVERY method (published-mutation-apis §2):
             // a URL's meaning is global per method, and a second workspace's route — whatever its
             // method — is not the caller's to learn about, hence the redacted shape.
             foreign != null -> PathConflict.Redacted
+
             else -> null
         }
     }
@@ -206,9 +209,9 @@ class PublishedEndpointRepository(
         method: EndpointMethod = EndpointMethod.GET,
     ): Boolean =
         jdbc.update(
-                "DELETE FROM published_endpoints WHERE path_pattern = :path AND method = :method",
-                mapOf("path" to pathPattern, "method" to method.name),
-            ) > 0
+            "DELETE FROM published_endpoints WHERE path_pattern = :path AND method = :method",
+            mapOf("path" to pathPattern, "method" to method.name),
+        ) > 0
 
     /** Deletes one entity by id (its versions cascade, and its mutation grants with them) — the sole-draft purge. */
     fun deleteById(id: UUID): Boolean = jdbc.update("DELETE FROM published_endpoints WHERE id = :id", mapOf("id" to id)) > 0
@@ -220,9 +223,9 @@ class PublishedEndpointRepository(
         method: EndpointMethod = EndpointMethod.GET,
     ): Boolean =
         jdbc.update(
-                "UPDATE published_endpoints SET is_enabled = :enabled, updated_at = NOW() WHERE path_pattern = :path AND method = :method",
-                mapOf("path" to pathPattern, "enabled" to enabled, "method" to method.name),
-            ) > 0
+            "UPDATE published_endpoints SET is_enabled = :enabled, updated_at = NOW() WHERE path_pattern = :path AND method = :method",
+            mapOf("path" to pathPattern, "enabled" to enabled, "method" to method.name),
+        ) > 0
 
     private fun params(
         endpoint: PublishedEndpoint,

@@ -203,7 +203,12 @@ class PromotionEndpointKeysTest {
         every { publishing.get(any(), any()) } returns null
         val entries =
             listOf(
-                PromotionWire.EndpointEntry(path = "/lending/home", pipeline = "lending_home", timeoutSeconds = 30, bindings = listOf("ci-lending")),
+                PromotionWire.EndpointEntry(
+                    path = "/lending/home",
+                    pipeline = "lending_home",
+                    timeoutSeconds = 30,
+                    bindings = listOf("ci-lending"),
+                ),
                 PromotionWire.EndpointEntry(
                     path = "/lending/applications",
                     pipeline = "lending_apply",
@@ -229,7 +234,13 @@ class PromotionEndpointKeysTest {
         every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, "ci-lending") } returns listOf(key("dpk_AAAAAAAAAAAA", "ci-lending"))
         every { publishing.get(any(), any()) } returns null
         val entry =
-            PromotionWire.EndpointEntry(path = "/lending/home", pipeline = "lending_home", timeoutSeconds = 30, bindings = listOf("ci-lending"), method = "GET")
+            PromotionWire.EndpointEntry(
+                path = "/lending/home",
+                pipeline = "lending_home",
+                timeoutSeconds = 30,
+                bindings = listOf("ci-lending"),
+                method = "GET",
+            )
 
         service.apply(batch("dev", listOf(entry)), peer)
 
