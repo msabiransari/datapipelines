@@ -2,6 +2,7 @@ package co.datapipelines.executor
 
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.events.NodeStarted
+import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.DmlInput
 import co.datapipelines.pipeline.DmlKey
 import co.datapipelines.pipeline.Node
@@ -19,6 +20,7 @@ import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.node.TextNode
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
@@ -72,10 +74,12 @@ class DmlFamilyAdmissionTest {
                     listOf(Fixtures.node("hop", type = NodeType.PIPELINE, source = "").copy(pipeline = PipelineNodeRef("test/grandchild", 1))),
                 )
             family(shop, mapOf("test/child" to child, "test/grandchild" to grandchild)).use { family ->
-                val thrown = family.runParent()
-                (thrown as PipelineExecutionFailed).errorCode shouldBe PipelineErrorCodes.Validation.DML_OPERATION_REQUIRED
+                val refusal = family.refusal(PipelineErrorCodes.Validation.DML_OPERATION_REQUIRED)
                 family.assertNothingRan()
-                thrown.message?.contains("test/grandchild") shouldBe true
+                refusal.message?.contains("pinned child 'test/grandchild' v1") shouldBe true
+                refusal.details["child"] shouldBe "test/grandchild@1"
+                refusal.details["via"] shouldBe listOf("child", "hop")
+                refusal.details["path"] shouldBe "nodes[0].operation"
             }
         }
     }
@@ -89,9 +93,10 @@ class DmlFamilyAdmissionTest {
             val insert = scalarInsert("insert", dependsOn = listOf("first"))
             val pipeline = Fixtures.pipeline(listOf(Fixtures.node("first", type = NodeType.DML, source = "shop"), insert), customerParameter())
             family(shop, emptyMap(), parent = pipeline).use { family ->
-                val thrown = family.runParent()
-                (thrown as PipelineExecutionFailed).errorCode shouldBe PipelineErrorCodes.Node.DML_INSERT_UNQUALIFIED
+                val refusal = family.refusal(PipelineErrorCodes.Node.DML_INSERT_UNQUALIFIED)
                 family.assertNothingRan()
+                // The root body is named by its node alone: no child, no path to one.
+                refusal.details shouldBe mapOf("node" to "insert", "dialect" to Dialect.MYSQL.wire)
             }
         }
     }
@@ -200,10 +205,11 @@ class DmlFamilyAdmissionTest {
         runBlocking {
             val shop = shop().copy(dialect = dialect)
             family(shop, mapOf("test/child" to Fixtures.pipeline(listOf(childNode), childParameters))).use { family ->
-                val thrown = family.runParent()
-                (thrown as PipelineExecutionFailed).errorCode shouldBe code
-                thrown.message?.contains("test/child") shouldBe true
+                val refusal = family.refusal(code)
                 family.assertNothingRan()
+                refusal.message?.contains("pinned child 'test/child' v1") shouldBe true
+                refusal.details["child"] shouldBe "test/child@1"
+                refusal.details["via"] shouldBe listOf("child")
             }
         }
     }
@@ -290,6 +296,21 @@ class DmlFamilyAdmissionTest {
 
         /** Runs the root pipeline; returns the failure it ended with, or null when it succeeded. */
         fun runParent(): Throwable? = runBlocking { runCatching { harness.executor.execute(rootRequest()) }.exceptionOrNull() }
+
+        /**
+         * Runs the root pipeline and returns its ADMISSION refusal: the catalogued [code] raised as
+         * a setup failure (the convention of `DmlPipelineExecutionTest`), never a node's failure,
+         * and streamed as `pipeline_failed` with that code and no failed node.
+         */
+        fun refusal(code: String): DatapipelinesException {
+            val refusal = runParent().shouldBeInstanceOf<DatapipelinesException>()
+            (refusal is PipelineExecutionFailed) shouldBe false
+            refusal.code shouldBe code
+            val failed = harness.emitter.firstOf<PipelineFailed>()
+            failed.failedNodeId shouldBe null
+            failed.error.code shouldBe code
+            return refusal
+        }
 
         private fun rootRequest() = Fixtures.request(root).copy(parameters = if (root.parameters.isEmpty()) emptyMap() else kidValues())
 
