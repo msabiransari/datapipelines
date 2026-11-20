@@ -75,7 +75,6 @@ class DmlFamilyAdmissionTest {
                 )
             family(shop, mapOf("test/child" to child, "test/grandchild" to grandchild)).use { family ->
                 val refusal = family.refusal(PipelineErrorCodes.Validation.DML_OPERATION_REQUIRED)
-                family.assertNothingRan()
                 refusal.message?.contains("pinned child 'test/grandchild' v1") shouldBe true
                 refusal.details["child"] shouldBe "test/grandchild@1"
                 refusal.details["via"] shouldBe listOf("child", "hop")
@@ -94,7 +93,6 @@ class DmlFamilyAdmissionTest {
             val pipeline = Fixtures.pipeline(listOf(Fixtures.node("first", type = NodeType.DML, source = "shop"), insert), customerParameter())
             family(shop, emptyMap(), parent = pipeline).use { family ->
                 val refusal = family.refusal(PipelineErrorCodes.Node.DML_INSERT_UNQUALIFIED)
-                family.assertNothingRan()
                 // The root body is named by its node alone: no child, no path to one.
                 refusal.details shouldBe mapOf("node" to "insert", "dialect" to Dialect.MYSQL.wire)
             }
@@ -206,7 +204,6 @@ class DmlFamilyAdmissionTest {
             val shop = shop().copy(dialect = dialect)
             family(shop, mapOf("test/child" to Fixtures.pipeline(listOf(childNode), childParameters))).use { family ->
                 val refusal = family.refusal(code)
-                family.assertNothingRan()
                 refusal.message?.contains("pinned child 'test/child' v1") shouldBe true
                 refusal.details["child"] shouldBe "test/child@1"
                 refusal.details["via"] shouldBe listOf("child")
@@ -298,12 +295,16 @@ class DmlFamilyAdmissionTest {
         fun runParent(): Throwable? = runBlocking { runCatching { harness.executor.execute(rootRequest()) }.exceptionOrNull() }
 
         /**
-         * Runs the root pipeline and returns its ADMISSION refusal: the catalogued [code] raised as
-         * a setup failure (the convention of `DmlPipelineExecutionTest`), never a node's failure,
-         * and streamed as `pipeline_failed` with that code and no failed node.
+         * Runs the root pipeline and returns its ADMISSION refusal. The observable effects are
+         * asserted first — the independent connection sees only the seed and no node started —
+         * because a late node-level refusal throws the same code (`DmlPipelineExecutionTest`'s
+         * order). Then: the catalogued [code] raised as a setup failure, never a node's, and
+         * streamed as `pipeline_failed` with that code and no failed node.
          */
         fun refusal(code: String): DatapipelinesException {
-            val refusal = runParent().shouldBeInstanceOf<DatapipelinesException>()
+            val thrown = runParent()
+            assertNothingRan()
+            val refusal = thrown.shouldBeInstanceOf<DatapipelinesException>()
             (refusal is PipelineExecutionFailed) shouldBe false
             refusal.code shouldBe code
             val failed = harness.emitter.firstOf<PipelineFailed>()
