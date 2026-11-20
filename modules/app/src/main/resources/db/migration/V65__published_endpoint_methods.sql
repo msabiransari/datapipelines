@@ -29,9 +29,9 @@
 --
 -- Down path (documented, not shipped — Flyway runs forward only):
 --   DELETE FROM endpoint_key_bindings WHERE method <> 'GET';
+--   ALTER TABLE endpoint_key_bindings DROP CONSTRAINT pk_endpoint_key_bindings;
 --   ALTER TABLE endpoint_key_bindings DROP CONSTRAINT chk_endpoint_key_bindings_shape,
 --     DROP CONSTRAINT chk_endpoint_key_bindings_method, DROP COLUMN endpoint_id, DROP COLUMN method;
---   ALTER TABLE endpoint_key_bindings DROP CONSTRAINT pk_endpoint_key_bindings;
 --   ALTER TABLE endpoint_key_bindings ADD PRIMARY KEY (path_prefix, api_key_id);
 --   ALTER TABLE published_endpoints DROP CONSTRAINT chk_published_endpoints_method,
 --     DROP CONSTRAINT uq_published_endpoints_path_method, DROP COLUMN method;
