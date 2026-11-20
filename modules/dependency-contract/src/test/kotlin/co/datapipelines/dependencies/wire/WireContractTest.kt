@@ -177,6 +177,28 @@ class WireContractTest {
     }
 
     @Test
+    fun `the request ceiling allows only API mutation method prefixes beyond the native path budget`() {
+        val request = WireFiles.validator("request")
+        val path = "/mix/v1/" + "a".repeat(64) + "/" + "b".repeat(64) + "/" + "c".repeat(62)
+        path.length shouldBe 200
+        for (prefix in listOf("", "POST ", "PUT ", "DELETE ")) {
+            val value = mapOf("family" to "api_endpoint", "name" to prefix + path, "version" to "1")
+            request.validate(WireFiles.mapper.valueToTree<JsonNode>(value)).shouldBeEmpty()
+            request.validate(WireFiles.mapper.valueToTree<JsonNode>(value + ("name" to prefix + path + "x"))).shouldNotBeEmpty()
+        }
+        for (family in listOf("api_endpoint", "pipeline")) {
+            for (prefix in listOf("GET ", "PATCH ", "post ")) {
+                val value = mapOf("family" to family, "name" to prefix + path, "version" to "1")
+                request.validate(WireFiles.mapper.valueToTree<JsonNode>(value)).shouldNotBeEmpty()
+            }
+        }
+        val pipeline = mapOf("family" to "pipeline", "name" to "POST $path", "version" to "1")
+        request.validate(WireFiles.mapper.valueToTree<JsonNode>(pipeline)).shouldNotBeEmpty()
+        val longVersion = mapOf("family" to "api_endpoint", "name" to path, "version" to "1".repeat(201))
+        request.validate(WireFiles.mapper.valueToTree<JsonNode>(longVersion)).shouldNotBeEmpty()
+    }
+
+    @Test
     fun `the data shape refuses an acyclic flag on an incomplete graph and an INCOMPLETE_VIEW naming a node`() {
         val data = WireFiles.validator()
         val incomplete = WireFiles.data.getValue("diagnostic-incomplete-view").deepCopy<JsonNode>()

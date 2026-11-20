@@ -1286,6 +1286,18 @@ class PublishedMethodIdentityIntegrationTest {
         currentVersion(endpointId(SHARED_PATH, "GET")) shouldBe 2
     }
 
+    @Test
+    @Order(23)
+    fun `a maximum-length published path retains its dependency tree for every method`() {
+        val path = "/mix/v1/" + "a".repeat(64) + "/" + "b".repeat(64) + "/" + "c".repeat(62)
+        path.length shouldBe 200
+        for (method in listOf("GET", "POST", "PUT", "DELETE")) {
+            publish(path = path, method = method, pipeline = READ_PIPELINE)
+            val name = if (method == "GET") path else "$method $path"
+            treeRequest(name, 1).statusCode(200)
+        }
+    }
+
     // -- same-path lifecycle helpers ----------------------------------------------------------
 
     private class Released(

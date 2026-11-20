@@ -49,6 +49,6 @@ enum class RefusalReason(
     /** `version` is absent where required, non-decimal, signed, zero-led, `current` or outside 1..2147483647. */
     VERSION_INVALID("version_invalid"),
 
-    /** A value is longer than 200 characters or not UTF-8 — checked before any grammar. */
+    /** A native value exceeds 200 characters (excluding an API name's mutation method prefix) or is not UTF-8. */
     VALUE_TOO_LONG("value_too_long"),
 }

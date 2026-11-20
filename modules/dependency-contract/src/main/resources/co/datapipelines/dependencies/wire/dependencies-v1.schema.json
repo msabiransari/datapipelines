@@ -748,7 +748,7 @@
         },
         "name": {
           "type": "string",
-          "maxLength": 200,
+          "maxLength": 207,
           "minLength": 1
         },
         "id": {
@@ -762,8 +762,34 @@
           "pattern": "^[1-9][0-9]{0,9}$"
         }
       },
-      "$comment": "The query fields as strings (GET /api/v1/dependencies). The grammar a schema can state: the 200-character ceiling, the UUID and decimal forms and which fields each family takes; the native name grammars and the 2147483647 ceiling are the route's validators (G4).",
+      "$comment": "The query fields as strings (GET /api/v1/dependencies). Values are at most 200 characters, excluding the POST/PUT/DELETE prefix on an api_endpoint name. Native name grammars and the 2147483647 ceiling are the route's validators (G4).",
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "api_endpoint"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "name": {
+                "anyOf": [
+                  { "maxLength": 200 },
+                  { "pattern": "^POST ", "maxLength": 205 },
+                  { "pattern": "^PUT ", "maxLength": 204 },
+                  { "pattern": "^DELETE ", "maxLength": 207 }
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "name": { "maxLength": 200 }
+            }
+          }
+        },
         {
           "if": {
             "properties": {

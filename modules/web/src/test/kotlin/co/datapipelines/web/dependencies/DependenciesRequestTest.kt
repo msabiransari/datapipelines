@@ -102,6 +102,32 @@ class DependenciesRequestTest {
     }
 
     @Test
+    fun `an API method prefix does not consume its valid 200 character path budget`() {
+        val path = "/mix/v1/" + "a".repeat(64) + "/" + "b".repeat(64) + "/" + "c".repeat(62)
+        path.length shouldBe 200
+        for (prefix in listOf("", "POST ", "PUT ", "DELETE ")) {
+            val name = prefix + path
+            parse(FamilyKey.API_ENDPOINT, "name=${enc(name)}&version=1")
+                .shouldBeInstanceOf<Parsed.Accepted>()
+                .request.lookupKey shouldBe name
+            refused(FamilyKey.API_ENDPOINT, "name=${enc(name + "x")}&version=1") shouldBe
+                Parsed.Refused(RequestField.NAME, RefusalReason.VALUE_TOO_LONG)
+        }
+        for (name in listOf("POST $path", "PUT $path", "DELETE $path")) {
+            refused(FamilyKey.PIPELINE, "name=${enc(name)}&version=1") shouldBe
+                Parsed.Refused(RequestField.NAME, RefusalReason.VALUE_TOO_LONG)
+        }
+        for (prefix in listOf("GET ", "PATCH ", "post ")) {
+            refused(FamilyKey.API_ENDPOINT, "name=${enc(prefix + path)}&version=1") shouldBe
+                Parsed.Refused(RequestField.NAME, RefusalReason.VALUE_TOO_LONG)
+        }
+        refused(FamilyKey.API_ENDPOINT, "name=${enc(path)}&version=${"1".repeat(201)}") shouldBe
+            Parsed.Refused(RequestField.VERSION, RefusalReason.VALUE_TOO_LONG)
+        refused(FamilyKey.API_ENDPOINT, "id=${enc("POST $path")}&version=1") shouldBe
+            Parsed.Refused(RequestField.ID, RefusalReason.VALUE_TOO_LONG)
+    }
+
+    @Test
     fun `a version missing on an artifact family is version_invalid - absent where required`() {
         for (family in listOf(
             FamilyKey.PIPELINE,

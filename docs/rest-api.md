@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.124 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
+**Status:** v2.125 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-19
+**Last updated:** 2026-11-20
 
 ---
 
@@ -3009,7 +3009,7 @@ ignored, as is any field the table does not name. Values are form-encoded (`+` i
 
 | Query field | Rule |
 |---|---|
-| any value | at most 200 characters and valid UTF-8, checked before any grammar; otherwise `details.reason = value_too_long` |
+| any value | at most 200 characters and valid UTF-8, checked before any grammar; an `api_endpoint` name's uppercase `POST `, `PUT ` or `DELETE ` prefix is counted separately, so its path retains the full 200-character budget (the complete name is at most 205, 204 or 207 respectively). Other fields and families retain the 200-character limit; otherwise `details.reason = value_too_long` |
 | `name` | required for `pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint` and `datasource`; forbidden for `schedule`. The family's own native name grammar decides it, never a repository lookup: pipeline and template names follow [pipeline-contract §3.2](pipeline-contract.md) and [Templates §3.2](templates.md), which parameter sets, visualizations and dashboards share. An API's name is its immutable ROUTE KEY ([§19.1](#19-published-endpoints); #1037): a GET route's name is its path, a mutation route's is `METHOD path` with ONE space (`POST /shop/v1/orders`; in a query string the space may travel as `+`, which the strict decoder maps back), so GET and POST at one path are two roots with their own trees. A bare path is a GET (the pre-#1037 spelling, byte-identical to every stored link); `GET /x`, an unknown or lower-case method, or a doubled space is `name_invalid`. A datasource name is `[a-z0-9_-]{1,63}` ([Datasources §3.3](datasources.md)). Slashes stay in the value. A refused name is `name_invalid` |
 | `id` | required instead of `name` for `schedule`, in the canonical 36-character lower-case UUID form, otherwise `id_invalid`. `id` on any other family is `selector_incompatible` |
 | `version` | required for the six artifact families; forbidden for `schedule` and `datasource` (`selector_incompatible`). Decimal digits only, no sign or leading zeros, `1 ≤ n ≤ 2147483647`. An absent, non-integer, `current` or out-of-range value is `version_invalid` |
@@ -3122,6 +3122,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-20 | v2.125 | #1037 merge follow-up F1 | **§25:** the API dependency name counts its uppercase mutation method prefix separately from the existing 200-character path limit; other fields and families keep their limit. The request schema and HTTP regression cover every supported method at the path boundary. |
 | 2026-11-19 | v2.124 | 1037 (#1037, published method identities) | **Additive.** §19's routes gain method identity: the intro admits non-GET routes at the same grammar (body/admission/idempotency arrive with #1038/#1039; the operator gate `mutations-enabled` refuses an otherwise-authorized mutation `503 endpoint.mutations_disabled`); §19.1's ambiguity rule and `UNIQUE (path_pattern, method)` are per-method, with the cross-workspace `409` redacted; §19.2's read-only pin rule is a GET rule (a mutation route may pin a writing pipeline; the pin rules themselves run for every method); §19.3 adds the non-GET request rules — session `401` first, exact method grants, opaque visibility (`Allow` = the visible methods, `404` at none); §19.5's management is addressed `?path=&method=` and create takes optional `method` (`400 endpoint.method_invalid` otherwise); §19.6's 405 and 503 rows describe the method era; §19.5's promotion paragraph states that only GET routes and GET grants travel (`409 endpoint.promotion.method_unsupported` on the sender, and on a receiver for an entry naming a non-GET `method`). |
 | 2026-11-15 | v2.123 | 987 (#987, js-rendered F3) | **Deliberate break, decided by the js-rendered charts record O-13:** §23.3's `GET /{id}/runtime/config` answers without `renderer` (its one member, `renderer.bundle`, named the chart library's bundle the page loaded); the visualization preview page's configuration loses the same object. The page loads the chart engine's files itself, from one list. No route, status, permission or other field changed. |
 | 2026-11-15 | v2.122 | 986 (#986, js-rendered F2) | **Deliberate break, decided by the js-rendered charts record O-13:** §22.2's `POST /api/v1/visualizations` and `PUT /api/v1/visualizations/{id}` answer the version without `warnings`: the server's chart library layer (its support table and the `chart.degraded.<field>` save warnings) is gone, and a save never draws the chart. No route, status, permission or other field changed. |
