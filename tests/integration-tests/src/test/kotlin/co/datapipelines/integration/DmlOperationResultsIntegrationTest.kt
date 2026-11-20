@@ -53,26 +53,28 @@ class DmlOperationResultsIntegrationTest {
     @Test
     fun `an insert returns generated and supplied keys under the physical key order_id, exact past 2^53`() {
         prepare()
-        createTemplate("test/dml_stage_two.sql", "POSTGRES", STAGE_TWO)
+        createTemplate("test/dml_stage_rows.sql", "POSTGRES", STAGE_ROWS)
         createTemplate("test/dml_insert_order.sql", "POSTGRES", INSERT_ORDER)
         val pipelineId =
-            createPipeline("test/dml_keys", listOf(stageNode("stage", "test/dml_stage_two.sql", "orders_in"), orderInsert("orders_in")))
+            createPipeline("test/dml_keys", listOf(stageNode("stage", "test/dml_stage_rows.sql", "orders_in"), orderInsert("orders_in")))
 
         val events = consumeExecutionStream(pipelineId, emptyMap())
 
         withClue(describe(events)) { events.last().first shouldBe "data_ready" }
         val result = resultOf(events.first().second["execution_id"].asText())
         result["schema"].map { it["name"].asText() to it["type"].asText() } shouldBe listOf("customer" to "STRING", "id" to "BIGINTEGER")
-        // The generated key is 2^53+1: a decimal string, never a rounded JSON number.
-        result["rows"].map { it[0].asText() to it[1].asText() } shouldBe listOf("gen" to GENERATED_FIRST, "sup" to "500")
-        result["rows"].map { it[1].isTextual } shouldBe listOf(true, true)
-        orders() shouldBe listOf(500L to "sup", GENERATED_FIRST.toLong() to "gen")
+        // Two generated keys past 2^53 and one supplied key: decimal strings, never rounded JSON numbers.
+        val returned = result["rows"].associate { it[0].asText() to it[1].asText() }
+        returned shouldBe mapOf("gen_a" to GENERATED_FIRST, "gen_b" to GENERATED_SECOND, "sup" to "500")
+        result["rows"].map { it[1].isTextual } shouldBe listOf(true, true, true)
+        // Matched by payload against the target read on this test's own connection.
+        orders().associate { (id, customer) -> customer to id.toString() } shouldBe returned
     }
 
     @Test
     fun `an empty staged input executes nothing and returns zero rows under the typed schema`() {
         prepare()
-        createTemplate("test/dml_stage_none.sql", "POSTGRES", "$STAGE_TWO_SELECT WHERE 1 = 0")
+        createTemplate("test/dml_stage_none.sql", "POSTGRES", "$STAGE_ROWS_SELECT WHERE 1 = 0")
         createTemplate("test/dml_insert_order.sql", "POSTGRES", INSERT_ORDER)
         val pipelineId =
             createPipeline("test/dml_empty", listOf(stageNode("stage", "test/dml_stage_none.sql", "orders_in"), orderInsert("orders_in")))
@@ -477,13 +479,15 @@ class DmlOperationResultsIntegrationTest {
 
         /** 2^53 + 1 — the first identity value, unrepresentable as a double. */
         private const val GENERATED_FIRST = "9007199254740993"
+        private const val GENERATED_SECOND = "9007199254740994"
 
         /** What the trigger turns the supplied key 2 into; it must never reach a diagnostic. */
         private const val REWRITTEN_KEY = "1002"
 
-        private const val STAGE_TWO_SELECT =
-            "SELECT id, customer FROM (VALUES (CAST(NULL AS bigint), 'gen'), (CAST(500 AS bigint), 'sup')) AS v(id, customer)"
-        private const val STAGE_TWO = "$STAGE_TWO_SELECT ORDER BY customer"
+        private const val STAGE_ROWS_SELECT =
+            "SELECT id, customer FROM (VALUES (CAST(NULL AS bigint), 'gen_a'), (CAST(NULL AS bigint), 'gen_b'), " +
+                "(CAST(500 AS bigint), 'sup')) AS v(id, customer)"
+        private const val STAGE_ROWS = "$STAGE_ROWS_SELECT ORDER BY customer"
         private const val STAGE_REWRITE =
             "SELECT id, customer FROM (VALUES (CAST(1 AS bigint), 'ok'), (CAST(2 AS bigint), 'rewrite')) AS v(id, customer) ORDER BY id"
 
