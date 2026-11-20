@@ -10,8 +10,10 @@ import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineNodeRef
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.DmlInsertQualification
 import co.datapipelines.typesystem.LogicalType
 import java.math.BigDecimal
 import java.math.BigInteger
@@ -188,17 +190,74 @@ internal data class DmlInputRows(
 
 /**
  * Run admission's DML gate (write-transactions §4 row 1, §7; pipeline-contract §12.4): the
- * pinned body's DML shape rules, re-applied before any business write. A stored version saved
- * before a DML node had to declare its operation (the owner's legacy-DML waiver) ends FAILED here
- * with the code save-time validation gives, never under the retired count-only contract.
+ * pinned body's DML shape rules and the insert qualification, re-applied before any business
+ * write. A stored version saved before a DML node had to declare its operation (the owner's
+ * legacy-DML waiver) ends FAILED here with the code save-time validation gives, never under the
+ * retired count-only contract.
+ *
+ * Both checks run over the WHOLE pinned family — the root body in [PipelineExecutor], every
+ * reachable child body in [LocalWritePlanner]'s walk — so an operation-less or unqualified node
+ * in a child is refused before an earlier writer anywhere in the family has run. Each execution
+ * still re-checks its own body and each insert re-checks its live target (the per-node
+ * backstops): a run admitted on yesterday's registry answer never writes through today's.
  */
 internal object DmlAdmission {
-    fun refuseInvalidShape(pipeline: Pipeline) {
+    /**
+     * Refuses [pipeline] when its DML nodes break the stable shape rules. [child] is the pinned
+     * reference the body was reached through, and [via] the node ids leading to it (empty for
+     * the root body); both are named in the refusal so an author can find the node.
+     */
+    fun refuseInvalidShape(
+        pipeline: Pipeline,
+        child: PipelineNodeRef? = null,
+        via: List<String> = emptyList(),
+    ) {
         val failure = DmlShapeCheck.failures(pipeline).firstOrNull() ?: return
         throw DatapipelinesException(
             code = failure.code,
-            message = "Run refused: ${failure.message}",
-            details = failure.details + ("path" to failure.path),
+            message = "Run refused: ${where(child)}${failure.message}",
+            details = failure.details + ("path" to failure.path) + family(child, via),
         )
     }
+
+    /**
+     * Refuses the first DML `insert` of [pipeline] whose target dialect is known and not
+     * qualified ([DmlInsertQualification]). [dialectOf] answers the CURRENT dialect of a node's
+     * destination, or null when it cannot be resolved — such a node is left to fail at its own
+     * execution with the ordinary `datasource_not_found`, exactly as without this check.
+     */
+    fun refuseUnqualifiedInsert(
+        pipeline: Pipeline,
+        dialectOf: (Node) -> Dialect?,
+        child: PipelineNodeRef? = null,
+        via: List<String> = emptyList(),
+    ) {
+        for (node in pipeline.nodes) {
+            if (node.type != NodeType.DML || node.dmlOperation != DmlOperation.INSERT) continue
+            val dialect = dialectOf(node) ?: continue
+            if (!DmlInsertQualification.isQualified(dialect)) throw unqualified(node.id, dialect, child, via)
+        }
+    }
+
+    /** The `dml_insert_unqualified` refusal, shared by run admission and the node-level backstop. */
+    fun unqualified(
+        nodeId: String,
+        dialect: Dialect,
+        child: PipelineNodeRef? = null,
+        via: List<String> = emptyList(),
+    ): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Node.DML_INSERT_UNQUALIFIED,
+            message =
+                "${where(child)}DML insert node '$nodeId' targets a ${dialect.wire} connection, " +
+                    "which is not qualified to return inserted keys; nothing was executed.",
+            details = mapOf("node" to nodeId, "dialect" to dialect.wire) + family(child, via),
+        )
+
+    private fun where(child: PipelineNodeRef?): String = child?.let { "pinned child '${it.name}' v${it.version}: " }.orEmpty()
+
+    private fun family(
+        child: PipelineNodeRef?,
+        via: List<String>,
+    ): Map<String, Any?> = if (child == null) emptyMap() else mapOf("child" to "${child.name}@${child.version}", "via" to via)
 }

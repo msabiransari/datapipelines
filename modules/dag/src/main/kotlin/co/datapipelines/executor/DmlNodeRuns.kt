@@ -131,7 +131,7 @@ internal object DmlNodeRuns {
         // Refused before input is read or any statement prepared: an unqualified engine is never
         // asked for a key it may answer with something else (SQLite's rowid).
         if (!DmlInsertQualification.isQualified(target.dialect)) {
-            throw signal(NodePhase.CONNECT, node.id, unqualified(node.id, target))
+            throw signal(NodePhase.CONNECT, node.id, DmlAdmission.unqualified(node.id, target.dialect))
         }
         val key = ScriptNodeRuns.phase(ctx, NodePhase.RENDER, node.id) { DeclaredKey.of(node.dml?.key, node.id) }
         val input = ScriptNodeRuns.phase(ctx, NodePhase.STAGE, node.id) { DmlInputs.load(node, ctx) }
@@ -352,18 +352,6 @@ internal object DmlNodeRuns {
             throw NodeFailedSignal(ErrorCodeMapper.map(overflow, NodePhase.STAGE, node.id), overflow)
         }
     }
-
-    private fun unqualified(
-        nodeId: String,
-        target: DmlTarget,
-    ): DatapipelinesException =
-        DatapipelinesException(
-            code = PipelineErrorCodes.Node.DML_INSERT_UNQUALIFIED,
-            message =
-                "DML insert node '$nodeId' targets a ${target.dialect.wire} connection, which is not qualified to " +
-                    "return inserted keys; nothing was executed.",
-            details = mapOf("node" to nodeId, "dialect" to target.dialect.wire),
-        )
 
     private fun signal(
         phase: NodePhase,
