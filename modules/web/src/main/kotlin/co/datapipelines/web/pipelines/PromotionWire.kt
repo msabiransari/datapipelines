@@ -1,6 +1,7 @@
 package co.datapipelines.web.pipelines
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.JsonNode
 
@@ -172,6 +173,16 @@ object PromotionWire {
         /** The names of the API keys bound at this endpoint's own path node. */
         @field:JsonProperty("bindings") @get:JsonProperty("bindings") @param:JsonProperty("bindings")
         val bindings: List<String> = emptyList(),
+        /**
+         * #1037 — READ, never written: this build's sender omits it (null, and `NON_NULL` keeps
+         * the wire byte-identical), because the wire is GET-only until method-aware transfer
+         * (#879, #1040). It is declared so the receiver can SEE a method a newer sender put here
+         * — under the entry's `ignoreUnknown` it would otherwise be dropped and the route
+         * imported as GET — and refuse the batch (`endpoint.promotion.method_unsupported`).
+         */
+        @field:JsonProperty("method") @get:JsonProperty("method") @param:JsonProperty("method")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        val method: String? = null,
     )
 
     /** What the receiver reports back: what it stored, per kind. */

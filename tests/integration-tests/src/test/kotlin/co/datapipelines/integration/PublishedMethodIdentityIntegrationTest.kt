@@ -10,6 +10,7 @@ import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.not
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.MethodOrderer.OrderAnnotation
 import org.junit.jupiter.api.Order
@@ -744,6 +745,331 @@ class PublishedMethodIdentityIntegrationTest {
     }
 
     // -----------------------------------------------------------------------------------------
+    // Roles on the method-aware management routes (auth.md §7.6 — cells unchanged by #1037)
+    // -----------------------------------------------------------------------------------------
+
+    @Test
+    @Order(13)
+    fun `the method-aware management routes keep their role cells - viewer reads, author publishes, only admins grant`() {
+        // endpoint.read — every member role reads a mutation route by path AND method.
+        given()
+            .port(port)
+            .asSession(VIEWER_SESSION)
+            .`when`()
+            .get("/api/v1/endpoints?path=/mix/v1/notes&method=POST")
+            .then()
+            .statusCode(200)
+            .body("data.method", equalTo("POST"))
+
+        // endpoint.publish — viewer and promoter refused, author admitted, for a NON-GET route.
+        listOf(VIEWER_SESSION, PROMOTER_SESSION).forEach { session ->
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(session)
+                .body("""{"path": "/mix/v1/authored", "method": "POST", "pipeline": "$WRITE_PIPELINE", "pipeline_version": 1}""")
+                .`when`()
+                .post("/api/v1/endpoints")
+                .then()
+                .statusCode(403)
+        }
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(AUTHOR_SESSION)
+            .body("""{"path": "/mix/v1/authored", "method": "POST", "pipeline": "$WRITE_PIPELINE", "pipeline_version": 1}""")
+            .`when`()
+            .post("/api/v1/endpoints")
+            .then()
+            .statusCode(201)
+            .body("data.method", equalTo("POST"))
+
+        // api_key.bind — the author (and viewer, promoter) may not grant a method; a workspace
+        // admin may, and may take it back.
+        listOf(VIEWER_SESSION, AUTHOR_SESSION, PROMOTER_SESSION).forEach { session ->
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(session)
+                .body("""{"api_key_id": "$rootKeyId", "path_prefix": "/mix/v1/authored", "method": "POST"}""")
+                .`when`()
+                .post("/api/v1/endpoints/bindings")
+                .then()
+                .statusCode(403)
+        }
+        jdbcCount("SELECT count(*) FROM endpoint_key_bindings WHERE path_prefix = '/mix/v1/authored'") shouldBe 0
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(WS_ADMIN_SESSION)
+            .body("""{"api_key_id": "$rootKeyId", "path_prefix": "/mix/v1/authored", "method": "POST"}""")
+            .`when`()
+            .post("/api/v1/endpoints/bindings")
+            .then()
+            .statusCode(201)
+        jdbcCount(
+            "SELECT count(*) FROM endpoint_key_bindings b JOIN published_endpoints e ON e.id = b.endpoint_id" +
+                " WHERE b.path_prefix = '/mix/v1/authored' AND b.method = 'POST' AND e.method = 'POST'",
+        ) shouldBe 1
+        listOf(VIEWER_SESSION, AUTHOR_SESSION, PROMOTER_SESSION).forEach { session ->
+            given()
+                .port(port)
+                .asSession(session)
+                .`when`()
+                .delete("/api/v1/endpoints/bindings?pathPrefix=/mix/v1/authored&apiKeyId=$rootKeyId&method=POST")
+                .then()
+                .statusCode(403)
+        }
+        given()
+            .port(port)
+            .asSession(WS_ADMIN_SESSION)
+            .`when`()
+            .delete("/api/v1/endpoints/bindings?pathPrefix=/mix/v1/authored&apiKeyId=$rootKeyId&method=POST")
+            .then()
+            .statusCode(204)
+
+        // endpoint.unpublish — viewer and promoter refused; the author deletes the draft-only POST route.
+        listOf(VIEWER_SESSION, PROMOTER_SESSION).forEach { session ->
+            given()
+                .port(port)
+                .asSession(session)
+                .`when`()
+                .delete("/api/v1/endpoints?path=/mix/v1/authored&method=POST")
+                .then()
+                .statusCode(403)
+        }
+        given()
+            .port(port)
+            .asSession(AUTHOR_SESSION)
+            .`when`()
+            .delete("/api/v1/endpoints?path=/mix/v1/authored&method=POST")
+            .then()
+            .statusCode(204)
+        jdbcCount("SELECT count(*) FROM published_endpoints WHERE path_pattern = '/mix/v1/authored'") shouldBe 0
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The machine-only gate — 401 before CSRF on the published subtree, CSRF kept elsewhere
+    // -----------------------------------------------------------------------------------------
+
+    @Test
+    @Order(14)
+    fun `a keyless or cookie-only mutation is 401 with no Allow - with or without a CSRF token`() {
+        // No credential at all.
+        given()
+            .port(port)
+            .`when`()
+            .post("/api/mix/v1/notes")
+            .then()
+            .statusCode(401)
+            .header("Allow", nullValue())
+        // A valid session WITH the double-submit token: still not a credential this surface accepts.
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .post("/api/mix/v1/notes")
+            .then()
+            .statusCode(401)
+            .header("Allow", nullValue())
+            .body("error.code", equalTo("auth.session.required"))
+        // A valid session WITHOUT the token: the key gate answers, not the CSRF filter.
+        given()
+            .port(port)
+            .cookie(E2eSession.COOKIE, ADMIN_SESSION)
+            .`when`()
+            .delete("/api/mix/v1/notes")
+            .then()
+            .statusCode(401)
+            .header("Allow", nullValue())
+            .body("error.code", equalTo("auth.session.required"))
+        // The exemption is scoped to the published subtree: the framework's own cookie-backed
+        // write without the token is still the CSRF refusal.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .cookie(E2eSession.COOKIE, ADMIN_SESSION)
+            .body("""{"path": "/mix/v1/csrf", "method": "POST", "pipeline": "$WRITE_PIPELINE", "pipeline_version": 1}""")
+            .`when`()
+            .post("/api/v1/endpoints")
+            .then()
+            .statusCode(403)
+            .body("error.code", equalTo("auth.csrf.invalid"))
+        jdbcCount("SELECT count(*) FROM published_endpoints WHERE path_pattern = '/mix/v1/csrf'") shouldBe 0
+    }
+
+    @Test
+    @Order(15)
+    fun `a pattern that could match a polling suffix is refused at publish, naming the suffix`() {
+        mapOf(
+            "/mix/v1/{dataset}/{record}" to "executions/{id}",
+            "/mix/v1/feed/executions/{id}" to "executions/{id}",
+            "/mix/v1/{a}/{b}/result" to "executions/{id}/result",
+        ).forEach { (path, suffix) ->
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body("""{"path": "$path", "method": "POST", "pipeline": "$WRITE_PIPELINE", "pipeline_version": 1}""")
+                .`when`()
+                .post("/api/v1/endpoints")
+                .then()
+                .statusCode(400)
+                .body("error.code", equalTo("endpoint.path_reserved"))
+                .body("error.details.segment", equalTo(suffix))
+        }
+        jdbcCount("SELECT count(*) FROM published_endpoints WHERE path_pattern LIKE '/mix/v1/%/%/%'") shouldBe 0
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Upgrade — a binding written with the pre-V65 column list is the GET grant it always was
+    // -----------------------------------------------------------------------------------------
+
+    @Test
+    @Order(16)
+    fun `a pre-V65 root binding serves its GET and gains a mutation only by an exact grant`() {
+        val minted =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body("""{"name": "mi-upgraded", "kind": "endpoint", "bindings": []}""")
+                .`when`()
+                .post("/api/v1/auth/api-keys")
+                .then()
+                .statusCode(201)
+                .extract()
+                .jsonPath()
+        val key = minted.getString("data.key")
+        val keyId = minted.getString("data.id")
+        // The pre-#1037 writer's INSERT, verbatim in shape: no method, no endpoint_id. V65's
+        // DEFAULT is the backfill, so this row is what every upgraded binding looks like.
+        DriverManager
+            .getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password)
+            .use { connection ->
+                connection
+                    .prepareStatement(
+                        "INSERT INTO endpoint_key_bindings (path_prefix, api_key_id, workspace_id, created_by)" +
+                            " VALUES ('/', ?, (SELECT id FROM workspaces WHERE name = 'default'), ?::uuid)",
+                    ).use { ps ->
+                        ps.setString(1, keyId)
+                        ps.setString(2, ADMIN_USER)
+                        ps.executeUpdate() shouldBe 1
+                    }
+            }
+        jdbcCount(
+            "SELECT count(*) FROM endpoint_key_bindings WHERE api_key_id = '$keyId' AND path_prefix = '/'" +
+                " AND method = 'GET' AND endpoint_id IS NULL",
+        ) shouldBe 1
+
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, key)
+            .`when`()
+            .get("/api/mix/v1/notes")
+            .then()
+            .statusCode(200)
+            .body("row_count", equalTo(SEEDED_ROWS))
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, key)
+            .`when`()
+            .post("/api/mix/v1/notes")
+            .then()
+            .statusCode(405)
+            .header("Allow", equalTo("GET"))
+
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"api_key_id": "$keyId", "path_prefix": "/mix/v1/notes", "method": "POST"}""")
+            .`when`()
+            .post("/api/v1/endpoints/bindings")
+            .then()
+            .statusCode(201)
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, key)
+            .`when`()
+            .post("/api/mix/v1/notes")
+            .then()
+            .statusCode(503)
+            .body("error.code", equalTo("endpoint.mutations_disabled"))
+    }
+
+    @Test
+    @Order(17)
+    fun `a write-only key and a root-bound key are judged independently at one path`() {
+        val minted =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body("""{"name": "mi-writer", "kind": "endpoint", "bindings": []}""")
+                .`when`()
+                .post("/api/v1/auth/api-keys")
+                .then()
+                .statusCode(201)
+                .extract()
+                .jsonPath()
+        val writer = minted.getString("data.key")
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"api_key_id": "${minted.getString("data.id")}", "path_prefix": "/mix/v1/notes", "method": "PUT"}""")
+            .`when`()
+            .post("/api/v1/endpoints/bindings")
+            .then()
+            .statusCode(201)
+
+        // The writer: its PUT is seen, its Allow is PUT alone, and the GET it was never granted is
+        // the GET handler's unchanged refusal — a mutation grant never implies a read.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, writer)
+            .`when`()
+            .put("/api/mix/v1/notes")
+            .then()
+            .statusCode(503)
+            .body("error.code", equalTo("endpoint.mutations_disabled"))
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, writer)
+            .`when`()
+            .post("/api/mix/v1/notes")
+            .then()
+            .statusCode(405)
+            .header("Allow", equalTo("PUT"))
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, writer)
+            .`when`()
+            .get("/api/mix/v1/notes")
+            .then()
+            .statusCode(403)
+            .body("error.code", equalTo("endpoint.key_not_bound"))
+
+        // The root-bound key: unchanged by the writer's grant.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, rootKey)
+            .`when`()
+            .put("/api/mix/v1/notes")
+            .then()
+            .statusCode(405)
+            .header("Allow", equalTo("GET"))
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, rootKey)
+            .`when`()
+            .get("/api/mix/v1/notes")
+            .then()
+            .statusCode(200)
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Fixture
     // -----------------------------------------------------------------------------------------
 
@@ -948,6 +1274,25 @@ class PublishedMethodIdentityIntegrationTest {
                         VALUES ('$ADMIN_USER', 'mi-admin@datapipelines.test', 'MI Admin', 'test', 'mi-admin', TRUE, TRUE)
                         """.trimIndent(),
                     )
+                    // The member roles of auth.md §7.6, in the default workspace the sessions act in.
+                    statement.execute(
+                        """
+                        INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
+                          ('$VIEWER_USER', 'mi-viewer@datapipelines.test', 'MI Viewer', 'test', 'mi-viewer', TRUE, FALSE),
+                          ('$AUTHOR_USER', 'mi-author@datapipelines.test', 'MI Author', 'test', 'mi-author', TRUE, FALSE),
+                          ('$PROMOTER_USER', 'mi-promoter@datapipelines.test', 'MI Promoter', 'test', 'mi-promoter', TRUE, FALSE),
+                          ('$WS_ADMIN_USER', 'mi-wsadmin@datapipelines.test', 'MI Workspace Admin', 'test', 'mi-wsadmin', TRUE, FALSE)
+                        """.trimIndent(),
+                    )
+                    statement.execute(
+                        """
+                        INSERT INTO workspace_members (workspace_id, user_id, role)
+                        SELECT w.id, m.user_id::uuid, m.role FROM workspaces w,
+                          (VALUES ('$VIEWER_USER', 'viewer'), ('$AUTHOR_USER', 'author'),
+                                  ('$PROMOTER_USER', 'promoter'), ('$WS_ADMIN_USER', 'workspace_admin')) AS m(user_id, role)
+                         WHERE w.name = 'default'
+                        """.trimIndent(),
+                    )
                     statement.execute(
                         """
                         INSERT INTO workspaces (id, name, display_name, created_by)
@@ -1037,6 +1382,14 @@ class PublishedMethodIdentityIntegrationTest {
         /** The per-run JWT secret — the admin's REST work is a session's (#215 B2). */
         private val JWT_SECRET = E2eSession.newSecret()
         private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER, "mi-admin@datapipelines.test")
+        private val VIEWER_USER: String = UUID.randomUUID().toString()
+        private val AUTHOR_USER: String = UUID.randomUUID().toString()
+        private val PROMOTER_USER: String = UUID.randomUUID().toString()
+        private val WS_ADMIN_USER: String = UUID.randomUUID().toString()
+        private val VIEWER_SESSION get() = E2eSession.jwt(JWT_SECRET, VIEWER_USER, "mi-viewer@datapipelines.test")
+        private val AUTHOR_SESSION get() = E2eSession.jwt(JWT_SECRET, AUTHOR_USER, "mi-author@datapipelines.test")
+        private val PROMOTER_SESSION get() = E2eSession.jwt(JWT_SECRET, PROMOTER_USER, "mi-promoter@datapipelines.test")
+        private val WS_ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, WS_ADMIN_USER, "mi-wsadmin@datapipelines.test")
 
         private val source = SharedE2e.scratchDatabase("method_identity_source")
 

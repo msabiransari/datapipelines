@@ -119,7 +119,11 @@ class EndpointPromotion(
                     ),
             )
         }
-        val allBindings = bindings.findByWorkspace(workspaceId)
+        // GET node grants only (#1037): the wire's `bindings` are GET tree grants by construction — the
+        // receiver binds each as one. A mutation grant at the same pattern belongs to a sibling METHOD's
+        // route that is not travelling (a travelling one refused the batch above); carried here it would
+        // land on the receiver as a GET grant, widening a write-only key into a reader.
+        val allBindings = bindings.findByWorkspace(workspaceId).filter { it.method == EndpointMethod.GET }
         return candidates
             .mapNotNull { endpoint ->
                 // #786: the API's CURRENT version is what travels; an API with none has nothing to promote.
@@ -141,6 +145,29 @@ class EndpointPromotion(
     // ---------------------------------------------------------------------------------------
     // Receiver
     // ---------------------------------------------------------------------------------------
+
+    /**
+     * Refuses the whole batch when an entry names a method other than GET (#1037).
+     *
+     * This receiver imports every entry as a GET route and binds its keys as GET tree grants
+     * ([apply]); an entry a newer, method-aware sender marked POST, PUT or DELETE would be
+     * reinterpreted as exactly the read route the method identity exists to keep distinct.
+     * Reported once for the batch, before anything is pushed, like [refuseIfKeysMissing]. An
+     * absent method (every batch this build's sender writes, and every older one) and an
+     * explicit `GET` pass.
+     */
+    fun refuseIfMethodUnsupported(entries: List<PromotionWire.EndpointEntry>) {
+        val unsupported = entries.filter { entry -> entry.method?.let { EndpointMethod.of(it) != EndpointMethod.GET } ?: false }
+        if (unsupported.isEmpty()) return
+        throw DatapipelinesException(
+            code = PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED,
+            message =
+                "This batch carries ${unsupported.size} API route(s) with a method other than GET. This deployment " +
+                    "imports promoted routes as GET only; method-aware transfer needs exact-pin promotion (#879) " +
+                    "and a receiver that advertises method support. Nothing was imported.",
+            details = mapOf("unsupported_routes" to unsupported.map { mapOf("path" to it.path) }),
+        )
+    }
 
     /**
      * Refuses the whole batch when it binds a key name this deployment does not have.

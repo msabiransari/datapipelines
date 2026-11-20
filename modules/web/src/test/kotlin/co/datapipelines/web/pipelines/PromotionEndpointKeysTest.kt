@@ -193,6 +193,50 @@ class PromotionEndpointKeysTest {
         )
     }
 
+    @Test
+    fun `a batch entry naming a non-GET method is refused whole, before anything is imported or bound`() {
+        // #1037: this receiver imports every entry as a GET route with GET tree grants. A newer,
+        // method-aware sender's POST entry would be reinterpreted as a read route; the batch is
+        // refused instead — even though its key exists, so the key check would have passed.
+        stubContext()
+        every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, "ci-lending") } returns listOf(key("dpk_AAAAAAAAAAAA", "ci-lending"))
+        every { publishing.get(any(), any()) } returns null
+        val entries =
+            listOf(
+                PromotionWire.EndpointEntry(path = "/lending/home", pipeline = "lending_home", timeoutSeconds = 30, bindings = listOf("ci-lending")),
+                PromotionWire.EndpointEntry(
+                    path = "/lending/applications",
+                    pipeline = "lending_apply",
+                    timeoutSeconds = 30,
+                    bindings = listOf("ci-lending"),
+                    method = "POST",
+                ),
+            )
+
+        val refused = shouldThrow<DatapipelinesException> { service.apply(batch("dev", entries), peer) }
+
+        assertAll(
+            { refused.code shouldBe PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED },
+            { refused.details["unsupported_routes"] shouldBe listOf(mapOf("path" to "/lending/applications")) },
+        )
+        verify(exactly = 0) { importer.importPromoted(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { endpointKeys.bind(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an entry naming GET explicitly is the legacy GET entry`() {
+        stubContext()
+        every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, "ci-lending") } returns listOf(key("dpk_AAAAAAAAAAAA", "ci-lending"))
+        every { publishing.get(any(), any()) } returns null
+        val entry =
+            PromotionWire.EndpointEntry(path = "/lending/home", pipeline = "lending_home", timeoutSeconds = 30, bindings = listOf("ci-lending"), method = "GET")
+
+        service.apply(batch("dev", listOf(entry)), peer)
+
+        verify(exactly = 1) { importer.importPromoted(WORKSPACE_ID, ACTOR, "/lending/home", "lending_home", 30, "") }
+        verify(exactly = 1) { endpointKeys.bind(any(), "dpk_AAAAAAAAAAAA", "/lending/home") }
+    }
+
     private fun stubContext() {
         every { inventory.contextFor(WORKSPACE_NAME) } returns WorkspaceContext(WORKSPACE_ID, WORKSPACE_NAME)
     }
