@@ -37,7 +37,7 @@ class ExhaustiveValidationTest {
      *    a JDBC URL.
      *  - §12.2 DAG — a dependency on a node that does not exist, and a cycle.
      *  - §12.3 caller — two nodes resolve to `caller`.
-     *  - §12.4 node type — a DML node carries an output block.
+     *  - §12.4 node type — a DML node targets a datasource (its result never writes back).
      *  - §12.5 datasource — an unregistered datasource name.
      *  - §12.6 template — a template that is not in the registry.
      *  - §12.7 parameter — a bad key, a missing precision, required-plus-default.
@@ -78,10 +78,12 @@ class ExhaustiveValidationTest {
                     // Two caller nodes.
                     Fixtures.node(id = "caller_a", output = NodeOutput.Caller),
                     Fixtures.node(id = "caller_b", output = NodeOutput.Caller),
-                    // A DML node with an output block, and a genuine cycle.
+                    // A DML node whose result targets a datasource, and a genuine cycle.
                     Fixtures.node(id = "cyc_a", output = NodeOutput.Tempdb("ca"), dependsOn = listOf("cyc_b")),
                     Fixtures.node(id = "cyc_b", output = NodeOutput.Tempdb("cb"), dependsOn = listOf("cyc_a")),
-                    Fixtures.node(id = "side", type = NodeType.DML).copy(output = NodeOutput.Caller),
+                    Fixtures
+                        .node(id = "side", type = NodeType.DML)
+                        .copy(operation = "update", output = NodeOutput.Datasource("pg-prod", "side_t", WriteMode.APPEND)),
                 ),
             checks = listOf(Fixtures.check(datasource = "pg-unregistered")),
         )

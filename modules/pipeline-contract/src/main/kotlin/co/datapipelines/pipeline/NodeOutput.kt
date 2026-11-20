@@ -64,6 +64,15 @@ sealed interface NodeOutput {
     ) : NodeOutput {
         override val target: OutputTarget get() = OutputTarget.DATASOURCE
     }
+
+    /**
+     * Drop the node's result rows (§4.4) — DML only. A DML node used for its side effect alone
+     * says so explicitly; an omitted DML output is a validation failure, never an implicit
+     * discard or an implicit caller (write-transactions §3.4: caller designation stays explicit).
+     */
+    data object Discard : NodeOutput {
+        override val target: OutputTarget get() = OutputTarget.DISCARD
+    }
 }
 
 /**

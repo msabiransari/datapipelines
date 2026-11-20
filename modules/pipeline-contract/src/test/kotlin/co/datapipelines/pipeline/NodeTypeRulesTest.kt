@@ -13,13 +13,19 @@ class NodeTypeRulesTest {
     private val workspaceId = UUID.randomUUID()
 
     @Test
-    fun `a DML node with an output block is rejected`() {
+    fun `a DML node whose result targets a datasource is rejected - a DML result never writes back`() {
         val pipeline =
             Fixtures.pipeline(
-                nodes = listOf(dqlSink(), Fixtures.node(id = "b", type = NodeType.DML).copy(output = NodeOutput.Caller)),
+                nodes =
+                    listOf(
+                        dqlSink(),
+                        Fixtures
+                            .node(id = "b", type = NodeType.DML)
+                            .copy(operation = "update", output = NodeOutput.Datasource("pg-prod", "t", WriteMode.APPEND)),
+                    ),
             )
 
-        validator.validate(pipeline, workspaceId).codes shouldContain Validation.DML_HAS_OUTPUT
+        validator.validate(pipeline, workspaceId).codes shouldContainExactly listOf(Validation.DML_HAS_OUTPUT)
     }
 
     @Test
@@ -37,18 +43,33 @@ class NodeTypeRulesTest {
     }
 
     @Test
-    fun `a DML or DDL node with no output block is fine - the side effect is the output`() {
+    fun `a DDL node with no output block is fine - the side effect is the output`() {
         val pipeline =
             Fixtures.pipeline(
                 nodes =
                     listOf(
                         dqlSink(),
-                        Fixtures.node(id = "b", type = NodeType.DML, dependsOn = listOf("a")),
-                        Fixtures.node(id = "c", type = NodeType.DDL, dependsOn = listOf("a")),
+                        Fixtures.node(id = "c", type = NodeType.DDL, output = null, dependsOn = listOf("a")),
                     ),
             )
 
         validator.validate(pipeline, workspaceId).failures shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `a DML node with no output block is rejected - its result rows go somewhere explicit`() {
+        val pipeline =
+            Fixtures.pipeline(
+                nodes =
+                    listOf(
+                        dqlSink(),
+                        Fixtures
+                            .node(id = "b", type = NodeType.DML, output = null, dependsOn = listOf("a"))
+                            .copy(operation = "delete"),
+                    ),
+            )
+
+        validator.validate(pipeline, workspaceId).codes shouldContainExactly listOf(Validation.DML_OUTPUT_REQUIRED)
     }
 
     @Test

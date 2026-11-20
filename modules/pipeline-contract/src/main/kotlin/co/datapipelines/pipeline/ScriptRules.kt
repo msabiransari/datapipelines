@@ -441,6 +441,10 @@ internal object ScriptRules {
                 }
             }
 
+            NodeOutput.Discard -> {
+                // `discard` is DML-only: DmlRules reports it (`output_target_invalid`) once.
+            }
+
             is NodeOutput.Datasource, null -> {
                 into.add(
                     Validation.SCRIPT_OUTPUT_SHAPE,

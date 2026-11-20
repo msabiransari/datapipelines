@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.104 (revised — see Change Log)
+**Status:** v1.106 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-11-16
+**Last updated:** 2026-11-20
 
 ---
 
@@ -299,20 +299,45 @@ SQL-sourced source against. This subsection is the source of truth for that reco
 }
 ```
 
-### 4.4 JSON structure (DML node, side-effect only)
+### 4.4 JSON structure (DML node)
+
+A DML node declares its **operation** — `insert`, `update` or `delete` — and where its result rows go (#1034; the transaction it joins is [DAG Executor §16.4](dag-executor.md#164-the-single-registration-local-write-transaction-1033)). One node type, one SQL template, one result contract on every engine that runs it.
 
 ```json
 {
-  "id": "update_last_run",
-  "description": "Update last_run timestamp in metadata.",
+  "id": "insert_order",
+  "description": "Insert the order and return it with its id.",
   "type": "DML",
-  "source": "pg-meta",
-  "template": {"id": "acme/finance/update_last_run.sql", "version": 1},
-  "depends_on": ["final_report"]
+  "source": "shop",
+  "template": {"id": "acme/shop/insert_order.sql", "version": 1},
+  "operation": "insert",
+  "key": {"column": "order_id", "type": "BIGINTEGER"},
+  "input": {"parameters": ["customer", "total"]},
+  "output": {"target": "tempdb", "table": "new_order"},
+  "depends_on": []
 }
 ```
 
-Note: no `output` block. DML's side effect IS the output.
+```json
+{
+  "id": "reserve_stock",
+  "description": "Reserve the ordered quantity.",
+  "type": "DML",
+  "source": "shop",
+  "template": {"id": "acme/shop/reserve_stock.sql", "version": 1},
+  "operation": "update",
+  "output": {"target": "discard"},
+  "depends_on": ["insert_lines"]
+}
+```
+
+- **`insert`** declares one physical `key` column and one `input`: either `parameters` — declared pipeline parameters bound as ONE input row (request parameters keep their scalar contract) — or `table` — a tempdb table an ancestor stages, one target row per staged row. The template binds each input field by its own name (`:customer`), and `:id` binds the row's logical key: the supplied value, or null when the input has no `id` field (absent or null asks the database to generate it). The executor runs the template **once per input row** on one prepared statement and reads the declared key column back from the driver's generated-key cursor. Each execution must affect exactly one row (`pipeline.node.dml_affected_rows_mismatch`) and return exactly that column, one row, one non-null value of the declared type — and, when the input supplied the id, that same value unchanged (a trigger that rewrote it is a miscorrelation). Anything else fails the node with `pipeline.node.dml_key_correlation_failed` and keeps no row of the insert: on the family's local write transaction the root rolls back (dag-executor §16); on any other connection the insert runs in its own node-local transaction. No key is ever inferred by row order or `MAX(key)`.
+- The **insert result** is every input row — every field except an input `id` — followed by `id`, typed by `key.type` (`INTEGER`, `BIGINTEGER` or `STRING`; a key named `order_id` in the table is still `id` on the row). `BIGINTEGER` travels as a decimal string ([Type System §3](type-system.md)), so a key past 2^53 stays exact. An empty staged input emits zero rows under that schema and executes nothing.
+- **`update` / `delete`** execute the statement once and emit ONE row with ONE field, `affected_rows` (`BIGINTEGER`, nonnegative, the driver's affected-row count) — also for zero. They declare no `key` or `input`.
+- **`output`** is required: `tempdb` (dependent nodes read the rows — e.g. a DQL node projects the staged order `id` as `order_id` for a line-item insert; an input field named `id` is always the reading insert's OWN supplied key), `caller` (the ordinary caller rules of §9 — a DML caller is designated explicitly, never by omission) or `discard` (the write is the only effect). A `datasource` target is refused (`dml_has_output`).
+- **Qualification.** An insert runs only where the pinned driver was measured to return the named key column: PostgreSQL, H2 and DuckDB (tempdb included). Any other dialect is refused before anything executes with `pipeline.node.dml_insert_unqualified`; MySQL, SQL Server and Oracle are qualified by real-driver tests (#1036). `update`/`delete` run wherever DML ran before.
+- **What the product cannot check.** Without a SQL parser the declared operation is the author's contract: an `update` template that deletes still returns a count, and a statement, trigger or procedure that commits on its own escapes the transaction. A template must insert exactly one row per execution — `INSERT … SELECT`, `MERGE` and upserts without one-to-one input correspondence are outside v1.
+- A DML node saved before this rule (no `operation`) is refused `pipeline.validation.dml_operation_required` at its next validation AND at run admission, before any business write (the owner's legacy-DML waiver).
 
 ### 4.5 JSON structure (DDL node, schema setup)
 
@@ -342,7 +367,10 @@ Note: no `output` block. DML's side effect IS the output.
 | `inputs` | object | CALCULATOR and SCRIPT nodes only | On a `CALCULATOR` node: the kind's inputs, by input name — a `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type (§4.10). On a `SCRIPT` node: the pinned contract's inputs, by input name — a `"$name"` string names a Context key, anything else names a tempdb table an ancestor stages (§4.12). Required on both; forbidden on every other type. |
 | `context_key` | string | CALCULATOR nodes on a single-output kind; value-mode SCRIPT nodes | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. XOR with `context_keys` on a `CALCULATOR` node (§4.10); required on a value-mode `SCRIPT` node (§4.12); forbidden on every other type. |
 | `context_keys` | object | CALCULATOR nodes on a multi-output kind | The Context key each of the kind's named outputs is written to, as `{output name: context key}` — every declared output mapped, each key per §6.1. XOR with `context_key`; forbidden on every other type. See §4.10. |
-| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). On `SCRIPT` nodes: required in `row`/`table` mode (`tempdb` or `caller`), forbidden in `value` mode (§4.12). See §4.7. |
+| `operation` | string (enum) | DML nodes only | `insert`, `update` or `delete` (§4.4). Required on `DML` nodes; forbidden on every other type. |
+| `key` | object | DML `insert` only | `{column, type}`: the ONE physical key column the driver returns (an SQL identifier, `[A-Za-z_][A-Za-z0-9_]{0,62}`) and the canonical type of the output `id` (`INTEGER`, `BIGINTEGER` or `STRING`). Required on an insert; forbidden elsewhere (§4.4). |
+| `input` | object | DML `insert` only | Exactly one of `{parameters: [names]}` (declared pipeline parameters, one row) or `{table: name}` (a tempdb table an ancestor stages, one row per staged row). Required on an insert; forbidden elsewhere (§4.4). |
+| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Required for `DML` nodes: `tempdb`, `caller` or `discard` (§4.4). Forbidden for `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). On `SCRIPT` nodes: required in `row`/`table` mode (`tempdb` or `caller`), forbidden in `value` mode (§4.12). See §4.7. |
 | `delivery` | object | no | DQL with source `tempdb` and DuckDB staging only: `{feed, id}` identifies the immutable landing folder. At most one per pipeline. Managed append requires it and depends transitively on all non-append nodes (§13.25). |
 | `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. **Data flow only** — never an edge added to avoid contention between nodes; the executor owns scheduling (§4.11). |
 | `settings` | object | no | Per-node execution settings. v1 holds one key, `timeout_seconds` — this node's wall-clock deadline. See §4.11. |
@@ -350,12 +378,13 @@ Note: no `output` block. DML's side effect IS the output.
 
 ### 4.7 `output` block reference
 
-The `output` block declares where the node's ResultSet goes. Optional for DQL nodes — **omitted means `{"target": "caller"}`**; forbidden for DML/DDL. On a PIPELINE node the block declares where the child execution's caller result lands, and is permitted only when the pinned child has a caller node (§12.9 `pipeline_output_on_sideeffect_child`).
+The `output` block declares where the node's ResultSet goes. Optional for DQL nodes — **omitted means `{"target": "caller"}`**; required for DML (`tempdb`, `caller` or `discard` — §4.4); forbidden for DDL. On a PIPELINE node the block declares where the child execution's caller result lands, and is permitted only when the pinned child has a caller node (§12.9 `pipeline_output_on_sideeffect_child`).
 
 | `target` value | Additional fields | Description |
 |---|---|---|
 | `"tempdb"` | `table: string`; SCRIPT only: `rejects: string` | Stage the ResultSet into the in-memory tempdb under the given table name. Downstream nodes can query it via `source: "tempdb"` SQL referencing the table. A node whose data downstream nodes consume must declare this explicitly. On a `SCRIPT` node `rejects` names the tempdb table the function's rejected rows go to, required exactly when the pinned contract declares `rejects` (§12.13); the rejects table joins the tempdb namespace's uniqueness rule (§12.1). |
 | `"caller"` | (none — `rejects` is refused, §12.13 R5) | Return the ResultSet as the pipeline's result. **Default when `output` is omitted.** At most one node per pipeline may resolve to this target; zero is legal (write-back pipelines return stats only). A `row`/`table`-mode SCRIPT may be the caller node only when its contract declares no rejects (§12.13). |
+| `"discard"` | (none) | DML nodes only (#1034): the statement's write is the node's only effect — no rows are staged or returned. Refused on every other node type (`output_target_invalid`; a DDL node's output is `ddl_has_output`). |
 | `"datasource"` | `datasource: string`, `table: string`, `mode: "replace" \| "append"` | Stream the ResultSet to an external datasource's table. `replace` = TRUNCATE+INSERT in one transaction; `append` = INSERT only. The target table must already exist in the datasource (or be created by a preceding DDL node in the pipeline). |
 
 ### 4.8 `source` field rules
@@ -730,13 +759,13 @@ A DQL node runs a `SELECT` query and produces a ResultSet. Behavior depends on `
 
 ### 8.2 DML nodes
 
-A DML node runs `INSERT`, `UPDATE`, `DELETE`, or `MERGE` against its `source`. The executor:
+A DML node runs its declared `operation` (§4.4) against its `source`. The executor:
 
-1. Renders the template, executes the SQL.
-2. Captures the affected row count.
-3. Records row count in `node_stats`. No staging, no output block.
+1. Renders the template. An `insert` loads its input BEFORE any target connection (one scalar row, or every row of the staged table under the execution's staging budget), refuses an unqualified dialect, then executes the template once per input row on one prepared statement and correlates each row with its returned key. An `update`/`delete` executes once.
+2. Builds the result rows — each input row plus `id`, or one `affected_rows` row — and delivers them after the target connection is returned: staged under `output.table`, materialized as the caller result, or discarded.
+3. Records the statement's write count (rows inserted, or rows affected) as the node's `rows_out` in `node_stats`.
 
-DML nodes are side-effect sinks. They typically appear as the last node(s) in a pipeline that needs to write back results — but write-back is more naturally modeled as a DQL node with `output.target: "datasource"` (let the framework handle the INSERT). DML is for cases where the SQL is too complex for the framework's auto-streaming (conditional logic, MERGE with custom conflict handling, etc.).
+DML nodes write through their own statement. They typically appear as the last node(s) in a pipeline that needs to write back results — but write-back is more naturally modeled as a DQL node with `output.target: "datasource"` (let the framework handle the INSERT). DML is for cases where the SQL is too complex for the framework's auto-streaming (conditional logic, MERGE with custom conflict handling, etc.).
 
 ### 8.3 DDL nodes
 
@@ -801,7 +830,7 @@ DAG position is irrelevant: the caller node may be a sink, or sit mid-DAG (thoug
 | Code | Check |
 |---|---|
 | `pipeline.validation.multiple_caller_nodes` | More than one node resolves to `output.target: "caller"` (explicitly or by omission). |
-| `pipeline.validation.non_dql_caller_target` | A `DML` or `DDL` node has an `output` block (`caller` or otherwise). Only DQL nodes have outputs. (Same check as `dml_has_output` / `ddl_has_output` — listed here for the caller-specific case.) |
+| `pipeline.validation.non_dql_caller_target` | A `DDL` node has an `output` block (`caller` or otherwise). (Same check as `ddl_has_output` — listed here for the caller-specific case.) A `DML` node MAY name `caller` since #1034 (§4.4) and counts toward `multiple_caller_nodes` like any other; it is never the caller by omission. |
 
 Any combination of `tempdb` / `datasource` / `caller` targets across DQL nodes is otherwise legal — a DQL sink may write to a datasource, stage to tempdb for a later DML node, or return to the caller.
 
@@ -941,9 +970,15 @@ All checks run at pipeline create/update time. A pipeline that fails any check i
 | Code | Check |
 |---|---|
 | `pipeline.validation.type_invalid` | Each node `type` is one of `DQL`, `DML`, `DDL`, `PIPELINE` |
-| `pipeline.validation.dml_has_output` | DML nodes must NOT have an `output` block |
+| `pipeline.validation.dml_has_output` | A DML node's `output.target` is `datasource` — a DML result goes to `tempdb`, `caller` or `discard` (§4.4, #1034; the code keeps its frozen name) |
+| `pipeline.validation.dml_output_required` | A DML node has no `output` block — it names where its result rows go: `tempdb` (with `table`), `caller` or `discard` (§4.4) |
+| `pipeline.validation.dml_operation_required` | A DML node declares no `operation` — refused at save AND at run admission before any business write, which is how a DML node saved before #1034 is refused (§4.4) |
+| `pipeline.validation.dml_operation_invalid` | A DML node's `operation` is not `insert`, `update` or `delete` |
+| `pipeline.validation.dml_key_invalid` | An `insert` declares no `key`, a `key.column` that is not an SQL identifier, or a `key.type` outside `INTEGER` / `BIGINTEGER` / `STRING`; or an `update`/`delete` declares a `key` |
+| `pipeline.validation.dml_input_invalid` | An `insert` declares no `input`, both or neither of `input.parameters` and `input.table`, a parameter that is not declared or is listed twice, or a table no node it depends on stages; or an `update`/`delete` declares an `input` |
+| `pipeline.validation.dml_field_forbidden` | A non-DML node declares `operation`, `key` or `input` |
 | `pipeline.validation.ddl_has_output` | DDL nodes must NOT have an `output` block |
-| `pipeline.validation.output_target_invalid` | `output.target` (when the block is present) is one of `tempdb`, `caller`, `datasource` |
+| `pipeline.validation.output_target_invalid` | `output.target` (when the block is present) is one of `tempdb`, `caller`, `datasource`, `discard` — and `discard` only on a DML node |
 | `pipeline.validation.output_table_missing` | `output.target: "tempdb"` requires `output.table` |
 | `pipeline.validation.output_datasource_missing` | `output.target: "datasource"` requires `output.datasource` and `output.table` |
 | `pipeline.validation.output_mode_invalid` | `output.target: "datasource"` requires `mode`, and it must be `replace` or `append` — a MISSING mode is rejected, never defaulted (2026-08-08: one of the two values TRUNCATEs the target table; guessing is not acceptable) |
@@ -1145,8 +1180,11 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.node.commit_failed` | 502 | A streamed DQL node's finalizing commit was refused (#336): the source connection's autocommit-equivalent net effect (dag-executor §6.4.2) did not happen, so the node's success was a lie and the run fails instead. The detail carries `sql_state` (the driver's, via `FailureShape`); the driver message rides in the envelope's `message` like its `query_execution_failed` sibling. When the node failed for its own reasons the refusal is `addSuppressed` to that failure — the primary stays the result |
 | `pipeline.node.calculator_failed` | 500 | A `CALCULATOR` node's evaluation failed. The detail carries the node id, the `kind`, the input at fault and the reason — an unknown `unit`, a `format` that does not compile, text that does not match its pattern, a zero denominator. Save-time validation (§12.10) has already refused everything decidable from the body, so this is a value the run itself produced |
 | `pipeline.node.sql_parameter_missing` | 500 | The rendered SQL references a `:name` bind parameter the execution context does not declare. Raised before anything executes (042: a missing value bound as null would return wrong data instead of an error); the message names the parameter |
+| `pipeline.node.dml_key_correlation_failed` | 500 | A DML `insert` could not correlate an input row with its key (§4.4): the driver returned no key row, more than one, a different column, a null or a value of another type, or a value different from the supplied `id` (a trigger rewrote it). The node fails and no row of the insert is kept. `details` carry `node`, `row_index` and `reason` (`key_columns`, `key_column`, `key_missing`, `key_ambiguous`, `key_type`, `key_rewritten`) — never a key value |
+| `pipeline.node.dml_affected_rows_mismatch` | 500 | A DML `insert` execution affected a count other than one for one input row (§4.4). `details` carry `node`, `row_index` and `affected_rows`; no row of the insert is kept |
+| `pipeline.node.dml_insert_unqualified` | 500 | A DML `insert` targets a dialect whose pinned driver is not qualified to return inserted keys (§4.4) — refused before input is read or any statement prepared. `details` carry `node` and `dialect` |
 | `pipeline.node.not_found` | 404 | A node-run debug query ([MCP §6.2.20](mcp-server.md#6220-pipelines_execute_node)) named a node id the resolved pipeline version does not hold (037 E2). `details` carries the node id and the version searched — after versioning, "no such node" usually means a typo, since the tool's E5 default already prefers the DRAFT body where authoring happens |
-| `pipeline.node.standalone_execution_refused` | 400 | A node-run debug query refused because the node has no standalone SQL to run (037 §A/E2): its `source` is `tempdb` — the staging database exists only inside a full execution, so use `pipelines_execute` — or it is a PIPELINE node, which runs a child pipeline, not SQL. `details.reason` names which (`tempdb_source` / `pipeline_node`) |
+| `pipeline.node.standalone_execution_refused` | 400 | A node-run debug query refused because the node has no standalone SQL to run (037 §A/E2): its `source` is `tempdb` — the staging database exists only inside a full execution, so use `pipelines_execute` — or it is a PIPELINE node, which runs a child pipeline, not SQL. `details.reason` names which (`tempdb_source` / `pipeline_node`) — or, since #1034, it is a DML `insert` whose `input.table` is a staged table (`staged_input`), refused before the datasource is resolved |
 
 ### 13.5 Staging
 
@@ -1980,18 +2018,22 @@ A downstream JOIN node then benefits from this index when querying `int_revenue`
   "type": "DML",
   "source": "pg-meta",
   "template": {"id": "acme/finance/record_execution.sql", "version": 1},
+  "operation": "insert",
+  "key": {"column": "execution_id", "type": "BIGINTEGER"},
+  "input": {"parameters": ["pipeline_id"]},
+  "output": {"target": "discard"},
   "depends_on": ["return_report"]
 }
 ```
 
 Template:
 
-```ftl
+```sql
 INSERT INTO pipeline_executions (pipeline_id, executed_at, status)
-VALUES ('${pipeline_id}', CURRENT_TIMESTAMP, 'SUCCESS')
+VALUES (:pipeline_id, CURRENT_TIMESTAMP, 'SUCCESS')
 ```
 
-Side-effect only. No `output` block. No data returned. ✓
+The node declares `"operation": "insert"`, its `key` (the audit table's generated `execution_id` column), an `input` (the declared parameter `pipeline_id`, bound as `:pipeline_id` rather than interpolated) and `"output": {"target": "discard"}`: the write is its only effect and no data is returned (§4.4). ✓
 
 ---
 
@@ -2054,6 +2096,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-20 | v1.106 | 1034 (#1034) | **DML operation results.** A DML node declares `operation` (`insert`/`update`/`delete`), an insert its `key` and `input`, and every DML node an `output` (`tempdb`, `caller` or the new DML-only target `discard`) — §4.4, §4.6, §4.7, §8.2, §9.2. An insert returns each input row plus its logical `id`; update/delete return one `affected_rows` row. §12.4 gains `dml_output_required`, `dml_operation_required`, `dml_operation_invalid`, `dml_key_invalid`, `dml_input_invalid` and `dml_field_forbidden`; `dml_has_output` (frozen name) now refuses a `datasource` target; `output_target_invalid` admits `discard` on DML only. §13.4 gains `pipeline.node.dml_key_correlation_failed`, `dml_affected_rows_mismatch` and `dml_insert_unqualified` (500, the `pipeline.node.` family default) and `standalone_execution_refused` the `staged_input` reason. Run admission re-applies the DML shape rules to the pinned body, so an operation-less DML node saved earlier is refused before any business write (owner waiver). Landed with the constants (§12 code count 85 → 91, §13 row count 525 → 528). Additive per §15.2 except the waived operation-less DML. |
 | 2026-11-18 | v1.105 | 1033 (#1033) | **§13.3 gains two rows**: `pipeline.execution.local_write_refused` (400 — the write-set plan's refusal of a run whose durable writes cannot share one local transaction; deterministic and author-side, so 400 against the family's 500 default) and `pipeline.execution.local_write_commit_failed` (502 — the root's settle of the family's shared local write transaction was refused after the last node succeeded), landed in the SAME commit as their `PipelineErrorCodes.Execution` constants, the `ApiErrorCatalog` rows and the §4.1 meter row in observability.md (§13 row count 520 → 522). Additive per §15.2. |
 | 2026-11-15 | v1.104 | 986 (#986, js-rendered F2) — renumbered at the spec sync after #994’s v1.103 | §13.22 `visualization.validation.config_schema_invalid`: for a `chart` the v1 schema, then the chart save rules — the declared library's support table (`chart.unsupported.<field>`) is gone (js-rendered record O-13). No code added or removed (§13 row count unchanged). |
 | 2026-11-15 | v1.103 | 994 (#994) | §13.5 gains `pipeline.staging.result_incomplete` (500, the `pipeline.staging.` family default — no explicit `ApiErrorCatalog` row), TEMPORARY until the pinned DuckDB driver throws mid-stream: a staging read that ended after a different number of rows than the engine counted for it in the same snapshot (details `rows_read`, `rows_expected`, `reader`). Landed with the constants in `StagingErrorCodes` and `PipelineErrorCodes.Staging`. §13 row count 519 → 520. |

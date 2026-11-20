@@ -575,7 +575,9 @@ class SubPipelineExecutionRunner(
         outcome: SinkOutcome,
     ): DirectResultSink? =
         when (val output = node.output) {
-            null -> {
+            // `discard` is a DML target only (§12.4 refuses it on a PIPELINE node at save and at
+            // run admission); were it reached, it delivers nothing, like an absent output.
+            null, NodeOutput.Discard -> {
                 null
             }
 

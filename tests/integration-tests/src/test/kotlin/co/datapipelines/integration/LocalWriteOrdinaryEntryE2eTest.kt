@@ -585,6 +585,8 @@ class LocalWriteOrdinaryEntryE2eTest {
             "type" to "DML",
             "source" to DATASOURCE,
             "template" to mapOf("id" to templateId, "version" to 1),
+            "operation" to "update",
+            "output" to mapOf("target" to "discard"),
             "depends_on" to dependsOn,
         )
 

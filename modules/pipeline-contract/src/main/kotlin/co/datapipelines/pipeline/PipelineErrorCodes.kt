@@ -102,8 +102,38 @@ object PipelineErrorCodes {
         /** §12.4 — each node `type` is one of `DQL`, `DML`, `DDL`. */
         const val TYPE_INVALID = "pipeline.validation.type_invalid"
 
-        /** §12.4 — DML nodes must NOT have an `output` block. */
+        /**
+         * §12.4 — a DML node's `output` block names a target a DML result cannot take. Since
+         * #1034 a DML node DOES have an output (its result rows: `tempdb`, `caller` or
+         * `discard`); the frozen code (§15.1) now names the one refused shape, a `datasource`
+         * target — a DML node writes through its own statement, never through a write-back.
+         */
         const val DML_HAS_OUTPUT = "pipeline.validation.dml_has_output"
+
+        /** §12.4 (#1034) — a DML node declares no `operation` (operation-less DML, waived legacy shape). */
+        const val DML_OPERATION_REQUIRED = "pipeline.validation.dml_operation_required"
+
+        /** §12.4 (#1034) — a DML node's `operation` is not `insert`, `update` or `delete`. */
+        const val DML_OPERATION_INVALID = "pipeline.validation.dml_operation_invalid"
+
+        /**
+         * §12.4 (#1034) — an insert's `key` is missing, names no valid column identifier, or
+         * declares a type outside INTEGER / BIGINTEGER / STRING; or an update/delete declares one.
+         */
+        const val DML_KEY_INVALID = "pipeline.validation.dml_key_invalid"
+
+        /**
+         * §12.4 (#1034) — an insert's `input` is missing, declares both or neither of
+         * `parameters` / `table`, names an undeclared parameter, or names a tempdb table no
+         * ancestor stages; or an update/delete declares one.
+         */
+        const val DML_INPUT_INVALID = "pipeline.validation.dml_input_invalid"
+
+        /** §12.4 (#1034) — a DML node omits `output`: its result goes to `tempdb`, `caller` or `discard`, explicitly. */
+        const val DML_OUTPUT_REQUIRED = "pipeline.validation.dml_output_required"
+
+        /** §12.4 (#1034) — `operation`, `key` or `input` on a node that is not DML. */
+        const val DML_FIELD_FORBIDDEN = "pipeline.validation.dml_field_forbidden"
 
         /** §12.4 — DDL nodes must NOT have an `output` block. */
         const val DDL_HAS_OUTPUT = "pipeline.validation.ddl_has_output"
@@ -645,6 +675,25 @@ object PipelineErrorCodes {
          * the parameter.
          */
         const val SQL_PARAMETER_MISSING = "pipeline.node.sql_parameter_missing"
+
+        /**
+         * §13.4 (#1034) — an insert could not correlate one input row with exactly one key from
+         * the SAME statement: the driver returned no key, several, a column other than the
+         * declared key, a null, a value of another type, or a value different from the supplied
+         * `id` (a trigger rewrote it). The node fails before any output row is published; a
+         * participating transaction rolls back, an ordinary connection rolls back the node's own
+         * statements. `details.reason` names which.
+         */
+        const val DML_KEY_CORRELATION_FAILED = "pipeline.node.dml_key_correlation_failed"
+
+        /** §13.4 (#1034) — an insert statement affected a row count other than exactly one for its input row. */
+        const val DML_AFFECTED_ROWS_MISMATCH = "pipeline.node.dml_affected_rows_mismatch"
+
+        /**
+         * §13.4 (#1034) — an insert targets a dialect whose generated-key return has not been
+         * qualified for one-to-one correlation (write-transactions §5). Refused before any SQL.
+         */
+        const val DML_INSERT_UNQUALIFIED = "pipeline.node.dml_insert_unqualified"
 
         /**
          * §13.4 (072) — a CALCULATOR node's evaluation failed. HTTP 500.

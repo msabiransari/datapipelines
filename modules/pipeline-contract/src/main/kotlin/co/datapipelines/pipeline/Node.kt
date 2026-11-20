@@ -18,10 +18,11 @@ import com.fasterxml.jackson.databind.JsonNode
  * default" (dag-executor §4.1). That rule needs `type` and `output` together, which a
  * per-property deserializer cannot see — hence the explicit [fromJson] creator.
  *
- * For DML / DDL / PIPELINE / CALCULATOR nodes an omitted `output` stays `null`: a DML/DDL side effect *is*
- * the output (§4.4/§4.5), and a PIPELINE node whose pinned child has no caller node is
- * side-effect-only (§4.9). A present block is a validation failure (§12.4, §12.9), not a shape
- * this class silently normalises away.
+ * For DML / DDL / PIPELINE / CALCULATOR nodes an omitted `output` stays `null`: a DDL side effect *is*
+ * the output (§4.5), a DML node must name its result's destination explicitly (`tempdb`, `caller`
+ * or `discard`, §4.4 — §12.4 refuses the omission), and a PIPELINE node whose pinned child has no
+ * caller node is side-effect-only (§4.9). A present block where the type forbids one is a
+ * validation failure (§12.4, §12.9), not a shape this class silently normalises away.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -117,7 +118,28 @@ data class Node(
     /** Trusted landing manifest materialised before this DQL node runs. */
     @field:JsonProperty("delivery") @get:JsonProperty("delivery") @param:JsonProperty("delivery")
     val delivery: DeliveryRef? = null,
+    /**
+     * DML nodes only (§4.4, write-transactions §3.4): `insert`, `update` or `delete`, as the wire
+     * string. Kept raw so §12.4 reports an absent (`dml_operation_required`) or out-of-catalog
+     * (`dml_operation_invalid`) value with its code; [dmlOperation] is the resolved view.
+     *
+     * Nullable with a null default under the class's `NON_NULL` inclusion — exactly as [kind]
+     * and [strict] are, and for the same reason: every non-DML node's canonical JSON (and body
+     * hash) is byte-identical after the field exists.
+     */
+    @field:JsonProperty("operation") @get:JsonProperty("operation") @param:JsonProperty("operation")
+    val operation: String? = null,
+    /** DML `insert` only (§4.4): the physical key column and the canonical type of the output `id`. */
+    @field:JsonProperty("key") @get:JsonProperty("key") @param:JsonProperty("key")
+    val key: DmlKey? = null,
+    /** DML `insert` only (§4.4): declared scalar parameters (one row) or an ancestor-staged tempdb table. */
+    @field:JsonProperty("input") @get:JsonProperty("input") @param:JsonProperty("input")
+    val input: DmlInput? = null,
 ) {
+    /** The resolved DML operation, or null when the node is not DML or its operation is absent/unknown. */
+    @get:JsonIgnore
+    val dmlOperation: DmlOperation? get() = if (type == NodeType.DML) DmlOperation.fromWireOrNull(operation) else null
+
     /** The resolved execution target (§4.8) — a registered datasource, or the tempdb literal. */
     @get:JsonIgnore
     val resolvedSource: NodeSource get() = NodeSource.from(source)
@@ -163,6 +185,9 @@ data class Node(
             @JsonProperty("settings") settings: NodeSettings?,
             @JsonProperty("strict") strict: Boolean?,
             @JsonProperty("delivery") delivery: DeliveryRef? = null,
+            @JsonProperty("operation") operation: String? = null,
+            @JsonProperty("key") key: DmlKey? = null,
+            @JsonProperty("input") input: DmlInput? = null,
         ): Node =
             Node(
                 id = id.orEmpty(),
@@ -193,6 +218,12 @@ data class Node(
                 // serializes back with no `strict` key at all.
                 strict = strict,
                 delivery = delivery,
+                // Absent stays absent, same body-hash rule. A DML node gets NO output default:
+                // caller designation stays explicit for DML (write-transactions §3.4), so §12.4
+                // must see an omitted block and ask for `tempdb`, `caller` or `discard`.
+                operation = operation,
+                key = key,
+                input = input,
             )
     }
 }

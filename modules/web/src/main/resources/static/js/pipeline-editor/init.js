@@ -1260,6 +1260,14 @@
           }
           push("Source", source);
           push("Template", self.templateRefText(node));
+          // #1034 (contract §4.4): a DML node's declared operation, and an insert's key and input.
+          if (type === "DML") {
+            push("Operation", node.operation || "— (required)");
+            if (node.operation === "insert") {
+              push("Key", self.dmlKeyText(node));
+              push("Input", self.dmlInputText(node));
+            }
+          }
           push("Output", self.outputText(node));
           push("Parameters", self.paramKeys.length ? self.paramKeys.join(", ") : "—");
         }
@@ -1760,7 +1768,8 @@
       /*
        * §8.1's Output copy: an omitted block on a DQL node is "returns result to
        * caller (default)" (contract §9.1) — never JSON.stringify's `undefined`.
-       * DML/DDL and a zero-caller PIPELINE node are side effects (§4.4/§4.5/§4.9).
+       * DDL and a zero-caller PIPELINE node are side effects (§4.5/§4.9); a DML node
+       * names where its result rows go (#1034, §4.4) — `discard` is its explicit side effect.
        */
       outputText: function (node) {
         if (!node) return "—";
@@ -1768,7 +1777,11 @@
           if (node.context_keys) return "context keys " + Object.keys(node.context_keys).sort().map(function (o) { return node.context_keys[o]; }).join(", ");
           return "context key " + (node.context_key || "—");
         }
-        if (node.type === "DML" || node.type === "DDL") return "side effect";
+        if (node.type === "DDL") return "side effect";
+        if (node.type === "DML") {
+          if (!node.output) return "— (required)";
+          if (node.output.target === "discard") return "discarded (side effect only)";
+        }
         if (!node.output) {
           return node.type === "DQL" ? "returns result to caller (default)" : "side effect";
         }
@@ -1782,6 +1795,22 @@
           );
         }
         return JSON.stringify(o);
+      },
+
+      /* #1034 (§4.4): an insert's physical key column and the canonical type its `id` carries. */
+      dmlKeyText: function (node) {
+        var key = node && node.key;
+        if (!key || !key.column) return "— (required)";
+        return key.column + " → id" + (key.type ? " (" + key.type + ")" : "");
+      },
+
+      /* #1034 (§4.4): an insert's input — named parameters (one row) or a staged table. */
+      dmlInputText: function (node) {
+        var input = node && node.input;
+        if (!input) return "— (required)";
+        if (input.table) return "tempdb table " + input.table + " (one insert per row)";
+        if (input.parameters) return "parameters " + (input.parameters.length ? input.parameters.join(", ") : "—") + " (one row)";
+        return "—";
       },
 
       /*
