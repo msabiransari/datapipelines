@@ -32,7 +32,7 @@
 -- non-GET route (versions and grants cascade), restores V11's constraints and removes V65's and the
 -- barrier's flyway_schema_history rows. A binary older than V65 does NOT refuse to start on this schema by
 -- itself (Flyway ignores a future versioned migration) and would serve non-GET metadata as GET — the
--- repeatable R__published_endpoint_method_downgrade_barrier.sql is what makes it refuse; read its header.
+-- repeatable db/downgrade-barrier/R__published_endpoint_method_downgrade_barrier.sql is what makes it refuse.
 
 ALTER TABLE published_endpoints ADD COLUMN method TEXT NOT NULL DEFAULT 'GET';
 ALTER TABLE published_endpoints ADD CONSTRAINT chk_published_endpoints_method

@@ -15,9 +15,12 @@ spring:
 
   # Flyway runs on startup against the metadata DB. Migrations live only in this
   # module (module-structure.md §3.1 rule 2); the DDL authority is metadata-db.md §4.
+  # The second location holds the repeatable downgrade barrier (#1037, metadata-db.md §7.4). It sits
+  # APART from db/migration because the test fixtures that apply the shipped scripts by hand read that
+  # directory for V<version>__<description>.sql only; the application itself runs both.
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    locations: classpath:db/migration,classpath:db/downgrade-barrier
     baseline-on-migrate: false
 
   # 075 — THE POSTURE IS THE PROFILE. `datapipelines.posture` is the operator-facing

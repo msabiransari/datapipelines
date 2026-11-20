@@ -43,6 +43,7 @@ class PublishedMethodDowngradeBarrierIntegrationTest {
     private val postRoute: UUID = UUID.randomUUID()
 
     private val shipped = repoFile("modules/app/src/main/resources/db/migration")
+    private val barrier = repoFile("modules/app/src/main/resources/db/downgrade-barrier")
     private val previousBinary: File = copyOf(shipped) { it.version < FIRST_METHOD_VERSION }
     private val withoutBarrier: File = copyOf(shipped) { it.version <= FIRST_METHOD_VERSION }
     private val db = SharedE2e.scratchDatabase("v65_barrier")
@@ -60,7 +61,7 @@ class PublishedMethodDowngradeBarrierIntegrationTest {
     @Test
     @Order(2)
     fun `the shipped scripts migrate to V65 and record the barrier as a repeatable`() {
-        migrate(db, shipped)
+        migrate(db, shipped, barrier)
 
         history() shouldContainExactly
             listOf("63|lake maintenance plan", "64|lake storage inventory", "65|published endpoint methods") +
@@ -99,14 +100,14 @@ class PublishedMethodDowngradeBarrierIntegrationTest {
     @Test
     @Order(6)
     fun `the current scripts migrate the rolled-back database forward again`() {
-        migrate(db, shipped)
+        migrate(db, shipped, barrier)
 
         history() shouldContainExactly
             listOf("63|lake maintenance plan", "64|lake storage inventory", "65|published endpoint methods") +
             "R|published endpoint method downgrade barrier"
         columnsOf("published_endpoints").contains("method") shouldBe true
         routes() shouldContainExactly listOf("/barrier/v1/x")
-        validate(db, shipped) shouldBe null
+        validate(db, shipped, barrier) shouldBe null
     }
 
     // ---------------------------------------------------------------- fixtures
@@ -143,21 +144,21 @@ class PublishedMethodDowngradeBarrierIntegrationTest {
 
     // ---------------------------------------------------------------- Flyway, by reflection
 
-    /** Applies [location]'s migrations to [target]; a Flyway failure is thrown unwrapped. */
+    /** Applies the migrations under [locations] to [target]; a Flyway failure is thrown as an IllegalStateException. */
     private fun migrate(
         target: SharedE2e.SharedPostgresRef,
-        location: File,
+        vararg locations: File,
     ) {
-        call(flyway(target, location), "migrate")
+        call(flyway(target, locations.toList()), "migrate")
     }
 
-    /** Flyway's own validation of [target] against [location]: null when it passes, else the refusal's message. */
+    /** Flyway's own validation of [target] against [locations]: null when it passes, else the refusal's message. */
     private fun validate(
         target: SharedE2e.SharedPostgresRef,
-        location: File,
+        vararg locations: File,
     ): String? =
         try {
-            call(flyway(target, location), "validate")
+            call(flyway(target, locations.toList()), "validate")
             null
         } catch (refusal: IllegalStateException) {
             refusal.message
@@ -165,7 +166,7 @@ class PublishedMethodDowngradeBarrierIntegrationTest {
 
     private fun flyway(
         target: SharedE2e.SharedPostgresRef,
-        location: File,
+        locations: List<File>,
     ): Any {
         val flywayClass = Class.forName("org.flywaydb.core.Flyway")
         val configuration = flywayClass.getMethod("configure").invoke(null)
@@ -173,7 +174,9 @@ class PublishedMethodDowngradeBarrierIntegrationTest {
         type
             .getMethod("dataSource", String::class.java, String::class.java, String::class.java)
             .invoke(configuration, target.jdbcUrl, target.username, target.password)
-        type.getMethod("locations", Array<String>::class.java).invoke(configuration, arrayOf("filesystem:${location.absolutePath}"))
+        type
+            .getMethod("locations", Array<String>::class.java)
+            .invoke(configuration, locations.map { "filesystem:${it.absolutePath}" }.toTypedArray())
         return type.getMethod("load").invoke(configuration)
     }
 

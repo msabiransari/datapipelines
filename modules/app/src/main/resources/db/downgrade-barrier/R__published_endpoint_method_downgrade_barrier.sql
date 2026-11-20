@@ -12,6 +12,9 @@
 -- locally" — Flyway's default `ignoreMigrationPatterns` ignores only FUTURE versioned migrations, never a
 -- missing repeatable — and the application does not start. The current binary resolves it, so it starts.
 --
+-- WHERE: its own Flyway location (spring.flyway.locations lists db/migration and db/downgrade-barrier), because
+-- the test fixtures that apply the shipped scripts by hand read db/migration for V<version>__<description>.sql only.
+--
 -- ROLLBACK is therefore a deliberate operator procedure (docs/metadata-db.md, "Rolling back V65"): drain
 -- writes, run V65's documented down path, delete this migration's and V65's rows from
 -- flyway_schema_history, then start the previous binary. The statement below is only a marker visible in

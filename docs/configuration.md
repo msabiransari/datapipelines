@@ -242,7 +242,7 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 |---|---|
 | `spring.application.name` | Log/metric attribution (`datapipelines`) |
 | `spring.flyway.enabled` | `true`: enables startup metadata migrations through Boot's Flyway auto-configuration. |
-| `spring.flyway.locations` | `classpath:db/migration`: migration scripts packaged by the app module. |
+| `spring.flyway.locations` | `classpath:db/migration,classpath:db/downgrade-barrier`: migration scripts packaged by the app module — the versioned scripts, and the repeatable downgrade barrier (#1037; [Metadata DB §7.4](metadata-db.md#74-rolling-back-v65-published-method-identities-1037)) kept in its own location so tooling that applies the versioned scripts by name never meets it. |
 | `spring.flyway.baseline-on-migrate` | `false`: do not automatically baseline a pre-existing nonempty schema; follow [Deployment §8.2](deployment.md#82-database-migrations). |
 | `spring.profiles.active` | Resolves the selected posture; do not independently select a conflicting profile (§6). |
 | `server.shutdown` | `graceful`: Boot/Tomcat stops accepting new requests and lets active requests finish during shutdown; the execution drain runs first. |
@@ -819,9 +819,12 @@ spring:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
       connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:10000}
 
+  # The second location holds the repeatable downgrade barrier (#1037, metadata-db.md §7.4). It sits
+  # APART from db/migration because the test fixtures that apply the shipped scripts by hand read that
+  # directory for V<version>__<description>.sql only; the application itself runs both.
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    locations: classpath:db/migration,classpath:db/downgrade-barrier
     baseline-on-migrate: false
 
   profiles:
@@ -1503,7 +1506,7 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-19 | v1.104 | 1037 (#1037) | **§3.22** gains `datapipelines.endpoints.mutations-enabled` (default `false`): the operator run-gate on published non-GET routes — off refuses an otherwise-authorized mutation `503 endpoint.mutations_disabled` before durable work (#1039 owns the writing side). **§8** its source binding and consumer row. |
+| 2026-11-19 | v1.104 | 1037 (#1037) | **§3.22** gains `datapipelines.endpoints.mutations-enabled` (default `false`): the operator run-gate on published non-GET routes — off refuses an otherwise-authorized mutation `503 endpoint.mutations_disabled` before durable work (#1039 owns the writing side). **§8** its source binding and consumer row. **§5 / `spring.flyway.locations`** gains `classpath:db/downgrade-barrier`, the repeatable migration that makes a binary older than V65 refuse to start (Metadata DB §7.4). |
 | 2026-11-17 | v1.103 | #819 final review F2 | **§7:** remove the stale claim that the cgroup memory sum and its reader term are deferred; #819 implements them at every boot. E10b acceptance stays open; the scratch budget against the pod filesystem limit remains deferred. |
 | 2026-11-17 | v1.102 | #997 final review F1 | **§3.36:** the process memory admission example follows the measured defaults: two staging databases with the lake on or off, after `staging-expansion-factor` became 10. The enabled non-heap terms total 4 GiB (staging 2, readers 1, reserve 1); this corrects the earlier seven-database example, not a measured capacity profile. |
 | 2026-11-16 | v1.101 | 997 (#997, dp-lake P6 evidence, round 4) | **§3.36** `admission.max-delivery-bytes` 2GB → 1GB (owner ruling 2026-11-16): a delivery reserves `max-delivery-bytes × staging-expansion-factor` whatever its size, so at 2GB one delivery held the whole shipped 20GB `scratch-bytes`; at 1GB two deliveries fit and compaction gets a 10GB ceiling. `scratch-bytes` stays 20GB. The row says why, what a delivery above the limit gets and what a deployment needing larger deliveries does ([Lake §6](lake.md#6-deliveries)). **§5** the template line. |
