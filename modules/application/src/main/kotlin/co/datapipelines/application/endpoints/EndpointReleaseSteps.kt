@@ -66,7 +66,7 @@ class EndpointReleaseSteps(
         val version = versions.find(endpoint.id, identity.version) ?: throw ReleaseRefusals.planConflict(ReleaseFamily.ENDPOINT)
         if (version.status != PipelineVersionStatus.DRAFT) throw noDraft(endpoint)
         if (version.bodyHash != expectedHash) throw conflict(endpoint, version)
-        pins.check(identity.workspaceId, endpoint.parsed, version.body, EndpointPinValidator.Admission.LIVE)
+        pins.check(identity.workspaceId, endpoint.parsed, version.body, EndpointPinValidator.Admission.LIVE, endpoint.method)
         return Prepared(endpoint, version, expectedHash, actor)
     }
 
@@ -74,7 +74,7 @@ class EndpointReleaseSteps(
     fun commit(prepared: Prepared): PublishedEndpointVersion {
         val endpoint = prepared.endpoint
         versions.lockEntity(endpoint.id) ?: throw ReleaseRefusals.planConflict(ReleaseFamily.ENDPOINT)
-        pins.check(endpoint.workspaceId, endpoint.parsed, prepared.version.body, EndpointPinValidator.Admission.RELEASED_ONLY)
+        pins.check(endpoint.workspaceId, endpoint.parsed, prepared.version.body, EndpointPinValidator.Admission.RELEASED_ONLY, endpoint.method)
         val released =
             versions.release(endpoint.id, prepared.version.version, prepared.expectedHash, prepared.actor)
                 ?: throw ReleaseRefusals.planConflict(ReleaseFamily.ENDPOINT)

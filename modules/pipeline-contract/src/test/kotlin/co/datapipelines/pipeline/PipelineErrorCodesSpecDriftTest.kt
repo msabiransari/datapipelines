@@ -267,6 +267,8 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED,
                 PipelineErrorCodes.Endpoint.NOT_FOUND,
                 PipelineErrorCodes.Endpoint.METHOD_NOT_ALLOWED,
+                PipelineErrorCodes.Endpoint.METHOD_INVALID,
+                PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED,
                 PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE,
                 PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
                 PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,

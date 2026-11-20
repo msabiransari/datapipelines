@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointVersionBody
 import co.datapipelines.application.endpoints.LegacyEndpointColumns
@@ -142,22 +143,22 @@ class PublishedEndpointRegistryIntegrationTest {
             { repository.findAllEnabled().shouldBeEmpty() },
             // §5.6: a disabled endpoint answers exactly like an unknown path, so it must not be
             // matchable — the 404 must not depend on a special case further down the serve path.
-            { EndpointRegistry(repository).reload().match("/nyc/v1/revenue") shouldBe null },
+            { EndpointRegistry(repository).reload().match("/nyc/v1/revenue", EndpointMethod.GET) shouldBe null },
         )
     }
 
     @Test
     fun `the registry serves its cached snapshot until it is invalidated`() {
         val registry = EndpointRegistry(repository)
-        registry.matcher().match("/nyc/v1/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue", EndpointMethod.GET) shouldBe null
 
         publish("/nyc/v1/revenue")
 
         // Still the old snapshot. This is the cache doing its job — and it is also exactly the
         // staleness the channel exists to end on OTHER instances.
-        registry.matcher().match("/nyc/v1/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue", EndpointMethod.GET) shouldBe null
         registry.invalidateLocally()
-        registry.matcher().match("/nyc/v1/revenue").shouldNotBeNull()
+        registry.matcher().match("/nyc/v1/revenue", EndpointMethod.GET).shouldNotBeNull()
     }
 
     @Test
@@ -167,8 +168,8 @@ class PublishedEndpointRegistryIntegrationTest {
         val registryA = EndpointRegistry(repository, publisherFor(INSTANCE_A))
 
         assertAll(
-            { registryA.matcher().match("/nyc/v1/revenue") shouldBe null },
-            { registryB.matcher().match("/nyc/v1/revenue") shouldBe null },
+            { registryA.matcher().match("/nyc/v1/revenue", EndpointMethod.GET) shouldBe null },
+            { registryB.matcher().match("/nyc/v1/revenue", EndpointMethod.GET) shouldBe null },
         )
 
         publish("/nyc/v1/revenue")
@@ -176,13 +177,13 @@ class PublishedEndpointRegistryIntegrationTest {
 
         // Polling, not sleeping: the claim is "B converges", and a fixed sleep is either flaky or
         // slow. Exhausting the budget means the message never arrived — the M3-shaped defect.
-        val seenByB = await { registryB.matcher().match("/nyc/v1/revenue") }
+        val seenByB = await { registryB.matcher().match("/nyc/v1/revenue", EndpointMethod.GET) }
 
         assertAll(
             {
                 registryA
                     .matcher()
-                    .match("/nyc/v1/revenue")
+                    .match("/nyc/v1/revenue", EndpointMethod.GET)
                     ?.endpoint
                     ?.pathPattern shouldBe "/nyc/v1/revenue"
             },
@@ -197,13 +198,13 @@ class PublishedEndpointRegistryIntegrationTest {
         // skip were removed, the endpoint below would be visible after the self-publish.
         val registry = EndpointRegistry(repository)
         subscribe(registry, instanceId = INSTANCE_A)
-        registry.matcher().match("/nyc/v1/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue", EndpointMethod.GET) shouldBe null
 
         publish("/nyc/v1/revenue")
         publisherFor(INSTANCE_A).publish()
         TimeUnit.MILLISECONDS.sleep(SELF_MESSAGE_SETTLE_MS)
 
-        registry.matcher().match("/nyc/v1/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue", EndpointMethod.GET) shouldBe null
     }
 
     @Test
@@ -214,7 +215,7 @@ class PublishedEndpointRegistryIntegrationTest {
         // matcher() call would load the endpoint from the table whether or not the channel ever
         // delivered anything, and the test would pass with the subscriber disabled. (It did,
         // until a falsification run showed only ONE test going red instead of two.)
-        registry.matcher().match("/nyc/v1/revenue") shouldBe null
+        registry.matcher().match("/nyc/v1/revenue", EndpointMethod.GET) shouldBe null
 
         redis.convertAndSend(EndpointInvalidationChannel.NAME, "{not json")
         TimeUnit.MILLISECONDS.sleep(SELF_MESSAGE_SETTLE_MS)
@@ -222,7 +223,7 @@ class PublishedEndpointRegistryIntegrationTest {
         // The garbage did not kill the listener thread: a well-formed message still lands.
         publish("/nyc/v1/revenue")
         publisherFor(INSTANCE_A).publish()
-        await { registry.matcher().match("/nyc/v1/revenue") }.shouldNotBeNull()
+        await { registry.matcher().match("/nyc/v1/revenue", EndpointMethod.GET) }.shouldNotBeNull()
     }
 
     /**

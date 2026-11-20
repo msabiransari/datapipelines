@@ -31,6 +31,11 @@ import java.util.UUID
  * nothing.** (Until #215 a `user` key holding `execute` could call an unbound path of its own
  * workspace; that branch went with the scopes.)
  *
+ * This walk is the GET grant of the method era (#1037, published-mutation-apis §2): the rows it
+ * reads are GET bindings, fetched so by the repository. A mutation grant never shadows it, is
+ * never inherited, and is decided elsewhere — by route entity id against the presenting key's
+ * grants — so the two shapes can never answer each other's question.
+ *
  * ## Pure
  *
  * Bindings and the endpoint row are passed in, so every case in §5.2 is a table test with no

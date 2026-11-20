@@ -1,17 +1,16 @@
 package co.datapipelines.web.endpoints
 
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.appPath
-import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiErrorResponse
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.config.WebHeaders
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpHeaders
-import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.RequestMapping
@@ -44,9 +43,13 @@ import java.util.UUID
  * Resolution, authorisation, validation and execution belong to [PublishedEndpointServeService].
  * This class turns a servlet request into that service's input and its outcome into a response.
  *
- * The `405` is answered here rather than left to Spring: with only `GET` mapped, another method
- * would get Spring's own 405 without an `Allow` header and without the product's error envelope,
- * and a `POST` to an unknown path would 404 instead — leaking which refusal came first.
+ * The method refusal is answered by the SERVICE, not left to Spring: with no method mapped,
+ * another verb would get Spring's own 405 without an `Allow` header and without the product's
+ * error envelope, and a `POST` to an unknown path would 404 instead of the service's opaque
+ * 404 — leaking which refusal came first. Since #1037 the `Allow` a `405` carries is exactly the
+ * methods the presenting key can call at that path (published-mutation-apis §4.4), which only
+ * the service can compute; the paging delegation stays GET-only, so a POST to a paging URL
+ * takes the mutation gate like any other non-GET path.
  */
 @RestController
 @RequestMapping(PublishedEndpointController.ROOT)
@@ -55,45 +58,35 @@ class PublishedEndpointController(
     /** Keys v2 A16/B3 — the business-path paging read, reached THROUGH this catch-all (see its KDoc). */
     private val pagingService: PublishedExecutionPagingService,
 ) {
-    /** Every method on the subtree; `GET` serves, everything else is a `405` carrying `Allow: GET`. */
+    /** Every method on the subtree; `GET` serves, everything else answers the method gate (§4.4). */
     @RequestMapping(CATCH_ALL)
     @RequiredScope(Permission.ENDPOINT_SERVE)
     fun serve(request: HttpServletRequest): ResponseEntity<Any> {
-        if (request.method != HTTP_GET) {
-            return ResponseEntity
-                .status(HttpStatus.METHOD_NOT_ALLOWED)
-                .headers(baseHeaders())
-                .header(HttpHeaders.ALLOW, HTTP_GET)
-                .body(
-                    ApiErrorResponse.of(
-                        PipelineErrorCodes.Endpoint.METHOD_NOT_ALLOWED,
-                        "Published endpoints answer GET only.",
-                        mapOf("method" to request.method),
-                    ),
-                )
-        }
-
+        val method = EndpointMethod.of(request.method)
         val path = pathOf(request)
-        // Keys v2 A16/B3: the paging suffix is the key's own-run read under the business path.
-        // Delegation happens after the serve path's session refusal — the shared rule order of
-        // §5 — so a session on a paging route is refused exactly as on a serve route.
-        parse(path)?.let { paged ->
-            val principal = currentPrincipal()
-            return if (paged.isResult) {
-                pagingService.executionResult(
-                    businessPath = paged.businessPath,
-                    executionId = paged.executionId,
-                    principal = principal,
-                    offset = request.getParameter("offset")?.toLongOrNull(),
-                    limit = request.getParameter("limit")?.toIntOrNull(),
-                    format = request.getParameter("format"),
-                )
-            } else {
-                pagingService.executionMetadata(paged.businessPath, paged.executionId, principal)
+
+        if (method == EndpointMethod.GET) {
+            // Keys v2 A16/B3: the paging suffix is the key's own-run read under the business path.
+            // Delegation happens after the serve path's session refusal — the shared rule order of
+            // §5 — so a session on a paging route is refused exactly as on a serve route.
+            parse(path)?.let { paged ->
+                val principal = currentPrincipal()
+                return if (paged.isResult) {
+                    pagingService.executionResult(
+                        businessPath = paged.businessPath,
+                        executionId = paged.executionId,
+                        principal = principal,
+                        offset = request.getParameter("offset")?.toLongOrNull(),
+                        limit = request.getParameter("limit")?.toIntOrNull(),
+                        format = request.getParameter("format"),
+                    )
+                } else {
+                    pagingService.executionMetadata(paged.businessPath, paged.executionId, principal)
+                }
             }
         }
 
-        return when (val outcome = serveService.serve(path, currentPrincipal(), validatorRequest(request))) {
+        return when (val outcome = serveService.serve(path, method, currentPrincipal(), validatorRequest(request))) {
             is PublishedEndpointServeService.Outcome.Served -> {
                 ResponseEntity
                     .ok()
@@ -110,12 +103,12 @@ class PublishedEndpointController(
                     .body(outcome.body)
             }
 
-            is PublishedEndpointServeService.Outcome.Refused -> {
+            is PublishedEndpointServeService.Outcome.Refused ->
                 ResponseEntity
                     .status(outcome.status)
                     .headers(baseHeaders())
+                    .apply { outcome.allow?.let { allow -> header(HttpHeaders.ALLOW, allow.joinToString(", ")) } }
                     .body(ApiErrorResponse.of(outcome.code, outcome.message, outcome.details))
-            }
         }
     }
 
@@ -176,8 +169,6 @@ class PublishedEndpointController(
          * at all, so `/api/v1/…` belongs to the product whether or not a route there exists.
          */
         const val CATCH_ALL = "/{category:" + EndpointPath.CATEGORY_URL_PATTERN + "}/**"
-
-        private const val HTTP_GET = "GET"
 
         /**
          * The keys-v2 paging suffix (A16/B3): `<business path>/executions/{id}` or

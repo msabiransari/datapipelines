@@ -2,6 +2,7 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPromotionImport
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
@@ -73,6 +74,18 @@ class EndpointPromotion(
      * omission is not silent (#286): the rows over the promoted pipelines are counted and logged
      * — a count, never a path — so an operator knows the endpoint did not travel. The fix is the
      * console's: unpublish the legacy row and republish at a legal path.
+     *
+     * ## #1037 — a mutation route refuses the WHOLE transfer, before anything is sent
+     *
+     * The wire carries no method: a non-GET route that travelled would arrive as a GET entity
+     * with a GET tree grant — reinterpreted, the exact harm §2 of the design record refuses.
+     * Method-aware transfer needs exact-pin semantics (#879) and a receiver that advertises
+     * method support (#1040); until both exist, one non-GET route over the promoted pipelines
+     * throws [PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED] for the entire batch,
+     * naming the sender's own routes (method and path) so the operator can see what to hold
+     * back. The receiver's half is already GET-only by construction: [apply] resolves the
+     * entry's path as GET and binds GET tree grants only, so a legacy payload can never widen a
+     * mutation route.
      */
     fun entriesFor(
         workspaceId: UUID,
@@ -88,9 +101,26 @@ class EndpointPromotion(
                 omitted,
             )
         }
+        val candidates = endpoints.findByWorkspace(workspaceId)
+        val travelling = candidates.mapNotNull { endpoint -> endpoint.current?.body?.takeIf { it.pipelineName in promoted }?.let { endpoint } }
+        val mutations = travelling.filter { it.method != EndpointMethod.GET }
+        if (mutations.isNotEmpty()) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED,
+                message =
+                    "This batch would promote non-GET API route(s) ${mutations.sortedBy { it.pathPattern }.joinToString(", ") { "${it.method.name} ${it.pathPattern}" }}. " +
+                        "Method-aware transfer needs exact-pin promotion (#879) and a receiver that advertises " +
+                        "method support; until then a mutation route cannot travel — unpublish it first, or promote " +
+                        "when #1040 lands.",
+                details =
+                    mapOf(
+                        "unsupported_routes" to
+                            mutations.sortedBy { it.pathPattern }.map { mapOf("method" to it.method.name, "path" to it.pathPattern) },
+                    ),
+            )
+        }
         val allBindings = bindings.findByWorkspace(workspaceId)
-        return endpoints
-            .findByWorkspace(workspaceId)
+        return candidates
             .mapNotNull { endpoint ->
                 // #786: the API's CURRENT version is what travels; an API with none has nothing to promote.
                 val body = endpoint.current?.body?.takeIf { it.pipelineName in promoted } ?: return@mapNotNull null

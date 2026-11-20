@@ -182,46 +182,77 @@ class EndpointKeyService(
     }
 
     /**
-     * Binds an existing key at [pathPrefix] (§6). Idempotent.
+     * Binds an existing key at [pathPrefix] (§6) — a GET grant at a tree node, or with [method] a mutation grant on
+     * exactly ONE route entity (#1037). Idempotent.
      *
-     * #191: the prefix must lie at or above a path the caller's OWN workspace publishes. A
-     * workspace that publishes nothing at or under the prefix is refused exactly like one that
-     * cannot name it — the message says nothing about anyone else's tree.
+     * #191: a GET prefix must lie at or above a path the caller's OWN workspace publishes. A workspace that publishes
+     * nothing at or under the prefix is refused exactly like one that cannot name it — the message says nothing about
+     * anyone else's tree.
+     *
+     * A mutation grant names the whole route — the prefix IS the entity's full pattern, and the entity must exist at
+     * that (path, method) in the caller's workspace: the grant stores its id, so it can never widen to a sibling
+     * method or survive a delete-and-recreate at the same pattern (published-mutation-apis §2).
      */
     fun bind(
         principal: AuthenticatedPrincipal,
         apiKeyId: String,
         pathPrefix: String,
+        method: EndpointMethod = EndpointMethod.GET,
     ): Boolean {
         val prefix = normalizeBinding(pathPrefix)
         val workspaceId = principal.requireWorkspace().id
-        requireInsideWorkspace(prefix, workspaceId)
+        val endpointId: UUID?
+        if (method == EndpointMethod.GET) {
+            requireInsideWorkspace(prefix, workspaceId)
+            endpointId = null
+        } else {
+            // The mutation grant's target: one entity of this method at this exact path in the caller's workspace.
+            // A disabled entity may still be granted (enabling it later is the operator's next step, and the serve
+            // path 404s a disabled route regardless of grants) — the same posture a GET node binding has toward the
+            // entities beneath it.
+            endpointId =
+                publishedEndpoints.findByPath(prefix, method)?.takeIf { it.workspaceId == workspaceId }?.id
+                    ?: throw DatapipelinesException(
+                        code = PipelineErrorCodes.Endpoint.PATH_INVALID,
+                        message =
+                            "Your workspace publishes no ${method.name} route at '$prefix'. Grant a method on a route " +
+                                "you publish — a mutation grant names one route, not a tree node.",
+                        details = mapOf("path_prefix" to prefix, "method" to method.name),
+                    )
+        }
         val added =
             bindings.insert(
-                EndpointKeyBinding(prefix, apiKeyId, workspaceId, principal.userId, Instant.now()),
+                EndpointKeyBinding(prefix, apiKeyId, workspaceId, principal.userId, Instant.now(), method, endpointId),
             )
         audit.log(
             event = AUDIT_BOUND,
             userId = principal.userId,
             keyId = apiKeyId,
-            details = mapOf("path_prefix" to prefix, "workspace_id" to workspaceId.toString(), "created" to added),
+            details =
+                mapOf(
+                    "path_prefix" to prefix,
+                    "workspace_id" to workspaceId.toString(),
+                    "method" to method.name,
+                    "created" to added,
+                ),
         )
         return added
     }
 
-    /** Unbinds a key from one node (§6). */
+    /** Unbinds a key from one grant (§6) — the GET node, or with [method] the mutation grant on that route. */
     fun unbind(
         principal: AuthenticatedPrincipal,
         apiKeyId: String,
         pathPrefix: String,
+        method: EndpointMethod = EndpointMethod.GET,
     ): Boolean {
         val prefix = normalizeBinding(pathPrefix)
-        val removed = bindings.delete(prefix, apiKeyId, principal.requireWorkspace().id)
+        val removed = bindings.delete(prefix, apiKeyId, principal.requireWorkspace().id, method)
         audit.log(
             event = AUDIT_UNBOUND,
             userId = principal.userId,
             keyId = apiKeyId,
-            details = mapOf("path_prefix" to prefix, "removed" to removed),
+            details = mapOf("path_prefix" to prefix, "method" to method.name, "removed" to removed),
         )
         return removed
     }

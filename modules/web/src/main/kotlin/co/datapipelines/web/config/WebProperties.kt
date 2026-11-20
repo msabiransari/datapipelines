@@ -139,6 +139,15 @@ data class EndpointsProperties(
      * published only when a budget stands behind them).
      */
     val keyRequestBudget: KeyRequestBudget = KeyRequestBudget(),
+    /**
+     * `mutations-enabled` (#1037, published-mutation-apis §7, configuration.md §3.22) — whether
+     * the serve path may run an otherwise-authorized non-GET route at all. Default OFF: a
+     * mutation route is refused `503 endpoint.mutations_disabled` BEFORE any durable business
+     * work, so an operator enables it per deployment when the writing side (#1039) is in place.
+     * It gates the run, never the identity checks: route resolution, grants and the 404/405
+     * discipline answer the same whether this is on or off.
+     */
+    val mutationsEnabled: Boolean = false,
 ) {
     init {
         // configuration.md §7 — the validator asserts exactly this ordering at startup.

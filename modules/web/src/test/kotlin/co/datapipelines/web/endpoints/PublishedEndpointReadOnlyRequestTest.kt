@@ -1,5 +1,6 @@
 package co.datapipelines.web.endpoints
 
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
@@ -146,7 +147,7 @@ class PublishedEndpointReadOnlyRequestTest {
         every { resultStore.describe(any()) } returns view()
         every { resultStore.page(any(), 0, any()) } returns page(UUID.randomUUID())
 
-        val outcome = service().serve("/x/v1/p", principal, request)
+        val outcome = service().serve("/x/v1/p", EndpointMethod.GET, principal, request)
 
         check(outcome is PublishedEndpointServeService.Outcome.Served) { "expected Served, got $outcome" }
         seen.single().readOnly shouldBe true

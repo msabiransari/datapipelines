@@ -1,21 +1,24 @@
 ---
 area: endpoints
 layer: guide
-purpose: One exact version of a read-only pipeline has to answer a plain HTTP GET.
+purpose: One exact version of a pipeline has to answer a plain HTTP call — GET to read, a method route to mutate.
 ---
 
 # Published endpoints
 
-An API serves one exact version of a **read-only** pipeline at a stable URL —
+An API serves one exact version of a pipeline at a stable URL —
 `/api/<category>/<version>/<path…>` — so an application fetches rows with one `GET` and no
-event handling. The category is YOUR namespace (a business domain, a team); `v<number>` and
-`api` are reserved to the product and refused with `endpoint.path_reserved`. The version is
-one free-form segment (`v1` by convention); path variables come after it. Three steps:
-create, bind a key, call it.
+event handling. The route's HTTP **method is half of its identity** (#1037), immutable like the
+path: `GET` by default, or `POST`/`PUT`/`DELETE` for a mutation route — a `GET` and a `POST` at
+one pattern are two routes. The category is YOUR namespace (a business domain, a team);
+`v<number>` and `api` are reserved to the product and refused with `endpoint.path_reserved`, as
+is a path that could match an `executions/{id}` or `executions/{id}/result` polling suffix. The
+version is one free-form segment (`v1` by convention); path variables come after it. Three
+steps: create, bind a key, call it.
 
 ```
 endpoints_create {"path": "/finance/v1/revenue/{region}", "pipeline": "revenue_by_region",
-                  "pipeline_version": 3, "timeout_seconds": 60}
+                  "pipeline_version": 3, "timeout_seconds": 60, "method": "GET"}
 → url: /api/finance/v1/revenue/{region}
 ```
 
@@ -25,6 +28,12 @@ given. Creation is an authoring operation: a deployment with authoring disabled 
 deployment the draft is the entity's current version and serves under the normal runtime
 checks — the entity is enabled, the caller's key is bound, and the pinned pipeline version is
 eligible. The pin never moves when the pipeline's current version moves.
+
+A route of the SAME method that could match the same URL as an existing one is refused
+(`endpoint.path_conflict`), never resolved by precedence; another workspace's route at a
+matching pattern is refused the same way with a redacted body naming nothing but your own
+pattern. Serving a mutation route answers `503 endpoint.mutations_disabled` until mutation
+admission ships (#1039) — creation and grants are the durable part you do now.
 
 The stored form is always the part after `/api`: write the path without the prefix (one
 prefix, if present, is stripped — never stored).
@@ -48,7 +57,7 @@ The `200` body is the `data_ready` payload you already know from `pipelines_exec
 `execution_id`, `schema`, `rows`, `row_count`, `total_rows`, `has_more`, `result_url`,
 `expires_at`, `ttl_seconds`. `DP-Result-Page-Rows` sizes the inline page.
 
-**Only side-effect-free pipelines can be published.** Every node must be `DQL` into tempdb or
+**Only side-effect-free pipelines can serve GET.** Every node must be `DQL` into tempdb or
 the caller (or `CALCULATOR`), a `DML`/`DDL` node whose `source` is `tempdb`, transitively
 through `PIPELINE` nodes. `tempdb` is the execution's own in-memory H2, created for the run
 and discarded with it — a `CREATE INDEX` or similar statement there cannot outlive the
@@ -56,7 +65,8 @@ request, so it does not make `GET` unsafe. A `DML`/`DDL` node against a register
 — or a DQL node writing back to a datasource, which is a write wearing a read's type — is
 refused with `endpoint.pipeline_not_readonly` naming the node and the datasource. This is not
 a formality: `GET` is retried on timeout, preloaded by browsers and followed by crawlers, so a
-write behind one of these URLs would happen repeatedly and unbidden. The rule is checked when
+write behind one of these URLs would happen repeatedly and unbidden. A mutation route's pin
+admits a writing pipeline by design — the read-only rule is the GET rule. It is checked when
 the API is created and re-checked on every serve of the exact pipeline version it pins.
 
 **An unknown query parameter is a `400`, on purpose.** `?start_dt=2024-01-01` on an endpoint
@@ -73,16 +83,20 @@ reports status; the cursor `404`s until the result exists). Do not treat a `202`
 and do not retry it as a new run: the answer is already coming, and retrying starts a second
 execution.
 
-**Keys are bound to tree NODES, and a deeper binding replaces a shallower one.** A key bound
+**Keys are bound to tree NODES for GET, and to one route for a mutation.** A key bound
 at `/finance` authorises everything beneath it — until some node deeper down carries its own
-binding, which then decides for that subtree alone. **An endpoint with no binding on any
-ancestor cannot be called**: serving is by key only, and no key reaches an unbound path, so
-ask an admin to bind one. An `endpoint` key with no binding authorises nothing at all. An
+binding, which then decides for that subtree alone. A mutation grant names exactly ONE route
+entity (`method` + pattern): a sibling method at the same pattern, or a recreated route at the
+same one, is NOT covered — the grant follows the entity. **An endpoint with no grant for the
+caller's method cannot be called**: serving is by key only, so ask an admin to bind one. An
+`endpoint` key with no binding authorises nothing at all. An
 endpoint key reaches published endpoints and the status and cursor of executions it started,
 and nothing else: not `/mcp`, and no other `/api/v1` route.
 
-`endpoints_list`, `endpoints_get` and `endpoints_delete` complete the surface. Deleting an
-endpoint stops the URL answering and leaves the pipeline untouched. Only a draft-only API is
+`endpoints_list`, `endpoints_get` and `endpoints_delete` complete the surface — each takes the
+route's `method` where it matters (absent means `GET`). Deleting an
+endpoint stops the URL answering that method and leaves the pipeline untouched; a mutation
+grant on the route goes with it, GET node grants stay. Only a draft-only API is
 deleted: one that holds a RELEASED or DISCARDED version is refused
 `endpoint.version.last_release` and stays whole — say so, never retry. A row listed with
 `"legacy": true` is a stored path saved before the current three-segment grammar: it is retired

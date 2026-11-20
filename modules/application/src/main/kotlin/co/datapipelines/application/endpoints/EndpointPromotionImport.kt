@@ -57,9 +57,11 @@ class EndpointPromotionImport(
                 )
         val current = record.currentVersion ?: throw noCurrent(pipelineName)
         val body = EndpointWrites.bodyOf(pipelineName, current, timeouts.clamp(timeoutSeconds), description)
-        val resolved = pins.check(workspaceId, parsed, body, EndpointPinValidator.Admission.LIVE)
+        // The promotion wire carries no method (#1037): an imported API is GET — the only method a
+        // legacy batch could have carried — and GET is the entity createWithFirstVersion stores.
+        val resolved = pins.check(workspaceId, parsed, body, EndpointPinValidator.Admission.LIVE, EndpointMethod.GET)
         val status = if (resolved.status == PipelineVersionStatus.RELEASED) PipelineVersionStatus.RELEASED else PipelineVersionStatus.DRAFT
-        return writes.createWithFirstVersion(workspaceId, parsed, record.id, body, status, actor)
+        return writes.createWithFirstVersion(workspaceId, parsed, EndpointMethod.GET, record.id, body, status, actor)
     }
 
     private fun noCurrent(name: String) =

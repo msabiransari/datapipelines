@@ -4,6 +4,7 @@ import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.application.dashboards.DashboardKeyService
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
@@ -176,7 +177,12 @@ class ApiKeysAdminController(
                 .flatMap { it.split(',') }
                 .mapNotNull { it.trim().takeIf { path -> path.isNotEmpty() } }
                 .toSet()
-        val current = bindings.findByKey(key.id).map { it.pathPrefix }.toSet()
+        // #1037: this form manages the GET node grants only. A mutation grant is scoped to one
+        // route ENTITY (method + pattern) and travels with its route — offering it in this
+        // set-delta would either strip it on an unrelated save or re-bind it as a GET node
+        // grant, the exact widening the method identity exists to prevent. The REST and MCP
+        // bind surfaces carry the method until #1040's authoring UI.
+        val current = bindings.findByKey(key.id).filter { it.method == EndpointMethod.GET }.map { it.pathPrefix }.toSet()
         wanted.filter { it !in current }.forEach { endpointKeys.bind(principal, key.id, it) }
         current.filter { it !in wanted }.forEach { endpointKeys.unbind(principal, key.id, it) }
         model.addAttribute("keys", rows(principal))
