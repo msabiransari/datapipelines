@@ -71,7 +71,9 @@ class DmlFamilyAdmissionTest {
             val grandchild = Fixtures.pipeline(listOf(legacyWriter("deep")))
             val child =
                 Fixtures.pipeline(
-                    listOf(Fixtures.node("hop", type = NodeType.PIPELINE, source = "").copy(pipeline = PipelineNodeRef("test/grandchild", 1))),
+                    listOf(
+                        Fixtures.node("hop", type = NodeType.PIPELINE, source = "").copy(pipeline = PipelineNodeRef("test/grandchild", 1)),
+                    ),
                 )
             family(shop, mapOf("test/child" to child, "test/grandchild" to grandchild)).use { family ->
                 val refusal = family.refusal(PipelineErrorCodes.Validation.DML_OPERATION_REQUIRED)
@@ -90,7 +92,11 @@ class DmlFamilyAdmissionTest {
         runBlocking {
             val shop = shop().copy(dialect = Dialect.MYSQL)
             val insert = scalarInsert("insert", dependsOn = listOf("first"))
-            val pipeline = Fixtures.pipeline(listOf(Fixtures.node("first", type = NodeType.DML, source = "shop"), insert), customerParameter())
+            val pipeline =
+                Fixtures.pipeline(
+                    listOf(Fixtures.node("first", type = NodeType.DML, source = "shop"), insert),
+                    customerParameter(),
+                )
             family(shop, emptyMap(), parent = pipeline).use { family ->
                 val refusal = family.refusal(PipelineErrorCodes.Node.DML_INSERT_UNQUALIFIED)
                 // The root body is named by its node alone: no child, no path to one.
@@ -132,7 +138,11 @@ class DmlFamilyAdmissionTest {
     fun `a qualified insert in a pinned child runs beside an update in an eligible parent`() {
         runBlocking {
             val shop = shop().copy(dialect = Dialect.POSTGRES)
-            family(shop, mapOf("test/child" to Fixtures.pipeline(listOf(scalarInsert("kid")), customerParameter())), childValues = kidValues()).use { family ->
+            family(
+                shop,
+                mapOf("test/child" to Fixtures.pipeline(listOf(scalarInsert("kid")), customerParameter())),
+                childValues = kidValues(),
+            ).use { family ->
                 family.runParent()
                 family.customers() shouldBe listOf("changed", "kid")
             }
@@ -143,7 +153,11 @@ class DmlFamilyAdmissionTest {
     fun `a qualified insert in a pinned child runs beside an update in an excluded-only family`() {
         runBlocking {
             val shop = shop().copy(dialect = Dialect.H2)
-            family(shop, mapOf("test/child" to Fixtures.pipeline(listOf(scalarInsert("kid")), customerParameter())), childValues = kidValues()).use { family ->
+            family(
+                shop,
+                mapOf("test/child" to Fixtures.pipeline(listOf(scalarInsert("kid")), customerParameter())),
+                childValues = kidValues(),
+            ).use { family ->
                 family.runParent()
                 family.customers() shouldBe listOf("changed", "kid")
             }
@@ -178,7 +192,11 @@ class DmlFamilyAdmissionTest {
             ).use { harness ->
                 val node = scalarInsert("insert", output = NodeOutput.Caller)
                 val executionId = UUID.randomUUID()
-                val request = Fixtures.request(Fixtures.pipeline(listOf(node), customerParameter())).copy(parameters = kidValues(), executionId = executionId)
+                val request =
+                    Fixtures
+                        .request(
+                            Fixtures.pipeline(listOf(node), customerParameter()),
+                        ).copy(parameters = kidValues(), executionId = executionId)
                 val thrown = runCatching { harness.executor.execute(request) }.exceptionOrNull()
                 (thrown as PipelineExecutionFailed).errorCode shouldBe PipelineErrorCodes.Result.TOO_LARGE
                 customersOf(shop) shouldBe listOf("seed")
@@ -221,7 +239,8 @@ class DmlFamilyAdmissionTest {
         dependsOn: List<String> = emptyList(),
         output: NodeOutput = NodeOutput.Discard,
     ): Node =
-        Fixtures.node(id, type = NodeType.DML, source = source, operation = "insert", dependsOn = dependsOn, dmlOutput = output)
+        Fixtures
+            .node(id, type = NodeType.DML, source = source, operation = "insert", dependsOn = dependsOn, dmlOutput = output)
             .copy(key = DmlKey("order_id", "BIGINTEGER"), input = DmlInput(parameters = listOf("customer")))
 
     private fun customerParameter(): Map<String, Parameter> = mapOf("customer" to Parameter(LogicalType.STRING))
@@ -247,12 +266,25 @@ class DmlFamilyAdmissionTest {
         private val registry = FakeDatasourceRegistry(mapOf("shop" to shop))
         private val executor = AtomicReference<PipelineExecutor>()
         private val templates =
-            mapOf("first" to "UPDATE orders SET customer = 'changed'", "insert" to INSERT_SQL, "kid" to INSERT_SQL, "legacy" to "DELETE FROM orders", "deep" to "DELETE FROM orders") + sql
+            mapOf(
+                "first" to "UPDATE orders SET customer = 'changed'",
+                "insert" to INSERT_SQL,
+                "kid" to INSERT_SQL,
+                "legacy" to "DELETE FROM orders",
+                "deep" to "DELETE FROM orders",
+            ) +
+                sql
         private val root =
             parent ?: Fixtures.pipeline(
                 listOf(Fixtures.node("first", type = NodeType.DML, source = "shop")) +
                     children.keys.sorted().take(1).map { name ->
-                        Fixtures.node("child", type = NodeType.PIPELINE, source = "", dependsOn = listOf("first")).copy(pipeline = PipelineNodeRef(name, 1))
+                        Fixtures
+                            .node(
+                                "child",
+                                type = NodeType.PIPELINE,
+                                source = "",
+                                dependsOn = listOf("first"),
+                            ).copy(pipeline = PipelineNodeRef(name, 1))
                     },
             )
         val harness =
@@ -320,7 +352,9 @@ class DmlFamilyAdmissionTest {
         /** The refusal's observable contract: the independent connection sees only the seed, and no node ever started. */
         fun assertNothingRan() {
             customers() shouldBe listOf("seed")
-            harness.emitter.events.filterIsInstance<NodeStarted>().shouldBeEmpty()
+            harness.emitter.events
+                .filterIsInstance<NodeStarted>()
+                .shouldBeEmpty()
         }
 
         override fun close() = harness.close()

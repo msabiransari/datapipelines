@@ -232,11 +232,11 @@ internal object DmlAdmission {
         child: PipelineNodeRef? = null,
         via: List<String> = emptyList(),
     ) {
-        for (node in pipeline.nodes) {
-            if (node.type != NodeType.DML || node.dmlOperation != DmlOperation.INSERT) continue
-            val dialect = dialectOf(node) ?: continue
-            if (!DmlInsertQualification.isQualified(dialect)) throw unqualified(node.id, dialect, child, via)
-        }
+        pipeline.nodes
+            .asSequence()
+            .filter { it.type == NodeType.DML && it.dmlOperation == DmlOperation.INSERT }
+            .firstNotNullOfOrNull { node -> dialectOf(node)?.takeUnless(DmlInsertQualification::isQualified)?.let { node to it } }
+            ?.let { (node, dialect) -> throw unqualified(node.id, dialect, child, via) }
     }
 
     /** The `dml_insert_unqualified` refusal, shared by run admission and the node-level backstop. */
