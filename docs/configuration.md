@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.103 (operator reference; source-traced configuration authority)
+**Status:** v1.104 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-11-17
+**Last updated:** 2026-11-19
 
 ---
 
@@ -242,7 +242,7 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 |---|---|
 | `spring.application.name` | Log/metric attribution (`datapipelines`) |
 | `spring.flyway.enabled` | `true`: enables startup metadata migrations through Boot's Flyway auto-configuration. |
-| `spring.flyway.locations` | `classpath:db/migration`: migration scripts packaged by the app module. |
+| `spring.flyway.locations` | `classpath:db/migration,classpath:db/downgrade-barrier`: migration scripts packaged by the app module — the versioned scripts, and the repeatable downgrade barrier (#1037; [Metadata DB §7.4](metadata-db.md#74-rolling-back-v65-published-method-identities-1037)) kept in its own location so tooling that applies the versioned scripts by name never meets it. |
 | `spring.flyway.baseline-on-migrate` | `false`: do not automatically baseline a pre-existing nonempty schema; follow [Deployment §8.2](deployment.md#82-database-migrations). |
 | `spring.profiles.active` | Resolves the selected posture; do not independently select a conflicting profile (§6). |
 | `server.shutdown` | `graceful`: Boot/Tomcat stops accepting new requests and lets active requests finish during shutdown; the execution drain runs first. |
@@ -376,6 +376,7 @@ The timeout bounds for a released pipeline published as a `GET` endpoint at `/ap
 | `datapipelines.endpoints.timeout-max-seconds` | `300` | Upper clamp, and the longest a serve may block before it answers `202` and leaves the execution running |
 | `datapipelines.endpoints.key-request-budget.window-seconds` | `60` | (#224) The fixed window of the serve path's per-key request budget — at most `max-requests` requests per window for EVERY `api_caller` key, then `429 rate_limit.exceeded` with `Retry-After` (rest-api §19). Per instance: N replicas admit N × `max-requests` (the same per-instance note as the login limiter, auth §11.5) |
 | `datapipelines.endpoints.key-request-budget.max-requests` | `60` | (#224) The per-key request ceiling per window. `0` turns the budget off — and with it the lake family's endpoint publishing, because the lake's endpoints pay S3 egress per run and are published only when a budget stands behind them |
+| `datapipelines.endpoints.mutations-enabled` | `false` | (#1037, published-mutation-apis §7) Whether the serve path may RUN an otherwise-authorized non-GET route. Default OFF: a mutation route is refused `503 endpoint.mutations_disabled` before any durable business work; an operator enables it per deployment when the writing side (#1039) is in place. Gates the run only — route resolution, grants and the 404/405 discipline answer the same whether this is on or off; already-admitted executions finish during draining |
 
 **There is deliberately no `page-rows-max` key here.** The `DP-Result-Page-Rows` request header is **one contract** across a published endpoint and `POST /pipelines/{id}/execute`, and both clamp it to `datapipelines.result.page-max-rows` (§3.5). A second key that had to equal the first would be a second authority for one bound, and an operator who retuned one and not the other would get two different clamps on one documented header.
 
@@ -818,9 +819,12 @@ spring:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
       connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:10000}
 
+  # The second location holds the repeatable downgrade barrier (#1037, metadata-db.md §7.4). It sits
+  # APART from db/migration because the test fixtures that apply the shipped scripts by hand read that
+  # directory for V<version>__<description>.sql only; the application itself runs both.
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    locations: classpath:db/migration,classpath:db/downgrade-barrier
     baseline-on-migrate: false
 
   profiles:
@@ -1363,6 +1367,7 @@ The following index records the bindings, wiring and effect-producing consumers 
 | §3.21 all five `datapipelines.org.*` keys: `currency.name`, `currency.symbol`, `fiscal-start-date`, `week-start`, `timezone` | `modules/web/src/main/kotlin/co/datapipelines/web/config/WebProperties.kt` — `OrgProperties.toContext`; `OrgConfiguration.kt` creates `OrgContext`; `modules/app/src/main/kotlin/co/datapipelines/config/ConfigValidator.kt` — `checkOrgSettings` | `modules/pipeline-contract/src/main/kotlin/co/datapipelines/pipeline/OrgContext.kt` / `ContextKeys`; `modules/dag/src/main/kotlin/co/datapipelines/executor/RunContext.kt` — initial org tier then platform tier then bound parameters. Timezone determines platform current_date before parameter overrides; currency/fiscal/week values are context inputs, not automatic formatting/bucketing switches. |
 | §3.22 `datapipelines.endpoints.timeout-default-seconds`, `datapipelines.endpoints.timeout-min-seconds`, `datapipelines.endpoints.timeout-max-seconds` | `modules/web/src/main/kotlin/co/datapipelines/web/config/WebProperties.kt` — `EndpointsProperties`, positive floor and ordered triple; `ConfigValidator.kt` repeats key-named ordering check | `modules/web/src/main/kotlin/co/datapipelines/web/config/EndpointsConfiguration.kt` → `modules/application/src/main/kotlin/co/datapipelines/application/endpoints/EndpointPublishService.kt` — default/clamp at publication; `modules/web/src/main/kotlin/co/datapipelines/web/endpoints/PublishedEndpointServeService.kt` re-clamps stored timeout at serve, bounds await only, then returns 202 without cancelling execution. |
 | §3.22 `datapipelines.endpoints.key-request-budget.window-seconds`, `datapipelines.endpoints.key-request-budget.max-requests` | `modules/web/src/main/kotlin/co/datapipelines/web/config/WebProperties.kt` — `KeyRequestBudget`, window > 0 / max ≥ 0; `modules/app/src/main/kotlin/co/datapipelines/config/DemoApiRules.kt` | `modules/web/src/main/kotlin/co/datapipelines/web/ratelimit/EndpointKeyBudgetFilter.kt` — per-key/JVM fixed window on published serves, 429 after max; `modules/web/src/main/kotlin/co/datapipelines/web/bootstrap/DemoEndpointSeeder.kt` omits LAKE endpoints when max is 0. |
+| §3.22 `datapipelines.endpoints.mutations-enabled` | `modules/web/src/main/kotlin/co/datapipelines/web/config/WebProperties.kt` — `EndpointsProperties.mutationsEnabled`, boolean, default false (#1037) | `modules/web/src/main/kotlin/co/datapipelines/web/endpoints/PublishedEndpointServeService.kt` — the run gate on an otherwise-authorized non-GET serve: off answers `503 endpoint.mutations_disabled` before durable work; identity checks (404/405/grants) run first either way. |
 | §3.27 all nine `datapipelines.mail.*` keys: `host`, `port`, `username`, `password`, `starttls`, `from`, `reply-to`, `ops-to`, `message-stream` | `modules/auth/src/main/kotlin/co/datapipelines/auth/MailProperties.kt` — enabled iff host/from non-blank, reply-to fallback, ops comma list; `modules/app/src/main/kotlin/co/datapipelines/config/MailRules.kt` — half-configured, port, base URL, hardened TLS/credential checks | `modules/auth/src/main/kotlin/co/datapipelines/auth/MailConfiguration.kt` chooses real/no-op sender; `SpringMailSender.kt` configures SMTP/auth/TLS and From/Reply-To; `MailNotifier.kt` selects ops recipients and adds stream header; `modules/web/src/main/kotlin/co/datapipelines/web/schedules/SmtpNotificationMailer.kt` uses the same transport/stream header. |
 | §3.35 `datapipelines.release.dependencies.max-depth`, `max-versions`, `max-edges` | `modules/web/src/main/kotlin/co/datapipelines/web/config/ReleaseDependencyProperties.kt` validates ranges and converts to `ReleaseBounds`; `modules/web/src/main/kotlin/co/datapipelines/web/release/ReleaseConfiguration.kt` wires bounds | `modules/pipeline-contract/src/main/kotlin/co/datapipelines/pipeline/release/ReleaseGraph.kt` checks longest depth, unique versions and each pin edge during traversal; `modules/web/src/main/kotlin/co/datapipelines/web/release/ReleaseCoordinator.kt` also bounds included-dependency/override entries with max-versions. |
 | §3.35 `datapipelines.release.dependencies.max-blockers`, `max-wire-bytes`, `lock-wait-seconds` | `modules/web/src/main/kotlin/co/datapipelines/web/config/ReleaseDependencyProperties.kt` — ranges/defaults; `ReleaseConfiguration.kt` passes lock timeout | `modules/pipeline-contract/src/main/kotlin/co/datapipelines/pipeline/release/ReleaseBlockers.kt` caps details; `TreeHash.kt` checks canonical bytes; `modules/web/src/main/kotlin/co/datapipelines/web/release/ReleasePlanBody.kt` checks request UTF-8 bytes; `JdbcReleaseMutationGuard.kt` grants each lock statement the remainder of one cumulative deadline as a local PostgreSQL lock_timeout and maps an exhausted wait to the caller's busy code. |
@@ -1501,6 +1506,7 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-19 | v1.104 | 1037 (#1037) | **§3.22** gains `datapipelines.endpoints.mutations-enabled` (default `false`): the operator run-gate on published non-GET routes — off refuses an otherwise-authorized mutation `503 endpoint.mutations_disabled` before durable work (#1039 owns the writing side). **§8** its source binding and consumer row. **§5 / `spring.flyway.locations`** gains `classpath:db/downgrade-barrier`, the repeatable migration that makes a binary older than V65 refuse to start (Metadata DB §7.4). |
 | 2026-11-17 | v1.103 | #819 final review F2 | **§7:** remove the stale claim that the cgroup memory sum and its reader term are deferred; #819 implements them at every boot. E10b acceptance stays open; the scratch budget against the pod filesystem limit remains deferred. |
 | 2026-11-17 | v1.102 | #997 final review F1 | **§3.36:** the process memory admission example follows the measured defaults: two staging databases with the lake on or off, after `staging-expansion-factor` became 10. The enabled non-heap terms total 4 GiB (staging 2, readers 1, reserve 1); this corrects the earlier seven-database example, not a measured capacity profile. |
 | 2026-11-16 | v1.101 | 997 (#997, dp-lake P6 evidence, round 4) | **§3.36** `admission.max-delivery-bytes` 2GB → 1GB (owner ruling 2026-11-16): a delivery reserves `max-delivery-bytes × staging-expansion-factor` whatever its size, so at 2GB one delivery held the whole shipped 20GB `scratch-bytes`; at 1GB two deliveries fit and compaction gets a 10GB ceiling. `scratch-bytes` stays 20GB. The row says why, what a delivery above the limit gets and what a deployment needing larger deliveries does ([Lake §6](lake.md#6-deliveries)). **§5** the template line. |

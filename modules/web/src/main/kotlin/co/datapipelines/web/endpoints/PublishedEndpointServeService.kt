@@ -2,6 +2,7 @@ package co.datapipelines.web.endpoints
 
 import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointRequestValidator
@@ -45,39 +46,51 @@ import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Serving one `GET` on the published subtree (published-endpoints design §5, R-EP5).
+ * Serving one request on the published subtree (published-endpoints design §5, R-EP5; the method era of #1037,
+ * published-mutation-apis §4).
  *
- * The order is the whole design, and it is deliberate: **resolve, authorise, validate, run**.
- * Nothing about the request's data is inspected before the caller has been authorised, so an
- * unauthorised caller cannot use the validator's error messages to learn a pipeline's parameter
- * names; and nothing is executed before the request has been validated, so a typo costs no
- * execution slot.
+ * The order is the whole design, and it is deliberate: **resolve, authorise, validate, run**. Nothing about the
+ * request's data is inspected before the caller has been authorised, so an unauthorised caller cannot use the
+ * validator's error messages to learn a pipeline's parameter names; and nothing is executed before the request has
+ * been validated, so a typo costs no execution slot.
+ *
+ * ## The two branches, and the one rule they share (#1037 §4.4)
+ *
+ * `GET` is the branch that serves, unchanged in its order: session refusal → match → liveness → pointer → read-only
+ * → authorise → validate → run. A non-GET method never runs in this build: it answers the session refusal, then the
+ * VISIBILITY computation — a method is visible iff a live route of it matches AND the presenting key holds a grant
+ * for it (the GET ancestor walk, or the mutation grant naming the route entity) — then the opaque `404` (nothing
+ * visible) or `405` with `Allow` = exactly the visible methods, then the pin eligibility `503`, then the
+ * `endpoint.mutations_disabled` `503` of `datapipelines.endpoints.mutations-enabled` (§7: refused BEFORE any durable
+ * business work; both flag branches answer it in this build, with distinct messages, until #1039 replaces the gate
+ * with the real admission path). A verb the surface cannot publish at all (PATCH, OPTIONS, …) follows the same
+ * visibility rule: `404` when nothing is visible, else `405` without itself in `Allow`.
  *
  * ## Timeout is `202`, never `504` (ruling R-EP3)
  *
- * The execution is launched into the application's own scope and then **awaited with a timeout**.
- * When the wait expires the execution is NOT cancelled — it keeps running, and the caller gets
- * `202` with the execution id and the cursor to come back to. `withTimeoutOrNull` here cancels
- * only the *await*, because the `Deferred` belongs to [scope] and not to the awaiting coroutine;
- * a `withTimeout` around the run itself would have killed the work the `202` promises.
+ * The execution is launched into the application's own scope and then **awaited with a timeout**. When the wait
+ * expires the execution is NOT cancelled — it keeps running, and the caller gets `202` with the execution id and
+ * the cursor to come back to. `withTimeoutOrNull` here cancels only the *await*, because the `Deferred` belongs to
+ * [scope] and not to the awaiting coroutine; a `withTimeout` around the run itself would have killed the work the
+ * `202` promises.
  *
  * A `504` would be a lie in both directions: the upstream is fine, and the answer is coming.
  *
  * ## The read-only rule runs again here
  *
- * §4.2 checked it when the API version was saved. Since #786 an API version pins an EXACT pipeline
- * version (the pin never moves when the pipeline's current moves, record §24/A06), so the body under a
- * live URL changes only through an API release or current switch, both of which re-run the check; the
- * per-serve check stays as the fail-closed backstop that keeps "GET is safe" true at the moment it
- * matters (a child pipeline the version composes is resolved at serve time). It costs one in-memory
- * walk of a body that is already loaded.
+ * §4.2 checked it when the API version was saved. Since #786 an API version pins an EXACT pipeline version (the pin
+ * never moves when the pipeline's current moves, record §24/A06), so the body under a live URL changes only through
+ * an API release or current switch, both of which re-run the check; the per-serve check stays as the fail-closed
+ * backstop that keeps "GET is safe" true at the moment it matters (a child pipeline the version composes is resolved
+ * at serve time). It costs one in-memory walk of a body that is already loaded. A GET rule (#1037): a mutation
+ * entity's pin admits a writing pipeline by design, and its run-time checks are #1039's.
  *
  * ## Which version runs (#786 B.1)
  *
- * entity → its `current_version` → that API version row → eligible under the posture → the row's
- * exact `(pipeline_name, pipeline_version)` → that pipeline version row → eligible under the posture
- * → execute. The pipeline's own CURRENT pointer is never read. Every refusal on that chain is the one
- * catalogued 503 whose body names no version, so a caller cannot learn which API versions exist.
+ * entity → its `current_version` → that API version row → eligible under the posture → the row's exact
+ * `(pipeline_name, pipeline_version)` → that pipeline version row → eligible under the posture → execute. The
+ * pipeline's own CURRENT pointer is never read. Every refusal on that chain is the one catalogued 503 whose body
+ * names no version, so a caller cannot learn which API versions exist.
  */
 @Suppress("LongParameterList") // one composition root for one request; every collaborator is used
 class PublishedEndpointServeService(
@@ -124,38 +137,59 @@ class PublishedEndpointServeService(
             val body: Map<String, Any?>,
         ) : Outcome
 
-        /** Any refusal, with the §5.6 status the controller should send. */
+        /** Any refusal, with the §5.6 status the controller should send; [allow] names the visible methods for a `405`. */
         data class Refused(
             val status: Int,
             val code: String,
             val message: String,
             val details: Map<String, Any?> = emptyMap(),
+            val allow: List<String>? = null,
         ) : Outcome
     }
 
     /**
-     * Resolves and serves [path] (the part after `/api`, with its leading `/`).
+     * Resolves and serves [path] (the part after `/api`, with its leading `/`) for [method] — `GET` serves; a
+     * mutation method answers the #1037 §4.4 gate; null is a verb this surface cannot publish at all (PATCH, …),
+     * which follows the mutation gate's visibility rules. A browser session is refused first on every branch.
      *
-     * Blocking by design: a servlet thread calls this, and the `202` contract means the block is
-     * bounded by the endpoint's own timeout.
+     * Blocking by design: a servlet thread calls this, and the `202` contract means the block is bounded by the
+     * endpoint's own timeout.
      */
     @Suppress("ReturnCount") // §5's order IS the refusal order; each stage refuses on its own terms
     fun serve(
         path: String,
+        method: EndpointMethod?,
         principal: AuthenticatedPrincipal,
         request: EndpointRequestValidator.Request,
     ): Outcome {
-        // §5.2 — a machine surface. A browser session is refused before anything is resolved, so
-        // a signed-in user cannot discover the registry by navigating to it.
+        // §5.2 — a machine surface, on every branch: a browser session learns nothing, not even
+        // which methods a path serves, so the 401 carries no Allow (§4.4) whatever the verb.
         if (principal.authMethod != AuthMethod.API_KEY) {
-            return Outcome.Refused(
-                HTTP_UNAUTHORIZED,
-                PipelineErrorCodes.Auth.SESSION_REQUIRED,
-                "Published endpoints are a machine surface: present an API key, not a browser session.",
-            )
+            return sessionRequired()
         }
+        return if (method == EndpointMethod.GET) {
+            serveGet(path, principal, request)
+        } else {
+            serveMutation(path, method, principal)
+        }
+    }
 
-        val matched = registry.matcher().match(path) ?: return notFound()
+    /** The session refusal, first on every branch and identical on every branch (§5.2, §4.4). */
+    private fun sessionRequired() =
+        Outcome.Refused(
+            HTTP_UNAUTHORIZED,
+            PipelineErrorCodes.Auth.SESSION_REQUIRED,
+            "Published endpoints are a machine surface: present an API key, not a browser session.",
+        )
+
+    /** The GET branch — §5's order, unchanged from the pre-method era, answer for answer. */
+    @Suppress("ReturnCount") // §5's order IS the refusal order; each stage refuses on its own terms
+    private fun serveGet(
+        path: String,
+        principal: AuthenticatedPrincipal,
+        request: EndpointRequestValidator.Request,
+    ): Outcome {
+        val matched = registry.matcher().match(path, EndpointMethod.GET) ?: return notFound()
         val endpoint = matched.endpoint
         // §5.6 / D15 — BEFORE the pipeline is resolved: nothing about a deactivated
         // workspace's endpoint is read, and the body is the unmatched path's, byte for byte.
@@ -217,6 +251,108 @@ class PublishedEndpointServeService(
 
             is EndpointRequestValidator.Outcome.Valid -> {
                 run(endpoint, pointed, principal, validated)
+            }
+        }
+    }
+
+    /**
+     * The non-GET branch (#1037 §4.4) — visibility, then 404/405, then the pin, then the mutations gate. Nothing
+     * runs in this build: [method] null is a verb this surface cannot publish (PATCH, OPTIONS, …) and follows the
+     * same rule, so it can never appear in `Allow` and never reaches the gates.
+     */
+    @Suppress("ReturnCount") // §4.4's order IS the refusal order; each stage refuses on its own terms
+    private fun serveMutation(
+        path: String,
+        method: EndpointMethod?,
+        principal: AuthenticatedPrincipal,
+    ): Outcome {
+        val visible = visibleMethods(path, principal)
+
+        // Nothing visible to THIS caller: the path is, as far as this key is concerned, unknown — the
+        // same opaque 404 as an unknown path, with nothing to learn from the difference (§4.4).
+        if (visible.isEmpty()) return notFound()
+
+        val requested = method?.takeIf { visible.containsKey(it) }
+        if (requested == null) {
+            // Some method is visible but the requested one is not published here or not granted to this
+            // key: say which methods ARE, and nothing else. The Allow list is bounded by construction —
+            // at most the four publishable methods, and only those with a live route AND a grant.
+            val allowed = visible.keys.sortedBy { it.ordinal }.map { it.name }
+            val requestedName = method?.name ?: "this method"
+            return Outcome.Refused(
+                HTTP_METHOD_NOT_ALLOWED,
+                PipelineErrorCodes.Endpoint.METHOD_NOT_ALLOWED,
+                "This path serves ${allowed.joinToString(", ")} for this credential, not $requestedName. " +
+                    "The Allow header lists exactly what is granted.",
+                mapOf("method" to requestedName, "allow" to allowed),
+                allow = allowed,
+            )
+        }
+
+        // Authorized for this method: the entity is in hand, and the eligibility checks run only now
+        // (§4.4 — after authorization, so an ungranted caller learns no version facts).
+        val endpoint = visible.getValue(requested)
+        pointedVersion(endpoint) ?: return notReleased(endpoint)
+
+        // §7 — the mutations gate, BEFORE any durable business work. Both branches answer the
+        // catalogued 503 with distinct messages until #1039 replaces this gate with the real
+        // admission path (flag off: the operator withheld it; flag on: this build cannot serve it).
+        return when {
+            !endpointsProperties.mutationsEnabled -> {
+                Outcome.Refused(
+                    HTTP_SERVICE_UNAVAILABLE,
+                    PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED,
+                    "Mutation routes are disabled on this deployment (datapipelines.endpoints.mutations-enabled=false). " +
+                        "The route and the grant are valid; ask the operator to enable them.",
+                    mapOf("method" to requested.name),
+                )
+            }
+
+            else -> {
+                Outcome.Refused(
+                    HTTP_SERVICE_UNAVAILABLE,
+                    PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED,
+                    "Serving mutation routes is not available in this build. The route and the grant are valid; " +
+                        "nothing was written.",
+                    mapOf("method" to requested.name),
+                )
+            }
+        }
+    }
+
+    /**
+     * The methods THIS key can call at [path]: a live route of the method whose grant the key holds — the GET
+     * ancestor walk for GET, an exact route-entity grant for a mutation (§4.4 "visible"). A path's entities share
+     * one workspace (the conflict refusal is per method ACROSS workspaces, so a second workspace can never publish
+     * at a matching pattern), which is why one liveness answer covers the map; a dead workspace's path is unknown
+     * to every key, the 404 rule again.
+     */
+    private fun visibleMethods(
+        path: String,
+        principal: AuthenticatedPrincipal,
+    ): Map<EndpointMethod, PublishedEndpoint> {
+        val matcher = registry.matcher()
+        val live =
+            buildMap {
+                EndpointMethod.entries.forEach { method ->
+                    matcher.match(path, method)?.let { match -> put(method, match.endpoint) }
+                }
+            }
+        if (live.isEmpty()) return emptyMap()
+        val workspaceId = live.values.first().workspaceId
+        // §5.6 / D15 — one liveness answer covers the map (see KDoc); a dead workspace's path is
+        // unknown to every key, the 404 rule again.
+        if (!workspaceLiveness.isActive(workspaceId)) return emptyMap()
+
+        val keyId = requireNotNull(principal.keyId) { "an API-key principal always carries its key id" }
+        val mutationGrants by lazy {
+            bindings.findMutationGrantsByKey(keyId, workspaceId).mapNotNull { it.endpointId }.toSet()
+        }
+        return live.filterValues { endpoint ->
+            if (endpoint.method == EndpointMethod.GET) {
+                authorize(path, principal, endpoint) == null
+            } else {
+                endpoint.id in mutationGrants
             }
         }
     }
@@ -483,6 +619,7 @@ class PublishedEndpointServeService(
         const val HTTP_UNAUTHORIZED = 401
         const val HTTP_FORBIDDEN = 403
         const val HTTP_NOT_FOUND = 404
+        const val HTTP_METHOD_NOT_ALLOWED = 405
         const val HTTP_NOT_ACCEPTABLE = 406
         const val HTTP_GONE = 410
         const val HTTP_SERVICE_UNAVAILABLE = 503

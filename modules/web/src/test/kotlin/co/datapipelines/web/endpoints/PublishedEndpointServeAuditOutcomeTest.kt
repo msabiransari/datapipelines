@@ -4,6 +4,7 @@ import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointMatcher
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.EndpointVersionBody
@@ -174,7 +175,7 @@ class PublishedEndpointServeAuditOutcomeTest {
         every { resultStore.describe(any()) } returns view()
         every { resultStore.page(any(), 0, any()) } returns page(UUID.randomUUID())
 
-        val outcome = service().serve("/x/v1/p", principal, request)
+        val outcome = service().serve("/x/v1/p", EndpointMethod.GET, principal, request)
 
         val served = outcome as? PublishedEndpointServeService.Outcome.Served
         check(served != null) { "expected Served, got $outcome" }
@@ -188,7 +189,7 @@ class PublishedEndpointServeAuditOutcomeTest {
     fun `a serve that outlives its timeout answers 202 and the audit ends at accepted`() {
         coEvery { runner.run(any(), workspaceId, ExecutionTrigger.ENDPOINT) } coAnswers { awaitCancellation() }
 
-        val outcome = service().serve("/x/v1/p", principal, request)
+        val outcome = service().serve("/x/v1/p", EndpointMethod.GET, principal, request)
 
         val accepted = outcome as? PublishedEndpointServeService.Outcome.Accepted
         check(accepted != null) { "expected Accepted, got $outcome" }
@@ -201,7 +202,7 @@ class PublishedEndpointServeAuditOutcomeTest {
             failed(firstArg<ExecuteRequest>().executionId ?: error("the serve request carries no execution id"))
         }
 
-        val outcome = service().serve("/x/v1/p", principal, request)
+        val outcome = service().serve("/x/v1/p", EndpointMethod.GET, principal, request)
 
         // The refusal shape is the surface's existing answer for a failed run; what #192 adds
         // is the terminal audit row that says the run FAILED rather than leaving `started`.

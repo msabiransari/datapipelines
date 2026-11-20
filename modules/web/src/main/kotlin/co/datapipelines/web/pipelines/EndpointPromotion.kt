@@ -2,6 +2,7 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPromotionImport
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
@@ -73,6 +74,18 @@ class EndpointPromotion(
      * omission is not silent (#286): the rows over the promoted pipelines are counted and logged
      * — a count, never a path — so an operator knows the endpoint did not travel. The fix is the
      * console's: unpublish the legacy row and republish at a legal path.
+     *
+     * ## #1037 — a mutation route refuses the WHOLE transfer, before anything is sent
+     *
+     * The wire carries no method: a non-GET route that travelled would arrive as a GET entity
+     * with a GET tree grant — reinterpreted, the exact harm §2 of the design record refuses.
+     * Method-aware transfer needs exact-pin semantics (#879) and a receiver that advertises
+     * method support (#1040); until both exist, one non-GET route over the promoted pipelines
+     * throws [PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED] for the entire batch,
+     * naming the sender's own routes (method and path) so the operator can see what to hold
+     * back. The receiver's half is already GET-only by construction: [apply] resolves the
+     * entry's path as GET and binds GET tree grants only, so a legacy payload can never widen a
+     * mutation route.
      */
     fun entriesFor(
         workspaceId: UUID,
@@ -88,9 +101,38 @@ class EndpointPromotion(
                 omitted,
             )
         }
-        val allBindings = bindings.findByWorkspace(workspaceId)
-        return endpoints
-            .findByWorkspace(workspaceId)
+        val candidates = endpoints.findByWorkspace(workspaceId)
+        val travelling =
+            candidates.mapNotNull { endpoint ->
+                endpoint.current
+                    ?.body
+                    ?.takeIf { it.pipelineName in promoted }
+                    ?.let { endpoint }
+            }
+        val mutations = travelling.filter { it.method != EndpointMethod.GET }
+        if (mutations.isNotEmpty()) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED,
+                message =
+                    "This batch would promote non-GET API route(s) ${mutations.sortedBy { it.pathPattern }.joinToString(
+                        ", ",
+                    ) { "${it.method.name} ${it.pathPattern}" }}. " +
+                        "Method-aware transfer needs exact-pin promotion (#879) and a receiver that advertises " +
+                        "method support; until then a mutation route cannot travel — unpublish it first, or promote " +
+                        "when #1040 lands.",
+                details =
+                    mapOf(
+                        "unsupported_routes" to
+                            mutations.sortedBy { it.pathPattern }.map { mapOf("method" to it.method.name, "path" to it.pathPattern) },
+                    ),
+            )
+        }
+        // GET node grants only (#1037): the wire's `bindings` are GET tree grants by construction — the
+        // receiver binds each as one. A mutation grant at the same pattern belongs to a sibling METHOD's
+        // route that is not travelling (a travelling one refused the batch above); carried here it would
+        // land on the receiver as a GET grant, widening a write-only key into a reader.
+        val allBindings = bindings.findByWorkspace(workspaceId).filter { it.method == EndpointMethod.GET }
+        return candidates
             .mapNotNull { endpoint ->
                 // #786: the API's CURRENT version is what travels; an API with none has nothing to promote.
                 val body = endpoint.current?.body?.takeIf { it.pipelineName in promoted } ?: return@mapNotNull null
@@ -111,6 +153,29 @@ class EndpointPromotion(
     // ---------------------------------------------------------------------------------------
     // Receiver
     // ---------------------------------------------------------------------------------------
+
+    /**
+     * Refuses the whole batch when an entry names a method other than GET (#1037).
+     *
+     * This receiver imports every entry as a GET route and binds its keys as GET tree grants
+     * ([apply]); an entry a newer, method-aware sender marked POST, PUT or DELETE would be
+     * reinterpreted as exactly the read route the method identity exists to keep distinct.
+     * Reported once for the batch, before anything is pushed, like [refuseIfKeysMissing]. An
+     * absent method (every batch this build's sender writes, and every older one) and an
+     * explicit `GET` pass.
+     */
+    fun refuseIfMethodUnsupported(entries: List<PromotionWire.EndpointEntry>) {
+        val unsupported = entries.filter { entry -> entry.method?.let { EndpointMethod.of(it) != EndpointMethod.GET } ?: false }
+        if (unsupported.isEmpty()) return
+        throw DatapipelinesException(
+            code = PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED,
+            message =
+                "This batch carries ${unsupported.size} API route(s) with a method other than GET. This deployment " +
+                    "imports promoted routes as GET only; method-aware transfer needs exact-pin promotion (#879) " +
+                    "and a receiver that advertises method support. Nothing was imported.",
+            details = mapOf("unsupported_routes" to unsupported.map { mapOf("path" to it.path) }),
+        )
+    }
 
     /**
      * Refuses the whole batch when it binds a key name this deployment does not have.

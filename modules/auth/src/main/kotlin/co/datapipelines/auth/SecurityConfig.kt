@@ -50,6 +50,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
  * - [LogoutSameOriginMatcher] (#782): the logout posted from the app's own page — the browser's
  *   own `Sec-Fetch-Site: same-origin` attestation is that request's control, so a stale token
  *   there still clears the session and lands on /login (a refusal must not strand the person).
+ * - [PublishedEndpointRouteMatcher] (#1037): the published subtree's ONE path-scoped exception —
+ *   a machine surface where the serve handler refuses a session outright (the 401 key gate ahead
+ *   of CSRF, published-mutation-apis §4.4), so no cookie-authenticated request exists there for
+ *   the double-submit to protect; the product's own `v<n>` routes keep it everywhere.
  * Other cookie-authenticated state-changing requests need the `dp_csrf` double-submit token
  * **everywhere**, the `/api/v1` prefix included — `SameSite=Lax` (§5.5: Strict breaks the
  * cross-site login redirect) is defence-in-depth, not the control, because it stops neither a
@@ -106,6 +110,10 @@ class SecurityConfig(
                     // same-origin) logs out on any token state — a stale tab's Log out must clear
                     // the session, not answer the raw JSON 403 (LogoutSameOriginMatcher's KDoc).
                     LogoutSameOriginMatcher(),
+                    // 1037: the published subtree — the handler's 401 key gate must meet the
+                    // caller BEFORE the CSRF filter would answer for it (§4.4; the matcher's
+                    // KDoc carries the full grounds, including why no cookie is protected there).
+                    PublishedEndpointRouteMatcher(),
                 )
                 // 027 (024 T41's browser family): Spring's default composite includes
                 // CsrfAuthenticationStrategy, written for server-side session

@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.KeyRole
@@ -137,6 +138,21 @@ class ApiKeyRowsTest {
             // of empty reads.
             { verify(exactly = 1) { bindings.findByKey(any()) } },
         )
+    }
+
+    @Test
+    fun `a mutation grant is labelled with its method, beside the GET node grants`() {
+        // #1037: a GET binding is a tree node; a POST grant names one route. Rendered as a bare
+        // path, the POST grant would read as a node grant the key does not hold.
+        every { bindings.findByKey("dpk_ENDPOINT001") } returns
+            listOf(
+                binding("/nyc"),
+                EndpointKeyBinding("/nyc/v1/pay", "dpk_ENDPOINT001", workspaceId, userId, now, EndpointMethod.POST, UUID.randomUUID()),
+            )
+
+        val built = rows.of(listOf(key(id = "dpk_ENDPOINT001", kind = ApiKeyKind.ENDPOINT)), now)
+
+        built.single().boundPaths shouldBe listOf("/nyc", "POST /nyc/v1/pay")
     }
 
     @Test

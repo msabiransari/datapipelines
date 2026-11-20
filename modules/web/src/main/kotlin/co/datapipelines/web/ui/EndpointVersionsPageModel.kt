@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointPinValidator
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.endpoints.EndpointRouteKey
 import co.datapipelines.application.endpoints.EndpointVersionService
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.auth.ApiKeyKind
@@ -48,6 +49,10 @@ class EndpointVersionsPageModel(
     data class Page(
         val id: UUID,
         val url: String,
+        /** #1037: the route's method — half of its identity; a GET and a POST at one path are two pages. */
+        val method: String,
+        /** The dependency tree's lookup key for this route ([EndpointRouteKey]: the bare path for GET, `METHOD path` else). */
+        val routeKey: String,
         val enabled: Boolean,
         val boundKeyNames: List<String>,
         val versions: List<Row>,
@@ -145,7 +150,7 @@ class EndpointVersionsPageModel(
         val bound =
             bindings
                 .findByWorkspace(workspace.id)
-                .filter { it.pathPrefix == endpoint.pathPattern }
+                .filter { it.pathPrefix == endpoint.pathPattern && it.method == endpoint.method }
                 .mapNotNull { keyNames[it.apiKeyId] }
                 .sorted()
         val selected =
@@ -155,6 +160,8 @@ class EndpointVersionsPageModel(
         return Page(
             id = endpoint.id,
             url = PUBLISHED_PREFIX + endpoint.pathPattern,
+            method = endpoint.method.name,
+            routeKey = EndpointRouteKey.of(endpoint.method, endpoint.pathPattern),
             enabled = endpoint.isEnabled,
             boundKeyNames = bound,
             versions = rows,

@@ -978,47 +978,57 @@ An agent that needs a datasource it cannot find should **ask the person** to add
 
 #### 6.2.23 `endpoints_create`
 
-Create a `GET` API at `/api/<category>/<version>/<path…>` (R-EP5; [REST API §19](rest-api.md#19-published-endpoints)) — its version 1 a DRAFT pinned to the EXACT `pipeline_version` given (#786; dependency-graph record §24): the pin never moves when the pipeline's current version moves, and no tool releases it — releasing is a person's act in the UI or over REST (`POST /api/v1/endpoints/{id}/release`, session only). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule, the same reserved-category refusal, the same ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
+Create an API at `/api/<category>/<version>/<path…>` for one HTTP method — `GET` by default, or `POST`/`PUT`/`DELETE` for a mutation route (#1037; method identity is half of the route, immutable like the path) — its version 1 a DRAFT pinned to the EXACT `pipeline_version` given (#786; dependency-graph record §24): the pin never moves when the pipeline's current version moves, and no tool releases it — releasing is a person's act in the UI or over REST (`POST /api/v1/endpoints/{id}/release`, session only). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule (`GET` routes only; a mutation route's pin admits a writing pipeline), the same reserved-category and executions-suffix refusals, the same per-method ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
 
 ```json
 {
   "name": "endpoints_create",
-  "description": "Create a GET endpoint at /api/<category>/<version>/<path>: this creates the API's first DRAFT version pinned to the exact pipeline_version given. Creation is an authoring operation: a deployment with authoring disabled refuses it (endpoint.authoring_disabled); there is no release to perform there. In an authoring-enabled deployment the draft is the entity's current version and serves under the normal runtime checks — the entity is enabled, the caller's key is bound, and the pinned pipeline version is eligible. The pin never moves when the pipeline's current version moves. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pinned pipeline version must be eligible here (RELEASED; a DRAFT only where authoring is enabled — else endpoint.pipeline_version.not_eligible) and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — create one with the api_caller role and bind it over REST or in the UI (auth.md §7.7); an endpoint bound to no key is served to no one, and an MCP key never reaches REST at all (it acts over /mcp only).",
+  "description": "Create an endpoint at /api/<category>/<version>/<path> for one HTTP method — GET by default, or POST/PUT/DELETE for a mutation route (#1037): the method is half of the route's identity and immutable like the path, so a GET and a POST at one pattern are two routes. This creates the API's first DRAFT version pinned to the exact pipeline_version given; the pin never moves. Authoring-disabled deployments refuse it (endpoint.authoring_disabled). The category is your namespace; categories matching v<number> and the literal 'api' are reserved (endpoint.path_reserved), as is a path that could match an executions/{id} or executions/{id}/result polling suffix. The version is one free-form segment (v1 by convention); path variables come after it; path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string; a leading /api prefix is stripped. The pinned version must be eligible here (RELEASED; a DRAFT only where authoring is enabled — endpoint.pipeline_version.not_eligible) and, for GET, side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes; a DML/DDL node against a registered datasource, or a DQL node writing back to one, is refused endpoint.pipeline_not_readonly naming node and datasource — what makes GET safe to retry and crawl; a mutation route's pin admits a writing pipeline by design. A route of the SAME method that could match the same URL is refused (endpoint.path_conflict), never resolved by precedence; another workspace's route at a matching pattern is refused the same way with a redacted body naming nothing but your own pattern. Calling the endpoint needs an API key granted its method — a GET grant is a tree node bound over REST or in the UI (auth.md §7.7); a mutation grant names this one route and is bound the same way with a method. Granted to no key, served to no one; an MCP key never reaches REST (it acts over /mcp only).",
   "inputSchema": {
-    "type": "object",
-    "required": [
-      "path",
-      "pipeline",
-      "pipeline_version"
-    ],
-    "additionalProperties": false,
-    "properties": {
-      "path": {
-        "type": "string",
-        "description": "e.g. /finance/v1/revenue/{region} — category, version, then the path; no /api prefix (one is stripped, not refused), no trailing slash."
-      },
-      "pipeline": {
-        "type": "string",
-        "description": "The pipeline NAME."
-      },
-      "pipeline_version": {
-        "type": "integer",
-        "minimum": 1,
-        "description": "The EXACT pipeline version the API's first draft pins. It never moves when the pipeline's current version moves."
-      },
-      "timeout_seconds": {
-        "type": "integer",
-        "description": "Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running."
-      },
-      "description": {
-        "type": "string"
-      }
+  "type": "object",
+  "required": [
+    "path",
+    "pipeline",
+    "pipeline_version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "e.g. /finance/v1/revenue/{region} — category, version, then the path; no /api prefix (one is stripped, not refused), no trailing slash."
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "description": "The route's HTTP method, immutable like the path. Absent means GET."
+    },
+    "pipeline": {
+      "type": "string",
+      "description": "The pipeline NAME."
+    },
+    "pipeline_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The EXACT pipeline version the API's first draft pins. It never moves when the pipeline's current version moves."
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "description": "Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running."
+    },
+    "description": {
+      "type": "string"
     }
   }
 }
+}
 ```
 
-Returns the endpoint's wire shape: `path`, `pipeline` (by NAME), `timeout_seconds`, `description`, `enabled`, `path_variables` and the servable `url`. A legacy path (listed flagged by §6.2.24) resolves as **not-found** here — the single read answers the valid shape only.
+Returns the endpoint's wire shape: `method`, `path`, `pipeline` (by NAME), `timeout_seconds`, `description`, `enabled`, `path_variables` and the servable `url`. A legacy path (listed flagged by §6.2.24) resolves as **not-found** here — the single read answers the valid shape only.
 
 #### 6.2.24 `endpoints_list`
 
@@ -1040,25 +1050,35 @@ Returns `{endpoints: [...]}` in the shape §6.2.23 returns. Legacy rows (#274) a
 
 #### 6.2.25 `endpoints_get`
 
-One published endpoint, by its path PATTERN.
+One published endpoint, by its path PATTERN and method (absent meaning `GET`, the pre-#1037 shape — a `GET` and a `POST` at one pattern are two routes, each with its own versions).
 
 ```json
 {
   "name": "endpoints_get",
-  "description": "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}'). For a promoter's key an endpoint over a pipeline it cannot see resolves as not-found.",
+  "description": "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}') and method (absent meaning GET, the pre-#1037 shape). A GET and a POST at one pattern are two routes, each with its own versions. For a promoter's key an endpoint over a pipeline it cannot see resolves as not-found.",
   "inputSchema": {
-    "type": "object",
-    "required": [
-      "path"
-    ],
-    "additionalProperties": false,
-    "properties": {
-      "path": {
-        "type": "string",
-        "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
-      }
+  "type": "object",
+  "required": [
+    "path"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "description": "The route's method. Absent means GET."
     }
   }
+}
 }
 ```
 
@@ -1066,29 +1086,39 @@ Returns the §6.2.23 shape, or `endpoint.not_found`.
 
 #### 6.2.26 `endpoints_delete`
 
-Unpublish an endpoint — the guarded entity deletion (#786). The pipeline is untouched; key bindings on that node are not removed, since a node may still carry other endpoints beneath it. An API is deleted only while every version it holds is a DRAFT: a RELEASED version (current or not) or a DISCARDED one refuses `endpoint.version.last_release` (409) with nothing removed — the API, its pointer, its versions and its bindings stay. A legacy row (#274) is never served and stays deletable.
+Unpublish an endpoint — the guarded entity deletion (#786). The pipeline is untouched; GET key bindings on that path are not removed, since a node may still carry other endpoints beneath it, while a mutation grant named this one route goes with it (#1037: the grant names the entity). Deleting one method's route never touches a sibling method's route at the same pattern. An API is deleted only while every version it holds is a DRAFT: a RELEASED version (current or not) or a DISCARDED one refuses `endpoint.version.last_release` (409) with nothing removed — the API, its pointer, its versions and its bindings stay. A legacy row (#274) is never served and stays deletable.
 
 ```json
 {
   "name": "endpoints_delete",
-  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row. An API that holds a RELEASED or DISCARDED version is never deleted: the call is refused endpoint.version.last_release and nothing is removed — discard is per version, the API stays.",
+  "description": "Unpublish an endpoint by its path and method (absent meaning GET). The pipeline is untouched — only the URL stops answering that method. GET key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it; a mutation grant named this one route and goes with it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row. An API that holds a RELEASED or DISCARDED version is never deleted: the call is refused endpoint.version.last_release and nothing is removed — discard is per version, the API stays.",
   "inputSchema": {
-    "type": "object",
-    "required": [
-      "path"
-    ],
-    "additionalProperties": false,
-    "properties": {
-      "path": {
-        "type": "string",
-        "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
-      }
+  "type": "object",
+  "required": [
+    "path"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "description": "The route's method. Absent means GET."
     }
   }
 }
+}
 ```
 
-Returns `{path, deleted: true}`, `endpoint.not_found`, or `endpoint.version.last_release` (`details`: this API's blocking `version` and `status`).
+Returns `{path, method, deleted: true}`, `endpoint.not_found`, or `endpoint.version.last_release` (`details`: this API's blocking `version` and `status`).
 
 **Permission:** `endpoint.unpublish`. **Mutating** — declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 

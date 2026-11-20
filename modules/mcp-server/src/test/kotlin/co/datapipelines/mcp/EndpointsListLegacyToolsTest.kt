@@ -19,8 +19,8 @@ import java.util.UUID
  * stored `enabled`, and no parse-derived fields. The assertion is about the agent's and the
  * operator's problem — a row that predates the current grammar must be VISIBLE and actionable
  * (`endpoints_delete` removes it), never a silent mystery or a boot-killing throw. The list
- * shape is pinned row for row: a valid row stays byte-identical to the shape before #274, and
- * the legacy row is distinguishable by its `legacy` key alone.
+ * shape is pinned row for row: a valid row is the shape before #274 plus #1037's `method` key,
+ * and the legacy row is distinguishable by its `legacy` key alone.
  */
 class EndpointsListLegacyToolsTest {
     private val publishing = mockk<EndpointPublishService>()
@@ -37,10 +37,12 @@ class EndpointsListLegacyToolsTest {
 
         endpoints.size shouldBe 2
 
-        // The valid row: exactly the pre-#274 shape — no `legacy` key at all. #786 changed assertion: `pipeline` is the
+        // The valid row: the pre-#274 shape plus `method` (#1037 — a route is a (method, path)
+        // pair) — no `legacy` key at all. #786 changed assertion: `pipeline` is the
         // current version's pinned name, read from the row itself (before: a pipeline lookup by the legacy id, null here).
         endpoints[0] shouldBe
             mapOf(
+                "method" to "GET",
                 "path" to "/nyc/v1/revenue/{borough}",
                 "pipeline" to "test/pipeline",
                 "timeout_seconds" to 30,

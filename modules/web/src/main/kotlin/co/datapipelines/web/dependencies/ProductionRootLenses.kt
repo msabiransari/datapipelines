@@ -1,6 +1,7 @@
 package co.datapipelines.web.dependencies
 
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.endpoints.EndpointRouteKey
 import co.datapipelines.application.endpoints.EndpointVersionService
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthenticatedPrincipal
@@ -31,7 +32,7 @@ import java.util.UUID
  * | parameter_set | `LensedView.parameterSets.admits(name)` | `ParameterSetService.findVersion(ws, lens, id, v)` |
  * | visualization | `LensedView.visualizations.admits(name)` | `VisualizationService.findVersion(ws, lens, id, v)` |
  * | dashboard | `LensedView.dashboards.admits(name)` | `DashboardService.findVersion(ws, lens, id, v)` |
- * | api_endpoint | `EndpointPublishService.get(principal, path)` | `EndpointVersionService.version(principal, id, v)` |
+ * | api_endpoint | `EndpointPublishService.get(principal, path, method)` (key split) | `EndpointVersionService.version(principal, id, v)` |
  * | schedule | `ScheduleService.get(ws, id, PrincipalTargetViewer(principal))` (its target admitted) | Same read and captured revision |
  *
  * The id-keyed version reads run after the walk because these families' version detail reads are keyed by the entity
@@ -99,7 +100,10 @@ object ProductionRootLenses {
                         principal: AuthenticatedPrincipal,
                         view: LensedView,
                         request: DependenciesRequest,
-                    ) = endpoints.get(principal, request.lookupKey) != null
+                    ): Boolean {
+                        val route = EndpointRouteKey.parse(request.lookupKey) ?: return false
+                        return endpoints.get(principal, route.path, route.method) != null
+                    }
 
                     override fun admitsResolved(
                         principal: AuthenticatedPrincipal,

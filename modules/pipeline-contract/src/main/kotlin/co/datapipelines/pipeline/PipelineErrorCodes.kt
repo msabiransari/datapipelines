@@ -1425,6 +1425,12 @@ object PipelineErrorCodes {
          * `api` (a normalised `/api/api/…` pattern). `details.segment` names it. Checked at
          * publish and re-checked when the serve registry is built, so a row written around the
          * publish path is never served.
+         *
+         * #1037 (published-mutation-apis §3.1) — the same code refuses a pattern that could
+         * match the reserved result-polling suffixes of an endpoint's own executions
+         * (`…/executions/{id}` and `…/executions/{id}/result`, the keys-v2 A16/B3 reads): the
+         * serve handler recognises those URLs before the registry, so a route beneath them would
+         * be silently shadowed exactly there. `details.segment` names the colliding suffix.
          */
         const val PATH_RESERVED = "endpoint.path_reserved"
 
@@ -1432,6 +1438,13 @@ object PipelineErrorCodes {
          * §4.1 — the pattern could match the same URL as one already published (`/a/{x}` against
          * `/a/b`). `details.conflicting_path` names the other. Ambiguity is REFUSED, never
          * resolved by precedence: at request time at most one pattern may match.
+         *
+         * #1037 (published-mutation-apis §2) — a route is a method+path pair, so the refusal is
+         * per method: the SAME method in the SAME workspace conflicts (named as above — the
+         * caller owns that workspace's tree); ANY method in ANOTHER workspace conflicts with a
+         * REDACTED body that names nothing but the caller's own pattern — no other path, no
+         * method, no workspace — because whether some other workspace publishes at a path is
+         * exactly what this refusal must not reveal.
          */
         const val PATH_CONFLICT = "endpoint.path_conflict"
 
@@ -1454,13 +1467,36 @@ object PipelineErrorCodes {
         const val PIPELINE_NOT_RELEASED = "endpoint.pipeline_not_released"
 
         /**
-         * §5.6 — no endpoint matches. Deliberately identical for an unknown path and a DISABLED
-         * one: distinguishing them would let an unauthenticated caller enumerate the registry.
+         * §5.6 — no endpoint matches, or no method of the addressed path is visible to this
+         * caller. Deliberately identical for an unknown path and a DISABLED one: distinguishing
+         * them would let an unauthenticated caller enumerate the registry.
          */
         const val NOT_FOUND = "endpoint.not_found"
 
-        /** §5.6 — any method but `GET` on the published path; the response carries `Allow: GET`. */
+        /**
+         * §5.6 — a method the addressed path does not serve THIS caller: some method is visible
+         * (a live route plus a grant the presenting key holds) but the requested one is not
+         * published there or not granted. `Allow` carries exactly the visible methods, and
+         * `details.method` the requested one. A path with NO visible method is
+         * [NOT_FOUND], not this — the caller must not learn it exists.
+         */
         const val METHOD_NOT_ALLOWED = "endpoint.method_not_allowed"
+
+        /**
+         * #1037 (published-mutation-apis §3.1) — 400: a publish names a method this surface does
+         * not publish (`PATCH` today, and any unknown verb): a route's method is one of GET,
+         * POST, PUT, DELETE, stated at publish and immutable like the path.
+         */
+        const val METHOD_INVALID = "endpoint.method_invalid"
+
+        /**
+         * #1037 (published-mutation-apis §7) — 503: the request is an otherwise-authorized
+         * mutation route (`datapipelines.endpoints.mutations-enabled` off, or the writing side
+         * not enabled on this deployment), refused BEFORE any durable business work. The
+         * identity checks — route resolution, grants, the 404/405 discipline — answered the same
+         * either way; only the run is withheld.
+         */
+        const val MUTATIONS_DISABLED = "endpoint.mutations_disabled"
 
         /** §5.3 — an `Accept` this surface cannot satisfy (v1 serves `application/json` only). */
         const val NOT_ACCEPTABLE = "endpoint.not_acceptable"
@@ -1486,6 +1522,15 @@ object PipelineErrorCodes {
          * promotion pre-validation, so the target is left byte-unchanged.
          */
         const val PROMOTION_KEY_MISSING = "endpoint.promotion.key_missing"
+
+        /**
+         * #1037 (published-mutation-apis §3.4) — 409: a promotion batch covers a pipeline with a
+         * published non-GET endpoint or a non-GET key grant over it. The transfer wire carries
+         * no method identity, so a batch that carried one would arrive as GET — a silent
+         * narrowing of the route. The whole batch is refused before anything is pushed, like
+         * every other promotion pre-validation, so the target is left byte-unchanged.
+         */
+        const val PROMOTION_METHOD_UNSUPPORTED = "endpoint.promotion.method_unsupported"
 
         /** #786 (record §24) — 404: the API has no version with that number (or the API is not visible). */
         const val VERSION_NOT_FOUND = "endpoint.version.not_found"

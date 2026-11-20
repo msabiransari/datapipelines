@@ -492,6 +492,14 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Endpoint.KEY_NOT_BOUND to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.PROMOTION_KEY_MISSING to HttpStatus.CONFLICT,
+            // #1037 §13.14 — the method era. A publish naming a method the surface does not
+            // publish is the caller's request (400, the family default, stated here because §13
+            // states it); the mutations gate is a withhold, not the caller's fault (503); a
+            // promotion covering a non-GET route or grant is a batch state conflict like its
+            // key_missing sibling (409).
+            PipelineErrorCodes.Endpoint.METHOD_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED to HttpStatus.CONFLICT,
             // #786 §13.14 — an unknown API version is a 404 under the version family's 409; an exact pin the caller's
             // posture does not admit, and an authoring-disabled deployment's API write, are state conflicts (409) under
             // the family's 400. `endpoint.pipeline_version.not_found` keeps the 400: the request names a version that

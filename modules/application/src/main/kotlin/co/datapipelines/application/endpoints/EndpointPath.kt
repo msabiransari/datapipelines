@@ -193,6 +193,79 @@ object EndpointPath {
         return first.value.takeIf { RESERVED_CATEGORY.matches(it) }
     }
 
+    /**
+     * The reserved paging suffix a NEW route's tail could collide with — `executions/{id}` or
+     * `executions/{id}/result` — or null for a pattern that can never match a paging URL
+     * (published-mutation-apis design record §3.1).
+     *
+     * The result-paging paths (the `…/executions/{id}` tail and its `/result` read, served by the
+     * published subtree's own handler before the registry is consulted) are recognised by the
+     * serve handler BEFORE the registry, so a published pattern that could match one is not
+     * "sometimes shadowed" — it is shadowed on exactly the URLs an operator would least expect,
+     * silently. The rule refuses the pattern at publish (`endpoint.path_reserved`, naming the
+     * suffix) instead of letting it happen.
+     *
+     * "Could match" is structural, not literal: the paging suffix is `executions` (a literal), a
+     * 36-character UUID, and optionally the literal `result`, beneath a business path of at least
+     * two segments — so a tail position collides when a VARIABLE sits there (it can bind
+     * `executions`, a UUID or `result`) or the literal already IS that token. `{dataset}/{record}`
+     * therefore collides (`/nyc/v1/executions/550e8400-…` matches it), while
+     * `{borough}/records` does not (no literal is a UUID).
+     */
+    fun reservedExecutionSuffix(parsed: Parsed): String? {
+        val segments = parsed.segments
+        // A paging URL carries at least a two-segment business path before its suffix, so a
+        // pattern shorter than suffix + two segments cannot collide with one.
+        val resultStart = segments.size - RESULT_TAIL_SEGMENTS
+        if (resultStart >= MIN_BUSINESS_SEGMENTS && matchesPaging(segments, resultStart, withResult = true)) return RESULT_SUFFIX
+        val executionStart = segments.size - EXECUTION_TAIL_SEGMENTS
+        if (executionStart >= MIN_BUSINESS_SEGMENTS && matchesPaging(segments, executionStart, withResult = false)) return EXECUTION_SUFFIX
+        return null
+    }
+
+    /** Whether [segments] at [start] is the paging tail — `executions`, a UUID, and `result` when [withResult]. */
+    private fun matchesPaging(
+        segments: List<Segment>,
+        start: Int,
+        withResult: Boolean,
+    ): Boolean {
+        val executions = canBe(segments[start], EXECUTIONS_SEGMENT)
+        val uuid = canBe(segments[start + 1], null)
+        val result = !withResult || canBe(segments[segments.lastIndex], RESULT_SEGMENT)
+        return executions && uuid && result
+    }
+
+    /**
+     * Whether one tail position could carry the paging tail's token there — a variable always can
+     * (it binds any one segment); a literal only when it IS the token. The UUID position has no
+     * token ([token] null): a literal matches only when it is itself a valid UUID's spelling.
+     */
+    private fun canBe(
+        segment: Segment,
+        token: String?,
+    ): Boolean =
+        when (segment) {
+            is Segment.Variable -> true
+            is Segment.Literal -> token?.let { segment.value == it } ?: runCatching { java.util.UUID.fromString(segment.value) }.isSuccess
+        }
+
+    /** The reserved suffixes as the refusal's details name them (the grammar's own spelling). */
+    const val EXECUTION_SUFFIX = "executions/{id}"
+
+    /** [EXECUTION_SUFFIX]'s result read. */
+    const val RESULT_SUFFIX = "executions/{id}/result"
+
+    /** The paging tail's segment counts: `executions/{id}` and `executions/{id}/result`. */
+    private const val EXECUTION_TAIL_SEGMENTS = 2
+    private const val RESULT_TAIL_SEGMENTS = 3
+
+    /** A paging URL's business path is at least `<category>/<version>` (the paging regex's own floor). */
+    private const val MIN_BUSINESS_SEGMENTS = 2
+
+    private const val EXECUTIONS_SEGMENT = "executions"
+
+    private const val RESULT_SEGMENT = "result"
+
     @Suppress("ReturnCount") // each §4.1 rule is its own refusal; collapsing them would obscure the grammar
     private fun parseNormalized(
         pattern: String,

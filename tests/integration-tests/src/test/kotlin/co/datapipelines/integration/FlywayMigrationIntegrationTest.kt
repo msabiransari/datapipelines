@@ -50,7 +50,7 @@ class FlywayMigrationIntegrationTest {
     fun `every shipped migration is recorded as applied and successful`() {
         val rows =
             query(
-                "SELECT version || '|' || description || '|' || success FROM flyway_schema_history ORDER BY installed_rank",
+                "SELECT COALESCE(version, 'R') || '|' || description || '|' || success FROM flyway_schema_history ORDER BY installed_rank",
             ) { it.getString(1) }
 
         rows shouldContainExactly
@@ -204,6 +204,11 @@ class FlywayMigrationIntegrationTest {
                 "63|lake maintenance plan|true",
                 // #964 (V64) — the lake storage breakdown: the latest six-row inventory per table (metadata-db §4.60).
                 "64|lake storage inventory|true",
+                // #1037 (V65) — method identity for published endpoints, exact mutation grants for bindings (§4.13/§4.14).
+                "65|published endpoint methods|true",
+                // #1037 — the repeatable downgrade barrier (version column NULL, shown as R): a binary that does not resolve it
+                // refuses to start on V65 metadata (metadata-db §7.4; PublishedMethodDowngradeBarrierIntegrationTest).
+                "R|published endpoint method downgrade barrier|true",
             )
     }
 
@@ -1074,6 +1079,50 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #1037 (V65) — method identity for published routes and exact mutation grants, read from the SHIPPED
+     * database: the closed method list on both tables, the bindings' shape rule (a GET row has no entity, a
+     * mutation row must), the per-method path unique that replaced V11's path-only one, the widened binding
+     * PK and the grant's entity pointer with its cascade. Behaviour is `PublishedMethodIdentityIntegrationTest`'s;
+     * this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V65 gives published endpoints method identity and bindings exact mutation grants`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid IN " +
+                "('published_endpoints'::regclass, 'endpoint_key_bindings'::regclass) AND conname IN " +
+                "('chk_published_endpoints_method', 'chk_endpoint_key_bindings_method', 'chk_endpoint_key_bindings_shape', " +
+                "'pk_endpoint_key_bindings', 'uq_published_endpoints_path_method', 'endpoint_key_bindings_endpoint_id_fkey') " +
+                "ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_endpoint_key_bindings_method|CHECK ((method = ANY (ARRAY['GET'::text, 'POST'::text, 'PUT'::text, " +
+                    "'DELETE'::text])))",
+                "chk_endpoint_key_bindings_shape|CHECK ((((method = 'GET'::text) AND (endpoint_id IS NULL)) OR " +
+                    "((method <> 'GET'::text) AND (endpoint_id IS NOT NULL))))",
+                "chk_published_endpoints_method|CHECK ((method = ANY (ARRAY['GET'::text, 'POST'::text, 'PUT'::text, " +
+                    "'DELETE'::text])))",
+                "endpoint_key_bindings_endpoint_id_fkey|FOREIGN KEY (endpoint_id) REFERENCES published_endpoints(id) ON DELETE CASCADE",
+                "pk_endpoint_key_bindings|PRIMARY KEY (path_prefix, api_key_id, method)",
+                "uq_published_endpoints_path_method|UNIQUE (path_pattern, method)",
+            )
+        // The backfill IS the default: every pre-V65 row is GET, and DEFAULT 'GET' keeps the
+        // application's GET-only writes (the ones that never name a method) on GET rows.
+        query(
+            "SELECT table_name || '|' || column_default FROM information_schema.columns" +
+                " WHERE table_schema = 'public' AND column_name = 'method'" +
+                " AND table_name IN ('published_endpoints', 'endpoint_key_bindings') ORDER BY 1",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "endpoint_key_bindings|'GET'::text",
+                "published_endpoints|'GET'::text",
+            )
+        // V11's deployment-wide path unique is GONE — a URL is one meaning per METHOD now.
+        query(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'published_endpoints_path_pattern_key'",
+        ) { it.getString(1) } shouldBe emptyList()
+    }
+
+    /**
      * #798 (V54) — managed lake table definitions, read from the SHIPPED database: the closed lists the
      * `lake.definitions` enums mirror (table status, apply state, version status, origin), the pointer/state pairing,
      * the one-DRAFT index and every column. Behaviour is `LakeDefinitionRepositoryIntegrationTest`'s; this pins
@@ -1905,8 +1954,10 @@ class FlywayMigrationIntegrationTest {
                 "datasources.uq_datasources_incarnation",
                 "dashboard_key_bindings.dashboard_key_bindings_pkey",
                 "dashboard_key_bindings.idx_dashboard_key_bindings_key",
-                "endpoint_key_bindings.endpoint_key_bindings_pkey",
+                "endpoint_key_bindings.pk_endpoint_key_bindings",
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
+                // #1037 (V65) — the mutation grant's entity lookup, partial on endpoint_id IS NOT NULL.
+                "endpoint_key_bindings.idx_endpoint_key_bindings_endpoint",
                 "execution_events.execution_events_pkey",
                 "execution_events.uq_events_execution_event",
                 // #785 (V53) — the two catalog tables' library PKs; the control row's PK; a lease per (kind, name) and
@@ -2025,7 +2076,8 @@ class FlywayMigrationIntegrationTest {
                 "published_endpoint_versions.uq_published_endpoint_versions_one_draft",
                 "published_endpoints.idx_published_endpoints_pipeline",
                 "published_endpoints.idx_published_endpoints_workspace",
-                "published_endpoints.published_endpoints_path_pattern_key",
+                // #1037 (V65) — one meaning per URL PER METHOD; replaced V11's published_endpoints_path_pattern_key.
+                "published_endpoints.uq_published_endpoints_path_method",
                 "published_endpoints.published_endpoints_pkey",
                 // #9 (V38) — db-scheduler's own three indexes (its DDL, verbatim) and its PK.
                 "scheduled_tasks.execution_time_idx",
@@ -2146,6 +2198,10 @@ class FlywayMigrationIntegrationTest {
                 // #874 (V59) — the generation counter starts at 1 and only ever advances.
                 "chk_datasources_generation",
                 "chk_dialect",
+                // #1037 (V65) — the closed method list on the bindings table, and its shape rule: a GET row
+                // has no entity, a mutation row must (metadata-db §4.14).
+                "chk_endpoint_key_bindings_method",
+                "chk_endpoint_key_bindings_shape",
                 // V30 (177, D11): the credential kind behind an execution — 'user' | 'endpoint' | 'server' | NULL.
                 "chk_executions_executed_by_key_kind",
                 // #798 (V54) — the semantics projection's floors and tags shape (§4.51), then the namespace's name grammar,
@@ -2279,6 +2335,8 @@ class FlywayMigrationIntegrationTest {
                 "chk_published_endpoint_versions_status",
                 "chk_published_endpoint_versions_version",
                 "chk_published_endpoints_current_version",
+                // #1037 (V65) — the closed method list on the route table (metadata-db §4.13).
+                "chk_published_endpoints_method",
                 // #442b (V51) — the outbox's CHECKs (metadata-db §4.39–§4.40): a delivery's state list, its due/sending/
                 // accepted/failure pairings and counts; an event's checkbox list, its event/outcome pairing and sequence.
                 "chk_schedule_notification_deliveries_accepted",

@@ -58,6 +58,11 @@ class WebPropertiesSpecDriftTest {
             props.keyRequestBudget.windowSeconds.toString()
         documented.getValue("datapipelines.endpoints.key-request-budget.max-requests") shouldBe
             props.keyRequestBudget.maxRequests.toString()
+        // #1037 — the operator run-gate on published non-GET routes; default OFF in both the
+        // doc and the binder, so a deployment gets 503 endpoint.mutations_disabled until it
+        // opts in.
+        documented.getValue("datapipelines.endpoints.mutations-enabled") shouldBe props.mutationsEnabled.toString()
+        props.mutationsEnabled shouldBe false
     }
 
     @Test

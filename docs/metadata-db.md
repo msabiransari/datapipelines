@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.69 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.70 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-19
 
 ---
 
@@ -624,13 +624,14 @@ CREATE INDEX idx_workspace_members_admins ON workspace_members(workspace_id) WHE
 
 ### 4.13 `published_endpoints`
 
-The registry of released pipelines served as `GET` endpoints at `/api/<category>/<version>/<path…>` (V11, round 074; re-rooted by 172's R-EP5). See [REST API §19](rest-api.md#19-published-endpoints).
+The registry of released pipelines served as endpoints at `/api/<category>/<version>/<path…>` (V11, round 074; re-rooted by 172's R-EP5; method identities V65, #1037). See [REST API §19](rest-api.md#19-published-endpoints).
 
 ```sql
 CREATE TABLE published_endpoints (
     id               UUID        PRIMARY KEY,
     workspace_id     UUID        NOT NULL REFERENCES workspaces(id),
     path_pattern     TEXT        NOT NULL,   -- '/lending/v1/{borough}/home'
+    method           TEXT        NOT NULL DEFAULT 'GET',             -- V65 (#1037): GET | POST | PUT | DELETE
     pipeline_id      UUID        NOT NULL REFERENCES pipelines(id),   -- #786: legacy, the conversion's SOURCE only
     timeout_seconds  INTEGER     NOT NULL,   -- #786: legacy creation snapshot; the version row's value serves
     description      TEXT        NOT NULL DEFAULT '',                 -- #786: legacy, as timeout_seconds
@@ -640,7 +641,8 @@ CREATE TABLE published_endpoints (
     created_by       UUID        NOT NULL REFERENCES users(id),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (path_pattern)
+    CONSTRAINT chk_published_endpoints_method CHECK (method IN ('GET', 'POST', 'PUT', 'DELETE')),
+    CONSTRAINT uq_published_endpoints_path_method UNIQUE (path_pattern, method)
 );
 
 CREATE INDEX idx_published_endpoints_workspace ON published_endpoints(workspace_id);
@@ -648,9 +650,9 @@ CREATE INDEX idx_published_endpoints_pipeline ON published_endpoints(pipeline_id
 ```
 
 **Notes:**
-- **`UNIQUE (path_pattern)` is deployment-wide, not per-workspace, on purpose.** A URL is global: `GET /api/lending/v1/home` has exactly one meaning on a deployment, so two workspaces cannot both own it. `workspace_id` says who may manage the row and whose datasources the pipeline runs against — it does not namespace the path. A per-workspace constraint would let two rows claim one URL and make request-time resolution ambiguous.
+- **`UNIQUE (path_pattern, method)` is deployment-wide, not per-workspace, on purpose.** A URL is global: `GET /api/lending/v1/home` has exactly one meaning on a deployment, so two workspaces cannot both own it. `workspace_id` says who may manage the row and whose datasources the pipeline runs against — it does not namespace the path. A per-workspace constraint would let two rows claim one URL and make request-time resolution ambiguous. Since V65 (#1037) a route's identity is **method + path**: the unique narrows to the pair, `method` is stated at publish and is as immutable as the path, and `DEFAULT 'GET'` was the whole backfill — every pre-#1037 row is a GET route, no row moved and no row's meaning changed. (V11 declared the original constraint table-level, so Postgres had named it with the full column name — `published_endpoints_path_pattern_key`, which is the name V65 drops; the down path documented in the migration's header restores it.)
 - **`retired_reason` (V41, #274) — a stored row that fails a later grammar is retired, never fatal.** R-EP5 (2026-09-19) made three segments the floor, and rows written before that day under the then-legal two-segment grammar parse against nothing: the row mapper threw inside the demo seeder's conflict check and refused the whole boot. V41 disables every row whose path has fewer than three segments and records why (`retired_reason = 'pre-R-EP5 path'`; NULL is a normal row). Rows are never deleted — the listing shows them flagged with the reason, and unpublishing one is the operator's deliberate act. Independently of this column, the repository maps a row whose path no longer parses as a legacy value and keeps it out of the serve registry and the conflict check, so a database V41 has not reached yet still boots; the column is what makes the row read back as an ordinary disabled row everywhere else. The migration's down path (documented in the file's header) re-enables every row the reason names — V41 cannot distinguish "disabled by V41" from "disabled by an operator before V41" — and drops the column. The column is an audit marker, not the source of the listing's flag: `legacy` and `reason` come from parsing the stored path on every read (the mapper), and V41's predicate is the two-segment shape only — a row malformed another way (an illegal segment, an empty path) stays `is_enabled = TRUE` in the table, is mapped legacy on every read and is never served. **What sees a legacy row (#286).** Only the legacy read (`findLegacy`, workspace-scoped — there is no deployment-wide read) and the row-level read unpublish needs (`findRowByPath`); every valid-endpoint read skips it — the serve registry, the conflict check, the workspace listing, `EndpointKeyService.requireInsideWorkspace` (a node only a legacy path lies under is not inside the workspace's tree, so no key binds there) and the pipeline explorer's Usage tab (`findByPipeline`: a pipeline served only by a legacy row reads as unpublished, which it is). A promotion batch omits it and the sender logs the count. `path_pattern` is `TEXT` with no CHECK, so the surfaces that echo a legacy path (REST, `endpoints_list`, the console) cut it at the grammar's 200 characters (`EndpointPath.echoBounded`); the column keeps the stored value, because unpublish is by path. The once-per-JVM `event=endpoint.legacy_rows` WARN names the FIRST query's count as `at_least` — after V41 the registry warm-up reads enabled rows only, so it is a floor, not the deployment's total.
-- The constraint is not the whole uniqueness rule. `/a/{x}` and `/a/b` are different strings that match the same URL; that overlap is refused at publish time in the application (`endpoint.path_conflict`), under a transaction-scoped advisory lock so two concurrent publishes cannot both pass the check. The constraint is the second line, catching exact duplication.
+- The constraint is not the whole uniqueness rule. `/a/{x}` and `/a/b` are different strings that match the same URL; that overlap is refused at publish time in the application (`endpoint.path_conflict`), under a transaction-scoped advisory lock so two concurrent publishes cannot both pass the check. The constraint is the second line, catching exact duplication. Since #1037 the overlap rule is **per method within a workspace** — GET and POST may overlap one pattern — and **every method across workspaces** (V11's "a URL has exactly one meaning" holds per method), and a cross-workspace conflict answers with a REDACTED 409 that names no other workspace, method or pattern.
 - **Since #786 (V58) the entity pins nothing itself.** Its `current_version` names one of its API versions (§4.13a), and that version pins an EXACT pipeline version; serving reads this pointer and that pin, never the pipeline's CURRENT. The pointer is tied to a version row by the composite foreign key `fk_published_endpoints_current_version (id, current_version) → published_endpoint_versions (endpoint_id, version)`, `DEFERRABLE INITIALLY DEFERRED` (a constraint, not a trigger: a transaction that purges the current version and moves the pointer is checked once, at commit); NULL serves nothing. `pipeline_id`, `timeout_seconds` and `description` stay as the in-place conversion's SOURCE — read once for an entity with no version row — and as a new entity's creation snapshot; no serve statement reads them. (Before #786 the row pinned a pipeline, not a version, and the latest RELEASED version was resolved at request time; the read-only rule is still re-checked on every serve.)
 - `timeout_seconds` is clamped to the `datapipelines.endpoints.timeout-min-seconds` / `datapipelines.endpoints.timeout-max-seconds` bounds when written, deliberately **not** by a CHECK constraint — the bounds are configuration an operator may retune, and a row written under the old bounds must keep serving rather than make the table unreadable.
 - Matching reads the enabled rows whole and matches them in memory (the set is small and cached per instance, invalidated over the same Redis channel datasource pools use), so no query plan depends on the shape of `path_pattern`.
@@ -708,26 +710,34 @@ ALTER TABLE published_endpoints ADD CONSTRAINT fk_published_endpoints_current_ve
 
 ### 4.14 `endpoint_key_bindings`
 
-Which API keys authorise which part of the endpoint tree (V11). See [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings).
+Which API keys authorise which part of the endpoint tree, and — since V65 (#1037) — which exact mutation routes (V11; method grants V65). See [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings).
 
 ```sql
 CREATE TABLE endpoint_key_bindings (
-    path_prefix      TEXT        NOT NULL,   -- a tree NODE: '/lending' binds '/lending/**'
+    path_prefix      TEXT        NOT NULL,   -- a GET row: a tree NODE ('/lending'); a mutation row: the entity's FULL pattern
     api_key_id       TEXT        NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
     workspace_id     UUID        NOT NULL REFERENCES workspaces(id),
+    method           TEXT        NOT NULL DEFAULT 'GET',             -- V65 (#1037): GET | POST | PUT | DELETE
+    endpoint_id      UUID        NULL REFERENCES published_endpoints(id) ON DELETE CASCADE,  -- V65: the mutation grant's entity
     created_by       UUID        NOT NULL REFERENCES users(id),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (path_prefix, api_key_id)
+    CONSTRAINT chk_endpoint_key_bindings_method CHECK (method IN ('GET', 'POST', 'PUT', 'DELETE')),
+    CONSTRAINT chk_endpoint_key_bindings_shape
+        CHECK ((method = 'GET' AND endpoint_id IS NULL) OR (method <> 'GET' AND endpoint_id IS NOT NULL)),
+    CONSTRAINT pk_endpoint_key_bindings PRIMARY KEY (path_prefix, api_key_id, method)
 );
 
 CREATE INDEX idx_endpoint_key_bindings_key ON endpoint_key_bindings(api_key_id);
+CREATE INDEX idx_endpoint_key_bindings_endpoint ON endpoint_key_bindings(endpoint_id)
+    WHERE endpoint_id IS NOT NULL;
 ```
 
 **Notes:**
-- `path_prefix` is a **node** of the endpoint tree, not a pattern: `/lending` authorises every endpoint beneath it. Resolution walks the request path's ancestors from the most specific, and the FIRST node carrying any binding decides — so a deeper binding **replaces** an inherited one for its subtree rather than adding to it. Bind both keys at the deeper node when both should keep working.
+- **A `GET` row is the tree-node grant it always was:** `path_prefix` is a node of the endpoint tree, not a pattern — `/lending` authorises every endpoint beneath it. Resolution walks the request path's ancestors from the most specific, and the FIRST node carrying any binding decides — so a deeper binding **replaces** an inherited one for its subtree rather than adding to it. Bind both keys at the deeper node when both should keep working. V65 backfilled every pre-#1037 row `GET` (`DEFAULT 'GET'` was the backfill; no row moved, no row's meaning changed), and the ancestor walk reads GET rows only.
+- **A non-GET row is an exact mutation grant, not a tree node (#1037).** `path_prefix` is the entity's FULL pattern, `endpoint_id` its identity (NOT NULL by the shape CHECK), and the grant is decided by entity id — never inherited by a deeper route, never replaced or shadowed by a binding at another node, never authorising the GET route at the same pattern or any sibling method. `ON DELETE CASCADE` retires the grant with its entity, so a recreated route starts ungranted: a delete-and-recreate at the same pattern cannot inherit a predecessor's grant.
 - `api_key_id` is `TEXT` because [`api_keys.id`](#42-api_keys) is the `dpk_…` id itself, not a UUID.
-- `ON DELETE CASCADE`: a key that no longer exists cannot authorise anything, and an orphaned binding would show on the endpoints screen as a binding to nothing. Note that ordinary revocation is a soft flag and leaves the row — the cascade is for a genuine row delete.
-- The primary key `(path_prefix, api_key_id)` says one key binds a node once and several keys may bind the same node.
+- `ON DELETE CASCADE` (key): a key that no longer exists cannot authorise anything, and an orphaned binding would show on the endpoints screen as a binding to nothing. Note that ordinary revocation is a soft flag and leaves the row — the cascade is for a genuine row delete.
+- The primary key `(path_prefix, api_key_id, method)` says one key holds each (node, method) grant once — the GET node grant and every mutation grant at the same pattern included — and several keys may hold the same grant.
 - No `updated_at`: a binding is inserted and deleted, never edited.
 
 ### 4.15 `lake_tables`
@@ -2362,14 +2372,15 @@ CREATE TABLE lake_storage_inventory (
 | `datasource_workspaces` | `datasource_workspaces_pkey` | via PK | The visibility check `(datasource_name, workspace_id)` — the hot per-read predicate (§4.16) |
 | `datasource_workspaces` | `idx_datasource_workspaces_workspace` | explicit | "Everything this workspace can see", the listing's access path |
 | `published_endpoints` | `published_endpoints_pkey` | via PK | Lookup by id |
-| `published_endpoints` | `published_endpoints_path_pattern_key` | via UNIQUE | One meaning per URL, deployment-wide ([§4.13](#413-published_endpoints)) |
+| `published_endpoints` | `uq_published_endpoints_path_method` | via UNIQUE | One meaning per URL, deployment-wide PER METHOD — V65 (#1037) replaced V11's `published_endpoints_path_pattern_key` ([§4.13](#413-published_endpoints)) |
 | `published_endpoints` | `idx_published_endpoints_workspace` | explicit | A workspace's endpoints — the management listing |
 | `published_endpoints` | `idx_published_endpoints_pipeline` | explicit | "Does any endpoint publish this pipeline?" — what a pipeline delete and the read-only re-check ask |
 | `published_endpoint_versions` | `published_endpoint_versions_pkey` | via PK | One row per `(endpoint_id, version)` ([§4.13a](#413a-published_endpoint_versions), #786) |
 | `published_endpoint_versions` | `uq_published_endpoint_versions_one_draft` | explicit (partial UNIQUE) | At most one working DRAFT per API |
 | `published_endpoint_versions` | `idx_published_endpoint_versions_pin` | explicit | "Which API versions pin this pipeline version?" — the pipeline discard/purge protection (#786 B.4) |
-| `endpoint_key_bindings` | `endpoint_key_bindings_pkey` | via PK | `(path_prefix, api_key_id)` — one key binds a node once |
+| `endpoint_key_bindings` | `pk_endpoint_key_bindings` | via PK | `(path_prefix, api_key_id, method)` — one key holds each (node, method) grant once; V65 (#1037) widened V11's `(path_prefix, api_key_id)` |
 | `endpoint_key_bindings` | `idx_endpoint_key_bindings_key` | explicit | Which nodes a key binds — the key detail view and a revoke's blast radius |
+| `endpoint_key_bindings` | `idx_endpoint_key_bindings_endpoint` | explicit (partial) | V65 (#1037): "which keys may call THIS route entity" — the mutation grant's entity lookup, partial on `endpoint_id IS NOT NULL` |
 | `dashboard_key_bindings` | `dashboard_key_bindings_pkey` | via PK | `(name_prefix, api_key_id)` — one key binds a folder once (§4.36) |
 | `dashboard_key_bindings` | `idx_dashboard_key_bindings_key` | explicit | Which folders a key binds — the Keys page's editor and a revoke's blast radius |
 | `lake_tables` | `lake_tables_pkey` | via PK | Lookup by surrogate id |
@@ -2717,6 +2728,45 @@ Flyway uses Postgres advisory locks (`pg_advisory_lock`). Multiple instances sta
 2. Instance B waits for the lock, finds the migration already applied, skips.
 3. No corruption, no double-execution.
 
+### 7.4 Rolling back V65 (published method identities, #1037)
+
+**The boundary.** A binary built before V65 reads `published_endpoints` and `endpoint_key_bindings` with no method predicate. Measured against the previous jar on a V65 copy (#1037 round 2): it STARTS (Flyway ignores a future *versioned* migration by default), serves a POST-only route's entity on `GET`, and honors a POST grant as a GET prefix grant — a key that holds only `POST /x` could read `GET /x`, the very reinterpretation the design forbids. A shipped jar cannot be changed, so the refusal is in the schema's history: `db/downgrade-barrier/R__published_endpoint_method_downgrade_barrier.sql` is a **repeatable** migration, in a Flyway location of its own beside `db/migration` (a harmless `COMMENT ON COLUMN published_endpoints.method`). A Flyway that has applied a repeatable it cannot resolve fails validation — default `ignoreMigrationPatterns` is `*:future`, which never covers a missing repeatable — so every binary without it **refuses to start** with `Detected applied migration not resolved locally: published endpoint method downgrade barrier`. The current binary resolves it and starts. `PublishedMethodDowngradeBarrierIntegrationTest` pins both halves, and the same measurement was taken against the real previous jar (store evidence `1037-published-method-identities/`, `r2-dg-*`).
+
+**Rollback is therefore deliberate, never an accident of redeploying an older image.** Order matters:
+
+1. Take a backup (`pg_dump`) — the procedure deletes every non-GET route, its versions and every mutation grant; that is the documented cost of an identity column (the same one V58's versions carry) and it is not recoverable from the schema afterwards.
+2. Drain writes: set `datapipelines.endpoints.mutations-enabled=false` on every instance, let admitted executions settle ([Deployment §8.3.1](deployment.md)), then stop **every** instance running a V65-aware binary — a V65-aware instance left running writes method-bearing rows after the cleanup.
+3. Run this block on the metadata database, as one transaction. It is the single source: the integration test extracts and executes THIS text.
+
+<!-- v65-rollback:start -->
+```sql
+BEGIN;
+-- Non-GET routes go; their versions and every grant that names them cascade (ON DELETE CASCADE).
+DELETE FROM published_endpoints WHERE method <> 'GET';
+ALTER TABLE endpoint_key_bindings DROP CONSTRAINT pk_endpoint_key_bindings;
+ALTER TABLE endpoint_key_bindings
+    DROP CONSTRAINT chk_endpoint_key_bindings_shape,
+    DROP CONSTRAINT chk_endpoint_key_bindings_method,
+    DROP COLUMN endpoint_id,
+    DROP COLUMN method;
+ALTER TABLE endpoint_key_bindings ADD PRIMARY KEY (path_prefix, api_key_id);
+ALTER TABLE published_endpoints
+    DROP CONSTRAINT chk_published_endpoints_method,
+    DROP CONSTRAINT uq_published_endpoints_path_method,
+    DROP COLUMN method;
+ALTER TABLE published_endpoints ADD CONSTRAINT published_endpoints_path_pattern_key UNIQUE (path_pattern);
+-- Forget V65 and its barrier, so a later upgrade re-applies both.
+DELETE FROM flyway_schema_history
+ WHERE version = '65'
+    OR (version IS NULL AND description = 'published endpoint method downgrade barrier');
+COMMIT;
+```
+<!-- v65-rollback:end -->
+
+4. Start the previous binary. It validates cleanly and answers GET routes only.
+
+A rollback that skips step 3 is refused by the previous binary at startup; do not "repair" the history instead — `flyway repair` or `spring.flyway.ignore-migration-patterns=*:missing` removes exactly the refusal that keeps non-GET metadata away from a binary that would misread it.
+
 ---
 
 ## 8. Operational Jobs
@@ -2869,6 +2919,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-19 | v1.70 | V65 (#1037, published method identities) | **V65 — method identity for `published_endpoints` (§4.13), exact mutation grants for `endpoint_key_bindings` (§4.14).** `published_endpoints` gains `method` (`GET`/`POST`/`PUT`/`DELETE`, CHECK'd, `DEFAULT 'GET'` is the backfill) and `UNIQUE (path_pattern)` narrows to `uq_published_endpoints_path_method (path_pattern, method)` — V11's table-level constraint was dropped by its Postgres name `published_endpoints_path_pattern_key`. `endpoint_key_bindings` gains `method`, `endpoint_id` (NULL for GET rows, `ON DELETE CASCADE`, shape CHECK'd) and the partial `idx_endpoint_key_bindings_endpoint`; the PK widens to `(path_prefix, api_key_id, method)`. §5's three rows updated. Down path documented in §7.4 (the one text the integration test executes), not shipped. **§7.4 Rolling back V65** and the repeatable `R__published_endpoint_method_downgrade_barrier.sql`: a binary older than V65 would START on this schema (Flyway ignores a future versioned migration) and serve non-GET metadata as GET, so a repeatable it cannot resolve makes every such binary refuse to start; rollback is the documented block, then the previous binary. |
 | 2026-11-14 | v1.69 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.67 and #964's v1.68 | **§4.55 `lake_maintenance_runs`**: compaction's own keys in its `parts_json` entry (`committed`, `left_for_fresh_run`, `blocked`, `largest_need_bytes`, `limit_bytes`, `limit_source`, and `groups`, one flat object per committed group). No DDL change, no migration. |
 | 2026-11-14 | v1.68 | V64 (#964, dp-lake P6) | **V64 — the lake storage breakdown.** New **§4.60 `lake_storage_inventory`**: the latest inventory per table, six rows (one per `StorageRow`, V64's CHECK) with their object count, bytes, one time and the run id, replaced by each cleanup in one transaction. §3 ERD, §5 (its primary key) and §5A (derived) updated. Down path documented in the migration header, not shipped. |
 | 2026-11-14 | v1.67 | 962 (#962, dp-lake P6) | **§4.55 `lake_maintenance_runs`**: the cleanup and purge deletion parts add their counts to their `parts_json` entries (scalars; a count by reason as one `<field>_<reason>` key per reason that occurred). No DDL change, no migration. |

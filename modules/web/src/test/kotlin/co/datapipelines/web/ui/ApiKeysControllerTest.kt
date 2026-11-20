@@ -520,6 +520,42 @@ class ApiKeysAdminControllerTest {
     }
 
     @Test
+    fun `associate judges GET node grants only - a mutation grant is neither the GET grant nor removed by it`() {
+        // #1037: the form edits GET node grants. A POST grant at /lending/v1/summary is a different grant:
+        // posting that path must ADD the GET node grant, and must never remove or reuse the POST grant.
+        authenticate()
+        stubPageReads()
+        every { apiKeyRepository.findById("dpk_abc123") } returns sampleKey()
+        every { bindingRepository.findByKey("dpk_abc123") } returns
+            listOf(
+                co.datapipelines.application.endpoints
+                    .EndpointKeyBinding("/nyc", "dpk_abc123", workspaceId, userId, Instant.now()),
+                co.datapipelines.application.endpoints.EndpointKeyBinding(
+                    "/lending/v1/summary",
+                    "dpk_abc123",
+                    workspaceId,
+                    userId,
+                    Instant.now(),
+                    co.datapipelines.application.endpoints.EndpointMethod.POST,
+                    java.util.UUID.randomUUID(),
+                ),
+            )
+
+        controller.associate("dpk_abc123", listOf("/nyc", "/lending/v1/summary"), ExtendedModelMap())
+
+        verify(exactly = 1) {
+            bindingRepository.insert(
+                match { it.pathPrefix == "/lending/v1/summary" && it.method == co.datapipelines.application.endpoints.EndpointMethod.GET },
+            )
+        }
+
+        // Leaving the path out of the form is a GET-only delta too: the POST grant is not the form's to remove.
+        controller.associate("dpk_abc123", listOf("/nyc"), ExtendedModelMap())
+
+        verify(exactly = 0) { bindingRepository.delete("/lending/v1/summary", any(), any(), any()) }
+    }
+
+    @Test
     fun `associate refuses a key of another kind or workspace as not found`() {
         authenticate()
         // An MCP key (somebody's agent credential) must never take a binding from this page.

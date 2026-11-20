@@ -414,8 +414,14 @@ class ApiErrorCatalogSpecDriftTest {
          * family's 500 default) and `pipeline.execution.local_write_commit_failed` (502, an
          * explicit catalog row beside node commit_failed), landed in the SAME commit as their
          * constants, the §4.1 meter row and the gateway-partition classification.
+         *
+         * 522 → 525 with #1037: §13.14 gains `endpoint.method_invalid` (400, an explicit catalog
+         * row), `endpoint.mutations_disabled` (503, explicit) and
+         * `endpoint.promotion.method_unsupported` (409, the promotion family default), landed in
+         * the SAME commit as their constants and `PipelineErrorCodesSpecDriftTest`'s
+         * `KNOWN_TWO_SEGMENT_CODES` additions.
          */
-        const val SECTION_13_ROW_COUNT = 522
+        const val SECTION_13_ROW_COUNT = 525
 
         /**
          * §12's distinct validation codes.

@@ -121,6 +121,10 @@ class PromotionReceiveService(
         // must already exist on this deployment, checked ONCE for the whole batch BEFORE anything
         // is pushed, so the target is left byte-unchanged rather than failing mid-batch. Keys are
         // environment-local — a promotion must never mint one.
+        // #1037: the same discipline for a method — an entry naming a non-GET method would be imported
+        // as a GET route with GET grants (this receiver has no method-aware import), so the whole batch
+        // is refused here, before the key check and before anything is pushed.
+        endpointPromotion.refuseIfMethodUnsupported(batch.endpoints)
         endpointPromotion.refuseIfKeysMissing(batch.endpoints, workspace.id, batch.workspace)
 
         // 140 §10.5 — the receiver's release-check gate, BEFORE the import transaction: a

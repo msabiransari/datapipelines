@@ -45,6 +45,22 @@ class EndpointVersionsPageRenderTest {
         doc.select("[data-api-pin]").text() shouldBe "finance/revenue@2"
     }
 
+    /**
+     * #1037 — a POST at the same path is its own page: its heading names POST (never the hard-coded GET) and its
+     * Dependencies pane asks for the POST route's tree by its route key, so it cannot read the GET sibling's.
+     */
+    @Test
+    fun `a mutation route's page names its method and addresses its own dependency tree`() {
+        val get = page(page(selected = 2))
+        get.select("[data-api-method]").text() shouldBe "GET"
+        get.select("[data-dp-deps]").attr("data-name") shouldBe "/finance/v1/revenue"
+        val post = page(page(selected = 2).copy(method = "POST", routeKey = "POST /finance/v1/revenue"))
+        post.select("[data-api-method]").text() shouldBe "POST"
+        post.select("[data-api-url]").text() shouldBe "/api/finance/v1/revenue"
+        post.select("[data-dp-deps]").attr("data-name") shouldBe "POST /finance/v1/revenue"
+        post.select("[data-dp-deps]").attr("data-family") shouldBe "api_endpoint"
+    }
+
     @Test
     fun `the API card is the entity's - the same whichever version is viewed`() {
         val two = page(page(selected = 2)).select("[data-api-entity]").outerHtml()
@@ -240,6 +256,8 @@ class EndpointVersionsPageRenderTest {
         return EndpointVersionsPageModel.Page(
             id = id,
             url = "/api/finance/v1/revenue",
+            method = "GET",
+            routeKey = "/finance/v1/revenue",
             enabled = false,
             boundKeyNames = listOf("ci", "nightly"),
             versions = rows,

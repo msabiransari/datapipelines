@@ -64,13 +64,22 @@ class EndpointPinValidator(
     fun eligible(status: PipelineVersionStatus): Boolean =
         PipelineVersionStatus.eligibleForPointer(status, draftsEligible = authoring.developmentPosture)
 
-    /** Checks [body]'s pin for an API at [parsed] in [workspaceId]; refuses with the catalogued code. */
+    /**
+     * Checks [body]'s pin for an API at [parsed] in [workspaceId]; refuses with the catalogued code.
+     *
+     * [method] is the ENTITY's method (#1037): the §4.2 read-only rule is a GET rule — a GET route serves an
+     * anonymous, side-effect-free read, while a mutation route exists to admit a writing pipeline (published-mutation-
+     * apis §3.1) — so the check runs for GET only, and every other pin check (existence, exactness, admission,
+     * declared variables) runs for every method. Defaults to GET: the pre-#1037 callers, and every surface that
+     * addresses a route by path alone.
+     */
     @Suppress("ThrowsCount") // each precondition is its own refusal, and each names itself
     fun check(
         workspaceId: UUID,
         parsed: EndpointPath.Parsed,
         body: EndpointVersionBody,
         admission: Admission,
+        method: EndpointMethod = EndpointMethod.GET,
     ): Resolved {
         val name = body.pipelineName
         val record =
@@ -91,7 +100,7 @@ class EndpointPinValidator(
         if (!admitted) throw notEligible(body, detail.status)
         val executable =
             pipelines.findExecutable(workspaceId, ReadLens.Everything, record, body.pipelineVersion) ?: throw versionNotFound(body)
-        requireReadOnly(executable, workspaceId, name)
+        if (method == EndpointMethod.GET) requireReadOnly(executable, workspaceId, name)
         requireDeclaredVariables(parsed, executable, name)
         return Resolved(record, detail.status, executable)
     }

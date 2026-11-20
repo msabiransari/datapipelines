@@ -112,7 +112,7 @@ class EndpointVersionService(
                         timeouts.clamp(input.timeoutSeconds ?: base.body.timeoutSeconds),
                         input.description ?: base.body.description,
                     )
-                pins.check(endpoint.workspaceId, endpoint.parsed, body, EndpointPinValidator.Admission.ELIGIBLE)
+                pins.check(endpoint.workspaceId, endpoint.parsed, body, EndpointPinValidator.Admission.ELIGIBLE, endpoint.method)
                 val written =
                     if (draft != null) {
                         versions.updateDraft(endpoint.id, draft.version, body, ifMatch, principal.userId) ?: throw conflict(endpoint, draft)
@@ -191,7 +191,12 @@ class EndpointVersionService(
                 if (found.status != PipelineVersionStatus.DISCARDED) {
                     throw wrongStatus(PipelineErrorCodes.Endpoint.VERSION_NOT_DISCARDED, found)
                 }
-                restorePins.recheck(endpoint.workspaceId, endpoint.pathPattern, found, principal.userId)
+                restorePins.recheck(
+                    endpoint.workspaceId,
+                    EndpointRouteKey.of(endpoint.method, endpoint.pathPattern),
+                    found,
+                    principal.userId,
+                )
                 versions.restore(endpoint.id, version)
                 endpoint to Moved(version, endpoint.current?.version, pointerOf(endpoint.id))
             }
@@ -213,7 +218,7 @@ class EndpointVersionService(
             guarded(principal, endpointId) { endpoint ->
                 val found = versions.find(endpoint.id, version) ?: throw notFound(endpoint.id, version)
                 if (!pins.eligible(found.status)) throw wrongStatus(PipelineErrorCodes.Endpoint.VERSION_NOT_ELIGIBLE, found)
-                pins.check(endpoint.workspaceId, endpoint.parsed, found.body, EndpointPinValidator.Admission.ELIGIBLE)
+                pins.check(endpoint.workspaceId, endpoint.parsed, found.body, EndpointPinValidator.Admission.ELIGIBLE, endpoint.method)
                 versions.setCurrent(endpoint.id, version)
                 endpoint to Moved(version, endpoint.current?.version, version)
             }

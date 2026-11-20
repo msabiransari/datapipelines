@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.123 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
+**Status:** v2.124 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-15
+**Last updated:** 2026-11-19
 
 ---
 
@@ -447,7 +447,7 @@ pinning the exact draft, and live dashboard versions pinning it. A sole-draft pu
 entity and checks stored dashboard pins to any version (DISCARDED included for a dashboard with
 a live version); parent scope remains live/exact. `details.pinned_by` names `{pipeline, version, node}`;
 `details.referencing_dashboards` names `{dashboard, version, status}` when non-empty; since #786
-`details.referencing_api_versions` (`{path, version, status, pipeline_version}`) and
+`details.referencing_api_versions` (`{path, version, status, pipeline_version}`, where `path` is the API's route key — the bare path for GET, `METHOD path` for a mutation route, #1037) and
 `details.referencing_schedules` (`{schedule, pipeline_version}`) name the live API versions and schedules the
 same way (any version for a sole-draft purge). Refusal
 precedes all deletion and preserves executions, hash and pointer.
@@ -2178,7 +2178,12 @@ The whole batch rolls back on any of the above. The sender's own refusals — `p
 
 One exact version of a read-only pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
 response is the `data_ready` payload — the first page plus the cursor — with no event handling on
-the client (this section is the contract). Ruling R-EP5: the **category** is the engineer's
+the client (this section is the contract). Since #1037 a route's identity is **method + path**: a
+`POST`, `PUT` or `DELETE` route may be published at the same grammar (its body, admission and
+idempotency semantics arrive with #1038/#1039 — until the operator gate
+[`mutations-enabled`](configuration.md#322-published-endpoints) is on, an otherwise-authorized
+mutation answers `503 endpoint.mutations_disabled` before any durable work). Ruling R-EP5: the
+**category** is the engineer's
 namespace — a business domain, a team, a product line — and the product's own API is simply its
 reserved namespace: a category matching `v[0-9]+` (`/api/v1/…` today, any `v<n>` tomorrow) or the
 literal `api` can never be published, so a published path cannot shadow a product route *by
@@ -2204,12 +2209,17 @@ built — a row written around the publish path is never served. The reservation
 contract: the catch-all handler's own pattern excludes those categories, so an unknown
 `/api/v1/…` path answers the product's 404, not the endpoint one.
 
-**Ambiguity is refused, not resolved.** `/nyc/v1/{x}` and `/nyc/v1/b` both match
+**Ambiguity is refused, not resolved — per method (#1037).** `/nyc/v1/{x}` and `/nyc/v1/b` both match
 `GET /api/nyc/v1/b`, so
 publishing the second is `409 endpoint.path_conflict` naming the first. Literal-beats-variable
 precedence is deliberately NOT offered in v1: because ambiguity cannot be published, at most one
-pattern can match a request, and a reader of the registry can tell what a URL does by finding the
-one row it matches. `UNIQUE (path_pattern)` is deployment-wide — a URL is global.
+pattern can match a request **of one method**, and a reader of the registry can tell what a URL does by finding the
+one row it matches. `UNIQUE (path_pattern, method)` is deployment-wide — a URL is global, and
+since #1037 a URL is global **per method**: the same pattern may carry a `GET` and a `POST` route
+as two entities with independent versions, pins and grants, and a conflict is judged against the
+published routes of the SAME method only. A cross-workspace conflict is redacted: the refusal
+names no path the caller's workspace does not publish (`details` carry `path` only for an
+own-workspace blocker, `Named`/`Redacted` in metadata-db §4.13).
 
 Publish and unpublish run under the workspace's writer guard, then the deployment-wide registry key, so the
 ambiguity check reads every committed path (#841, [release-dependencies design §4.4](superpowers/specs/2026-10-13-release-dependencies-design.md#44-the-metadata-writer-protocol-amended-2026-11-10-841-g0)).
@@ -2233,9 +2243,13 @@ the datasource.
 
 That rule is what makes `GET` safe here, and it is not a formality: `GET` is retried on timeout,
 preloaded by browsers and followed by crawlers. It is checked when the API is created and at every draft save,
-and **re-checked on every serve** of the exact pipeline version the API's current version pins. The pin never
+and **re-checked on every serve** of the exact pipeline version the API's current version pins. **Since #1037 the
+read-only rule is a `GET` rule** — a non-GET route may pin a writing pipeline (its runs are gated by
+`mutations-enabled` and, later, #1039's admission rules); every rule that is about the PIN rather than
+the verb — the version exists in the workspace, is eligible under the posture, and every path variable
+names a declared parameter — runs for every method. The pin never
 moves when the pipeline's current version moves: a later pipeline release reaches the URL only through a new API
-version that pins it, released or switched to explicitly. Every serve also runs read-only at the connection (#463): each
+version that pins it, released or switched to explicitly. Every `GET` serve also runs read-only at the connection (#463): each
 `DQL` datasource statement of the pinned version and of its composed children runs in the per-lease read-only mode,
 so on the dialects marked `DATABASE` in [DAG Executor §8.2](dag-executor.md#82-error-code-mapping)'s table the
 database itself refuses a write (`pipeline.node.query_execution_failed`), and on the others the rule above and a
@@ -2253,6 +2267,18 @@ and a session is `401`. Authorisation is the key's hierarchical bindings
 ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): an `endpoint` key (role
 `api_caller`) serves what is bound to it, the MCP key is refused here by kind, and so **a published
 path with no binding on any ancestor serves no one until a key is bound to it** (#215 B3).
+
+**A non-GET route adds the method-grant rule (#1037, [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)).**
+A browser session is refused `401` before anything resolves — CSRF processing included. What is
+VISIBLE to the presenting key is, per method: the `GET` route iff the ancestor walk above admits
+it, and a mutation route iff the key holds that route's **exact grant** (one entity — method plus
+full pattern; never inherited, never the sibling method's). The refusal discipline is opaque: a
+method that is not visible is simply absent — a `405 endpoint.method_not_allowed`'s `Allow` lists
+only the VISIBLE methods, and a path where NO method is visible answers the ordinary `404`
+`endpoint.not_found` with no `Allow`. A visible, granted mutation is then gated by
+[`datapipelines.endpoints.mutations-enabled`](configuration.md#322-published-endpoints): off (the
+default) answers `503 endpoint.mutations_disabled` before any durable work; a route pinned to a
+non-servable version answers the pin's own `503` first.
 
 The accepted parameters are the pinned pipeline version's declared ones: **path variables** bind by
 name, and the **query string** supplies the rest. Validation is strict and **reports every defect
@@ -2312,27 +2338,31 @@ is fine, and the answer is coming.
 
 ### 19.5 Managing endpoints
 
-`POST` / `GET` / `DELETE /api/v1/endpoints` (`author`), addressed by `?path=` — never by a path
+`POST` / `GET` / `DELETE /api/v1/endpoints` (`author`), addressed by `?path=&method=` (`method`
+defaults to `GET`; #1037) — never by a path
 segment, because a `path_pattern` contains `/` and an encoded `%2F` is refused below routing on
 the pinned Tomcat (the measured reason §8 moved templates to query addressing). The `GET` listing
 answers a **promoter** through the lens (178, [Auth §11A.1](auth.md#11a1-the-404-rule)): an endpoint is
 listed iff its pipeline is visible to that principal, so a hidden pipeline never leaks through
-the endpoint that publishes it.
+the endpoint that publishes it. Each row carries its `method`.
 
-**Create (#786).** `POST /api/v1/endpoints` takes `path`, `pipeline`, **`pipeline_version`** (REQUIRED, an integer of
+**Create (#786, #1037).** `POST /api/v1/endpoints` takes `path`, `pipeline`, **`pipeline_version`** (REQUIRED, an integer of
 at least 1 — the exact pin, an authored input like a pipeline node's `template_version`), `timeout_seconds` and
-`description`, and answers `201` with the entity. It writes the entity and its **v1 DRAFT** in one transaction —
+`description`, and — since #1037 — **`method`** (optional, default `GET`; one of `GET`, `POST`,
+`PUT`, `DELETE` — anything else is `400 endpoint.method_invalid`), and answers `201` with the entity.
+The conflict check runs against the same method's routes (§19.1). It writes the entity and its **v1 DRAFT** in one transaction —
 no path leaves an entity without a version — and that draft is the API's current version: on an authoring-enabled
 deployment it serves under the normal runtime checks (the entity is enabled, the caller's key is bound, the pinned
 pipeline version is eligible). Creation is an authoring operation: a deployment with authoring disabled refuses it
 with `409 endpoint.authoring_disabled`, and there is no release to perform there. A promotion receiver creates an
 absent API through its own receiver-only import (§18), never through this route.
 
-**Delete (#786).** `DELETE /api/v1/endpoints?path=` is the **guarded entity deletion** (versioning §3.2, the
+**Delete (#786, #1037).** `DELETE /api/v1/endpoints?path=&method=` is the **guarded entity deletion** (versioning §3.2, the
 parameter-set entity rule): an API is deleted — with its versions — only while every version it holds is a DRAFT.
 A RELEASED version, current or not, or a DISCARDED one refuses `409 endpoint.version.last_release` (`details`: this
 API's blocking `version` and its `status`) and nothing is removed: the entity, its current pointer, its versions and
-its key bindings all stay. Discard is per version (below); an API that was ever released keeps its history. The
+its key bindings all stay — the sibling method's entity at the same pattern is untouched by the delete
+(a `DELETE` management call never reaches the other route). Discard is per version (below); an API that was ever released keeps its history. The
 check reads the versions under the entity row lock in the transaction that deletes, after the writer guard and the
 registry key, so no release lands between the check and the delete. A legacy row (below) never serves and stays
 deletable whatever its converted version's status.
@@ -2396,6 +2426,11 @@ name** — the bindings are read with the workspace predicate in the query (2026
 neighbouring workspace's key bound at an equal node (legal: only the exact `path_pattern` is
 unique deployment-wide, path trees may overlap) never rides into the batch; a target missing
 that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed.
+**Only GET routes and GET grants travel (#1037).** A published non-GET route over a promoted
+pipeline refuses the whole batch on the sender with `409 endpoint.promotion.method_unsupported`
+before anything is pushed, and a mutation grant is never carried in an entry's bindings; a receiver
+refuses, with the same code and before anything is imported, a batch whose entry names a `method`
+other than `GET` ([Pipeline Contract §13.14](pipeline-contract.md#1314-published-endpoints)).
 The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool-definitions)).
 
 ### 19.6 Status codes, complete
@@ -2408,11 +2443,11 @@ The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool
 | 401 | No or invalid API key; a browser session |
 | 403 | Key not bound / wrong workspace / wrong key kind |
 | 404 | No endpoint matches. **The same body whether the path is unknown or the endpoint is disabled** — otherwise the registry is enumerable one URL at a time |
-| 405 | Any method but `GET`, with `Allow: GET` |
+| 405 | A method the addressed path does not serve THIS caller (#1037): some method is visible (a live route plus a grant the presenting key holds) but the requested one is not published there or not granted — `Allow` carries exactly the visible methods |
 | 406 | An `Accept` this surface cannot satisfy |
 | 429 | Rate limit or concurrency limit, with `Retry-After` |
 | 500 / 502 | Pipeline failure, mapped by [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) (datasource connection failures are `502`) |
-| 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version |
+| 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version. Since #1037 also `endpoint.mutations_disabled`: an otherwise-authorized mutation refused by the operator gate `datapipelines.endpoints.mutations-enabled` before any durable work |
 
 ### 19.7 Not in v1
 
@@ -2975,7 +3010,7 @@ ignored, as is any field the table does not name. Values are form-encoded (`+` i
 | Query field | Rule |
 |---|---|
 | any value | at most 200 characters and valid UTF-8, checked before any grammar; otherwise `details.reason = value_too_long` |
-| `name` | required for `pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint` and `datasource`; forbidden for `schedule`. The family's own native name grammar decides it, never a repository lookup: pipeline and template names follow [pipeline-contract §3.2](pipeline-contract.md) and [Templates §3.2](templates.md), which parameter sets, visualizations and dashboards share. An API's name is its immutable path ([§19.1](#19-published-endpoints)), and a datasource name is `[a-z0-9_-]{1,63}` ([Datasources §3.3](datasources.md)). Slashes stay in the value. A refused name is `name_invalid` |
+| `name` | required for `pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint` and `datasource`; forbidden for `schedule`. The family's own native name grammar decides it, never a repository lookup: pipeline and template names follow [pipeline-contract §3.2](pipeline-contract.md) and [Templates §3.2](templates.md), which parameter sets, visualizations and dashboards share. An API's name is its immutable ROUTE KEY ([§19.1](#19-published-endpoints); #1037): a GET route's name is its path, a mutation route's is `METHOD path` with ONE space (`POST /shop/v1/orders`; in a query string the space may travel as `+`, which the strict decoder maps back), so GET and POST at one path are two roots with their own trees. A bare path is a GET (the pre-#1037 spelling, byte-identical to every stored link); `GET /x`, an unknown or lower-case method, or a doubled space is `name_invalid`. A datasource name is `[a-z0-9_-]{1,63}` ([Datasources §3.3](datasources.md)). Slashes stay in the value. A refused name is `name_invalid` |
 | `id` | required instead of `name` for `schedule`, in the canonical 36-character lower-case UUID form, otherwise `id_invalid`. `id` on any other family is `selector_incompatible` |
 | `version` | required for the six artifact families; forbidden for `schedule` and `datasource` (`selector_incompatible`). Decimal digits only, no sign or leading zeros, `1 ≤ n ≤ 2147483647`. An absent, non-integer, `current` or out-of-range value is `version_invalid` |
 
@@ -3087,6 +3122,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-19 | v2.124 | 1037 (#1037, published method identities) | **Additive.** §19's routes gain method identity: the intro admits non-GET routes at the same grammar (body/admission/idempotency arrive with #1038/#1039; the operator gate `mutations-enabled` refuses an otherwise-authorized mutation `503 endpoint.mutations_disabled`); §19.1's ambiguity rule and `UNIQUE (path_pattern, method)` are per-method, with the cross-workspace `409` redacted; §19.2's read-only pin rule is a GET rule (a mutation route may pin a writing pipeline; the pin rules themselves run for every method); §19.3 adds the non-GET request rules — session `401` first, exact method grants, opaque visibility (`Allow` = the visible methods, `404` at none); §19.5's management is addressed `?path=&method=` and create takes optional `method` (`400 endpoint.method_invalid` otherwise); §19.6's 405 and 503 rows describe the method era; §19.5's promotion paragraph states that only GET routes and GET grants travel (`409 endpoint.promotion.method_unsupported` on the sender, and on a receiver for an entry naming a non-GET `method`). |
 | 2026-11-15 | v2.123 | 987 (#987, js-rendered F3) | **Deliberate break, decided by the js-rendered charts record O-13:** §23.3's `GET /{id}/runtime/config` answers without `renderer` (its one member, `renderer.bundle`, named the chart library's bundle the page loaded); the visualization preview page's configuration loses the same object. The page loads the chart engine's files itself, from one list. No route, status, permission or other field changed. |
 | 2026-11-15 | v2.122 | 986 (#986, js-rendered F2) | **Deliberate break, decided by the js-rendered charts record O-13:** §22.2's `POST /api/v1/visualizations` and `PUT /api/v1/visualizations/{id}` answer the version without `warnings`: the server's chart library layer (its support table and the `chart.degraded.<field>` save warnings) is gone, and a save never draws the chart. No route, status, permission or other field changed. |
 | 2026-11-12 | v2.121 | #463 read-only execution at the connection — renumbered at final sync after dependency-graph | **§19.2:** one sentence — every serve runs each DQL datasource statement of the pinned version and its children in the per-lease read-only mode; the database refuses a write on the `DATABASE` dialects of the DAG Executor §8.2 table, the rule and a SELECT-only user stay the guard elsewhere. Additive. |
