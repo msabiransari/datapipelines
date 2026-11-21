@@ -371,31 +371,7 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
             val fixture = ChartBrowserFixtures.fixture("bar-shade-diverging")
             val preview = open(agent, "$root/charts/bar_shade_diverging", fixture, "light")
             try {
-                for (theme in listOf("light", "dark")) {
-                    if (theme != "light") {
-                        preview.navigate(preview.url().replace("theme=light", "theme=$theme"))
-                        preview.waitForSelector("$CASE[data-dp-ready='true']")
-                        preview.waitForFunction(
-                            "sel => { const c = document.querySelector(sel + ' .dp-dashboard-status');" +
-                                " return !!c && ['success', 'ready'].indexOf(c.getAttribute('data-dp-state')) >= 0; }",
-                            CASE,
-                        )
-                    }
-                    val read = preview.evaluate(DIVERGING_READ, CASE) as Map<*, *>
-                    println("bar-shade-diverging $theme: $read")
-                    val expected = requireNotNull(DIVERGING[theme])
-                    withClue("bar-shade-diverging $theme: the scheme the page is in $read") { read["scheme"] shouldBe theme }
-                    withClue("bar-shade-diverging $theme: each bar painted in its step's colour, steps 1 to 7 $read") {
-                        read["bars"] shouldBe expected
-                    }
-                    withClue("bar-shade-diverging $theme: the legend's seven rectangles, step 1 to step 7 $read") {
-                        read["legend"] shouldBe expected
-                    }
-                    withClue("bar-shade-diverging $theme: the legend's two numbers $read") {
-                        read["texts"] shouldBe fixture.expect.getAsJsonArray("legend_texts").map { it.asString }
-                    }
-                    withClue("CSP on the bar-shade-diverging preview in $theme") { drainCspViolations().shouldBeEmpty() }
-                }
+                listOf("light", "dark").forEach { theme -> assertDivergingScheme(preview, fixture, theme) }
             } finally {
                 preview.close()
             }
@@ -403,6 +379,41 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
             agent.close()
         }
         withClue("bar-shade-diverging: no console error, no page error") { errors.shouldBeEmpty() }
+    }
+
+    /**
+     * Puts the open two-sided preview in [theme] (navigating as [shoot] does, for any scheme but the light one it was
+     * opened in) and reads it: the scheme in force, each bar's and each legend rectangle's colour against [DIVERGING],
+     * the legend's two numbers; then the CSP drain, empty.
+     */
+    private fun assertDivergingScheme(
+        preview: Page,
+        fixture: ChartBrowserFixtures.Fixture,
+        theme: String,
+    ) {
+        if (theme != "light") {
+            preview.navigate(preview.url().replace("theme=light", "theme=$theme"))
+            preview.waitForSelector("$CASE[data-dp-ready='true']")
+            preview.waitForFunction(
+                "sel => { const c = document.querySelector(sel + ' .dp-dashboard-status');" +
+                    " return !!c && ['success', 'ready'].indexOf(c.getAttribute('data-dp-state')) >= 0; }",
+                CASE,
+            )
+        }
+        val read = preview.evaluate(DIVERGING_READ, CASE) as Map<*, *>
+        println("bar-shade-diverging $theme: $read")
+        val expected = requireNotNull(DIVERGING[theme]) { "no colours held for the $theme scheme" }
+        withClue("bar-shade-diverging $theme: the scheme the page is in $read") { read["scheme"] shouldBe theme }
+        withClue("bar-shade-diverging $theme: each bar painted in its step's colour, steps 1 to 7 $read") {
+            read["bars"] shouldBe expected
+        }
+        withClue("bar-shade-diverging $theme: the legend's seven rectangles, step 1 to step 7 $read") {
+            read["legend"] shouldBe expected
+        }
+        withClue("bar-shade-diverging $theme: the legend's two numbers $read") {
+            read["texts"] shouldBe fixture.expect.getAsJsonArray("legend_texts").map { it.asString }
+        }
+        withClue("CSP on the bar-shade-diverging preview in $theme") { drainCspViolations().shouldBeEmpty() }
     }
 
     /** Opens fixture [name]'s preview when it carries `expect.hover` entries and reads each one; returns how many were read. */
