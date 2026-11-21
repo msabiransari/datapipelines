@@ -240,6 +240,7 @@ object McpFixtures {
         executedBy: UUID = USER,
         startedAt: Instant = Instant.parse("2026-08-09T12:00:00Z"),
         resultRowCount: Long? = 3,
+        resultUnavailable: Boolean = false,
     ): ExecutionRecord =
         ExecutionRecord(
             executionId = executionId,
@@ -255,6 +256,7 @@ object McpFixtures {
             durationMs = 2_000,
             nodeStatsJson = """[{"node_id":"fetch","status":"SUCCESS"}]""",
             resultRowCount = resultRowCount,
+            resultUnavailable = resultUnavailable,
             resultSizeBytes = resultRowCount?.let { it * 100 },
         )
 

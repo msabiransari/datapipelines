@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.45 (revised — see Change Log)
+**Status:** v1.50 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-11-20
@@ -1550,7 +1550,7 @@ The executor exports Micrometer metrics. **[Observability §4.1](observability.m
 
 | Metric | Type | Tags |
 |---|---|---|
-| `datapipelines.executions.total` | counter | `status` (success/failed/aborted), `pipeline_id` |
+| `datapipelines.executions.total` | counter | `status` (success/failed/aborted/outcome_unknown), `pipeline_id` |
 | `datapipelines.executions.duration` | timer | `pipeline_id` |
 | `datapipelines.executions.concurrent` | gauge | (none) — bound to the live execution-slot count by the execution-slot bean, once per instance |
 | `datapipelines.executions.aborted` | counter | `reason` (`client_disconnect`/`cancelled`/`shutdown`) |
@@ -1703,11 +1703,10 @@ separate (§16.1's rule 2 is unchanged).
 and the caller result is materialized; terminal success (`data_ready` included) is emitted after
 the commit. Every other terminal path — a failing node, the execution deadline, an explicit abort,
 a structural abort, a setup failure — rolls the lease back, and with it every enrolled write. A
-commit that is refused or loses its acknowledgement ends the run FAILED with
-`pipeline.execution.local_write_commit_failed` (502) and the transaction outcome **unknown**: the
-database may have committed, the engine never re-runs business SQL to settle the question, and the
-operator checks the target before any deliberate re-run (the stale-run surface carrying
-`OUTCOME_UNKNOWN` is #1035's).
+commit that is refused or loses its acknowledgement ends the run **`OUTCOME_UNKNOWN`** with
+`pipeline.execution.local_write_commit_failed` (502): the database may have committed, the engine
+never re-runs business SQL to settle the question, and the operator checks the target before any
+deliberate re-run ([§16.5](#165-the-commit-boundary-and-outcome_unknown-1035)).
 
 **Telemetry.** One counter, `datapipelines.executions.local_write_transactions` (tags `outcome`
 `started`/`committed`/`rolled_back`/`unknown`, and `dialect`), catalogued in
@@ -1720,8 +1719,8 @@ once per input row on the participant connection and reads each row's key back f
 missing, extra or rewritten key fails the node, and the root's rollback removes every row the
 family wrote. Its result rows (each input row plus `id`, or one `affected_rows` row) are staged or
 materialized under the ordinary staging and result limits BEFORE the commit — so a dependent
-line-item node can read a staged order `id` — and stay unpublished until the settle (#1035 owns
-what publishes after it). Off the transaction — tempdb, H2, DuckDB, and any run with no enrolled
+line-item node can read a staged order `id` — and stay unpublished until the settle
+([§16.5](#165-the-commit-boundary-and-outcome_unknown-1035) owns what publishes after it). Off the transaction — tempdb, H2, DuckDB, and any run with no enrolled
 writer — a multi-row insert runs in its own node-local transaction, so an uncorrelated set still
 leaves no row behind.
 
@@ -1737,12 +1736,84 @@ committed. The refusal names the child (`details.child`, `details.via`). Exclude
 enrolled to achieve this, and nothing is rolled back after a late detection: there is none. Each
 execution's own body re-check and the insert node's live qualification check remain as backstops.
 
+### 16.5 The commit boundary and `OUTCOME_UNKNOWN` (#1035)
+
+**Ratified by the design record `pipeline-write-transactions.md` §3.5/§4; implemented in #1035.** A
+family that shares one transaction publishes nothing until its ONE commit settles it, and an
+execution whose commit may have happened is never labelled as if it had not.
+
+**Nothing is exposed before the commit.** Until the root's commit is confirmed, no surface shows
+the family's result: the root holds its caller result (the result is stored under the ordinary key
+but no `data_ready`, result URL or `committed` evidence is emitted), and every successful CHILD of
+the family ends *provisionally* — its execution row stays `RUNNING` with `settlement_pending`, its
+completion is recorded on NO history surface (not streamed, not in the durable `execution_events`
+record, not in the Redis replay log, and it spends no event id), and no child `data_ready` is ever
+emitted for a held child. A second connection, a direct child cursor, history, the replay, the MCP
+and the scheduler all see `RUNNING`, no terminal event and no rows until the settle. At the root's
+terminal write the settlement publishes each child's ONE terminal event with the root's final
+outcome — `pipeline_completed` after `SUCCESS`, `pipeline_failed` (payload `status` `FAILED` or
+`OUTCOME_UNKNOWN`, the root's error) after a failed root, `execution_aborted` (the root's reason)
+after an abort — so a child's history never claims a success its root did not reach. A family the
+stale sweep settles (the instance died) gets its status only: the dead instance's history is not
+invented. A zero-caller run still returns its
+execution statistics at the settle; only result rows are held.
+
+**The durable commit boundary.** Immediately BEFORE the customer commit is called, the root stamps
+`commit_attempted_at` on its own row (an autocommit statement on the metadata database — no
+metadata transaction is ever held across customer I/O); after the driver confirms, it stamps
+`commit_confirmed_at`. If the attempt stamp cannot be made durable the commit is not called: the run
+ends FAILED with `pipeline.execution.local_write_refused` (`reason: commit_evidence_unavailable`)
+and rolls back — an unrecorded commit attempt is the one thing the sweeper could mislabel.
+
+**The terminal funnel.** Every terminal path first reads the boundary:
+
+| Boundary at the terminal | Status | What publishes |
+|---|---|---|
+| Never attempted (a failing node, the deadline, an explicit or structural abort, a setup failure, a cancellation) | `FAILED` / `ABORTED` as before — the lease is rolled back | nothing; every provisional child inherits the root's status |
+| Attempted, confirmation lost or the commit refused | **`OUTCOME_UNKNOWN`** (`pipeline_failed` event, payload `status: "OUTCOME_UNKNOWN"`, code `pipeline.execution.local_write_commit_failed`) | nothing: no `data_ready`, no success payload; every provisional child inherits `OUTCOME_UNKNOWN` |
+| Confirmed | `SUCCESS` | the held result (`data_ready`) and terminal success; a delivery failure here sets `result_unavailable` and changes nothing else — the status stays `SUCCESS`, and the business SQL is never re-run. Before the terminal event the executor builds the announcement and reads the stored result back: a result lost since it was prepared (or a store or URL failure) is recorded on the terminal row itself (`result_unavailable`, with the prepared result's counts) and never announced (#1035 r3). A surviving header does not make a result readable: the store's `describe` and `page` answer absent when the header counts rows but the rows list is gone, so a rows-only loss is reported unavailable exactly like a loss of both keys (#1035 r4); a result that counts no rows has no list and stays a readable empty result. Availability is decided by the rows the read actually returned, not by an earlier existence check: a page range the header counts rows in that comes back empty or short — the list expired or was removed between the check and the row read — is absent too, while a page at or beyond the end stays a valid empty page (#1035 r5) |
+| Attempted, then the instance died | settled by the stale sweep ([metadata-db §8.3](metadata-db.md#83-stale-execution-sweep)): confirmed → `SUCCESS` + `result_unavailable`; attempted → `OUTCOME_UNKNOWN`; neither → `ABORTED` `instance_lost` — one decision per execution made at write time by a single statement, so evidence that arrives while the sweep runs is never overtaken; each `OUTCOME_UNKNOWN` the sweep finds is alerted individually (ERROR `execution.outcome_unknown`, meter `datapipelines.executions.outcome_unknown_swept`) | nothing from the dead instance |
+
+A commit that was attempted is never rolled back by the funnel: a cancellation or deadline arriving
+inside the window does not interrupt the settle (the settle runs non-cancellable), and an
+ancestor's cancellation still writes the terminal row before it propagates.
+
+**Visible on every surface.** `OUTCOME_UNKNOWN` is a terminal status like `FAILED`: history and
+the execution record ([REST §10](rest-api.md#10-execution-history)), the SSE stream (the existing
+`pipeline_failed` event, its payload's `status` saying which), the MCP tools, the scheduler (run
+state `unknown`, which blocks a retry exactly as an unreadable outcome does) and the result cursor
+(`410 result.execution_failed`, `details.status: OUTCOME_UNKNOWN`). A replayed request with its
+original `Idempotency-Key` inside the reservation TTL returns the same execution, unknown included.
+The engine never replays writes to settle the uncertainty; the operator looks up the execution id
+and checks the target before any deliberate new run.
+
+**The execution budget bounds the commit.** The driver's `commit()` runs on a dedicated daemon
+thread and the root waits for its answer for at most the execution's REMAINING budget (the existing
+execution deadline — no new setting; a run without a deadline waits for the driver). When the budget
+ends first the run is `OUTCOME_UNKNOWN` — the attempt stamp is already durable, so it is never
+`FAILED`, `ABORTED` or `SUCCESS` — the execution slot and the executor thread are released, nothing
+is announced, and the customer session is aborted. The abandoned commit is never confirmed: if the
+driver answers later, its thread returns the connection and the recorded outcome stands (a late
+success still lands in the customer database, which is exactly what `OUTCOME_UNKNOWN` says may
+happen — the operator checks the target). A commit entered with the budget already spent is
+abandoned at once.
+
+**Rolling back.** The schema half is [metadata-db §7.5](metadata-db.md#75-rolling-back-v66-execution-commit-outcomes-1035):
+a repeatable downgrade barrier makes a binary older than V66 refuse to start, and the documented
+rollback block refuses while any unknown outcome or unsettled commit attempt exists. Drain first,
+preserve unknown outcomes and their readability, then revert the executor.
+
 ---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.50 | 1035 r5 (#1035) | **§16.5** the confirmed row: the Redis store judges a result by the rows its read returned — a range the header counts rows in that reads back empty or short (rows lost between the existence check and the row read) is absent, so the read-back reports `result_unavailable` and withholds `data_ready`; pages beyond the end and zero-row results are unchanged. |
+| 2026-11-21 | v1.49 | 1035 r4 (#1035) | **§16.5** the confirmed row: a stored result whose header survives but whose rows list is gone is lost, not an empty result — the Redis store's `describe` and `page` answer absent for it, so the read-back reports `result_unavailable` and withholds `data_ready`; a genuine zero-row result is unchanged. |
+| 2026-11-21 | v1.48 | 1035 r3 (#1035) | **§16.5** the confirmed row: the held result is read back from the store after the confirmation, before the terminal event; a lost result is `SUCCESS` with `result_unavailable` on the terminal row (with the prepared counts) and no `data_ready`. Every caller run's terminal row now carries its result counts. |
+| 2026-11-21 | v1.47 | 1035 r2 (#1035) | **§16.5** corrected after the review: a held child's completion reaches no history surface until the root settles, and the settlement publishes its terminal event with the root's outcome (R2); the hung commit is bounded by the execution budget and ends `OUTCOME_UNKNOWN` instead of "Not bounded" (R3); the stale sweep decides in one statement and alerts per unknown (R1/R4). |
+| 2026-11-20 | v1.46 | 1035 (#1035) | **§16.5 The commit boundary and `OUTCOME_UNKNOWN`:** nothing is exposed before the root's commit (held result, provisional children, no child `data_ready`); the durable `commit_attempted_at`/`commit_confirmed_at` boundary stamped around the customer commit; the terminal funnel (never attempted → rollback statuses, attempted → `OUTCOME_UNKNOWN`, confirmed → `SUCCESS` with `result_unavailable` kept separate from the status); the stale sweep's three-way label; the surfaces that show it; the unbounded hung commit stated. §16.4's "FAILED, outcome unknown" and "#1035 owns" prose corrected. |
 | 2026-11-20 | v1.45 | 1034 (#1034) | §16.4 gains **DML results inside the transaction**: an insert's per-row execution and key correlation on the participant connection, its result staged/materialized before the commit and unpublished until the settle, and the node-local transaction a multi-row insert takes off the family transaction; and **DML admission over the pinned family**: the write-set walk applies the DML shape rules and the current insert qualification to the root and every reachable pinned child before any business write, the refusal naming the child, with the per-execution and per-node checks kept as backstops. |
 | 2026-11-18 | v1.44 | 1033 (#1033) | §16 gains the exception the blockquote now carries and **§16.4: the single-registration local write transaction** — automatic root-only planning of the durable write set (DML-with-datasource source, DQL/PIPELINE `output.target: "datasource"`, external DDL counted separately; registrations unique by name; POSTGRES/MYSQL/MSSQL/ORACLE eligible), refusal with `pipeline.execution.local_write_refused` before any business write, the lazy one-connection lease with participant writes withholding committed evidence, root-only single commit after result materialization (terminal success after it), rollback on every other terminal path, the unknown-outcome honesty on a refused/lost commit ack (`pipeline.execution.local_write_commit_failed`, no re-run), and the §4.1 meter `datapipelines.executions.local_write_transactions`. The §16.1 seam table row and §16.2's atomic-parts paragraph carry the pointer; §16.3's rejections stand. |
 | 2026-11-12 | v1.43 | #905 review F1 | §10.1 shutdown and crash: the result-history write deferred behind an unconfirmed insert is also an in-memory continuation that can remain pending after the execution finishes and be lost on process exit. |

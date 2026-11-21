@@ -254,10 +254,10 @@ class ScheduledJobsSchedulerTest {
         withProbe: Boolean = false,
     ): AnnotationConfigApplicationContext {
         val executions = mockk<ExecutionRepository>()
-        every { executions.sweepStaleRunning(any(), any()) } answers {
+        every { executions.sweepStaleRunningDetailed(any(), any()) } answers {
             tick(SWEEP) {
                 tickGate.await(GATE_SECONDS, TimeUnit.SECONDS)
-                0
+                emptyList()
             }
         }
         val datasources = mockk<DatasourceRegistry>()

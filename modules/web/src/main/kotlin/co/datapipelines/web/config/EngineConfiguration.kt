@@ -202,7 +202,15 @@ class EngineConfiguration {
         pipelineResolver: co.datapipelines.pipeline.PipelineResolver,
         datasourceRegistry: DatasourceRegistry,
         config: ExecutorConfig,
-    ): LocalWritePlanner = LocalWritePlanner(pipelineResolver, datasourceRegistry, config.maxCompositionDepth)
+        executionRepository: co.datapipelines.executor.ExecutionRepository,
+    ): LocalWritePlanner =
+        LocalWritePlanner(
+            pipelineResolver,
+            datasourceRegistry,
+            config.maxCompositionDepth,
+            co.datapipelines.executor.CommitLedger
+                .over(executionRepository),
+        )
 
     /**
      * **Carry-forward #3 — the absolute `result_url` builder.**

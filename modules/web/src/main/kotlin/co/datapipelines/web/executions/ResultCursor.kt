@@ -31,7 +31,8 @@ import java.util.UUID
  * ## Rule order (§7.6)
  * Unknown **or non-owned** execution → `404 result.execution_not_found` (ownership failures are
  * indistinguishable from absence — carry-forward #2). Still running → `409
- * result.execution_incomplete`. Failed or aborted → `410 result.execution_failed`. TTL elapsed →
+ * result.execution_incomplete`. Failed, aborted or `OUTCOME_UNKNOWN` → `410 result.execution_failed`; a confirmed
+ * SUCCESS whose result was never delivered → `503 result.storage_unavailable` (#1035). TTL elapsed →
  * `410 result.expired`. Unknown format → `400 result.format_unsupported`.
  *
  * ## Formats (§7.5)
@@ -66,7 +67,8 @@ class ResultCursor(
         when (record.status) {
             ExecutionStatus.RUNNING -> throw ApiErrors.executionIncomplete(executionId.toString())
             ExecutionStatus.FAILED, ExecutionStatus.ABORTED -> throw ApiErrors.executionFailed(executionId.toString())
-            ExecutionStatus.SUCCESS -> Unit
+            ExecutionStatus.OUTCOME_UNKNOWN -> throw ApiErrors.executionOutcomeUnknown(executionId.toString())
+            ExecutionStatus.SUCCESS -> if (record.resultUnavailable) throw ApiErrors.resultDeliveryFailed(executionId.toString())
         }
         return record
     }

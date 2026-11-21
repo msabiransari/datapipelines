@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.88 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.89 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-15
@@ -320,7 +320,8 @@ The executor's two scheduled jobs on the `dp-scheduled` thread (§3.4H) — the 
 | WARN | `execution.sweep_failed` | The stale sweep's UPDATE threw, or was cancelled at its bound (`sql_state=57014`; the 10 s `SWEEP_STATEMENT_TIMEOUT_SECONDS`, #326); the tick is skipped and the next one retries. Counted as `datapipelines.scheduled_jobs.tick_failed{job=stale_sweep}` (§4.1) | `cutoff`, `heartbeat_cutoff`, `error`, `sql_state` |
 | WARN | `execution.event_retention_failed` | The retention tick's DELETE threw, or was cancelled at its bound (`sql_state=57014`; the 25 s `RETENTION_STATEMENT_TIMEOUT_SECONDS`, #326) — the DELETE is one statement, so a cancel deletes nothing; the next tick retries. Counted as `datapipelines.scheduled_jobs.tick_failed{job=event_retention}` (§4.1) |
 | ERROR | `retention.step_failed` | One step of the hourly retention sweep threw past its own handling (`step` = `execution_events`, `dashboard_refreshes`, `parameter_evaluation_sweep`, `parameter_evaluations`, `keys` or `audit_log`); the sweep runs its remaining steps and the next tick retries. For `keys` this is the keys purge's only failure line: its statements carry the retention bound, and a cancel (`sql_state=57014`) rolls the whole purge transaction back. Counted as `tick_failed` under the step's job (§4.1): `execution_events` → `job=event_retention`, `dashboard_refreshes` → `job=dashboard_refresh_retention`, `parameter_evaluation_sweep` → `job=parameter_evaluation_sweep`, `parameter_evaluations` → `job=parameter_evaluation_retention`, `keys` → `job=keys_purge`, `audit_log` → `job=audit_retention`. Every step but `keys` counts the store faults it catches itself (its own WARN line); this line and its count are only what escaped that catch, so no failure is counted twice (#636) | `step`, `error`, `sql_state` | `cutoff`, `error`, `sql_state` |
-| INFO | `execution.swept` | A stale-execution sweep (15 s fixed delay on `dp-scheduled`) marked at least one stale RUNNING row ABORTED with `pipeline.execution.instance_lost`; silent for zero rows. A stale heartbeat, or an old start with no heartbeat, triggers the UPDATE | `count`, `cutoff`, `heartbeat_cutoff`, `message` (static explanation) |
+| INFO | `execution.swept` | A stale-execution sweep (15 s fixed delay on `dp-scheduled`) settled at least one stale RUNNING row by its commit boundary (`SUCCESS` with `result_unavailable`, `OUTCOME_UNKNOWN`, or `ABORTED` `pipeline.execution.instance_lost`; #1035); silent for zero rows. A stale heartbeat, or an old start with no heartbeat, triggers the UPDATE | `count`, `cutoff`, `heartbeat_cutoff`, `message` (static explanation) |
+| ERROR | `execution.outcome_unknown` | (#1035) The stale sweep settled an execution `OUTCOME_UNKNOWN`: its instance was lost after the commit attempt was durably stamped and before the confirmation, so the writes may or may not exist in the customer database. ONE line per execution, alongside the `datapipelines.executions.outcome_unknown_swept` increment (§4.1) — alert on each; the operator checks the target database and never re-runs to find out. Never SQL, rows or credentials | `source` (`stale_sweep`), `execution_id`, `message` (static) |
 
 #### 3.4J The dashboard refresh events (#10 L2)
 
@@ -599,7 +600,8 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 
 | Metric | Type | Tags | Description |
 |---|---|---|---|
-| `datapipelines.executions.total` | counter | `status` (success/failed/aborted), `pipeline_id` | Execution count |
+| `datapipelines.executions.total` | counter | `status` (success/failed/aborted/outcome_unknown), `pipeline_id` | Execution count (`outcome_unknown`: the family's shared commit was attempted and not acknowledged, #1035 — alert on each) |
+| `datapipelines.executions.outcome_unknown_swept` | counter | (none) | (#1035) Executions the stale sweep itself labelled `OUTCOME_UNKNOWN` (instance lost inside the commit window) — one increment per execution, never an aggregate; alert on each. The execution ids are in the `execution.outcome_unknown` ERROR line (§3.4I) |
 | `datapipelines.executions.aborted` | counter | `reason` (`client_disconnect`/`cancelled`/`shutdown`) | Aborted executions by trigger — the three D7 paths ([dag-executor §15.3](dag-executor.md#153-monitoring), [enums `ExecutionStatus`](enums.md)) |
 | `datapipelines.executions.duration` | timer | `pipeline_id` | Execution wall-clock duration |
 | `datapipelines.executions.concurrent` | gauge | (none) | Currently-running executions; bound by the execution-slot bean, once per instance |
@@ -885,6 +887,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.89 | 1035 r2 (#1035) | **§3.4I** gains ERROR `execution.outcome_unknown` (one line per execution the crash sweep labelled `OUTCOME_UNKNOWN`) and `execution.swept` names the three-way label; **§4.1** gains `datapipelines.executions.outcome_unknown_swept` (one increment per execution). |
 | 2026-11-15 | v1.88 | 819 (#819) | **§3.4C**: WARN `lake.freshness_tick_capped` — the freshness tick leaves a stale managed generation serving while `datapipelines.lake.reads.max-retired-generations` retired generations still hold their engine; the age bound still retires it. **§4.1**: counter `datapipelines.lake.freshness_tick.capped` (`datasource_name`), once per capped datasource per tick. |
 | 2026-11-15 | v1.87 | 994 (#994) | **§3.4Z** (new, TEMPORARY with #994's guard): INFO `staging.guard.unguarded_read` (a DuckDB tempdb read the written form does not take — SHOW kinds, a PIVOT without an IN list, `PRAGMA`, `EXPLAIN`, several statements; execution, node and statement kind only) and WARN `staging.guard.drop_failed` (the guard relation's drop failed). §3.4's namespace sentence: fourteen catalogued, `staging` not enforced by the parity test. |
 | 2026-11-14 | v1.86 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.84 and #964's v1.85 (its section renumbered §3.4X → §3.4Y) | **§3.4Y** (new): the compaction part's three events: INFO `lake.maintenance.compaction_group_committed` (one per committed group, with D9's figures), WARN `lake.maintenance.compaction_blocked` (one per `capacity` result: the blocked count, the largest need, the limit and its source, the grant) and WARN `lake.maintenance.compaction_deadline` (a scratch-database failure the clock judged to be the deadline; class and SQLSTATE only). |

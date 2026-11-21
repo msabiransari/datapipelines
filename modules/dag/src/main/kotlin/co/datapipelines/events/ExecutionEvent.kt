@@ -147,6 +147,31 @@ data class PipelineCompleted(
      * reached the Context — a setup failure — so the row keeps whatever it had.
      */
     val contextSnapshot: Map<String, Any?> = emptyMap(),
+    /**
+     * (#1035) A CHILD of an enrolled family finished its work, but the family's writes are not
+     * durable until the root settles: the execution record is NOT completed by this event (it stays
+     * `RUNNING`, pending settlement) and the stream carries it no further than the node boundary.
+     * The root's terminal write settles every provisional child to the root's final status.
+     */
+    val provisional: Boolean = false,
+    /**
+     * (#1035) The commit is confirmed (this event reports SUCCESS) but the caller result could not
+     * be delivered. Recorded on the row as `result_unavailable`; the status stays SUCCESS.
+     */
+    val resultUnavailable: Boolean = false,
+    /**
+     * (#1035) This terminal event is the ROOT of a family that shared one local write transaction:
+     * its row's terminal write settles every provisional child to the same final status.
+     */
+    val settlesFamily: Boolean = false,
+    /**
+     * (#1035) The caller result's total rows and stored bytes, as prepared before the terminal event;
+     * null for a run with no caller node. Written with the terminal status, so the record of a run
+     * that had a caller result never reads as a zero-caller run — not while the post-run bookkeeping
+     * is still pending, and not when the stored result was lost after a confirmed commit.
+     */
+    val resultRowCount: Long? = null,
+    val resultSizeBytes: Long? = null,
 ) : ExecutionEvent() {
     override val timestamp: Instant get() = completedAt
     override val type: SseEventType get() = SseEventType.PIPELINE_COMPLETED
@@ -174,6 +199,18 @@ data class PipelineFailed(
      * reached the Context — a setup failure — so the row keeps whatever it had.
      */
     val contextSnapshot: Map<String, Any?> = emptyMap(),
+    /**
+     * (#1035) The terminal status this event records: [ExecutionStatus.FAILED] by default, or
+     * [ExecutionStatus.OUTCOME_UNKNOWN] when the family's shared commit was attempted and its
+     * acknowledgement lost. The event type stays `pipeline_failed` — existing stream clients treat
+     * it as terminal-and-not-success — and the payload's `status` field says which.
+     */
+    val status: co.datapipelines.executor.ExecutionStatus = co.datapipelines.executor.ExecutionStatus.FAILED,
+    /**
+     * (#1035) This terminal event is the ROOT of a family that shared one local write transaction:
+     * its row's terminal write settles every provisional child to the same final status.
+     */
+    val settlesFamily: Boolean = false,
 ) : ExecutionEvent() {
     override val timestamp: Instant get() = failedAt
     override val type: SseEventType get() = SseEventType.PIPELINE_FAILED
@@ -196,6 +233,11 @@ data class ExecutionAborted(
      * reached the Context — a setup failure — so the row keeps whatever it had.
      */
     val contextSnapshot: Map<String, Any?> = emptyMap(),
+    /**
+     * (#1035) This terminal event is the ROOT of a family that shared one local write transaction:
+     * its row's terminal write settles every provisional child to the same final status.
+     */
+    val settlesFamily: Boolean = false,
 ) : ExecutionEvent() {
     override val timestamp: Instant get() = abortedAt
     override val type: SseEventType get() = SseEventType.EXECUTION_ABORTED

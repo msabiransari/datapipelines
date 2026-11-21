@@ -32,7 +32,7 @@
           <tr class="app-row-clickable" th:each="r : ${runs}" th:attr="data-href='/executions/' + ${r.executionId}">
             <td>
               <span class="app-chip" th:attr="data-status=${r.status.name()}"
-                    th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.toLowerCase(r.status.name()))}">Success</span></span>
+                    th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.replace(#strings.toLowerCase(r.status.name()),'_',' '))}">Success</span></span>
             </td>
             <td class="u-mono" th:text="${'v' + r.pipelineVersion}">v1</td>
             <td class="u-mono" th:text="${r.durationMs != null} ? ${r.durationMs} + ' ms' : '—'">3200 ms</td>

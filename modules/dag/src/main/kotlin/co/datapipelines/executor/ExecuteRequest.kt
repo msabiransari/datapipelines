@@ -25,13 +25,20 @@ data class ExecutionReference(
     val timezone: ZoneId,
 )
 
-/** The whole-pipeline outcome (enums.md §10, authored by rest-api; see [SseEventType] for the layering note). */
+/**
+ * The whole-pipeline outcome (enums.md §10, authored by rest-api; see [SseEventType] for the layering note).
+ *
+ * [OUTCOME_UNKNOWN] (#1035, write-transactions §4) is terminal: the family's shared commit was
+ * attempted and its acknowledgement lost, so the customer database may or may not hold the
+ * writes. It is neither success nor failure and nothing replays the writes to find out.
+ */
 @Suppress("KDocUnresolvedReference")
 enum class ExecutionStatus {
     RUNNING,
     SUCCESS,
     FAILED,
     ABORTED,
+    OUTCOME_UNKNOWN,
 }
 
 /**
@@ -160,6 +167,10 @@ data class ExecuteRequest(
  *
  * [warnings] carries the non-fatal type-mapping warnings drained out of every `StageResult`
  * (staging §8.2) and out of the caller result's schema mapping. They never fail an execution.
+ *
+ * [resultUnavailable] (#1035) is true only on a SUCCESS whose commit is confirmed but whose caller
+ * result could not be delivered: [resultRef] then names a result no reader can fetch, and a surface
+ * reports the result unavailable — never an empty result that reads as a zero-caller run.
  */
 data class ExecutionResult(
     val executionId: UUID,
@@ -170,6 +181,7 @@ data class ExecutionResult(
     val completedAt: Instant,
     val durationMs: Long,
     val warnings: List<TypeMappingWarning> = emptyList(),
+    val resultUnavailable: Boolean = false,
 )
 
 /**

@@ -139,6 +139,19 @@ class PipelineJobExecutorTest {
         outcomeFor(null) shouldBe ExecutionOutcome.Absent
     }
 
+    /**
+     * #1035: an OUTCOME_UNKNOWN run may have committed, so the scheduler must treat it like an unreadable outcome
+     * (UNKNOWN blocks the next run, scheduler.md section 5.2) — never FAILED, which would invite a replay.
+     */
+    @Test
+    fun `an OUTCOME_UNKNOWN run is unknown with its own reason, never failed, and reads no events`() {
+        val record = record(ExecutionStatus.OUTCOME_UNKNOWN)
+
+        outcomeFor(record) shouldBe
+            ExecutionOutcome.Finished(RunState.UNKNOWN, PipelineJobExecutor.COMMIT_OUTCOME_UNKNOWN, record.startedAt, record.completedAt)
+        verify(exactly = 0) { events.findByExecution(any()) }
+    }
+
     @Test
     fun `R6 - an abort is cancelled when a person asked, aborted with its reason when the drain did`() {
         val record = record(ExecutionStatus.ABORTED)

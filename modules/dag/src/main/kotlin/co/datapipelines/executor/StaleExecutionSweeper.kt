@@ -61,6 +61,16 @@ class StaleExecutionSweeper(
                 .register(registry)
         }
 
+    /** One increment per execution the sweep itself labelled OUTCOME_UNKNOWN (#1035): the alert hook, ids stay in the log. */
+    private val unknownOutcomes: Counter? =
+        metrics?.let { registry ->
+            Counter
+                .builder(UNKNOWN_SWEPT_METER)
+                .description(
+                    "Executions the stale sweep found inside their commit window and labelled OUTCOME_UNKNOWN; alert on each",
+                ).register(registry)
+        }
+
     init {
         require(!staleTimeout.isNegative && !staleTimeout.isZero) { "staleTimeout must be positive, was $staleTimeout" }
         require(!heartbeatInterval.isNegative && !heartbeatInterval.isZero) {
@@ -78,9 +88,9 @@ class StaleExecutionSweeper(
         val now = Instant.now()
         val cutoff = now.minus(staleTimeout)
         val heartbeatCutoff = now.minus(heartbeatInterval.multipliedBy(MISSED_BEATS))
-        val swept =
+        val sweptRows =
             try {
-                executions.sweepStaleRunning(cutoff, heartbeatCutoff)
+                executions.sweepStaleRunningDetailed(cutoff, heartbeatCutoff)
             } catch (e: DataAccessException) {
                 // The class and the SQLState, never the message: Spring's message carries the
                 // statement text and the driver's text (observability §3.4G; #321).
@@ -94,10 +104,13 @@ class StaleExecutionSweeper(
                 failedTicks?.increment()
                 return 0
             }
+        val swept = sweptRows.size
+        alertOnUnknown(sweptRows)
         if (swept > 0) {
             LOG.info(
                 "event=execution.swept count={} cutoff={} heartbeat_cutoff={} " +
-                    "message=\"stale RUNNING executions marked ABORTED (pipeline.execution.instance_lost)\"",
+                    "message=\"stale RUNNING executions settled by their commit boundary " +
+                    "(SUCCESS / OUTCOME_UNKNOWN / ABORTED instance_lost)\"",
                 swept,
                 cutoff,
                 heartbeatCutoff,
@@ -106,10 +119,29 @@ class StaleExecutionSweeper(
         return swept
     }
 
-    private companion object {
-        val LOG = LoggerFactory.getLogger(StaleExecutionSweeper::class.java)
+    /**
+     * (#1035, write-transactions §7: "alert on each unknown") One ERROR line and one counter increment per
+     * execution this tick labelled OUTCOME_UNKNOWN. The line carries the execution id an operator needs to
+     * check the customer database — never SQL, rows or credentials.
+     */
+    private fun alertOnUnknown(swept: List<SweptExecution>) {
+        swept.filter { it.status == ExecutionStatus.OUTCOME_UNKNOWN }.forEach { row ->
+            LOG.error(
+                "event=execution.outcome_unknown source=stale_sweep execution_id={} " +
+                    "message=\"instance lost inside the commit window; the writes may have committed, check the target database\"",
+                row.executionId,
+            )
+            unknownOutcomes?.increment()
+        }
+    }
+
+    companion object {
+        /** The per-unknown alert meter of the crash sweep (#1035); observability.md lists it. */
+        const val UNKNOWN_SWEPT_METER = "datapipelines.executions.outcome_unknown_swept"
+
+        private val LOG = LoggerFactory.getLogger(StaleExecutionSweeper::class.java)
 
         /** How many heartbeats an instance may miss before it is declared gone — see the ctor. */
-        const val MISSED_BEATS = 3L
+        private const val MISSED_BEATS = 3L
     }
 }
