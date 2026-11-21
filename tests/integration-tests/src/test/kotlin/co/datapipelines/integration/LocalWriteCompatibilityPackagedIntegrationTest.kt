@@ -8,6 +8,7 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.nio.file.Files
 import java.security.SecureRandom
 import java.sql.Connection
 import java.sql.DriverManager
@@ -112,6 +113,7 @@ class LocalWriteCompatibilityPackagedIntegrationTest {
         check(script.isFile) { "the report wrapper is missing at ${script.absolutePath}" }
         // The wrapper's JVM keeps its temp files below this test JVM's own (DEVELOPMENT.md 9.7): a fixed child name.
         val childTmp = File(System.getProperty("java.io.tmpdir"), "cr1036-report")
+        check(!Files.isSymbolicLink(childTmp.toPath())) { "the report JVM's temp directory ${childTmp.absolutePath} is a symbolic link" }
         check(childTmp.isDirectory || childTmp.mkdirs()) { "cannot create the report JVM's temp directory ${childTmp.absolutePath}" }
         val process =
             ProcessBuilder("bash", script.absolutePath, jar().absolutePath)
