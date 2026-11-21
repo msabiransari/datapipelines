@@ -1,0 +1,72 @@
+{
+ "note": "row names and column names that must be cut; < and & in names",
+ "document": {
+  "display_name": "Test type test_grid",
+  "config": {
+   "mark": {
+    "type": "test_grid"
+   },
+   "encoding": {
+    "x": {
+     "field": "c"
+    },
+    "y": {
+     "field": "r"
+    }
+   }
+  }
+ },
+ "columns": {
+  "c": [
+   "Quarter one of the fiscal year 2026",
+   "Quarter two of the fiscal year 2026",
+   "Quarter three < four & five",
+   "Quarter four of the fiscal year 2026",
+   "A fifth very long category name here",
+   "Quarter one of the fiscal year 2026",
+   "Quarter two of the fiscal year 2026",
+   "Quarter three < four & five",
+   "Quarter four of the fiscal year 2026",
+   "A fifth very long category name here",
+   "Quarter one of the fiscal year 2026",
+   "Quarter two of the fiscal year 2026",
+   "Quarter three < four & five",
+   "Quarter four of the fiscal year 2026",
+   "A fifth very long category name here",
+   "Quarter one of the fiscal year 2026",
+   "Quarter two of the fiscal year 2026",
+   "Quarter three < four & five",
+   "Quarter four of the fiscal year 2026",
+   "A fifth very long category name here"
+  ],
+  "r": [
+   "Northern distribution region alpha & <beta>",
+   "Northern distribution region alpha & <beta>",
+   "Northern distribution region alpha & <beta>",
+   "Northern distribution region alpha & <beta>",
+   "Northern distribution region alpha & <beta>",
+   "Southern coastal warehouse gamma",
+   "Southern coastal warehouse gamma",
+   "Southern coastal warehouse gamma",
+   "Southern coastal warehouse gamma",
+   "Southern coastal warehouse gamma",
+   "Eastern mountain depot delta and more",
+   "Eastern mountain depot delta and more",
+   "Eastern mountain depot delta and more",
+   "Eastern mountain depot delta and more",
+   "Eastern mountain depot delta and more",
+   "Western logistics hub epsilon",
+   "Western logistics hub epsilon",
+   "Western logistics hub epsilon",
+   "Western logistics hub epsilon",
+   "Western logistics hub epsilon"
+  ]
+ },
+ "types": {
+  "c": "STRING",
+  "r": "STRING"
+ },
+ "expect": {
+  "marks": 20
+ }
+}

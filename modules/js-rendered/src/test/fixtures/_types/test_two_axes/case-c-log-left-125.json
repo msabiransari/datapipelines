@@ -1,0 +1,57 @@
+{
+ "note": "case (c): a log left axis with 1, 2, 5 ticks (1..50) beside a linear right axis",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y",
+     "log": true
+    },
+    "y2": {
+     "field": "y2"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "y": [
+   1,
+   3,
+   8,
+   20,
+   50,
+   12
+  ],
+  "y2": [
+   10,
+   40,
+   25,
+   60,
+   35,
+   55
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}

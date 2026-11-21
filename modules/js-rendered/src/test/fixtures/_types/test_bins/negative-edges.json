@@ -1,0 +1,48 @@
+{
+ "note": "edges across zero with decimals (-2.5..2.5 by 0.5); an empty bin draws nothing",
+ "document": {
+  "display_name": "Test type test_bins",
+  "config": {
+   "mark": {
+    "type": "test_bins"
+   },
+   "encoding": {
+    "x": {
+     "field": "v",
+     "edges": [
+      -2.5,
+      -2,
+      -1.5,
+      -1,
+      -0.5,
+      0,
+      0.5,
+      1,
+      1.5,
+      2,
+      2.5
+     ]
+    }
+   }
+  }
+ },
+ "columns": {
+  "v": [
+   -2.4,
+   -1.7,
+   -1.6,
+   -0.2,
+   0.1,
+   0.3,
+   1.1,
+   2.4,
+   2.5
+  ]
+ },
+ "types": {
+  "v": "DOUBLE"
+ },
+ "expect": {
+  "marks": 6
+ }
+}

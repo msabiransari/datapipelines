@@ -1,0 +1,56 @@
+{
+ "note": "a right extent far from the left's (left -40..60, right 1e6..2e6)",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    },
+    "y2": {
+     "field": "y2"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "y": [
+   -40,
+   -10,
+   20,
+   60,
+   35,
+   -25
+  ],
+  "y2": [
+   1000000,
+   1400000,
+   1250000,
+   2000000,
+   1750000,
+   1100000
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}

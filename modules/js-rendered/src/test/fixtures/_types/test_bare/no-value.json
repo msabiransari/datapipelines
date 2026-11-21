@@ -1,0 +1,41 @@
+{
+ "note": "rows but no value at all: the no-data state, no guide text",
+ "document": {
+  "display_name": "Test type test_bare",
+  "config": {
+   "mark": {
+    "type": "test_bare"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    }
+   },
+   "options": {
+    "last": "value"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0,
+   1,
+   2
+  ],
+  "y": [
+   null,
+   null,
+   null
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

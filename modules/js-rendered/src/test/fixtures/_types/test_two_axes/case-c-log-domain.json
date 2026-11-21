@@ -1,0 +1,61 @@
+{
+ "note": "case (c), a domain smaller than the data: a log right axis over 3..30 with the domain 1..10",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    },
+    "y2": {
+     "field": "y2",
+     "log": true,
+     "domain": [
+      1,
+      10
+     ]
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "y": [
+   5,
+   15,
+   25,
+   35,
+   45,
+   55
+  ],
+  "y2": [
+   3,
+   5,
+   9,
+   14,
+   22,
+   30
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}

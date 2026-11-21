@@ -1,0 +1,61 @@
+{
+ "note": "case (a): a linear left axis beside a linear right axis",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y",
+     "title": "Orders"
+    },
+    "y2": {
+     "field": "y2",
+     "title": "Rate"
+    }
+   },
+   "title": {
+    "text": "Orders and rate"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "y": [
+   12,
+   30,
+   45,
+   22,
+   38,
+   51
+  ],
+  "y2": [
+   0.31,
+   0.42,
+   0.38,
+   0.55,
+   0.61,
+   0.47
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}

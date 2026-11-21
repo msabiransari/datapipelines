@@ -1,0 +1,137 @@
+{
+ "note": "two series, the legend at the bottom, both axis titles",
+ "document": {
+  "display_name": "Test type test_grid",
+  "config": {
+   "mark": {
+    "type": "test_grid"
+   },
+   "encoding": {
+    "x": {
+     "field": "c",
+     "title": "Column axis"
+    },
+    "y": {
+     "field": "r",
+     "title": "Row axis"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": {
+      "orient": "bottom"
+     }
+    }
+   },
+   "title": {
+    "text": "Legend at the bottom"
+   }
+  }
+ },
+ "columns": {
+  "c": [
+   "A",
+   "B",
+   "C",
+   "D",
+   "E",
+   "F",
+   "A",
+   "B",
+   "C",
+   "D",
+   "E",
+   "F",
+   "A",
+   "B",
+   "C",
+   "D",
+   "E",
+   "F",
+   "A",
+   "B",
+   "C",
+   "D",
+   "E",
+   "F",
+   "A",
+   "B",
+   "C",
+   "D",
+   "E",
+   "F"
+  ],
+  "r": [
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "1",
+   "1",
+   "1",
+   "1",
+   "1",
+   "1",
+   "2",
+   "2",
+   "2",
+   "2",
+   "2",
+   "2",
+   "3",
+   "3",
+   "3",
+   "3",
+   "3",
+   "3",
+   "4",
+   "4",
+   "4",
+   "4",
+   "4",
+   "4"
+  ],
+  "s": [
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd",
+   "Even",
+   "Odd"
+  ]
+ },
+ "types": {
+  "c": "STRING",
+  "r": "STRING",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 30
+ }
+}

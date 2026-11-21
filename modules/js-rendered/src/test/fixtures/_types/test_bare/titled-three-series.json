@@ -1,0 +1,95 @@
+{
+ "note": "a title, a subtitle, three series and a switched-off id: no title text, no legend group",
+ "document": {
+  "display_name": "Test type test_bare",
+  "config": {
+   "mark": {
+    "type": "test_bare"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "options": {
+    "last": "value",
+    "format": "integer"
+   },
+   "title": {
+    "text": "A title the frame never writes",
+    "subtitle": "Nor this subtitle"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14
+  ],
+  "y": [
+   3,
+   5,
+   4,
+   8,
+   6,
+   9,
+   2,
+   3,
+   2,
+   4,
+   5,
+   7,
+   6,
+   5,
+   4
+  ],
+  "s": [
+   "A",
+   "A",
+   "A",
+   "A",
+   "A",
+   "B",
+   "B",
+   "B",
+   "B",
+   "B",
+   "C",
+   "C",
+   "C",
+   "C",
+   "C"
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 6
+ },
+ "hidden": [
+  "string:B"
+ ]
+}

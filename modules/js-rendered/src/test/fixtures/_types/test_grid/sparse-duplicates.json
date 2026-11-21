@@ -1,0 +1,46 @@
+{
+ "note": "cells missing, one cell filled twice (one mark), a null row",
+ "document": {
+  "display_name": "Test type test_grid",
+  "config": {
+   "mark": {
+    "type": "test_grid"
+   },
+   "encoding": {
+    "x": {
+     "field": "c"
+    },
+    "y": {
+     "field": "r"
+    }
+   }
+  }
+ },
+ "columns": {
+  "c": [
+   "a",
+   "b",
+   "c",
+   "a",
+   "b",
+   null,
+   "a"
+  ],
+  "r": [
+   "x",
+   "y",
+   "z",
+   "z",
+   "x",
+   "y",
+   "x"
+  ]
+ },
+ "types": {
+  "c": "STRING",
+  "r": "STRING"
+ },
+ "expect": {
+  "marks": 5
+ }
+}

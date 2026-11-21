@@ -1,0 +1,149 @@
+{
+ "note": "a log x against a log value axis, three series over several decades",
+ "document": {
+  "display_name": "Test type test_points",
+  "config": {
+   "mark": {
+    "type": "test_points"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "log"
+    },
+    "y": {
+     "field": "y",
+     "log": true
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0.02,
+   0.038,
+   0.0722,
+   0.1372,
+   0.2606,
+   0.4952,
+   0.9409,
+   1.7877,
+   3.3967,
+   6.4538,
+   12.2621,
+   23.2981,
+   0.06,
+   0.114,
+   0.2166,
+   0.4115,
+   0.7819,
+   1.4857,
+   2.8228,
+   5.3632,
+   10.1901,
+   19.3613,
+   36.7864,
+   69.8942,
+   0.14,
+   0.266,
+   0.5054,
+   0.9603,
+   1.8245,
+   3.4665,
+   6.5864,
+   12.5142,
+   23.777,
+   45.1763,
+   85.8349,
+   163.0864
+  ],
+  "y": [
+   3.0,
+   6.9,
+   15.87,
+   36.501,
+   83.952,
+   193.09,
+   444.108,
+   1021.448,
+   2349.33,
+   3.0,
+   6.9,
+   15.87,
+   9.0,
+   20.7,
+   47.61,
+   109.503,
+   251.857,
+   579.271,
+   1332.323,
+   3064.343,
+   7047.989,
+   9.0,
+   20.7,
+   47.61,
+   21.0,
+   48.3,
+   111.09,
+   255.507,
+   587.666,
+   1351.632,
+   3108.754,
+   7150.133,
+   16445.307,
+   21.0,
+   48.3,
+   111.09
+  ],
+  "s": [
+   "North",
+   "North",
+   "North",
+   "North",
+   "North",
+   "North",
+   "North",
+   "North",
+   "North",
+   "North",
+   "North",
+   "North",
+   "South",
+   "South",
+   "South",
+   "South",
+   "South",
+   "South",
+   "South",
+   "South",
+   "South",
+   "South",
+   "South",
+   "South",
+   "East",
+   "East",
+   "East",
+   "East",
+   "East",
+   "East",
+   "East",
+   "East",
+   "East",
+   "East",
+   "East",
+   "East"
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 36
+ }
+}

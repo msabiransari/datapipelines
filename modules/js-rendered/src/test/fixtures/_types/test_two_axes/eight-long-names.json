@@ -1,0 +1,63 @@
+{
+ "note": "eight long band names: at 360 x 240 the column turns the x labels and the left ticks become fewer (bars below 50, two-digit left texts: without right room a band is 40.53 px, so every second label has the 80.04 px of six em plus a label gap and nothing turns; with the column a band is 36.03 px and they turn)",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    },
+    "y2": {
+     "field": "y2",
+     "title": "Share & <rate>"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Northern distribution region alpha",
+   "Southern distribution region beta",
+   "Eastern coastal warehouse gamma",
+   "Western mountain depot delta",
+   "Central logistics hub epsilon",
+   "Overseas partner network zeta",
+   "Online marketplace channel eta",
+   "Wholesale direct accounts theta"
+  ],
+  "y": [
+   12,
+   45,
+   38,
+   33,
+   41,
+   24,
+   27,
+   35
+  ],
+  "y2": [
+   1.2,
+   3.4,
+   2.2,
+   5.6,
+   4.1,
+   2.9,
+   3.7,
+   1.8
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 17
+ }
+}

@@ -1,0 +1,31 @@
+{
+ "note": "no rows: the no-data state",
+ "document": {
+  "display_name": "Test type test_points",
+  "config": {
+   "mark": {
+    "type": "test_points"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "linear"
+    },
+    "y": {
+     "field": "y"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [],
+  "y": []
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

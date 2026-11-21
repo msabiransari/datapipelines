@@ -195,5 +195,135 @@
     return tg + cs[0] * h.boxH(s) + cs[1] * Math.min(rotatedMax(h, maxLen), rotatedWidest(h, labels));
   }
 
-  R.axes = { valueAxis: valueAxis, logAxis: logAxis, scaleOf: scaleOf, labelRow: labelRow, rowReserve: rowReserve, angle: angle, overlaps: overlaps, ANGLES: ANGLES };
+  // ---- the second value axis (brief 1051 D5; look contract §4.7, combo: one grid) ----
+
+  /** How far apart, as a share of the axis, two positions may be and still be one (the left ticks' spacing test). */
+  var SAME = 1e-9;
+  /** The ladder steps (1, 2, 2.5, 5 × a power of ten) case (a) climbs before it gives way to case (c). */
+  var LADDER_CLIMB = 48;
+
+  /** Where a value lies on an axis {lo, hi, log}, as a share of it from lo (0) to hi (1); 0 on an axis of no width. */
+  function shareOf(ax, v) {
+    if (ax.log === true) {
+      var l0 = S.log10(ax.lo), dl = S.log10(ax.hi) - l0;
+      return dl > 0 ? (S.log10(v) - l0) / dl : 0;
+    }
+    var d = ax.hi - ax.lo;
+    return d > 0 ? (v - ax.lo) / d : 0;
+  }
+
+  /** The extent of a linear right axis with no domain, widened as S.nice widens one value (or none) first. */
+  function linearExtent(ext) {
+    var lo = ext && typeof ext[0] === "number" ? ext[0] : NaN, hi = ext && typeof ext[1] === "number" ? ext[1] : NaN;
+    if (!(lo > -Infinity && lo < Infinity && hi > -Infinity && hi < Infinity)) return [0, 1];
+    if (!(hi > lo)) {
+      if (lo === 0) return [0, 1];
+      return lo > 0 ? [0, lo] : [lo, 0];
+    }
+    return [lo, hi];
+  }
+
+  /** The step after s on the tick rule's ladder (1 → 2 → 2.5 → 5 → 10 times its power of ten). */
+  function nextStep(s) {
+    var p = S.pow10(S.decade(s)), f = s / p;
+    return (f < 1.5 ? 2 : f < 2.25 ? 2.5 : f < 3.75 ? 5 : 10) * p;
+  }
+
+  /**
+   * Case (a): the right values r0 + j × s at equally spaced left positions f0 + j × df. s is the smallest step of the
+   * ladder for which the largest multiple r0 of s whose bottom-edge value holds the extent's low end also gives a
+   * top-edge value that holds its high end. null where no step of the climb does (two ticks at both edges with a span
+   * across zero) or a number is not finite: case (c) then.
+   */
+  function caseA(ext, n, f0, df, format) {
+    var e = linearExtent(ext), e0 = e[0], e1 = e[1];
+    var s = S.niceStep((e1 - e0) * df);
+    for (var c = 0; c < LADDER_CLIMB && s > 0 && s < Infinity; c++, s = nextStep(s)) {
+      var span = s / df, k = Math.floor((e0 + f0 * span) / s + SAME);
+      var lo = k * s - f0 * span, hi = lo + span;
+      if (!(lo > -Infinity && hi < Infinity)) return null;
+      if (lo > e0 + SAME * span || hi < e1 - SAME * span) continue;
+      var decimals = Math.max(0, 1 - S.decade(s)), scale = S.pow10(decimals > 308 ? 308 : decimals), ticks = [];
+      for (var j = 0; j < n; j++) {
+        var t = Math.round((k + j) * s * scale) / scale + 0;
+        if (!(t > -Infinity && t < Infinity)) return null;
+        ticks.push(t);
+      }
+      return { lo: lo, hi: hi, ticks: ticks, texts: T.ticks(ticks, format), log: false, rule: "a" };
+    }
+    return null;
+  }
+
+  /**
+   * Case (b): a log right axis whose left ticks are equally spaced from the plot's bottom edge to its top edge (ticks
+   * 0…k): the values 10^(k0 + j × m), 10^k0 the record's lower bound (§4.4 G4) and m the smallest whole number from 1
+   * that reaches the largest value. null past the power table: case (c) then.
+   */
+  function caseB(ext, n, format) {
+    var min = ext ? ext[0] : null, max = ext ? ext[1] : null;
+    if (min === null || !(min > 0)) {
+      min = 1;
+      max = 10;
+    }
+    var k0 = S.decade(min), k = n - 1, m = 1;
+    while (k0 + k * m <= 308 && S.pow10(k0 + k * m) < max) m++;
+    if (k0 + k * m > 308) return null;
+    var ticks = [], texts = [];
+    for (var j = 0; j < n; j++) {
+      ticks.push(S.pow10(k0 + j * m));
+      texts.push(T.ticks([ticks[j]], format)[0]);
+    }
+    return { lo: ticks[0], hi: ticks[n - 1], ticks: ticks, texts: texts, log: true, rule: "b" };
+  }
+
+  /** A value written with d significant digits, as the double its decimal text reads as (0 stays 0). */
+  function significant(v, d) {
+    if (!(v !== 0 && v > -Infinity && v < Infinity)) return v;
+    var a = v < 0 ? -v : v, e = S.decade(a) - (d - 1), q = Math.round(a / S.pow10(e));
+    return (v < 0 ? -1 : 1) * Number(q + "e" + e);
+  }
+
+  /**
+   * Case (c): the right axis's own range (A.valueAxis's or A.logAxis's lo and hi over the same length, or its domain's
+   * two ends) laid over the plot, and at each left position the value its scale gives there, held as it is; the texts
+   * are those values at three significant digits, one more for all while two neighbours would share one.
+   */
+  function caseC(lvl, S2, ext, length, shares) {
+    var own = S2.log === true ? logAxis(lvl, ext, S2.domain, length, S2.format) : valueAxis(lvl, ext, S2.domain, length, S2.format, 0);
+    var lo = own.lo, hi = own.hi, l0 = S2.log === true ? S.log10(lo) : 0, l1 = S2.log === true ? S.log10(hi) : 0, ticks = [];
+    for (var j = 0; j < shares.length; j++) ticks.push(S2.log === true ? S.exp10(l0 + shares[j] * (l1 - l0)) : lo + shares[j] * (hi - lo));
+    var rounded = [];
+    for (var d = 3; d <= 17; d++) {
+      rounded = [];
+      var same = false;
+      for (var r = 0; r < ticks.length; r++) {
+        rounded.push(significant(ticks[r], d));
+        if (r > 0 && rounded[r] === rounded[r - 1]) same = true;
+      }
+      if (!same) break;
+    }
+    return { lo: lo, hi: hi, ticks: ticks, texts: T.ticks(rounded, S2.format), log: S2.log === true, rule: "c" };
+  }
+
+  /**
+   * The second value axis at the right (brief 1051 D5; look contract §4.7, combo): exactly one tick per tick of the left
+   * axis `left` = {lo, hi, ticks, log}, at that tick's position, so every right tick lies on a left grid line and there
+   * is one grid. S2 = {domain: [lo, hi] | null, format, log}; ext = S2.extent(visible); length = the plot's height in px.
+   * Which values are written there is case (a) (left positions equally spaced, a linear right axis, no domain), (b) (a
+   * log right axis, no domain, left positions equally spaced from the bottom edge to the top edge) or (c) (every other
+   * case, and an (a) or (b) that has no finite answer). Returns {lo, hi, ticks, texts, log, rule}: lo and hi are the
+   * values at the plot's bottom and top edges; an author's domain is kept as it is, never widened.
+   */
+  function secondAxis(lvl, S2, ext, left, length) {
+    var n = left.ticks.length, shares = [];
+    for (var i = 0; i < n; i++) shares.push(shareOf(left, left.ticks[i]));
+    var df = n >= 2 ? shares[1] - shares[0] : 0, even = n >= 2 && df > SAME;
+    for (var j = 2; even && j < n; j++) if (Math.abs(shares[j] - shares[0] - j * df) > SAME) even = false;
+    var noDomain = S2.domain === null || S2.domain === undefined, out = null;
+    if (even && noDomain && S2.log !== true) out = caseA(ext, n, shares[0], df, S2.format);
+    else if (even && noDomain && S2.log === true && Math.abs(shares[0]) <= SAME && Math.abs(shares[n - 1] - 1) <= SAME) out = caseB(ext, n, S2.format);
+    return out !== null ? out : caseC(lvl, S2, ext, length, shares);
+  }
+
+  R.axes = { valueAxis: valueAxis, logAxis: logAxis, scaleOf: scaleOf, labelRow: labelRow, rowReserve: rowReserve, angle: angle, overlaps: overlaps, ANGLES: ANGLES, secondAxis: secondAxis };
 })(JsRendered);

@@ -1,0 +1,61 @@
+{
+ "note": "4 columns by 3 rows, every cell filled",
+ "document": {
+  "display_name": "Test type test_grid",
+  "config": {
+   "mark": {
+    "type": "test_grid"
+   },
+   "encoding": {
+    "x": {
+     "field": "c",
+     "title": "Weekday"
+    },
+    "y": {
+     "field": "r",
+     "title": "Shift"
+    }
+   },
+   "title": {
+    "text": "Shifts"
+   }
+  }
+ },
+ "columns": {
+  "c": [
+   "Mon",
+   "Tue",
+   "Wed",
+   "Thu",
+   "Mon",
+   "Tue",
+   "Wed",
+   "Thu",
+   "Mon",
+   "Tue",
+   "Wed",
+   "Thu"
+  ],
+  "r": [
+   "Early",
+   "Early",
+   "Early",
+   "Early",
+   "Day",
+   "Day",
+   "Day",
+   "Day",
+   "Late",
+   "Late",
+   "Late",
+   "Late"
+  ]
+ },
+ "types": {
+  "c": "STRING",
+  "r": "STRING"
+ },
+ "expect": {
+  "marks": 12
+ }
+}

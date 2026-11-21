@@ -1,0 +1,60 @@
+{
+ "note": "case (c): a left axis with the domain 0.55..1.45, one tick (1) where the plot is short",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y",
+     "domain": [
+      0.55,
+      1.45
+     ]
+    },
+    "y2": {
+     "field": "y2"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "y": [
+   0.6,
+   0.8,
+   1,
+   1.2,
+   1.4,
+   0.9
+  ],
+  "y2": [
+   10,
+   20,
+   30,
+   40,
+   50,
+   60
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}

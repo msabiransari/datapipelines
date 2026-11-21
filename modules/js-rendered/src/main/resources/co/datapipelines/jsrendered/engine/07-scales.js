@@ -225,5 +225,29 @@
     };
   }
 
-  R.scales = { r2: r2, pow10: pow10, decade: decade, niceStep: niceStep, nice: nice, within: within, linear: linear, log10: log10, logNice: logNice, log: log, tenths: tenths };
+  /** Terms of the series below: y ≤ ln 10 / 16 < 0.144, so 24 terms leave 0.144^24 / 24!, far below a double's last bit. */
+  var EXP_TERMS = 24;
+
+  /**
+   * 10^x for a number x, without a power or exponential function (brief 1051 D5: the value a log axis has at a position
+   * between its ticks; O-16): 10^x = 10^k × e^(f ln 10) for the integer k = floor(x) and f = x − k in [0, 1); e^y by its
+   * series on y / 16, then squared four times. Four operations and comparisons only, so the runtimes agree to the bit
+   * (I6). A whole x gives the table's power exactly; NaN gives NaN; past the table's range Infinity or 0.
+   */
+  function exp10(x) {
+    if (x !== x) return x;
+    if (!(x < 309)) return Infinity;
+    if (!(x >= -323)) return 0;
+    var k = Math.floor(x), f = x - k;
+    if (f === 0) return pow10(k);
+    var y = (f * LN10) / 16, term = 1, sum = 1;
+    for (var n = 1; n < EXP_TERMS; n++) {
+      term = (term * y) / n;
+      sum += term;
+    }
+    for (var i = 0; i < 4; i++) sum *= sum;
+    return pow10(k) * sum;
+  }
+
+  R.scales = { r2: r2, pow10: pow10, decade: decade, niceStep: niceStep, nice: nice, within: within, linear: linear, log10: log10, logNice: logNice, log: log, tenths: tenths, exp10: exp10 };
 })(JsRendered);

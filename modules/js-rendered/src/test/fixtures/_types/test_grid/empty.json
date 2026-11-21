@@ -1,0 +1,30 @@
+{
+ "note": "no rows: the no-data state",
+ "document": {
+  "display_name": "Test type test_grid",
+  "config": {
+   "mark": {
+    "type": "test_grid"
+   },
+   "encoding": {
+    "x": {
+     "field": "c"
+    },
+    "y": {
+     "field": "r"
+    }
+   }
+  }
+ },
+ "columns": {
+  "c": [],
+  "r": []
+ },
+ "types": {
+  "c": "STRING",
+  "r": "STRING"
+ },
+ "expect": {
+  "marks": 0
+ }
+}
