@@ -68,52 +68,66 @@ class ChartLegendFormsBrowserTest {
             )
         var places = 0
         open(overrides).use { s ->
-            for ((fixture, description) in descriptions) {
-                s.draw("test_keys/$fixture/960x540.input.json")
-                val r = s.read(LEGEND_JS)
-                val groups = s.groups()
-                withClue("$fixture: the legend of keys is drawn") { groups.size shouldBeGreaterThanOrEqual 2 }
-                withClue("$fixture: D10, no switch attribute in the page") { (r["switchy"] as Number).toInt() shouldBe 0 }
-                withClue("$fixture: the picture stays an image") { r["role"] shouldBe "img" }
-                withClue("$fixture: no child of the picture is hidden from assistive technology") {
-                    (r["hiddenKids"] as Number).toInt() shouldBe 0
-                }
-                withClue("$fixture: the desc names the entries") { r["desc"] as String shouldContain description }
-                for (g in groups) {
-                    withClue("$fixture: a legend group carries no label from a title") { g["label"] shouldBe null }
-                    withClue("$fixture: a key at the full opacity, a name never struck") {
-                        (g["keyOpacity"] as Number).toDouble() shouldBe 1.0
-                        g["struck"] shouldBe null
-                    }
-                    for (at in listOf(g["key"], g["name"]).filterNotNull()) {
-                        val (x, y) = point(at)
-                        s.page.mouse().move(x, y)
-                        s.settled()
-                        val dim = s.read(DIM_JS)
-                        withClue("$fixture at $x,$y: nothing is dimmed") {
-                            dim["dimmed"] shouldBe false
-                            @Suppress("UNCHECKED_CAST")
-                            (dim["marks"] as List<Number>).map { it.toDouble() }.distinct() shouldContainExactly listOf(1.0)
-                        }
-                        s.page.mouse().click(x, y)
-                        places++
-                    }
-                }
-                s.page.locator("#chart").focus()
-                for (key in WALK) {
-                    s.page.keyboard().press(key)
-                    val ring = s.read(RING_JS)
-                    for (g in s.groups()) {
-                        val (x, y) = point(g["key"])
-                        withClue("$fixture after $key: the keys' stop is on a legend group") { inside(ring, x, y) shouldBe false }
-                    }
-                    s.page.keyboard().press("Enter")
-                }
-                withClue("$fixture: the host was asked for no switch") { s.asked().shouldBeEmpty() }
-            }
+            for ((fixture, description) in descriptions) places += keysFixture(s, fixture, description)
             s.clean("legend of keys")
         }
         withClue("A.8 (a) non-vacuity: pointer places tried") { places shouldBeGreaterThanOrEqual MIN_PLACES }
+    }
+
+    /** A.8 (a) on one fixture of test_keys; returns the pointer places tried. */
+    private fun keysFixture(
+        s: Session,
+        fixture: String,
+        description: String,
+    ): Int {
+        var places = 0
+        s.draw("test_keys/$fixture/960x540.input.json")
+        val r = s.read(LEGEND_JS)
+        val groups = s.groups()
+        withClue("$fixture: the legend of keys is drawn") { groups.size shouldBeGreaterThanOrEqual 2 }
+        withClue("$fixture: D10, no switch attribute in the page") { (r["switchy"] as Number).toInt() shouldBe 0 }
+        withClue("$fixture: the picture stays an image") { r["role"] shouldBe "img" }
+        withClue("$fixture: no child of the picture is hidden from assistive technology") { (r["hiddenKids"] as Number).toInt() shouldBe 0 }
+        withClue("$fixture: the desc names the entries") { r["desc"] as String shouldContain description }
+        for (g in groups) {
+            withClue("$fixture: a legend group carries no label from a title") { g["label"] shouldBe null }
+            withClue("$fixture: a key at the full opacity, a name never struck") {
+                (g["keyOpacity"] as Number).toDouble() shouldBe 1.0
+                g["struck"] shouldBe null
+            }
+            for (at in listOf(g["key"], g["name"]).filterNotNull()) {
+                pointNothing(s, fixture, point(at))
+                places++
+            }
+        }
+        s.page.locator("#chart").focus()
+        for (key in WALK) {
+            s.page.keyboard().press(key)
+            val ring = s.read(RING_JS)
+            val onLegend = s.groups().map { point(it["key"]) }.filter { (x, y) -> inside(ring, x, y) }
+            withClue("$fixture after $key: the keys' stop is on a legend group") { onLegend.shouldBeEmpty() }
+            s.page.keyboard().press("Enter")
+        }
+        withClue("$fixture: the host was asked for no switch") { s.asked().shouldBeEmpty() }
+        return places
+    }
+
+    /** The pointer over a place of a key-only entry dims nothing; a click there (the host's count is read later). */
+    private fun pointNothing(
+        s: Session,
+        fixture: String,
+        at: Pair<Double, Double>,
+    ) {
+        val (x, y) = at
+        s.page.mouse().move(x, y)
+        s.settled()
+        val dim = s.read(DIM_JS)
+        withClue("$fixture at $x,$y: nothing is dimmed") {
+            dim["dimmed"] shouldBe false
+            @Suppress("UNCHECKED_CAST")
+            (dim["marks"] as List<Number>).map { it.toDouble() }.distinct() shouldContainExactly listOf(1.0)
+        }
+        s.page.mouse().click(x, y)
     }
 
     /** A.8 (b) on the page served with [overrides] (none: the real files). */
@@ -350,6 +364,7 @@ class ChartLegendFormsBrowserTest {
             y: Double,
         ): Boolean {
             if (ring["on"] != true) return false
+
             fun n(k: String) = (ring[k] as Number).toDouble()
             return x >= n("left") && x <= n("right") && y >= n("top") && y <= n("bottom")
         }
