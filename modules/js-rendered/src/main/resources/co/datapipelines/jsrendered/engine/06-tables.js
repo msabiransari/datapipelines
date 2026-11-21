@@ -72,6 +72,7 @@
     areaFade: f(true, "render", "§2 area: the fill fades from --chart-area-top at the plot's top to --chart-area-bottom at the baseline (false: one flat opacity, the top's)"),
     legendKeyLine: f("line", "render", "§4.2: a line's legend key is a short line"),
     legendKeyArea: f("square", "render", "§4.2: an area's legend key is a square"),
+    legendKeyPoint: f("dot", "render", "§4.2: a point's legend key is a dot"),
     directMin: f(2, "render", "§4.2 line 4 (L5): the names are on the lines from this many series in the data"),
     directMax: f(4, "render", "§4.2 line 4 (L5): the names are on the lines up to this many series in the data"),
     directGap: f(0.5, "render", "em: between the plot's right edge and a name or a last value written after the lines"),

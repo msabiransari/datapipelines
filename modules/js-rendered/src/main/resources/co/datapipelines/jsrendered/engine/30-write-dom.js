@@ -173,7 +173,7 @@
 
   /**
    * The accessible description of a draw (record §4.8, brief 990 D6): {title, desc}. title = the document's display
-   * name; desc = the type, the series names of the data, the mark count, then the document's description when it has
+   * name; desc = the type, the series names of the data, a legend of keys' names (summary.keys), the mark count, then the document's description when it has
    * one. Both are data and reach a picture as text nodes only. output = render's result; document = its input's.
    */
   function describe(output, document) {
@@ -185,6 +185,12 @@
       var names = [];
       for (var i = 0; i < summary.series.length; i++) names.push(summary.series[i].title);
       if (names.length > 0) parts.push("series: " + names.join(", "));
+      // A legend of keys (brief 1054 D6): its entries' names, as the series are named.
+      if (Array.isArray(summary.keys) && summary.keys.length > 0) {
+        var titles = [];
+        for (var k = 0; k < summary.keys.length; k++) titles.push(summary.keys[k].title);
+        parts.push("legend: " + titles.join(", "));
+      }
       parts.push(R.text.value(summary.marks, "integer") + (summary.marks === 1 ? " mark" : " marks"));
     }
     var desc = parts.join("; ") + ".";

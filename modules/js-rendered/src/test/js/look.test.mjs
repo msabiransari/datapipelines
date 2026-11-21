@@ -24,7 +24,9 @@ const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stac
   // The radial axis's (brief 1055 D8): its rings' form, its tick rule's span, its names' column and the rule of no room.
   "radialRings", "radialTickSpan", "radialNameShare", "radialRadiusFloor",
   // Colour by value's (brief 1050 D5): the width of a step of a colour scale's legend, in keys.
-  "legendStepRatio"];
+  "legendStepRatio",
+  // The legend's forms (brief 1054 D8): a point's key, a dot.
+  "legendKeyPoint"];
 
 /**
  * The interaction layer's fields (brief 990 D4a): consumer `interaction`, read on the page by the layer and never by
@@ -49,7 +51,9 @@ const OTHER = { legendSideMaxEm: 2, legendKeyBar: "line", labelsDefault: "none",
   // A quarter down, not up: no fixture has five series, so 5 shows nothing; at 3 the four-line fixture loses its names on the lines.
   directMax: 3,
   // The ring's other form (brief 1055 D8; the contract's LA15 plant for the radar's rings).
-  radialRings: "circle" };
+  radialRings: "circle",
+  // A point's key as a square (brief 1054 D8).
+  legendKeyPoint: "square" };
 function other(name, v) {
   if (Object.prototype.hasOwnProperty.call(OTHER, name)) return OTHER[name];
   if (typeof v === "boolean") return !v;
@@ -64,7 +68,9 @@ const A14_FRAMES = [[960, 540], [480, 360], [372, 250], [300, 180], [240, 160], 
  * dead when none of those pictures changes. The test type's fixtures never join chartFixtures(); and with each of these
  * fields changed, every chart fixture's picture equals its base (no product picture reads it).
  */
-const A14_ON_TYPE = { radialRings: "test_web", radialTickSpan: "test_web", radialNameShare: "test_web", radialRadiusFloor: "test_web" };
+const A14_ON_TYPE = { radialRings: "test_web", radialTickSpan: "test_web", radialNameShare: "test_web", radialRadiusFloor: "test_web",
+  // Brief 1054 D8: no product fixture reads a point's key before scatter.
+  legendKeyPoint: "test_switch" };
 
 test("A14 (render half): changing any one look field changes the primitives of at least one chart fixture", () => {
   const base = new Map();

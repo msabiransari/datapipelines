@@ -130,10 +130,12 @@
    *   5. otherwise → "top".
    * At the compact level the legend of line 3 or 5 is one row at the bottom ("compact"). Every count is of the series
    * in the data, never of the visible ones. series = [{id, title}] of the FULL data; legend = absent, null or {orient}.
+   * alone (brief 1054 D3, optional): true → line 2 does not apply, so one entry is a legend; only a legend of keys whose
+   * model hands `keysAlone: true` passes it (the gauge's one tone). Five arguments answer as before.
    */
-  function legendPlace(series, hidden, lvl, legend, direct) {
+  function legendPlace(series, hidden, lvl, legend, direct, alone) {
     if (lvl === "minimal" || legend === null) return null;
-    if (series.length === 1 && hidden.indexOf(series[0].id) < 0) return null;
+    if (alone !== true && series.length === 1 && hidden.indexOf(series[0].id) < 0) return null;
     var orient = legend && typeof legend === "object" && typeof legend.orient === "string" ? legend.orient : null;
     var place = orient === "top" || orient === "bottom" || orient === "left" || orient === "right" ? orient : null;
     if (place === null && direct === true && lvl === "full" && series.length >= look("directMin") && series.length <= look("directMax")) {
@@ -220,29 +222,110 @@
   }
 
   /**
-   * The legend's primitives at (ox, oy): one group per entry (role legend, its series id, its name, on = shown) holding
-   * the key, a square of the series colour (§4.2: a bar's key; its opacity --chart-dim when hidden) and the name in
-   * ink-2, struck through when hidden. colourOf(id) → the series' colour token.
+   * The legend's primitives at (ox, oy). A switch entry (keysOnly not true) is one group {role legend, series id,
+   * legend id, label title, on = shown} holding the key in the entry's colour (its opacity --chart-dim when hidden) and
+   * the name in ink-2, struck through when hidden. A key-only entry (keysOnly true, brief 1054 D4) is a group with no
+   * series, no legend and no label, on, holding the key at opacity 1 and the name never struck, each with no series: no
+   * writer makes it a button and the layer finds no entry in it. colourOf(id) → the entry's colour token. keyField: the
+   * look field of every entry's key (absent: legendKeyBar), or a function (id) → that field for one entry. The key's
+   * form is the field's value: "square" (the key's side), "line" (a stroke of --chart-line across the key's width) or
+   * "dot" (a circle at the centre of the key's square, its radius --chart-point and at most half the key's side); every
+   * form stands inside the same square, so the layout's arithmetic is one for all three.
    */
-  function legendPrims(h, lay, ox, oy, hiddenOf, colourOf, out, keyField) {
-    var row = look("lineHeight") * h.text;
+  function legendPrims(h, lay, ox, oy, hiddenOf, colourOf, out, keyField, keysOnly) {
+    var row = look("lineHeight") * h.text, only = keysOnly === true;
     for (var i = 0; i < lay.items.length; i++) {
-      var it = lay.items[i], e = it.e, x = ox + it.x, cy = oy + it.y + row / 2, off = hiddenOf(it.s.id);
-      var token = colourOf(it.s.id), kids = [];
-      // The key's form, from the look field the type names (contract §4.2: a square for bars and areas, a short line for
-      // lines): "square", or "line" (a stroke of --chart-line across the key's width).
-      var form = look(keyField === undefined ? "legendKeyBar" : keyField), kh = form === "square" ? e.key : form === "line" ? h.theme.n("--chart-line") : -1;
-      if (kh < 0) throw new Error("unknown legend key " + form);
-      kids.push(P.rect({ role: "legend", x: x, y: r2(cy - kh / 2), w: e.key, h: kh, fill: token, color: h.theme.css(token), opacity: off ? h.theme.n("--chart-dim") : 1, series: it.s.id }));
-      if (e.shown !== "") {
-        kids.push(h.label({ role: "legend", x: x + e.key + e.gap, y: h.middle(cy, h.text), text: it.s.title, shown: e.shown, size: h.text, ink: "--chart-ink-2", struck: off, series: it.s.id }));
+      var it = lay.items[i], e = it.e, x = ox + it.x, cy = oy + it.y + row / 2, off = !only && hiddenOf(it.s.id);
+      var token = colourOf(it.s.id), kids = [], ser = only ? null : it.s.id;
+      var field = typeof keyField === "function" ? keyField(it.s.id) : keyField;
+      if (field === undefined) field = "legendKeyBar";
+      var form = look(field), opacity = off ? h.theme.n("--chart-dim") : 1;
+      if (form === "dot") {
+        kids.push(P.circle({ role: "legend", cx: x + e.key / 2, cy: cy, r: Math.min(h.theme.n("--chart-point"), e.key / 2), fill: token, color: h.theme.css(token), opacity: opacity, series: ser }));
+      } else {
+        var kh = form === "square" ? e.key : form === "line" ? h.theme.n("--chart-line") : -1;
+        if (kh < 0) throw new Error("unknown legend key " + form);
+        kids.push(P.rect({ role: "legend", x: x, y: r2(cy - kh / 2), w: e.key, h: kh, fill: token, color: h.theme.css(token), opacity: opacity, series: ser }));
       }
-      P.group(out, { role: "legend", series: it.s.id, legend: it.s.id, label: it.s.title, on: !off }, kids);
+      if (e.shown !== "") {
+        kids.push(h.label({ role: "legend", x: x + e.key + e.gap, y: h.middle(cy, h.text), text: it.s.title, shown: e.shown, size: h.text, ink: "--chart-ink-2", struck: off, series: ser }));
+      }
+      if (only) P.group(out, { role: "legend", series: null, legend: null, label: null, on: true }, kids);
+      else P.group(out, { role: "legend", series: it.s.id, legend: it.s.id, label: it.s.title, on: !off }, kids);
     }
     if (lay.more !== null) {
       out.push(h.label({ role: "legend", x: ox + lay.more.x, y: h.middle(oy + lay.more.y + row / 2, h.text), text: lay.more.text, size: h.text, ink: "--chart-ink-2" }));
     }
     return out;
+  }
+
+  /** The three legend key forms a look field may hold (look contract §4.2: a square, a short line, a dot). */
+  var KEY_FORMS = { square: true, line: true, dot: true };
+  var KEY_MEMBERS = { id: true, title: true, key: true, colour: true };
+
+  /** A look field that holds a key form, or a throw naming where it was handed. */
+  function keyFieldOf(where, field) {
+    if (typeof field !== "string" || !Object.prototype.hasOwnProperty.call(R.tables.LOOK, field)) throw new Error("legend: " + where + " " + String(field) + " is no look-table field");
+    var form = look(field);
+    if (typeof form !== "string" || KEY_FORMS[form] !== true) throw new Error("legend: " + where + " " + field + " holds " + String(form) + ", not a key form (square, line, dot)");
+    return field;
+  }
+
+  /**
+   * What a type's model hands its legend, checked (brief 1054 D2): {keyOf(id) → the look field of series id's key,
+   * keys: null | [{id, title, key, colour}], alone: null | true | false}. A series may carry `legendKey`, the name of a
+   * look field whose value is a key form; one without takes the model's `legendKey` (absent: legendKeyBar, in
+   * legendPrims). A model may carry `keys` (a legend of keys, no entry a switch) with `keysAlone` (true: one entry is a
+   * legend). A throw is a defect of a type's template, never a state of a draw.
+   */
+  function legendModel(m) {
+    var has = function (k) {
+      return Object.prototype.hasOwnProperty.call(m, k) && m[k] !== undefined;
+    };
+    var own = new Map();
+    for (var i = 0; i < m.series.length; i++) {
+      var s = m.series[i];
+      if (s !== null && typeof s === "object" && Object.prototype.hasOwnProperty.call(s, "legendKey") && s.legendKey !== undefined) own.set(s.id, keyFieldOf("series " + s.id + ": legendKey", s.legendKey));
+    }
+    var keyOf = function (id) {
+      return own.has(id) ? own.get(id) : m.legendKey;
+    };
+    if (!has("keys")) {
+      if (has("keysAlone")) throw new Error("legend: keysAlone is handed without keys");
+      return { keyOf: keyOf, keys: null, alone: null };
+    }
+    if (!Array.isArray(m.keys)) throw new Error("legend: keys is not a list");
+    if (m.shade) throw new Error("legend: a model hands keys or shade, not both");
+    if (m.direct === true) throw new Error("legend: a model hands keys or direct: true, not both");
+    if (m.keysAlone !== true && m.keysAlone !== false) throw new Error("legend: keys is handed without keysAlone true or false");
+    var keys = [], seen = new Map(), tokens = R.theme.TOKENS;
+    for (var k = 0; k < m.keys.length; k++) {
+      var e = m.keys[k], at = "keys[" + k + "]";
+      if (e === null || typeof e !== "object" || Array.isArray(e)) throw new Error("legend: " + at + " is not an object");
+      for (var name in e) if (Object.prototype.hasOwnProperty.call(e, name) && KEY_MEMBERS[name] !== true) throw new Error("legend: " + at + ": " + name + " is not a member");
+      for (var want in KEY_MEMBERS) if (!Object.prototype.hasOwnProperty.call(e, want) || e[want] === undefined) throw new Error("legend: " + at + ": " + want + " is missing");
+      if (typeof e.id !== "string") throw new Error("legend: " + at + ": id is not a text");
+      if (e.id === "") throw new Error("legend: " + at + ": id is empty");
+      if (seen.has(e.id)) throw new Error("legend: " + at + ": id " + e.id + " stands twice");
+      seen.set(e.id, true);
+      if (typeof e.title !== "string") throw new Error("legend: " + at + ": title is not a text");
+      var kind = typeof e.colour === "string" && Object.prototype.hasOwnProperty.call(tokens, e.colour) ? tokens[e.colour][0] : null;
+      if (kind !== "colour" && kind !== "opaque") throw new Error("legend: " + at + ": colour " + String(e.colour) + " is no colour token");
+      keys.push({ id: e.id, title: e.title, key: keyFieldOf(at + ": key", e.key), colour: e.colour });
+    }
+    return { keyOf: keyOf, keys: keys, alone: m.keysAlone };
+  }
+
+  /**
+   * The output's names of a legend of keys (brief 1054 D6): summary.keys = [{id, title}] in the model's order, for a
+   * model whose `keys` is not empty, whether the legend is drawn or not; nothing for any other model.
+   */
+  function legendKeys(m, summary) {
+    var keys = legendModel(m).keys;
+    if (keys === null || keys.length === 0) return;
+    summary.keys = keys.map(function (e) {
+      return { id: e.id, title: e.title };
+    });
   }
 
   /**
@@ -324,5 +407,5 @@
     return rows[0].y - half(rows[0]) >= lo - 1e-9;
   }
 
-  R.chrome = { helpers: helpers, level: level, titles: titles, wrapTwo: wrapTwo, legendPlace: legendPlace, legendLayout: legendLayout, legendPrims: legendPrims, endRoom: endRoom, endLabels: endLabels };
+  R.chrome = { helpers: helpers, level: level, titles: titles, wrapTwo: wrapTwo, legendPlace: legendPlace, legendLayout: legendLayout, legendPrims: legendPrims, legendModel: legendModel, legendKeys: legendKeys, endRoom: endRoom, endLabels: endLabels };
 })(JsRendered);

@@ -1,0 +1,50 @@
+{
+ "note": "eight series with long names and mixed keys: the compact level folds them into +n",
+ "document": {
+  "display_name": "Test type test_switch",
+  "config": {
+   "mark": {
+    "type": "test_switch"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Eight long names"
+   },
+   "test": {
+    "keys": {
+     "Northern territories and islands": "legendKeyBar",
+     "Southern coastal provinces": "legendKeyLine",
+     "Eastern mountain districts": "legendKeyPoint",
+     "Western river valleys": "legendKeyBar",
+     "Central plains and lakes": "legendKeyLine",
+     "Far north tundra region": "legendKeyPoint",
+     "Deep south desert basin": "legendKeyBar",
+     "Offshore island chains": "legendKeyLine"
+    }
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Northern territories and islands",
+   "Southern coastal provinces",
+   "Eastern mountain districts",
+   "Western river valleys",
+   "Central plains and lakes",
+   "Far north tundra region",
+   "Deep south desert basin",
+   "Offshore island chains"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 8
+ }
+}

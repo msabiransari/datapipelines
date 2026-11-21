@@ -1,0 +1,59 @@
+{
+ "note": "the legend of keys written at left",
+ "document": {
+  "display_name": "Test type test_keys",
+  "config": {
+   "mark": {
+    "type": "test_keys"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": {
+      "orient": "left"
+     }
+    }
+   },
+   "title": {
+    "text": "Keys left"
+   },
+   "test": {
+    "keys": [
+     {
+      "id": "bar",
+      "title": "Bars",
+      "key": "legendKeyBar",
+      "colour": "--chart-series-1"
+     },
+     {
+      "id": "line",
+      "title": "Lines",
+      "key": "legendKeyLine",
+      "colour": "--chart-series-2"
+     },
+     {
+      "id": "dot",
+      "title": "Points",
+      "key": "legendKeyPoint",
+      "colour": "--chart-muted"
+     }
+    ],
+    "keysAlone": false
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Amount",
+   "Amount",
+   "Amount"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 3
+ }
+}

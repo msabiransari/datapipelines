@@ -6,7 +6,6 @@ import com.microsoft.playwright.BrowserContext
 import com.microsoft.playwright.BrowserType
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.Playwright
-import com.microsoft.playwright.Route
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -19,8 +18,6 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
-import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.math.abs
 
 /**
@@ -33,6 +30,7 @@ import kotlin.math.abs
  * reference page's policy, word for word, as a `meta` element) and its script. Any other request is aborted and fails
  * the test; the class listens itself, from the first request on, for console errors, page errors, dialogs and policy
  * violations, and every test ends with all of them, the aborted requests and the `style` attributes at 0.
+ * The serving code is [ChartTestPage]'s, shared with [ChartLegendFormsBrowserTest] (brief 1054 D11).
  *
  * The oracle is the test's own (the in-page checks below): which mark a place finds (`Math.hypot`, `Math.atan2`), the
  * card's lines from the FIXTURE the test holds (never the served copy, never the layer's `cardLines`), measured with the
@@ -534,106 +532,26 @@ class ChartMarkLookupBrowserTest {
     }
 
     /** A page of its own; [overrides] replaces a served file's bytes by its path (a plant, or A.9's changed field). */
-    private fun open(overrides: Map<String, ByteArray> = emptyMap()): Session {
-        val errors = CopyOnWriteArrayList<String>()
-        val violations = CopyOnWriteArrayList<String>()
-        val off = CopyOnWriteArrayList<String>()
-        val context = browser.newContext(Browser.NewContextOptions().setViewportSize(VIEW_W, VIEW_H))
-        context.route("**/*") { route -> serve(route, off, overrides) }
-        val page = context.newPage()
-        page.onConsoleMessage { m ->
-            if (m.text().contains("Content Security Policy")) violations += m.text()
-            if (m.type() == "error") errors += "console: ${m.text()}"
-        }
-        page.onPageError { e -> errors += "page error: $e" }
-        page.onDialog { d ->
-            errors += "dialog: ${d.message()}"
-            d.dismiss()
-        }
-        page.navigate("$ORIGIN/index.html")
-        return Session(context, page, errors, violations, off)
-    }
-
-    private fun serve(
-        route: Route,
-        off: MutableList<String>,
-        overrides: Map<String, ByteArray>,
-    ) {
-        val url = route.request().url()
-        val rel = if (url.startsWith("$ORIGIN/")) url.removePrefix("$ORIGIN/").substringBefore('?').substringBefore('#') else null
-        val bytes = rel?.let { overrides[it] ?: served(it) }
-        if (rel == null || bytes == null) {
-            off += "aborted: $url"
-            route.abort()
-            return
-        }
-        route.fulfill(
-            Route
-                .FulfillOptions()
-                .setStatus(OK)
-                .setBodyBytes(bytes)
-                .setContentType(typeOf(rel)),
-        )
-    }
-
-    /** The closed set of files the page may ask for (D11); null for any other path. */
-    private fun served(rel: String): ByteArray? =
-        when {
-            rel == "index.html" -> {
-                page().toByteArray()
-            }
-
-            rel == "chart-marks.js" -> {
-                resourceText("chart-marks/chart-marks.js").toByteArray()
-            }
-
-            rel == TEST_TYPE_PATH -> {
-                resourceBytes("co/datapipelines/jsrendered/test/types/test_marks.js")
-            }
-
-            rel.startsWith("emitted/") && EMITTED.matches(rel.removePrefix("emitted/")) -> {
-                resourceBytes("co/datapipelines/jsrendered/emitted/_types/test_marks/${rel.removePrefix("emitted/")}")
-            }
-
-            rel.startsWith("engine/") && rel.removePrefix("engine/") in JsRenderedEngineFiles.names -> {
-                fromDir(rel)
-            }
-
-            rel == LAYER || rel == "css/app.css" || rel in fonts -> {
-                fromDir(rel)
-            }
-
-            else -> {
-                null
-            }
-        }
-
-    /** The page with its one marker line replaced by the script tags: engine (load order), test type, layer, script. */
-    private fun page(): String {
-        val text = resourceText("chart-marks/index.html")
-        val marker = "<!-- chart-marks: scripts -->"
-        require(text.split(marker).size - 1 == 1) { "chart-marks/index.html carries the marker other than once" }
-        val tags =
-            (JsRenderedEngineFiles.names.map { "engine/$it" } + TEST_TYPE_PATH + LAYER + "chart-marks.js")
-                .joinToString("\n") { "  <script src=\"$it\"></script>" }
-        return text.replace(marker, tags)
-    }
-
-    private fun fromDir(rel: String): ByteArray? {
-        val file = dir.resolve(rel).normalize()
-        return if (file.startsWith(dir) && Files.isRegularFile(file)) Files.readAllBytes(file) else null
-    }
+    private fun open(overrides: Map<String, ByteArray> = emptyMap()): Session =
+        PAGE.open(browser, VIEW_W, VIEW_H, overrides).let { Session(it.context, it.page, it.errors, it.violations, it.off) }
 
     companion object {
-        private const val ORIGIN = "https://chart-marks.test"
         private const val VIEW_W = 1280
         private const val VIEW_H = 900
-        private const val OK = 200
         private const val WAIT_NANOS = 10_000_000_000L
         private const val POLL_MILLIS = 50.0
-        private const val LAYER = "js/datapipelines-chart-interactions.js"
-        private const val TEST_TYPE_PATH = "test/types/test_marks.js"
+        private const val LAYER = ChartTestPage.LAYER
         private val EMITTED = Regex("""[a-z-]+/\d+x\d+\.input\.json""")
+
+        /** The page this class serves itself (D11): the shared serving code, with G4's test type, page and inputs. */
+        private val PAGE =
+            ChartTestPage(
+                origin = "https://chart-marks.test",
+                resources = "chart-marks",
+                script = "chart-marks.js",
+                testTypes = listOf("test_marks"),
+                emitted = { r -> if (EMITTED.matches(r)) "co/datapipelines/jsrendered/emitted/_types/test_marks/$r" else null },
+            )
 
         /** The look table's three fields at their defaults, written here from brief D9 (the oracle is not the table). */
         private const val REACH = 24
@@ -658,35 +576,9 @@ class ChartMarkLookupBrowserTest {
         private const val MIN_CARDS = 60
         private const val MIN_KEY_TARGETS = 15
 
-        private val dir: Path by lazy {
-            val p = System.getProperty("dp.reference.dir") ?: error("dp.reference.dir is not set: the test serves the assembled directory")
-            Paths
-                .get(p)
-                .toAbsolutePath()
-                .normalize()
-                .also { require(Files.isRegularFile(it.resolve(LAYER))) { "no layer in $it" } }
-        }
+        private val dir: Path get() = ChartTestPage.dir
 
-        /** The font files `css/app.css` names by url(), relative to the directory. */
-        private val fonts: Set<String> by lazy {
-            val css = Files.readString(dir.resolve("css/app.css"))
-            Regex("""url\(\s*(['"]?)([^'")]+)\1\s*\)""")
-                .findAll(css)
-                .map { it.groupValues[2].trim() }
-                .filter { !it.startsWith("data:") && !it.startsWith("#") }
-                .map { dir.resolve("css").resolve(it.substringBefore('?').substringBefore('#')).normalize() }
-                .filter { it.startsWith(dir) }
-                .map { dir.relativize(it).toString().replace('\\', '/') }
-                .toSet()
-        }
-
-        private fun resourceBytes(path: String): ByteArray? =
-            ChartMarkLookupBrowserTest::class.java.classLoader
-                .getResourceAsStream(path)
-                ?.use { it.readBytes() }
-
-        private fun resourceText(path: String): String =
-            checkNotNull(resourceBytes(path)) { "$path is not on the test classpath" }.toString(Charsets.UTF_8)
+        private fun resourceText(path: String): String = ChartTestPage.resourceText(path)
 
         /** The fixture's emitted input as the TEST holds it (the oracle's source; a plant changes the served copy only). */
         private fun fixtureText(
@@ -703,16 +595,6 @@ class ChartMarkLookupBrowserTest {
             val a = mark["anchor"] as Map<String, Any?>
             return (a["x"] as Number).toDouble() to (a["y"] as Number).toDouble()
         }
-
-        private fun typeOf(rel: String): String =
-            when (rel.substringAfterLast('.')) {
-                "html" -> "text/html; charset=utf-8"
-                "js" -> "text/javascript; charset=utf-8"
-                "css" -> "text/css; charset=utf-8"
-                "json" -> "application/json"
-                "woff2" -> "font/woff2"
-                else -> "application/octet-stream"
-            }
 
         private var playwright: Playwright? = null
         private lateinit var browser: Browser

@@ -1,0 +1,56 @@
+{
+ "note": "the record's check: two squares and a line, coloured by three tokens (two not series colours)",
+ "document": {
+  "display_name": "Test type test_keys",
+  "config": {
+   "mark": {
+    "type": "test_keys"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Two squares and a line"
+   },
+   "test": {
+    "keys": [
+     {
+      "id": "up",
+      "title": "Increase",
+      "key": "legendKeyBar",
+      "colour": "--chart-series-3"
+     },
+     {
+      "id": "down",
+      "title": "Decrease",
+      "key": "legendKeyBar",
+      "colour": "--chart-seq-6"
+     },
+     {
+      "id": "total",
+      "title": "Opening and total",
+      "key": "legendKeyLine",
+      "colour": "--chart-ink-2"
+     }
+    ],
+    "keysAlone": false
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Amount",
+   "Amount",
+   "Amount"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 3
+ }
+}

@@ -1,0 +1,44 @@
+{
+ "note": "ONE entry under keysAlone true (the gauge's case): the legend stands",
+ "document": {
+  "display_name": "Test type test_keys",
+  "config": {
+   "mark": {
+    "type": "test_keys"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "One key alone"
+   },
+   "test": {
+    "keys": [
+     {
+      "id": "tone",
+      "title": "Within range",
+      "key": "legendKeyBar",
+      "colour": "--chart-series-3"
+     }
+    ],
+    "keysAlone": true
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Amount",
+   "Amount",
+   "Amount"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 3
+ }
+}
