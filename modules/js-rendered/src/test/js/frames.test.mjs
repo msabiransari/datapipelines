@@ -5,10 +5,12 @@
 // check run over a planted copy of the engine must fail, naming what it checks.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { engineWith, testTypes, testTypeKey, typeFixtures, typeInputOf } from "./engine.mjs";
+import { engine, engineWith, testTypes, testTypeKey, typeFixtures, typeInputOf } from "./engine.mjs";
 import { textBox, drawn as shownOf, TOL } from "./geometry.mjs";
 
-const NAMES = testTypes();
+// These checks own G1's three types; later lanes add test types and frames of their own. The shared sweep discovers
+// all of them in types.test.mjs, while this fixed context keeps registry and diagnostic assertions independent.
+const NAMES = ["test_plain", "test_polar", "test_quiet"];
 const R = engineWith(NAMES);
 /** One frame per level (emit.mjs's first three): full, compact, minimal. */
 const LEVELS = [["full", 960, 540], ["compact", 300, 180], ["minimal", 120, 40]];
@@ -91,14 +93,18 @@ function samePlot(a, b) {
 // ---------------------------------------------------------------------------------------------------- registration
 
 test("the frame registry holds cartesian, polar, none, and the test types' own frame after test_quiet loads", () => {
-  assert.deepEqual([...R.frames.names()], ["cartesian", "polar", "none", "test_quiet"]);
-  assert.deepEqual([...R.types()].map((t) => t.name), ["bar", "line", "area", "test_plain", "test_polar", "test_quiet"]);
-  assert.deepEqual(NAMES, ["test_plain", "test_polar", "test_quiet"]);
+  const product = engine();
+  for (const name of ["cartesian", "polar", "none"]) assert.ok(product.frames.names().includes(name), name + " is a product frame");
+  assert.deepEqual([...R.frames.names()], [...product.frames.names(), "test_quiet"]);
+  assert.deepEqual([...R.types()].map((t) => t.name), [...product.types()].map((t) => t.name).concat(NAMES));
+  for (const name of NAMES) assert.ok(testTypes().includes(name), name + " has a test type file");
 });
 
 test("D2: a type registered with an unknown axes throws naming it", () => {
   const def = { channels: [], model: () => null, marks: () => [], axes: "spiral" };
-  assert.throws(() => R.type("test_spiral", def), /test_spiral: axes spiral is not a frame \(cartesian, polar, none, test_quiet\)/);
+  assert.throws(() => R.type("test_spiral", def), {
+    message: "type: test_spiral: axes spiral is not a frame (" + R.frames.names().join(", ") + ")",
+  });
   assert.throws(() => R.type("test_none", Object.assign({}, def, { axes: undefined })), /axes undefined is not a frame/);
 });
 
