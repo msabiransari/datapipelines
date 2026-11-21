@@ -49,10 +49,6 @@
     "chart.rule.negative-part": function () {
       return "This chart cannot show negative values.";
     },
-    // Lane G2 (brief 1050 D6): a two-sided colour scale (`shade.scale: diverging`) until lane G5 draws it.
-    "chart.rule.shade-diverging": function () {
-      return "This chart's colour scale is not drawn yet.";
-    },
   };
 
   /** The fixed sentence of a refusal {code, details} (§4.3), its numbers grouped as the engine writes numbers. */

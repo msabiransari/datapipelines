@@ -1,0 +1,84 @@
+{
+ "source": [
+  "lane 1053 make_diverging_fixtures.py (brief 1053 D9)"
+ ],
+ "note": "(8) band B's shade is null (sum of no values) beside drawn bars: B in --chart-grid, still a mark",
+ "document": {
+  "display_name": "A null beside a two-sided shade",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "delta",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "delta",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "diverging"
+    }
+   },
+   "title": {
+    "text": "A null beside a two-sided shade"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A",
+   "B",
+   "C",
+   "D"
+  ],
+  "amount": [
+   10,
+   15,
+   20,
+   25
+  ],
+  "delta": [
+   -4,
+   null,
+   2,
+   4
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "delta": "DOUBLE"
+ }
+}

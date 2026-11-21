@@ -138,10 +138,10 @@ class JsRenderedSourceGuardTest {
 
         /**
          * Brief 1049's three test types (test_plain, test_polar, test_quiet), brief 1052's test_marks, brief 1051's five
-         * (test_points, test_grid, test_two_axes, test_bins, test_bare), brief 1055's test_web and brief 1054's two
-         * (test_switch, test_keys).
+         * (test_points, test_grid, test_two_axes, test_bins, test_bare), brief 1055's test_web, brief 1053's test_tones
+         * and brief 1054's two (test_switch, test_keys).
          */
-        const val TEST_TYPE_FLOOR = 12
+        const val TEST_TYPE_FLOOR = 13
 
         const val BANNED_COUNT = 23
 

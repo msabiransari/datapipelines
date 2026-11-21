@@ -201,8 +201,8 @@ class ChartLookContractTokensTest {
         private const val TEXT_PAIRS = 5
         private const val SERIES_FLOOR = 3.0
         private const val TEXT_FLOOR = 4.5
-        private const val ENGINE_TOKEN_COUNT = 43
-        private const val OWN_TOKEN_COUNT = 37
+        private const val ENGINE_TOKEN_COUNT = 56
+        private const val OWN_TOKEN_COUNT = 50
         private const val DESIGN_SYSTEM_FONT = "--font-sans"
         private const val DARK_QUERY = "prefers-color-scheme: dark"
         private val ROOT = listOf(":root")
@@ -212,7 +212,10 @@ class ChartLookContractTokensTest {
             dark: String = light,
         ) = light to dark
 
-        /** The look contract's §3 (draft 8), Light and Dark, written from its text: §3.1, §3.2, §3.3, §3.4, §3.5. */
+        /**
+         * The look contract's §3, Light and Dark, written from its text: §3.1, §3.2, §3.3, §3.4, §3.5 (draft 8), and §3.6's
+         * thirteen colours with a meaning and the two-sided ramp (draft 13, the owner's pick L9; brief 1053 D4).
+         */
         private val CONTRACT: Map<String, Pair<String, String>> =
             linkedMapOf(
                 "--chart-canvas" to t("#ffffff", "#171b21"),
@@ -240,6 +243,19 @@ class ChartLookContractTokensTest {
                 "--chart-seq-5" to t("#6979b7", "#6376be"),
                 "--chart-seq-6" to t("#495ca6", "#7388dd"),
                 "--chart-seq-7" to t("#283e95", "#839bfb"),
+                "--chart-positive" to t("#1971c2", "#4dabf7"),
+                "--chart-negative" to t("#d9480f", "#ff922b"),
+                "--chart-total" to t("#343a40", "#dee2e6"),
+                "--chart-good" to t("#00755a", "#42ae8e"),
+                "--chart-warn" to t("#ce7c04", "#fab72a"),
+                "--chart-bad" to t("#cd171e", "#d42325"),
+                "--chart-div-1" to t("#283e95", "#839bfb"),
+                "--chart-div-2" to t("#6279b6", "#6375b5"),
+                "--chart-div-3" to t("#a5b3d5", "#465174"),
+                "--chart-div-4" to t("#eceef2", "#2a2f38"),
+                "--chart-div-5" to t("#d7a699", "#674c3b"),
+                "--chart-div-6" to t("#b95d42", "#a86734"),
+                "--chart-div-7" to t("#7f2400", "#ee820b"),
                 "--chart-text" to t("12"),
                 "--chart-text-small" to t("11"),
                 "--chart-title" to t("14"),

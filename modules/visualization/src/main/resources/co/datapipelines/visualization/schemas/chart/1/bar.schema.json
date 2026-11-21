@@ -319,18 +319,13 @@
       }
     },
     "shade": {
-      "description": "The skeleton's shade; on a bar the scale is sequential (a diverging scale is not drawn yet).",
+      "description": "The skeleton's shade: on a bar the scale is sequential or diverging (two-sided around mid, zero where none is given), as the skeleton says.",
       "type": "object",
       "allOf": [
         {
           "$ref": "skeleton.schema.json#/$defs/shade"
         }
-      ],
-      "properties": {
-        "scale": {
-          "const": "sequential"
-        }
-      }
+      ]
     }
   }
 }

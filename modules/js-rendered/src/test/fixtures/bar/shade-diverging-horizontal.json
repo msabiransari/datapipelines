@@ -1,0 +1,87 @@
+{
+ "source": [
+  "lane 1053 make_diverging_fixtures.py (brief 1053 D9)"
+ ],
+ "note": "(11) a horizontal bar with a two-sided shade",
+ "document": {
+  "display_name": "Change by region, horizontal",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "delta",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "y": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "color": {
+     "field": "delta",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "diverging"
+    }
+   },
+   "title": {
+    "text": "Change by region, horizontal"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A",
+   "B",
+   "C",
+   "D",
+   "E"
+  ],
+  "amount": [
+   10,
+   15,
+   20,
+   25,
+   30
+  ],
+  "delta": [
+   -30,
+   -15,
+   0,
+   15,
+   30
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "delta": "DOUBLE"
+ }
+}

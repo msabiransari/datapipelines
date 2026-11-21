@@ -35,8 +35,6 @@
     var band = vertical ? e.x : e.y, value = vertical ? e.y : e.x, given = e.color || null;
     // `color` names a series (nominal, ordinal) or a shade (quantitative); from here `color` is the series form only.
     var shade = given !== null && given.type === "quantitative" ? given : null, color = shade === null ? given : null;
-    // D6: the two-sided scale is lane G5's; until then the draw is refused rather than drawn as something else.
-    if (shade !== null && shade.scale !== "sequential") return { rule: { code: "chart.rule.shade-diverging" } };
     types = types && typeof types === "object" ? types : {};
     var warnings = [];
     var B = D.column(columns, band.field), V = value.field ? D.column(columns, value.field) : null, C = color ? D.column(columns, color.field) : null;
@@ -168,7 +166,7 @@
     var shades = shade ? categories.map(function (c, ci2) {
       return cells[0][ci2].num === null ? null : D.aggregate(shadeVals.get(c.key) || [], shade.aggregate, shade.field);
     }) : null;
-    var scale = shade ? R.colour.sequential(shades) : null;
+    var scale = shade ? R.colour.of(shade, shades) : null;
     for (var q = 0; q < series.length; q++) {
       series[q].id = color ? series[q].key : fields ? "field:" + series[q].field : "measure";
       series[q].title = series[q].full;

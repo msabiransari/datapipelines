@@ -1,6 +1,6 @@
 {
- "display_name": "Diverging shade",
- "description": "A diverging shade on a bar.",
+ "display_name": "Diverging shade around 100",
+ "description": "A diverging shade on a bar with mid 100.",
  "renderer": {
   "kind": "chart",
   "version": "1"
@@ -64,11 +64,12 @@
     "field": "units",
     "type": "quantitative",
     "aggregate": "sum",
-    "scale": "diverging"
+    "scale": "diverging",
+    "mid": 100
    }
   },
   "title": {
-   "text": "Diverging shade"
+   "text": "Diverging shade around 100"
   }
  }
 }
