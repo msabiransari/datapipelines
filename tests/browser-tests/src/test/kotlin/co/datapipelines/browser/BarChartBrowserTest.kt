@@ -349,6 +349,62 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         return read["bar"] as String to (read["keys"] as List<*>).single() as String
     }
 
+    /**
+     * Brief 1053 D11: the two-sided scale through the stylesheet, the adapter, the engine and the DOM (`bar-shade-diverging`,
+     * fixture (1) of D9, not in [ChartBrowserFixtures.NAMES], so no other case sees it). The seven bars stand on the seven
+     * steps in category order; in the light scheme and then in the dark one each bar's painted fill and each of the scale
+     * legend's seven rectangles is the colour the look contract's §3.6 names for that step in that scheme, held here in the
+     * form the browser reports a colour ([DIVERGING]). After each scheme the CSP drain is empty; no console error and no
+     * page error on the page.
+     */
+    @Test
+    fun `a two-sided shade paints the contract's seven colours on the bars and the legend, in the light and the dark scheme`() {
+        startTrace()
+        val root = ready("vbardiv")
+        val agent = newYorkContext()
+        val errors = mutableListOf<String>()
+        agent.onPage { page ->
+            page.onConsoleMessage { m -> if (m.type() == "error") errors += "${page.url()}: console ${m.text()}" }
+            page.onPageError { e -> errors += "${page.url()}: page error $e" }
+        }
+        try {
+            val fixture = ChartBrowserFixtures.fixture("bar-shade-diverging")
+            val preview = open(agent, "$root/charts/bar_shade_diverging", fixture, "light")
+            try {
+                for (theme in listOf("light", "dark")) {
+                    if (theme != "light") {
+                        preview.navigate(preview.url().replace("theme=light", "theme=$theme"))
+                        preview.waitForSelector("$CASE[data-dp-ready='true']")
+                        preview.waitForFunction(
+                            "sel => { const c = document.querySelector(sel + ' .dp-dashboard-status');" +
+                                " return !!c && ['success', 'ready'].indexOf(c.getAttribute('data-dp-state')) >= 0; }",
+                            CASE,
+                        )
+                    }
+                    val read = preview.evaluate(DIVERGING_READ, CASE) as Map<*, *>
+                    println("bar-shade-diverging $theme: $read")
+                    val expected = requireNotNull(DIVERGING[theme])
+                    withClue("bar-shade-diverging $theme: the scheme the page is in $read") { read["scheme"] shouldBe theme }
+                    withClue("bar-shade-diverging $theme: each bar painted in its step's colour, steps 1 to 7 $read") {
+                        read["bars"] shouldBe expected
+                    }
+                    withClue("bar-shade-diverging $theme: the legend's seven rectangles, step 1 to step 7 $read") {
+                        read["legend"] shouldBe expected
+                    }
+                    withClue("bar-shade-diverging $theme: the legend's two numbers $read") {
+                        read["texts"] shouldBe fixture.expect.getAsJsonArray("legend_texts").map { it.asString }
+                    }
+                    withClue("CSP on the bar-shade-diverging preview in $theme") { drainCspViolations().shouldBeEmpty() }
+                }
+            } finally {
+                preview.close()
+            }
+        } finally {
+            agent.close()
+        }
+        withClue("bar-shade-diverging: no console error, no page error") { errors.shouldBeEmpty() }
+    }
+
     /** Opens fixture [name]'s preview when it carries `expect.hover` entries and reads each one; returns how many were read. */
     private fun readHovers(
         agent: BrowserContext,
@@ -770,6 +826,49 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
               });
               const rects = Array.from(svg.querySelectorAll('g.dp-tooltip rect'));
               return { bar: bar ? bar.getAttribute('fill') : null, keys: rects.slice(1).map(r => r.getAttribute('fill')) };
+            }"""
+
+        /**
+         * The look contract's §3.6 two-sided ramp, `--chart-div-1` to `--chart-div-7`, in each scheme, as the browser
+         * reports a computed colour (brief 1053 D2; the engine's table `E/05-theme.js` and `app.css` carry the same).
+         */
+        val DIVERGING: Map<String, List<String>> =
+            mapOf(
+                "light" to
+                    listOf(
+                        "rgb(40, 62, 149)",
+                        "rgb(98, 121, 182)",
+                        "rgb(165, 179, 213)",
+                        "rgb(236, 238, 242)",
+                        "rgb(215, 166, 153)",
+                        "rgb(185, 93, 66)",
+                        "rgb(127, 36, 0)",
+                    ),
+                "dark" to
+                    listOf(
+                        "rgb(131, 155, 251)",
+                        "rgb(99, 117, 181)",
+                        "rgb(70, 81, 116)",
+                        "rgb(42, 47, 56)",
+                        "rgb(103, 76, 59)",
+                        "rgb(168, 103, 52)",
+                        "rgb(238, 130, 11)",
+                    ),
+            )
+
+        /**
+         * The two-sided bar's page: the scheme in force (the root's computed `color-scheme`), each bar's computed fill in
+         * DOM order, the scale legend's rectangles' computed fills and its texts.
+         */
+        const val DIVERGING_READ =
+            """sel => {
+              const svg = document.querySelector(sel + ' svg.dp-chart');
+              const fill = el => getComputedStyle(el).fill;
+              const legend = svg.querySelector('g.dp-legend');
+              return { scheme: getComputedStyle(document.documentElement).colorScheme,
+                bars: Array.from(svg.querySelectorAll('g.dp-mark[data-series] > .dp-mark')).map(fill),
+                legend: legend ? Array.from(legend.querySelectorAll('rect')).map(fill) : null,
+                texts: legend ? Array.from(legend.querySelectorAll('text')).map(t => t.textContent) : [] };
             }"""
 
         /** The texts of the tooltip card the page shows, one per line. */
