@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.84 (frozen contract — additive-only changes after this point)
+**Status:** v1.85 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-11-20
@@ -699,7 +699,7 @@ Fetch metadata for a specific execution (no rows).
 
 **Permission:** `execution.read`.
 
-**`OUTCOME_UNKNOWN` and `result_unavailable` (#1035).** The record's `status` may be `OUTCOME_UNKNOWN` — terminal, with `error.code` `pipeline.execution.local_write_commit_failed`: the family's shared commit was attempted and its acknowledgement lost, so the writes may or may not exist. Never re-run to settle it; a re-run can write twice. A `SUCCESS` record may carry `result_unavailable: true` — the commit is confirmed, only the caller result was not delivered; `executions_get_result` then answers `result.storage_unavailable` and the status stays `SUCCESS`. A child of such a family stays `RUNNING` until its root settles and then reports the root's final status.
+**`OUTCOME_UNKNOWN` and `result_unavailable` (#1035).** The record's `status` may be `OUTCOME_UNKNOWN` — terminal, with `error.code` `pipeline.execution.local_write_commit_failed`: the family's shared commit was attempted and its acknowledgement lost, so the writes may or may not exist. Never re-run to settle it; a re-run can write twice. A `SUCCESS` record may carry `result_unavailable: true` — the commit is confirmed, only the caller result was not delivered; `executions_get_result` then answers `result.storage_unavailable` and the status stays `SUCCESS`. A `pipelines_execute` call (fresh, or attached to the same `Idempotency-Key`) whose run ends that way returns `status: "SUCCESS"` with `"result_unavailable": true` and no `rows` — not an error, and not an empty result that reads as a zero-caller run (#1035 r3). A child of such a family stays `RUNNING` until its root settles and then reports the root's final status.
 
 **Response (057, on a `FAILED` execution):** `error` is the full failure record — the same object the SSE stream carried and `error_json` stores. (Plain fence: an example, not a tool definition — §6.2's `json` fences are exactly the input schemas `McpToolSurfaceSpecDriftTest` pins.)
 
@@ -3156,6 +3156,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.85 | 1035 r3 (#1035) | **§6.2.3 `pipelines_execute`:** a confirmed run whose caller result cannot be delivered returns `status: "SUCCESS"` with `result_unavailable: true` and no rows (before: a `result.expired` error); the attached replay of the same key says the same. No new tool, no new permission. |
 | 2026-11-20 | v1.84 | 1035 (#1035) | **§6.2.13 `executions_list`:** the `status` filter gains `OUTCOME_UNKNOWN`. **§6.2.14 `executions_get`:** `status` may be `OUTCOME_UNKNOWN`; the record gains `result_unavailable`; a family child stays `RUNNING` until its root settles. **§6.2.15:** `result.execution_failed` covers `OUTCOME_UNKNOWN`, `result.storage_unavailable` a confirmed SUCCESS whose result was not delivered. No new tool, no new permission. |
 | 2026-11-15 | v1.83 | 989 (#989, js-rendered F5) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the three chart families (bar, line, area) and the schema address per family; the `tests` description's `mark_count` names a line's or an area's data points beside a bar's bars. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-15 | v1.82 | 988 (#988, js-rendered F4) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update`:** the `renderer` description no longer names the kind retired by #860; it reads "html and svg are reserved and refused". Text only: the input schema, the accepted kinds and every refusal are unchanged. |

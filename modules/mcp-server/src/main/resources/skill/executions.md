@@ -54,8 +54,8 @@ and its acknowledgement was lost: the writes may or may not exist. **Never re-ru
 pipeline to find out** — a re-run can write twice. Check the target database, or tell the
 person with the execution id, before any deliberate new run. `executions_get_result` answers
 `result.execution_failed` for it. A `SUCCESS` carrying `result_unavailable: true` committed;
-only its result was not delivered (`result.storage_unavailable`), and the writes are not
-repeated by re-running. Until the root settles, a child run of the same family stays
+only its result was not delivered (`result.storage_unavailable`; `pipelines_execute` returns
+it as `result_unavailable: true` with no rows), and the writes are not repeated by re-running. Until the root settles, a child run of the same family stays
 `RUNNING` and its event history shows no terminal event; afterwards it ends in one terminal
 event carrying the root's outcome. The wait for a commit is bounded by the run's own time
 budget: a commit that never answers ends the run `OUTCOME_UNKNOWN` at that budget.

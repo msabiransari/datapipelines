@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.127 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
+**Status:** v2.128 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-20
@@ -858,6 +858,8 @@ Emitted when execution finishes successfully, immediately before `data_ready`.
 
 **After the commit (#1035).** When the run enrolled a local write transaction ([DAG Executor §16.4](dag-executor.md#164-the-single-registration-local-write-transaction-1033)), `pipeline_completed` — and `data_ready` — are emitted only after the root's commit is confirmed; until then the stream carries node events and nothing that reads as success. A CHILD of such a family never streams its own `pipeline_completed`/`data_ready` before the settle (its record stays `RUNNING`, pending), and none is emitted for it afterwards.
 
+**`result_unavailable` (#1035 r3).** When the commit is confirmed but the caller result cannot be delivered, `pipeline_completed` carries `"result_unavailable": true` and no `data_ready` follows — so a stream client can tell this from a zero-caller run without reading the record. The field is absent on every other `pipeline_completed`.
+
 ```json
 {
   "execution_id": "exec-uuid",
@@ -935,7 +937,7 @@ data: {
 
 - `rows` — the first page. For results ≤ one page, `rows` IS the whole result (`has_more: false`) and no cursor read is needed.
 - `result_url` + `expires_at` — cursor for paging the full result within TTL (§7). Always present, small results included — a client may re-fetch or download in another format within the TTL.
-- On a run that enrolled a local write transaction, `data_ready` is emitted only after the commit is confirmed (#1035). If the commit is confirmed and the result then cannot be delivered, the execution is `SUCCESS` and no `data_ready` follows; the record carries `result_unavailable: true` (§10.2) and the cursor answers `503 result.storage_unavailable`.
+- On a run that enrolled a local write transaction, `data_ready` is emitted only after the commit is confirmed (#1035). If the commit is confirmed and the result then cannot be delivered, the execution is `SUCCESS` and no `data_ready` follows; the record carries `result_unavailable: true` (§10.2) and the cursor answers `503 result.storage_unavailable`. "Cannot be delivered" is decided after the confirmation from the stored result as it is then — the result prepared before the commit is read back from the store, and a result that is gone (or a store failure) is never announced, never served as an empty page and never cached in the event history as `data_ready`.
 - There is no `delivery_mode` field — the delivery model is uniform (v1.3; the former inline/claim-check split is gone).
 
 #### 6.4.8 `execution_aborted`
@@ -1643,7 +1645,7 @@ result is unexpired):
 | `executed_by` | uuid | The user the run belongs to (D11, 177): the session's user, or a key's OWNER. Was `triggered_by` until 2026-09-20 — renamed, not re-derived; every row kept its actor |
 | `executed_by_key_kind` | string \| null | Which KIND of credential started it when a key did — `user` \| `endpoint` \| `server` ([enums §18A](enums.md#18a-executedbykeykind--which-kind-of-credential-started-an-execution)); `null` for a signed-in session. An `endpoint` run is nobody's OWN: it lists for workspace admins only, and for the endpoint key itself (§19) |
 | `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` \| `ENDPOINT` \| `SCHEDULE` (#9 — a schedule fired it; `executed_by` is then the system identity, [Auth §4.5](auth.md#45-the-system-service-account-r7)) \| `DASHBOARD` (#10 — a dashboard refresh started it; `executed_by` is the refreshing person, [Dashboards §5](dashboards.md#5-the-runtime); it writes no stored result and is cancelled only through its refresh's abort) |
-| `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child |
+| `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child. Written with the terminal status (#1035 r3), and kept — the prepared result's count — on a `SUCCESS` with `result_unavailable: true`, so a run that had a caller result never reads as a zero-caller run |
 | `result_size_bytes` | int \| null | Size of the materialized caller result |
 | `parent_execution_id` | uuid \| null | The execution whose PIPELINE node spawned this one; null for a root ([§10.2](#102-get-execution-metadata)) |
 | `parent_node_id` | string \| null | That node's id; null for a root |
@@ -3129,6 +3131,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v2.128 | 1035 r3 (#1035) | **§6.4.5:** `pipeline_completed` carries `result_unavailable: true` (absent otherwise) when the confirmed commit's caller result cannot be delivered. **§6.4.7:** that decision reads the stored result back after the confirmation; a lost result is never announced or served as an empty success. **§10.2:** `result_row_count` is written with the terminal status and kept on an unavailable result. No new code, route or permission. |
 | 2026-11-21 | v2.127 | 1035 r2 (#1035) | **§10.3 / §10.2 family settlement:** a held child's event history (durable record, replay and MCP) carries no terminal event until its root settles, then one terminal event with the root's outcome and the next `event_id`; no route or field changes. |
 | 2026-11-20 | v2.126 | 1035 (#1035) | **Commit outcomes.** §6.4.5/§6.4.7/§6.5: success events follow the root's confirmed commit; a held child streams neither. §6.4.6: `pipeline_failed` also carries `status: "OUTCOME_UNKNOWN"`. §7.6: `result.execution_failed` covers `OUTCOME_UNKNOWN`; `result.storage_unavailable` covers a confirmed SUCCESS whose result was not delivered. §10.1/§10.2: `status` gains `OUTCOME_UNKNOWN`; the record gains `result_unavailable`; family settlement. No new code, no new route, no new permission. |
 | 2026-11-20 | v2.125 | #1037 merge follow-up F1 | **§25:** the API dependency name counts its uppercase mutation method prefix separately from the existing 200-character path limit; other fields and families keep their limit. The request schema and HTTP regression cover every supported method at the path boundary. |
