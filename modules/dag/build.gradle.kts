@@ -72,6 +72,10 @@ dependencies {
     // not bundled by default (-Pmysql), so it joins the TEST runtime only.
     testImplementation(libs.testcontainers.mysql)
     testRuntimeOnly(libs.mysql.connector.j)
+    // #1036: `LocalTransactionDialectQualificationTest` qualifies the single-database transaction on
+    // a real SQL Server (the pinned digest `datasources`' MSSQL suites use). The mssql-jdbc driver is
+    // already on this module's runtime classpath through datasources; this adds only the container.
+    testImplementation(libs.testcontainers.mssqlserver)
 }
 
 // Dependency-locking exclusion, copied from modules/datasources (the authority for the pattern):

@@ -223,9 +223,7 @@ class PipelineExecutor(
                     is LocalWriteVerdict.Refuse -> {
                         throw DatapipelinesException(
                             code = PipelineErrorCodes.Execution.LOCAL_WRITE_REFUSED,
-                            message =
-                                "Run refused: this pipeline's durable writes span more than one " +
-                                    "destination, so they cannot share one transaction (${verdict.reason.replace('_', ' ')})",
+                            message = localWriteRefusalMessage(verdict.reason),
                             details = verdict.details + ("reason" to verdict.reason),
                         )
                     }
