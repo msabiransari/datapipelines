@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.62 (living document — updated as enums evolve)
+**Status:** v1.63 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -86,7 +86,7 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 | Value | Required fields | Description |
 |---|---|---|
 | `tempdb` | `table` | Stage ResultSet into in-memory tempdb table for downstream nodes to query. |
-| `caller` | (none) | Return ResultSet as the pipeline's result. **Default if the `output` block is omitted.** At most one node per pipeline may resolve to `caller`; zero is legal (pure write-back pipelines emit no `data_ready`). |
+| `caller` | (none) | Return ResultSet as the pipeline's result. **Default when a DQL node omits its `output` block.** A DML node must declare its output explicitly (§4.4 of the Pipeline Contract). At most one node per pipeline may resolve to `caller`; zero is legal (pure write-back pipelines emit no `data_ready`). |
 | `datasource` | `datasource`, `table`, `mode` | Stream ResultSet to an external datasource's table. |
 | `discard` | (none) | DML nodes only (#1034, [Pipeline Contract §4.4](pipeline-contract.md#44-json-structure-dml-node)): the statement's write is the node's only effect; no rows are staged or returned. |
 
@@ -1425,6 +1425,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.63 | #1034 review F1 | §3 scopes the omitted-output `caller` default to DQL; DML always declares its output explicitly. |
 | 2026-11-20 | v1.62 | 1034 (#1034) | **§3 `OutputTarget`:** gains `discard`, the DML-only target whose write is the node's only effect (pipeline contract §4.4). |
 | 2026-11-15 | v1.61 | 989 (#989, js-rendered F5) | **§63 `ChartType`:** rows `line` and `area`, each with its enum entry, schema file, template and fixtures; their `x` is a band or a position (a temporal `x` has the one form `position`). |
 | 2026-11-15 | v1.60 | 988 (#988, js-rendered F4) | **§31 `RendererKind`:** the closing paragraph no longer names the kind retired by #860; it is refused as any unknown kind, as before. Text only: the closed set and its refusal are unchanged. |
