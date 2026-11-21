@@ -130,6 +130,21 @@ class LocalWriteCompatibilityCliIntegrationTest {
     }
 
     @Test
+    fun `a version only a published POST API pins is listed with its route`() {
+        releaseVersions("acme/order_api", listOf(oneWriter(), twoDestinations(), harmless()))
+        endpoint("POST", "/orders/v1/place", "acme/order_api", 2)
+
+        val lines = runCli().second.lines().filter { it.startsWith("workspace=") }
+
+        lines.map { it.substringBefore(" details=") } shouldContainExactly
+            listOf(
+                "workspace=$workspaceName pipeline=acme/order_api version=2 source=endpoint:POST:/orders/v1/place verdict=refused " +
+                    "reason=second_durable_destination",
+                "workspace=$workspaceName pipeline=acme/order_api version=3 source=current verdict=unchanged",
+            )
+    }
+
+    @Test
     fun `the report's session is read-only on the server`() {
         val pg = SharedPostgres.postgres
         LocalWriteCompatibilityCli.readOnlyDataSource(pg.jdbcUrl, pg.username, pg.password).use { dataSource ->
@@ -219,6 +234,29 @@ class LocalWriteCompatibilityCliIntegrationTest {
                     pipelines.releaseDraft(workspaceId, record.id, name, body.displayName, body.description, draft.bodyHash, owner),
                 ).record
         }
+    }
+
+    /** A published API at [method] [path] whose released current version pins [pipeline] at [version]. */
+    private fun endpoint(
+        method: String,
+        path: String,
+        pipeline: String,
+        version: Int,
+    ) {
+        val endpointId = UUID.randomUUID()
+        val pipelineId = checkNotNull(pipelines.findByNameAnyStatus(workspaceId, pipeline)).id
+        jdbc.update(
+            "INSERT INTO published_endpoints (id, workspace_id, path_pattern, method, pipeline_id, timeout_seconds, created_by)" +
+                " VALUES (:id, :ws, :path, :method, :pipeline, 30, :owner)",
+            mapOf("id" to endpointId, "ws" to workspaceId, "path" to path, "method" to method, "pipeline" to pipelineId, "owner" to owner),
+        )
+        jdbc.update(
+            "INSERT INTO published_endpoint_versions (endpoint_id, version, status, pipeline_name, pipeline_version, timeout_seconds," +
+                " body_hash, created_by, released_at, released_by)" +
+                " VALUES (:id, 1, 'RELEASED', :pipeline, :version, 30, 'h1', :owner, NOW(), :owner)",
+            mapOf("id" to endpointId, "pipeline" to pipeline, "version" to version, "owner" to owner),
+        )
+        jdbc.update("UPDATE published_endpoints SET current_version = 1 WHERE id = :id", mapOf("id" to endpointId))
     }
 
     private fun schedule(

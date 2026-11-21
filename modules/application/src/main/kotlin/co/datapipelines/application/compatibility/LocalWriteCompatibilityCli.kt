@@ -1,5 +1,6 @@
 package co.datapipelines.application.compatibility
 
+import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.executor.LocalWritePlanner
@@ -80,6 +81,7 @@ object LocalWriteCompatibilityCli {
                 workspaces = WorkspaceRepository(jdbc),
                 pipelines = pipelines,
                 schedules = ScheduleRepository(jdbc, PipelineJson.objectMapper()),
+                endpoints = PublishedEndpointRepository(jdbc),
             )
         val registrations = RegistrationView.over(DatasourceRepository(jdbc))
         val planner = LocalWritePlanner(candidates.resolver(), registrations, maxCompositionDepth)

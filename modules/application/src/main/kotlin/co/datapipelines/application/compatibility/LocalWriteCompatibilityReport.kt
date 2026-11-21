@@ -9,7 +9,7 @@ import java.util.UUID
 /**
  * The offline pre-upgrade compatibility report of the single-database pipeline transaction
  * (pipeline-write-transactions §7, dag-executor.md §16.7): every CURRENT stored pipeline version
- * and every version a live schedule PINS, run through the SAME [LocalWritePlanner] run admission
+ * and every version a live schedule or a published API PINS, run through the SAME [LocalWritePlanner] run admission
  * uses, so an operator sees before deploying which versions the transaction will enroll and which
  * it will refuse — and why — instead of discovering it at the first run.
  *
@@ -99,7 +99,7 @@ data class CompatibilityCandidate(
     val pipelineName: String,
     /** The exact version, or null when a schedule's payload did not name one the store holds. */
     val version: Int?,
-    /** `current`, and/or `schedule:<name>` for each live schedule pinning this version. */
+    /** `current`, `schedule:<name>` per live schedule and `endpoint:<METHOD>:<path>` per API pinning this version. */
     val sources: List<String>,
     /** The parsed body, or null when it could not be read — then [unreadable] says why. */
     val pipeline: Pipeline?,

@@ -1,5 +1,6 @@
 package co.datapipelines.application.compatibility
 
+import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineDeserializer
@@ -14,8 +15,9 @@ import java.util.UUID
  * The report's inventory (pipeline-write-transactions §7: "current stored and scheduled
  * versions"): for every live workspace, each pipeline's CURRENT version, plus every version a live
  * pipeline schedule pins — the exact pin of payload schema 2 (`{"pipeline": <name>, "version":
- * <n>}`, #786), the only schema a live schedule runs. A version that is both current and pinned is
- * one candidate listing both sources. A schema-1 schedule (converted to an exact pin at startup)
+ * <n>}`, #786), the only schema a live schedule runs — plus every version a published API's current
+ * version pins (an API pins an exact version, and since #1037 a POST/PUT/DELETE API may write). A
+ * version reached from several places is one candidate listing every source. A schema-1 schedule (converted to an exact pin at startup)
  * or a pin the store does not hold is listed UNREADABLE, never skipped silently.
  *
  * Read-only: every call here is a metadata SELECT.
@@ -24,6 +26,7 @@ class StoredCompatibilityCandidates(
     private val workspaces: WorkspaceRepository,
     private val pipelines: PipelineRepository,
     private val schedules: ScheduleRepository,
+    private val endpoints: PublishedEndpointRepository,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     /** Every candidate, by workspace name, pipeline name and version. */
@@ -46,6 +49,14 @@ class StoredCompatibilityCandidates(
         }
         schedules.listLiveAtSchema(PIPELINE_EXECUTOR, LEGACY_SCHEMA).filter { it.workspaceId in names }.forEach { schedule ->
             unreadable += schedule.unreadable(names, "schedule payload schema 1 is converted to an exact pin at startup")
+        }
+        names.keys.forEach { workspaceId ->
+            endpoints.findByWorkspace(workspaceId).forEach { endpoint ->
+                endpoint.current?.body?.let { pin ->
+                    found.getOrPut(Key(workspaceId, pin.pipelineName, pin.pipelineVersion)) { mutableListOf() } +=
+                        "endpoint:${endpoint.method}:${endpoint.pathPattern}"
+                }
+            }
         }
         val inspected = found.map { (key, sources) -> candidate(key, names.getValue(key.workspaceId), sources) }
         return (inspected + unreadable).sortedWith(compareBy({ it.workspace }, { it.pipelineName }, { it.version ?: 0 }))
