@@ -104,6 +104,8 @@ class StructuredPublishedInputIntegrationTest {
         val events = executeStream(pipelineId, """{"parameters":{},"request_body":$ORDER_OBJECT}""")
         withClue(describe(events)) { events.last().first shouldBe "data_ready" }
         val viaFramework = lines()
+        // Non-vacuity: two empty tables would compare equal.
+        viaFramework.map { Line(it.sku, it.qty, it.extId) } shouldBe listOf(Line("A-1", 2, null), Line("B-2", 1, EXACT_ID))
         val frameworkRows = resultOf(events.first().second["execution_id"].asText())["rows"].map { row -> row.map { it.asText() } }
 
         truncate()
