@@ -6,6 +6,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -14,11 +15,13 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.data.redis.core.StringRedisTemplate
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * [RedisResultStore] against a real Redis and a real JDBC cursor (dag-executor.md §6.4.2, D9).
@@ -168,6 +171,39 @@ class RedisResultStoreIntegrationTest {
             redis.hasKey("${stored.key}:meta") shouldBe true
             store.describe(stored.key).shouldBeNull()
             store.page(stored.key, 0, 10).shouldBeNull()
+        }
+
+    @Test
+    fun `rows lost after the existence probe and before the row read read as absent, never as an empty page (1035 R5)`() =
+        runBlocking<Unit> {
+            for (lose in listOf(listOf("rows"), listOf("rows", "meta"))) {
+                val probed = LoseAfterRowsProbe(requireNotNull(redis.connectionFactory), lose)
+                val store = RedisResultStore(probed, ResultConfig())
+                val stored = store.materialize(UUID.randomUUID(), rows(1, 5), Dialect.H2, TTL_SECONDS)
+
+                probed.arm("${stored.key}:rows")
+                withClue("describe, losing $lose") { store.describe(stored.key).shouldBeNull() }
+                probed.lost shouldBe lose.size.toLong()
+
+                val again = store.materialize(UUID.randomUUID(), rows(1, 5), Dialect.H2, TTL_SECONDS)
+                probed.arm("${again.key}:rows")
+                withClue("page, losing $lose") { store.page(again.key, 2, 10).shouldBeNull() }
+                probed.lost shouldBe lose.size.toLong()
+            }
+        }
+
+    @Test
+    fun `a page beyond the end is still a valid empty page, and an intact result still reads in full (1035 R5)`() =
+        runBlocking<Unit> {
+            val store = store()
+            val stored = store.materialize(UUID.randomUUID(), rows(1, 5), Dialect.H2, TTL_SECONDS)
+
+            store.describe(stored.key, firstPageRows = 2).shouldNotBeNull().firstPage.size shouldBe 2
+            store.page(stored.key, 3, 10).shouldNotBeNull().rows.size shouldBe 2
+            val beyond = store.page(stored.key, 5, 10).shouldNotBeNull()
+            beyond.rows shouldBe emptyList()
+            beyond.totalRows shouldBe 5L
+            store.page(stored.key, 50, 10).shouldNotBeNull().rows shouldBe emptyList()
         }
 
     @Test
@@ -325,6 +361,35 @@ class RedisResultStoreIntegrationTest {
     // ------------------------------------------------------------------ helpers
 
     private fun store(config: ResultConfig = ResultConfig()) = RedisResultStore(redis, config)
+
+    /**
+     * A real template that, once armed with a rows key, lets the real `EXISTS` answer and then removes
+     * the result's real keys before the store's next call — the `LRANGE` that reads the rows. It
+     * changes only WHEN the storage loss happens, never what Redis answers.
+     */
+    private class LoseAfterRowsProbe(
+        factory: RedisConnectionFactory,
+        private val suffixes: List<String>,
+    ) : StringRedisTemplate(factory) {
+        private val armed = AtomicReference<String?>()
+
+        /** How many keys the last armed loss removed. */
+        @Volatile var lost = -1L
+
+        fun arm(rowsKey: String) {
+            lost = -1L
+            armed.set(rowsKey)
+        }
+
+        override fun hasKey(key: String): Boolean {
+            val observed = super.hasKey(key)
+            if (observed && armed.compareAndSet(key, null)) {
+                val base = key.removeSuffix(":rows")
+                lost = delete(suffixes.map { "$base:$it" })
+            }
+            return observed
+        }
+    }
 
     /**
      * A real forward-only H2 cursor over `[from, to]`, with one column of each numeric shape.
