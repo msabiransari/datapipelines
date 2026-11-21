@@ -36,8 +36,10 @@ class ExecutorHarness(
     lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
     /** The preflight write-set planner (#1033) — null keeps the executor on the pre-feature gate-off. */
     localWritePlanner: LocalWritePlanner? = null,
+    /** (#1035) Makes the emitter throw for the events it names — result delivery failing after the commit. */
+    emitterFailsOn: (co.datapipelines.events.ExecutionEvent) -> Throwable? = { null },
 ) : Closeable {
-    val emitter = RecordingEmitter()
+    val emitter = RecordingEmitter(emitterFailsOn)
     val flags = InMemoryCancellationFlags()
     val slots =
         executionSlots ?: ExecutionSlots(config.maxConcurrentExecutionsPerUser, config.maxConcurrentExecutionsPerInstance)

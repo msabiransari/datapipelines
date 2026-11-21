@@ -61,6 +61,7 @@ class ResultCursorTest {
         status: ExecutionStatus,
         executedBy: UUID = owner,
         rows: Long? = 5,
+        resultUnavailable: Boolean = false,
     ) = ExecutionRecord(
         executionId = executionId,
         pipelineId = UUID.randomUUID(),
@@ -70,6 +71,7 @@ class ResultCursorTest {
         executedBy = executedBy,
         triggeredVia = ExecutionTrigger.REST,
         resultRowCount = rows,
+        resultUnavailable = resultUnavailable,
     )
 
     /**
@@ -113,6 +115,31 @@ class ResultCursorTest {
 
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.ABORTED)
         shouldThrow<ApiException> { cursor.readable(executionId, principal()) }.code shouldBe "result.execution_failed"
+    }
+
+    /**
+     * #1035: an OUTCOME_UNKNOWN run may or may not have committed, and its result was never exposed. The cursor
+     * says so by status — never the "failed" wording of a rollback — and carries the status in the details.
+     */
+    @Test
+    fun `an outcome-unknown execution is 410-failed with its status in the details, never a page`() {
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.OUTCOME_UNKNOWN)
+
+        val refused = shouldThrow<ApiException> { cursor.readable(executionId, principal()) }
+
+        refused.code shouldBe "result.execution_failed"
+        refused.details["status"] shouldBe "OUTCOME_UNKNOWN"
+    }
+
+    /** #1035: the commit is confirmed (SUCCESS) but the result was never delivered — a storage failure, not a 404. */
+    @Test
+    fun `a successful execution whose result was never delivered is 503 storage-unavailable with the delivery reason`() {
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS, resultUnavailable = true)
+
+        val refused = shouldThrow<ApiException> { cursor.readable(executionId, principal()) }
+
+        refused.code shouldBe "result.storage_unavailable"
+        refused.details["reason"] shouldBe "result_delivery_failed"
     }
 
     @Test

@@ -25,13 +25,20 @@ data class ExecutionReference(
     val timezone: ZoneId,
 )
 
-/** The whole-pipeline outcome (enums.md §10, authored by rest-api; see [SseEventType] for the layering note). */
+/**
+ * The whole-pipeline outcome (enums.md §10, authored by rest-api; see [SseEventType] for the layering note).
+ *
+ * [OUTCOME_UNKNOWN] (#1035, write-transactions §4) is terminal: the family's shared commit was
+ * attempted and its acknowledgement lost, so the customer database may or may not hold the
+ * writes. It is neither success nor failure and nothing replays the writes to find out.
+ */
 @Suppress("KDocUnresolvedReference")
 enum class ExecutionStatus {
     RUNNING,
     SUCCESS,
     FAILED,
     ABORTED,
+    OUTCOME_UNKNOWN,
 }
 
 /**

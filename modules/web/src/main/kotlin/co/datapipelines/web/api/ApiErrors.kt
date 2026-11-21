@@ -299,6 +299,33 @@ object ApiErrors {
             mapOf("execution_id" to id),
         )
 
+    /**
+     * (#1035) The execution's commit was attempted and its acknowledgement lost — it ended
+     * `OUTCOME_UNKNOWN`, so no result exists and the writes may or may not be durable. The same
+     * `410 result.execution_failed` row as a failure; `details.status` names the difference.
+     */
+    fun executionOutcomeUnknown(id: String): ApiException =
+        ApiException(
+            PipelineErrorCodes.Result.EXECUTION_FAILED,
+            "Execution '$id' ended with an unknown outcome; there is no result to retrieve.",
+            mapOf("execution_id" to id, "status" to "OUTCOME_UNKNOWN"),
+        )
+
+    /** `details.reason` of [resultDeliveryFailed] — the commit is confirmed, the caller result was not delivered (#1035). */
+    const val RESULT_DELIVERY_FAILED = "result_delivery_failed"
+
+    /**
+     * (#1035) The execution is `SUCCESS` (its commit is confirmed) but its caller result could not
+     * be delivered — the instance was lost or the store failed after the commit. `503` through the
+     * catalog's `result.storage_unavailable` row; the status stays SUCCESS.
+     */
+    fun resultDeliveryFailed(id: String): ApiException =
+        ApiException(
+            PipelineErrorCodes.Result.STORAGE_UNAVAILABLE,
+            "The result for execution '$id' could not be delivered; the execution itself succeeded.",
+            mapOf("execution_id" to id, REASON to RESULT_DELIVERY_FAILED),
+        )
+
     /** The stored result's TTL has elapsed (rest-api §7.4/§7.6). */
     fun resultExpired(id: String): ApiException =
         ApiException(

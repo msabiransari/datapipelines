@@ -178,7 +178,7 @@ class SseEventProjection(
             STARTED_AT to event.startedAt,
             "failed_at" to event.failedAt,
             DURATION_MS to event.durationMs,
-            STATUS to ExecutionStatus.FAILED.name,
+            STATUS to event.status.name,
             "failed_node_id" to event.failedNodeId,
             ERROR to errorPayload(event.error),
             NODE_STATS to event.nodeStats,

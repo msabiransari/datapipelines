@@ -53,8 +53,8 @@ import kotlin.coroutines.coroutineContext
  * confirmed commit, confirmed rollback and unknown per execution, by dialect, and nothing
  * else — no SQL, no row data, no credentials.
  *
- * The outcome-unknown STATUS (§4's lost-ack rows) is #1035's; this class only records the
- * honest outcome and throws the catalogued commit failure.
+ * The outcome-unknown STATUS (§4's lost-ack rows) is the executor's (#1035); this class records
+ * the honest outcome, the durable commit boundary ([CommitLedger]) and throws the catalogued commit failure.
  */
 class LocalWriteTransaction(
     /** The family this lease belongs to — the root execution's id. */
@@ -72,8 +72,32 @@ class LocalWriteTransaction(
      * pre-R7 tests (which construct this class directly) on the ordinary path.
      */
     private val deadline: Instant? = null,
+    /**
+     * (#1035) The durable commit boundary: stamped before the driver's commit is called and again
+     * once it confirmed, so a stale sweep on another instance can tell "never attempted" from "may
+     * have committed". [CommitLedger.NONE] keeps direct constructions (tests) on the old path.
+     */
+    private val ledger: CommitLedger = CommitLedger.NONE,
 ) {
     private val mutex = Mutex()
+
+    /**
+     * (#1035) True once [commit] has been entered past its durable attempt stamp: from here on the
+     * customer database MAY hold the family's writes, so no terminal path may claim a rollback.
+     * Volatile — the root's terminal handlers read it from whichever coroutine unwinds.
+     */
+    @Volatile
+    var commitAttempted: Boolean = false
+        private set
+
+    /**
+     * (#1035) True once the driver CONFIRMED the commit. The writes are durable whatever happens
+     * to result delivery afterwards: a late cancellation, deadline or delivery failure settles as
+     * SUCCESS, never as ABORTED or FAILED.
+     */
+    @Volatile
+    var commitConfirmed: Boolean = false
+        private set
 
     /**
      * Guards [state], [connection] and [snapshot] as one unit. [enlistedConnection]'s blocking
@@ -136,10 +160,14 @@ class LocalWriteTransaction(
     suspend fun commit() {
         val conn = enlistedOrNull() ?: return
         withContext(NonCancellable + dispatcher.context) {
+            recordAttemptOrRefuse()
+            commitAttempted = true
             try {
                 conn.commit()
                 synchronized(stateLock) { state = State.SETTLED }
+                commitConfirmed = true
                 metrics.localWriteTransaction(OUTCOME_COMMITTED, dialectForTelemetry())
+                recordConfirmationBestEffort()
             } catch (e: SQLException) {
                 // R4: a refused commit is TERMINAL and its outcome unknown — the write may have
                 // landed, so the root's subsequent rollback attempt must not record `rolled_back`
@@ -161,6 +189,55 @@ class LocalWriteTransaction(
                     cause = e,
                 )
             }
+        }
+    }
+
+    /**
+     * (#1035) Persists the attempt boundary BEFORE the driver's commit. When the stamp is not
+     * durable the commit is NOT called — the work is still uncommitted (state stays ENLISTED), so
+     * the root's rollback stays honest — and the run ends FAILED with the catalogued refusal. No
+     * metadata transaction is held across the customer commit: this is one autocommit statement.
+     */
+    private fun recordAttemptOrRefuse() {
+        val durable =
+            try {
+                ledger.recordAttempt(rootExecutionId)
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+            ) {
+                LOG.error("Commit attempt of local write transaction {} could not be recorded ({})", rootExecutionId, e.javaClass.simpleName)
+                false
+            }
+        if (!durable) {
+            throw refused(
+                "commit_evidence_unavailable",
+                "The commit boundary could not be recorded, so the commit was not attempted and the writes were rolled back",
+            )
+        }
+    }
+
+    /**
+     * (#1035) Records that the confirmed commit's result could not be delivered. Best effort and
+     * never throws: the status stays SUCCESS either way.
+     */
+    fun markResultUnavailable() {
+        try {
+            ledger.recordResultUnavailable(rootExecutionId)
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+        ) {
+            LOG.warn("Result-unavailable mark of execution {} could not be recorded ({})", rootExecutionId, e.javaClass.simpleName)
+        }
+    }
+
+    /** The confirmation stamp is best effort: the root's terminal write settles the row either way. */
+    private fun recordConfirmationBestEffort() {
+        try {
+            ledger.recordConfirmed(rootExecutionId)
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+        ) {
+            LOG.warn("Commit confirmation of local write transaction {} could not be recorded ({})", rootExecutionId, e.javaClass.simpleName)
         }
     }
 

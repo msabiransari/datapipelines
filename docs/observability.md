@@ -599,7 +599,7 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 
 | Metric | Type | Tags | Description |
 |---|---|---|---|
-| `datapipelines.executions.total` | counter | `status` (success/failed/aborted), `pipeline_id` | Execution count |
+| `datapipelines.executions.total` | counter | `status` (success/failed/aborted/outcome_unknown), `pipeline_id` | Execution count (`outcome_unknown`: the family's shared commit was attempted and not acknowledged, #1035 — alert on each) |
 | `datapipelines.executions.aborted` | counter | `reason` (`client_disconnect`/`cancelled`/`shutdown`) | Aborted executions by trigger — the three D7 paths ([dag-executor §15.3](dag-executor.md#153-monitoring), [enums `ExecutionStatus`](enums.md)) |
 | `datapipelines.executions.duration` | timer | `pipeline_id` | Execution wall-clock duration |
 | `datapipelines.executions.concurrent` | gauge | (none) | Currently-running executions; bound by the execution-slot bean, once per instance |

@@ -237,7 +237,7 @@ class ExecutorMetricsTest {
         registry
             .find(ExecutorMetrics.EXECUTIONS_TOTAL)
             .counters()
-            .map { it.id.getTag("status") } shouldContainExactlyInAnyOrder listOf("running", "success", "failed", "aborted")
+            .map { it.id.getTag("status") } shouldContainExactlyInAnyOrder listOf("running", "success", "failed", "aborted", "outcome_unknown")
         // observability §4.1: reason ∈ {client_disconnect, cancelled, shutdown} — the wire values.
         registry
             .find(ExecutorMetrics.EXECUTIONS_ABORTED)

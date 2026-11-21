@@ -42,10 +42,14 @@ class PublishedMethodDowngradeBarrierIntegrationTest {
     private val getRoute: UUID = UUID.randomUUID()
     private val postRoute: UUID = UUID.randomUUID()
 
-    private val shipped = repoFile("modules/app/src/main/resources/db/migration")
-    private val barrier = repoFile("modules/app/src/main/resources/db/downgrade-barrier")
-    private val previousBinary: File = copyOf(shipped) { it.version < FIRST_METHOD_VERSION }
-    private val withoutBarrier: File = copyOf(shipped) { it.version <= FIRST_METHOD_VERSION }
+    private val allShipped = repoFile("modules/app/src/main/resources/db/migration")
+
+    // This class pins V65's boundary: its "shipped" scripts end at V65 and its barrier is V65's alone, so the
+    // history it asserts stays the V65 one. V66 and its own barrier have their own class (#1035).
+    private val shipped: File = copyOf(allShipped) { it.version <= FIRST_METHOD_VERSION }
+    private val barrier: File = barrierCopy()
+    private val previousBinary: File = copyOf(allShipped) { it.version < FIRST_METHOD_VERSION }
+    private val withoutBarrier: File = shipped
     private val db = SharedE2e.scratchDatabase("v65_barrier")
     private val control = SharedE2e.scratchDatabase("v65_no_barrier")
 
@@ -248,7 +252,16 @@ class PublishedMethodDowngradeBarrierIntegrationTest {
         return target
     }
 
+    /** A scratch directory holding only V65's repeatable barrier — a later version's barrier is that version's class's. */
+    private fun barrierCopy(): File {
+        val target = Files.createTempDirectory("dp-v65-barrier-only-").toFile().also { it.deleteOnExit() }
+        val source = File(repoFile("modules/app/src/main/resources/db/downgrade-barrier"), V65_BARRIER)
+        source.copyTo(File(target, V65_BARRIER))
+        return target
+    }
+
     companion object {
+        private const val V65_BARRIER = "R__published_endpoint_method_downgrade_barrier.sql"
         private const val FIRST_METHOD_VERSION = 65
         private const val ROLLBACK_START = "<!-- v65-rollback:start -->"
         private const val ROLLBACK_END = "<!-- v65-rollback:end -->"

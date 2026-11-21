@@ -190,10 +190,14 @@ object Fixtures {
 }
 
 /** Captures every emitted event so a test can assert on order and on exactly-once rules. */
-class RecordingEmitter : EventEmitter {
+class RecordingEmitter(
+    /** (#1035) Throws this for an event instead of recording it — a delivery that fails after the commit. */
+    private val failOn: (ExecutionEvent) -> Throwable? = { null },
+) : EventEmitter {
     val events = CopyOnWriteArrayList<ExecutionEvent>()
 
     override suspend fun emit(event: ExecutionEvent) {
+        failOn(event)?.let { throw it }
         events += event
     }
 

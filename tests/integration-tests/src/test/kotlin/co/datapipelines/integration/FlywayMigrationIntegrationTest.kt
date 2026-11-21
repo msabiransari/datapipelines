@@ -206,6 +206,13 @@ class FlywayMigrationIntegrationTest {
                 "64|lake storage inventory|true",
                 // #1037 (V65) — method identity for published endpoints, exact mutation grants for bindings (§4.13/§4.14).
                 "65|published endpoint methods|true",
+                // #1035 (V66) — execution commit outcomes: OUTCOME_UNKNOWN status, the commit attempt/confirmation stamps,
+                // the family settlement flag and the result-unavailable flag (metadata-db §4.6).
+                "66|execution commit outcomes|true",
+                // #1035 — the repeatable downgrade barrier of V66 (repeatables run in description order, so it precedes
+                // #1037's): a binary that does not resolve it refuses to start on V66 metadata (metadata-db §7.5;
+                // ExecutionCommitOutcomeDowngradeBarrierIntegrationTest).
+                "R|execution commit outcome downgrade barrier|true",
                 // #1037 — the repeatable downgrade barrier (version column NULL, shown as R): a binary that does not resolve it
                 // refuses to start on V65 metadata (metadata-db §7.4; PublishedMethodDowngradeBarrierIntegrationTest).
                 "R|published endpoint method downgrade barrier|true",
@@ -1123,6 +1130,41 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #1035 (V66) — the commit boundary, read from the SHIPPED database: the four columns with their types, nullability
+     * and defaults (the flags default FALSE so every pre-V66 row reads "nothing pending, result delivered"), the status
+     * CHECK that admits `OUTCOME_UNKNOWN`, and the partial index the family settlement rides. Behaviour is
+     * `PipelineCommitOutcomeIntegrationTest`'s; this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V66 adds the commit boundary columns the OUTCOME_UNKNOWN status and the settlement index`() {
+        query(
+            "SELECT column_name || '|' || data_type || '|' || is_nullable || '|' || COALESCE(column_default, '-') " +
+                "FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'pipeline_executions' " +
+                "AND column_name IN ('commit_attempted_at', 'commit_confirmed_at', 'settlement_pending', 'result_unavailable') " +
+                "ORDER BY column_name COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "commit_attempted_at|timestamp with time zone|YES|-",
+                "commit_confirmed_at|timestamp with time zone|YES|-",
+                "result_unavailable|boolean|NO|false",
+                "settlement_pending|boolean|NO|false",
+            )
+        query("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'pipeline_executions'::regclass AND conname = 'chk_status'") {
+            it.getString(1)
+        } shouldContainExactly
+            listOf(
+                "CHECK ((status = ANY (ARRAY['RUNNING'::text, 'SUCCESS'::text, 'FAILED'::text, 'ABORTED'::text, 'OUTCOME_UNKNOWN'::text])))",
+            )
+        query("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_executions_settlement_pending'") {
+            it.getString(1)
+        } shouldContainExactly
+            listOf(
+                "CREATE INDEX idx_executions_settlement_pending ON public.pipeline_executions USING btree (root_execution_id) " +
+                    "WHERE settlement_pending",
+            )
+    }
+
+    /**
      * #798 (V54) — managed lake table definitions, read from the SHIPPED database: the closed lists the
      * `lake.definitions` enums mirror (table status, apply state, version status, origin), the pointer/state pairing,
      * the one-DRAFT index and every column. Behaviour is `LakeDefinitionRepositoryIntegrationTest`'s; this pins
@@ -1958,6 +2000,8 @@ class FlywayMigrationIntegrationTest {
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
                 // #1037 (V65) — the mutation grant's entity lookup, partial on endpoint_id IS NOT NULL.
                 "endpoint_key_bindings.idx_endpoint_key_bindings_endpoint",
+                // #1035 (V66) — the family settlement's lookup, partial on settlement_pending.
+                "pipeline_executions.idx_executions_settlement_pending",
                 "execution_events.execution_events_pkey",
                 "execution_events.uq_events_execution_event",
                 // #785 (V53) — the two catalog tables' library PKs; the control row's PK; a lease per (kind, name) and

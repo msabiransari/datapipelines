@@ -15,7 +15,7 @@
         <div class="u-row u-wrap u-mb-sm">
           <span class="ds-badge"
                 th:classappend="${record.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${record.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${record.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
-                th:text="${record.status.name()}">status</span>
+                th:text="${#strings.replace(record.status.name(),'_',' ')}">status</span>
           <span class="u-text-meta u-muted">v<span th:text="${record.pipelineVersion}">1</span></span>
           <!-- versioning §8 / D55: this run's version was a DRAFT when it ran (or still is). -->
           <span class="ds-badge ds-badge-warning" th:if="${draftRun}" th:attr="data-draft-run=true">DRAFT</span>

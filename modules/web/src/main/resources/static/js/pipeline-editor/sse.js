@@ -784,7 +784,7 @@
         // #358 (merge follow-up): a run the recovery poll finds FINISHED is as terminal as a
         // streamed terminal event — the live-run record clears here too, or a later restore
         // would re-attach to the finished run and replay its terminal (one more toast).
-        if (status === "completed" || status === "success" || status === "failed" || status === "aborted") {
+        if (status === "completed" || status === "success" || status === "failed" || status === "aborted" || status === "outcome_unknown") {
           if (typeof window !== "undefined") window.__peLiveExecution = null;
         }
         if (status === "completed" || status === "success") {
@@ -802,6 +802,13 @@
           var errCode =
             (data.error && data.error.code) || (data.data && data.data.error && data.data.error.code) || null;
           self.editor.setBanner(errCode ? "Pipeline failed — " + errCode : "Pipeline failed", "error");
+        } else if (status === "outcome_unknown") {
+          // #1035: the commit was attempted and its acknowledgement lost — the writes may or may not be durable.
+          // Terminal, and deliberately NOT "failed": the banner tells the person to check before re-running.
+          self.editor.isExecuting = false;
+          if (self.editor.stopRunClock) self.editor.stopRunClock("failed");
+          self.settlePolledOutcome("failed");
+          self.editor.setBanner("Outcome unknown — check the execution before running it again", "error");
         } else if (status === "aborted") {
           // The recovery poll previously had no aborted branch (031 F5): a cancel
           // that raced a dropped stream fell through to "Connection lost".

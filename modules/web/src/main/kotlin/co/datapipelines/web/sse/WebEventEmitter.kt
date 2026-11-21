@@ -262,7 +262,9 @@ class WebEventEmitter(
         val name = projection.eventName(event)
         val payload = projection.payload(event)
 
-        if (target != null) {
+        // #1035: a child's PROVISIONAL completion is not a success on any surface — it is recorded (the event row,
+        // the pending flag) but never streamed; the family's root decides what the child's final outcome was.
+        if (target != null && !event.isProvisional()) {
             target.send(name, eventId, payload)
             if (event.isTerminalOnTheWire()) target.markTerminal(name)
         }
@@ -376,7 +378,7 @@ class WebEventEmitter(
                     // /executions/{id}`, the detail page and MCP `executions_get` all read what
                     // the live stream showed, `user_message`/`doc_url`/`correlation_id` included.
                     val errorJson = SseJson.mapper.writeValueAsString(projection.errorPayload(event.error))
-                    Triple(ExecutionStatus.FAILED, event.failedNodeId, errorJson)
+                    Triple(event.status, event.failedNodeId, errorJson)
                 }
 
                 is ExecutionAborted -> {
@@ -408,18 +410,31 @@ class WebEventEmitter(
         // Everything that can throw — the stats serialization, the aborted duration's row read — runs
         // where the UPDATE runs (inside the bound's runCatching, or deferred after the late insert
         // has landed), so it can never escape emit.
-        val update = {
-            executionRepository.complete(
-                executionId = event.executionId,
-                status = status,
-                completedAt = event.timestamp,
-                durationMs = durationMsOf(event),
-                nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
-                failedNodeId = failedNodeId,
-                errorJson = errorJson,
-                contextJson = contextJson,
-            )
-        }
+        val update: () -> Boolean =
+            if (event.isProvisional()) {
+                // #1035: a child of an enrolled family — stats and Context are kept, the row stays RUNNING
+                // (pending) until the root's terminal write settles the whole family at once.
+                { executionRepository.completeProvisionally(event.executionId, SseJson.mapper.writeValueAsString(nodeStats), contextJson) }
+            } else {
+                {
+                    val updated =
+                        executionRepository.complete(
+                            executionId = event.executionId,
+                            status = status,
+                            completedAt = event.timestamp,
+                            durationMs = durationMsOf(event),
+                            nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
+                            failedNodeId = failedNodeId,
+                            errorJson = errorJson,
+                            contextJson = contextJson,
+                            resultUnavailable = (event as? PipelineCompleted)?.resultUnavailable == true,
+                        )
+                    // The root's terminal write is the family's one settlement moment; the sweep repeats it for a
+                    // root whose instance died before this line.
+                    if (updated && event.settlesFamilyOnWrite()) executionRepository.settleFamilies(event.executionId)
+                    updated
+                }
+            }
         writeTerminalRow(event.executionId, update)
     }
 
@@ -654,6 +669,16 @@ class WebEventEmitter(
                 FailureShape.sqlState(it),
             )
         }.getOrNull() ?: 0
+
+    private fun ExecutionEvent.settlesFamilyOnWrite(): Boolean =
+        when (this) {
+            is PipelineCompleted -> settlesFamily
+            is PipelineFailed -> settlesFamily
+            is ExecutionAborted -> settlesFamily
+            else -> false
+        }
+
+    private fun ExecutionEvent.isProvisional(): Boolean = this is PipelineCompleted && provisional
 
     private fun ExecutionEvent.completesTheRow(): Boolean = this is PipelineCompleted || this is PipelineFailed || this is ExecutionAborted
 

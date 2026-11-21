@@ -184,8 +184,24 @@ class ExecutionsGetResultTool(
                 )
             }
 
+            ExecutionStatus.OUTCOME_UNKNOWN -> {
+                DatapipelinesException(
+                    code = PipelineErrorCodes.Result.EXECUTION_FAILED,
+                    message = "Execution ${record.executionId} ended with an unknown outcome; there is no result.",
+                    details = details,
+                )
+            }
+
             ExecutionStatus.SUCCESS -> {
-                null
+                if (record.resultUnavailable) {
+                    DatapipelinesException(
+                        code = PipelineErrorCodes.Result.STORAGE_UNAVAILABLE,
+                        message = "Execution ${record.executionId} succeeded but its result could not be delivered.",
+                        details = details + ("reason" to "result_delivery_failed"),
+                    )
+                } else {
+                    null
+                }
             }
         }
     }
