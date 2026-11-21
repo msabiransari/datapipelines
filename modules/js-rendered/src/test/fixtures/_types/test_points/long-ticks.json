@@ -1,0 +1,103 @@
+{
+ "note": "tick texts ten digits wide on both axes; series names with < and &",
+ "document": {
+  "display_name": "Test type test_points",
+  "config": {
+   "mark": {
+    "type": "test_points"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "linear"
+    },
+    "y": {
+     "field": "y"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1234567000,
+   1234567250,
+   1234567500,
+   1234567750,
+   1234568000,
+   1234568250,
+   1234568500,
+   1234568750,
+   1234569000,
+   1234569250,
+   1234569500,
+   1234569750,
+   1234570000,
+   1234570250,
+   1234570500,
+   1234570750,
+   1234571000,
+   1234571250,
+   1234571500,
+   1234571750,
+   1234572000
+  ],
+  "y": [
+   9876543000,
+   9876545000,
+   9876547000,
+   9876549000,
+   9876551000,
+   9876544600,
+   9876546600,
+   9876548600,
+   9876550600,
+   9876544200,
+   9876546200,
+   9876548200,
+   9876550200,
+   9876543800,
+   9876545800,
+   9876547800,
+   9876549800,
+   9876543400,
+   9876545400,
+   9876547400,
+   9876549400
+  ],
+  "s": [
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>",
+   "A < B & C",
+   "Rows & <columns>"
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 21
+ }
+}

@@ -195,5 +195,230 @@
     return tg + cs[0] * h.boxH(s) + cs[1] * Math.min(rotatedMax(h, maxLen), rotatedWidest(h, labels));
   }
 
-  R.axes = { valueAxis: valueAxis, logAxis: logAxis, scaleOf: scaleOf, labelRow: labelRow, rowReserve: rowReserve, angle: angle, overlaps: overlaps, ANGLES: ANGLES };
+  // ---- the second value axis (brief 1051 D5; look contract §4.7, combo: one grid) ----
+
+  /** How far apart, as a share of the axis, two positions may be and still be one (the left ticks' spacing test). */
+  var SAME = 1e-9;
+  /** The ladder steps (1, 2, 2.5, 5 × a power of ten) case (a) climbs before it gives way to case (c). */
+  var LADDER_CLIMB = 48;
+  /** The smallest k whose 10^k is a normal double (10^-308 is subnormal); below it significant() raises first. */
+  var MIN_NORMAL_POWER = -307;
+  /** The power significant() raises a value of a subnormal decade by: a value below 10^-290 times 10^300 stays below 10^10. */
+  var RAISE = 300;
+
+  /**
+   * Where a value lies on an axis {lo, hi, log}, as a share of it from lo (0) to hi (1); 0 on an axis of no width. Two
+   * finite ends whose difference a double cannot hold (-1e308 to 1e308) are halved first, as S.linear does: halving a
+   * number that large is exact, so the share is the one the two ends define and never NaN (brief 1051 r3, R2). An end
+   * that is not finite keeps the plain difference, so such an input fails as it did before. A finite tick whose own
+   * distance from lo overflows on a finite span (a tick past hi beside lo = -MAX) is halved too (brief 1051 r5, D3: the
+   * left scale admits ticks a hair past its ends; valueAxis cannot hand this one today, and the second axis does not
+   * rely on that).
+   */
+  function shareOf(ax, v) {
+    if (ax.log === true) {
+      var l0 = S.log10(ax.lo), dl = S.log10(ax.hi) - l0;
+      return dl > 0 ? (S.log10(v) - l0) / dl : 0;
+    }
+    var d = ax.hi - ax.lo;
+    if ((d < Infinity && !(v - ax.lo === Infinity || v - ax.lo === -Infinity)) || !finite(ax.lo, ax.hi) || !finite(v, v)) return d > 0 ? (v - ax.lo) / d : 0;
+    var d2 = ax.hi / 2 - ax.lo / 2;
+    return d2 > 0 ? (v / 2 - ax.lo / 2) / d2 : 0;
+  }
+
+  /**
+   * The value at share t of a linear range [lo, hi]. Where hi - lo overflows (two finite ends of opposite signs past
+   * half a double's range), it is lo × (1 - t) + hi × t: each term is at most the larger end, the two have opposite
+   * signs, so the sum cannot overflow, and t = 0 and t = 1 give lo and hi exactly (brief 1051 r3, R2). Otherwise lo + t ×
+   * (hi - lo), and at t = 1 hi itself: lo + (hi - lo) need not read hi (-MAX + (MAX - 1) is 0, not -1), and an
+   * author's end is returned as written (brief 1051 r4, the boundary bank). An end that is not finite keeps lo + t ×
+   * (hi - lo): such a domain is refused downstream with the values, and so the message, it gave before (the save
+   * refuses it first, chart.scale.domain_invalid).
+   */
+  function lerp(lo, hi, t) {
+    var d = hi - lo;
+    if (!finite(lo, hi)) return lo + t * d;
+    if (t === 1) return hi;
+    if (t < 0 || t > 1) return pastEnd(lo, hi, d, t);
+    return d < Infinity ? lo + t * d : lo * (1 - t) + hi * t;
+  }
+
+  /** The largest and the smallest positive double: where the second axis's value past an end of its range stops. */
+  var MAX = Number.MAX_VALUE, MIN = Number.MIN_VALUE;
+
+  /**
+   * The value at a share t below 0 or above 1 of a finite linear range [lo, hi] (d = hi - lo, Infinity where it
+   * overflows): the scale extended past the end t passes, end + u × span, u = t (below) or t - 1 (above), the span
+   * halved where it overflows; a value past the doubles reads as the nearest one, ±MAX. The left scale admits a tick
+   * within its own tolerance past an end of its domain (S.within keeps ticks up to 1e-9 of the span outside it), so a
+   * share can lie a little below 0 or above 1; both lerp formulas then overflow where the range reaches ±MAX (brief
+   * 1051 r5, R6: left [0, 0.9999999999] beside right [-MAX, MAX] or [1e308, MAX] threw), and lo + t × d reads Infinity
+   * on [-MAX, -1], whose value there is 1.8e298. Measured from the passed end, u × span is a hair of the span, so the
+   * sum overflows only where the exact value lies past the doubles. Inside [0, 1] neither lerp formula can overflow,
+   * and a share there keeps the value it had.
+   */
+  function pastEnd(lo, hi, d, t) {
+    var u = t < 0 ? t : t - 1, v = (t < 0 ? lo : hi) + (d < Infinity ? u * d : 2 * u * (hi / 2 - lo / 2));
+    return v === Infinity ? MAX : v === -Infinity ? -MAX : v;
+  }
+
+  /**
+   * The value at share t of a log range [lo, hi] (0 < lo < hi, both finite): lo and hi themselves at t = 0 and t = 1,
+   * else 10^(log lo + t × (log hi − log lo)) bounded to [lo, hi]. The bound matters only within a few units in the last
+   * place of an end, where the approximate inverse can step past it: past the largest double that read Infinity, and
+   * below the smallest subnormal 0 (brief 1051 r4, R4: [1e308, MAX] and [MIN_VALUE, 1e-322], ranges the save admits).
+   * So every value is positive and finite, the authored ends come back exactly, and each lies within one double of
+   * the exact value at its share (a subnormal has few doubles near it: there that one step is the format's). A share
+   * past an end (the left scale's tolerance, see pastEnd) is read on the scale extended past that end, bounded to
+   * the positive finite doubles, MIN_VALUE to MAX, so a tick a hair outside the left domain stands on its own position
+   * and not on the edge's (brief 1051 r5, R6).
+   */
+  function logLerp(lo, hi, l0, l1, t) {
+    if (t === 0) return lo;
+    if (t === 1) return hi;
+    var v = S.exp10(l0 + t * (l1 - l0)), a = t < 0 ? MIN : lo, b = t > 1 ? MAX : hi;
+    return v < a ? a : v > b ? b : v;
+  }
+
+  /** Both ends are finite numbers. */
+  function finite(lo, hi) {
+    return lo > -Infinity && lo < Infinity && hi > -Infinity && hi < Infinity;
+  }
+
+  /** The extent of a linear right axis with no domain, widened as S.nice widens one value (or none) first. */
+  function linearExtent(ext) {
+    var lo = ext && typeof ext[0] === "number" ? ext[0] : NaN, hi = ext && typeof ext[1] === "number" ? ext[1] : NaN;
+    if (!(lo > -Infinity && lo < Infinity && hi > -Infinity && hi < Infinity)) return [0, 1];
+    if (!(hi > lo)) {
+      if (lo === 0) return [0, 1];
+      return lo > 0 ? [0, lo] : [lo, 0];
+    }
+    return [lo, hi];
+  }
+
+  /** The step after s on the tick rule's ladder (1 → 2 → 2.5 → 5 → 10 times its power of ten). */
+  function nextStep(s) {
+    var p = S.pow10(S.decade(s)), f = s / p;
+    return (f < 1.5 ? 2 : f < 2.25 ? 2.5 : f < 3.75 ? 5 : 10) * p;
+  }
+
+  /**
+   * Case (a): the right values r0 + j × s at equally spaced left positions f0 + j × df. s is the smallest step of the
+   * ladder for which the largest multiple r0 of s whose bottom-edge value holds the extent's low end also gives a
+   * top-edge value that holds its high end. null where no step of the climb does or a number is not finite: case (c)
+   * then, whose range is the right axis's own nice range and so holds the extent, both signs of it included. A
+   * candidate holds the extent only within `tol`, a share SAME of the EXTENT's own span (rounding noise of the data's
+   * scale), never of the candidate's span: a share of a span that grows with the climb accepted, at 0..1e9, a range
+   * that leaves out the whole negative half of [-1, 1] (brief 1051 r3, R1). Two left ticks on the plot's two edges
+   * beside an extent across zero are such a case: the multiples k × s and (k + 1) × s never straddle zero, so no step
+   * of the ladder holds it and the climb ends in case (c).
+   */
+  function caseA(ext, n, f0, df, format) {
+    var e = linearExtent(ext), e0 = e[0], e1 = e[1], tol = SAME * (e1 - e0);
+    var s = S.niceStep((e1 - e0) * df);
+    for (var c = 0; c < LADDER_CLIMB && s > 0 && s < Infinity; c++, s = nextStep(s)) {
+      // k: the largest multiple whose bottom-edge value holds e0; the next one is taken where only rounding of the
+      // division put it out (0.3 / 0.1 is 2.9999999999999996, and 3 × 0.1 holds 0.3 within tol).
+      var span = s / df, k = Math.floor((e0 + f0 * span) / s);
+      if ((k + 1) * s - f0 * span <= e0 + tol) k++;
+      var lo = k * s - f0 * span, hi = lo + span;
+      if (!(lo > -Infinity && hi < Infinity)) return null;
+      if (lo > e0 + tol || hi < e1 - tol) continue;
+      // The tick rule's rounding to the step's decimals takes off a product's last-place noise (3 × 0.1); a step below
+      // 10^-307 has more decimals than the power table can scale by, and rounding at 10^308 instead would cut every
+      // value to a multiple of 10^-308 (2.2e-308 read 3e-308, a subnormal 0): there the multiple is kept as it is
+      // (brief 1051 r4, the boundary bank).
+      var decimals = Math.max(0, 1 - S.decade(s)), scale = decimals > 308 ? 0 : S.pow10(decimals), ticks = [];
+      for (var j = 0; j < n; j++) {
+        var t = scale > 0 ? Math.round((k + j) * s * scale) / scale + 0 : (k + j) * s + 0;
+        if (!(t > -Infinity && t < Infinity)) return null;
+        ticks.push(t);
+      }
+      return { lo: lo, hi: hi, ticks: ticks, texts: T.ticks(ticks, format), log: false, rule: "a" };
+    }
+    return null;
+  }
+
+  /**
+   * Case (b): a log right axis whose left ticks are equally spaced from the plot's bottom edge to its top edge (ticks
+   * 0…k): the values 10^(k0 + j × m), 10^k0 the record's lower bound (§4.4 G4) and m the smallest whole number from 1
+   * that reaches the largest value. null past the power table: case (c) then.
+   */
+  function caseB(ext, n, format) {
+    var min = ext ? ext[0] : null, max = ext ? ext[1] : null;
+    if (min === null || !(min > 0)) {
+      min = 1;
+      max = 10;
+    }
+    var k0 = S.decade(min), k = n - 1, m = 1;
+    while (k0 + k * m <= 308 && S.pow10(k0 + k * m) < max) m++;
+    if (k0 + k * m > 308) return null;
+    var ticks = [], texts = [];
+    for (var j = 0; j < n; j++) {
+      ticks.push(S.pow10(k0 + j * m));
+      texts.push(T.ticks([ticks[j]], format)[0]);
+    }
+    return { lo: ticks[0], hi: ticks[n - 1], ticks: ticks, texts: texts, log: true, rule: "b" };
+  }
+
+  /**
+   * A value written with d significant digits, as the double its decimal text reads as (0 stays 0). Total over finite
+   * values: where 10^e is below a normal double (a value near the smallest subnormals asks for e down to -340, past the
+   * power table's -323), the value is first raised by 10^300 and then divided by 10^(e + 300), both normal powers of the
+   * table, so q is a whole number of d digits. A value next to the largest double can round up past it (1.797…e308 at
+   * three digits reads 1.80e308, Infinity): there the d digits are taken one unit lower, the largest such value below
+   * it. So every finite value gives a finite one (brief 1051 r3, R3). Four operations only (O-16).
+   */
+  function significant(v, d) {
+    if (!(v !== 0 && v > -Infinity && v < Infinity)) return v;
+    var a = v < 0 ? -v : v, e = S.decade(a) - (d - 1);
+    var q = e >= MIN_NORMAL_POWER ? Math.round(a / S.pow10(e)) : Math.round((a * S.pow10(RAISE)) / S.pow10(e + RAISE));
+    var r = Number(q + "e" + e);
+    if (!(r < Infinity)) r = Number(q - 1 + "e" + e);
+    return (v < 0 ? -1 : 1) * r;
+  }
+
+  /**
+   * Case (c): the right axis's own range (A.valueAxis's or A.logAxis's lo and hi over the same length, or its domain's
+   * two ends) laid over the plot, and at each left position the value its scale gives there, held as it is; the texts
+   * are those values at three significant digits, one more for all while two neighbours would share one.
+   */
+  function caseC(lvl, S2, ext, length, shares) {
+    var own = S2.log === true ? logAxis(lvl, ext, S2.domain, length, S2.format) : valueAxis(lvl, ext, S2.domain, length, S2.format, 0);
+    var lo = own.lo, hi = own.hi, l0 = S2.log === true ? S.log10(lo) : 0, l1 = S2.log === true ? S.log10(hi) : 0, ticks = [];
+    for (var j = 0; j < shares.length; j++) ticks.push(S2.log === true ? logLerp(lo, hi, l0, l1, shares[j]) : lerp(lo, hi, shares[j]));
+    var rounded = [];
+    for (var d = 3; d <= 17; d++) {
+      rounded = [];
+      var same = false;
+      for (var r = 0; r < ticks.length; r++) {
+        rounded.push(significant(ticks[r], d));
+        if (r > 0 && rounded[r] === rounded[r - 1]) same = true;
+      }
+      if (!same) break;
+    }
+    return { lo: lo, hi: hi, ticks: ticks, texts: T.ticks(rounded, S2.format), log: S2.log === true, rule: "c" };
+  }
+
+  /**
+   * The second value axis at the right (brief 1051 D5; look contract §4.7, combo): exactly one tick per tick of the left
+   * axis `left` = {lo, hi, ticks, log}, at that tick's position, so every right tick lies on a left grid line and there
+   * is one grid. S2 = {domain: [lo, hi] | null, format, log}; ext = S2.extent(visible); length = the plot's height in px.
+   * Which values are written there is case (a) (left positions equally spaced, a linear right axis, no domain), (b) (a
+   * log right axis, no domain, left positions equally spaced from the bottom edge to the top edge) or (c) (every other
+   * case, and an (a) or (b) that has no finite answer). Returns {lo, hi, ticks, texts, log, rule}: lo and hi are the
+   * values at the plot's bottom and top edges; an author's domain is kept as it is, never widened.
+   */
+  function secondAxis(lvl, S2, ext, left, length) {
+    var n = left.ticks.length, shares = [];
+    for (var i = 0; i < n; i++) shares.push(shareOf(left, left.ticks[i]));
+    var df = n >= 2 ? shares[1] - shares[0] : 0, even = n >= 2 && df > SAME;
+    for (var j = 2; even && j < n; j++) if (Math.abs(shares[j] - shares[0] - j * df) > SAME) even = false;
+    var noDomain = S2.domain === null || S2.domain === undefined, out = null;
+    if (even && noDomain && S2.log !== true) out = caseA(ext, n, shares[0], df, S2.format);
+    else if (even && noDomain && S2.log === true && Math.abs(shares[0]) <= SAME && Math.abs(shares[n - 1] - 1) <= SAME) out = caseB(ext, n, S2.format);
+    return out !== null ? out : caseC(lvl, S2, ext, length, shares);
+  }
+
+  R.axes = { valueAxis: valueAxis, logAxis: logAxis, scaleOf: scaleOf, labelRow: labelRow, rowReserve: rowReserve, angle: angle, overlaps: overlaps, ANGLES: ANGLES, secondAxis: secondAxis };
 })(JsRendered);

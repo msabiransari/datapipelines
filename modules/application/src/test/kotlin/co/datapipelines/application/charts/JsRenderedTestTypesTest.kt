@@ -20,8 +20,10 @@ import org.junit.jupiter.api.TestInstance
  * fixture's hand-written `expect.marks`;
  * (iii) the engine's own sine and cosine (`trig.json`, 5,761 angles) recomputed in the sandbox, byte for byte.
  *
- * Also in the sandbox: the checker's arc bounds (A.3) and G7's planted rectangle 2 px beyond the frame. A process
- * without the isolate fails at [JsRenderedSandbox]'s construction; nothing here skips.
+ * Also in the sandbox: the checker's arc bounds (A.3) and G7's planted rectangle 2 px beyond the frame, on test_plain
+ * (brief 1049) and on test_grid (brief 1051); and the second value axis on the inputs of brief 1051's round-3, round-4
+ * and round-5 corrections, which no picture can carry (`second-axis-probes.js`, compared with Node's `second-axis-probes.json`). A
+ * process without the isolate fails at [JsRenderedSandbox]'s construction; nothing here skips.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class JsRenderedTestTypesTest {
@@ -164,6 +166,33 @@ class JsRenderedTestTypesTest {
         (clean as List<*>).size shouldBe 0
     }
 
+    @Test
+    fun `G7 in the sandbox - test_grid's last cell planted 2 px beyond a 300 wide frame is one I2 naming the mark`() {
+        val source = typeSource("test_grid")
+        source.split(G7_ANCHOR).size shouldBe 2
+        val given = mapOf("input" to emitted("test_grid/legend-top/300x180.input.json"))
+        val planted = sandbox.evaluate(source.replace(G7_ANCHOR, G7_GRID_PLANT) + "\n" + CHECK_ONE, given, withInvariants = true)
+        val clean = sandbox.evaluate(source + "\n" + CHECK_ONE, given, withInvariants = true)
+
+        @Suppress("UNCHECKED_CAST")
+        val bad = planted as List<Map<String, Any?>>
+        bad.size shouldBe 1
+        bad.single()["inv"] shouldBe "I2"
+        (bad.single()["what"] as String).matches(Regex("""^mark of string:\w+ leaves the frame: [\d.]+,[\d.]+,302,[\d.]+$""")) shouldBe true
+        (clean as List<*>).size shouldBe 0
+    }
+
+    @Test
+    fun `rounds 3 to 5 - the second value axis on R1 to R6's inputs in the sandbox is Node's, byte for byte`() {
+        val probes = ChartGuardFiles.repoFile("${ChartGuardFiles.MODULE}/src/test/js/second-axis-probes.js").readText()
+        val node = ChartGuardFiles.repoFile("${ChartGuardFiles.MODULE}/src/test/js/second-axis-probes.json").readText().removeSuffix("\n")
+        val sandboxText = sandbox.evaluate(probes + "\nreturn secondAxisProbes(JsRendered);", null) as String
+        val count = JSON.readTree(node).size()
+        println("JsRenderedTestTypesTest second-axis probes: $count probes, ${node.length} characters")
+        sandboxText shouldBe node
+        count shouldBeGreaterThanOrEqual PROBE_FLOOR
+    }
+
     /** The test types in the repository (their files, without `.js`), sorted: what the index must cover. */
     private fun typeNames(): List<String> =
         ChartGuardFiles
@@ -190,21 +219,32 @@ class JsRenderedTestTypesTest {
     private companion object {
         const val TYPES = "co/datapipelines/jsrendered/test/types"
 
-        /** Brief 1049's three test types and brief 1055's test_web. */
-        const val TYPE_FLOOR = 4
-
+        /**
+         * Brief 1049's three test types, brief 1052's test_marks, brief 1051's five (test_points, test_grid, test_two_axes,
+         * test_bins, test_bare) and brief 1055's test_web.
+         */
+        const val TYPE_FLOOR = 10
         const val FRAMES = 7
 
         /**
-         * 33 fixtures (brief 1049's 23 and test_web's 10, brief 1055) × 7 frames, and × 35 × 5; the rendered, text and
-         * mark floors as the Node sweep's (types.test.mjs).
+         * 23 fixtures × 7 frames, and × 35 × 5; the rendered, text and mark floors as the Node sweep's (types.test.mjs).
+         *
+         * Brief 1052 adds the type test_marks and its 11 fixtures; brief 1051 adds five types and their 45 fixtures (44,
+         * and round 3's signed-two-ticks); brief 1055 adds test_web and its 10 fixtures: 89 fixtures in all.
          */
-        const val IDENTITY_FLOOR = 33 * 7
-        const val SWEEP_FLOOR = 33 * 35 * 5
+        const val IDENTITY_FLOOR = (23 + 11 + 45 + 10) * 7
+        const val SWEEP_FLOOR = (23 + 11 + 45 + 10) * 35 * 5
         const val RENDERED_FLOOR = 3000
         const val TEXT_FLOOR = 9000
         const val MARK_FLOOR = 15000
         const val ANGLES = 5761
+
+        /**
+         * The probes of `second-axis-probes.js`: five of R1, eight of R2, five of R3 (brief 1051 round 3), and eight of
+         * round 4 (R4's log domains at both ends of the number range, and the boundary bank's own-code fixes), and ten of
+         * round 5 (R6: left axes made by the real producers whose ticks stand a hair past an edge of their domain).
+         */
+        const val PROBE_FLOOR = 36
 
         val JSON = JsonMapper()
 
@@ -269,5 +309,10 @@ class JsRenderedTestTypesTest {
         const val G7_PLANT =
             "    if (out.length > 0 && plot.x + plot.w === 294) { var q = out.pop(); out.push(P.rect({ role: \"mark\", x: q.x, y: q.y, " +
                 "w: 302 - q.x, h: q.h, fill: q.fill, color: q.color, series: q.series })); }\n" + G7_ANCHOR
+
+        /** forms.test.mjs's G7 plant on test_grid (brief 1051), the same text: its marks read the plot from the hand. */
+        const val G7_GRID_PLANT =
+            "    if (out.length > 0 && hand.plot.x + hand.plot.w === 294) { var q = out.pop(); out.push(P.rect({ role: \"mark\", " +
+                "x: q.x, y: q.y, w: 302 - q.x, h: q.h, fill: q.fill, color: q.color, series: q.series })); }\n" + G7_ANCHOR
     }
 }

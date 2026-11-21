@@ -16,9 +16,16 @@
  * ## What it reads
  * The engine's public surface only: the output of `render` (`primitives`, `index`, `summary`), `JsRendered.writeDom`'s
  * sibling `JsRendered.write.append` (the card, the guide and the focus ring are primitives written over the picture),
- * `JsRendered.nearest` (the lookup through the data index), `JsRendered.measure` (a card's widths by the draw's own
- * `measure`) and the look table's `interaction` fields (`JsRendered.tables.look`). It is not an engine file: no sandbox
- * loads it.
+ * `JsRendered.nearest` (the lookup through the data index), `JsRendered.lookup.at` (a mark found by its own shape, the
+ * index's second form, brief 1052), `JsRendered.scales.r2` (a number rounded as the engine rounds it),
+ * `JsRendered.measure` (a card's widths by the draw's own `measure`) and the look table's `interaction` fields
+ * (`JsRendered.tables.look`). It is not an engine file: no sandbox loads it.
+ *
+ * ## Two kinds of draw
+ * A draw whose `output.index.marks` is a list is "by mark" (brief 1052 D5 to D8): its marks are found by their own
+ * shape, its card is the one each mark carries, its highlight is the mark's own (`ring`, `move`) and its keys walk the
+ * marks' rows. Every rule for such a draw stands in a branch of its own; a draw without the member runs the code below
+ * as it ran before.
  *
  * ## The rendering rule
  * Every line of a card is data and reaches the page as a text node through the engine's writer. No markup string, no
@@ -135,13 +142,17 @@
     }
     var weight = line.kind === "row" ? m.bold : 400;
     var vw = width(line.value, s, weight);
-    var lead = line.kind === "row" ? m.key + m.gap : 0;
+    // A row that stands for no colour (brief 1052 D6, contract §4.7) keeps no room for a key and is fitted as a field
+    // is: its name cut, its value never, and a name that cannot show one character does not fit. Its value keeps the
+    // row's weight.
+    var plain = line.kind === "row" && line.plain === true;
+    var lead = line.kind === "row" && !plain ? m.key + m.gap : 0;
     if (lead + vw > w + EPS) return { line: line, ok: false };
     var nameWeight = line.kind === "row" && line.bold ? m.bold : 400;
     var label = line.kind === "row" ? line.name : line.title;
     var room = w - lead - vw - m.gap;
     var shown = label === "" || room <= 0 ? "" : R.measure.fit(width, label, s, nameWeight, room);
-    if (line.kind === "field" && label !== "" && shown === "") return { line: line, ok: false };
+    if ((line.kind === "field" || plain) && label !== "" && shown === "") return { line: line, ok: false };
     var nw = shown === "" ? 0 : width(shown, s, nameWeight) + m.gap;
     return { line: line, ok: true, label: shown, labelWeight: nameWeight, labelW: nw, valueW: vw, w: lead + nw + vw };
   }
@@ -149,7 +160,8 @@
   /**
    * A mark's card (contract §4.4, L8; brief 990 D2a): what it holds, decided before anything is drawn. lines = the full
    * card in its own order: [{kind: "heading", text}], then rows {kind: "row", id, name, value, colour, color, bold},
-   * then fields {kind: "field", title, value}. hovered = the hovered series' id. Returns null (no card) or
+   * then fields {kind: "field", title, value}. hovered = the hovered series' id. A card of one mark (brief 1052 D6)
+   * marks its kept row itself (`kept: true` on one row), and then `hovered` plays no part. Returns null (no card) or
    * {W, w, k, lines: [fitted], n, box: {w, h}}; a count line is {line: {kind: "more"}, text, w}.
    */
   function markCard(R, width, lines, hovered, frame, m) {
@@ -160,6 +172,12 @@
     });
     var hov = -1;
     for (var i = 0; i < fitted.length; i++) if (fitted[i].line.kind === "row" && fitted[i].line.id === hovered) hov = i;
+    for (var q = 0; q < fitted.length; q++) {
+      if (fitted[q].line.kind === "row" && fitted[q].line.kept === true) {
+        hov = q;
+        break;
+      }
+    }
     if (hov < 0 || !fitted[hov].ok) return null;
     var all = fitted.every(function (f) {
       return f.ok;
@@ -359,7 +377,7 @@
    * Nothing here is a rule of the layer's own about which series is shown: the index and the primitives say it.
    */
   function modelOf(R, output, width) {
-    var model = { series: [], entries: [], cuts: [], titles: {}, colours: {}, bars: {}, lines: {}, totals: null, crosshair: true, plot: null, axis: "x", order: {}, output: output };
+    var model = { series: [], entries: [], cuts: [], titles: {}, colours: {}, markColours: {}, bars: {}, lines: {}, totals: null, crosshair: true, plot: null, axis: "x", order: {}, output: output };
     if (!output || !output.index || !Array.isArray(output.primitives)) return model;
     var prims = output.primitives;
     var summary = output.summary || { series: [] };
@@ -374,11 +392,13 @@
     for (var i = 0; i < prims.length; i++) {
       var p = prims[i];
       if (p.role === "mark" && p.series !== null && p.k !== "group" && p.k !== "text") {
-        if (!model.colours[p.series]) {
-          model.colours[p.series] = p.fill !== null && p.fill !== undefined ? { token: p.fill, css: p.color } : { token: p.stroke, css: p.strokeColor };
-        }
+        var own = p.fill !== null && p.fill !== undefined ? { token: p.fill, css: p.color } : { token: p.stroke, css: p.strokeColor };
+        if (!model.colours[p.series]) model.colours[p.series] = own;
         if (p.datum !== null && p.datum !== undefined) {
           model.crosshair = false;
+          // A mark's own colour (brief 1057 D1): a bar coloured by value fills the marks of ONE series differently.
+          var mkey = p.series + "\u0000" + p.datum;
+          if (!model.markColours[mkey]) model.markColours[mkey] = own;
           model.bars[p.series + "\u0000" + p.datum] = p.k === "rect" ? { x: p.x, y: p.y, w: p.w, h: p.h } : p.k === "circle" ? { x: p.cx - p.r, y: p.cy - p.r, w: 2 * p.r, h: 2 * p.r } : pathBox(p.d, R.prim.ARITY);
         } else if (p.k === "path" && p.stroke !== null && p.fill === null) {
           (model.lines[p.series] = model.lines[p.series] || []).push(p.d);
@@ -389,6 +409,7 @@
       }
       if (p.k === "text" && p.shown !== null) model.cuts.push({ i: i, text: p.text, box: textBox(R, p, width) });
     }
+    if (Array.isArray(output.index.marks)) byMark(model, output.index.marks, prims);
     var ix = output.index.series || [];
     for (var s = 0; s < ix.length; s++) {
       var e = ix[s];
@@ -398,6 +419,30 @@
       model.series.push({ id: e.id, marks: marks });
     }
     return model;
+  }
+
+  /**
+   * A draw by mark (brief 1052 D5): model.marks = the index's marks, and model.held[n] = the positions in the
+   * primitives of mark n's own primitives (role `mark`, not a group, not a text, its series and datum). The index has
+   * no position, so model.series stays empty and neither the crosshair nor a bar's rule runs.
+   */
+  function byMark(model, marks, prims) {
+    model.marks = marks;
+    model.held = marks.map(function (mk) {
+      var at = [];
+      for (var i = 0; i < prims.length; i++) {
+        var p = prims[i];
+        if (p.role === "mark" && p.k !== "group" && p.k !== "text" && p.series === mk.series && p.datum === mk.datum) at.push(i);
+      }
+      return at;
+    });
+  }
+
+  /** The position of the mark (id, datum) in model.marks, or -1. */
+  function markAt(model, id, datum) {
+    if (!model.marks) return -1;
+    for (var i = 0; i < model.marks.length; i++) if (model.marks[i].series === id && model.marks[i].datum === datum) return i;
+    return -1;
   }
 
   /** A text primitive's box: its shown text measured as the draw measured it; a rotated text by its four corners. */
@@ -469,6 +514,10 @@
 
   /** The point a mark is anchored at: a bar's centre; a line point on its line. */
   function anchorOf(model, id, datum) {
+    if (model.marks) {
+      var n = markAt(model, id, datum);
+      return n < 0 ? null : model.marks[n].anchor;
+    }
     var s = model.series[seriesOf(model, id)];
     var m = s ? s.marks[markOf(s, datum)] : null;
     if (!m) return null;
@@ -491,6 +540,15 @@
     for (var e = 0; e < model.entries.length; e++) if (inside(model.entries[e].box, pos)) hit.entry = model.entries[e].id;
     for (var c = 0; c < model.cuts.length; c++) if (inside(model.cuts[c].box, pos)) hit.cut = c;
     var plot = model.plot;
+    if (model.marks) {
+      // A draw by mark (brief 1052 D5): the index's own lookup, at the look table's reach; always the index, so a moved
+      // slice is found where it was drawn.
+      if (hit.entry === null && hit.cut === null) {
+        var n = R.lookup.at(model.output.index, pos.x, pos.y, R.tables.look("markReach"));
+        if (n >= 0) hit.mark = { id: model.marks[n].series, datum: model.marks[n].datum };
+      }
+      return hit;
+    }
     if (hit.entry !== null || hit.cut !== null || !plot || model.series.length === 0) return hit;
     if (pos.x < plot.x - SAME || pos.x > plot.x + plot.w + SAME || pos.y < plot.y - SAME || pos.y > plot.y + plot.h + SAME) return hit;
     var along = model.axis === "y" ? pos.y : pos.x;
@@ -565,7 +623,8 @@
       var name = model.titles[ser.id] === undefined ? ser.id : model.titles[ser.id];
       var line = tip.length > 1 ? tip[1] : "";
       var value = line.indexOf(name + ": ") === 0 ? line.slice(name.length + 2) : line;
-      var colour = model.colours[ser.id] || { token: "--chart-ink", css: model.theme ? model.theme.css("--chart-ink") : "" };
+      // The row's key is its own mark's colour, else its series' (brief 1057 D2).
+      var colour = model.markColours[ser.id + "\u0000" + datum] || model.colours[ser.id] || { token: "--chart-ink", css: model.theme ? model.theme.css("--chart-ink") : "" };
       var row = { kind: "row", id: ser.id, name: name, value: value, colour: colour.token, color: colour.css, bold: false, at: ser.marks[k].at };
       rows.push(row);
       if (ser.id === id) hovered = { row: row, tip: tip };
@@ -594,6 +653,27 @@
     return true;
   }
 
+  /**
+   * The full card of mark n of a draw by mark (brief 1052 D6): its heading when it is a text that is not empty, its rows
+   * in the template's order (`kept` on rows[keep]; `plain` on a row that stands for no colour), then its extra lines as
+   * fields. Nothing is read from the tips.
+   */
+  function markLines(model, n) {
+    var mk = model.marks[n];
+    var c = mk.card;
+    var lines = [];
+    if (typeof c.heading === "string" && c.heading !== "") lines.push({ kind: "heading", text: c.heading, total: null });
+    for (var r = 0; r < c.rows.length; r++) {
+      var row = c.rows[r];
+      lines.push({ kind: "row", id: mk.series, name: row.name, value: row.value, colour: row.colour, color: row.color, bold: row.bold, kept: r === c.keep, plain: row.colour === null });
+    }
+    for (var f = 0; f < c.extra.length; f++) {
+      var parts = fieldParts(c.extra[f]);
+      lines.push({ kind: "field", title: parts.title, value: parts.value });
+    }
+    return lines;
+  }
+
   // ------------------------------------------------------------------------------------ the keyboard
 
   function mark(id, datum) {
@@ -602,6 +682,10 @@
 
   /** Entering (D5): the first mark; with none the first legend entry; with neither the first cut text; else none. */
   function enter(model) {
+    if (model.marks) {
+      var first = keysOf(model);
+      if (first.length > 0) return markTarget(model, first[0]);
+    }
     if (model.series.length > 0) return mark(model.series[0].id, model.series[0].marks[0].datum);
     if (model.entries.length > 0) return { kind: "entry", id: model.entries[0].id };
     if (model.cuts.length > 0) return { kind: "cut", n: 0 };
@@ -609,6 +693,12 @@
   }
 
   function lastMarkOfFirst(model) {
+    if (model.marks) {
+      var rows = rowsOf(model);
+      if (rows.length === 0) return null;
+      var row = rows[0].at;
+      return markTarget(model, row[row.length - 1]);
+    }
     if (model.series.length === 0) return null;
     var first = model.series[0];
     return mark(first.id, first.marks[first.marks.length - 1].datum);
@@ -645,6 +735,7 @@
       return { target: enter(model), toggle: null, handled: true };
     }
     out.handled = MOVES[key] === 1 || key === "Enter" || key === " ";
+    if (target.kind === "mark" && model.marks) return keyByMark(model, target, key, out);
     if (target.kind === "mark") {
       var s = seriesOf(model, target.id);
       var ser = model.series[s];
@@ -684,6 +775,17 @@
    */
   function findAgain(model, target) {
     if (target === null) return null;
+    if (model.marks && (target.kind === "mark" || target.kind === "entry")) {
+      // A draw by mark (brief 1052 D8): a key target still drawn stays; else the first key target of its series; else
+      // that series' entry; else as on entering. An entry stays while drawn, else its series' first key target.
+      var keys = keysOf(model);
+      var n = target.kind === "mark" ? markAt(model, target.id, target.datum) : -1;
+      if (target.kind === "entry" && entryIndex(model, target.id) >= 0) return target;
+      if (n >= 0 && model.marks[n].key === true) return target;
+      for (var k = 0; k < keys.length; k++) if (model.marks[keys[k]].series === target.id) return markTarget(model, keys[k]);
+      if (target.kind === "mark" && entryIndex(model, target.id) >= 0) return { kind: "entry", id: target.id };
+      return enter(model);
+    }
     if (target.kind === "mark") {
       var s = seriesOf(model, target.id);
       if (s >= 0 && markOf(model.series[s], target.datum) >= 0) return target;
@@ -697,6 +799,76 @@
       return e >= 0 ? mark(target.id, model.series[e].marks[0].datum) : enter(model);
     }
     return target.n < model.cuts.length ? target : enter(model);
+  }
+
+  /** The key targets of a draw by mark (D8): the positions of the marks with key true, in the list's order. */
+  function keysOf(model) {
+    var out = [];
+    for (var i = 0; i < model.marks.length; i++) if (model.marks[i].key === true) out.push(i);
+    return out;
+  }
+
+  /** The rows of the key targets (D8): [{row, at: [positions in the list's order]}], ordered by the row's number. */
+  function rowsOf(model) {
+    var rows = [];
+    var keys = keysOf(model);
+    for (var i = 0; i < keys.length; i++) {
+      var r = model.marks[keys[i]].row;
+      var found = null;
+      for (var j = 0; j < rows.length; j++) if (rows[j].row === r) found = rows[j];
+      if (found === null) rows.push((found = { row: r, at: [] }));
+      found.at.push(keys[i]);
+    }
+    rows.sort(function (a, b) {
+      return a.row - b.row;
+    });
+    return rows;
+  }
+
+  function markTarget(model, n) {
+    return mark(model.marks[n].series, model.marks[n].datum);
+  }
+
+  /**
+   * A key on a mark of a draw by mark (D8): Left and Right along the mark's row (past the last: the mark's series'
+   * entry, else the first entry, else the first cut text, else it stays); Home and End the row's first and last; Up and
+   * Down the row before and after, at its target whose anchor is nearest (the first of two equally near).
+   */
+  function keyByMark(model, target, key, out) {
+    var n = markAt(model, target.id, target.datum);
+    if (n < 0) return out;
+    var rows = rowsOf(model);
+    var r = -1;
+    for (var j = 0; j < rows.length; j++) if (rows[j].row === model.marks[n].row) r = j;
+    if (r < 0) return out;
+    var row = rows[r].at;
+    var i = row.indexOf(n);
+    if (key === "ArrowLeft" && i > 0) out.target = markTarget(model, row[i - 1]);
+    else if (key === "ArrowRight") {
+      if (i < row.length - 1) out.target = markTarget(model, row[i + 1]);
+      else if (target.id !== null && entryIndex(model, target.id) >= 0) out.target = { kind: "entry", id: target.id };
+      else if (model.entries.length > 0) out.target = { kind: "entry", id: model.entries[0].id };
+      else if (model.cuts.length > 0) out.target = { kind: "cut", n: 0 };
+    } else if (key === "Home") out.target = markTarget(model, row[0]);
+    else if (key === "End") out.target = markTarget(model, row[row.length - 1]);
+    else if ((key === "ArrowUp" && r > 0) || (key === "ArrowDown" && r < rows.length - 1)) {
+      var next = rows[key === "ArrowUp" ? r - 1 : r + 1].at;
+      var a = model.marks[n].anchor;
+      var pick = next[0];
+      var best = Infinity;
+      for (var k = 0; k < next.length; k++) {
+        var b = model.marks[next[k]].anchor;
+        var dx = b.x - a.x;
+        var dy = b.y - a.y;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d < best) {
+          best = d;
+          pick = next[k];
+        }
+      }
+      out.target = markTarget(model, pick);
+    }
+    return out;
   }
 
   // ===================================================================================== primitives
@@ -730,7 +902,11 @@
       var kind = l.line.kind;
       if (kind === "heading") kids.push(text(left, i, l.text, "start", "--chart-muted", 400));
       else if (kind === "more") kids.push(text(left, i, l.text, "start", "--chart-muted", 400));
-      else if (kind === "row") {
+      else if (kind === "row" && l.line.plain === true) {
+        // A row without a colour (brief 1052 D6): no key; its name where a key would stand, its value as a row's.
+        if (l.label !== "") kids.push(text(left, i, l.label, "start", "--chart-tip-ink", l.labelWeight));
+        kids.push(text(right, i, l.line.value, "end", "--chart-tip-ink", m.bold));
+      } else if (kind === "row") {
         var cy = at.y + m.p + (i + 0.5) * m.h;
         kids.push(P.rect({ role: "tooltip", x: left, y: cy - m.key / 2, w: m.key, h: m.key, fill: l.line.colour, color: l.line.color, series: l.line.id }));
         if (l.label !== "") kids.push(text(left + m.key + m.gap, i, l.label, "start", "--chart-tip-ink", l.labelWeight));
@@ -798,6 +974,10 @@
       var c = model.cuts[target.n];
       return c ? flatBox(c.box) : null;
     }
+    if (model.marks) {
+      var n = markAt(model, target.id, target.datum);
+      return n < 0 ? null : model.marks[n].box;
+    }
     if (!model.crosshair) return model.bars[target.id + "\u0000" + target.datum] || null;
     var a = anchorOf(model, target.id, target.datum);
     return a === null ? null : { x: a.x - m.dot, y: a.y - m.dot, w: 2 * m.dot, h: 2 * m.dot };
@@ -821,7 +1001,40 @@
   }
 
   /**
-   * What is shown for one state, pure: {prims, active}. focus = the keyboard's target; last = "key" | "pointer" | null;
+   * The hover ring of mark n (brief 1052 D7, rule 2): one primitive of role `guide`, no fill, its stroke the colour of
+   * the mark's first primitive (its fill, else its stroke), `--chart-line` wide; around a point a circle markRing × s
+   * beyond its radius, around a box a rectangle markRing × s outside it with the focus ring's corner. [] for any other.
+   */
+  function ringPrims(R, model, n, m) {
+    var mk = model.marks[n];
+    var held = model.held[n];
+    if (mk.emphasis !== "ring" || held.length === 0) return [];
+    var first = model.output.primitives[held[0]];
+    var token = first.fill !== null && first.fill !== undefined ? first.fill : first.stroke;
+    var css = first.fill !== null && first.fill !== undefined ? first.color : first.strokeColor;
+    var t = m.theme;
+    var g = R.tables.look("markRing") * m.s;
+    var base = { role: "guide", fill: null, stroke: token, strokeColor: css, strokeWidth: t.n("--chart-line") };
+    var sh = mk.shape;
+    if (sh.kind === "point") return [R.prim.circle(Object.assign({ cx: sh.x, cy: sh.y, r: sh.r + g }, base))];
+    if (sh.kind === "box") return [R.prim.rect(Object.assign({ x: sh.x - g, y: sh.y - g, w: sh.w + 2 * g, h: sh.h + 2 * g, rx: t.n("--chart-bar-radius") }, base))];
+    return [];
+  }
+
+  /**
+   * The move of mark n (brief 1052 D7, rule 3): {at: [positions of its primitives], value} with the sector's `out`
+   * times markMove, rounded as the engine rounds and written as the writer writes a number; null for any other mark.
+   */
+  function moveOf(R, model, n) {
+    var mk = model.marks[n];
+    if (mk.emphasis !== "move" || !mk.out) return null;
+    var by = R.tables.look("markMove");
+    var r2 = R.scales.r2;
+    return { at: model.held[n], value: "translate(" + String(r2(mk.out.x * by)) + " " + String(r2(mk.out.y * by)) + ")" };
+  }
+
+  /**
+   * What is shown for one state, pure: {prims, active, move}. focus = the keyboard's target; last = "key" | "pointer" | null;
    * hit = the pointer's lookup; pointer = its place. The card follows the input that acted last (D2a).
    */
   function scene(R, model, draw, m, width, state) {
@@ -829,6 +1042,7 @@
     var under = [];
     var card = [];
     var active = null;
+    var move = null;
     var show = null;
     if (state.last === "key" && state.target !== null) show = { what: state.target, anchor: null };
     else if (state.last === "pointer" && state.hit !== null) show = { what: state.hit, anchor: state.pointer };
@@ -837,7 +1051,20 @@
       var markT = what.kind === "mark" ? what : what.mark || null;
       var entryT = what.kind === "entry" ? what.id : what.entry !== undefined ? what.entry : null;
       var cutT = what.kind === "cut" ? what.n : what.cut !== undefined ? what.cut : null;
-      if (markT) {
+      if (markT && model.marks) {
+        // A draw by mark (brief 1052 D6, D7): the mark's own card, its series (none for a mark without one) and its
+        // ring or move; no crosshair.
+        var n = markAt(model, markT.id, markT.datum);
+        if (n >= 0) {
+          var mk = model.marks[n];
+          active = mk.series;
+          var mc = markCard(R, width, markLines(model, n), null, frame, m);
+          var ma = show.anchor || mk.anchor;
+          if (mc !== null) card = cardPrims(R, mc, place(mc.box, ma, frame, m.dist), m, false);
+          under = ringPrims(R, model, n, m);
+          move = moveOf(R, model, n);
+        }
+      } else if (markT) {
         active = markT.id;
         var lines = cardLines(model, markT.id, markT.datum);
         if (model.crosshair) under = crosshairPrims(R, model, markT.datum, m);
@@ -856,7 +1083,7 @@
       }
     }
     var ring = focusPrims(R, model, state.target, m, frame);
-    return { prims: under.concat(ring, card), active: active };
+    return { prims: under.concat(ring, card), active: active, move: move };
   }
 
   // ===================================================================================== the DOM half
@@ -918,6 +1145,7 @@
     var st = { draw: null, model: null, m: null, width: null, target: null, last: null, hit: null, pointer: null };
     var made = [];
     var marked = [];
+    var moved = []; // the elements this layer moved (brief 1052 D7), for clear to take the move away
     var hidden = []; // the writer's elements this layer gave aria-hidden (brief 1010 D2), for detach to give back
     var listeners = [];
     var detached = false;
@@ -980,6 +1208,10 @@
         setClass(el, "dp-active", false);
       });
       marked = [];
+      moved.forEach(function (el) {
+        el.removeAttribute("transform");
+      });
+      moved = [];
       setClass(svg, "dp-dimmed", false);
     }
 
@@ -999,6 +1231,14 @@
           }
         }
         setClass(svg, "dp-dimmed", true);
+      }
+      if (sc.move !== null) {
+        var all = elementsOf(svg, st.draw.output.primitives.length);
+        sc.move.at.forEach(function (at) {
+          if (!all[at]) return;
+          all[at].setAttribute("transform", sc.move.value);
+          moved.push(all[at]);
+        });
       }
       if (sc.prims.length > 0) made = R.write.append(sc.prims, svg, st.draw.theme);
       hide(made, false); // the card, guide and ring leave with clear; nothing to give back
@@ -1083,6 +1323,7 @@
         if (detached) return;
         made = []; // the writer emptied the svg: the old card went with the old picture
         marked = [];
+        moved = [];
         load(next);
         dress();
         st.target = findAgain(st.model, st.target);
@@ -1130,6 +1371,10 @@
       pathY: pathY,
       scene: scene,
       cardPrims: cardPrims,
+      markLines: markLines,
+      ringPrims: ringPrims,
+      moveOf: moveOf,
+      targetBox: targetBox,
       MORE: MORE,
       PLUS: PLUS,
     },

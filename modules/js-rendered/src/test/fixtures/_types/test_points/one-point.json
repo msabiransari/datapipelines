@@ -1,0 +1,35 @@
+{
+ "note": "one point: both extents are one value",
+ "document": {
+  "display_name": "Test type test_points",
+  "config": {
+   "mark": {
+    "type": "test_points"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "linear"
+    },
+    "y": {
+     "field": "y"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   42.5
+  ],
+  "y": [
+   17.25
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE"
+ },
+ "expect": {
+  "marks": 1
+ }
+}

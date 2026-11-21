@@ -273,6 +273,12 @@
    * that holds the plot, every series and no position.
    */
   function indexOf(reg, m, geo, series, visible, drawn, marks) {
+    // A template of any frame that finds its marks by their own shape returns {primitives, lookup, count} (brief 1052
+    // D2): the index's second form, 21-lookup.js. Every other result takes the path below, unchanged.
+    if (!Array.isArray(drawn) && Object.prototype.hasOwnProperty.call(drawn, "lookup")) {
+      if (Object.prototype.hasOwnProperty.call(drawn, "index")) throw new Error("render: a template returns lookup or index, not both");
+      return { marks: drawn.count, index: R.lookup.index(geo.plot, series, visible, drawn.lookup, marks) };
+    }
     if (Array.isArray(drawn)) {
       var count = 0;
       for (var p = 0; p < marks.length; p++) if (marks[p].role === "mark" && marks[p].k !== "group" && marks[p].k !== "text") count++;

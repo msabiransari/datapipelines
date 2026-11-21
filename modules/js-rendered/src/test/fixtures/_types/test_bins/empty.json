@@ -1,0 +1,30 @@
+{
+ "note": "no rows: the no-data state",
+ "document": {
+  "display_name": "Test type test_bins",
+  "config": {
+   "mark": {
+    "type": "test_bins"
+   },
+   "encoding": {
+    "x": {
+     "field": "v",
+     "edges": [
+      0,
+      1,
+      2
+     ]
+    }
+   }
+  }
+ },
+ "columns": {
+  "v": []
+ },
+ "types": {
+  "v": "DOUBLE"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

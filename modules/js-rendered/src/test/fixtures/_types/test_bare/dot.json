@@ -1,0 +1,55 @@
+{
+ "note": "last: dot, the dot alone",
+ "document": {
+  "display_name": "Test type test_bare",
+  "config": {
+   "mark": {
+    "type": "test_bare"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    }
+   },
+   "options": {
+    "last": "dot"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9
+  ],
+  "y": [
+   12,
+   18,
+   15,
+   22,
+   30,
+   26,
+   35,
+   31,
+   38,
+   42
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE"
+ },
+ "expect": {
+  "marks": 2
+ }
+}

@@ -1,0 +1,35 @@
+{
+ "note": "no rows: the no-data state",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    },
+    "y2": {
+     "field": "y2"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [],
+  "y": [],
+  "y2": []
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

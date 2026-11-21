@@ -1,0 +1,57 @@
+{
+ "note": "case (b): a linear left axis whose ticks span the plot, beside a log right axis over 3..4000",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    },
+    "y2": {
+     "field": "y2",
+     "log": true
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "y": [
+   0,
+   25,
+   50,
+   75,
+   100,
+   60
+  ],
+  "y2": [
+   3,
+   40,
+   250,
+   900,
+   4000,
+   1200
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}

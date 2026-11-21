@@ -91,6 +91,9 @@
     tipValueWeight: f(600, "interaction", "contract §4.4: a card row's value is bold, and the hovered series' name in a bar's group"),
     crosshairDot: f(0.5, "interaction", "contract §3.4: a crosshair dot's radius is --chart-point plus this many px"),
     focusGap: f(0.25, "interaction", "em: the keyboard's focus ring stands this far outside its target's box"),
+    markReach: f(24, "interaction", "contract §3.8 (C5), §4.4: a point that asks for it is found within this many px of the pointer"),
+    markMove: f(5, "interaction", "contract §3.8 (C5), §4.4: a hovered slice moves this many px outward"),
+    markRing: f(0.25, "interaction", "em: the hover ring stands this far outside its mark"),
   };
 
   var CAPS = {

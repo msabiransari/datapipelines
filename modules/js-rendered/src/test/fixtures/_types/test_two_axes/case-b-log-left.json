@@ -1,0 +1,58 @@
+{
+ "note": "case (b): a log left axis of whole powers (1..10000) beside a log right axis over 0.2..70",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y",
+     "log": true
+    },
+    "y2": {
+     "field": "y2",
+     "log": true
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "y": [
+   1,
+   30,
+   700,
+   10000,
+   4000,
+   90
+  ],
+  "y2": [
+   0.2,
+   1.5,
+   7,
+   70,
+   12,
+   3
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}
