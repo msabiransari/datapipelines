@@ -377,7 +377,7 @@
    * Nothing here is a rule of the layer's own about which series is shown: the index and the primitives say it.
    */
   function modelOf(R, output, width) {
-    var model = { series: [], entries: [], cuts: [], titles: {}, colours: {}, bars: {}, lines: {}, totals: null, crosshair: true, plot: null, axis: "x", order: {}, output: output };
+    var model = { series: [], entries: [], cuts: [], titles: {}, colours: {}, markColours: {}, bars: {}, lines: {}, totals: null, crosshair: true, plot: null, axis: "x", order: {}, output: output };
     if (!output || !output.index || !Array.isArray(output.primitives)) return model;
     var prims = output.primitives;
     var summary = output.summary || { series: [] };
@@ -392,11 +392,13 @@
     for (var i = 0; i < prims.length; i++) {
       var p = prims[i];
       if (p.role === "mark" && p.series !== null && p.k !== "group" && p.k !== "text") {
-        if (!model.colours[p.series]) {
-          model.colours[p.series] = p.fill !== null && p.fill !== undefined ? { token: p.fill, css: p.color } : { token: p.stroke, css: p.strokeColor };
-        }
+        var own = p.fill !== null && p.fill !== undefined ? { token: p.fill, css: p.color } : { token: p.stroke, css: p.strokeColor };
+        if (!model.colours[p.series]) model.colours[p.series] = own;
         if (p.datum !== null && p.datum !== undefined) {
           model.crosshair = false;
+          // A mark's own colour (brief 1057 D1): a bar coloured by value fills the marks of ONE series differently.
+          var mkey = p.series + "\u0000" + p.datum;
+          if (!model.markColours[mkey]) model.markColours[mkey] = own;
           model.bars[p.series + "\u0000" + p.datum] = p.k === "rect" ? { x: p.x, y: p.y, w: p.w, h: p.h } : p.k === "circle" ? { x: p.cx - p.r, y: p.cy - p.r, w: 2 * p.r, h: 2 * p.r } : pathBox(p.d, R.prim.ARITY);
         } else if (p.k === "path" && p.stroke !== null && p.fill === null) {
           (model.lines[p.series] = model.lines[p.series] || []).push(p.d);
@@ -621,7 +623,8 @@
       var name = model.titles[ser.id] === undefined ? ser.id : model.titles[ser.id];
       var line = tip.length > 1 ? tip[1] : "";
       var value = line.indexOf(name + ": ") === 0 ? line.slice(name.length + 2) : line;
-      var colour = model.colours[ser.id] || { token: "--chart-ink", css: model.theme ? model.theme.css("--chart-ink") : "" };
+      // The row's key is its own mark's colour, else its series' (brief 1057 D2).
+      var colour = model.markColours[ser.id + "\u0000" + datum] || model.colours[ser.id] || { token: "--chart-ink", css: model.theme ? model.theme.css("--chart-ink") : "" };
       var row = { kind: "row", id: ser.id, name: name, value: value, colour: colour.token, color: colour.css, bold: false, at: ser.marks[k].at };
       rows.push(row);
       if (ser.id === id) hovered = { row: row, tip: tip };
