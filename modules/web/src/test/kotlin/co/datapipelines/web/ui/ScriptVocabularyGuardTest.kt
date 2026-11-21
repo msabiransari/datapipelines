@@ -587,6 +587,15 @@ class ScriptVocabularyGuardTest {
                     "the chart engine's SVG `transform` attribute (a rotated label) and its tests (kept sense 1; #985)",
                 ),
                 Triple(
+                    Regex(
+                        "^(?:modules/web/src/(?:main/resources/static/js/datapipelines-chart-interactions\\.js|" +
+                            "test/js/chart-marks\\.test\\.mjs)|" +
+                            "tests/browser-tests/src/test/kotlin/co/datapipelines/browser/ChartMarkLookupBrowserTest\\.kt)$",
+                    ),
+                    Regex("(?:set|get|remove)Attribute\\((?:\"transform\"|\\\\\"transform\\\\\")|\"transform\", \"translate\\("),
+                    "the chart interaction layer's SVG `transform` attribute (a moved slice) and its tests (kept sense 1; #1052)",
+                ),
+                Triple(
                     Regex("^modules/application/src/test/kotlin/co/datapipelines/application/charts/ChartJudgeEngineTest\\.kt$"),
                     Regex("TemplatePin\\.Transform|\"transform\":\\{\"template\""),
                     "the judge's engine suite (#986): a chart document's block pin and its wire key — a node noun stays red here",

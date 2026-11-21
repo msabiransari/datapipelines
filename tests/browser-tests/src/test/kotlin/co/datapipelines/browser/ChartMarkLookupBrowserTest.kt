@@ -182,7 +182,7 @@ class ChartMarkLookupBrowserTest {
     }
 
     @Test
-    fun `G7 the browser half - a layer copy whose clear keeps the transform leaves the slice moved after the pointer left`() {
+    fun `G7 the browser half - a layer copy whose clear keeps the move leaves the slice moved after the pointer left`() {
         val layerText = Files.readString(dir.resolve(LAYER))
         val needle = "        el.removeAttribute(\"transform\");\n"
         withClue("the plant's anchor occurs once in the layer") { layerText.split(needle).size - 1 shouldBe 1 }
@@ -195,7 +195,7 @@ class ChartMarkLookupBrowserTest {
                 s.nothing().also { s.clean("G7, after the leave") }
             }
         val red = leftBehind(mapOf(LAYER to layerText.replace(needle, "").toByteArray()))
-        println("G7 red (clear keeps the transform): $red")
+        println("G7 red (clear keeps the move): $red")
         withClue("G7: the planted layer leaves the slice moved") { red.joinToString() shouldContain "moved elements" }
         val green = leftBehind(emptyMap())
         println("G7 green: $green")
@@ -383,7 +383,7 @@ class ChartMarkLookupBrowserTest {
         return problems
     }
 
-    /** markMove 5 -> 10: the hovered slice's transform and its place on the screen move twice as far. */
+    /** markMove 5 -> 10: the hovered slice's move and its place on the screen go twice as far. */
     private fun moveChange(files: Map<String, ByteArray>): List<String> {
         val problems = mutableListOf<String>()
         val moved = mutableMapOf<String, Double>()
@@ -1053,11 +1053,11 @@ private object MarkChecks {
               const want = "translate(" + String(r2(dx)) + " " + String(r2(dy)) + ")";
               const mine = own.map((i) => els[i]);
               if (mv.length !== mine.length || mine.some((e) => !mv.includes(e))) p.push(mk.datum + ": " + mv.length + " moved elements, its own " + mine.length);
-              mine.forEach((e) => { if (e.getAttribute("transform") !== want) p.push(mk.datum + ": transform " + e.getAttribute("transform") + ", the test's own " + want); });
+              mine.forEach((e) => { if (e.getAttribute("transform") !== want) p.push(mk.datum + ": move " + e.getAttribute("transform") + ", the test's own " + want); });
               const before = cm.rects[[...cm.written].indexOf(mine[0])], now = mine[0].getBoundingClientRect();
               const r = svg.getBoundingClientRect(), sx = r.width / frame.w, sy = r.height / frame.h;
               const sdx = now.left - before.left, sdy = now.top - before.top;
-              raw.move = { transform: mine[0].getAttribute("transform"), dx: sdx, dy: sdy, screen: Math.hypot(sdx, sdy) };
+              raw.move = { value: mine[0].getAttribute("transform"), dx: sdx, dy: sdy, screen: Math.hypot(sdx, sdy) };
               if (!near(sdx, dx * sx, 0.6) || !near(sdy, dy * sy, 0.6)) p.push(mk.datum + ": moved on the screen by " + sdx + "," + sdy + ", the test's own " + dx * sx + "," + dy * sy);
             } else if (mv.length !== 0) p.push(mk.datum + ": " + mv.length + " moved elements on a mark without a move");
             p.push(...invisible());
@@ -1065,7 +1065,7 @@ private object MarkChecks {
             """.trimIndent(),
         )
 
-    /** A picture without a highlight: no card, ring, focus ring, transform or dimming, the writer's element count. */
+    /** A picture without a highlight: no card, ring, focus ring, move or dimming, the writer's element count. */
     val NOTHING_JS =
         fn(
             "",

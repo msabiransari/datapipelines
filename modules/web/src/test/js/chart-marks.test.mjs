@@ -1,7 +1,7 @@
 // The interaction layer over a draw whose marks are found by their own shape (brief 1052 A.3 to A.6; design record
 // 2026-11-14 §4.8; look contract §4.4, §4.7, LA17's shared part): the model and the pointer (D5), the card of one mark
 // (D6), the highlight (D7) and the keys (D8). The engine is loaded as the page loads it, then the test-only type
-// test_marks from the engine module's test tree. Every expected place, line, width, k and transform is computed HERE
+// test_marks from the engine module's test tree. Every expected place, line, width, k and move is computed HERE
 // from the fixtures' own numbers and the look table's fields, never by the function under test. The gates G5 to G9 and
 // G13 run the same checks on a copy of the layer (or of a fixture) with one plant: red there, green on the real file.
 
@@ -240,10 +240,10 @@ function translateOf(mk, by) {
   return `translate(${String(r2(Math.sin(mid * DEG) * by))} ${String(r2(-Math.cos(mid * DEG) * by))})`;
 }
 
-/** The picture shows nothing of a highlight: no card, no ring, no transform, no dimming, the writer's element count. */
+/** The picture shows nothing of a highlight: no card, no ring, no move, no dimming, the writer's element count. */
 function nothingLeft(env, what) {
   assert.equal(guides(env).length, 0, what + ": a ring is left");
-  assert.equal(moved(env.svg).length, 0, what + ": a transform is left");
+  assert.equal(moved(env.svg).length, 0, what + ": a move is left");
   assert.equal(dimmed(env.svg), false, what + ": dp-dimmed is left");
   assert.equal(descendants(env.svg).length, env.written, what + ": the picture's element count");
 }
@@ -727,7 +727,7 @@ test("G6: a row without a colour: three plants in copies of the layer, each red"
 });
 
 const G7_PLANTS = [
-  ["clear no longer removes transform", [['        el.removeAttribute("transform");\n', ""]], EXITS.map((h) => "(a) nothing is left after " + h).concat(["(e) from one mark to the next leaves nothing on the first"])],
+  ["clear no longer takes the move away", [['        el.removeAttribute("transform");\n', ""]], EXITS.map((h) => "(a) nothing is left after " + h).concat(["(e) from one mark to the next leaves nothing on the first"])],
   ["the ring not taken away before a repaint", [["        if (el.parentNode === svg) svg.removeChild(el);", '        if (el.parentNode === svg && !/dp-guide/.test(el.getAttribute("class") || "")) svg.removeChild(el);']], EXITS.map((h) => "(a) nothing is left after " + h).concat(["(e) from one mark to the next leaves nothing on the first"])],
   ["the repaint dropped after update", [['        if (st.last === "key" && st.target === null) st.last = null;\n        paint();', '        if (st.last === "key" && st.target === null) st.last = null;']], ["(c) a redraw with the target draws exactly one fresh ring or move from the new index"]],
   ["the keys' ownership cleared by a pointer leave", [['      if (st.last === "pointer") st.last = null;', "      st.last = null;"]], ["(b) the keys keep theirs when the pointer leaves"]],

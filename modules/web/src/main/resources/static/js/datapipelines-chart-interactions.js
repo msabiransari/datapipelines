@@ -1019,7 +1019,7 @@
   }
 
   /**
-   * The move of mark n (brief 1052 D7, rule 3): {at: [positions of its primitives], transform} with the sector's `out`
+   * The move of mark n (brief 1052 D7, rule 3): {at: [positions of its primitives], value} with the sector's `out`
    * times markMove, rounded as the engine rounds and written as the writer writes a number; null for any other mark.
    */
   function moveOf(R, model, n) {
@@ -1027,7 +1027,7 @@
     if (mk.emphasis !== "move" || !mk.out) return null;
     var by = R.tables.look("markMove");
     var r2 = R.scales.r2;
-    return { at: model.held[n], transform: "translate(" + String(r2(mk.out.x * by)) + " " + String(r2(mk.out.y * by)) + ")" };
+    return { at: model.held[n], value: "translate(" + String(r2(mk.out.x * by)) + " " + String(r2(mk.out.y * by)) + ")" };
   }
 
   /**
@@ -1142,7 +1142,7 @@
     var st = { draw: null, model: null, m: null, width: null, target: null, last: null, hit: null, pointer: null };
     var made = [];
     var marked = [];
-    var moved = []; // the elements this layer gave a `transform` (brief 1052 D7), for clear to take it away
+    var moved = []; // the elements this layer moved (brief 1052 D7), for clear to take the move away
     var hidden = []; // the writer's elements this layer gave aria-hidden (brief 1010 D2), for detach to give back
     var listeners = [];
     var detached = false;
@@ -1233,7 +1233,7 @@
         var all = elementsOf(svg, st.draw.output.primitives.length);
         sc.move.at.forEach(function (at) {
           if (!all[at]) return;
-          all[at].setAttribute("transform", sc.move.transform);
+          all[at].setAttribute("transform", sc.move.value);
           moved.push(all[at]);
         });
       }
