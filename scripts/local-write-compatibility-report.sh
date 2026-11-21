@@ -10,8 +10,8 @@
 # Runs the report class from the packaged application jar (default
 # modules/app/build/libs/datapipelines-app.jar, or $DATAPIPELINES_APP_JAR) WITHOUT starting
 # the application: no scheduler, sweeper or executor, no customer connection. It reads the
-# metadata store through one read-only session and prints one line per current or
-# schedule-pinned pipeline version, then a SUMMARY line. Exit 0 = report produced; 1 = it
+# metadata store through one read-only session and prints one line per current,
+# schedule-pinned or API-pinned pipeline version, then a SUMMARY line. Exit 0 = report produced; 1 = it
 # could not be (the reason on stderr, without the URL); 2 = usage.
 #
 # The connection settings are read from the environment ONLY — never from arguments — so the
