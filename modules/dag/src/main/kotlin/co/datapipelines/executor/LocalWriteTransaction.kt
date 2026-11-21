@@ -2,6 +2,7 @@ package co.datapipelines.executor
 
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.LocalWriteQualification
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import kotlinx.coroutines.CompletableDeferred
@@ -471,10 +472,13 @@ class LocalWriteTransaction(
         val resolved =
             registry.getVisible(registration, workspaceId)
                 ?: throw refused("registration_ineligible", "Registration '$registration' is no longer visible to the workspace")
-        if (resolved.dialect !in LocalWritePlanner.ELIGIBLE_DIALECTS) {
+        // #1036: a repoint between planning and first use onto a covered but UNQUALIFIED engine
+        // is refused exactly like one onto an excluded engine — never enlisted without evidence.
+        if (resolved.dialect !in LocalWritePlanner.ELIGIBLE_DIALECTS || !LocalWriteQualification.transactionQualified(resolved.dialect)) {
             throw refused(
                 "registration_ineligible",
-                "Registration '$registration' now points at ${resolved.dialect.wire}, which the single-database transaction does not cover",
+                "Registration '$registration' now points at ${resolved.dialect.wire}, which the single-database transaction " +
+                    "does not cover or has not qualified",
             )
         }
         return enlistAcquired(resolved)

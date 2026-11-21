@@ -1,6 +1,10 @@
 package co.datapipelines.executor
 
 import co.datapipelines.datasources.DatasourceRegistry
+import co.datapipelines.datasources.LocalWriteOperation
+import co.datapipelines.datasources.LocalWriteQualification
+import co.datapipelines.datasources.QualificationStatus
+import co.datapipelines.pipeline.DmlOperation
 import co.datapipelines.pipeline.Node
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
@@ -8,6 +12,7 @@ import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineNodeRef
 import co.datapipelines.pipeline.PipelineResolver
+import co.datapipelines.pipeline.WriteMode
 import co.datapipelines.typesystem.Dialect
 import java.time.Instant
 import java.util.UUID
@@ -39,7 +44,9 @@ import java.util.UUID
  *  - [LocalWriteVerdict.Refuse] — an eligible writer participates AND the plan has a second
  *    durable destination (eligible, excluded or external DDL), an external DDL node, or a
  *    child whose body could not be read. Refusal happens before any business write (§4 row
- *    1); a run already accepted ends FAILED at run admission.
+ *    1); a run already accepted ends FAILED at run admission. (#1036) A single-destination
+ *    plan is also refused when its engine, or one of its writes, lacks real-driver
+ *    qualification in [LocalWriteQualification] — see [qualify].
  *
  * An unresolvable WRITER name beside an eligible one is a second durable destination whose
  * eligibility is unknown — refused. Alone, it stays [Ordinary][LocalWriteVerdict.Ordinary]:
@@ -97,7 +104,7 @@ class LocalWritePlanner(
                 when (node.type) {
                     NodeType.PIPELINE -> {
                         (node.output as? NodeOutput.Datasource)?.let {
-                            rowWrites += Destination(it.datasource, node.id, current.trail)
+                            rowWrites += Destination(it.datasource, node.id, current.trail, operationOf(it.mode))
                         }
                         expand(node, current, workspaceId, expandedAt, unreadableChildren)?.let(stack::addLast)
                     }
@@ -110,13 +117,13 @@ class LocalWritePlanner(
 
                     NodeType.DML -> {
                         (node.resolvedSource as? NodeSource.Datasource)?.let {
-                            writers += Destination(it.name, node.id, current.trail)
+                            writers += Destination(it.name, node.id, current.trail, node.dmlOperation?.let(::operationOf))
                         }
                     }
 
                     NodeType.DQL -> {
                         (node.output as? NodeOutput.Datasource)?.let {
-                            rowWrites += Destination(it.datasource, node.id, current.trail)
+                            rowWrites += Destination(it.datasource, node.id, current.trail, operationOf(it.mode))
                         }
                     }
 
@@ -126,12 +133,56 @@ class LocalWritePlanner(
                 }
             }
         }
-        val eligibility =
+        val resolved =
             (writers + rowWrites + externalDdl)
                 .map { it.registration }
                 .toSet()
-                .associateWith { name -> eligibleIn(datasources.getVisible(name, workspaceId)) }
-        return verdict(writers, rowWrites, externalDdl, unreadableChildren, eligibility)
+                .associateWith { name -> datasources.getVisible(name, workspaceId) }
+        val eligibility = resolved.mapValues { (_, datasource) -> eligibleIn(datasource) }
+        val verdict = verdict(writers, rowWrites, externalDdl, unreadableChildren, eligibility)
+        val enrolled = (verdict as? LocalWriteVerdict.Enroll)?.registration
+        return qualify(verdict, enrolled?.let { resolved[it]?.dialect }, writers + rowWrites)
+    }
+
+    /**
+     * Run admission's qualification gate (#1036; record §3.2/§5, dag-executor §16.6): an
+     * [Enroll][LocalWriteVerdict.Enroll] verdict stands only when [LocalWriteQualification] says
+     * the engine's transaction AND every enrolled write's operation were qualified by real-driver
+     * evidence. An engine the transaction covers but that is not qualified (Oracle today) is
+     * REFUSED before the first business statement — never run as independent commits, which would
+     * silently downgrade the guarantee. Pure, so the rule is unit-testable without a registry.
+     */
+    internal fun qualify(
+        verdict: LocalWriteVerdict,
+        dialect: Dialect?,
+        writes: List<Destination>,
+    ): LocalWriteVerdict {
+        if (verdict !is LocalWriteVerdict.Enroll || dialect == null) return verdict
+        if (!LocalWriteQualification.transactionQualified(dialect)) {
+            val rows = LocalWriteQualification.rows(dialect, LocalWriteOperation.TRANSACTION)
+            return LocalWriteVerdict.Refuse(
+                reason = UNQUALIFIED_TARGET,
+                details =
+                    mapOf(
+                        "registration" to verdict.registration,
+                        "dialect" to dialect.wire,
+                        "qualification" to LocalWriteQualification.status(dialect, LocalWriteOperation.TRANSACTION).wire,
+                        "qualification_reason" to rows.firstOrNull()?.reason,
+                    ),
+            )
+        }
+        val unqualified =
+            writes.mapNotNull { write ->
+                write.operation
+                    ?.let { operation -> operation to LocalWriteQualification.status(dialect, operation) }
+                    ?.takeIf { (_, status) -> status != QualificationStatus.QUALIFIED }
+                    ?.let { (operation, status) -> write.describe() + mapOf("operation" to operation.wire, "qualification" to status.wire) }
+            }
+        if (unqualified.isEmpty()) return verdict
+        return LocalWriteVerdict.Refuse(
+            reason = UNQUALIFIED_OPERATION,
+            details = mapOf("registration" to verdict.registration, "dialect" to dialect.wire, "writes" to unqualified),
+        )
     }
 
     /**
@@ -275,11 +326,16 @@ class LocalWritePlanner(
     private fun eligibleIn(datasource: co.datapipelines.datasources.Datasource?): Boolean =
         datasource != null && datasource.dialect in ELIGIBLE_DIALECTS
 
-    /** One declared durable destination: a registration name, the node that declared it, and how to reach that node. */
+    /**
+     * One declared durable destination: a registration name, the node that declared it, how to
+     * reach that node, and the write it performs there (null for external DDL, which never
+     * enrolls, and for an operation-less DML node, which DML admission refuses first).
+     */
     data class Destination(
         val registration: String,
         val nodeId: String,
         val trail: List<String>,
+        val operation: LocalWriteOperation? = null,
     ) {
         internal fun describe(): Map<String, Any?> =
             mapOf(
@@ -299,12 +355,34 @@ class LocalWritePlanner(
 
     companion object {
         /**
-         * The engines the single-database guarantee is qualified for (§3.2: PostgreSQL, MySQL,
-         * SQL Server, Oracle — completion requires all four per §5). H2, SQLite, DuckDB and
+         * The engines the single-database guarantee COVERS (§3.2: PostgreSQL, MySQL, SQL Server,
+         * Oracle — completion requires all four per §5), read from the qualification matrix's
+         * scope. Covered is not qualified: a covered engine's writer always participates in the
+         * plan, and [qualify] refuses it when its evidence is missing. H2, SQLite, DuckDB and
          * dp-lake are excluded from this feature and never enroll.
          */
-        val ELIGIBLE_DIALECTS: Set<Dialect> =
-            setOf(Dialect.POSTGRES, Dialect.MYSQL, Dialect.MSSQL, Dialect.ORACLE)
+        val ELIGIBLE_DIALECTS: Set<Dialect> = Dialect.entries.filter(LocalWriteQualification::inScope).toSet()
+
+        /** The refusal reason for a covered engine whose transaction is not qualified (#1036). */
+        const val UNQUALIFIED_TARGET = "unqualified_transactional_target"
+
+        /** The refusal reason for an enrolled write whose operation is not qualified on the engine (#1036). */
+        const val UNQUALIFIED_OPERATION = "unqualified_write_operation"
+
+        /** The matrix operation a DML node performs. */
+        fun operationOf(operation: DmlOperation): LocalWriteOperation =
+            when (operation) {
+                DmlOperation.INSERT -> LocalWriteOperation.INSERT
+                DmlOperation.UPDATE -> LocalWriteOperation.UPDATE
+                DmlOperation.DELETE -> LocalWriteOperation.DELETE
+            }
+
+        /** The matrix operation a write-back in [mode] performs. */
+        fun operationOf(mode: WriteMode): LocalWriteOperation =
+            when (mode) {
+                WriteMode.APPEND -> LocalWriteOperation.WRITEBACK_APPEND
+                WriteMode.REPLACE -> LocalWriteOperation.WRITEBACK_REPLACE
+            }
     }
 }
 
@@ -321,10 +399,35 @@ sealed interface LocalWriteVerdict {
     /**
      * An eligible writer participates, but the write set is not single-destination. The
      * executor refuses the run before any business write; [reason] is one of
-     * `second_durable_destination` / `external_ddl` / `unknown_child_writes`.
+     * `second_durable_destination` / `external_ddl` / `unknown_child_writes`, or (#1036)
+     * `unqualified_transactional_target` / `unqualified_write_operation` when the single
+     * destination's engine or one of its writes lacks real-driver qualification.
      */
     data class Refuse(
         val reason: String,
         val details: Map<String, Any?>,
     ) : LocalWriteVerdict
 }
+
+/**
+ * The human-readable message of a `pipeline.execution.local_write_refused` run-admission refusal,
+ * per [LocalWriteVerdict.Refuse.reason]. Names no SQL, business value or credential: the details
+ * carry the registration, node ids and qualification statuses.
+ */
+internal fun localWriteRefusalMessage(reason: String): String =
+    when (reason) {
+        LocalWritePlanner.UNQUALIFIED_TARGET -> {
+            "Run refused: the datasource this pipeline writes to runs on an engine whose single-database " +
+                "transaction is not qualified, so its writes cannot be committed together (unqualified transactional target)"
+        }
+
+        LocalWritePlanner.UNQUALIFIED_OPERATION -> {
+            "Run refused: a write in this pipeline uses an operation that is not qualified inside the " +
+                "single-database transaction on its engine (unqualified write operation)"
+        }
+
+        else -> {
+            "Run refused: this pipeline's durable writes span more than one " +
+                "destination, so they cannot share one transaction (${reason.replace('_', ' ')})"
+        }
+    }

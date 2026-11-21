@@ -8,7 +8,6 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.StagingMemoryLimitException
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
-import co.datapipelines.typesystem.DmlInsertQualification
 import co.datapipelines.typesystem.LogicalType
 import kotlinx.coroutines.CancellationException
 import java.sql.Connection
@@ -130,8 +129,9 @@ internal object DmlNodeRuns {
     ): DmlRows {
         // Refused before input is read or any statement prepared: an unqualified engine is never
         // asked for a key it may answer with something else (SQLite's rowid).
-        if (!DmlInsertQualification.isQualified(target.dialect)) {
-            throw signal(NodePhase.CONNECT, node.id, DmlAdmission.unqualified(node.id, target.dialect))
+        val declaredType = node.dml?.key?.logicalType
+        if (!DmlAdmission.insertQualified(target.dialect, declaredType)) {
+            throw signal(NodePhase.CONNECT, node.id, DmlAdmission.unqualified(node.id, target.dialect, keyType = declaredType))
         }
         val key = ScriptNodeRuns.phase(ctx, NodePhase.RENDER, node.id) { DeclaredKey.of(node.dml?.key, node.id) }
         val input = ScriptNodeRuns.phase(ctx, NodePhase.STAGE, node.id) { DmlInputs.load(node, ctx) }

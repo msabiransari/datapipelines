@@ -236,6 +236,7 @@ GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.DatasourceAuditEv
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.DatasourceErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ManagedLakeErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ReadOnlyEnforcementSpecDriftTest"  # inventory 995: reads docs/dag-executor.md
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.LocalWriteQualificationSpecDriftTest"  # 1036: reads docs/dag-executor.md
 GUARDS[":modules:dag"]="co.datapipelines.executor.StaleSweepCommitEvidenceIntegrationTest"  # reads the Flyway migrations under modules/app (1035 r2): the sweep classifies on the real schema
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ShippedMigrationsTest"  # inventory 995: reads README.md modules/app/src/main/resources/db/migration
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.semantics.LearnedFactKindSpecDriftTest"  # inventory 995: reads docs/enums.md modules/app/src/main/resources/db/migration/V25__learned_facts.sql
@@ -260,6 +261,7 @@ GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteFaqCitationTest"  # i
 GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.OrderedTestAnnotationGuardTest"  # inventory 995: reads modules modules/pipeline-contract
 GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.ScratchDatabaseOnceGuardTest"  # inventory 995: reads modules modules/pipeline-contract
 GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.PublishedMethodDowngradeBarrierIntegrationTest"  # #1037: reads docs/metadata-db.md modules/app/src/main/resources/db/migration modules/app/src/main/resources/db/downgrade-barrier
+GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.LocalWriteCompatibilityPackagedIntegrationTest"  # 1036 r2: reads modules/app/build/libs/datapipelines-app.jar modules/app/src/main/resources/db/migration scripts/local-write-compatibility-report.sh
 # buildSrc (#1004, owner ruling 2026-11-15): each buildSrc test class that reads the repository
 # beyond buildSrc and starts no nested build runs in EVERY lane check. Found by reading each class
 # (lane 1004's evidence, A.1) and by PregateGuardInventoryTest, which scans buildSrc's tests too.

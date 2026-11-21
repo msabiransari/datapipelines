@@ -1,5 +1,7 @@
 package co.datapipelines.executor
 
+import co.datapipelines.datasources.LocalWriteQualification
+import co.datapipelines.datasources.QualificationStatus
 import co.datapipelines.pipeline.DmlFields
 import co.datapipelines.pipeline.DmlInput
 import co.datapipelines.pipeline.DmlKey
@@ -221,10 +223,29 @@ internal object DmlAdmission {
     }
 
     /**
+     * True when an insert whose declared key is [keyType] may run on [dialect]: the dialect returns its
+     * named key column ([DmlInsertQualification]) AND, on an engine the single-database transaction's
+     * qualification matrix covers (#1036), that key type was measured in both key modes with the pinned
+     * driver ([LocalWriteQualification.insertStatus]). A key type no matrix row covers is refused, never
+     * admitted under another type's evidence. An invalid key (null type) is left to the key rules'
+     * own `dml_key_invalid`.
+     */
+    fun insertQualified(
+        dialect: Dialect,
+        keyType: LogicalType?,
+    ): Boolean =
+        DmlInsertQualification.isQualified(dialect) &&
+            (
+                keyType == null ||
+                    !LocalWriteQualification.inScope(dialect) ||
+                    LocalWriteQualification.insertStatus(dialect, keyType) == QualificationStatus.QUALIFIED
+            )
+
+    /**
      * Refuses the first DML `insert` of [pipeline] whose target dialect is known and not
-     * qualified ([DmlInsertQualification]). [dialectOf] answers the CURRENT dialect of a node's
-     * destination, or null when it cannot be resolved — such a node is left to fail at its own
-     * execution with the ordinary `datasource_not_found`, exactly as without this check.
+     * qualified for its declared key type ([insertQualified]). [dialectOf] answers the CURRENT
+     * dialect of a node's destination, or null when it cannot be resolved — such a node is left to
+     * fail at its own execution with the ordinary `datasource_not_found`, exactly as without this check.
      */
     fun refuseUnqualifiedInsert(
         pipeline: Pipeline,
@@ -235,8 +256,9 @@ internal object DmlAdmission {
         pipeline.nodes
             .asSequence()
             .filter { it.type == NodeType.DML && it.dmlOperation == DmlOperation.INSERT }
-            .firstNotNullOfOrNull { node -> dialectOf(node)?.takeUnless(DmlInsertQualification::isQualified)?.let { node to it } }
-            ?.let { (node, dialect) -> throw unqualified(node.id, dialect, child, via) }
+            .firstNotNullOfOrNull { node ->
+                dialectOf(node)?.takeUnless { insertQualified(it, node.key?.logicalType) }?.let { node to it }
+            }?.let { (node, dialect) -> throw unqualified(node.id, dialect, child, via, node.key?.logicalType) }
     }
 
     /** The `dml_insert_unqualified` refusal, shared by run admission and the node-level backstop. */
@@ -245,14 +267,24 @@ internal object DmlAdmission {
         dialect: Dialect,
         child: PipelineNodeRef? = null,
         via: List<String> = emptyList(),
-    ): DatapipelinesException =
-        DatapipelinesException(
+        keyType: LogicalType? = null,
+    ): DatapipelinesException {
+        // A dialect that returns keys at all but was not measured with THIS key type says so.
+        val typeOnly = keyType != null && DmlInsertQualification.isQualified(dialect)
+        return DatapipelinesException(
             code = PipelineErrorCodes.Node.DML_INSERT_UNQUALIFIED,
             message =
                 "${where(child)}DML insert node '$nodeId' targets a ${dialect.wire} connection, " +
-                    "which is not qualified to return inserted keys; nothing was executed.",
-            details = mapOf("node" to nodeId, "dialect" to dialect.wire) + family(child, via),
+                    if (typeOnly) {
+                        "which is not qualified to return ${keyType.wire} keys; nothing was executed."
+                    } else {
+                        "which is not qualified to return inserted keys; nothing was executed."
+                    },
+            details =
+                mapOf("node" to nodeId, "dialect" to dialect.wire) +
+                    (if (typeOnly) mapOf("key_type" to keyType.wire) else emptyMap()) + family(child, via),
         )
+    }
 
     private fun where(child: PipelineNodeRef?): String = child?.let { "pinned child '${it.name}' v${it.version}: " }.orEmpty()
 

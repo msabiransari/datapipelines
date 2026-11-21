@@ -89,6 +89,7 @@ waived-for-cost co.datapipelines.config.DriverVersionSpecDriftTest  measured 271
 # the migrations under modules/app. The merge gate and CI run them; follow-up issue named in #995.
 waived-for-cost co.datapipelines.ApplicationSmokeTest  starts a container or context: GenericContainer, PostgreSQLContainer
 waived-for-cost co.datapipelines.application.checks.PipelineCheckRunRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.compatibility.LocalWriteCompatibilityCliIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.datasources.LakeTableRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.datasources.ManagedLakeTableRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.dependencies.ApiAndScheduleConsumersIntegrationTest  starts a container or context: PostgreSQLContainer
@@ -138,6 +139,7 @@ waived-for-cost co.datapipelines.datasources.DatasourceIdentityIntegrationTest  
 waived-for-cost co.datapipelines.executor.BoundedJdbcPostgresIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ExecutionEventRetentionTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ExecutionRepositoriesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.LocalTransactionDialectQualificationTest  starts a container or context: MSSQLServerContainer,MySQLContainer,PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.LocalWriteTransactionIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ParameterBindingIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.PostgresSourceIntegrationTest  starts a container or context: PostgreSQLContainer
