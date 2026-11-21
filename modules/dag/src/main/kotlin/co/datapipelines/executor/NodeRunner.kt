@@ -25,6 +25,7 @@ import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.TypeMappingWarning
+import co.datapipelines.typesystem.body.StructuredBody
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -177,6 +178,10 @@ data class NodeExecutionContext(
     val readOnly: Boolean = false,
     /** The root surface's admission check, retained through every composed child execution. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
+    /** [ExecuteRequest.requestBody] (#1038): read only by a SCRIPT body input; never inherited by a child. */
+    val requestBody: StructuredBody = StructuredBody.Absent,
+    /** [ExecuteRequest.boundedDiagnostics] (#1038): failures and script console text leave only bounded metadata; children inherit it. */
+    val boundedDiagnostics: Boolean = false,
 )
 
 /**

@@ -38,9 +38,11 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.release.ReleaseBounds
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ResolvedNode
+import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
 import co.datapipelines.web.endpoints.PublishedEndpointServeService
 import co.datapipelines.web.endpoints.PublishedExecutionPagingService
+import co.datapipelines.web.endpoints.PublishedRequestBodyCodec
 import co.datapipelines.web.executions.ExecutionMetadataProjection
 import co.datapipelines.web.executions.ExecutionVisibility
 import co.datapipelines.web.executions.ResultCursor
@@ -94,6 +96,22 @@ import org.springframework.transaction.support.TransactionTemplate
 @Configuration
 @Suppress("TooManyFunctions") // one @Bean per collaborator of the API family; #786 added the version and lifecycle beans
 class EndpointsConfiguration {
+    /**
+     * The ONE bounded structured-body decoder (#1038; pipeline-contract §3.4): framework execute's
+     * and `pipelines_execute`'s `request_body` fixture and the published-request codec all decode
+     * with the operator's `datapipelines.endpoints.body-max-*` budget, so no surface admits a body
+     * another would refuse.
+     */
+    @Bean
+    fun structuredBodyDecoder(properties: EndpointsProperties): StructuredBodyDecoder = StructuredBodyDecoder(properties.bodyLimits())
+
+    /**
+     * #1038 — the published-request body codec over the shared decoder: the transport half of a published mutation
+     * request (media type, encoding, route body rules, bounded decoding). #1039's admission path is its caller.
+     */
+    @Bean
+    fun publishedRequestBodyCodec(decoder: StructuredBodyDecoder): PublishedRequestBodyCodec = PublishedRequestBodyCodec(decoder)
+
     /**
      * The registry's persistence. Declared here rather than in `DomainConfiguration` for
      * cohesion — every bean of the published-endpoint feature that `web` owns is in this file —

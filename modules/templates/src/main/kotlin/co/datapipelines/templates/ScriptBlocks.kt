@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import com.fasterxml.jackson.databind.cfg.CoercionAction
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape
 import com.fasterxml.jackson.databind.json.JsonMapper
@@ -67,11 +69,15 @@ data class ContractColumn(
     val nullable: Boolean = false,
 )
 
-/** One declared input of a script contract — a staged table, or a single Context value. */
+/**
+ * One declared input of a script contract — a staged table, a single Context value, or the
+ * execution's structured request body (#1038).
+ */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "kind")
 @JsonSubTypes(
     JsonSubTypes.Type(ScriptInput.Table::class, name = "table"),
     JsonSubTypes.Type(ScriptInput.Value::class, name = "value"),
+    JsonSubTypes.Type(ScriptInput.Body::class, name = "body"),
 )
 sealed interface ScriptInput {
     val kind: String
@@ -98,6 +104,26 @@ sealed interface ScriptInput {
     ) : ScriptInput {
         @get:JsonProperty("kind")
         override val kind: String get() = "value"
+    }
+
+    /**
+     * The execution's structured request body (published-mutation requirement §3.3, #1038): any
+     * JSON object, or an array of objects, delivered in its original root form as a native value
+     * — never a string, never converted, never checked against a field schema (the transformer
+     * owns interpretation and declares the typed output). Absent when the execution supplied no
+     * body. Script-only by construction (only script templates carry a contract); at most one per
+     * contract. Distinct from [Value]: an object-valued Context key keeps its object-only gate.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = false)
+    class Body : ScriptInput {
+        @get:JsonProperty("kind")
+        override val kind: String get() = "body"
+
+        override fun equals(other: Any?): Boolean = other is Body
+
+        override fun hashCode(): Int = kind.hashCode()
+
+        override fun toString(): String = "Body"
     }
 }
 
@@ -184,12 +210,19 @@ data class ScriptInvariant(
  * optional — the runner supplies `{ node_id: "test", context_key: null }` — and [now] pins the
  * instant `$now()`/`$millis()` return for a case that reads the clock (absent → the clock
  * builtins refuse, 7a's A.3 choice).
+ *
+ * [inputs] binds as [FixtureInputs] (#1038): each member keeps its exact JSON text beside its
+ * ordinary value, so a `body` input is decoded exactly by the runner while table and value inputs
+ * keep their ordinary reading.
  */
 @JsonIgnoreProperties(ignoreUnknown = false)
 data class ScriptTestInput(
     @field:JsonProperty("rows") @get:JsonProperty("rows") @param:JsonProperty("rows")
     val rows: List<Map<String, Any?>>? = null,
     @field:JsonProperty("inputs") @get:JsonProperty("inputs") @param:JsonProperty("inputs")
+    @field:JsonDeserialize(using = FixtureInputs.Deserializer::class)
+    @param:JsonDeserialize(using = FixtureInputs.Deserializer::class)
+    @get:JsonSerialize(using = FixtureInputs.Serializer::class)
     val inputs: Map<String, Any?>? = null,
     @field:JsonProperty("meta") @get:JsonProperty("meta") @param:JsonProperty("meta")
     val meta: Map<String, Any?>? = null,
@@ -280,8 +313,26 @@ object ScriptBlocks {
     /** Serializes the invariants block; an empty list serializes as `[]` (never null). */
     fun writeInvariants(invariants: List<ScriptInvariant>?): String? = invariants?.let { mapper.writeValueAsString(it) }
 
-    /** Serializes the tests block. */
-    fun writeTests(tests: List<ScriptTestCase>?): String? = tests?.let { mapper.writeValueAsString(it) }
+    /**
+     * Serializes the tests block to its stored form (#1038, review C2). [contract] names the body inputs
+     * whose exact fixture text the stored `jsonb` could not keep (member order, a repeated member at any
+     * depth, a repeated input name): each is stored with its occurrences' exact text beside the ordinary
+     * value ([FixtureInputs]). A contract with no body input stores what it always did. [contract] has no
+     * default, so a caller cannot forget it.
+     */
+    fun writeTests(
+        tests: List<ScriptTestCase>?,
+        contract: ScriptContract?,
+    ): String? {
+        if (tests == null) return null
+        val bodyInputs =
+            contract
+                ?.inputs
+                ?.filterValues { it is ScriptInput.Body }
+                ?.keys
+                .orEmpty()
+        return mapper.writer().withAttribute(FixtureInputs.STORAGE_BODY_INPUTS, bodyInputs).writeValueAsString(tests)
+    }
 
     /** Reads one stored `contract_json` back. */
     fun readContract(json: String?): ScriptContract? = json?.let { mapper.readValue(it, ScriptContract::class.java) }
@@ -292,6 +343,13 @@ object ScriptBlocks {
             mapper.readValue(it, Array<ScriptInvariant>::class.java).toList()
         }
 
-    /** Reads one stored `tests_json` back. */
-    fun readTests(json: String?): List<ScriptTestCase>? = json?.let { mapper.readValue(it, Array<ScriptTestCase>::class.java).toList() }
+    /** Reads one stored `tests_json` back, restoring the exact body fixtures [writeTests] stored beside the ordinary values. */
+    fun readTests(json: String?): List<ScriptTestCase>? =
+        json?.let {
+            mapper
+                .readerFor(Array<ScriptTestCase>::class.java)
+                .withAttribute(FixtureInputs.STORAGE_READ, true)
+                .readValue<Array<ScriptTestCase>>(it)
+                .toList()
+        }
 }

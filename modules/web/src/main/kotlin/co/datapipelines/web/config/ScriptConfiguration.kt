@@ -82,6 +82,7 @@ class ScriptConfiguration {
         pool: ScriptEvaluationPool,
         properties: ScriptProperties,
         engines: Map<ScriptLanguage, ScriptEngine>,
+        endpoints: EndpointsProperties,
     ): ScriptTestRunner =
         ScriptTestRunner(
             engines = engines,
@@ -96,6 +97,8 @@ class ScriptConfiguration {
             maxStatements = properties.js.maxStatements,
             maxResultBytes = properties.js.maxResultMb * MIB,
             maxInputBytes = properties.js.maxInputMb * MIB,
+            // #1038: an authored body fixture meets the budget a live body meets.
+            bodyLimits = endpoints.bodyLimits(),
         )
 
     /**

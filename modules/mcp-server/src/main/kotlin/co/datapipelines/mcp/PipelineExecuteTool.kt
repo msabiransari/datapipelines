@@ -22,7 +22,11 @@ import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.RequestBodyAdmission
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.body.StructuredBody
+import co.datapipelines.typesystem.body.StructuredBodyDecoder
+import co.datapipelines.typesystem.body.StructuredBodyDecoding
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
 import kotlinx.coroutines.runBlocking
@@ -33,6 +37,12 @@ import java.util.UUID
 private const val PARAMETERS_DESC =
     "Object whose keys match the pipeline's declared parameters. Values must match the declared types (BIGINTEGER " +
         "and BIGDECIMAL as strings, others as JSON native types)."
+
+/** §6.2.3 / #1038 — the `request_body` description. */
+private const val REQUEST_BODY_DESC =
+    "The pipeline's structured request body (pipeline-contract §3.4): one JSON object or array of objects, delivered " +
+        "unchanged to the SCRIPT transformer that binds @request_body. Only for a pipeline that declares request_body; " +
+        "never part of parameters. A member repeated anywhere inside it is refused, and every number keeps its exact value."
 
 /**
  * `pipelines_execute` (mcp-server.md §6.2.3). Permission: `pipeline.execute`.
@@ -121,6 +131,11 @@ class PipelineExecuteTool(
      * outside the assembled application.
      */
     private val renderFreshness: TemplateRenderFreshness? = null,
+    /**
+     * #1038 — the shared bounded decoder the `request_body` argument is re-read with, so its
+     * shape, depth, size and duplicate rules are framework execute's and the published codec's.
+     */
+    private val bodyDecoder: StructuredBodyDecoder = StructuredBodyDecoder(),
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -146,6 +161,10 @@ class PipelineExecuteTool(
                       "type": "object",
                       "description": "$PARAMETERS_DESC",
                       "additionalProperties": true
+                    },
+                    "request_body": {
+                      "description": "$REQUEST_BODY_DESC",
+                      "anyOf": [{"type": "object"}, {"type": "array", "items": {"type": "object"}}]
                     }
                   }
                 }
@@ -178,6 +197,7 @@ class PipelineExecuteTool(
         }
 
         val parameters = parameters(args)
+        val requestBody = requestBody(args)
         val request =
             ExecuteRequest(
                 pipelineId = id,
@@ -202,6 +222,7 @@ class PipelineExecuteTool(
                 triggeredVia = ExecutionTrigger.MCP,
                 // D11: an MCP run is the key owner's own — `/mcp` authenticates with a user key only.
                 executedByKeyKind = ExecutedByKeyKind.USER,
+                requestBody = requestBody,
             )
         return when (val decision = decide(request, parameters, ctx)) {
             is LaunchDecision.Attach -> {
@@ -234,6 +255,7 @@ class PipelineExecuteTool(
                 parameters = parameters,
                 parametersJson = ExecutorJson.write(parameters),
                 idempotencyKey = ctx.idempotencyKey,
+                requestBody = request.requestBody,
             ),
         ) ?: LaunchDecision.Start(null)
 
@@ -346,6 +368,30 @@ class PipelineExecuteTool(
     private fun parameters(args: McpArguments): Map<String, JsonNode> =
         args.requiredObject("parameters").mapValues { (_, value) -> ExecutorJson.mapper.valueToTree(value) }
 
+    /**
+     * The optional `request_body` argument (#1038), re-serialized and decoded by [bodyDecoder] as a
+     * fixture ([StructuredBodyDecoder.decodeFixture]): the byte budget is counted over the decoded
+     * value's canonical form, exactly as framework execute counts the fixture embedded in its
+     * request and the authored runner counts a body fixture — never over this re-serialization's
+     * spelling, which can differ from the canonical one (`1.000…0` against `1`). A member that is
+     * present is decoded even when it is JSON `null` — `null` is an invalid root, never absence,
+     * exactly as on framework execute.
+     *
+     * The JSON-RPC transport has already parsed the arguments, but [ExactRequestBodyJsonMapper]
+     * refused a repeated member and rebuilt the value with exact fractions first, so what arrives
+     * here is the client's value. It is written back with a mapper that keeps a `BigDecimal` in
+     * its short form: [ExecutorJson]'s plain form would expand `1e999999999` into a gigabyte string
+     * before the decoder could refuse it as out of range.
+     */
+    private fun requestBody(args: McpArguments): StructuredBody {
+        val raw = args.rawMap()
+        if (!raw.containsKey(REQUEST_BODY_ARG)) return StructuredBody.Absent
+        return when (val decoded = bodyDecoder.decodeFixture(bodyWriter.writeValueAsString(raw[REQUEST_BODY_ARG]))) {
+            is StructuredBodyDecoding.Decoded -> decoded.body
+            is StructuredBodyDecoding.Refused -> throw RequestBodyAdmission.decodeRefused(decoded.refusal)
+        }
+    }
+
     private fun payload(
         request: ExecuteRequest,
         result: ExecutionResult,
@@ -400,5 +446,13 @@ class PipelineExecuteTool(
 
         /** #1035: the result half of a confirmed SUCCESS whose caller result was never delivered. */
         val RESULT_UNAVAILABLE_BLOCK: Map<String, Any?> = mapOf("result_unavailable" to true)
+
+        /** The structured request-body argument (#1038). */
+        const val REQUEST_BODY_ARG = "request_body"
+
+        /** Writes the argument back as JSON text: `BigDecimal` in its short form, never the plain expansion. */
+        val bodyWriter: com.fasterxml.jackson.databind.ObjectMapper =
+            com.fasterxml.jackson.databind
+                .ObjectMapper()
     }
 }

@@ -298,6 +298,8 @@ class SubPipelineExecutionRunner(
         // its invoker runs, so its datasource resolution scopes identically (025 A5).
         workspaceId = ctx.workspaceId,
         parameters = resolveParameters(node, child, ctx),
+        // #1038: a child of a body execution keeps the parent's bounded diagnostics.
+        inheritedBoundedDiagnostics = ctx.boundedDiagnostics,
         triggeredVia = ExecutionTrigger.PIPELINE,
         executionId = childExecutionId,
         directSink = sinkFor(node, ctx, outcome),
@@ -431,7 +433,7 @@ class SubPipelineExecutionRunner(
         child: Pipeline,
         ctx: NodeExecutionContext,
     ): Map<String, JsonNode> {
-        val childOutputKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
+        val childOutputKeys = child.calculatorOutputs() + child.callerScriptKeys().associateWith { null }
         return node.parameters.orEmpty().mapValues { (key, value) ->
             val reference =
                 value.takeIf { it.isTextual }?.asText()?.let(PARAMETER_REFERENCE::matchEntire)

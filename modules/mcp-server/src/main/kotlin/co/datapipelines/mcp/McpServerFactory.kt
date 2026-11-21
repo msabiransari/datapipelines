@@ -98,12 +98,16 @@ object McpServerFactory {
      * `StreamReadConstraints` that bound a hostile-but-within-the-cap body on REST bind the MCP
      * surface too. The factory is `pipeline-contract`'s [RequestLimits.jsonFactory] — the one
      * home `web`'s REST mapper is also built from — so the two surfaces cannot drift.
+     *
+     * The mapper is wrapped by [ExactRequestBodyJsonMapper] (#1038): a `pipelines_execute`
+     * `request_body` is checked for repeated members and kept exact at the one point where it is
+     * still the client's text, before the SDK's plain parse discards either.
      */
     fun transport(): HttpServletStatelessServerTransport =
         HttpServletStatelessServerTransport
             .builder()
             .messageEndpoint(ENDPOINT)
-            .jsonMapper(JacksonMcpJsonMapper(transportMapper()))
+            .jsonMapper(ExactRequestBodyJsonMapper(JacksonMcpJsonMapper(transportMapper())))
             .contextExtractor { request: HttpServletRequest -> transportContext(request) }
             .build()
 

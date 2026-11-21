@@ -442,7 +442,7 @@ class TemplateImplementsIntegrationTest {
             body = draft.body,
             contractJson = ScriptBlocks.writeContract(draft.contract),
             invariantsJson = ScriptBlocks.writeInvariants(draft.invariants),
-            testsJson = ScriptBlocks.writeTests(draft.tests),
+            testsJson = ScriptBlocks.writeTests(draft.tests, draft.contract),
         )
 
     private fun citationRows(): Int = jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM template_implements", Int::class.java)!!

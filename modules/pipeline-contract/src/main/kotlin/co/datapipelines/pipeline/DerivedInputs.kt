@@ -37,7 +37,7 @@ object DerivedInputs {
         val pipeline = PipelineJson.objectMapper().treeToValue(body, Pipeline::class.java)
         // 7c (#7): a value-mode SCRIPT's `context_key` is the same implicit optional input,
         // typed ANY here — the contract that types it is the pinned template's, not the body's.
-        val outputs = pipeline.calculatorOutputs(kinds) + pipeline.scriptOutputKeys().associateWith { null }
+        val outputs = pipeline.calculatorOutputs(kinds) + pipeline.callerScriptKeys().associateWith { null }
         if (outputs.isEmpty()) return
         val parameters = body.get("parameters") as? ObjectNode ?: body.putObject("parameters")
         outputs.forEach { (key, type) ->

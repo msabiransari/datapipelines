@@ -219,6 +219,8 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Import.CONTEXT_KEY_MISSING to HttpStatus.CONFLICT,
             PipelineErrorCodes.Execution.NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Execution.PARAMETER_REQUIRED to HttpStatus.BAD_REQUEST,
+            // §13.3 / #1038 — the structured request body refused (reason in details, never a value).
+            PipelineErrorCodes.Execution.REQUEST_BODY_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE to HttpStatus.BAD_REQUEST,
             // §13.3 / #194 — a value breaking a declared constraint, precision or scale: 400 like
             // its invalid_parameter_type sibling — the execute input is not acceptable, nothing ran.
@@ -500,6 +502,12 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Endpoint.METHOD_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED to HttpStatus.CONFLICT,
+            // #1038 §13.14 — the structured request body. A GET pin of a body-requiring pipeline is a state conflict
+            // like its read-only sibling (409); the transport refusals carry their own HTTP meanings (413, 415); the
+            // per-defect body code takes the request family's 400.
+            PipelineErrorCodes.Endpoint.REQUEST_BODY_INCOMPATIBLE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.EndpointRequest.TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
+            PipelineErrorCodes.EndpointRequest.UNSUPPORTED_MEDIA_TYPE to HttpStatus.UNSUPPORTED_MEDIA_TYPE,
             // #786 §13.14 — an unknown API version is a 404 under the version family's 409; an exact pin the caller's
             // posture does not admit, and an authoring-disabled deployment's API write, are state conflicts (409) under
             // the family's 400. `endpoint.pipeline_version.not_found` keeps the 400: the request names a version that

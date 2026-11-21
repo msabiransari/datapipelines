@@ -118,7 +118,7 @@ class TemplatesController(
         authoring.requireTemplateAuthoring()
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val draft = validator.validateOrThrow(bindOrThrow(readBody(body)), workspaceId)
+        val draft = validator.validateOrThrow(bindOrThrow(readBody(body), body), workspaceId)
         // D55: authoring lands version 1 DRAFT (`status: "DRAFT"` in the response); a human
         // releases it. The RELEASED create belongs to the import path alone. 7e: the draft
         // service lands the stated `implements` on that version (the MCP twin's one path).
@@ -291,7 +291,7 @@ class TemplatesController(
         val workspaceId = principal.requireWorkspace().id
         val tree = readBody(body)
         if (tree is ObjectNode) inheritFromWorking(tree, workspaceId)
-        val draft = validator.validateOrThrow(bindOrThrow(tree), workspaceId)
+        val draft = validator.validateOrThrow(bindOrThrow(tree, body), workspaceId)
         val id =
             draft.id ?: throw ApiException(
                 PipelineErrorCodes.Template.ID_INVALID,
@@ -626,7 +626,16 @@ class TemplatesController(
                 )
         val input =
             try {
-                ScriptBlocks.mapper.treeToValue(inputNode, co.datapipelines.templates.ScriptTestInput::class.java)
+                // #1038: bound from the request's own text of `input` (the tree's copy is lossy), so a `body`
+                // input reaches the runner with its exact decimals and repeated members.
+                val text =
+                    co.datapipelines.templates.ExactJsonText
+                        .topLevelMember(body, "input")
+                if (text != null) {
+                    ScriptBlocks.mapper.readValue(text, co.datapipelines.templates.ScriptTestInput::class.java)
+                } else {
+                    ScriptBlocks.mapper.treeToValue(inputNode, co.datapipelines.templates.ScriptTestInput::class.java)
+                }
             } catch (
                 @Suppress("SwallowedException") err: com.fasterxml.jackson.databind.JsonMappingException,
             ) {
@@ -658,9 +667,15 @@ class TemplatesController(
         return EvaluateRequest(name, version, input, now)
     }
 
-    /** [TemplateDeserializer.readOrThrow] for a tree already parsed (and possibly completed by [inheritFromWorking]). */
-    private fun bindOrThrow(tree: JsonNode): co.datapipelines.templates.TemplateDraft =
-        when (val outcome = deserializer.fromTree(tree)) {
+    /**
+     * [TemplateDeserializer.readOrThrow] for a tree already parsed (and possibly completed by [inheritFromWorking]);
+     * [body] is the text it was parsed from, so the `tests` fixtures bind exactly (#1038).
+     */
+    private fun bindOrThrow(
+        tree: JsonNode,
+        body: String,
+    ): co.datapipelines.templates.TemplateDraft =
+        when (val outcome = deserializer.fromTree(tree, exactJson = body)) {
             is TemplateDeserializationOutcome.Parsed -> outcome.draft
             is TemplateDeserializationOutcome.Rejected -> throw TemplateValidationException(outcome.result)
         }
@@ -781,7 +796,7 @@ class TemplatesController(
         template: Template,
         draft: co.datapipelines.templates.TemplateVersionDetail?,
     ): JsonNode {
-        val node = MAPPER.valueToTree<JsonNode>(template) as ObjectNode
+        val node = TemplateJson.toTree(template)
         if (draft != null) {
             val pointer = node.putObject("draft")
             pointer.put("version", draft.version)

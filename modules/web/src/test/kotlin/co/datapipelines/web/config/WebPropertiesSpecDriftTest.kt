@@ -63,6 +63,9 @@ class WebPropertiesSpecDriftTest {
         // opts in.
         documented.getValue("datapipelines.endpoints.mutations-enabled") shouldBe props.mutationsEnabled.toString()
         props.mutationsEnabled shouldBe false
+        // #1038 — the structured request body's envelope budget, shared by every body-accepting surface.
+        documented.getValue("datapipelines.endpoints.body-max-bytes") shouldBe props.bodyMaxBytes.toString()
+        documented.getValue("datapipelines.endpoints.body-max-depth") shouldBe props.bodyMaxDepth.toString()
     }
 
     @Test

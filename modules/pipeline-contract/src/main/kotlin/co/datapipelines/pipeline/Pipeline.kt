@@ -63,6 +63,14 @@ data class Pipeline(
     @field:JsonProperty("checks") @get:JsonProperty("checks") @param:JsonProperty("checks")
     @get:JsonInclude(JsonInclude.Include.NON_EMPTY)
     val checks: List<PipelineCheck> = emptyList(),
+    /**
+     * The structured request-body input (§3.4, #1038) — null when the pipeline takes no body.
+     * `NON_NULL` inclusion keeps it body-hash neutral exactly as [checks]' `NON_EMPTY` does: an
+     * existing pipeline serializes back byte-identical, so no stored version's hash moves.
+     */
+    @field:JsonProperty("request_body") @get:JsonProperty("request_body") @param:JsonProperty("request_body")
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val requestBody: RequestBodyDeclaration? = null,
 ) {
     /** The node with this id, or null. */
     fun node(id: String): Node? = nodes.firstOrNull { it.id == id }
@@ -137,6 +145,28 @@ data class Pipeline(
             .mapNotNull { node -> node.contextKey?.takeUnless(String::isBlank) }
             .toSet()
 
+    /**
+     * The SCRIPT nodes that bind the request body ([RequestBodyDeclaration.REFERENCE]) — the
+     * transformers a caller can never skip (#1038; published-mutation-apis §3 item 3).
+     */
+    fun requestBodyReaders(): List<Node> =
+        nodes.filter { node ->
+            node.type == NodeType.SCRIPT &&
+                node.inputs
+                    .orEmpty()
+                    .values
+                    .any { it.isTextual && it.asText() == RequestBodyDeclaration.REFERENCE }
+        }
+
+    /**
+     * The value-mode SCRIPT `context_key`s a CALLER may supply, skipping the node (7c #7):
+     * [scriptOutputKeys] minus every key a [requestBodyReaders] node writes. A body-derived value
+     * comes only from the pinned transformer, never from a caller override (#1038), so those keys
+     * are refused as overrides at admission ([RequestBodyAdmission]) and never mark a node skipped.
+     */
+    fun callerScriptKeys(): Set<String> =
+        scriptOutputKeys() - requestBodyReaders().mapNotNull { node -> node.contextKey?.takeUnless(String::isBlank) }.toSet()
+
     companion object {
         /** The only pipeline-JSON schema version v1 accepts (§3.2, §12.1). */
         const val SUPPORTED_SCHEMA_VERSION = 1
@@ -163,6 +193,7 @@ data class Pipeline(
             @JsonProperty("parameters") parameters: Map<String, Parameter>?,
             @JsonProperty("nodes") nodes: List<Node>?,
             @JsonProperty("checks") checks: List<PipelineCheck>?,
+            @JsonProperty("request_body") requestBody: RequestBodyDeclaration?,
         ): Pipeline =
             Pipeline(
                 schemaVersion = schemaVersion ?: SUPPORTED_SCHEMA_VERSION,
@@ -173,6 +204,7 @@ data class Pipeline(
                 parameters = parameters ?: emptyMap(),
                 nodes = nodes ?: emptyList(),
                 checks = checks ?: emptyList(),
+                requestBody = requestBody,
             )
     }
 }

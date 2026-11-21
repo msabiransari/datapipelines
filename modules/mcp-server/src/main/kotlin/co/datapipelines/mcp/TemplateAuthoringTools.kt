@@ -95,17 +95,26 @@ private fun parseBlocks(args: McpArguments): Triple<ScriptContract?, List<Script
         type: com.fasterxml.jackson.databind.JavaType,
     ): Any? {
         val raw = args.rawMap()[name] ?: return null
+
+        fun refused(
+            mapping: JsonMappingException?,
+            err: Exception,
+        ) = DatapipelinesException(
+            code = PipelineErrorCodes.Template.CONTRACT_INVALID,
+            message = safeTemplateBindMessage(mapping, "The '$name' block does not bind"),
+            details = mapOf("rule" to "unknown_field"),
+            cause = err,
+        )
         return try {
-            ScriptBlocks.mapper.convertValue(raw, type)
+            // #1038: a block the transport kept the exact text of (the `tests` fixtures) binds from that text, so a
+            // `body` fixture keeps its exact decimals and repeated members for the save-time runner to judge.
+            args.exactText(name)?.let { ScriptBlocks.mapper.readValue<Any?>(it, type) } ?: ScriptBlocks.mapper.convertValue(raw, type)
+        } catch (err: JsonMappingException) {
+            throw refused(err, err)
         } catch (err: IllegalArgumentException) {
             // convertValue wraps the mapping failure as IllegalArgumentException; the
             // mapping error rides as its cause.
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Template.CONTRACT_INVALID,
-                message = safeTemplateBindMessage(err.cause as? JsonMappingException, "The '$name' block does not bind"),
-                details = mapOf("rule" to "unknown_field"),
-                cause = err,
-            )
+            throw refused(err.cause as? JsonMappingException, err)
         }
     }
     val contract =
@@ -495,7 +504,7 @@ class TemplatesUpdateTool(
         stored: Template,
         written: TemplateVersionDetail,
     ): ObjectNode {
-        val node = TemplateJson.objectMapper().valueToTree<ObjectNode>(stored)
+        val node = TemplateJson.toTree(stored)
         if (written.status == PipelineVersionStatus.DRAFT) {
             node.putObject("draft").apply {
                 put("version", written.version)

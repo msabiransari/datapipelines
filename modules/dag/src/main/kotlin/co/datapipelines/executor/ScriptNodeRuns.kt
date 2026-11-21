@@ -279,6 +279,9 @@ internal object ScriptNodeRuns {
             console =
                 ConsoleSink { line ->
                     val event = org.slf4j.LoggerFactory.getLogger("script.js.console")
+                    // #1038: author text can quote the body or a value taken from it; a body
+                    // execution logs the level and the position, never the text (BoundedFailure).
+                    val text = if (ctx.boundedDiagnostics) WITHHELD_CONSOLE_TEXT else line.text
                     val builder =
                         when (line.level) {
                             ConsoleLevel.WARN, ConsoleLevel.ERROR -> event.atWarn()
@@ -290,7 +293,7 @@ internal object ScriptNodeRuns {
                         .addKeyValue("node", node.id)
                         .addKeyValue("execution", ctx.executionId)
                         .addKeyValue("level", line.level.name.lowercase())
-                        .addKeyValue("text", line.text)
+                        .addKeyValue("text", text)
                         .log(
                             "script.js.console template={} version={} node={} execution={} level={} text={}",
                             node.template.id,
@@ -298,7 +301,7 @@ internal object ScriptNodeRuns {
                             node.id,
                             ctx.executionId,
                             line.level.name.lowercase(),
-                            line.text,
+                            text,
                         )
                 },
         )
@@ -801,11 +804,52 @@ internal class ScriptRun(
         }
 
     /**
+     * The value inputs and the body input, keyed by contract input name — what the evaluation
+     * receives as `inputs` beside the loaded tables. An absent request body leaves its input out
+     * entirely, so a transformer sees it undefined: never null, never `{}` or `[]` (#1038).
+     */
+    private fun resolveValueInputs(): Map<String, Any?> = resolveScalarAndObjectInputs() + resolveBodyInputs()
+
+    /**
+     * The body input (#1038; pipeline-contract §3.4): the execution's decoded request body, gated
+     * by [TypeGate.gateBody] — any object or array of objects under the value byte cap — and handed
+     * over as the decoder's native value. §12.13 already proved the input binds `@request_body` on
+     * a pipeline that declares one; the gate is the defensive second check.
+     */
+    private fun resolveBodyInputs(): Map<String, Any?> {
+        val body = ctx.requestBody
+        if (!body.present) return emptyMap()
+        return contract.inputs
+            .filterValues { it is ScriptInput.Body }
+            .mapValues { (name, _) ->
+                when (
+                    val verdict =
+                        TypeGate.over(emptyList(), support.maxStringBytes).gateBody(body.value, support.maxValueBytes)
+                ) {
+                    is TypeGate.GateResult.Refuse -> {
+                        val detail = "input '$name': ${ScriptNodeRuns.describe(verdict.refusal)}"
+                        // An admitted body past the transformer's own byte cap is the engine-limit
+                        // failure (published-mutation-apis §5); any other refusal is the contract.
+                        throw if (verdict.refusal is co.datapipelines.scripting.GateRefusal.ValueTooLarge) {
+                            ScriptFailures.tooLarge(node, detail)
+                        } else {
+                            ScriptFailures.inputContract(node, detail, "body_shape")
+                        }
+                    }
+
+                    is TypeGate.GateResult.Pass -> {
+                        verdict.value
+                    }
+                }
+            }
+    }
+
+    /**
      * The value inputs, resolved from the live Context and converted to wire form (§6). A Map
      * value is an object-valued key (R4): it binds only to a SCRIPT input, and crosses as
      * the object itself under the byte cap — the one input shape no `LogicalType` names.
      */
-    private fun resolveValueInputs(): Map<String, Any?> =
+    private fun resolveScalarAndObjectInputs(): Map<String, Any?> =
         contract.inputs
             .filterValues { it is ScriptInput.Value }
             .mapValues { (name, input) ->
@@ -1128,6 +1172,9 @@ internal fun List<ContractColumn>.toColumnSchemas(): List<ColumnSchema> =
 
 /** The read batch's initial capacity hint — the batch grows to the configured batch size, never past it. */
 private const val WIRE_BATCH_CAPACITY = 1_024
+
+/** What a body execution logs in place of a script console line (#1038). */
+private const val WITHHELD_CONSOLE_TEXT = "withheld"
 
 /**
  * One batch of a cursor, decoded and converted to the wire forms the engine sees (§6) —

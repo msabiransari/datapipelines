@@ -679,7 +679,8 @@ Idempotency-Key: ...   (strongly recommended)
     "start_date": "2026-01-01",
     "end_date": "2026-03-31",
     "include_cancelled": false
-  }
+  },
+  "request_body": {"lines": [{"sku": "A", "qty": 2}]}   // optional; only for a pipeline that declares request_body (§6.1.4)
 }
 ```
 
@@ -733,6 +734,40 @@ authenticated caller: the stream's completion re-enters the server as an async d
 authorization interceptor judged that dispatch against its empty security context (#404,
 [auth §8.2](auth.md#82-filter-order-per-request)). A refusal after the first event is not an
 HTTP status at all — it is the stream's own terminal event (§6.5).
+
+#### 6.1.4 The structured request body (#1038)
+
+A pipeline that declares `request_body` ([pipeline-contract §3.4](pipeline-contract.md#34-structured-request-body))
+takes one JSON object or array of objects in the optional `request_body` member — the draft fixture of the
+body its published API will accept, delivered unchanged to the SCRIPT transformer that binds `@request_body`.
+It is read from the raw request text by the one bounded decoder the published codec and `pipelines_execute`
+share: a member repeated anywhere inside it (or `request_body` itself given twice) is refused, not resolved
+last-wins; numbers keep their exact decoded value; depth and size are bounded by
+`datapipelines.endpoints.body-max-depth` and `body-max-bytes` ([configuration §3.22](configuration.md)).
+`null` is not absence. It is separate from `parameters`, never echoed into the stored parameters, and joins
+the `Idempotency-Key` fingerprint when present: the same key with a different `request_body` is
+`409 idempotency.key_reused_for_different_request`.
+
+Every refusal is `400 pipeline.execution.request_body_invalid` with a `details.reason` — a decoder reason
+(`malformed_json`, `invalid_encoding`, `duplicate_member`, `invalid_root`, `number_out_of_range`,
+`too_many_bytes`, `too_deep`, `token_too_large`, with an `offset` or `index` where one applies) or an admission reason
+(`required`, `not_accepted`, `override_refused` with `details.keys`) — and never a value or a member name.
+Every refusal is decided before any node runs, so nothing is written.
+
+A run that carries a `request_body` (and every child pipeline it starts) reports a failure as its code and node
+metadata only — on the `node_failed`/`pipeline_failed` events, the live and replayed stream, the stored execution
+record and `GET /api/v1/executions/{id}/events` — never a value from the body, an engine or driver message, a
+transformer's rejection reason or invariant text ([pipeline-contract §3.4](pipeline-contract.md#34-structured-request-body)).
+
+The byte budget counts the fixture's canonical encoding, so the same body costs the same bytes here and on
+`pipelines_execute` however it is spelled. An authored body fixture (`POST /api/v1/templates/evaluate`, a template
+create or update) is read from the request's own text in the same way: a repeated member is refused and fractions
+stay exact. A saved fixture keeps its member order, every repeated member and its exact numbers through the stored
+tests, `GET` read-back (the `tests` of a template read repeat a member as the author wrote it), re-save, export and
+release, so a case that expects a duplicate's refusal, or an order-dependent result, judges the same at release as
+at save (#1080). An authored body case reports its evaluation and suite verdict with the same bounded diagnostics: code,
+safe details, the case's rule word and `reason`, with console and invariant text withheld
+([pipeline-contract §3.4](pipeline-contract.md#34-structured-request-body)).
 
 ### 6.2 Why SSE, not WebSocket
 
@@ -2264,6 +2299,13 @@ so on the dialects marked `DATABASE` in [DAG Executor §8.2](dag-executor.md#82-
 database itself refuses a write (`pipeline.node.query_execution_failed`), and on the others the rule above and a
 SELECT-only database user remain the guard.
 
+**A route must be able to deliver the body its pin requires (#1038).** A `GET` route carries no body, so
+pinning a pipeline version that declares `request_body` with `required: true`
+([Pipeline Contract §3.4](pipeline-contract.md#34-structured-request-body)) refuses with
+`409 endpoint.request_body_incompatible` naming the pipeline and the method — at create, at version save, at
+release and at promotion import. A mutation route may pin it; a pipeline whose body is optional may sit behind
+any method (a `GET` serve supplies none).
+
 Every path variable must name a declared parameter of that version
 (`400 endpoint.path_variable_unknown`); the pipeline may declare more, and they come from the
 query string. `timeout_seconds` is clamped to `datapipelines.endpoints.timeout-min-seconds` /
@@ -2308,6 +2350,21 @@ at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carrie
   `constraints` block or `cardinality` then ignored) is `409 pipeline.execution.parameter_declaration_invalid`
   (v2.45, #268) — the pipeline must be re-saved;
 - a value over 4 KB is `endpoint.request.value_too_large`.
+
+**The request body of a mutation route (#1038; reached once #1039 serves mutations — until then the gate
+above answers first).** A mutation route whose pinned pipeline declares `request_body` reads the entity as one
+JSON object or array of objects through the same bounded decoder as framework execute's `request_body` fixture
+(§6.1.4), so both surfaces decode one document to the same value. In order: no entity is absent — refused with
+reason `required` when the declaration requires one; a `Content-Encoding` other than identity, a `Content-Type`
+other than `application/json`, or a charset other than UTF-8 is `415 endpoint.request.unsupported_media_type`
+(`details.reason` `content_encoding`, `media_type` or `charset`, never the header's value); a body on a `GET` or
+on a route whose pin declares none is reason `not_accepted`; more than
+[`datapipelines.endpoints.body-max-bytes`](configuration.md#322-published-endpoints) entity bytes (counted while
+reading, so a chunked body stops at the cap), more nesting than `body-max-depth`, or one oversized token is
+`413 endpoint.request.too_large` with `details.reason` and `details.limit`; malformed JSON, invalid UTF-8, a
+duplicate member, a scalar or null root, a non-object array element or a number out of range is one
+`endpoint.request.body_invalid` entry (`parameter` null, `reason` naming which) of the `400
+endpoint.request.invalid` above. No refusal echoes a supplied value.
 
 Headers: `DP-Result-TTL-Seconds` (§7.4's clamp) and `DP-Result-Page-Rows` (R-EP4, clamped to
 `page-max-rows`) are honoured; an unparseable value reads as absent, because the server clamps
@@ -2454,6 +2511,8 @@ The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool
 | 404 | No endpoint matches. **The same body whether the path is unknown or the endpoint is disabled** — otherwise the registry is enumerable one URL at a time |
 | 405 | A method the addressed path does not serve THIS caller (#1037): some method is visible (a live route plus a grant the presenting key holds) but the requested one is not published there or not granted — `Allow` carries exactly the visible methods |
 | 406 | An `Accept` this surface cannot satisfy |
+| 413 | A mutation's request body over the byte, depth or token bound — `endpoint.request.too_large` (#1038) |
+| 415 | A mutation's request body with an unsupported media type, charset or content encoding — `endpoint.request.unsupported_media_type` (#1038) |
 | 429 | Rate limit or concurrency limit, with `Retry-After` |
 | 500 / 502 | Pipeline failure, mapped by [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) (datasource connection failures are `502`) |
 | 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version. Since #1037 also `endpoint.mutations_disabled`: an otherwise-authorized mutation refused by the operator gate `datapipelines.endpoints.mutations-enabled` before any durable work |
@@ -3131,6 +3190,10 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v2.132 | 1038 r4 (#1038) | **§6.1.4 (additive):** a saved body fixture keeps member order, repeated members and exact numbers through stored tests, template read-back, re-save, export and release (#1080). |
+| 2026-11-21 | v2.131 | 1038 r3 (#1038) | **§6.1.4 (additive):** the fixture budget counts canonical bytes on both full-run surfaces; an authored body fixture on evaluate and template save is read from the request's own text (a repeated member refused, exact fractions); an authored body case's evaluation and suite verdict use the bounded diagnostics. |
+| 2026-11-21 | v2.130 | 1038 r2 (#1038) | **§6.1.4 (additive):** a failure of a run that carries a `request_body` (and of its children) is reported as code and node metadata only on every event, stream, replay and stored-error surface. |
+| 2026-11-21 | v2.129 | 1038 (#1038) | **§6.1 / §6.1.4 (additive):** the execute body takes an optional `request_body` — one JSON object or array of objects for a pipeline that declares `request_body` (pipeline-contract §3.4), decoded by the shared bounded decoder, part of the idempotency fingerprint, never stored in parameters; refusals `400 pipeline.execution.request_body_invalid` with `details.reason`. **§19.2 / §19.3 / §19.6:** a `GET` pin of a body-requiring pipeline is `409 endpoint.request_body_incompatible`; the mutation-route body rules (400 `endpoint.request.body_invalid` entries, 413 `endpoint.request.too_large`, 415 `endpoint.request.unsupported_media_type`) are stated for the codec #1039's serve path applies. |
 | 2026-11-21 | v2.128 | 1035 r3 (#1035) | **§6.4.5:** `pipeline_completed` carries `result_unavailable: true` (absent otherwise) when the confirmed commit's caller result cannot be delivered. **§6.4.7:** that decision reads the stored result back after the confirmation; a lost result is never announced or served as an empty success. **§10.2:** `result_row_count` is written with the terminal status and kept on an unavailable result. No new code, route or permission. |
 | 2026-11-21 | v2.127 | 1035 r2 (#1035) | **§10.3 / §10.2 family settlement:** a held child's event history (durable record, replay and MCP) carries no terminal event until its root settles, then one terminal event with the root's outcome and the next `event_id`; no route or field changes. |
 | 2026-11-20 | v2.126 | 1035 (#1035) | **Commit outcomes.** §6.4.5/§6.4.7/§6.5: success events follow the root's confirmed commit; a held child streams neither. §6.4.6: `pipeline_failed` also carries `status: "OUTCOME_UNKNOWN"`. §7.6: `result.execution_failed` covers `OUTCOME_UNKNOWN`; `result.storage_unavailable` covers a confirmed SUCCESS whose result was not delivered. §10.1/§10.2: `status` gains `OUTCOME_UNKNOWN`; the record gains `result_unavailable`; family settlement. No new code, no new route, no new permission. |

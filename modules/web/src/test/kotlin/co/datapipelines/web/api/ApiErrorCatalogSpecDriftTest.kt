@@ -425,8 +425,13 @@ class ApiErrorCatalogSpecDriftTest {
          * `pipeline.node.dml_affected_rows_mismatch` and `pipeline.node.dml_insert_unqualified`,
          * all 500 through the `pipeline.node.` family default (no explicit catalog row), landed
          * in the SAME commit as their constants.
+         *
+         * 528 → 533 with #1038: §13.3 gains `pipeline.execution.request_body_invalid` (400) and
+         * §13.14 gains `endpoint.request_body_incompatible` (409), `endpoint.request.body_invalid`
+         * (400), `endpoint.request.too_large` (413) and `endpoint.request.unsupported_media_type`
+         * (415), each an explicit catalog row landed in the SAME commit as its constant.
          */
-        const val SECTION_13_ROW_COUNT = 528
+        const val SECTION_13_ROW_COUNT = 533
 
         /**
          * §12's distinct validation codes.

@@ -1,18 +1,25 @@
 package co.datapipelines.application
 
+import co.datapipelines.executor.IdempotencyKeys
 import co.datapipelines.executor.IdempotencyOutcome
 import co.datapipelines.executor.IdempotencyStore
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineSettings
+import co.datapipelines.pipeline.RequestBodyAdmission
+import co.datapipelines.pipeline.RequestBodyDeclaration
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.body.StructuredBody
+import co.datapipelines.typesystem.body.StructuredBodyDecoder
+import co.datapipelines.typesystem.body.StructuredBodyDecoding
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -126,12 +133,55 @@ class ExecutionLauncherTest {
         store.reservations shouldBe 2
     }
 
+    // ------------------------------------------------------------- #1038: the structured request body
+
+    @Test
+    fun `the body joins the fingerprint - member order immaterial, array order and presence material`() {
+        val declared = pipeline().copy(requestBody = RequestBodyDeclaration(required = false))
+        val first =
+            launcher.decide(
+                launch(key = "b1", pipeline = declared, body = body("""{"a":1,"b":[{"x":1},{"y":2}]}""")),
+            ) as LaunchDecision.Start
+        launcher.decide(launch(key = "b1", pipeline = declared, body = body("""{"b":[{"x":1},{"y":2}],"a":1}"""))) shouldBe
+            LaunchDecision.Attach(requireNotNull(first.executionId))
+        listOf(
+            body("""{"a":1,"b":[{"y":2},{"x":1}]}"""),
+            body("{}"),
+            StructuredBody.Absent,
+        ).forEach { other ->
+            withClue(other.canonical()) {
+                shouldThrow<DatapipelinesException> { launcher.decide(launch(key = "b1", pipeline = declared, body = other)) }
+                    .code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED
+            }
+        }
+        IdempotencyKeys.requestHash(PIPELINE_ID, 1, "{}", body("{}")) shouldNotBe
+            IdempotencyKeys.requestHash(PIPELINE_ID, 1, "{}", body("[]"))
+    }
+
+    @Test
+    fun `a request without a body hashes exactly as before the body existed`() {
+        IdempotencyKeys.requestHash(PIPELINE_ID, 1, """{"month":"2026-07"}""") shouldBe
+            IdempotencyKeys.hash("$PIPELINE_ID|1|{\"month\":\"2026-07\"}")
+    }
+
+    @Test
+    fun `a refused body is refused BEFORE the key is claimed`() {
+        val error = shouldThrow<DatapipelinesException> { launcher.decide(launch(key = "b2", body = body("{}"))) }
+        error.code shouldBe PipelineErrorCodes.Execution.REQUEST_BODY_INVALID
+        error.details["reason"] shouldBe RequestBodyAdmission.NOT_ACCEPTED
+        withClue("nothing may be reserved when admission failed") { store.reservations shouldBe 0 }
+    }
+
     // ------------------------------------------------------------------------------- fixtures
+
+    private fun body(json: String): StructuredBody =
+        (StructuredBodyDecoder().decode(json.toByteArray()) as StructuredBodyDecoding.Decoded).body
 
     private fun launch(
         key: String?,
         pipeline: Pipeline = pipeline(),
         parametersJson: String = """{"month":"2026-07"}""",
+        body: StructuredBody = StructuredBody.Absent,
     ) = ExecutionLaunch(
         pipelineId = PIPELINE_ID,
         pipelineVersion = 1,
@@ -140,6 +190,7 @@ class ExecutionLauncherTest {
         parameters = parameters(parametersJson),
         parametersJson = parametersJson,
         idempotencyKey = key,
+        requestBody = body,
     )
 
     private fun parameters(json: String): Map<String, JsonNode> = MAPPER.readTree(json).properties().associate { it.key to it.value }

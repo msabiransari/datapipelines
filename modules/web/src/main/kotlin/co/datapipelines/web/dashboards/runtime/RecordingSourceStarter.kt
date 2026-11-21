@@ -60,7 +60,7 @@ class RecordingSourceStarter(
                 pipeline.parameters,
                 pipeline.calculatorOutputs(),
                 pipeline.calculatorOutputGroups(),
-                pipeline.scriptOutputKeys(),
+                pipeline.callerScriptKeys(),
             ).bindOrThrow(launch.parameters)
         } catch (e: DatapipelinesException) {
             return SourceOutcome.Failed(null, e.code)

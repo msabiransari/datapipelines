@@ -72,7 +72,8 @@ class RecordingSourceStarterTest {
             every { parameters } returns emptyMap()
             every { calculatorOutputs(any()) } returns emptyMap()
             every { calculatorOutputGroups(any()) } returns emptyMap()
-            every { scriptOutputKeys() } returns emptySet()
+            // #1038: the binder admits only the script keys a caller may supply (body readers excluded).
+            every { callerScriptKeys() } returns emptySet()
         }
 
     private fun launch(parameters: Map<String, com.fasterxml.jackson.databind.JsonNode> = emptyMap()) =

@@ -315,6 +315,19 @@ class SubPipelineExecutionRunnerTest {
         }
 
     @Test
+    fun `a child of a body execution inherits its bounded diagnostics, and a child of an ordinary one does not`() =
+        runTest {
+            stubRegistry()
+            val bounded = ExecutorStub()
+            runner(bounded).run(pipelineNode(), context().copy(boundedDiagnostics = true))
+            bounded.captured.single().boundedDiagnostics shouldBe true
+
+            val ordinary = ExecutorStub()
+            runner(ordinary).run(pipelineNode(), context())
+            ordinary.captured.single().boundedDiagnostics shouldBe false
+        }
+
+    @Test
     fun `dashboard admission judges the exact loaded child and is inherited by its request`() {
         runTest {
             stubRegistry()

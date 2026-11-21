@@ -4,6 +4,7 @@ import co.datapipelines.executor.ErrorDetail
 import co.datapipelines.pipeline.OrgContext
 import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.body.StructuredBodyLimits
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
 
@@ -148,8 +149,21 @@ data class EndpointsProperties(
      * discipline answer the same whether this is on or off.
      */
     val mutationsEnabled: Boolean = false,
+    /**
+     * `body-max-bytes` (#1038, published-mutation-apis §5, configuration.md §3.22) — the structured
+     * request body's byte cap: the received entity's UTF-8 bytes on a published route (counted while
+     * reading, chunked bodies included) and a fixture's canonical encoding on framework execute and
+     * `pipelines_execute`. Independent of the `/api/v1` and `/mcp` request caps.
+     */
+    val bodyMaxBytes: Long = StructuredBodyLimits.DEFAULT_MAX_BYTES,
+    /** `body-max-depth` (#1038) — the body's nesting cap, 1..64, the root container counting 1. */
+    val bodyMaxDepth: Int = StructuredBodyLimits.DEFAULT_MAX_DEPTH,
 ) {
     init {
+        require(bodyMaxBytes > 0) { "datapipelines.endpoints.body-max-bytes must be > 0" }
+        require(bodyMaxDepth in 1..StructuredBodyLimits.MAX_DEPTH) {
+            "datapipelines.endpoints.body-max-depth must be in 1..${StructuredBodyLimits.MAX_DEPTH}"
+        }
         // configuration.md §7 — the validator asserts exactly this ordering at startup.
         require(timeoutMinSeconds <= timeoutDefaultSeconds && timeoutDefaultSeconds <= timeoutMaxSeconds) {
             "datapipelines.endpoints: timeout-min-seconds <= timeout-default-seconds <= timeout-max-seconds must hold"
@@ -159,6 +173,9 @@ data class EndpointsProperties(
 
     /** The §5.5 clamp a publish applies to a requested timeout. */
     fun clampTimeout(requested: Int): Int = requested.coerceIn(timeoutMinSeconds, timeoutMaxSeconds)
+
+    /** The structured request-body bounds every body-accepting surface decodes with (#1038). */
+    fun bodyLimits(): StructuredBodyLimits = StructuredBodyLimits(maxBytes = bodyMaxBytes, maxDepth = bodyMaxDepth)
 
     /** True when the serve path's per-key budget is active (`max-requests` > 0). */
     val keyRequestBudgetActive: Boolean get() = keyRequestBudget.maxRequests > 0
