@@ -1,0 +1,39 @@
+{
+ "note": "no rows: the no-data state",
+ "document": {
+  "display_name": "Test type test_polar",
+  "config": {
+   "mark": {
+    "type": "test_polar"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "from": {
+     "field": "from"
+    },
+    "to": {
+     "field": "to"
+    }
+   },
+   "title": {
+    "text": "Empty"
+   }
+  }
+ },
+ "columns": {
+  "s": [],
+  "from": [],
+  "to": []
+ },
+ "types": {
+  "s": "STRING",
+  "from": "INTEGER",
+  "to": "INTEGER"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

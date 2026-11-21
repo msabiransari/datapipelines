@@ -1,0 +1,40 @@
+{
+ "note": "a title, a subtitle and three series with one id switched off: no title, no legend, all drawn",
+ "document": {
+  "display_name": "Test type test_quiet",
+  "config": {
+   "mark": {
+    "type": "test_quiet"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "A title the frame takes away",
+    "subtitle": "and a subtitle it takes away too"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East",
+   "North",
+   "South",
+   "East"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "hidden": [
+  "string:South"
+ ],
+ "expect": {
+  "marks": 6
+ }
+}

@@ -1,0 +1,46 @@
+{
+ "note": "eight series with long names: the legend wraps at full, one row with +n at compact",
+ "document": {
+  "display_name": "Test type test_plain",
+  "config": {
+   "mark": {
+    "type": "test_plain"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Eight series"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Northern distribution region alpha",
+   "Northern distribution region alpha",
+   "Southern distribution region beta",
+   "Southern distribution region beta",
+   "Eastern coastal warehouse gamma",
+   "Eastern coastal warehouse gamma",
+   "Western mountain depot delta",
+   "Western mountain depot delta",
+   "Central logistics hub epsilon",
+   "Central logistics hub epsilon",
+   "Overseas partner network zeta",
+   "Overseas partner network zeta",
+   "Online marketplace channel eta",
+   "Online marketplace channel eta",
+   "Wholesale direct accounts theta",
+   "Wholesale direct accounts theta"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 16
+ }
+}

@@ -1,0 +1,35 @@
+{
+ "note": "legend: null: no legend at any level",
+ "document": {
+  "display_name": "Test type test_plain",
+  "config": {
+   "mark": {
+    "type": "test_plain"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": null
+    }
+   },
+   "title": {
+    "text": "No legend"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East",
+   "North"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 4
+ }
+}

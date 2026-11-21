@@ -1,0 +1,39 @@
+{
+ "note": "the legend written at top",
+ "document": {
+  "display_name": "Test type test_plain",
+  "config": {
+   "mark": {
+    "type": "test_plain"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": {
+      "orient": "top"
+     }
+    }
+   },
+   "title": {
+    "text": "Legend top"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 6
+ }
+}
