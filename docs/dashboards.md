@@ -133,8 +133,9 @@ each as `{field: [values]}` (§2.1.2).
   the save, `chart.shade.mid_invalid`). The same distance reaches the same step on both sides: the shade farthest
   from the middle, on either side, sets the reach `m` of both arms, and a bar is the middle step within `m`/6 of the
   middle, one step out to `m`/2, two to 5`m`/6 and three beyond — steps 1 to 3 one colour below the middle, 5 to 7
-  the other above it, each darker away from it (`--chart-div-1` … `--chart-div-7`). Every bar at the middle is the
-  middle step. The legend's two numbers are the middle minus and plus `m`: the end where a drawn shade stands reads
+  the other above it, each darker away from it in the light scheme and lighter in the dark scheme
+  (`--chart-div-1` … `--chart-div-7`). Every bar at the middle is the middle step. The legend's two numbers are the
+  middle minus and plus `m`: the end where a drawn shade stands reads
   that shade's exact text, the other its mirror around the middle (exact from a DECIMAL or BIGINTEGER column when
   `mid` is written as a plain decimal), so values from 90 to 110 around `mid: 100` read 90 and 110 and values from
   0 to 50 around zero read −50 and 50. The legend's places, compact and minimal levels and `null` are the
