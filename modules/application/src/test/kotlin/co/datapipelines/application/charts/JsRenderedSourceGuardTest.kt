@@ -130,8 +130,8 @@ class JsRenderedSourceGuardTest {
         /** The string writer: the one engine file that holds markup strings (brief 985 Security, "Rendering"). */
         const val STRING_WRITER = "31-write-string.js"
 
-        /** The engine's file count: 23 at brief 1049's base, and its two files (17-trig.js, 18-frames.js). */
-        const val FILE_FLOOR = 25
+        /** The engine's file count: 23 at brief 1049's base, its two files (17-trig.js, 18-frames.js), brief 1050's one (19-colour.js). */
+        const val FILE_FLOOR = 26
 
         /** Brief 1049's three test types: test_plain, test_polar, test_quiet. */
         const val TEST_TYPE_FLOOR = 3
