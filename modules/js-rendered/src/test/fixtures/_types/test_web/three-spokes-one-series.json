@@ -1,0 +1,41 @@
+{
+ "note": "3 spokes (the fewest), one series, no legend",
+ "document": {
+  "display_name": "Test type test_web",
+  "config": {
+   "mark": {
+    "type": "test_web"
+   },
+   "encoding": {
+    "category": {
+     "field": "k"
+    },
+    "value": {
+     "field": "v"
+    }
+   },
+   "title": {
+    "text": "Three spokes"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "North",
+   "East",
+   "South"
+  ],
+  "v": [
+   10,
+   20,
+   30
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE"
+ },
+ "expect": {
+  "marks": 4
+ }
+}

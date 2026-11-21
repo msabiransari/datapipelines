@@ -1,0 +1,57 @@
+{
+ "note": "every value 0: the extent 0..0 is widened by the tick rule to 0..1",
+ "document": {
+  "display_name": "Test type test_web",
+  "config": {
+   "mark": {
+    "type": "test_web"
+   },
+   "encoding": {
+    "category": {
+     "field": "k"
+    },
+    "value": {
+     "field": "v"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "All zero"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Speed",
+   "Range",
+   "Comfort",
+   "Price",
+   "Safety"
+  ],
+  "v": [
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "s": [
+   "Only",
+   "Only",
+   "Only",
+   "Only",
+   "Only"
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 6
+ }
+}

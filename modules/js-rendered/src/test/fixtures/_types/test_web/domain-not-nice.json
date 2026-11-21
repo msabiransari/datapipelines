@@ -1,0 +1,66 @@
+{
+ "note": "an author's domain [0, 115] whose end is no nice tick: a ring at 115 that is no tick",
+ "document": {
+  "display_name": "Test type test_web",
+  "config": {
+   "mark": {
+    "type": "test_web"
+   },
+   "encoding": {
+    "category": {
+     "field": "k"
+    },
+    "value": {
+     "field": "v",
+     "scale": {
+      "domain": [
+       0,
+       115
+      ]
+     }
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Fixed scale"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Mon",
+   "Tue",
+   "Wed",
+   "Thu",
+   "Fri",
+   "Sat"
+  ],
+  "v": [
+   100,
+   85,
+   40,
+   72,
+   95,
+   60
+  ],
+  "s": [
+   "Week",
+   "Week",
+   "Week",
+   "Week",
+   "Week",
+   "Week"
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 7
+ }
+}

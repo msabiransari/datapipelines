@@ -1,0 +1,73 @@
+{
+ "note": "5 spokes, two series, a legend; title and subtitle",
+ "document": {
+  "display_name": "Test type test_web",
+  "config": {
+   "mark": {
+    "type": "test_web"
+   },
+   "encoding": {
+    "category": {
+     "field": "k"
+    },
+    "value": {
+     "field": "v"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Two models compared",
+    "subtitle": "Each axis is one rating from zero; the subtitle is long enough to wrap at narrow frames"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Speed",
+   "Range",
+   "Comfort",
+   "Price",
+   "Safety",
+   "Speed",
+   "Range",
+   "Comfort",
+   "Price",
+   "Safety"
+  ],
+  "v": [
+   62,
+   48,
+   75,
+   30,
+   88,
+   41,
+   70,
+   52,
+   66,
+   59
+  ],
+  "s": [
+   "Model A",
+   "Model A",
+   "Model A",
+   "Model A",
+   "Model A",
+   "Model B",
+   "Model B",
+   "Model B",
+   "Model B",
+   "Model B"
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 12
+ }
+}

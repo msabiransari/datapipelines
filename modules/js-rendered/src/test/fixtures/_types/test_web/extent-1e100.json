@@ -1,0 +1,57 @@
+{
+ "note": "values up to 1e100: a tick text wider than the frame, so no ring number fits (D5's example)",
+ "document": {
+  "display_name": "Test type test_web",
+  "config": {
+   "mark": {
+    "type": "test_web"
+   },
+   "encoding": {
+    "category": {
+     "field": "k"
+    },
+    "value": {
+     "field": "v"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Huge values"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Speed",
+   "Range",
+   "Comfort",
+   "Price",
+   "Safety"
+  ],
+  "v": [
+   1e+100,
+   5e+99,
+   2e+99,
+   7e+99,
+   1e+99
+  ],
+  "s": [
+   "Only",
+   "Only",
+   "Only",
+   "Only",
+   "Only"
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 6
+ }
+}
