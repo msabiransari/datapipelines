@@ -126,8 +126,20 @@ write `color` as a **shade** — a quantitative `color` with an `aggregate` and 
 - Each bar takes one of seven steps from the smallest to the largest shade of the bars drawn; the legend is that
   scale (the two end values and the seven steps), at the top unless `color.legend` places it (`null` for none).
 - The shade's field is a numeric column, with every aggregate (`count` counts its non-null values). The bar then has
-  one series: leave `stack` and `fields` out. `scale` is `sequential` on a bar; `diverging` is refused.
+  one series: leave `stack` and `fields` out.
 - A shade has no `title` or `sort`. `mark_count` counts the bars, one per band, as without a colour.
+
+**Sequential or diverging?** `scale: "sequential"` runs from the smallest shade to the largest. Use
+`scale: "diverging"` when the shade lies on two sides of a middle that means something — a change (up or down), a
+difference from a target — and give that middle as `mid` (zero when left out). Both sides use the same distance, so
+equal gaps above and below the middle get equally strong colours; the legend reads the middle minus and plus the
+farthest gap:
+
+```json
+"color": { "field": "vs_target", "type": "quantitative", "aggregate": "sum", "scale": "diverging", "mid": 100 }
+```
+
+- `mid` is admitted with `diverging` only, and must be a finite number.
 
 **Line or area?** A `line` shows how values move along an ordered axis (time, a number, an ordered category) and
 compares a few series; an `area` shows the same where the amount itself matters — filled down to zero, or stacked

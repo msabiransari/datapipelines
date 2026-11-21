@@ -1,0 +1,74 @@
+{
+ "display_name": "Diverging shade",
+ "description": "A diverging shade on a bar: two-sided around zero (no mid), drawn since lane 1053.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "bar"
+  },
+  "encoding": {
+   "x": {
+    "field": "region",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Region"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "title": "Amount",
+    "format": "compact"
+   },
+   "color": {
+    "field": "units",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "scale": "diverging"
+   }
+  },
+  "title": {
+   "text": "Diverging shade"
+  }
+ }
+}
