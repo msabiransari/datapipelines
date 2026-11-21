@@ -31,9 +31,16 @@ import kotlin.system.exitProcess
  * without the URL).
  */
 object LocalWriteCompatibilityCli {
+    /**
+     * The report is the ONLY thing on stdout, so an operator can redirect or diff it: whatever a
+     * library prints to `System.out` (the unconfigured console logger, the commons-logging
+     * discovery notice) is sent to stderr, redirected here before any of them initialises.
+     */
     @JvmStatic
     fun main(args: Array<String>) {
-        exitProcess(run(System.getenv(), System.out, System.err))
+        val report = System.out
+        System.setOut(System.err)
+        exitProcess(run(System.getenv(), report, System.err))
     }
 
     /** Produces the report from [env] onto [out]; diagnostics go to [err]. */
