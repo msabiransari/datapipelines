@@ -131,10 +131,10 @@ class JsRenderedSourceGuardTest {
         const val STRING_WRITER = "31-write-string.js"
 
         /**
-         * The engine's file count: 23 at brief 1049's base, its two files (17-trig.js, 18-frames.js), and brief 1055's
-         * one (18b-radial.js).
+         * The engine's file count: 23 at brief 1049's base, its two files (17-trig.js, 18-frames.js), brief 1050's one
+         * (19-colour.js) and brief 1055's one (18b-radial.js).
          */
-        const val FILE_FLOOR = 26
+        const val FILE_FLOOR = 27
 
         /** Brief 1049's three test types (test_plain, test_polar, test_quiet) and brief 1055's test_web. */
         const val TEST_TYPE_FLOOR = 4

@@ -158,6 +158,7 @@ GUARDS[":modules:app"]+=" co.datapipelines.metrics.MeterCatalogueParityTest"  # 
 GUARDS[":modules:application"]="co.datapipelines.application.semantics.SemanticsAuditEventsSpecDriftTest"  # inventory 995: reads docs/enums.md
 GUARDS[":modules:application"]+=" co.datapipelines.application.charts.ChartJudgeEngineTest"  # reads the js-rendered engine and shared fixtures
 GUARDS[":modules:application"]+=" co.datapipelines.application.charts.ChartTypeRegistryTest"  # reads docs/enums.md and modules/js-rendered
+GUARDS[":modules:application"]+=" co.datapipelines.application.charts.JsRenderedColourScaleTest"  # reads modules/js-rendered (the emitted colour.json)
 GUARDS[":modules:application"]+=" co.datapipelines.application.charts.JsRenderedIdentityTest"  # reads modules/js-rendered
 GUARDS[":modules:application"]+=" co.datapipelines.application.charts.JsRenderedPictureTest"  # reads modules/js-rendered
 GUARDS[":modules:application"]+=" co.datapipelines.application.charts.JsRenderedSourceGuardTest"  # scans modules/js-rendered source

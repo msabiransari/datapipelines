@@ -7,6 +7,9 @@
 // identity test and its counts do not see them); trig.json, the engine's sine and cosine of every multiple of 0.25°
 // from −720° to 720° as [deg, sin, cos] in canonical number text; sweep.json, the invariant sweep's widths and heights
 // (geometry.mjs), the one list both runtimes sweep.
+// Brief 1050 A.3 adds colour.json for the JVM test JsRenderedColourScaleTest: the colour scale's steps and tokens over a
+// table of ranges and values, and its end texts over sets of aggregates, each row holding its inputs, so the sandbox
+// recomputes the same rows from them (COLOUR below, the test's copy of it) and compares the text byte for byte.
 // Usage: node emit.mjs <out dir>. The out dir is emptied first, so a removed fixture leaves no file behind.
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -56,6 +59,38 @@ for (const theme of ["light", "dark"]) {
   choices.push({ theme: "light", token: "grey-128", fill: grey, light, dark, ink: R.theme.onFill(grey, light, dark), swapped: R.theme.onFill(grey, dark, light) });
 }
 writeFileSync(join(out, "on-fill.json"), JSON.stringify(choices));
+
+// A.3: the colour scale's table. The ranges: whole borders, below zero, the extremes of D4, two neighbouring floats,
+// no spread, and ranges whose borders are not whole. Per range 22 values from lo to hi (computed without overflow and
+// kept inside the range) and a null. The end texts: exact texts beyond 2^53, ties on one num at either end, floats.
+const COLOUR_RANGES = [[0, 7], [-14, -7], [-1e308, 1e308], [0, 1e308], [1, 1 + Number.EPSILON], [-3.3, 1e-9], [2, 2], [-Number.MAX_VALUE, Number.MAX_VALUE], [0.1, 0.7], [-0.05, 0.4]];
+const colourSteps = [];
+for (const [lo, hi] of COLOUR_RANGES) {
+  for (let i = 0; i <= 21; i++) colourSteps.push([lo, hi, Math.min(hi, Math.max(lo, lo + (hi / 2 - lo / 2) * 2 * (i / 21)))]);
+  colourSteps.push([lo, hi, null]);
+}
+const ex = (num, exact) => ({ num, exact });
+const colourEnds = [
+  [ex(5, "5"), ex(9007199254740992, "9007199254740993")],
+  [ex(9007199254740992, "9007199254740992"), ex(9007199254740992, "9007199254740993"), ex(1, "1")],
+  [ex(-9007199254740992, "-9007199254740992"), ex(-9007199254740992, "-9007199254740993"), ex(1, "1")],
+  [ex(2, null), ex(2, "2.00")],
+  [ex(0.5, null), ex(2.25, null), null, ex(null, null)],
+  [ex(-1234567.125, "-1234567.125"), ex(0.000001, "0.000001")],
+];
+/** COLOUR: the rows of colour.json from their inputs (JsRenderedColourScaleTest runs its copy of this in the sandbox). */
+const COLOUR = (C, t) => JSON.stringify({
+  steps: t.steps.map((r) => {
+    const s = C.sequential([{ num: r[0], exact: null }, { num: r[1], exact: null }]);
+    return [r[0], r[1], r[2], C.step(s, r[2]), C.token(s, r[2])];
+  }),
+  ends: t.ends.map((e) => {
+    const s = C.sequential(e);
+    return [e, s.loText, s.hiText];
+  }),
+});
+const colour = COLOUR(R.colour, { steps: colourSteps, ends: colourEnds });
+writeFileSync(join(out, "colour.json"), colour);
 writeFileSync(join(out, "index.txt"), index.join("\n") + "\n");
 
 // The test types (brief 1049 D5): their pictures under _types/, their own index.
@@ -89,4 +124,4 @@ for (let i = 0; i <= 5760; i++) {
 writeFileSync(join(out, "trig.json"), JSON.stringify(trig));
 writeFileSync(join(out, "sweep.json"), JSON.stringify({ widths: WIDTHS, heights: HEIGHTS }));
 console.log(`test types: ${names.length} types, ${typeFixtureCount} fixtures x ${FRAMES.length} frames = ${typesIndex.length} pictures; trig ${trig.length} angles; sweep ${WIDTHS.length} x ${HEIGHTS.length}`);
-console.log(`emitted ${fixtures.length} chart fixtures x ${FRAMES.length} frames = ${index.length} pictures, ${choices.length} on-fill choices`);
+console.log(`emitted ${fixtures.length} chart fixtures x ${FRAMES.length} frames = ${index.length} pictures, ${choices.length} on-fill choices, ${colourSteps.length} colour steps and ${colourEnds.length} end texts`);

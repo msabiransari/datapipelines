@@ -22,7 +22,9 @@ const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stac
   // The line family's (brief 989 D6, D7, D10a): its defaults, its legend keys, the direct legend's bounds and gap.
   "curveDefault", "pointsDefault", "lineLabelsDefault", "lastLabelFormat", "lineRound", "areaFade", "legendKeyLine", "legendKeyArea", "directMin", "directMax", "directGap",
   // The radial axis's (brief 1055 D8): its rings' form, its tick rule's span, its names' column and the rule of no room.
-  "radialRings", "radialTickSpan", "radialNameShare", "radialRadiusFloor"];
+  "radialRings", "radialTickSpan", "radialNameShare", "radialRadiusFloor",
+  // Colour by value's (brief 1050 D5): the width of a step of a colour scale's legend, in keys.
+  "legendStepRatio"];
 
 /**
  * The interaction layer's fields (brief 990 D4a): consumer `interaction`, read on the page by the layer and never by

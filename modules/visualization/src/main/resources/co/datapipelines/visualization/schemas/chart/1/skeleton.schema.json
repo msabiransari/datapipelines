@@ -671,6 +671,108 @@
         "legend": true
       }
     },
+    "shade": {
+      "description": "Colour by value (record §4.4 shade, G3): the aggregate of field over a mark's rows on a colour scale, sequential (seven steps from the smallest to the largest value) or diverging (two-sided around mid, zero where none is given; mid is admitted with diverging only). count counts the mark's rows whose field is not null. legend: a place, or null for none. A family narrows scale to what its engine draws.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "aggregate",
+        "type",
+        "scale"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "aggregate": {
+          "$ref": "#/$defs/aggregate"
+        },
+        "type": {
+          "const": "quantitative"
+        },
+        "scale": {
+          "enum": [
+            "sequential",
+            "diverging"
+          ]
+        },
+        "mid": {
+          "type": "number"
+        },
+        "legend": {
+          "$ref": "#/$defs/legend"
+        }
+      },
+      "if": {
+        "type": "object",
+        "properties": {
+          "scale": {
+            "const": "sequential"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "type": "object",
+          "required": [
+            "mid"
+          ]
+        }
+      }
+    },
+    "size": {
+      "description": "Size by value (record §4.4 size): field's value as a mark's diameter in px, in range [min, max], each 4 to 64 (default [6, 40]); the area follows the value. That min is below max is a save rule (chart.size.range_invalid). Used by types that come later.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "range": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number",
+            "minimum": 4,
+            "maximum": 64
+          }
+        }
+      }
+    },
+    "count": {
+      "description": "A count of rows (record §4.4 count): count, or share of the whole; it carries no field. Used by types that come later.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aggregate"
+      ],
+      "properties": {
+        "aggregate": {
+          "enum": [
+            "count",
+            "share"
+          ]
+        }
+      }
+    },
+    "level": {
+      "description": "One level of a hierarchy (record §4.4 level): a nominal or ordinal column, not nullable (a save rule, chart.category.nullable). Used by types that come later.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        }
+      }
+    },
     "position": {
       "description": "A continuous axis (record §4.4 position) with no aggregation: quantitative (a number axis, linear or log) or temporal (a continuous UTC time axis; its format is G9's granularity, no scale and no unit).",
       "type": "object",

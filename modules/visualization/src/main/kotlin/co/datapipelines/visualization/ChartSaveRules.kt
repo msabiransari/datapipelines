@@ -30,9 +30,32 @@ object ChartSaveRules {
     /** ISO 4217 codes the JVM knows — the server-side twin of the reference's `Intl.supportedValuesOf('currency')`. */
     val CURRENCIES: Set<String> = Currency.getAvailableCurrencies().map { it.currencyCode }.toSet()
 
+    /** The rules over [body] by the descriptor and the mark policy of the [ChartType] its `config.mark.type` names. */
     fun check(
         body: JsonNode,
         columns: List<InputColumn>?,
+    ): ChartSaveVerdict {
+        val type =
+            ChartType.fromWire(
+                body
+                    .path("config")
+                    .path("mark")
+                    .path("type")
+                    .asText(),
+            )
+        return check(body, columns, type?.channels.orEmpty(), type?.policy)
+    }
+
+    /**
+     * The rules over [body] by the descriptor [channels] and the type's mark [policy] (record §9 G2: the walk and the
+     * rules take a descriptor as their input, so a test hands them a layered descriptor of its own). A scale rule takes
+     * the policy of the shape's own layer mark where it has one, else [policy].
+     */
+    fun check(
+        body: JsonNode,
+        columns: List<InputColumn>?,
+        channels: List<ChartChannel>,
+        policy: ChartMarkPolicy?,
     ): ChartSaveVerdict {
         val refusals = mutableListOf<ChartRefusal>()
         val hasTransform = body.get("transform")?.isObject == true
@@ -49,19 +72,13 @@ object ChartSaveRules {
             return ChartSaveVerdict(refusals, emptyMap())
         }
         val byName = columns.associateBy { it.name }
-        val shapes = ChartPositions.shapes(body.path("config"))
+        val shapes = ChartPositions.shapes(body.path("config"), channels)
         // The positions' column rules first, then each shape's own rules (record §4.2): one walk, every type.
         shapes.flatMap { it.positions }.forEach { field(it, byName, refusals) }
-        val type =
-            ChartType.fromWire(
-                body
-                    .path("config")
-                    .path("mark")
-                    .path("type")
-                    .asText(),
-            )
         shapes.filter { it.shape == VALUE }.forEach { valueRules(it, refusals) }
-        shapes.filter { it.shape == VALUE || it.shape == POSITION }.forEach { scaleRules(type, it, refusals) }
+        shapes.filter { it.shape == VALUE || it.shape == POSITION }.forEach { scaleRules(policyOf(it, policy), it, refusals) }
+        shapes.filter { it.shape == SHADE }.forEach { shadeRules(it, refusals) }
+        shapes.filter { it.shape == SIZE }.forEach { sizeRules(it, refusals) }
         val derived =
             shapes
                 .flatMap { it.positions }
@@ -85,13 +102,16 @@ object ChartSaveRules {
     private const val VALUE = "value"
     private const val SERIES = "series"
     private const val POSITION = "position"
+    private const val SHADE = "shade"
+    private const val SIZE = "size"
+    private const val LEVEL = "level"
     private const val LOG = "log"
 
-    /** G8: the types whose value axis always holds zero (`scale.zero: false` is refused by their schema). */
-    private val ALWAYS_ZERO = setOf(ChartType.BAR, ChartType.AREA)
-
-    /** G4: the types that admit a log scale; any other is refused with `chart.scale.log_unsupported`. */
-    private val LOG_TYPES = setOf(ChartType.BAR, ChartType.LINE)
+    /** The policy a scale rule reads for [shape]: its own layer mark's where it sits in a layer, else the type's. */
+    private fun policyOf(
+        shape: ChartShapeNode,
+        policy: ChartMarkPolicy?,
+    ): ChartMarkPolicy? = shape.mark?.let { ChartMarkPolicy.of(it) } ?: policy
 
     // One refusal per position, first rule wins: a branch per save rule in the reference's order (record §4.4), each at
     // the pointer of its position (§4.2).
@@ -130,6 +150,14 @@ object ChartSaveRules {
                     )
                 }
 
+                (shape == SHADE || shape == SIZE) && column.type !in ChartTypes.QUANTITATIVE -> {
+                    ChartRefusal(
+                        "chart.measure.not_numeric",
+                        path,
+                        "A colour or size by value must be an INTEGER, BIGINTEGER, DECIMAL or BIGDECIMAL column.",
+                    )
+                }
+
                 shape == POSITION && holderType == "quantitative" && column.type !in ChartTypes.QUANTITATIVE -> {
                     ChartRefusal(
                         "chart.measure.not_numeric",
@@ -146,7 +174,7 @@ object ChartSaveRules {
                     )
                 }
 
-                shape == BAND && column.nullable -> {
+                (shape == BAND || shape == LEVEL) && column.nullable -> {
                     ChartRefusal("chart.category.nullable", path, "A category column must not be nullable.")
                 }
 
@@ -184,22 +212,53 @@ object ChartSaveRules {
     }
 
     /**
-     * G4 and G8 over a value's or a position's `scale` (record §4.4): a log scale only on a type that admits it, never
-     * stacked or normalized and never beside `zero` (`chart.scale.log_unsupported`); a log range greater than 0 and
-     * increasing (`chart.scale.domain_log`); a linear range increasing, and holding zero where the axis always does —
-     * a bar's or an area's value, or `zero: true` (`chart.scale.domain_invalid`, today's bar rule unchanged). Both ends
+     * A `shade`'s own rule (record §4.4): `mid`, where given, is a finite number (`chart.shade.mid_invalid`). A number
+     * past a double's range reads as an infinity and is refused, as a scale's range is in [scaleRules].
+     */
+    private fun shadeRules(
+        shade: ChartShapeNode,
+        refusals: MutableList<ChartRefusal>,
+    ) {
+        val mid = shade.node.get("mid") ?: return
+        if (!mid.isNumber || !mid.asDouble().isFinite()) {
+            refusals +=
+                ChartRefusal("chart.shade.mid_invalid", "${shade.pointer}/mid", "The middle of a colour scale must be a finite number.")
+        }
+    }
+
+    /**
+     * A `size`'s own rule (record §4.4): `range`, where given, is strictly increasing (`chart.size.range_invalid`). Its
+     * length and bounds are the schema's; the order of two values of one instance is not (the 2020-12 dialect compares
+     * none).
+     */
+    private fun sizeRules(
+        size: ChartShapeNode,
+        refusals: MutableList<ChartRefusal>,
+    ) {
+        val range = size.node.get("range")?.takeIf { it.isArray && it.size() == 2 } ?: return
+        if (!(range[0].asDouble() < range[1].asDouble())) {
+            refusals += ChartRefusal("chart.size.range_invalid", "${size.pointer}/range", "A size range must be increasing.")
+        }
+    }
+
+    /**
+     * G4 and G8 over a value's or a position's `scale` (record §4.4): a log scale only under a mark [policy] that admits
+     * it, never stacked or normalized and never beside `zero` (`chart.scale.log_unsupported`); a log range greater than
+     * 0 and increasing (`chart.scale.domain_log`); a linear range increasing, and holding zero where the axis always
+     * does — a value under a policy whose axis always holds zero (bar, area), or `zero: true`
+     * (`chart.scale.domain_invalid`, today's bar rule unchanged). Both ends
      * must be finite: a number past a double's range reads as an infinity and is refused like a reversed range. A
      * normalized range is [valueRules]' refusal alone.
      */
     private fun scaleRules(
-        type: ChartType?,
+        policy: ChartMarkPolicy?,
         holder: ChartShapeNode,
         refusals: MutableList<ChartRefusal>,
     ) {
         val scale = holder.node.get("scale")?.takeIf { it.isObject } ?: return
         val sp = "${holder.pointer}/scale"
         val log = scale.path("type").asText() == LOG
-        if (log && !logAdmitted(type, holder, scale)) {
+        if (log && !logAdmitted(policy, holder, scale)) {
             refusals +=
                 ChartRefusal(
                     "chart.scale.log_unsupported",
@@ -212,7 +271,7 @@ object ChartSaveRules {
         if (holder.node.path("stack").asText() == "normalize") return
         val lo = domain[0].asDouble()
         val hi = domain[1].asDouble()
-        val holdsZero = scale.path("zero").asBoolean(false) || (holder.shape == VALUE && type in ALWAYS_ZERO)
+        val holdsZero = scale.path("zero").asBoolean(false) || (holder.shape == VALUE && policy?.alwaysZero == true)
         val fine = if (log) logRange(lo, hi) else linearRange(lo, hi, holdsZero)
         if (!fine) {
             refusals +=
@@ -234,12 +293,12 @@ object ChartSaveRules {
         hi: Double,
     ): Boolean = lo > 0.0 && lo < hi && hi.isFinite()
 
-    /** G4: a log scale on a type that admits it, on a value that is not stacked or normalized, without `zero`. */
+    /** G4: a log scale under a policy that admits it, on a value that is not stacked or normalized, without `zero`. */
     private fun logAdmitted(
-        type: ChartType?,
+        policy: ChartMarkPolicy?,
         holder: ChartShapeNode,
         scale: JsonNode,
-    ): Boolean = type in LOG_TYPES && holder.node.get("stack")?.isTextual != true && !scale.has("zero")
+    ): Boolean = policy?.logAdmitted == true && holder.node.get("stack")?.isTextual != true && !scale.has("zero")
 
     /** A linear range: both ends finite, increasing, and holding zero when [holdsZero]. */
     private fun linearRange(

@@ -49,6 +49,10 @@
     "chart.rule.negative-part": function () {
       return "This chart cannot show negative values.";
     },
+    // Lane G2 (brief 1050 D6): a two-sided colour scale (`shade.scale: diverging`) until lane G5 draws it.
+    "chart.rule.shade-diverging": function () {
+      return "This chart's colour scale is not drawn yet.";
+    },
   };
 
   /** The fixed sentence of a refusal {code, details} (§4.3), its numbers grouped as the engine writes numbers. */
@@ -228,9 +232,12 @@
    * prims(h, lay, ox, oy, out)}. The ONE place a draw decides which legend it has (where: C.legendPlace, look contract
    * §4.2); a legend of series is laid out by C.legendLayout ({place, w, h, items, more, drawn} plus `empty`, nothing to
    * draw) and written by C.legendPrims. With the names on the lines (`direct`) every entry is drawn (line 4: no id of
-   * the data is on the list, so every series is drawn).
+   * the data is on the list, so every series is drawn). A model that hands a colour scale (m.shade = {scale, legend,
+   * title}, brief 1050 D5) gets the scale's legend instead (R.colour.legend, placed by R.colour.place): no type has both,
+   * `color` is a series or a shade. Its `drawn` is empty, so it hides no series.
    */
   function legendOf(reg, m, series, hidden, lvl) {
+    if (m.shade) return R.colour.legend(m.shade.scale, { place: R.colour.place(lvl, m.shade.legend), label: m.shade.title });
     var place = C.legendPlace(series, hidden, lvl, m.legend, m.direct === true);
     if (place === null) return null;
     var colourOf = new Map();
