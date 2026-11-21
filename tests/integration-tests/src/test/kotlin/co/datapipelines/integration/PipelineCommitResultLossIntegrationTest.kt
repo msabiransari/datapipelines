@@ -9,8 +9,10 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.response.Response
+import org.aopalliance.intercept.MethodInterceptor
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
+import org.springframework.aop.framework.ProxyFactory
 import org.springframework.beans.factory.config.BeanPostProcessor
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -85,22 +87,24 @@ class PipelineCommitResultLossIntegrationTest {
 
         /** The real template; once armed, a real `EXISTS` of the run's rows that answers true is followed by the loss. */
         private fun probed(template: Any): Any {
-            val factory = org.springframework.aop.framework.ProxyFactory(template)
+            val factory = ProxyFactory(template)
             factory.isProxyTargetClass = true
             factory.addAdvice(
-                org.aopalliance.intercept.MethodInterceptor { invocation ->
+                MethodInterceptor { invocation ->
                     val observed = invocation.proceed()
-                    val key = invocation.arguments.firstOrNull()
-                    val armed = PROBE_ARMED.get()
-                    if (invocation.method.name == "hasKey" && observed == true && armed != null && key == armed &&
-                        PROBE_ARMED.compareAndSet(armed, null)
-                    ) {
-                        loseStoredResult(armed.removePrefix("dp:result:").removeSuffix(":rows"))
-                    }
+                    if (invocation.method.name == "hasKey" && observed == true) loseIfArmed(invocation.arguments.firstOrNull())
                     observed
                 },
             )
             return factory.proxy
+        }
+
+        /** Disarms by equality, then by the armed instance (compareAndSet compares identity), so the loss happens once. */
+        private fun loseIfArmed(key: Any?) {
+            val armed = PROBE_ARMED.get() ?: return
+            if (key == armed && PROBE_ARMED.compareAndSet(armed, null)) {
+                loseStoredResult(armed.removePrefix("dp:result:").removeSuffix(":rows"))
+            }
         }
 
         private fun loseStoredResult(executionId: String) {

@@ -198,12 +198,15 @@ class RedisResultStoreIntegrationTest {
             val store = store()
             val stored = store.materialize(UUID.randomUUID(), rows(1, 5), Dialect.H2, TTL_SECONDS)
 
-            store.describe(stored.key, firstPageRows = 2).shouldNotBeNull().firstPage.size shouldBe 2
-            store.page(stored.key, 3, 10).shouldNotBeNull().rows.size shouldBe 2
+            val first = store.describe(stored.key, firstPageRows = 2).shouldNotBeNull()
+            first.firstPage.size shouldBe 2
+            val tail = store.page(stored.key, 3, 10).shouldNotBeNull()
+            tail.rows.size shouldBe 2
             val beyond = store.page(stored.key, 5, 10).shouldNotBeNull()
             beyond.rows shouldBe emptyList()
             beyond.totalRows shouldBe 5L
-            store.page(stored.key, 50, 10).shouldNotBeNull().rows shouldBe emptyList()
+            val farBeyond = store.page(stored.key, 50, 10).shouldNotBeNull()
+            farBeyond.rows shouldBe emptyList()
         }
 
     @Test
