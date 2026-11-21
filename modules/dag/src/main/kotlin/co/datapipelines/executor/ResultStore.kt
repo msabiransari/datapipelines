@@ -81,7 +81,8 @@ interface ResultStore {
      * `DP-Result-Page-Rows` request header (ruling R-EP4) is what supplies a value, clamped by
      * the surface before it gets here.
      *
-     * @return null when the key is unknown or its TTL has elapsed.
+     * @return null when the key is unknown or its TTL has elapsed, or when the header survives but
+     *   the rows it counts are gone (a result with lost rows is not a readable result).
      */
     fun describe(
         key: String,
@@ -104,7 +105,10 @@ interface ResultStore {
      */
     fun keyFor(executionId: UUID): String
 
-    /** One page of the stored result, or null when the key is unknown or expired (REST §7.2). */
+    /**
+     * One page of the stored result, or null when the key is unknown or expired, or when its rows are
+     * gone while the header survives (REST §7.2).
+     */
     fun page(
         key: String,
         offset: Long,

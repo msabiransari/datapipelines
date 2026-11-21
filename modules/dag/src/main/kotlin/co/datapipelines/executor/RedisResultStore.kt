@@ -125,6 +125,7 @@ class RedisResultStore(
     ): StoredResultView? {
         requireResultKey(key)
         val meta = readMeta(key) ?: return null
+        if (rowsLost(key, meta)) return null
         // The requested size is clamped the same way a cursor `limit` is — one bound for one
         // documented header, whichever surface asked (R-EP4).
         val inlineRows = firstPageRows?.let { config.effectiveLimit(it) } ?: config.pageSizeRows
@@ -147,6 +148,7 @@ class RedisResultStore(
     ): ResultPage? {
         requireResultKey(key)
         val meta = readMeta(key) ?: return null
+        if (rowsLost(key, meta)) return null
         val effectiveLimit = config.effectiveLimit(limit)
         // A negative offset is TAIL-relative in `LRANGE`, so -1 silently serves the last row while
         // `hasMore` is computed from the negative offset and comes out wrong too. Clamp, don't trust.
@@ -287,6 +289,18 @@ class RedisResultStore(
             throw corruptMeta(key, e)
         }
     }
+
+    /**
+     * (#1035) True when the header survives but the rows it counts are gone. The two keys expire and
+     * can be lost independently, and [readRows] reads an absent list as an empty one, so a header
+     * alone would present a nonempty result as a page of zero rows. A header that counts no rows
+     * legitimately has no list (an empty result), so it is never lost. Such a result is absent, like
+     * an expired key: the store never serves a header as proof that the rows remain readable.
+     */
+    private fun rowsLost(
+        key: String,
+        meta: ResultMeta,
+    ): Boolean = meta.totalRows > 0 && redis.hasKey(rowsKey(key)) != true
 
     private fun corruptMeta(
         key: String,
