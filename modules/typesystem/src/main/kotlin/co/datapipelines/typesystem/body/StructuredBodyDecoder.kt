@@ -76,15 +76,39 @@ class StructuredBodyDecoder(
     fun decodeEmbedded(parser: JsonParser): StructuredBodyDecoding =
         refusing(offsetOf = { parser.currentLocation()?.charOffset }) { _ ->
             val body = readRoot(parser, parser.currentToken())
-            val bytes =
-                body
-                    .canonical()
-                    ?.toByteArray(StandardCharsets.UTF_8)
-                    ?.size
-                    ?.toLong() ?: 0L
-            if (bytes > limits.maxBytes) throw Refusal(StructuredBodyRefusalReason.TOO_MANY_BYTES)
+            if (canonicalBytes(body) > limits.maxBytes) throw Refusal(StructuredBodyRefusalReason.TOO_MANY_BYTES)
             body
         }
+
+    /**
+     * Decodes [text] — one complete JSON value that a surface has already received inside its own
+     * request (an MCP `request_body` argument, an authored `body` fixture of a template test case
+     * or `templates_evaluate`) — as a fixture: the same syntax, strict-text, duplicate-member,
+     * root, depth and number rules as [decode], with the byte cap applied to the decoded value's
+     * canonical UTF-8 form exactly as [decodeEmbedded] applies it. One fixture therefore has one
+     * byte verdict on every fixture surface, whatever spelling (`1.000…0` against `1`, spaces,
+     * member order) the surface happened to carry. The enclosing request's own outer cap bounds
+     * [text]; the raw published entity keeps [decode]'s streaming count. Trailing tokens are
+     * malformed.
+     */
+    fun decodeFixture(text: String): StructuredBodyDecoding =
+        refusing(offsetOf = { it?.currentLocation()?.charOffset }) { hold ->
+            factory.createParser(text).use { parser ->
+                hold(parser)
+                val body = readRoot(parser, parser.nextToken())
+                if (parser.nextToken() != null) throw Refusal(StructuredBodyRefusalReason.MALFORMED)
+                if (canonicalBytes(body) > limits.maxBytes) throw Refusal(StructuredBodyRefusalReason.TOO_MANY_BYTES)
+                body
+            }
+        }
+
+    /** The UTF-8 length of [body]'s canonical form; 0 for [StructuredBody.Absent]. */
+    private fun canonicalBytes(body: StructuredBody): Long =
+        body
+            .canonical()
+            ?.toByteArray(StandardCharsets.UTF_8)
+            ?.size
+            ?.toLong() ?: 0L
 
     /**
      * Decodes the top-level [member] of the JSON object [json] as a fixture — the form framework

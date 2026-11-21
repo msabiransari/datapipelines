@@ -30,6 +30,17 @@ import java.io.StringWriter
  * 2. **Restores the value exactly**: the subtree is rebuilt with every fraction as a
  *    `BigDecimal` and put back in place of the lossy one. Integers were already exact.
  *
+ * 3. **Keeps authored fixtures' exact text** (review C2): the exact JSON text of a call's
+ *    `arguments.input` (`templates_evaluate`) and `arguments.tests` (`templates_create`,
+ *    `templates_update`) is put into the request's `params._meta` under [EXACT_ARGUMENTS], where
+ *    [McpToolDispatcher] hands it to the tool as [McpArguments.exactText]. Which `inputs` member is
+ *    a template's `body` input is only known once the tool resolves the contract, so nothing is
+ *    refused or changed here: the tool binds the fixture from the text, the runner decodes a
+ *    `body` input exactly and refuses its repeated members, and every other input keeps the
+ *    ordinary reading. A client-supplied [EXACT_ARGUMENTS] entry is always removed first, so the
+ *    only text a tool sees under it is this mapper's copy of the same message. A repeated `input`
+ *    or `tests` argument keeps its last copy, as the ordinary reading does.
+ *
  * Every other member of every message is left exactly as the delegate read it — other tools'
  * arguments keep their lenient, double-valued behaviour; nothing outside the body changes.
  */
@@ -59,71 +70,103 @@ internal class ExactRequestBodyJsonMapper(
         type: TypeRef<T>,
     ): T = restored(content.decodeToString(), delegate.readValue(content, type))
 
-    /** [value] with its request body replaced by the exact one, or [value] itself when the message has none. */
+    /**
+     * [value] with its request body replaced by the exact one and its authored fixtures' exact text
+     * under `params._meta`, or [value] itself when the message has neither.
+     */
     private fun <T> restored(
         text: String,
         value: T,
     ): T {
-        val body = bodyOf(text) ?: return value
+        @Suppress("UNCHECKED_CAST")
+        val params = (value as? MutableMap<String, Any?>)?.get(PARAMS) as? MutableMap<String, Any?> ?: return value
 
         @Suppress("UNCHECKED_CAST")
-        val params = (value as? MutableMap<String, Any?>)?.get("params") as? MutableMap<String, Any?> ?: return value
+        val meta = params[META] as? MutableMap<String, Any?>
+        // Only this mapper writes the entry: a client's own copy never reaches a tool.
+        meta?.remove(EXACT_ARGUMENTS)
+        val found = scan(text) ?: return value
 
         @Suppress("UNCHECKED_CAST")
-        val arguments = params["arguments"] as? MutableMap<String, Any?> ?: return value
-        arguments[REQUEST_BODY] = exact.readValue(body, Any::class.java)
+        val arguments = params[ARGUMENTS] as? MutableMap<String, Any?> ?: return value
+        found.body()?.let { arguments[REQUEST_BODY] = exact.readValue(it, Any::class.java) }
+        if (found.fixtures.isNotEmpty() && (meta != null || params[META] == null)) {
+            val target = meta ?: LinkedHashMap<String, Any?>().also { params[META] = it }
+            target[EXACT_ARGUMENTS] = LinkedHashMap(found.fixtures)
+        }
         return value
     }
 
-    /** The exact text of the one `params.arguments.request_body` value, or null when there is none. */
-    private fun bodyOf(text: String): String? {
+    /** What the message's text holds under `params.arguments`, or null when it is not an object. */
+    private fun scan(text: String): Found? {
         val found = Found()
         factory.createParser(text).use { parser ->
             if (parser.nextToken() != JsonToken.START_OBJECT) return null
-            eachMember(parser, PARAMS) {
+            eachMember(parser, setOf(PARAMS)) { _ ->
                 found.params++
-                eachMember(parser, ARGUMENTS) {
+                eachMember(parser, setOf(ARGUMENTS)) { _ ->
                     found.arguments++
-                    eachMember(parser, REQUEST_BODY, anyToken = true) { found.bodies += copyExact(parser) }
+                    eachMember(parser, ARGUMENT_TARGETS, anyToken = true) { name ->
+                        if (name == REQUEST_BODY) {
+                            found.bodies += copyExact(parser, strict = true)
+                        } else if (parser.currentToken.isStructStart) {
+                            found.fixtures[name] = copyExact(parser, strict = false)
+                        } else {
+                            parser.skipChildren()
+                        }
+                    }
                 }
             }
         }
-        if (found.bodies.isEmpty()) return null
-        if (found.bodies.size > 1 || found.params > 1 || found.arguments > 1) throw refused()
-        return found.bodies.single()
+        return found
     }
 
-    private class Found {
+    private inner class Found {
         var params = 0
         var arguments = 0
         val bodies = mutableListOf<String>()
+        val fixtures = LinkedHashMap<String, String>()
+
+        /** The exact text of the one `request_body`, or null; a repeated one (or an ambiguous enclosure) is refused. */
+        fun body(): String? {
+            if (bodies.isEmpty()) return null
+            if (bodies.size > 1 || params > 1 || arguments > 1) throw refused()
+            return bodies.single()
+        }
     }
 
     /**
-     * Walks the members of the object [parser] is on, skipping every member but [target]; [onTarget]
-     * runs with the parser on the target's first token. A container target must be an object unless
-     * [anyToken] (the request body may be any JSON value — the decoder judges its root).
+     * Walks the members of the object [parser] is on, skipping every member not in [targets];
+     * [onTarget] runs with the parser on the target's first token and must consume the value. A
+     * container target must be an object unless [anyToken] (the request body may be any JSON
+     * value — the decoder judges its root).
      */
     private fun eachMember(
         parser: JsonParser,
-        target: String,
+        targets: Set<String>,
         anyToken: Boolean = false,
-        onTarget: () -> Unit,
+        onTarget: (String) -> Unit,
     ) {
         while (parser.nextToken() == JsonToken.FIELD_NAME) {
             val name = parser.currentName()
             parser.nextToken()
-            if (name == target && (anyToken || parser.currentToken == JsonToken.START_OBJECT)) onTarget() else parser.skipChildren()
+            if (name in targets && (anyToken || parser.currentToken == JsonToken.START_OBJECT)) onTarget(name) else parser.skipChildren()
         }
     }
 
-    /** The value [parser] is on, as exact JSON text; a repeated member inside it is the generator's refusal. */
+    /**
+     * The value [parser] is on, as exact JSON text. With [strict], a repeated member inside it is the
+     * generator's refusal; without, every member is copied as written (the runner judges it).
+     */
     @Suppress("SwallowedException") // the generator's message names the member: refused value-free
-    private fun copyExact(parser: JsonParser): String {
+    private fun copyExact(
+        parser: JsonParser,
+        strict: Boolean,
+    ): String {
         val out = StringWriter()
         try {
             factory.createGenerator(out).use { generator ->
-                generator.enable(JsonGenerator.Feature.STRICT_DUPLICATE_DETECTION)
+                if (strict) generator.enable(JsonGenerator.Feature.STRICT_DUPLICATE_DETECTION)
                 generator.copyCurrentStructureExact(parser)
             }
         } catch (err: JsonGenerationException) {
@@ -137,9 +180,21 @@ internal class ExactRequestBodyJsonMapper(
     /** The refusal; its message carries no member name or value. */
     private class RepeatedRequestBodyMember : JsonProcessingException("request_body repeats a member")
 
-    private companion object {
-        const val PARAMS = "params"
-        const val ARGUMENTS = "arguments"
-        const val REQUEST_BODY = "request_body"
+    companion object {
+        /**
+         * The `params._meta` entry holding authored fixtures' exact text: an object from argument
+         * name (`input`, `tests`) to that argument's exact JSON text. Namespaced, so it cannot be
+         * mistaken for a protocol field.
+         */
+        const val EXACT_ARGUMENTS = "co.datapipelines/exact-arguments"
+
+        private const val PARAMS = "params"
+        private const val ARGUMENTS = "arguments"
+        private const val META = "_meta"
+        private const val REQUEST_BODY = "request_body"
+
+        /** The arguments whose exact text this mapper keeps: the authored fixture carriers. */
+        private val FIXTURE_ARGUMENTS = setOf("input", "tests")
+        private val ARGUMENT_TARGETS = FIXTURE_ARGUMENTS + REQUEST_BODY
     }
 }

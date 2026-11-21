@@ -290,14 +290,25 @@ delivers, unchanged, to the SCRIPT transformers that bind it (#1038; published-m
   test case, a release/test run, `POST /api/v1/templates/evaluate` and `templates_evaluate` — obeys
   the same two numbers, depth first and then bytes, refused as `pipeline.script.input_contract_violation`
   with the bounded reason word (`too_deep`, `too_many_bytes`) and no value, so a fixture the editor
-  accepts is a body the live surfaces accept. Legacy table and value fixtures and map-only object
-  outputs are unchanged.
+  accepts is a body the live surfaces accept. The fixture is bound from the request's own text —
+  `templates/evaluate`, `templates_evaluate`, and a template create or update on REST and MCP — so
+  a member repeated anywhere inside it, or the body input named twice, is refused with the reason
+  `duplicate_member`, and a fraction keeps every digit, as full execution decodes it; the stored
+  tests and the release run keep its exact numbers (member order and repeated members in stored
+  tests: #1080). Legacy table and value fixtures and map-only object outputs are unchanged.
 - **Diagnostics.** An execution that carries a body — and every child pipeline it runs — discloses a
   failure as its code and node metadata only (`node`, `phase`, `rule`, `reason`, counts, `sql_state`,
   `vendor_code`): no engine or driver text, no transformer author text (invariant message, strict
   rejection reasons), no SQL and no exception chain, on the `node_failed` and `pipeline_failed`
   events, the live and replayed stream, the stored `error_json`, `node_stats_json` and events, and
-  the logs; a script `console` line keeps its level and loses its text. Private capture for
+  the logs; a script `console` line keeps its level and loses its text. An **authored body case**
+  (`templates/evaluate`, `templates_evaluate`, the save and release test run) follows the same
+  policy: a refusal's message is its code and its details keep only the safe keys (`input`,
+  `reason`, `case`, `rule`, …); `console` lines keep their level and lose their text; an invariant
+  keeps its name and verdict and loses its message; and a failing case in the suite is reported
+  only by its case name, a rule word (`unexpected_refusal`, `wrong_refusal`, `unexpected_success`,
+  `output_differs`, `invariant_false`, `invariant_invalid`) and, for a refusal, its `reason`. A
+  case without a body input keeps its full messages. Private capture for
   support is #1043's, not this default. The Context snapshot keeps its existing access rules.
 - **Surfaces.** Framework execute (`POST /api/v1/pipelines/{id}/execute`, REST API §6.1) and
   `pipelines_execute` take the body as a separate `request_body` fixture beside `parameters`. The
@@ -2161,6 +2172,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.109 | 1038 r3 (#1038) | **§3.4 (additive):** an authored body fixture is bound from the request's own text on evaluate and save (REST and MCP): a repeated member is refused `duplicate_member` and fractions stay exact through save, stored tests and release; an authored body case's evaluation and suite verdict are bounded (code, safe details, rule word and `reason`; console and invariant text withheld). |
 | 2026-11-21 | v1.108 | 1038 r2 (#1038) | **§3.4 (additive):** an authored body fixture (template test case, release/test run, evaluate) obeys the shared depth and byte budget; an execution that carries a body — and its children — discloses a failure as code and node metadata only (bounded diagnostics); the MCP `request_body` refuses a repeated member and keeps exact numbers. |
 | 2026-11-20 | v1.107 | 1035 (#1035) | **Commit outcomes.** §4.4: a DML caller result is held until the commit settles. §8.1/§8.2/§8.5/§9.1: `data_ready`, result URLs, child results and zero-caller stats appear only after the root's confirmed commit; a child's record stays `RUNNING` (pending) and takes the root's final status. §12.4: no new validation (runtime facts). §13.3: `local_write_commit_failed` now ends the run `OUTCOME_UNKNOWN`; `local_write_refused` gains the reason `commit_evidence_unavailable`; `instance_lost` is recorded only when no commit was attempted. No new code, no field change. |
 | 2026-11-20 | v1.106 | 1034 (#1034) | **DML operation results.** A DML node declares `operation` (`insert`/`update`/`delete`), an insert its `key` and `input`, and every DML node an `output` (`tempdb`, `caller` or the new DML-only target `discard`) — §4.4, §4.6, §4.7, §8.2, §9.2. An insert returns each input row plus its logical `id`; update/delete return one `affected_rows` row. §12.4 gains `dml_output_required`, `dml_operation_required`, `dml_operation_invalid`, `dml_key_invalid`, `dml_input_invalid` and `dml_field_forbidden`; `dml_has_output` (frozen name) now refuses a `datasource` target; `output_target_invalid` admits `discard` on DML only. §13.4 gains `pipeline.node.dml_key_correlation_failed`, `dml_affected_rows_mismatch` and `dml_insert_unqualified` (500, the `pipeline.node.` family default) and `standalone_execution_refused` the `staged_input` reason. Run admission re-applies the DML shape rules and the insert qualification to the pinned root and every reachable pinned child, so an operation-less DML node saved earlier, or an unqualified insert anywhere in the family, is refused before any business write (owner waiver; the refusal names the child). Landed with the constants (§12 code count 85 → 91, §13 row count 525 → 528). Additive per §15.2 except the waived operation-less DML. |

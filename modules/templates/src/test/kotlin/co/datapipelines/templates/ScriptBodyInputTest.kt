@@ -276,15 +276,16 @@ class ScriptBodyInputTest {
             runWith(StructuredBodyLimits(), nested(StructuredBodyLimits.DEFAULT_MAX_DEPTH + 1))
                 .shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Refused>()
         refused.code shouldBe PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION
-        refused.message shouldContain "too_deep"
-        refused.message shouldNotContain "leaf"
+        refused.details["reason"] shouldBe "too_deep"
+        refused.details["input"] shouldBe "order"
+        refused.message shouldBe PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION
     }
 
     @Test
     fun `an operator-adjusted depth and byte budget moves the authored fixture boundary with it`() {
         val shallow = StructuredBodyLimits(maxDepth = 2)
         runWith(shallow, nested(2)).shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Evaluated>()
-        runWith(shallow, nested(3)).shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Refused>().message shouldContain "too_deep"
+        runWith(shallow, nested(3)).shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Refused>().details["reason"] shouldBe "too_deep"
 
         val deep = StructuredBodyLimits(maxDepth = StructuredBodyLimits.MAX_DEPTH)
         runWith(deep, nested(StructuredBodyLimits.DEFAULT_MAX_DEPTH + 1))
@@ -303,7 +304,7 @@ class ScriptBodyInputTest {
             runWith(StructuredBodyLimits(maxBytes = canonicalBytes - 1), body)
                 .shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Refused>()
         over.code shouldBe PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION
-        over.message shouldContain "too_many_bytes"
-        over.message shouldNotContain "AAAA"
+        over.details["reason"] shouldBe "too_many_bytes"
+        over.message shouldBe PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION
     }
 }

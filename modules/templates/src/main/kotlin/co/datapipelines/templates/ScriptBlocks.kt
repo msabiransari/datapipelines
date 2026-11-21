@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import com.fasterxml.jackson.databind.cfg.CoercionAction
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape
 import com.fasterxml.jackson.databind.json.JsonMapper
@@ -208,12 +210,19 @@ data class ScriptInvariant(
  * optional — the runner supplies `{ node_id: "test", context_key: null }` — and [now] pins the
  * instant `$now()`/`$millis()` return for a case that reads the clock (absent → the clock
  * builtins refuse, 7a's A.3 choice).
+ *
+ * [inputs] binds as [FixtureInputs] (#1038): each member keeps its exact JSON text beside its
+ * ordinary value, so a `body` input is decoded exactly by the runner while table and value inputs
+ * keep their ordinary reading.
  */
 @JsonIgnoreProperties(ignoreUnknown = false)
 data class ScriptTestInput(
     @field:JsonProperty("rows") @get:JsonProperty("rows") @param:JsonProperty("rows")
     val rows: List<Map<String, Any?>>? = null,
     @field:JsonProperty("inputs") @get:JsonProperty("inputs") @param:JsonProperty("inputs")
+    @field:JsonDeserialize(using = FixtureInputs.Deserializer::class)
+    @param:JsonDeserialize(using = FixtureInputs.Deserializer::class)
+    @get:JsonSerialize(using = FixtureInputs.Serializer::class)
     val inputs: Map<String, Any?>? = null,
     @field:JsonProperty("meta") @get:JsonProperty("meta") @param:JsonProperty("meta")
     val meta: Map<String, Any?>? = null,

@@ -35,6 +35,19 @@ import java.time.Instant
  * suite (#770): it starts before the runner compiles, every pool call of the suite is clipped to
  * what remains, and a case finishing after it fails. [nanoClock] is the clock every deadline read
  * goes through (a test seam; production passes nothing).
+ *
+ * ## Body fixtures (#1038)
+ *
+ * A case that supplies the contract's `body` input is a body fixture. Its body is decoded from the
+ * exact text [FixtureInputs] kept ([BodyFixtureReader]), by the same decoder rules and canonical byte
+ * budget framework execute and `pipelines_execute` apply, so a duplicate member is refused and a
+ * long fraction stays exact. Its outcome then follows the default diagnostics policy
+ * ([BodyFixtureDiagnostics]): a refusal discloses its code and the safe detail keys and the
+ * message is the code; console text is withheld line by line; the save- and release-time verdict
+ * names the case and what went wrong, never an output, a value, an engine message or an author's
+ * invariant text. Declared evaluation results — the output, the rejects and each invariant's
+ * name and pass/fail verdict — are the caller's intended answer and stay. Cases without a body keep
+ * every message they had.
  */
 class ScriptTestRunner(
     private val engines: Map<ScriptLanguage, ScriptEngine>,
@@ -58,6 +71,9 @@ class ScriptTestRunner(
     private val bodyLimits: StructuredBodyLimits = StructuredBodyLimits(),
     private val nanoClock: () -> Long = System::nanoTime,
 ) {
+    /** The one reading of an exact body fixture, over [bodyLimits]. */
+    private val bodyFixtures = BodyFixtureReader(bodyLimits)
+
     /** One invariant's verdict on one evaluation (record §9.1's `{ name, passed, message }`). */
     data class InvariantVerdict(
         val name: String,
@@ -146,7 +162,20 @@ class ScriptTestRunner(
             }
             val outcome =
                 runCase("$label case '${case.name}'", engine, script, contract, compiledInvariants, case.input, deadlineNanos = deadline)
-            val verdict = if (outcome.isSuiteTimeout()) listOf(suiteTimedOut()) else verdictOf(case, outcome)
+            val verdict =
+                when {
+                    outcome.isSuiteTimeout() -> {
+                        listOf(suiteTimedOut())
+                    }
+
+                    BodyFixtureDiagnostics.isBodyCase(contract, case.input.inputs.orEmpty()) -> {
+                        BodyFixtureDiagnostics.verdictOf(case, outcome)
+                    }
+
+                    else -> {
+                        verdictOf(case, outcome)
+                    }
+                }
             // The completion check: work that finished after D never passes, whatever it produced.
             failures += if (nanoClock() > deadline) listOf(suiteTimedOut()) else verdict
         }
@@ -204,8 +233,9 @@ class ScriptTestRunner(
      * editor's detail pass — leaves every limit as it is): each pool call is clipped to what
      * remains, none is made below [MIN_REMAINING_NANOS], and a clipped call's timeout is a
      * refusal carrying `details.timeout = suite`.
+     *
+     * A body fixture (the class KDoc) is decoded exactly first, and its outcome leaves bounded.
      */
-    @Suppress("ReturnCount") // each §4.3/§5.1 guard is its own early refusal; the order is the contract
     fun runCase(
         label: String,
         engine: ScriptEngine,
@@ -216,8 +246,25 @@ class ScriptTestRunner(
         now: Instant? = null,
         deadlineNanos: Long? = null,
     ): RunOutcome {
+        val outcome = runUnbounded(label, engine, script, contract, compiledInvariants, input, now, deadlineNanos)
+        return if (BodyFixtureDiagnostics.isBodyCase(contract, input.inputs.orEmpty())) BodyFixtureDiagnostics.bounded(outcome) else outcome
+    }
+
+    @Suppress("ReturnCount") // each §4.3/§5.1 guard is its own early refusal; the order is the contract
+    private fun runUnbounded(
+        label: String,
+        engine: ScriptEngine,
+        script: CompiledScript,
+        contract: ScriptContract,
+        compiledInvariants: List<Pair<ScriptInvariant, CompiledScript>>,
+        input: ScriptTestInput,
+        now: Instant? = null,
+        deadlineNanos: Long? = null,
+    ): RunOutcome {
         val rows = input.rows.orEmpty()
-        val inputs = input.inputs.orEmpty()
+        val exact = bodyFixtures.resolve(contract, input.inputs.orEmpty())
+        exact.refusal?.let { return it }
+        val inputs = exact.inputs
 
         inputCaps(contract, rows, inputs)?.let { return it }
 
@@ -236,7 +283,8 @@ class ScriptTestRunner(
                 maxInputBytes = maxInputBytes,
                 console = ConsoleSink { console += it },
             )
-        val evaluated = evaluateOnPool(label, engine, script, contract, CaseContext(input, rows, inputs), limits, deadlineNanos)
+        val case = CaseContext(input, rows, inputs)
+        val evaluated = evaluateOnPool(label, engine, script, contract, case, limits, deadlineNanos)
         if (evaluated is RunOutcome.Refused) return evaluated.copy(console = console.toList())
 
         // Shape + gate the output (§5.3).
@@ -247,8 +295,7 @@ class ScriptTestRunner(
                 else -> error("shapeAndGate returned ${shaped.javaClass}")
             }
 
-        val verdicts =
-            runInvariants(label, contract, compiledInvariants, gated, CaseContext(input, rows, inputs), limits, deadlineNanos)
+        val verdicts = runInvariants(label, contract, compiledInvariants, gated, case, limits, deadlineNanos)
         if (verdicts is RunOutcome.Refused) return verdicts.copy(console = console.toList())
         return RunOutcome.Evaluated(gated.output, gated.rejects, (verdicts as RunOutcome.Evaluated).invariants, console.toList())
     }
@@ -452,16 +499,15 @@ class ScriptTestRunner(
                 if (!inputs.containsKey(name)) return null
                 val verdict = TypeGate.over(emptyList(), maxStringBytes).gateBody(inputs[name], maxValueBytes)
                 (verdict as? GateResult.Refuse)?.let {
-                    return RunOutcome.Refused(PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION, "input '$name': ${describe(it.refusal)}")
+                    return RunOutcome.Refused(
+                        PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION,
+                        "input '$name': ${describe(it.refusal)}",
+                        details = mapOf("input" to name),
+                    )
                 }
                 // The shared body policy (depth, then bytes), after the root shape: the bounded
                 // reason word only, never a member name or value.
-                return bodyLimits.refusalOf(inputs[name])?.let {
-                    RunOutcome.Refused(
-                        PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION,
-                        "input '$name': body ${it.wire} (budget ${bodyLimits.maxBytes} bytes, depth ${bodyLimits.maxDepth})",
-                    )
-                }
+                return bodyLimits.refusalOf(inputs[name])?.let { bodyFixtures.refusal(name, it) }
             }
 
             is ScriptInput.Value -> {
@@ -702,7 +748,7 @@ class ScriptTestRunner(
         outcome: RunOutcome.Evaluated,
     ): List<TemplateValidationFailure> {
         val expected = ScriptBlocks.mapper.convertValue(case.expect.output, Any::class.java)
-        val diff = firstDifference("$", expected, outcome.output)
+        val diff = OutputDifference.first("$", expected, outcome.output)
         val invariantFailure =
             outcome.invariants.firstOrNull { !it.passed }?.let { invariant ->
                 testFailed(case.name, "invariant '${invariant.name}' is false: ${invariant.message}", invariant.name)
@@ -717,36 +763,6 @@ class ScriptTestRunner(
             },
             invariantFailure,
         )
-    }
-
-    /** The first structural difference between two JSON-shaped values, numbers compared by value (§5.5). */
-    @Suppress("ReturnCount") // recursion returns the first difference found; every other path falls through to null
-    private fun firstDifference(
-        path: String,
-        expected: Any?,
-        actual: Any?,
-    ): Triple<String, Any?, Any?>? {
-        if (expected is Map<*, *> && actual is Map<*, *>) {
-            (expected.keys + actual.keys).distinct().forEach { key ->
-                val diff = firstDifference("$path.$key", expected[key], actual[key])
-                if (diff != null) return diff
-            }
-            return null
-        }
-        if (expected is List<*> && actual is List<*>) {
-            val size = maxOf(expected.size, actual.size)
-            for (index in 0 until size) {
-                val diff =
-                    firstDifference(
-                        "$path[$index]",
-                        expected.getOrNull(index),
-                        actual.getOrNull(index),
-                    )
-                if (diff != null) return diff
-            }
-            return null
-        }
-        return if (CanonicalJson.equal(expected, actual)) null else Triple(path, expected, actual)
     }
 
     private fun refused(refusal: GateRefusal): RunOutcome.Refused = RunOutcome.Refused(codeOf(refusal), describe(refusal))

@@ -1,5 +1,7 @@
 package co.datapipelines.executor
 
+import co.datapipelines.typesystem.body.StructuredBodyDiagnostics
+
 /**
  * The failure record of an execution that carries a structured request body (#1038; published-
  * mutation requirement §4 and §6): a bounded code and metadata, and nothing a caller or author
@@ -22,34 +24,20 @@ package co.datapipelines.executor
  */
 internal object BoundedFailure {
     /**
-     * The detail keys a bounded record keeps: identifiers the pipeline author chose and counts the
-     * platform computed. `reason` is the decoder's bounded wire word, `rule` a fixed contract-rule
-     * word; neither is ever a supplied value. Deliberately absent: `first_reasons`, `invariant`,
-     * `message`, `column`, `value`, `sql` and anything not named here.
+     * The detail keys a bounded record keeps — the one list the authored test runner applies too
+     * ([StructuredBodyDiagnostics.SAFE_DETAILS]): identifiers the pipeline author chose and counts
+     * the platform computed. `reason` is the decoder's bounded wire word, `rule` a fixed
+     * contract-rule word; neither is ever a supplied value. Deliberately absent: `first_reasons`,
+     * `invariant`, `message`, `column`, `value`, `sql` and anything not named there.
      */
-    val SAFE_DETAILS: Set<String> =
-        setOf(
-            "node",
-            "node_id",
-            "phase",
-            "rule",
-            "reason",
-            "rejected",
-            "batch",
-            "row",
-            "rows",
-            "max_input_rows",
-            "sql_state",
-            "vendor_code",
-            "execution_id",
-        )
+    val SAFE_DETAILS: Set<String> get() = StructuredBodyDiagnostics.SAFE_DETAILS
 
     /** [error] reduced to the bounded form. Idempotent. */
     fun of(error: MappedError): MappedError =
         MappedError(
             code = error.code,
             message = error.code,
-            details = error.details.filterKeys { it in SAFE_DETAILS },
+            details = StructuredBodyDiagnostics.bounded(error.details),
             node = error.node,
             sql = null,
             exception = null,

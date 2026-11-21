@@ -43,7 +43,7 @@ class PipelineExecuteToolRequestBodyTest {
             mockk(relaxed = true),
             mockk<ResultStore>(),
             ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" },
-            bodyDecoder = StructuredBodyDecoder(StructuredBodyLimits(maxBytes = 256, maxDepth = 4)),
+            bodyDecoder = StructuredBodyDecoder(StructuredBodyLimits(maxBytes = BOUND.toLong(), maxDepth = 4)),
         )
     private val ctx = McpFixtures.ctx()
 
@@ -96,6 +96,21 @@ class PipelineExecuteToolRequestBodyTest {
     }
 
     @Test
+    fun `the byte bound counts the body's canonical bytes, the budget framework execute applies, not the re-serialized spelling`() {
+        // {"n":1,"p":"x…"} canonically: 14 bytes around the padding; the argument as sent spells n with 120 more zeros.
+        fun padded(pad: Int) = mapOf("n" to BigDecimal("1." + "0".repeat(TRAILING_ZEROS)), "p" to "x".repeat(pad))
+        val atBound = executed(args("request_body" to padded(BOUND - CANONICAL_OVERHEAD))).requestBody
+        atBound
+            .shouldBeInstanceOf<StructuredBody.ObjectRoot>()
+            .canonical()!!
+            .toByteArray()
+            .size shouldBe BOUND
+        val refused =
+            shouldThrow<DatapipelinesException> { tool.call(args("request_body" to padded(BOUND - CANONICAL_OVERHEAD + 1)), ctx) }
+        refused.details["reason"] shouldBe "too_many_bytes"
+    }
+
+    @Test
     fun `a null, scalar, mixed or over-bound argument is refused before the executor runs, naming no value`() {
         storedPipeline()
         val cases =
@@ -116,5 +131,11 @@ class PipelineExecuteToolRequestBodyTest {
             }
         }
         coVerify(exactly = 0) { executor.execute(any()) }
+    }
+
+    private companion object {
+        const val BOUND = 256
+        const val CANONICAL_OVERHEAD = 14
+        const val TRAILING_ZEROS = 120
     }
 }

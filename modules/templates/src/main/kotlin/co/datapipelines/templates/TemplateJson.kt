@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializerProvider
 import com.fasterxml.jackson.databind.cfg.CoercionAction
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape
+import com.fasterxml.jackson.databind.cfg.JsonNodeFeature
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.databind.module.SimpleModule
 import com.fasterxml.jackson.databind.type.LogicalType.Textual
@@ -37,6 +38,14 @@ import com.fasterxml.jackson.databind.type.LogicalType.Boolean as JacksonBoolean
  * for a single field — and the explicit formatter also pins the *spelling*, which the JSR-310
  * module leaves to `WRITE_DATES_AS_TIMESTAMPS` (numeric epoch by default, ISO only once
  * disabled). One field, one format, no configuration to get wrong.
+ *
+ * ## Exact decimals in trees (#1038)
+ *
+ * An authored body fixture keeps its exact decimals ([FixtureInputs]), and the read shapes build
+ * a tree from the [Template] (the REST draft pointer, the MCP authoring response). Jackson's node
+ * factory strips trailing zeros from a decimal by default, which would turn `0.50` into `0.5` on
+ * the way out — a different fixture once an author saves it back. Trailing zeros are kept. This
+ * mapper binds fractions as doubles everywhere else, so only a fixture's exact decimals meet it.
  */
 object TemplateJson {
     fun objectMapper(): ObjectMapper =
@@ -51,6 +60,7 @@ object TemplateJson {
                     config.setCoercion(it, CoercionAction.Fail)
                 }
             }.withCoercionConfig(JacksonBoolean) { it.setCoercion(CoercionInputShape.Integer, CoercionAction.Fail) }
+            .configure(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES, false)
             .build()
 
     private val MAPPER = objectMapper()

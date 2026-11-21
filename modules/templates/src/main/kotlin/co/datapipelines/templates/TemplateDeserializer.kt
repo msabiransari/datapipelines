@@ -45,10 +45,20 @@ class TemplateDeserializer(
      * these failures with the validator's, so an author sees every problem in one response
      * (§7, D2: the whole check set runs before anything is written).
      */
-    fun read(json: String): TemplateDeserializationOutcome = fromTree(mapper.readTree(json))
+    fun read(json: String): TemplateDeserializationOutcome = fromTree(mapper.readTree(json), exactJson = json)
 
-    /** As [read], for a document already parsed into a tree. */
-    fun fromTree(tree: JsonNode): TemplateDeserializationOutcome {
+    /**
+     * As [read], for a document already parsed into a tree. [exactJson] is the text the tree was
+     * parsed from, when the caller has it (#1038): the `tests` block is then bound from that text
+     * rather than the tree, so an authored `body` fixture keeps its exact decimals and its repeated
+     * members for the save-time runner to judge ([FixtureInputs]). The tree's other members are
+     * bound as before — a caller may have completed them ([TemplateDeserializer] callers fold the
+     * working version's `type` and `dialect` in).
+     */
+    fun fromTree(
+        tree: JsonNode,
+        exactJson: String? = null,
+    ): TemplateDeserializationOutcome {
         val type = tree.get("type")?.let { node -> node.takeIf { it.isTextual }?.asText() ?: node.asText() }
         if (type != null && TemplateType.fromWire(type) == null) {
             return TemplateDeserializationOutcome.Rejected(
@@ -66,7 +76,7 @@ class TemplateDeserializer(
         }
         val typed = type?.let { TemplateType.fromWire(it) }
         dialectPreScan(typed, tree)?.let { return it }
-        return when (val bound = bindDraft(tree, typed)) {
+        return when (val bound = bindDraft(tree, typed, exactJson)) {
             is TemplateDeserializationOutcome.Rejected -> bound
             is TemplateDeserializationOutcome.Parsed -> bound
         }
@@ -76,10 +86,11 @@ class TemplateDeserializer(
     private fun bindDraft(
         tree: JsonNode,
         typed: TemplateType?,
+        exactJson: String?,
     ): TemplateDeserializationOutcome {
         val parsed =
             try {
-                mapper.treeToValue(tree, TemplateDraft::class.java)
+                withExactTests(mapper.treeToValue(tree, TemplateDraft::class.java), exactJson)
             } catch (err: com.fasterxml.jackson.databind.JsonMappingException) {
                 // Two author errors reach here, and BindFailure tells them apart. The script
                 // blocks are strict interior (the model's KDoc): a typo is a refusal, never a
@@ -114,6 +125,21 @@ class TemplateDeserializer(
                 parsed
             }
         return TemplateDeserializationOutcome.Parsed(normalized)
+    }
+
+    /**
+     * [draft] with its `tests` rebound from the exact text of [exactJson]'s top-level `tests` member
+     * (the last one, as the tree kept), or [draft] itself when there is no text or no tests.
+     */
+    private fun withExactTests(
+        draft: TemplateDraft,
+        exactJson: String?,
+    ): TemplateDraft {
+        if (draft.tests == null || exactJson == null) return draft
+        val text = ExactJsonText.topLevelMember(exactJson, "tests") ?: return draft
+        val tests: List<ScriptTestCase> =
+            mapper.readValue(text, mapper.typeFactory.constructCollectionType(List::class.java, ScriptTestCase::class.java))
+        return draft.copy(tests = tests)
     }
 
     /** The type/dialect wire-value verdicts, or null when the pair is sound (046 §7, 7b §2.1). */

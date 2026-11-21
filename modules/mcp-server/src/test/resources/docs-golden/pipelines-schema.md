@@ -61,8 +61,9 @@ may not name a body reader's `context_key`. Malformed JSON, a duplicate member, 
 or a body the pipeline does not accept is refused before any node runs
 (`pipeline.execution.request_body_invalid`); `pipelines_execute` refuses a repeated member too and
 keeps every number exact, like framework execute. A test or evaluation fixture for a body input
-obeys the same depth and size budget as a real body. A failed run that read a body reports its code
-and node only — never a value from the body, a transformer's message or a rejection reason. Send an
+obeys the same depth and size budget as a real body, refuses a repeated member and keeps every
+number exact; its failure reports the code, the case and a rule word, never its text or console
+lines. A failed run that read a body reports its code and node only — never a value from the body, a transformer's message or a rejection reason. Send an
 identifier that JavaScript must not round as a string. See `pipeline-contract` §3.4.
 
 **Timeouts** — a pipeline may declare `settings.query_timeout_seconds` (the default SQL

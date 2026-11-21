@@ -80,7 +80,7 @@ class McpToolDispatcher(
         startedAt: Long,
     ): McpSchema.CallToolResult =
         try {
-            val payload = tool.call(McpArguments(request.arguments() ?: emptyMap()), ctx)
+            val payload = tool.call(McpArguments(request.arguments() ?: emptyMap(), exactArguments(request)), ctx)
             audit(tool.name, request, ctx, outcome = "success", startedAt = startedAt, invoked = true)
             McpToolResults.success(payload, ctx.correlationId)
         } catch (e: SearchQueryTooLongException) {
@@ -111,6 +111,14 @@ class McpToolDispatcher(
         } catch (e: Exception) {
             throw internalError(tool.name, request, ctx, e, startedAt)
         }
+
+    /** The transport's exact text of the call's authored-fixture arguments ([ExactRequestBodyJsonMapper.EXACT_ARGUMENTS]). */
+    private fun exactArguments(request: McpSchema.CallToolRequest): Map<String, String> {
+        val entry = request.meta()?.get(ExactRequestBodyJsonMapper.EXACT_ARGUMENTS) as? Map<*, *> ?: return emptyMap()
+        return buildMap {
+            entry.forEach { (name, text) -> if (name is String && text is String) put(name, text) }
+        }
+    }
 
     /**
      * The catch-all an uncatalogued fault lands in — a Redis outage, a metadata-DB connection

@@ -13,9 +13,22 @@ import java.util.UUID
  */
 class McpArguments(
     private val raw: Map<String, Any?>,
+    /**
+     * The exact JSON text the transport kept for an authored-fixture argument (#1038:
+     * [ExactRequestBodyJsonMapper.EXACT_ARGUMENTS]) — `input` and `tests` — keyed by argument name.
+     * Empty when the call did not arrive through that transport.
+     */
+    private val exact: Map<String, String> = emptyMap(),
 ) {
     /** The raw argument map — for the two tools whose input is a free-form object (§6.2.3, §6.2.9). */
     fun rawMap(): Map<String, Any?> = raw
+
+    /**
+     * The exact JSON text of argument [name] as the client wrote it, or null. A tool that binds an
+     * authored fixture reads it from this text, so a `body` input keeps its exact decimals and its
+     * repeated members for the runner to judge.
+     */
+    fun exactText(name: String): String? = exact[name]
 
     fun has(name: String): Boolean = raw[name] != null
 

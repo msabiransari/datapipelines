@@ -369,9 +369,13 @@ class PipelineExecuteTool(
         args.requiredObject("parameters").mapValues { (_, value) -> ExecutorJson.mapper.valueToTree(value) }
 
     /**
-     * The optional `request_body` argument (#1038), re-serialized and decoded by [bodyDecoder]. A
-     * member that is present is decoded even when it is JSON `null` — `null` is an invalid root,
-     * never absence, exactly as on framework execute.
+     * The optional `request_body` argument (#1038), re-serialized and decoded by [bodyDecoder] as a
+     * fixture ([StructuredBodyDecoder.decodeFixture]): the byte budget is counted over the decoded
+     * value's canonical form, exactly as framework execute counts the fixture embedded in its
+     * request and the authored runner counts a body fixture — never over this re-serialization's
+     * spelling, which can differ from the canonical one (`1.000…0` against `1`). A member that is
+     * present is decoded even when it is JSON `null` — `null` is an invalid root, never absence,
+     * exactly as on framework execute.
      *
      * The JSON-RPC transport has already parsed the arguments, but [ExactRequestBodyJsonMapper]
      * refused a repeated member and rebuilt the value with exact fractions first, so what arrives
@@ -382,7 +386,7 @@ class PipelineExecuteTool(
     private fun requestBody(args: McpArguments): StructuredBody {
         val raw = args.rawMap()
         if (!raw.containsKey(REQUEST_BODY_ARG)) return StructuredBody.Absent
-        return when (val decoded = bodyDecoder.decode(bodyWriter.writeValueAsBytes(raw[REQUEST_BODY_ARG]))) {
+        return when (val decoded = bodyDecoder.decodeFixture(bodyWriter.writeValueAsString(raw[REQUEST_BODY_ARG]))) {
             is StructuredBodyDecoding.Decoded -> decoded.body
             is StructuredBodyDecoding.Refused -> throw RequestBodyAdmission.decodeRefused(decoded.refusal)
         }

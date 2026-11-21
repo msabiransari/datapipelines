@@ -116,7 +116,12 @@ internal object ScriptFace {
                 put("body", panes.body)
                 parsed.forEach { (pane, node) -> set<JsonNode>(pane, node) }
             }
-        return when (val outcome = DESERIALIZER.fromTree(tree)) {
+        // #1038: the tests pane's own text, so a `body` fixture binds with its exact decimals and repeated members.
+        val exactTests =
+            co.datapipelines.templates.ExactJsonText
+                .firstValue(panes.tests)
+                ?.let { "{\"$TESTS\":$it}" }
+        return when (val outcome = DESERIALIZER.fromTree(tree, exactJson = exactTests)) {
             is TemplateDeserializationOutcome.Parsed -> Bound.Draft(outcome.draft)
             is TemplateDeserializationOutcome.Rejected -> Bound.Refused(outcome.result.failures.map(::refusalOf))
         }
