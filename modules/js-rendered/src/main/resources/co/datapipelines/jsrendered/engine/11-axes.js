@@ -201,15 +201,35 @@
   var SAME = 1e-9;
   /** The ladder steps (1, 2, 2.5, 5 × a power of ten) case (a) climbs before it gives way to case (c). */
   var LADDER_CLIMB = 48;
+  /** The smallest k whose 10^k is a normal double (10^-308 is subnormal); below it significant() raises first. */
+  var MIN_NORMAL_POWER = -307;
+  /** The power significant() raises a value of a subnormal decade by: a value below 10^-290 times 10^300 stays below 10^10. */
+  var RAISE = 300;
 
-  /** Where a value lies on an axis {lo, hi, log}, as a share of it from lo (0) to hi (1); 0 on an axis of no width. */
+  /**
+   * Where a value lies on an axis {lo, hi, log}, as a share of it from lo (0) to hi (1); 0 on an axis of no width. Two
+   * finite ends whose difference a double cannot hold (-1e308 to 1e308) are halved first, as S.linear does: halving a
+   * number that large is exact, so the share is the one the two ends define and never NaN (brief 1051 r3, R2).
+   */
   function shareOf(ax, v) {
     if (ax.log === true) {
       var l0 = S.log10(ax.lo), dl = S.log10(ax.hi) - l0;
       return dl > 0 ? (S.log10(v) - l0) / dl : 0;
     }
     var d = ax.hi - ax.lo;
-    return d > 0 ? (v - ax.lo) / d : 0;
+    if (d < Infinity) return d > 0 ? (v - ax.lo) / d : 0;
+    var d2 = ax.hi / 2 - ax.lo / 2;
+    return d2 > 0 ? (v / 2 - ax.lo / 2) / d2 : 0;
+  }
+
+  /**
+   * The value at share t of a linear range [lo, hi]. Where hi - lo overflows (two finite ends of opposite signs past
+   * half a double's range), it is lo × (1 - t) + hi × t: each term is at most the larger end, the two have opposite
+   * signs, so the sum cannot overflow, and t = 0 and t = 1 give lo and hi exactly (brief 1051 r3, R2).
+   */
+  function lerp(lo, hi, t) {
+    var d = hi - lo;
+    return d < Infinity ? lo + t * d : lo * (1 - t) + hi * t;
   }
 
   /** The extent of a linear right axis with no domain, widened as S.nice widens one value (or none) first. */
@@ -232,17 +252,24 @@
   /**
    * Case (a): the right values r0 + j × s at equally spaced left positions f0 + j × df. s is the smallest step of the
    * ladder for which the largest multiple r0 of s whose bottom-edge value holds the extent's low end also gives a
-   * top-edge value that holds its high end. null where no step of the climb does (two ticks at both edges with a span
-   * across zero) or a number is not finite: case (c) then.
+   * top-edge value that holds its high end. null where no step of the climb does or a number is not finite: case (c)
+   * then, whose range is the right axis's own nice range and so holds the extent, both signs of it included. A
+   * candidate holds the extent only within `tol`, a share SAME of the EXTENT's own span (rounding noise of the data's
+   * scale), never of the candidate's span: a share of a span that grows with the climb accepted, at 0..1e9, a range
+   * that leaves out the whole negative half of [-1, 1] (brief 1051 r3, R1). Two left ticks on the plot's two edges
+   * beside an extent across zero are such a case: the multiples k × s and (k + 1) × s never straddle zero, so no step
+   * of the ladder holds it and the climb ends in case (c).
    */
   function caseA(ext, n, f0, df, format) {
-    var e = linearExtent(ext), e0 = e[0], e1 = e[1];
+    var e = linearExtent(ext), e0 = e[0], e1 = e[1], tol = SAME * (e1 - e0);
+    if (!(tol < Infinity)) return null;
     var s = S.niceStep((e1 - e0) * df);
     for (var c = 0; c < LADDER_CLIMB && s > 0 && s < Infinity; c++, s = nextStep(s)) {
-      var span = s / df, k = Math.floor((e0 + f0 * span) / s + SAME);
+      var span = s / df, k = Math.floor((e0 + f0 * span) / s);
+      if ((k + 1) * s - f0 * span <= e0 + tol) k++;
       var lo = k * s - f0 * span, hi = lo + span;
       if (!(lo > -Infinity && hi < Infinity)) return null;
-      if (lo > e0 + SAME * span || hi < e1 - SAME * span) continue;
+      if (lo > e0 + tol || hi < e1 - tol) continue;
       var decimals = Math.max(0, 1 - S.decade(s)), scale = S.pow10(decimals > 308 ? 308 : decimals), ticks = [];
       for (var j = 0; j < n; j++) {
         var t = Math.round((k + j) * s * scale) / scale + 0;
@@ -276,11 +303,21 @@
     return { lo: ticks[0], hi: ticks[n - 1], ticks: ticks, texts: texts, log: true, rule: "b" };
   }
 
-  /** A value written with d significant digits, as the double its decimal text reads as (0 stays 0). */
+  /**
+   * A value written with d significant digits, as the double its decimal text reads as (0 stays 0). Total over finite
+   * values: where 10^e is below a normal double (a value near the smallest subnormals asks for e down to -340, past the
+   * power table's -323), the value is first raised by 10^300 and then divided by 10^(e + 300), both normal powers of the
+   * table, so q is a whole number of d digits. A value next to the largest double can round up past it (1.797…e308 at
+   * three digits reads 1.80e308, Infinity): there the d digits are taken one unit lower, the largest such value below
+   * it. So every finite value gives a finite one (brief 1051 r3, R3). Four operations only (O-16).
+   */
   function significant(v, d) {
     if (!(v !== 0 && v > -Infinity && v < Infinity)) return v;
-    var a = v < 0 ? -v : v, e = S.decade(a) - (d - 1), q = Math.round(a / S.pow10(e));
-    return (v < 0 ? -1 : 1) * Number(q + "e" + e);
+    var a = v < 0 ? -v : v, e = S.decade(a) - (d - 1);
+    var q = e >= MIN_NORMAL_POWER ? Math.round(a / S.pow10(e)) : Math.round((a * S.pow10(RAISE)) / S.pow10(e + RAISE));
+    var r = Number(q + "e" + e);
+    if (!(r < Infinity)) r = Number(q - 1 + "e" + e);
+    return (v < 0 ? -1 : 1) * r;
   }
 
   /**
@@ -291,7 +328,7 @@
   function caseC(lvl, S2, ext, length, shares) {
     var own = S2.log === true ? logAxis(lvl, ext, S2.domain, length, S2.format) : valueAxis(lvl, ext, S2.domain, length, S2.format, 0);
     var lo = own.lo, hi = own.hi, l0 = S2.log === true ? S.log10(lo) : 0, l1 = S2.log === true ? S.log10(hi) : 0, ticks = [];
-    for (var j = 0; j < shares.length; j++) ticks.push(S2.log === true ? S.exp10(l0 + shares[j] * (l1 - l0)) : lo + shares[j] * (hi - lo));
+    for (var j = 0; j < shares.length; j++) ticks.push(S2.log === true ? S.exp10(l0 + shares[j] * (l1 - l0)) : lerp(lo, hi, shares[j]));
     var rounded = [];
     for (var d = 3; d <= 17; d++) {
       rounded = [];

@@ -1,0 +1,48 @@
+{
+ "note": "round 3, R1: the landing verdict's case. Left domain 0..1 (two left ticks on the plot's edges at a small frame) beside a right extent across zero, -1..1, no domain: no ladder step holds both signs, so the right axis is its own nice range (case (c)) and holds both ends",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y",
+     "domain": [
+      0,
+      1
+     ]
+    },
+    "y2": {
+     "field": "y2"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "A",
+   "B"
+  ],
+  "y": [
+   0,
+   1
+  ],
+  "y2": [
+   -1,
+   1
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 5
+ }
+}

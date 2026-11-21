@@ -316,7 +316,7 @@ test("A.7: the five test types' sweep is not vacuous: at least five fixtures eac
     }
   }
   assert.deepEqual(bad.slice(0, 8), [], bad.length + " violations");
-  assert.ok(seen.fixtures >= 44, "fixtures: " + seen.fixtures);
+  assert.ok(seen.fixtures >= 45, "fixtures: " + seen.fixtures);
   assert.equal(seen.pictures, seen.fixtures * 175);
   assert.ok(seen.rendered >= 5000, "rendered: " + seen.rendered);
   assert.ok(seen.texts >= 40000, "texts: " + seen.texts);

@@ -25,8 +25,15 @@ const twin = (right) => (m) => {
   m.line = m.line.map(() => null);
 };
 
+/** The share of v on an axis; ends whose difference overflows a double are quartered first (the test's own way). */
 function share(ax, v) {
-  return ax.log ? (Math.log10(v) - Math.log10(ax.lo)) / (Math.log10(ax.hi) - Math.log10(ax.lo)) : (v - ax.lo) / (ax.hi - ax.lo);
+  if (ax.log) return (Math.log10(v) - Math.log10(ax.lo)) / (Math.log10(ax.hi) - Math.log10(ax.lo));
+  return Number.isFinite(ax.hi - ax.lo) ? (v - ax.lo) / (ax.hi - ax.lo) : (v / 4 - ax.lo / 4) / (ax.hi / 4 - ax.lo / 4);
+}
+
+/** The value at share t of a linear range, quartered where hi - lo overflows (the test's own way, not the engine's). */
+function valueAt(lo, hi, t) {
+  return Number.isFinite(hi - lo) ? lo + t * (hi - lo) : 4 * (lo / 4 + t * (hi / 4 - lo / 4));
 }
 
 /** The line's extent as the test reads the data (numbers; on a log axis positive ones), widened as a nice range widens one value. */
@@ -36,20 +43,39 @@ function extentOf(fx) {
   return [Math.min(...Y2), Math.max(...Y2)];
 }
 
-/** Case (a)'s step and its first multiple, found by the test: the smallest step of the ladder whose range holds the extent. */
+/**
+ * Case (a)'s step and its first multiple, found by the test: the smallest step of the ladder whose range holds the
+ * extent. "Holds" is judged against the DATA: within a share 1e-9 of the extent's own span (rounding noise), never of
+ * the candidate range's span, which grows with the step and once let 0..1e9 "hold" [-1, 1] (round 3, R1).
+ */
 function ladderA(ext, f0, df) {
   let [e0, e1] = ext;
   if (!(e1 > e0)) [e0, e1] = e0 === 0 ? [0, 1] : e0 > 0 ? [0, e0] : [e0, 0];
-  const need = (e1 - e0) * df;
+  const need = (e1 - e0) * df, tol = 1e-9 * (e1 - e0);
   for (let p = Math.floor(Math.log10(need)) - 1; p < Math.floor(Math.log10(need)) + 14; p++) {
     for (const f of LADDER) {
       const s = f * 10 ** p;
       if (s < need * (1 - 1e-12)) continue;
-      const span = s / df, k = Math.floor((e0 + f0 * span) / s + 1e-9), lo = k * s - f0 * span;
-      if (lo <= e0 + 1e-9 * span && lo + span >= e1 - 1e-9 * span) return { s, k, lo, hi: lo + span, e0, e1 };
+      const span = s / df, k = Math.floor((e0 + tol + f0 * span) / s), lo = k * s - f0 * span;
+      if (lo <= e0 + tol && lo + span >= e1 - tol) return { s, k, lo, hi: lo + span, e0, e1 };
     }
   }
   return null;
+}
+
+/**
+ * Where the engine chose the right range (no domain), it holds the data: the line's smallest and largest number (a log
+ * axis: its positive ones) lie inside value2.lo..hi, within a share 1e-9 of the DATA's span on a linear axis (one value:
+ * exactly) and a relative 1e-12 on a log one. Independent of the case and of the ladder (round 3, R1).
+ */
+function holdsData(fx, v2, at) {
+  const e2 = fx.document.config.encoding.y2;
+  if (e2.domain) return [];
+  const Y2 = fx.columns[e2.field].filter((v) => typeof v === "number" && (!e2.log || v > 0));
+  if (Y2.length === 0) return [];
+  const min = Math.min(...Y2), max = Math.max(...Y2);
+  const ok = e2.log ? v2.lo <= min * (1 + 1e-12) && v2.hi >= max * (1 - 1e-12) : v2.lo <= min + 1e-9 * (max - min) && v2.hi >= max - 1e-9 * (max - min);
+  return ok ? [] : [`the right range ${v2.lo}..${v2.hi} leaves out data of ${min}..${max} ${at}`];
 }
 
 /** Three significant digits, one more for all while two neighbours share one (the test's own rounding, by toPrecision). */
@@ -99,6 +125,8 @@ function secondProblems(fx, w, h, E = R) {
     if (!same(underLabels(r, plot), underLabels(t.r, tp))) out.push(`twin x labels differ ${at}`);
   }
 
+  out.push(...holdsData(fx, v2, at));
+
   // The case the test expects, and its values.
   const e2 = fx.document.config.encoding.y2, sh = v.ticks.map((x) => share(v, x)), df = n >= 2 ? sh[1] - sh[0] : 0;
   const even = n >= 2 && df > 1e-9 && sh.every((s, j) => Math.abs(s - sh[0] - j * df) <= 1e-9), ext = extentOf(fx);
@@ -123,8 +151,8 @@ function secondProblems(fx, w, h, E = R) {
   if (rule === "c") {
     const S2 = e2.log ? R.axes.logAxis(r.level, ext === null ? [null, null] : ext, e2.domain || null, plot.h, e2.format || null) : R.axes.valueAxis(r.level, ext, e2.domain || null, plot.h, e2.format || null, 0);
     if (v2.lo !== S2.lo || v2.hi !== S2.hi) out.push(`(c) value2 ${v2.lo}..${v2.hi}, the right axis's own range ${S2.lo}..${S2.hi} ${at}`);
-    const want = sh.map((s) => (e2.log ? 10 ** (Math.log10(S2.lo) + s * (Math.log10(S2.hi) - Math.log10(S2.lo))) : S2.lo + s * (S2.hi - S2.lo)));
-    const tol = (x) => (e2.log ? 1e-9 * x : 1e-9 * (S2.hi - S2.lo));
+    const want = sh.map((s) => (e2.log ? 10 ** (Math.log10(S2.lo) + s * (Math.log10(S2.hi) - Math.log10(S2.lo))) : valueAt(S2.lo, S2.hi, s)));
+    const tol = (x) => (e2.log ? 1e-9 * x : 1e-9 * (Math.abs(S2.hi) + Math.abs(S2.lo)));
     if (!v2.ticks.every((x, j) => Math.abs(x - want[j]) <= tol(want[j]))) out.push(`(c) right values ${v2.ticks}, the scale at the left positions ${want} ${at}`);
     const texts = R.text.ticks(digits(want), e2.format || null), drawn = rightLabels(r, plot).map((l) => l.text);
     for (const d of drawn) if (!texts.includes(d)) out.push(`(c) right text ${d} is none of ${texts} ${at}`);
@@ -152,9 +180,13 @@ test("A.3: every fixture, every frame: one right tick per left tick at its posit
 });
 
 test("A.3: each fixture meets the case it was written for at 960 x 540", () => {
-  const want = { "case-a-linear": "a", "case-a-one-value": "a", "case-a-left-domain": "a", "case-b-linear-left": "b", "case-b-log-left": "b", "case-c-log-left-125": "c", "case-c-right-domain": "c", "case-c-log-domain": "c", column: "c", inset: "b" };
+  const want = { "case-a-linear": "a", "case-a-one-value": "a", "case-a-left-domain": "a", "case-b-linear-left": "b", "case-b-log-left": "b", "case-c-log-left-125": "c", "case-c-right-domain": "c", "case-c-log-domain": "c", column: "c", inset: "b", "signed-two-ticks": "a" };
   // inset at 960 x 540: its left ticks are 1 to 9, edge to edge, so (b); the inset case is its own test below.
   for (const [name, rule] of Object.entries(want)) assert.equal(secondProblems(fixture(TYPE, name), 960, 540).rule, rule, name);
+  // signed-two-ticks (round 3, R1) at the verdict's 240 x 140: two left ticks on the edges beside -1..1, no ladder
+  // step holds both signs, so (c), and the picture's checks above (the data held) find nothing.
+  const signed = secondProblems(fixture(TYPE, "signed-two-ticks"), 240, 140);
+  assert.deepEqual([signed.rule, signed.problems], ["c", []]);
   // left-one-tick: its one tick where the plot is short.
   const one = SWEEP.filter(([w, h]) => {
     const { hand, r } = draw(R, fixture(TYPE, "left-one-tick"), w, h);
@@ -255,7 +287,7 @@ test("G3: the right axis given its own nice ticks is red on a right tick that li
 });
 
 test("G3: the right range one step too small is red on the extent", () => {
-  const E = formsEngine((s) => plant(s, AXES, "      if (lo > e0 + SAME * span || hi < e1 - SAME * span) continue;\n", "      if (false) continue;\n"));
+  const E = formsEngine((s) => plant(s, AXES, "      if (lo > e0 + tol || hi < e1 - tol) continue;\n", "      if (false) continue;\n"));
   const bad = ["case-a-linear", "case-a-one-value", "case-a-left-domain", "far-extent", "long-right-ticks"].flatMap((n) => sweepProblems(E, n));
   assert.ok(bad.some((p) => /does not hold the extent/.test(p)), JSON.stringify(bad.slice(0, 3)));
 });
