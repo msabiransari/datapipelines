@@ -189,8 +189,10 @@ class JsRenderedTestTypesTest {
 
     private companion object {
         const val TYPES = "co/datapipelines/jsrendered/test/types"
+
         /** Brief 1049's three test types and brief 1055's test_web. */
         const val TYPE_FLOOR = 4
+
         const val FRAMES = 7
 
         /**
