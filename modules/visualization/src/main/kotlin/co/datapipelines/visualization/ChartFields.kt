@@ -6,12 +6,15 @@ import com.fasterxml.jackson.databind.JsonNode
 /**
  * One §4.4 shape object of a chart document (design record 2026-11-14-js-rendered-charts §4.2, O-12): the shape's
  * name, the object, and its JSON Pointer. Its field-bearing [positions] are `fields[i].field` when the object carries a
- * `fields` array (a `value`'s series from columns, G1), else its `field`; a field-less shape (`count`) has none.
+ * `fields` array (a `value`'s series from columns, G1), else its `field`; a field-less shape (`count`) has none. [mark]
+ * is the text of the layer's mark member for a shape found inside a layer object (record §9 G2, "The layer policy"),
+ * null elsewhere.
  */
 data class ChartShapeNode(
     val shape: String,
     val node: JsonNode,
     val pointer: String,
+    val mark: String? = null,
 ) {
     val positions: List<ChartPosition> =
         node.get("fields")?.takeIf { it.isArray }?.let { fields ->
@@ -41,12 +44,23 @@ data class ChartPosition(
 object ChartPositions {
     private const val ENCODING = "/config/encoding"
 
-    /** Every shape object of [config], in descriptor order. */
+    /** Every shape object of [config], in descriptor order, by the descriptor of the [ChartType] its `mark.type` names. */
     fun shapes(config: JsonNode): List<ChartShapeNode> {
         val type = ChartType.fromWire(config.path("mark").path("type").asText()) ?: return emptyList()
+        return shapes(config, type.channels)
+    }
+
+    /**
+     * Every shape object of [config] by the descriptor [channels] (record §9 G2: the walk takes a descriptor as its input,
+     * so a test hands it a layered descriptor of its own), in descriptor order.
+     */
+    fun shapes(
+        config: JsonNode,
+        channels: List<ChartChannel>,
+    ): List<ChartShapeNode> {
         val encoding = config.path("encoding")
-        return type.channels.flatMap { channel ->
-            encoding.get(channel.key)?.let { walk(channel.node, it, "$ENCODING/${channel.key}") }.orEmpty()
+        return channels.flatMap { channel ->
+            encoding.get(channel.key)?.let { walk(channel.node, it, "$ENCODING/${channel.key}", null) }.orEmpty()
         }
     }
 
@@ -57,26 +71,29 @@ object ChartPositions {
         node: ChannelNode,
         json: JsonNode,
         pointer: String,
+        mark: String?,
     ): List<ChartShapeNode> =
         when (node) {
             is ChannelNode.Shape -> {
-                shape(node.name, json, pointer)
+                shape(node.name, json, pointer, mark)
             }
 
             is ChannelNode.OneOf -> {
                 val type = json.path("type").asText()
                 node.alternatives
                     .firstOrNull { type in it.types }
-                    ?.let { shape(it.shape, json, pointer) }
+                    ?.let { shape(it.shape, json, pointer, mark) }
                     .orEmpty()
             }
 
             is ChannelNode.ListOf -> {
-                if (json.isArray) json.flatMapIndexed { i, element -> walk(node.of, element, "$pointer/$i") } else emptyList()
+                if (json.isArray) json.flatMapIndexed { i, element -> walk(node.of, element, "$pointer/$i", mark) } else emptyList()
             }
 
             is ChannelNode.ObjectOf -> {
-                node.members.flatMap { (key, member) -> json.get(key)?.let { walk(member, it, "$pointer/$key") }.orEmpty() }
+                // A layer object hands its own mark to every shape inside it; a plain object passes on the one it got.
+                val inner = node.layer?.let { json.get(it)?.takeIf { m -> m.isTextual }?.asText() } ?: mark
+                node.members.flatMap { (key, member) -> json.get(key)?.let { walk(member, it, "$pointer/$key", inner) }.orEmpty() }
             }
         }
 
@@ -84,7 +101,8 @@ object ChartPositions {
         name: String,
         json: JsonNode,
         pointer: String,
-    ): List<ChartShapeNode> = if (json.isObject) listOf(ChartShapeNode(name, json, pointer)) else emptyList()
+        mark: String?,
+    ): List<ChartShapeNode> = if (json.isObject) listOf(ChartShapeNode(name, json, pointer, mark)) else emptyList()
 }
 
 /** The column-type sets the bar rules read (record §4.1). */

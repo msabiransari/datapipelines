@@ -330,6 +330,48 @@
    "code": "chart.category.type_mismatch",
    "pointer": "/config/encoding/x/type",
    "note": "a temporal position on a STRING column"
+  },
+  "valid/bar-shade.json": {
+   "valid": true
+  },
+  "valid/bar-shade-horizontal-count.json": {
+   "valid": true
+  },
+  "invalid/bar-shade-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/bar-shade-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding"
+  },
+  "invalid/bar-shade-diverging.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/color/scale"
+  },
+  "invalid/bar-shade-no-field.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/color"
+  },
+  "invalid/bar-shade-text-sum.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/color/field"
+  },
+  "invalid/bar-shade-text-count.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/color/field"
   }
  }
 }
