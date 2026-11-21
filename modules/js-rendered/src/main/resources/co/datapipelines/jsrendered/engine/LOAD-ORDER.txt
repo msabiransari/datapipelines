@@ -18,6 +18,7 @@
 17-trig.js
 18-frames.js
 20-render.js
+21-lookup.js
 30-write-dom.js
 31-write-string.js
 types/bar.js

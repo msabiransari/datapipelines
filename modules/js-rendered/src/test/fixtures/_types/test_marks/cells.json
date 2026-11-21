@@ -1,0 +1,333 @@
+{
+ "note": "boxes without a series in three rows of four, one missing in the middle row; ring; a heading and one row with a colour",
+ "document": {
+  "display_name": "Test type test_marks",
+  "config": {
+   "mark": {
+    "type": "test_marks"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": null
+    },
+    "id": {
+     "field": "id"
+    }
+   },
+   "cards": {
+    "r0c0": {
+     "heading": "Row 1, column 1",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "0",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r0c1": {
+     "heading": "Row 1, column 2",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "1",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r0c2": {
+     "heading": "Row 1, column 3",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "2",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r0c3": {
+     "heading": "Row 1, column 4",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "3",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r1c0": {
+     "heading": "Row 2, column 1",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "10",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r1c1": {
+     "heading": "Row 2, column 2",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "11",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r1c3": {
+     "heading": "Row 2, column 4",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "13",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r2c0": {
+     "heading": "Row 3, column 1",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "20",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r2c1": {
+     "heading": "Row 3, column 2",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "21",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r2c2": {
+     "heading": "Row 3, column 3",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "22",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    },
+    "r2c3": {
+     "heading": "Row 3, column 4",
+     "rows": [
+      {
+       "name": "Value",
+       "value": "23",
+       "colour": "series"
+      }
+     ],
+     "keep": 0
+    }
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "id": [
+   "r0c0",
+   "r0c1",
+   "r0c2",
+   "r0c3",
+   "r1c0",
+   "r1c1",
+   "r1c3",
+   "r2c0",
+   "r2c1",
+   "r2c2",
+   "r2c3"
+  ],
+  "kind": [
+   "box",
+   "box",
+   "box",
+   "box",
+   "box",
+   "box",
+   "box",
+   "box",
+   "box",
+   "box",
+   "box"
+  ],
+  "a": [
+   0.05,
+   0.285,
+   0.52,
+   0.755,
+   0.05,
+   0.285,
+   0.755,
+   0.05,
+   0.285,
+   0.52,
+   0.755
+  ],
+  "b": [
+   0.05,
+   0.05,
+   0.05,
+   0.05,
+   0.37,
+   0.37,
+   0.37,
+   0.6900000000000001,
+   0.6900000000000001,
+   0.6900000000000001,
+   0.6900000000000001
+  ],
+  "c": [
+   0.2,
+   0.2,
+   0.2,
+   0.2,
+   0.2,
+   0.2,
+   0.2,
+   0.2,
+   0.2,
+   0.2,
+   0.2
+  ],
+  "d": [
+   0.26,
+   0.26,
+   0.26,
+   0.26,
+   0.26,
+   0.26,
+   0.26,
+   0.26,
+   0.26,
+   0.26,
+   0.26
+  ],
+  "e": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "f": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "row": [
+   0,
+   0,
+   0,
+   0,
+   1,
+   1,
+   1,
+   2,
+   2,
+   2,
+   2
+  ],
+  "key": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "near": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "emph": [
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring"
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "id": "STRING",
+  "kind": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE",
+  "d": "DOUBLE",
+  "e": "DOUBLE",
+  "f": "DOUBLE",
+  "row": "INTEGER",
+  "key": "BOOLEAN",
+  "near": "BOOLEAN",
+  "emph": "STRING"
+ },
+ "expect": {
+  "marks": 11
+ }
+}
