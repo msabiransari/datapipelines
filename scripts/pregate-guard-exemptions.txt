@@ -142,6 +142,7 @@ waived-for-cost co.datapipelines.executor.LocalWriteTransactionIntegrationTest  
 waived-for-cost co.datapipelines.executor.ParameterBindingIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.PostgresSourceIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ReadOnlyPostgresSourceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.integration.CommitInstanceLossIntegrationTest  starts a container or context: GenericContainer, PostgreSQLContainer
 waived-for-cost co.datapipelines.integration.DatasourceIncarnationE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
 waived-for-cost co.datapipelines.integration.DependenciesGoldenE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
 waived-for-cost co.datapipelines.integration.DependenciesUnmetParameterNamesE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
