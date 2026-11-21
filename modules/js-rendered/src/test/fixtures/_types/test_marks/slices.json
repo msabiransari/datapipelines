@@ -1,0 +1,108 @@
+{
+ "note": "sectors around the centre of 30, exactly 180 and 150 degrees, move, one series per slice, a legend",
+ "document": {
+  "display_name": "Test type test_marks",
+  "config": {
+   "mark": {
+    "type": "test_marks"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "id": {
+     "field": "id"
+    }
+   },
+   "title": {
+    "text": "Slices"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Small",
+   "Half",
+   "Rest"
+  ],
+  "id": [
+   "small",
+   "half",
+   "rest"
+  ],
+  "kind": [
+   "sector",
+   "sector",
+   "sector"
+  ],
+  "a": [
+   0,
+   30,
+   210
+  ],
+  "b": [
+   30,
+   210,
+   360
+  ],
+  "c": [
+   0,
+   0,
+   0
+  ],
+  "d": [
+   0.9,
+   0.9,
+   0.9
+  ],
+  "e": [
+   null,
+   null,
+   null
+  ],
+  "f": [
+   null,
+   null,
+   null
+  ],
+  "row": [
+   null,
+   null,
+   null
+  ],
+  "key": [
+   null,
+   null,
+   null
+  ],
+  "near": [
+   null,
+   null,
+   null
+  ],
+  "emph": [
+   "move",
+   "move",
+   "move"
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "id": "STRING",
+  "kind": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE",
+  "d": "DOUBLE",
+  "e": "DOUBLE",
+  "f": "DOUBLE",
+  "row": "INTEGER",
+  "key": "BOOLEAN",
+  "near": "BOOLEAN",
+  "emph": "STRING"
+ },
+ "expect": {
+  "marks": 3
+ }
+}
