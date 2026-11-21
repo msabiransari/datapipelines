@@ -129,11 +129,13 @@ class RedisResultStore(
         // The requested size is clamped the same way a cursor `limit` is — one bound for one
         // documented header, whichever surface asked (R-EP4).
         val inlineRows = firstPageRows?.let { config.effectiveLimit(it) } ?: config.pageSizeRows
+        val firstPage = readRows(key, 0, inlineRows.toLong())
+        if (rowsShort(meta, 0, inlineRows.toLong(), firstPage)) return null
         return StoredResultView(
             key = key,
             executionId = meta.executionId,
             schema = meta.schema,
-            firstPage = readRows(key, 0, inlineRows.toLong()),
+            firstPage = firstPage,
             totalRows = meta.totalRows,
             bytes = meta.bytes,
             expiresAt = meta.expiresAt,
@@ -153,10 +155,12 @@ class RedisResultStore(
         // A negative offset is TAIL-relative in `LRANGE`, so -1 silently serves the last row while
         // `hasMore` is computed from the negative offset and comes out wrong too. Clamp, don't trust.
         val effectiveOffset = offset.coerceAtLeast(0)
+        val rows = readRows(key, effectiveOffset, effectiveLimit.toLong())
+        if (rowsShort(meta, effectiveOffset, effectiveLimit.toLong(), rows)) return null
         return ResultPage(
             executionId = meta.executionId,
             schema = meta.schema,
-            rows = readRows(key, effectiveOffset, effectiveLimit.toLong()),
+            rows = rows,
             offset = effectiveOffset,
             limit = effectiveLimit,
             totalRows = meta.totalRows,
@@ -301,6 +305,21 @@ class RedisResultStore(
         key: String,
         meta: ResultMeta,
     ): Boolean = meta.totalRows > 0 && redis.hasKey(rowsKey(key)) != true
+
+    /**
+     * (#1035 R5) True when the rows actually read are fewer than the header counts in the requested
+     * range. [rowsLost] only proves the list existed when it was probed; the list can expire or be
+     * removed between that probe and the `LRANGE`, which [readRows] then reads as an empty list. The
+     * answer is therefore decided by what the read returned, not by the earlier probe: a range the
+     * header says holds rows must come back with exactly those rows. A range at or beyond the end
+     * legitimately holds none (a valid empty page), and so does any range of a zero-row result.
+     */
+    private fun rowsShort(
+        meta: ResultMeta,
+        offset: Long,
+        limit: Long,
+        read: List<List<Any?>>,
+    ): Boolean = read.size.toLong() < (meta.totalRows - offset).coerceIn(0, limit)
 
     private fun corruptMeta(
         key: String,

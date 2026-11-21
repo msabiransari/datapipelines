@@ -82,7 +82,9 @@ interface ResultStore {
      * the surface before it gets here.
      *
      * @return null when the key is unknown or its TTL has elapsed, or when the header survives but
-     *   the rows it counts are gone (a result with lost rows is not a readable result).
+     *   the rows it counts are gone — including rows that disappear during this read, so the first
+     *   page actually read must hold every row the header counts for it (a result with lost rows is
+     *   not a readable result).
      */
     fun describe(
         key: String,
@@ -107,7 +109,9 @@ interface ResultStore {
 
     /**
      * One page of the stored result, or null when the key is unknown or expired, or when its rows are
-     * gone while the header survives (REST §7.2).
+     * gone while the header survives — judged by the rows this read returned, so a range the header
+     * counts rows in never comes back empty or short (REST §7.2). A page at or beyond the end is a
+     * valid empty page.
      */
     fun page(
         key: String,
