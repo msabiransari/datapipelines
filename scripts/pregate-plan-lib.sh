@@ -161,6 +161,7 @@ GUARDS[":modules:application"]+=" co.datapipelines.application.charts.ChartTypeR
 GUARDS[":modules:application"]+=" co.datapipelines.application.charts.JsRenderedIdentityTest"  # reads modules/js-rendered
 GUARDS[":modules:application"]+=" co.datapipelines.application.charts.JsRenderedPictureTest"  # reads modules/js-rendered
 GUARDS[":modules:application"]+=" co.datapipelines.application.charts.JsRenderedSourceGuardTest"  # scans modules/js-rendered source
+GUARDS[":modules:application"]+=" co.datapipelines.application.charts.JsRenderedTestTypesTest"  # reads modules/js-rendered (test types and their fixtures)
 GUARDS[":modules:app"]+=" co.datapipelines.config.ChartLibraryRemnantGuardTest"  # walks the tree (git ls-files)
 GUARDS[":modules:app"]+=" co.datapipelines.config.ChildJvmTempDirectoryGuardTest"  # walks the tree (git ls-files)
 GUARDS[":modules:auth"]+=" co.datapipelines.auth.AuthErrorSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
