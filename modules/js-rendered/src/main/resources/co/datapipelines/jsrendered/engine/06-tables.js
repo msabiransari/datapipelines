@@ -57,6 +57,11 @@
     legendGap: f(0.67, "render", "em: between the legend and the plot"),
     legendStepRatio: f(1.6, "render", "§3.3 and the first look study (16 × 10 px): a step of a colour scale's legend is legendKey high and this many times as wide in a row, the other way round in a column"),
     valueLabelGap: f(0.25, "render", "em of --chart-text-small: between a bar's end and its value label"),
+    // the radial axis (brief 1055 D8; record §9 G3, look contract §2.1 radar "grid: straight", §4.7 radar)
+    radialRings: f("polygon", "render", "look contract §2.1 radar (L9, grid: straight): a radial axis's rings are polygons through the spokes (\"circle\": one circle per ring, reached by the table's test only)"),
+    radialTickSpan: f(2, "render", "× the radius: the axis length the radial axis's tick rule is given (its scale is read across the whole circle)"),
+    radialNameShare: f(0.25, "render", "the widest a radial axis's name may be, as a share of the plot's width"),
+    radialRadiusFloor: f(0.5, "render", "a radial axis writes its names only while the radius left after their room is at least this share of the polar frame's"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
     curveDefault: f("smooth", "render", "§2 line and the record's §4.5: a line's curve is a monotone cubic unless the author wrote another"),

@@ -3,7 +3,7 @@
 // may call it; the engine may not), so the engine's sRGB table is checked against an independent oracle.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { engine, chartFixtures, inputOf, canonical } from "./engine.mjs";
+import { engine, engineWith, chartFixtures, inputOf, canonical, typeFixtures, typeInputOf } from "./engine.mjs";
 import { violations, WIDTHS, HEIGHTS } from "./geometry.mjs";
 
 const R = engine();
@@ -21,6 +21,8 @@ const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stac
   "emptyText", "morePrefix",
   // The line family's (brief 989 D6, D7, D10a): its defaults, its legend keys, the direct legend's bounds and gap.
   "curveDefault", "pointsDefault", "lineLabelsDefault", "lastLabelFormat", "lineRound", "areaFade", "legendKeyLine", "legendKeyArea", "directMin", "directMax", "directGap",
+  // The radial axis's (brief 1055 D8): its rings' form, its tick rule's span, its names' column and the rule of no room.
+  "radialRings", "radialTickSpan", "radialNameShare", "radialRadiusFloor",
   // Colour by value's (brief 1050 D5): the width of a step of a colour scale's legend, in keys.
   "legendStepRatio"];
 
@@ -45,7 +47,9 @@ test("LA5: the look table is closed and holds exactly the fixed values bar, the 
 const OTHER = { legendSideMaxEm: 2, legendKeyBar: "line", labelsDefault: "none", stackTotalFormat: "integer", emptyText: "Nothing to show", morePrefix: "and ", rotateAngle: 60,
   curveDefault: "step", pointsDefault: "markers", lineLabelsDefault: "last", lastLabelFormat: "integer", legendKeyLine: "square", legendKeyArea: "line",
   // A quarter down, not up: no fixture has five series, so 5 shows nothing; at 3 the four-line fixture loses its names on the lines.
-  directMax: 3 };
+  directMax: 3,
+  // The ring's other form (brief 1055 D8; the contract's LA15 plant for the radar's rings).
+  radialRings: "circle" };
 function other(name, v) {
   if (Object.prototype.hasOwnProperty.call(OTHER, name)) return OTHER[name];
   if (typeof v === "boolean") return !v;
@@ -54,6 +58,13 @@ function other(name, v) {
   throw new Error("A14 has no other value for " + name);
 }
 const A14_FRAMES = [[960, 540], [480, 360], [372, 250], [300, 180], [240, 160], [200, 140], [150, 60], [90, 26], [80, 24], [1600, 480]];
+/**
+ * The fields only a frame no product type uses reads (brief 1055 D8): each is proven on the fixtures of the test type
+ * named here (the engine loaded with it by engineWith, the field changed in that copy's table, the same frames) and is
+ * dead when none of those pictures changes. The test type's fixtures never join chartFixtures(); and with each of these
+ * fields changed, every chart fixture's picture equals its base (no product picture reads it).
+ */
+const A14_ON_TYPE = { radialRings: "test_web", radialTickSpan: "test_web", radialNameShare: "test_web", radialRadiusFloor: "test_web" };
 
 test("A14 (render half): changing any one look field changes the primitives of at least one chart fixture", () => {
   const base = new Map();
@@ -62,7 +73,27 @@ test("A14 (render half): changing any one look field changes the primitives of a
   const key = (f, w, h) => f.wire + "/" + f.name + "@" + w + "x" + h;
   for (const f of FIXTURES) for (const [w, h] of A14_FRAMES) base.set(key(f, w, h), canonical(R.render(inputOf(f.fixture, w, h))));
   const dead = [];
+  const typeBase = new Map();
+  let onType = 0, productKept = 0;
   for (const name of Object.keys(R.tables.LOOK).filter((n) => R.tables.LOOK[n].consumer === "render")) {
+    if (Object.prototype.hasOwnProperty.call(A14_ON_TYPE, name)) {
+      const type = A14_ON_TYPE[name], fxs = typeFixtures(type), T0 = engineWith([type]), T = engineWith([type]);
+      for (const f of fxs) for (const [w, h] of A14_FRAMES) if (!typeBase.has(key(f, w, h))) typeBase.set(key(f, w, h), canonical(T0.render(typeInputOf(f.fixture, w, h))));
+      T.tables.LOOK[name].value = other(name, T.tables.LOOK[name].value);
+      const first = fxs.flatMap((f) => A14_FRAMES.map(([w, h]) => [f, w, h])).find(([f, w, h]) => canonical(T.render(typeInputOf(f.fixture, w, h))) !== typeBase.get(key(f, w, h)));
+      if (first === undefined) dead.push(name);
+      else console.log(`A14 ${name}: first changed on ${type}/${first[0].name} at ${first[1]} x ${first[2]}`);
+      const E = engine();
+      E.tables.LOOK[name].value = other(name, E.tables.LOOK[name].value);
+      for (const f of FIXTURES) {
+        for (const [w, h] of A14_FRAMES) {
+          assert.equal(canonical(E.render(inputOf(f.fixture, w, h))), base.get(key(f, w, h)), name + " reached a product picture: " + key(f, w, h));
+          productKept++;
+        }
+      }
+      onType++;
+      continue;
+    }
     const E = engine();
     E.tables.LOOK[name].value = other(name, E.tables.LOOK[name].value);
     let changed = false;
@@ -77,8 +108,11 @@ test("A14 (render half): changing any one look field changes the primitives of a
     }
     if (!changed) dead.push(name);
   }
-  assert.deepEqual(dead, [], "look fields whose change no chart fixture shows");
+  assert.deepEqual(dead, [], "look fields whose change no chart fixture (or, for A14_ON_TYPE, no fixture of its test type) shows");
   assert.ok(Object.keys(R.tables.LOOK).length >= 37, "fields checked");
+  assert.equal(onType, Object.keys(A14_ON_TYPE).length, "every field of A14_ON_TYPE is in the table and proven on its type");
+  assert.equal(productKept, onType * FIXTURES.length * A14_FRAMES.length);
+  console.log(`A14 on a test type: ${onType} fields; ${productKept} chart pictures compared with each changed, 0 differ`);
 });
 
 test("A14 (the interaction fields): render never reads one; a change of each leaves every picture as it was (their check is the browser's)", () => {

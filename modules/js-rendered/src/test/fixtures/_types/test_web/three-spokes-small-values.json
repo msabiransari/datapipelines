@@ -1,0 +1,52 @@
+{
+ "note": "3 spokes, values 0.001 to 0.003: at a small radius the one numbered ring's plate is wide enough to cover the centre (D5's condition d)",
+ "document": {
+  "display_name": "Test type test_web",
+  "config": {
+   "mark": {
+    "type": "test_web"
+   },
+   "encoding": {
+    "category": {
+     "field": "k"
+    },
+    "value": {
+     "field": "v"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Small values",
+    "subtitle": "A subtitle that takes a line of the height"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "North",
+   "East",
+   "South"
+  ],
+  "v": [
+   0.001,
+   0.002,
+   0.003
+  ],
+  "s": [
+   "Only",
+   "Only",
+   "Only"
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 4
+ }
+}
