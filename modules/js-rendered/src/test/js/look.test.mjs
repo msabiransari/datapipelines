@@ -20,14 +20,16 @@ const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stac
   "textAscent", "textDescent", "edge", "lineHeight", "titleGap", "tickGap", "labelGap", "cornerClear", "axisTitleGap", "legendKey", "legendKeyGap", "legendEntryGap", "legendGap", "valueLabelGap",
   "emptyText", "morePrefix",
   // The line family's (brief 989 D6, D7, D10a): its defaults, its legend keys, the direct legend's bounds and gap.
-  "curveDefault", "pointsDefault", "lineLabelsDefault", "lastLabelFormat", "lineRound", "areaFade", "legendKeyLine", "legendKeyArea", "directMin", "directMax", "directGap"];
+  "curveDefault", "pointsDefault", "lineLabelsDefault", "lastLabelFormat", "lineRound", "areaFade", "legendKeyLine", "legendKeyArea", "directMin", "directMax", "directGap",
+  // Colour by value's (brief 1050 D5): the width of a step of a colour scale's legend, in keys.
+  "legendStepRatio"];
 
 /**
  * The interaction layer's fields (brief 990 D4a): consumer `interaction`, read on the page by the layer and never by
  * render. Their A14 half is the browser's (a placed pointer sees each field's own result change); here they are only
  * required to exist, to name their consumer, and to leave every picture render draws unchanged.
  */
-const INTERACTION = ["tipDistance", "tipLine", "tipPad", "tipKey", "tipGap", "tipMax", "tipTotalJoin", "tipValueWeight", "crosshairDot", "focusGap"];
+const INTERACTION = ["tipDistance", "tipLine", "tipPad", "tipKey", "tipGap", "tipMax", "tipTotalJoin", "tipValueWeight", "crosshairDot", "focusGap", "markReach", "markMove", "markRing"];
 
 test("LA5: the look table is closed and holds exactly the fixed values bar, the line family, the shared layout and the interaction layer use", () => {
   assert.deepEqual(Object.keys(R.tables.LOOK).sort(), [...LA5, ...INTERACTION].sort());

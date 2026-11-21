@@ -1,0 +1,198 @@
+{
+ "note": "one mark with a heading, eight rows (four with a colour), two extra lines, a very long name, < and & in a name and the heading; and its twin without them",
+ "document": {
+  "display_name": "Test type test_marks",
+  "config": {
+   "mark": {
+    "type": "test_marks"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": null
+    },
+    "id": {
+     "field": "id"
+    }
+   },
+   "title": {
+    "text": "Long card"
+   },
+   "cards": {
+    "special": {
+     "heading": "Heading < and &",
+     "rows": [
+      {
+       "name": "Row 1",
+       "value": "3.0",
+       "colour": "--chart-series-1"
+      },
+      {
+       "name": "Row 2",
+       "value": "10.1",
+       "colour": null
+      },
+      {
+       "name": "A name far wider than any card can hold, written out at length so that no frame of the sweep shows it whole, A name far wider than any card can hold, written out at length so that no frame of the sweep shows it whole,",
+       "value": "17.2",
+       "colour": "--chart-series-2"
+      },
+      {
+       "name": "Row 4",
+       "value": "24.3",
+       "colour": null
+      },
+      {
+       "name": "Row 5",
+       "value": "31.4",
+       "colour": "--chart-series-3"
+      },
+      {
+       "name": "Less < more &",
+       "value": "38.5",
+       "colour": null
+      },
+      {
+       "name": "Row 7",
+       "value": "45.6",
+       "colour": "--chart-series-4"
+      },
+      {
+       "name": "Row 8",
+       "value": "52.7",
+       "colour": null
+      }
+     ],
+     "keep": 1,
+     "extra": [
+      "Source: survey & panel",
+      "Note: values < 100"
+     ]
+    },
+    "twin": {
+     "heading": "Heading l and a",
+     "rows": [
+      {
+       "name": "Row 1",
+       "value": "3.0",
+       "colour": "--chart-series-1"
+      },
+      {
+       "name": "Row 2",
+       "value": "10.1",
+       "colour": null
+      },
+      {
+       "name": "A name far wider than any card can hold, written out at length so that no frame of the sweep shows it whole, A name far wider than any card can hold, written out at length so that no frame of the sweep shows it whole,",
+       "value": "17.2",
+       "colour": "--chart-series-2"
+      },
+      {
+       "name": "Row 4",
+       "value": "24.3",
+       "colour": null
+      },
+      {
+       "name": "Row 5",
+       "value": "31.4",
+       "colour": "--chart-series-3"
+      },
+      {
+       "name": "Less l more a",
+       "value": "38.5",
+       "colour": null
+      },
+      {
+       "name": "Row 7",
+       "value": "45.6",
+       "colour": "--chart-series-4"
+      },
+      {
+       "name": "Row 8",
+       "value": "52.7",
+       "colour": null
+      }
+     ],
+     "keep": 1,
+     "extra": [
+      "Source: survey a panel",
+      "Note: values l 100"
+     ]
+    }
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Card",
+   "Card"
+  ],
+  "id": [
+   "special",
+   "twin"
+  ],
+  "kind": [
+   "box",
+   "box"
+  ],
+  "a": [
+   0.1,
+   0.55
+  ],
+  "b": [
+   0.2,
+   0.2
+  ],
+  "c": [
+   0.35,
+   0.35
+  ],
+  "d": [
+   0.6,
+   0.6
+  ],
+  "e": [
+   null,
+   null
+  ],
+  "f": [
+   null,
+   null
+  ],
+  "row": [
+   null,
+   null
+  ],
+  "key": [
+   null,
+   null
+  ],
+  "near": [
+   null,
+   null
+  ],
+  "emph": [
+   null,
+   null
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "id": "STRING",
+  "kind": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE",
+  "d": "DOUBLE",
+  "e": "DOUBLE",
+  "f": "DOUBLE",
+  "row": "INTEGER",
+  "key": "BOOLEAN",
+  "near": "BOOLEAN",
+  "emph": "STRING"
+ },
+ "expect": {
+  "marks": 2
+ }
+}

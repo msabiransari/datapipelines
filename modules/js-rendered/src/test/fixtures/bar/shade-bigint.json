@@ -1,0 +1,94 @@
+{
+ "source": [
+  "lane 1050 make_shade_fixtures.py (brief 1050 D7)"
+ ],
+ "note": "a BIGINTEGER shade beyond 2^53: A's sum is exactly 9007199254740993 (its float ...992 ties C's); the legend's hi text and A's tooltip write 9,007,199,254,740,993",
+ "document": {
+  "display_name": "Big shade values",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "units",
+      "type": "BIGINTEGER"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "units",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "Big shade values"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A",
+   "A",
+   "B",
+   "C"
+  ],
+  "amount": [
+   10,
+   5,
+   20,
+   30
+  ],
+  "units": [
+   "9007199254740992",
+   "1",
+   "5",
+   "9007199254740992"
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "units": "BIGINTEGER"
+ },
+ "expect": {
+  "loText": "5",
+  "hiText": "9,007,199,254,740,993",
+  "tips": {
+   "A": [
+    "A",
+    "15",
+    "units: 9,007,199,254,740,993"
+   ]
+  }
+ }
+}

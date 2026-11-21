@@ -1,0 +1,87 @@
+{
+ "source": [
+  "lane 1050 make_shade_fixtures.py (brief 1050 D7)"
+ ],
+ "note": "colour by value with every shade value equal: no spread, every bar takes the middle step (4)",
+ "document": {
+  "display_name": "Same margin everywhere",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "margin",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "margin",
+     "aggregate": "max",
+     "type": "quantitative",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "Same margin everywhere"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "North",
+   "South",
+   "East",
+   "West",
+   "Central"
+  ],
+  "amount": [
+   120.5,
+   80,
+   45.25,
+   200,
+   60
+  ],
+  "margin": [
+   0.2,
+   0.2,
+   0.2,
+   0.2,
+   0.2
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "margin": "DOUBLE"
+ }
+}

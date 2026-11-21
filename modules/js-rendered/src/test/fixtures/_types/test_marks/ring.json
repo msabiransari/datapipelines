@@ -1,0 +1,95 @@
+{
+ "note": "two ring sectors of 240 and 120 degrees with r0 above 0",
+ "document": {
+  "display_name": "Test type test_marks",
+  "config": {
+   "mark": {
+    "type": "test_marks"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "id": {
+     "field": "id"
+    }
+   },
+   "title": {
+    "text": "Ring"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Most",
+   "Some"
+  ],
+  "id": [
+   "most",
+   "some"
+  ],
+  "kind": [
+   "sector",
+   "sector"
+  ],
+  "a": [
+   0,
+   240
+  ],
+  "b": [
+   240,
+   360
+  ],
+  "c": [
+   0.5,
+   0.5
+  ],
+  "d": [
+   0.9,
+   0.9
+  ],
+  "e": [
+   null,
+   null
+  ],
+  "f": [
+   null,
+   null
+  ],
+  "row": [
+   null,
+   null
+  ],
+  "key": [
+   null,
+   null
+  ],
+  "near": [
+   null,
+   null
+  ],
+  "emph": [
+   "move",
+   "move"
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "id": "STRING",
+  "kind": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE",
+  "d": "DOUBLE",
+  "e": "DOUBLE",
+  "f": "DOUBLE",
+  "row": "INTEGER",
+  "key": "BOOLEAN",
+  "near": "BOOLEAN",
+  "emph": "STRING"
+ },
+ "expect": {
+  "marks": 2
+ }
+}

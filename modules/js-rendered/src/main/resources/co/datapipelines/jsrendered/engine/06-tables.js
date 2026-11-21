@@ -55,6 +55,7 @@
     legendKeyGap: f(0.42, "render", "em: between a legend key and its name"),
     legendEntryGap: f(1, "render", "em: between two legend entries"),
     legendGap: f(0.67, "render", "em: between the legend and the plot"),
+    legendStepRatio: f(1.6, "render", "§3.3 and the first look study (16 × 10 px): a step of a colour scale's legend is legendKey high and this many times as wide in a row, the other way round in a column"),
     valueLabelGap: f(0.25, "render", "em of --chart-text-small: between a bar's end and its value label"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
@@ -85,6 +86,9 @@
     tipValueWeight: f(600, "interaction", "contract §4.4: a card row's value is bold, and the hovered series' name in a bar's group"),
     crosshairDot: f(0.5, "interaction", "contract §3.4: a crosshair dot's radius is --chart-point plus this many px"),
     focusGap: f(0.25, "interaction", "em: the keyboard's focus ring stands this far outside its target's box"),
+    markReach: f(24, "interaction", "contract §3.8 (C5), §4.4: a point that asks for it is found within this many px of the pointer"),
+    markMove: f(5, "interaction", "contract §3.8 (C5), §4.4: a hovered slice moves this many px outward"),
+    markRing: f(0.25, "interaction", "em: the hover ring stands this far outside its mark"),
   };
 
   var CAPS = {
