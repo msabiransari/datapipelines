@@ -86,7 +86,7 @@ class LocalTransactionDialectQualificationTest {
         val counter = LeaseCounter(engine.registration(TARGET))
 
         runBlocking {
-            harness(engine, counter, meters, onCommitAttempt = {
+            harness(counter, meters, onCommitAttempt = {
                 midRun += engine.midRunView("log_t")
                 midRun += engine.midRunView("acct")
             }).use { h ->
@@ -119,7 +119,7 @@ class LocalTransactionDialectQualificationTest {
         val meters = SimpleMeterRegistry()
 
         runBlocking {
-            harness(engine, LeaseCounter(engine.registration(TARGET)), meters).use { h ->
+            harness(LeaseCounter(engine.registration(TARGET)), meters).use { h ->
                 shouldThrow<PipelineExecutionFailed> { h.executor.execute(Fixtures.request(Fixtures.pipeline(familyNodes(boom = true)))) }
             }
         }
@@ -150,7 +150,7 @@ class LocalTransactionDialectQualificationTest {
             holder.createStatement().use { it.executeUpdate("UPDATE acct SET bal = 50 WHERE id = 1") }
             val startedAt = System.nanoTime()
             runBlocking {
-                harness(engine, LeaseCounter(engine.registration(TARGET)), meters).use { h ->
+                harness(LeaseCounter(engine.registration(TARGET)), meters).use { h ->
                     shouldThrow<PipelineExecutionFailed> { h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))) }
                     val failed = h.emitter.allOf<NodeFailed>().single { it.nodeId == "upd_locked" }
                     report(engine, "statement_timeout", "code=${failed.error.code} after_ms=${elapsedMs(startedAt)}")
@@ -178,7 +178,7 @@ class LocalTransactionDialectQualificationTest {
             val meters = SimpleMeterRegistry()
             val registration = engine.registration(TARGET, proxy.route(engine.database.jdbcUrl))
             runBlocking {
-                harness(engine, LeaseCounter(registration), meters, onCommitAttempt = proxy::cutAll).use { h ->
+                harness(LeaseCounter(registration), meters, onCommitAttempt = proxy::cutAll).use { h ->
                     val thrown =
                         shouldThrow<DatapipelinesException> { h.executor.execute(Fixtures.request(Fixtures.pipeline(lostAckNodes()))) }
                     thrown.code shouldBe PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED
@@ -215,7 +215,7 @@ class LocalTransactionDialectQualificationTest {
             val registration = engine.registration(TARGET, proxy.route(engine.database.jdbcUrl))
             val config = ExecutorConfig(maxParallelNodes = 4, executionTimeoutSeconds = LOST_ACK_BUDGET_S)
             runBlocking {
-                harness(engine, LeaseCounter(registration), meters, config, onCommitAttempt = proxy::dropReplies).use { h ->
+                harness(LeaseCounter(registration), meters, config, onCommitAttempt = proxy::dropReplies).use { h ->
                     val thrown =
                         shouldThrow<DatapipelinesException> { h.executor.execute(Fixtures.request(Fixtures.pipeline(lostAckNodes()))) }
                     thrown.code shouldBe PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED
@@ -281,7 +281,7 @@ class LocalTransactionDialectQualificationTest {
         val qualified = LocalWriteQualification.status(engine.dialect, LocalWriteOperation.INSERT) == QualificationStatus.QUALIFIED
 
         runBlocking {
-            harness(engine, counter, SimpleMeterRegistry()).use { h ->
+            harness(counter, SimpleMeterRegistry()).use { h ->
                 if (qualified) {
                     h.executor.execute(request).status shouldBe ExecutionStatus.SUCCESS
                 } else {
@@ -319,7 +319,7 @@ class LocalTransactionDialectQualificationTest {
             )
 
         runBlocking {
-            harness(engine, LeaseCounter(engine.registration(TARGET)), SimpleMeterRegistry()).use { h ->
+            harness(LeaseCounter(engine.registration(TARGET)), SimpleMeterRegistry()).use { h ->
                 shouldThrow<PipelineExecutionFailed> { h.executor.execute(Fixtures.request(Fixtures.pipeline(nodes))) }
             }
         }
@@ -390,7 +390,6 @@ class LocalTransactionDialectQualificationTest {
         )
 
     private fun harness(
-        engine: QualificationEngine,
         registry: DatasourceRegistry,
         meters: SimpleMeterRegistry,
         config: ExecutorConfig = ExecutorConfig(maxParallelNodes = 4, executionTimeoutSeconds = BUDGET_S),
@@ -405,7 +404,6 @@ class LocalTransactionDialectQualificationTest {
 
                 override fun recordResultUnavailable(executionId: UUID) = true
             }
-        check(engine.dialect in LocalWritePlanner.ELIGIBLE_DIALECTS) { "not a transactional engine" }
         return ExecutorHarness(
             templateEngine = Fixtures.templateEngine(sql),
             registry = registry,
