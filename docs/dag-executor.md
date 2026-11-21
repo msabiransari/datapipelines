@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.48 (revised — see Change Log)
+**Status:** v1.49 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-11-20
@@ -1771,7 +1771,7 @@ and rolls back — an unrecorded commit attempt is the one thing the sweeper cou
 |---|---|---|
 | Never attempted (a failing node, the deadline, an explicit or structural abort, a setup failure, a cancellation) | `FAILED` / `ABORTED` as before — the lease is rolled back | nothing; every provisional child inherits the root's status |
 | Attempted, confirmation lost or the commit refused | **`OUTCOME_UNKNOWN`** (`pipeline_failed` event, payload `status: "OUTCOME_UNKNOWN"`, code `pipeline.execution.local_write_commit_failed`) | nothing: no `data_ready`, no success payload; every provisional child inherits `OUTCOME_UNKNOWN` |
-| Confirmed | `SUCCESS` | the held result (`data_ready`) and terminal success; a delivery failure here sets `result_unavailable` and changes nothing else — the status stays `SUCCESS`, and the business SQL is never re-run. Before the terminal event the executor builds the announcement and reads the stored result back: a result lost since it was prepared (or a store or URL failure) is recorded on the terminal row itself (`result_unavailable`, with the prepared result's counts) and never announced (#1035 r3) |
+| Confirmed | `SUCCESS` | the held result (`data_ready`) and terminal success; a delivery failure here sets `result_unavailable` and changes nothing else — the status stays `SUCCESS`, and the business SQL is never re-run. Before the terminal event the executor builds the announcement and reads the stored result back: a result lost since it was prepared (or a store or URL failure) is recorded on the terminal row itself (`result_unavailable`, with the prepared result's counts) and never announced (#1035 r3). A surviving header does not make a result readable: the store's `describe` and `page` answer absent when the header counts rows but the rows list is gone, so a rows-only loss is reported unavailable exactly like a loss of both keys (#1035 r4); a result that counts no rows has no list and stays a readable empty result |
 | Attempted, then the instance died | settled by the stale sweep ([metadata-db §8.3](metadata-db.md#83-stale-execution-sweep)): confirmed → `SUCCESS` + `result_unavailable`; attempted → `OUTCOME_UNKNOWN`; neither → `ABORTED` `instance_lost` — one decision per execution made at write time by a single statement, so evidence that arrives while the sweep runs is never overtaken; each `OUTCOME_UNKNOWN` the sweep finds is alerted individually (ERROR `execution.outcome_unknown`, meter `datapipelines.executions.outcome_unknown_swept`) | nothing from the dead instance |
 
 A commit that was attempted is never rolled back by the funnel: a cancellation or deadline arriving
@@ -1809,6 +1809,7 @@ preserve unknown outcomes and their readability, then revert the executor.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.49 | 1035 r4 (#1035) | **§16.5** the confirmed row: a stored result whose header survives but whose rows list is gone is lost, not an empty result — the Redis store's `describe` and `page` answer absent for it, so the read-back reports `result_unavailable` and withholds `data_ready`; a genuine zero-row result is unchanged. |
 | 2026-11-21 | v1.48 | 1035 r3 (#1035) | **§16.5** the confirmed row: the held result is read back from the store after the confirmation, before the terminal event; a lost result is `SUCCESS` with `result_unavailable` on the terminal row (with the prepared counts) and no `data_ready`. Every caller run's terminal row now carries its result counts. |
 | 2026-11-21 | v1.47 | 1035 r2 (#1035) | **§16.5** corrected after the review: a held child's completion reaches no history surface until the root settles, and the settlement publishes its terminal event with the root's outcome (R2); the hung commit is bounded by the execution budget and ends `OUTCOME_UNKNOWN` instead of "Not bounded" (R3); the stale sweep decides in one statement and alerts per unknown (R1/R4). |
 | 2026-11-20 | v1.46 | 1035 (#1035) | **§16.5 The commit boundary and `OUTCOME_UNKNOWN`:** nothing is exposed before the root's commit (held result, provisional children, no child `data_ready`); the durable `commit_attempted_at`/`commit_confirmed_at` boundary stamped around the customer commit; the terminal funnel (never attempted → rollback statuses, attempted → `OUTCOME_UNKNOWN`, confirmed → `SUCCESS` with `result_unavailable` kept separate from the status); the stale sweep's three-way label; the surfaces that show it; the unbounded hung commit stated. §16.4's "FAILED, outcome unknown" and "#1035 owns" prose corrected. |
