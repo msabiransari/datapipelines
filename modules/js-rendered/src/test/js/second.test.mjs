@@ -299,3 +299,34 @@ test("G3: a right domain widened to hold the extent is red on value2.hi in both 
     assert.ok(bad.some((p) => /\(c\) value2 /.test(p)), name);
   }
 });
+
+// Case (c)'s texts where three significant digits are not enough. No fixture of the sweep needs a fourth digit (the
+// sweep's case (c) texts all hold at three), so the rule "one more digit for all while two neighbours share a text" is
+// asked here of R.axes.secondAxis directly: a log left axis with the ticks 1, 2, 5, 10 (not equally spaced: case (c))
+// beside a linear right axis with the domain 1000 to 1001. Its values 1000, 1000.30103, 1000.69897, 1001 share texts at
+// three digits and at four; at five they do not. The expected texts are the test's own rounding (digits, toPrecision).
+const NARROW = { left: { lo: 1, hi: 10, ticks: [1, 2, 5, 10], log: true }, S2: { domain: [1000, 1001], format: null, log: false } };
+const narrowAxis = (E) => E.axes.secondAxis("full", NARROW.S2, [1000, 1001], NARROW.left, 200);
+
+test("A.3 (c): neighbours that share a text at three significant digits get more digits, all of them, until none share one", () => {
+  const ax = narrowAxis(R);
+  assert.equal(ax.rule, "c");
+  const want = NARROW.left.ticks.map((t) => 1000 + Math.log10(t));
+  assert.equal(ax.ticks.length, want.length);
+  ax.ticks.forEach((v, i) => assert.ok(Math.abs(v - want[i]) <= 1e-9, `tick ${i}: ${v} vs ${want[i]}`));
+  // The case is real: at three and at four digits two neighbours share a value.
+  for (const d of [3, 4]) {
+    const r = want.map((v) => Number(v.toPrecision(d)));
+    assert.ok(r.some((v, i) => i > 0 && v === r[i - 1]), `at ${d} digits two neighbours share a value`);
+  }
+  assert.deepEqual([...ax.texts], [...R.text.ticks(digits(want), null)]);
+  assert.equal(new Set(ax.texts).size, ax.texts.length, "no two right texts are equal: " + ax.texts.join(" | "));
+});
+
+test("G3 (c): the digits stopped at one more than three leave two right texts equal (red); the clean rule does not", () => {
+  const E = formsEngine((s) => plant(s, "11-axes.js", "    for (var d = 3; d <= 17; d++) {", "    for (var d = 3; d <= 4; d++) {"));
+  const planted = narrowAxis(E).texts;
+  assert.ok(new Set(planted).size < planted.length, "the planted copy writes two equal texts: " + planted.join(" | "));
+  const clean = narrowAxis(R).texts;
+  assert.equal(new Set(clean).size, clean.length);
+});
