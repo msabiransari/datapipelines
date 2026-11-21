@@ -136,7 +136,7 @@ class LocalWriteCompatibilityCliIntegrationTest {
             dataSource.connection.use { connection ->
                 val refused =
                     shouldThrow<SQLException> {
-                        connection.createStatement().use { it.executeUpdate("DELETE FROM workspaces WHERE name = 'default'") }
+                        connection.createStatement().use { it.executeUpdate(NO_OP_WRITE) }
                     }
                 refused.sqlState shouldBe "25006"
             }
@@ -298,6 +298,8 @@ class LocalWriteCompatibilityCliIntegrationTest {
     )
 
     private companion object {
+        /** A write that changes nothing, so the probe is harmless even if the guard were gone. */
+        const val NO_OP_WRITE = "UPDATE workspaces SET display_name = display_name WHERE name = 'default'"
         val FORBIDDEN = listOf("jdbc:", ".invalid", "warehouse", "password", "SELECT", "INSERT", "CREATE TABLE")
     }
 }
