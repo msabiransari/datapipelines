@@ -1,0 +1,66 @@
+{
+ "note": "canvas and plot in two different colours: one --chart-plot rectangle over the plot",
+ "document": {
+  "display_name": "Test type test_polar",
+  "config": {
+   "mark": {
+    "type": "test_polar"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "from": {
+     "field": "from"
+    },
+    "to": {
+     "field": "to"
+    }
+   },
+   "title": {
+    "text": "Two colours"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East"
+  ],
+  "from": [
+   0,
+   45,
+   90
+  ],
+  "to": [
+   300,
+   200,
+   135
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "from": "INTEGER",
+  "to": "INTEGER"
+ },
+ "theme": {
+  "base": "light",
+  "tokens": {
+   "--chart-canvas": [
+    255,
+    255,
+    255
+   ],
+   "--chart-plot": [
+    232,
+    238,
+    247
+   ]
+  }
+ },
+ "expect": {
+  "marks": 3
+ }
+}

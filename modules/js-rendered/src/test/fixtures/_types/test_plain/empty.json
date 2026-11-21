@@ -1,0 +1,29 @@
+{
+ "note": "no rows: the no-data state",
+ "document": {
+  "display_name": "Test type test_plain",
+  "config": {
+   "mark": {
+    "type": "test_plain"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Empty"
+   }
+  }
+ },
+ "columns": {
+  "s": []
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

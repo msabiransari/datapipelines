@@ -14,7 +14,7 @@ const G = ctx.G;
 
 /** Overlap below this many px is not a meeting (rounding to two decimals moves an edge by at most 0.005). */
 export const TOL = G.TOL;
-export const { width, drawn, textBox, meet, markBox, texts } = G;
+export const { width, drawn, textBox, meet, markBox, arcExtremes, texts } = G;
 
 /** The violations of I1, I2, I4 and I5 in one picture of frame W × H, with the counts checked: {violations, texts, marks}. */
 export function violations(prims, W, H) {

@@ -1,0 +1,51 @@
+{
+ "note": "a segment of exactly 180 degrees, one of 240 and a full circle (two arcs each)",
+ "document": {
+  "display_name": "Test type test_polar",
+  "config": {
+   "mark": {
+    "type": "test_polar"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "from": {
+     "field": "from"
+    },
+    "to": {
+     "field": "to"
+    }
+   },
+   "title": {
+    "text": "Half, two thirds, full"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "half",
+   "two thirds",
+   "full"
+  ],
+  "from": [
+   0,
+   30,
+   0
+  ],
+  "to": [
+   180,
+   270,
+   360
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "from": "INTEGER",
+  "to": "INTEGER"
+ },
+ "expect": {
+  "marks": 3
+ }
+}
