@@ -458,6 +458,8 @@ class WebEventEmitter(
                         failedNodeId = failedNodeId,
                         errorJson = errorJson,
                         contextJson = contextJson,
+                        resultRowCount = (event as? PipelineCompleted)?.resultRowCount,
+                        resultSizeBytes = (event as? PipelineCompleted)?.resultSizeBytes,
                         resultUnavailable = (event as? PipelineCompleted)?.resultUnavailable == true,
                     )
                 // The root's terminal write is the family's one settlement moment; the sweep repeats it for a

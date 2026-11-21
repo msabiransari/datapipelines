@@ -101,11 +101,11 @@ class CommitScenarioApi(
         return response.jsonPath().getString("data.id")
     }
 
-    /** Creates and releases a pipeline, so another pipeline's PIPELINE node can invoke it as a child. */
+    /** Creates and releases a pipeline (a child for a PIPELINE node, or a released run target) and returns its id. */
     fun releasedPipeline(
         name: String,
         nodes: List<Map<String, Any?>>,
-    ) {
+    ): String {
         val id = pipeline(name, nodes)
         val hash =
             given()
@@ -124,6 +124,7 @@ class CommitScenarioApi(
             .post("/api/v1/pipelines/$id/release")
             .then()
             .statusCode(HTTP_OK)
+        return id
     }
 
     /** A DQL node that copies the rows [template] returns into [table] (append). */

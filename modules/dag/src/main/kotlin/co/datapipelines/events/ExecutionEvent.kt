@@ -164,6 +164,14 @@ data class PipelineCompleted(
      * its row's terminal write settles every provisional child to the same final status.
      */
     val settlesFamily: Boolean = false,
+    /**
+     * (#1035) The caller result's total rows and stored bytes, as prepared before the terminal event;
+     * null for a run with no caller node. Written with the terminal status, so the record of a run
+     * that had a caller result never reads as a zero-caller run — not while the post-run bookkeeping
+     * is still pending, and not when the stored result was lost after a confirmed commit.
+     */
+    val resultRowCount: Long? = null,
+    val resultSizeBytes: Long? = null,
 ) : ExecutionEvent() {
     override val timestamp: Instant get() = completedAt
     override val type: SseEventType get() = SseEventType.PIPELINE_COMPLETED

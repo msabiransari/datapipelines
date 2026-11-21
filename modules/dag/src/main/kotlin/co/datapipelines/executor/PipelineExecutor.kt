@@ -45,6 +45,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -745,6 +746,10 @@ class PipelineExecutor(
                     nodeStats = stats,
                     contextSnapshot = run.context.snapshot(),
                     provisional = provisional,
+                    // (#1035) The terminal row carries the caller result's counts: a reader can never see a
+                    // SUCCESS that had a caller result as one with none, whatever later happens to the store.
+                    resultRowCount = view?.totalRows,
+                    resultSizeBytes = view?.bytes,
                 ),
             )
         }
@@ -763,10 +768,16 @@ class PipelineExecutor(
      * durable, so the execution is SUCCESS whatever happened to delivery. A delivery failure after
      * the confirmation is recorded separately (`result_unavailable`) and never changes the status
      * or re-runs any business SQL.
+     *
+     * The held result is re-checked against the store BEFORE the terminal event ([heldDelivery]):
+     * a result lost between its preparation and now is recorded on the terminal row itself
+     * (`result_unavailable`, with the prepared counts) and is never announced.
      */
     private suspend fun settleCommitted(run: ExecutionRun): ExecutionResult {
+        val delivery = heldDelivery(run)
         val completedAt = Instant.now()
         val stats = run.stats.snapshot(run.plan.dag.nodeIds)
+        val unavailable = delivery is HeldResultDelivery.Unavailable
         run.emitTerminal {
             emit(
                 PipelineCompleted(
@@ -778,27 +789,76 @@ class PipelineExecutor(
                     durationMs = run.elapsedMsAt(completedAt),
                     nodeStats = stats,
                     contextSnapshot = run.context.snapshot(),
+                    resultUnavailable = unavailable,
                     settlesFamily = true,
+                    resultRowCount = delivery.prepared?.totalRows,
+                    resultSizeBytes = delivery.prepared?.bytes,
                 ),
             )
             metrics.executionFinished(run.request.pipelineId, ExecutionStatus.SUCCESS, run.elapsed(completedAt))
         }
-        deliverHeldResult(run)
-        return run.result(ExecutionStatus.SUCCESS, stats, run.heldResultRef, completedAt)
+        if (unavailable) markResultUnavailable(run)
+        deliverHeldResult(run, delivery)
+        return run.result(ExecutionStatus.SUCCESS, stats, run.heldResultRef, completedAt, resultUnavailable = run.resultUnavailable.get())
     }
 
     /**
-     * Announces the held caller result (`data_ready`) exactly once, after the confirmed commit. Runs
-     * under [NonCancellable]: a cancellation that landed after the confirmation must not cost the
-     * caller the result of a commit that is durable. A failure is NOT rethrown — the commit stands —
-     * it marks the row's `result_unavailable` and is logged without row data.
+     * (#1035) Decides, once per run, what the confirmed commit can publish of its held caller result
+     * ([HeldResultDelivery]). Runs after the confirmation and before the terminal event, under
+     * [NonCancellable] (a cancellation after the confirmation must not cost the caller a durable
+     * commit's result). The announcement's URL is built first, then the stored result is read back
+     * from the store: a key that is gone, or a store or URL failure, makes the result unavailable —
+     * the status stays SUCCESS and nothing is announced. Never throws.
      */
-    private suspend fun deliverHeldResult(run: ExecutionRun) {
-        val view = run.heldResultView ?: return
+    private suspend fun heldDelivery(run: ExecutionRun): HeldResultDelivery {
+        run.heldDelivery.get()?.let { return it }
+        val decided = withContext(NonCancellable) { verifyHeldResult(run) }
+        return if (run.heldDelivery.compareAndSet(null, decided)) decided else requireNotNull(run.heldDelivery.get())
+    }
+
+    private suspend fun verifyHeldResult(run: ExecutionRun): HeldResultDelivery {
+        val prepared = run.heldResultView ?: return HeldResultDelivery.NoCaller
+        return try {
+            val url = resultUrls.urlFor(run.executionId)
+            // §15.2: a Redis read is blocking I/O and belongs on the executor's own pool.
+            val stored = withContext(dispatcher.context) { resultStore.describe(prepared.key, run.request.resultPageRows) }
+            if (stored == null) {
+                LOG.error(
+                    "Stored result of execution {} is gone after its confirmed commit; status stays SUCCESS, result unavailable",
+                    run.executionId,
+                )
+                HeldResultDelivery.Unavailable(prepared)
+            } else {
+                HeldResultDelivery.Deliverable(prepared, stored, url)
+            }
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            LOG.error(
+                "Result of execution {} could not be prepared for delivery after its confirmed commit ({}); status stays SUCCESS",
+                run.executionId,
+                e.javaClass.simpleName,
+            )
+            HeldResultDelivery.Unavailable(prepared)
+        }
+    }
+
+    /**
+     * Announces the held caller result (`data_ready`) exactly once, after the confirmed commit, from
+     * the view [heldDelivery] read back after the confirmation. Runs under [NonCancellable]: a
+     * cancellation that landed after the confirmation must not cost the caller the result of a commit
+     * that is durable. A failure is NOT rethrown — the commit stands — it marks the row's
+     * `result_unavailable` and is logged without row data.
+     */
+    private suspend fun deliverHeldResult(
+        run: ExecutionRun,
+        delivery: HeldResultDelivery,
+    ) {
+        if (delivery !is HeldResultDelivery.Deliverable) return
         if (!run.dataReadyPending.compareAndSet(true, false)) return
         withContext(NonCancellable) {
             try {
-                emit(DataReady.from(run.request.pipelineId, view, resultUrls.urlFor(run.executionId), run.resultTtlSeconds(config)))
+                emit(DataReady.from(run.request.pipelineId, delivery.view, delivery.url, run.resultTtlSeconds(config)))
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
@@ -807,9 +867,15 @@ class PipelineExecutor(
                     run.executionId,
                     e.javaClass.simpleName,
                 )
-                withContext(dispatcher.context) { run.localWriteTransaction?.markResultUnavailable() }
+                markResultUnavailable(run)
             }
         }
+    }
+
+    /** (#1035) Records the confirmed commit's undelivered result on the run and its row; best effort, never throws. */
+    private suspend fun markResultUnavailable(run: ExecutionRun) {
+        run.resultUnavailable.set(true)
+        withContext(NonCancellable + dispatcher.context) { run.localWriteTransaction?.markResultUnavailable() }
     }
 
     /**
@@ -1389,6 +1455,12 @@ internal class ExecutionRun(
     /** `data_ready` still owed after the confirmed commit — flipped once by [PipelineExecutor.deliverHeldResult]. */
     val dataReadyPending = AtomicBoolean()
 
+    /** (#1035) What the confirmed commit can publish of the held result — decided once by [PipelineExecutor.heldDelivery]. */
+    val heldDelivery = AtomicReference<HeldResultDelivery?>()
+
+    /** (#1035) The confirmed commit's caller result could not be delivered; carried onto [ExecutionResult.resultUnavailable]. */
+    val resultUnavailable = AtomicBoolean()
+
     /**
      * Set once the execution scope is unwinding with an outcome already decided, and the in-flight
      * statements have been interrupted to make that unwind reach the source databases (B4a).
@@ -1437,6 +1509,7 @@ internal class ExecutionRun(
         nodeStats: List<NodeStats>,
         resultRef: String?,
         completedAt: Instant,
+        resultUnavailable: Boolean = false,
     ): ExecutionResult =
         ExecutionResult(
             executionId = executionId,
@@ -1447,6 +1520,7 @@ internal class ExecutionRun(
             completedAt = completedAt,
             durationMs = elapsedMsAt(completedAt),
             warnings = warnings.collected(),
+            resultUnavailable = resultUnavailable,
         )
 }
 

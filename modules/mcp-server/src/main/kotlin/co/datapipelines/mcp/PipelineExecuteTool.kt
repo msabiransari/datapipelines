@@ -12,6 +12,7 @@ import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionResult
+import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.PipelineExecutor
@@ -272,8 +273,13 @@ class PipelineExecuteTool(
         }
     }
 
-    /** The `data_ready`-shaped half of an attached payload, read back from the stored result. */
+    /**
+     * The `data_ready`-shaped half of an attached payload, read back from the stored result. #1035: a
+     * confirmed SUCCESS whose result was never delivered says so (`result_unavailable: true`) instead
+     * of attaching nothing, which would read as a zero-caller run.
+     */
     private fun storedResult(record: ExecutionRecord): Map<String, Any?> {
+        if (record.status == ExecutionStatus.SUCCESS && record.resultUnavailable) return RESULT_UNAVAILABLE_BLOCK
         if (record.resultRowCount == null) return emptyMap()
         val view = resultStore.describe(resultStore.keyFor(record.executionId)) ?: return emptyMap()
         return mapOf(
@@ -362,8 +368,13 @@ class PipelineExecuteTool(
      * node (§6.2.3). A stored result that has vanished between the executor resolving it and this
      * read is reported as `result.expired` rather than silently dropped — an empty `rows` on a
      * pipeline that returns data is the failure mode D9 exists to prevent.
+     *
+     * #1035: a confirmed commit whose caller result could not be delivered is SUCCESS with
+     * `result_unavailable: true` — the writes are durable, so this is neither an error (an agent must
+     * not re-run it) nor an empty result.
      */
     private fun callerResult(result: ExecutionResult): Map<String, Any?> {
+        if (result.resultUnavailable) return RESULT_UNAVAILABLE_BLOCK
         val ref = result.resultRef ?: return emptyMap()
         val view =
             resultStore.describe(ref)
@@ -386,5 +397,8 @@ class PipelineExecuteTool(
 
     private companion object {
         val log: org.slf4j.Logger = LoggerFactory.getLogger(PipelineExecuteTool::class.java)
+
+        /** #1035: the result half of a confirmed SUCCESS whose caller result was never delivered. */
+        val RESULT_UNAVAILABLE_BLOCK: Map<String, Any?> = mapOf("result_unavailable" to true)
     }
 }

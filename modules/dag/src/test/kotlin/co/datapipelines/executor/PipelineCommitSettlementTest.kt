@@ -34,6 +34,12 @@ class PipelineCommitSettlementTest {
     private val calls = CopyOnWriteArrayList<String>()
     private val resultUnavailableMarks = CopyOnWriteArrayList<UUID>()
 
+    /** The run's real result store; [loseResultOnConfirm] removes the stored result the moment the confirmation is durable. */
+    private val store = InMemoryResultStore()
+
+    @Volatile
+    private var loseResultOnConfirm = false
+
     private val ledger =
         object : CommitLedger {
             override fun recordAttempt(executionId: UUID): Boolean {
@@ -43,6 +49,11 @@ class PipelineCommitSettlementTest {
 
             override fun recordConfirmed(executionId: UUID): Boolean {
                 calls += "confirmed"
+                // #1035 R4: the stored caller result is lost AFTER the confirmation is recorded and before anything announces it.
+                if (loseResultOnConfirm) {
+                    check(store.describe(store.keyFor(executionId)) != null) { "the result must be stored before the loss" }
+                    store.discard(store.keyFor(executionId))
+                }
                 return true
             }
 
@@ -89,6 +100,7 @@ class PipelineCommitSettlementTest {
     ): ExecutorHarness {
         val registry = registry(source, refuseCommit)
         return ExecutorHarness(
+            resultStore = store,
             templateEngine =
                 Fixtures.templateEngine(
                     mapOf(
@@ -156,10 +168,59 @@ class PipelineCommitSettlementTest {
                 val completedAt = types.indexOf(SseEventType.PIPELINE_COMPLETED)
                 val dataReadyAt = types.indexOf(SseEventType.DATA_READY)
                 (completedAt in 0 until dataReadyAt) shouldBe true
+                val completed = harness.emitter.allOf<PipelineCompleted>().single()
+                completed.settlesFamily shouldBe true
+                completed.resultUnavailable shouldBe false
+                completed.resultRowCount shouldBe 1L
+                result.resultUnavailable shouldBe false
                 harness.emitter
-                    .allOf<PipelineCompleted>()
+                    .allOf<DataReady>()
                     .single()
-                    .settlesFamily shouldBe true
+                    .totalRows shouldBe 1L
+                rows(source) shouldBe 1L
+            }
+        }
+    }
+
+    @Test
+    fun `a stored result lost after the confirmed commit is SUCCESS with the result unavailable - never announced or empty`() {
+        runBlocking {
+            val source = source()
+            loseResultOnConfirm = true
+            harness(source).use { harness ->
+                val result = harness.executor.execute(Fixtures.request(Fixtures.pipeline(familyNodes(source))))
+
+                result.status shouldBe ExecutionStatus.SUCCESS
+                result.resultUnavailable shouldBe true
+                harness.emitter.types() shouldNotContain SseEventType.DATA_READY
+                val completed = harness.emitter.allOf<PipelineCompleted>().single()
+                // The terminal row itself says so, and keeps the prepared result's count: it cannot read as a zero-caller run.
+                completed.resultUnavailable shouldBe true
+                completed.resultRowCount shouldBe 1L
+                calls.toList() shouldBe listOf("attempt", "confirmed", "result_unavailable")
+                rows(source) shouldBe 1L
+            }
+        }
+    }
+
+    @Test
+    fun `a confirmed commit with no caller node completes with stats only - not marked unavailable`() {
+        runBlocking {
+            val source = source()
+            harness(source).use { harness ->
+                val nodes = listOf(Fixtures.node("write", NodeType.DML, source.name))
+
+                val result = harness.executor.execute(Fixtures.request(Fixtures.pipeline(nodes)))
+
+                result.status shouldBe ExecutionStatus.SUCCESS
+                result.resultRef shouldBe null
+                result.resultUnavailable shouldBe false
+                harness.emitter.types() shouldNotContain SseEventType.DATA_READY
+                val completed = harness.emitter.allOf<PipelineCompleted>().single()
+                completed.resultUnavailable shouldBe false
+                completed.resultRowCount shouldBe null
+                completed.nodeStats.map { it.nodeId } shouldContain "write"
+                calls.toList() shouldBe listOf("attempt", "confirmed")
                 rows(source) shouldBe 1L
             }
         }
@@ -175,6 +236,7 @@ class PipelineCommitSettlementTest {
                 val result = harness.executor.execute(request)
 
                 result.status shouldBe ExecutionStatus.SUCCESS
+                result.resultUnavailable shouldBe true
                 harness.emitter.types() shouldContain SseEventType.PIPELINE_COMPLETED
                 harness.emitter.types() shouldNotContain SseEventType.DATA_READY
                 calls.toList() shouldBe listOf("attempt", "confirmed", "result_unavailable")

@@ -167,6 +167,10 @@ data class ExecuteRequest(
  *
  * [warnings] carries the non-fatal type-mapping warnings drained out of every `StageResult`
  * (staging §8.2) and out of the caller result's schema mapping. They never fail an execution.
+ *
+ * [resultUnavailable] (#1035) is true only on a SUCCESS whose commit is confirmed but whose caller
+ * result could not be delivered: [resultRef] then names a result no reader can fetch, and a surface
+ * reports the result unavailable — never an empty result that reads as a zero-caller run.
  */
 data class ExecutionResult(
     val executionId: UUID,
@@ -177,6 +181,7 @@ data class ExecutionResult(
     val completedAt: Instant,
     val durationMs: Long,
     val warnings: List<TypeMappingWarning> = emptyList(),
+    val resultUnavailable: Boolean = false,
 )
 
 /**
