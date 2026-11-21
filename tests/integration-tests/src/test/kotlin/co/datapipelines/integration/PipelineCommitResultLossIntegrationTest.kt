@@ -91,8 +91,8 @@ class PipelineCommitResultLossIntegrationTest {
     @Test
     fun `a stored result lost after the confirmed commit is SUCCESS with the result unavailable on every surface`() {
         seedOnce()
-        val pipelineId = callerPipeline("test/cl_rest", "cl_tgt_rest")
-        val key = "cl1035-${UUID.randomUUID()}"
+        val pipelineId = callerPipeline("test/rl_rest", "rl_tgt_rest")
+        val key = "rl1035-${UUID.randomUUID()}"
         ARMED.set(true)
 
         val events = stream(pipelineId, key)
@@ -111,14 +111,14 @@ class PipelineCommitResultLossIntegrationTest {
 
         val duplicate = stream(pipelineId, key).map { it.first }
         withClue("same-key duplicate: $duplicate") { duplicate.contains("data_ready") shouldBe false }
-        count("cl_tgt_rest") shouldBe ROWS
+        count("rl_tgt_rest") shouldBe ROWS
         metaScalar("SELECT count(*) FROM pipeline_executions WHERE pipeline_id = '$pipelineId'") shouldBe "1"
     }
 
     @Test
     fun `an MCP run whose stored result is lost after the confirmed commit answers SUCCESS with the result unavailable`() {
         seedOnce()
-        val pipelineId = callerPipeline("test/cl_mcp", "cl_tgt_mcp", released = true)
+        val pipelineId = callerPipeline("test/rl_mcp", "rl_tgt_mcp", released = true)
         ARMED.set(true)
 
         val payload =
@@ -139,16 +139,16 @@ class PipelineCommitResultLossIntegrationTest {
             LOST.get() shouldBe body["execution_id"].asText()
             assertRecordUnavailable(body["execution_id"].asText())
         }
-        count("cl_tgt_mcp") shouldBe ROWS
+        count("rl_tgt_mcp") shouldBe ROWS
     }
 
     @Test
     fun `a confirmed commit with no caller node stays an empty success - not reported unavailable`() {
         seedOnce()
-        val pipelineId = api.pipeline("test/cl_zero", listOf(api.copy("copy", "test/cl_read.sql", "cl_tgt_zero", emptyList())))
+        val pipelineId = api.pipeline("test/rl_zero", listOf(api.copy("copy", "test/rl_read.sql", "rl_tgt_zero", emptyList())))
         ARMED.set(false)
 
-        val events = stream(pipelineId, "cl1035-${UUID.randomUUID()}")
+        val events = stream(pipelineId, "rl1035-${UUID.randomUUID()}")
 
         val executionId = events.first { it.first == "execution_started" }.second["execution_id"].asText()
         events.map { it.first }.contains("data_ready") shouldBe false
@@ -172,7 +172,7 @@ class PipelineCommitResultLossIntegrationTest {
                 ),
             )
         withClue("zero-caller MCP $fetched") { fetched.path("isError").asBoolean(false) shouldBe false }
-        count("cl_tgt_zero") shouldBe ROWS
+        count("rl_tgt_zero") shouldBe ROWS
     }
 
     /** The record: SUCCESS, both commit stamps, `result_unavailable`, the prepared caller result's count kept, no result URL. */
@@ -233,7 +233,7 @@ class PipelineCommitResultLossIntegrationTest {
         released: Boolean = false,
     ): String {
         val nodes =
-            listOf(api.copy("copy", "test/cl_read.sql", target, emptyList()), api.caller("ret", "test/cl_read_one.sql", listOf("copy")))
+            listOf(api.copy("copy", "test/rl_read.sql", target, emptyList()), api.caller("ret", "test/rl_read_one.sql", listOf("copy")))
         return if (released) api.releasedPipeline(name, nodes) else api.pipeline(name, nodes)
     }
 
@@ -284,14 +284,14 @@ class PipelineCommitResultLossIntegrationTest {
         )
         DriverManager.getConnection(db.jdbcUrl, db.username, db.password).use { c ->
             c.createStatement().use { s ->
-                s.execute("CREATE TABLE cl_src (id INT PRIMARY KEY)")
-                s.execute("INSERT INTO cl_src SELECT generate_series(1, $ROWS)")
-                listOf("cl_tgt_rest", "cl_tgt_mcp", "cl_tgt_zero").forEach { s.execute("CREATE TABLE $it (id INT PRIMARY KEY)") }
+                s.execute("CREATE TABLE rl_src (id INT PRIMARY KEY)")
+                s.execute("INSERT INTO rl_src SELECT generate_series(1, $ROWS)")
+                listOf("rl_tgt_rest", "rl_tgt_mcp", "rl_tgt_zero").forEach { s.execute("CREATE TABLE $it (id INT PRIMARY KEY)") }
             }
         }
         api.registerDatasource(db.jdbcUrl, db.username, db.password)
-        api.template("test/cl_read.sql", "SELECT id FROM cl_src ORDER BY id")
-        api.template("test/cl_read_one.sql", "SELECT id FROM cl_src WHERE id = 1")
+        api.template("test/rl_read.sql", "SELECT id FROM rl_src ORDER BY id")
+        api.template("test/rl_read_one.sql", "SELECT id FROM rl_src WHERE id = 1")
     }
 
     private fun metaRow(id: String): Map<String, String?> =
@@ -325,18 +325,18 @@ class PipelineCommitResultLossIntegrationTest {
         }
 
     companion object {
-        private const val DATASOURCE = "cl1035"
+        private const val DATASOURCE = "rl1035"
         private const val ROWS = 2500
         private const val EXCERPT = 600
         private const val HTTP_OK = 200
         private const val HTTP_UNAVAILABLE = 503
         private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
-        private const val ADMIN_EMAIL = "e2e-cl1035@datapipelines.test"
+        private const val ADMIN_EMAIL = "e2e-rl1035@datapipelines.test"
         private val ARMED = AtomicBoolean(false)
         private val SEEDED = AtomicBoolean(false)
         private val LOST = AtomicReference<String?>()
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val MCP_KEY = E2eAuth.generateKey("cl1035-mcp-reader")
+        private val MCP_KEY = E2eAuth.generateKey("rl1035-mcp-reader")
         private val MCP_IDENTITY_ID: String = UUID.randomUUID().toString()
         private val JWT_SECRET = E2eSession.newSecret()
         private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, ADMIN_EMAIL)
