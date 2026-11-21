@@ -472,6 +472,50 @@ class TypeGateTest {
     }
 
     @Test
+    fun `gate object stays object-only - an array of objects is still refused there (#1038)`() {
+        val gate = TypeGate.over(emptyList())
+        (gate.gateObject(listOf(linkedMapOf("a" to 1)), 64) as TypeGate.GateResult.Refuse).refusal shouldBe
+            GateRefusal.ValueTypeMismatch(null, "<object>", "object", "SingletonList")
+    }
+
+    @Test
+    fun `gate body admits an object or an array of objects, empty containers included (#1038)`() {
+        val gate = TypeGate.over(emptyList())
+        listOf(
+            linkedMapOf("a" to 1, "n" to null),
+            emptyMap<String, Any?>(),
+            emptyList<Any?>(),
+            listOf(linkedMapOf("only" to true)),
+            listOf(linkedMapOf("a" to 1), linkedMapOf("b" to listOf(1, 2))),
+        ).forEach { value -> gate.gateBody(value, 1024) shouldBe TypeGate.GateResult.Pass(value) }
+    }
+
+    @Test
+    fun `gate body refuses null, scalars and arrays holding a non-object, naming only the kind (#1038)`() {
+        val gate = TypeGate.over(emptyList())
+        mapOf<Any?, String>(
+            null to "null",
+            "secret-text" to "String",
+            42 to "Integer",
+            listOf(linkedMapOf("a" to 1), "secret-text") to "array holding String",
+            listOf(linkedMapOf("a" to 1), null) to "array holding null",
+            listOf(listOf(linkedMapOf("a" to 1))) to "array holding SingletonList",
+        ).forEach { (value, actual) ->
+            (gate.gateBody(value, 1024) as TypeGate.GateResult.Refuse).refusal shouldBe
+                GateRefusal.ValueTypeMismatch(null, "<body>", "object or array of objects", actual)
+        }
+    }
+
+    @Test
+    fun `gate body bounds the canonical bytes (#1038)`() {
+        val gate = TypeGate.over(emptyList())
+        // [{"k":" + 64 x's + "}] = 74 canonical bytes.
+        val value = listOf(linkedMapOf("k" to "x".repeat(64)))
+        gate.gateBody(value, 74) shouldBe TypeGate.GateResult.Pass(value)
+        (gate.gateBody(value, 73) as TypeGate.GateResult.Refuse).refusal shouldBe GateRefusal.ValueTooLarge(null, "<body>", 74)
+    }
+
+    @Test
     fun `a string over maxStringBytes is value too large with the byte count`() {
         val gate = TypeGate.over(listOf(column("s", LogicalType.STRING)), maxStringBytes = 8)
         val verdict = gate.gateRow(mapOf("s" to "é".repeat(5)), rowNumber = 3)

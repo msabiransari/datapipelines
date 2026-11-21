@@ -86,7 +86,11 @@ class TemplateDryRendererImpl(
     }
 }
 
-/** The one mapping from 7b's contract model to pipeline-contract's §12.13 view — see the view's KDoc. */
+/**
+ * The one mapping from 7b's contract model to pipeline-contract's §12.13 view — see the view's KDoc.
+ * A body input (#1038) binds no Context key or staged table; it is not projected until the view
+ * gains its own body input in the pipeline-contract half of #1038.
+ */
 private fun viewOf(contract: ScriptContract): co.datapipelines.pipeline.ScriptContractView =
     co.datapipelines.pipeline.ScriptContractView(
         mode =
@@ -96,8 +100,12 @@ private fun viewOf(contract: ScriptContract): co.datapipelines.pipeline.ScriptCo
                 ScriptMode.VALUE -> co.datapipelines.pipeline.ScriptContractView.Mode.VALUE
             },
         inputs =
-            contract.inputs.mapValues { (_, input) ->
+            contract.inputs.filterValues { it !is ScriptInput.Body }.mapValues { (_, input) ->
                 when (input) {
+                    is ScriptInput.Body -> {
+                        error("filtered above")
+                    }
+
                     is ScriptInput.Table -> {
                         co.datapipelines.pipeline.ScriptContractView.Input
                             .Table(input.columns.map(::viewColumn))

@@ -471,6 +471,20 @@ class TemplateValidator(
                     mapOf("mode" to contract.mode.wire, "table_inputs" to tableInputs.keys.sorted()),
                 )
         }
+        val bodyInputs =
+            contract.inputs
+                .filterValues { it is ScriptInput.Body }
+                .keys
+                .sorted()
+        if (bodyInputs.size > 1) {
+            failures +=
+                contractFailure(
+                    "body_inputs",
+                    "A script contract declares at most one body input — an execution carries one request body; " +
+                        "found ${bodyInputs.size} ($bodyInputs).",
+                    mapOf("body_inputs" to bodyInputs),
+                )
+        }
         validateDeclaredTypes(contract, failures)
         validateModeAndRejects(contract, failures)
     }

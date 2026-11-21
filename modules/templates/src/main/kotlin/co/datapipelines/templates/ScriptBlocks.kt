@@ -67,11 +67,15 @@ data class ContractColumn(
     val nullable: Boolean = false,
 )
 
-/** One declared input of a script contract — a staged table, or a single Context value. */
+/**
+ * One declared input of a script contract — a staged table, a single Context value, or the
+ * execution's structured request body (#1038).
+ */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "kind")
 @JsonSubTypes(
     JsonSubTypes.Type(ScriptInput.Table::class, name = "table"),
     JsonSubTypes.Type(ScriptInput.Value::class, name = "value"),
+    JsonSubTypes.Type(ScriptInput.Body::class, name = "body"),
 )
 sealed interface ScriptInput {
     val kind: String
@@ -98,6 +102,26 @@ sealed interface ScriptInput {
     ) : ScriptInput {
         @get:JsonProperty("kind")
         override val kind: String get() = "value"
+    }
+
+    /**
+     * The execution's structured request body (published-mutation requirement §3.3, #1038): any
+     * JSON object, or an array of objects, delivered in its original root form as a native value
+     * — never a string, never converted, never checked against a field schema (the transformer
+     * owns interpretation and declares the typed output). Absent when the execution supplied no
+     * body. Script-only by construction (only script templates carry a contract); at most one per
+     * contract. Distinct from [Value]: an object-valued Context key keeps its object-only gate.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = false)
+    class Body : ScriptInput {
+        @get:JsonProperty("kind")
+        override val kind: String get() = "body"
+
+        override fun equals(other: Any?): Boolean = other is Body
+
+        override fun hashCode(): Int = kind.hashCode()
+
+        override fun toString(): String = "Body"
     }
 }
 

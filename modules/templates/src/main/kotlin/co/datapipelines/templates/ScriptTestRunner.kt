@@ -401,42 +401,61 @@ class ScriptTestRunner(
             }
         }
         contract.inputs.forEach { (name, input) ->
-            when (input) {
-                is ScriptInput.Table -> {
-                    if (contract.mode != ScriptMode.ROW) {
-                        val gate = TypeGate.over(input.columns.toColumnSchemas(), maxStringBytes)
-                        val table = (inputs[name] as? List<*>) ?: emptyList<Any?>()
-                        table.forEachIndexed { index, entry ->
-                            val map =
-                                entry as? Map<String, Any?>
-                                    ?: return RunOutcome.Refused(
-                                        PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION,
-                                        "input '$name' row ${index + 1}: not an object",
-                                    )
-                            val verdict = gate.gateRow(map, index + 1)
-                            if (verdict is GateResult.Refuse) {
-                                return RunOutcome.Refused(
-                                    PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION,
-                                    "input '$name' row ${index + 1}: ${describe(verdict.refusal)}",
-                                )
-                            }
-                        }
-                    }
-                }
+            declaredInputViolation(contract.mode, name, input, inputs)?.let { return it }
+        }
+        return null
+    }
 
-                is ScriptInput.Value -> {
-                    val column = ColumnSchema(name, input.type, input.precision, input.scale, nullable = false)
-                    val verdict = TypeGate.over(listOf(column), maxStringBytes).gateValue(inputs[name], column)
+    /** One declared input's first violation (a row-mode table rides `rows`, checked above), or null. */
+    @Suppress("UNCHECKED_CAST", "ReturnCount")
+    // gateRow's Pass value is a LinkedHashMap by the gate's contract; each violation is its own early refusal.
+    private fun declaredInputViolation(
+        mode: ScriptMode,
+        name: String,
+        input: ScriptInput,
+        inputs: Map<String, Any?>,
+    ): RunOutcome.Refused? {
+        when (input) {
+            is ScriptInput.Table -> {
+                if (mode == ScriptMode.ROW) return null
+                val gate = TypeGate.over(input.columns.toColumnSchemas(), maxStringBytes)
+                val table = (inputs[name] as? List<*>) ?: emptyList<Any?>()
+                table.forEachIndexed { index, entry ->
+                    val map =
+                        entry as? Map<String, Any?>
+                            ?: return RunOutcome.Refused(
+                                PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION,
+                                "input '$name' row ${index + 1}: not an object",
+                            )
+                    val verdict = gate.gateRow(map, index + 1)
                     if (verdict is GateResult.Refuse) {
                         return RunOutcome.Refused(
                             PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION,
-                            "input '$name': ${describe(verdict.refusal)}",
+                            "input '$name' row ${index + 1}: ${describe(verdict.refusal)}",
                         )
                     }
                 }
+                return null
+            }
+
+            is ScriptInput.Body -> {
+                // Absent stays absent (the transformer sees no key); a supplied body is an
+                // object or an array of objects under the value byte cap (#1038).
+                if (!inputs.containsKey(name)) return null
+                val verdict = TypeGate.over(emptyList(), maxStringBytes).gateBody(inputs[name], maxValueBytes)
+                return (verdict as? GateResult.Refuse)?.let {
+                    RunOutcome.Refused(PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION, "input '$name': ${describe(it.refusal)}")
+                }
+            }
+
+            is ScriptInput.Value -> {
+                val column = ColumnSchema(name, input.type, input.precision, input.scale, nullable = false)
+                val verdict = TypeGate.over(listOf(column), maxStringBytes).gateValue(inputs[name], column)
+                return (verdict as? GateResult.Refuse)?.let {
+                    RunOutcome.Refused(PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION, "input '$name': ${describe(it.refusal)}")
+                }
             }
         }
-        return null
     }
 
     /** Shapes the engine result and gates it (§5.3) — the output (rows/value/object) and the rejects. */
