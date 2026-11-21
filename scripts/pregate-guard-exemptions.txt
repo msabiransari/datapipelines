@@ -320,6 +320,7 @@ waived-for-cost co.datapipelines.web.release.MetadataWriterGuardOrderIntegration
 waived-for-cost co.datapipelines.web.release.ReleaseStatementBoundSourcesIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.web.release.ReleaseStatementCeilingWiringTest  starts a container or context: ApplicationContextRunner
 waived-for-cost co.datapipelines.web.release.TemplateProviderParityPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.templates.TemplateImportBodyFixtureIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.web.ui.FamilyInventoryE2eTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.web.ui.FamilyRecentE2eTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.web.ui.OverviewDashboardsE2eTest  starts a container or context: PostgreSQLContainer
