@@ -195,7 +195,6 @@ test("the fixed sentence of every refusal code, numbers grouped", () => {
   assert.equal(R.sentence({ code: "chart.too_many_rows", details: { rows: 100001, limit: 100000 } }), "Too many rows to draw (100,001, the limit is 100,000). Aggregate in the query.");
   assert.equal(R.sentence({ code: "chart.too_many_series", details: { series: 9, limit: 8 } }), "Too many series to draw (9, the limit is 8). Group the smaller ones in the query.");
   assert.equal(R.sentence({ code: "chart.rule.negative-part", details: {} }), "This chart cannot show negative values.");
-  assert.equal(R.sentence({ code: "chart.rule.shade-diverging", details: {} }), "This chart's colour scale is not drawn yet.");
   assert.throws(() => R.sentence({ code: "chart.nope", details: {} }), /no sentence for chart\.nope/);
 });
 

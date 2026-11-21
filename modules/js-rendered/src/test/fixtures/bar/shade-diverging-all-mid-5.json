@@ -1,0 +1,82 @@
+{
+ "source": [
+  "lane 1053 make_diverging_fixtures.py (brief 1053 D9)"
+ ],
+ "note": "(6) every value at the middle, mid 5 (all 5): step 4 for all, no division; both texts 5",
+ "document": {
+  "display_name": "All on target",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "delta",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "delta",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "diverging",
+     "mid": 5
+    }
+   },
+   "title": {
+    "text": "All on target"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A",
+   "B",
+   "C"
+  ],
+  "amount": [
+   10,
+   15,
+   20
+  ],
+  "delta": [
+   5,
+   5,
+   5
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "delta": "DOUBLE"
+ }
+}

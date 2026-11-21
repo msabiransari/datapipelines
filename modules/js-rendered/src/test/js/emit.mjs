@@ -10,6 +10,7 @@
 // Brief 1050 A.3 adds colour.json for the JVM test JsRenderedColourScaleTest: the colour scale's steps and tokens over a
 // table of ranges and values, and its end texts over sets of aggregates, each row holding its inputs, so the sandbox
 // recomputes the same rows from them (COLOUR below, the test's copy of it) and compares the text byte for byte.
+// Brief 1053 A.3 appends the two-sided scale's rows to colour.json (dsteps, dends), recomputed by the same JVM test.
 // Usage: node emit.mjs <out dir>. The out dir is emptied first, so a removed fixture leaves no file behind.
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -78,6 +79,51 @@ const colourEnds = [
   [ex(0.5, null), ex(2.25, null), null, ex(null, null)],
   [ex(-1234567.125, "-1234567.125"), ex(0.000001, "0.000001")],
 ];
+// Brief 1053 A.3: the two-sided scale's rows, appended after the one-sided ones (dsteps, dends; the old rows' text is
+// unchanged). A step row holds the drawn values, the middle (null: none given, so zero), the value, its step and token:
+// per set the drawn values, 22 values from the lowest to the highest of them and the middle, the set's own extra values
+// (each border, a value just inside the first border) and a null. An end row holds the aggregates, the middle and the
+// two end texts (null where the end is not finite and has no exact text: the legend is not drawn).
+const D_SETS = [
+  [[-30, -20, -10, 0, 10, 20, 30], null, []],
+  [[90, 110], 100, [95, 105]],
+  [[-110, -90], -100, [-105, -95]],
+  [[0, 10, 25, 50], null, []],
+  [[10], null, [-10]],
+  [[0, 0, 0], null, []],
+  [[5, 5], 5, []],
+  [[-6, 6], null, [-6, -5, -3, -1, 1, 3, 5, 6]],
+  [[-3, 3], null, [0.49999999999999994, -0.49999999999999994, 0.5, -0.5, 1.5, -1.5, 2.5, -2.5]],
+  [[-1e308, 1e308], null, []],
+  [[-1e308], 1e308, [1e308]],
+  [[-1e308, 1e308], 1e308, []],
+  [[-Number.MAX_VALUE, Number.MAX_VALUE], 0, []],
+  [[-0.3, 0.1], 0.05, []],
+  [[1, 1 + Number.EPSILON], 1, []],
+];
+const divSteps = [];
+for (const [nums, mid, extra] of D_SETS) {
+  const c = mid === null ? 0 : mid, lo = Math.min(c, ...nums), hi = Math.max(c, ...nums), seen = [];
+  for (let i = 0; i <= 21; i++) seen.push(Math.min(hi, Math.max(lo, lo + (hi / 2 - lo / 2) * ((2 * i) / 21))));
+  for (const v of [...nums, ...seen, ...extra, null]) divSteps.push([nums, mid, v]);
+}
+const divEnds = [
+  [[ex(9007199254740992, "9007199254740993"), ex(-5, "-5")], null],
+  [[ex(9007199254740992, "9007199254740993"), ex(-5, "-5")], 100],
+  [[ex(9007199254740992, "9007199254740992"), ex(9007199254740992, "9007199254740993"), ex(1, "1")], null],
+  [[ex(-9007199254740992, "-9007199254740992"), ex(-9007199254740992, "-9007199254740993"), ex(1, "1")], null],
+  [[ex(2e21, "2000000000000000000000"), ex(1e21, "1000000000000000000000")], 1e21],
+  [[ex(1.25, "1.25")], 0.5],
+  [[ex(7, null)], 2],
+  [[ex(-2, null), ex(2, "2.00"), ex(2, null)], null],
+  [[ex(90, null), ex(110, null)], 100],
+  [[ex(-110, null), ex(-90, null)], -100],
+  [[ex(0, null), ex(0, null)], null],
+  [[ex(5, null), ex(5, "5")], 5],
+  [[ex(-1e308, null), ex(1e308, null)], 1e308],
+  [[ex(-1e308, null)], 1e308],
+  [[ex(0.5, null), null, ex(null, null), ex(-0.25, null)], null],
+];
 /** COLOUR: the rows of colour.json from their inputs (JsRenderedColourScaleTest runs its copy of this in the sandbox). */
 const COLOUR = (C, t) => JSON.stringify({
   steps: t.steps.map((r) => {
@@ -88,8 +134,16 @@ const COLOUR = (C, t) => JSON.stringify({
     const s = C.sequential(e);
     return [e, s.loText, s.hiText];
   }),
+  dsteps: t.dsteps.map((r) => {
+    const s = C.diverging(r[0].map((n) => ({ num: n, exact: null })), r[1]);
+    return [r[0], r[1], r[2], C.step(s, r[2]), C.token(s, r[2])];
+  }),
+  dends: t.dends.map((e) => {
+    const s = C.diverging(e[0], e[1]);
+    return [e[0], e[1], s.loText, s.hiText];
+  }),
 });
-const colour = COLOUR(R.colour, { steps: colourSteps, ends: colourEnds });
+const colour = COLOUR(R.colour, { steps: colourSteps, ends: colourEnds, dsteps: divSteps, dends: divEnds });
 writeFileSync(join(out, "colour.json"), colour);
 writeFileSync(join(out, "index.txt"), index.join("\n") + "\n");
 
@@ -124,4 +178,4 @@ for (let i = 0; i <= 5760; i++) {
 writeFileSync(join(out, "trig.json"), JSON.stringify(trig));
 writeFileSync(join(out, "sweep.json"), JSON.stringify({ widths: WIDTHS, heights: HEIGHTS }));
 console.log(`test types: ${names.length} types, ${typeFixtureCount} fixtures x ${FRAMES.length} frames = ${typesIndex.length} pictures; trig ${trig.length} angles; sweep ${WIDTHS.length} x ${HEIGHTS.length}`);
-console.log(`emitted ${fixtures.length} chart fixtures x ${FRAMES.length} frames = ${index.length} pictures, ${choices.length} on-fill choices, ${colourSteps.length} colour steps and ${colourEnds.length} end texts`);
+console.log(`emitted ${fixtures.length} chart fixtures x ${FRAMES.length} frames = ${index.length} pictures, ${choices.length} on-fill choices, ${colourSteps.length} colour steps and ${colourEnds.length} end texts; two-sided ${divSteps.length} steps and ${divEnds.length} end texts`);

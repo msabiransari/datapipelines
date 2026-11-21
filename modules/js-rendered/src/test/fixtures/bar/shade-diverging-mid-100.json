@@ -1,0 +1,88 @@
+{
+ "source": [
+  "lane 1053 make_diverging_fixtures.py (brief 1053 D9)"
+ ],
+ "note": "(2) mid 100, values 90 to 110: the legend reads 90 and 110",
+ "document": {
+  "display_name": "Score around a target of 100",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "delta",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "delta",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "diverging",
+     "mid": 100
+    }
+   },
+   "title": {
+    "text": "Score around a target of 100"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A",
+   "B",
+   "C",
+   "D",
+   "E"
+  ],
+  "amount": [
+   10,
+   15,
+   20,
+   25,
+   30
+  ],
+  "delta": [
+   90,
+   95,
+   100,
+   105,
+   110
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "delta": "DOUBLE"
+ }
+}
