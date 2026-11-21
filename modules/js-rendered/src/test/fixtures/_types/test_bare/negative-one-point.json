@@ -1,0 +1,38 @@
+{
+ "note": "one negative point: a dot at the right edge, the value -7",
+ "document": {
+  "display_name": "Test type test_bare",
+  "config": {
+   "mark": {
+    "type": "test_bare"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    }
+   },
+   "options": {
+    "last": "value",
+    "format": "integer"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0
+  ],
+  "y": [
+   -7
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE"
+ },
+ "expect": {
+  "marks": 1
+ }
+}

@@ -1,0 +1,60 @@
+{
+ "note": "case (c), a domain smaller than the data: a linear right axis over 0..20 with the domain 0..10",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y"
+    },
+    "y2": {
+     "field": "y2",
+     "domain": [
+      0,
+      10
+     ]
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "y": [
+   5,
+   15,
+   25,
+   35,
+   45,
+   55
+  ],
+  "y2": [
+   0,
+   4,
+   8,
+   12,
+   16,
+   20
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}

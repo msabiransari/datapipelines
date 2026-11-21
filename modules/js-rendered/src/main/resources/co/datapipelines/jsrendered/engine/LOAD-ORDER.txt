@@ -17,6 +17,7 @@
 16-lines.js
 17-trig.js
 18-frames.js
+18a-bare.js
 19-colour.js
 20-render.js
 21-lookup.js

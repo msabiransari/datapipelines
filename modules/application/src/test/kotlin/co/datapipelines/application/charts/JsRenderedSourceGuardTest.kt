@@ -132,12 +132,15 @@ class JsRenderedSourceGuardTest {
 
         /**
          * The engine's file count: 23 at brief 1049's base, its two files (17-trig.js, 18-frames.js), brief 1050's one
-         * (19-colour.js) and brief 1052's 21-lookup.js.
+         * (19-colour.js), brief 1052's 21-lookup.js and brief 1051's 18a-bare.js.
          */
-        const val FILE_FLOOR = 27
+        const val FILE_FLOOR = 28
 
-        /** Brief 1049's three test types: test_plain, test_polar, test_quiet; and brief 1052's test_marks. */
-        const val TEST_TYPE_FLOOR = 4
+        /**
+         * Brief 1049's three test types (test_plain, test_polar, test_quiet), brief 1052's test_marks and brief 1051's five
+         * (test_points, test_grid, test_two_axes, test_bins, test_bare).
+         */
+        const val TEST_TYPE_FLOOR = 9
 
         const val BANNED_COUNT = 23
 
