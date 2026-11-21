@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.63 (living document — updated as enums evolve)
+**Status:** v1.64 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -303,6 +303,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `SUCCESS` | All nodes completed; result returned |
 | `FAILED` | A node failed; execution aborted |
 | `ABORTED` | Execution cancelled: client disconnect beyond `sse.disconnect-grace-seconds`, explicit `DELETE /api/v1/executions/{id}`, server shutdown, or the crash sweep ([Metadata DB §8](metadata-db.md#8-operational-jobs)) |
+| `OUTCOME_UNKNOWN` | Terminal (#1035, V66): the family's shared local write transaction was attempted and its acknowledgement was lost — the database may or may not hold the writes, and the engine never replays them to find out. A child of that family inherits it. Carried on the `pipeline_failed` event's `status`; never produced when no commit was attempted ([DAG Executor §16.5](dag-executor.md#165-the-commit-boundary-and-outcome_unknown-1035)) |
 
 **Reserved for future:** `PARTIAL` (partial-result mode where some nodes succeeded but a non-critical path failed — see [ROADMAP](ROADMAP.md)).
 
@@ -1425,6 +1426,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-20 | v1.64 | 1035 (#1035) | **§10 `ExecutionStatus`:** gains `OUTCOME_UNKNOWN` (V66) — terminal; the family's shared commit was attempted and not acknowledged. Carried on `pipeline_failed`'s `status`; the metric tag `status` gains `outcome_unknown`. |
 | 2026-11-21 | v1.63 | #1034 review F1 | §3 scopes the omitted-output `caller` default to DQL; DML always declares its output explicitly. |
 | 2026-11-20 | v1.62 | 1034 (#1034) | **§3 `OutputTarget`:** gains `discard`, the DML-only target whose write is the node's only effect (pipeline contract §4.4). |
 | 2026-11-15 | v1.61 | 989 (#989, js-rendered F5) | **§63 `ChartType`:** rows `line` and `area`, each with its enum entry, schema file, template and fixtures; their `x` is a band or a position (a temporal `x` has the one form `position`). |

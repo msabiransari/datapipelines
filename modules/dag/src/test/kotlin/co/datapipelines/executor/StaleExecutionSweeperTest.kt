@@ -19,6 +19,7 @@ import org.springframework.dao.DataAccessResourceFailureException
 import java.sql.SQLException
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 /**
  * [StaleExecutionSweeper]: the cutoff arithmetic, the return contract, and the
@@ -30,7 +31,7 @@ class StaleExecutionSweeperTest {
     fun `sweeps rows older than the configured timeout`() {
         val executions = mockk<ExecutionRepository>()
         val cutoff = slot<Instant>()
-        every { executions.sweepStaleRunning(capture(cutoff), any()) } returns 3
+        every { executions.sweepStaleRunningDetailed(capture(cutoff), any()) } returns swept(3)
         val before = Instant.now()
 
         val swept = StaleExecutionSweeper(executions, Duration.ofMinutes(60), HEARTBEAT).sweepOnce()
@@ -53,7 +54,7 @@ class StaleExecutionSweeperTest {
     fun `the heartbeat cutoff is three intervals, not the stale-timeout`() {
         val executions = mockk<ExecutionRepository>()
         val heartbeatCutoff = slot<Instant>()
-        every { executions.sweepStaleRunning(any(), capture(heartbeatCutoff)) } returns 0
+        every { executions.sweepStaleRunningDetailed(any(), capture(heartbeatCutoff)) } returns emptyList()
         val before = Instant.now()
 
         StaleExecutionSweeper(executions, Duration.ofMinutes(60), HEARTBEAT).sweepOnce()
@@ -66,7 +67,7 @@ class StaleExecutionSweeperTest {
     @Test
     fun `a metadata-db fault fails the tick, not the scheduler`() {
         val executions = mockk<ExecutionRepository>()
-        every { executions.sweepStaleRunning(any(), any()) } throws DataAccessResourceFailureException("metadata DB down")
+        every { executions.sweepStaleRunningDetailed(any(), any()) } throws DataAccessResourceFailureException("metadata DB down")
 
         val swept = StaleExecutionSweeper(executions, Duration.ofMinutes(60), HEARTBEAT).sweepOnce()
 
@@ -81,7 +82,7 @@ class StaleExecutionSweeperTest {
     @Test
     fun `the failure line names the class and the SQLState - never the store's message`() {
         val executions = mockk<ExecutionRepository>()
-        every { executions.sweepStaleRunning(any(), any()) } throws
+        every { executions.sweepStaleRunningDetailed(any(), any()) } throws
             DataAccessResourceFailureException("UPDATE refused: $SENTINEL", SQLException("driver: $SENTINEL", SQL_STATE))
 
         val (swept, lines) = captured { StaleExecutionSweeper(executions, Duration.ofMinutes(60), HEARTBEAT).sweepOnce() }
@@ -105,7 +106,7 @@ class StaleExecutionSweeperTest {
     fun `a failed tick is counted under job=stale_sweep, a successful one is not`() {
         val registry = SimpleMeterRegistry()
         val executions = mockk<ExecutionRepository>()
-        every { executions.sweepStaleRunning(any(), any()) } returns 2 andThenThrows
+        every { executions.sweepStaleRunningDetailed(any(), any()) } returns swept(2) andThenThrows
             DataAccessResourceFailureException("cancelled", SQLException("canceling statement due to statement timeout", "57014"))
         val sweeper = StaleExecutionSweeper(executions, Duration.ofMinutes(60), HEARTBEAT, registry)
 
@@ -125,6 +126,50 @@ class StaleExecutionSweeperTest {
             .exceptionOrNull()
             .shouldBeInstanceOf<IllegalArgumentException>()
     }
+
+    /**
+     * #1035 (write-transactions §7: "alert on each unknown"): every root the sweep labels OUTCOME_UNKNOWN is one
+     * ERROR line naming its execution id and one increment of the alert meter; SUCCESS and ABORTED roots raise
+     * neither, and the line carries no SQL or message of the store. A real registry, read back.
+     */
+    @Test
+    fun `each execution the sweep labels OUTCOME_UNKNOWN raises its own alert, others raise none`() {
+        val registry = SimpleMeterRegistry()
+        val unknownA = UUID.randomUUID()
+        val unknownB = UUID.randomUUID()
+        val others =
+            listOf(SweptExecution(UUID.randomUUID(), ExecutionStatus.ABORTED), SweptExecution(UUID.randomUUID(), ExecutionStatus.SUCCESS))
+        val executions = mockk<ExecutionRepository>()
+        every { executions.sweepStaleRunningDetailed(any(), any()) } returns
+            others + SweptExecution(unknownA, ExecutionStatus.OUTCOME_UNKNOWN) + SweptExecution(unknownB, ExecutionStatus.OUTCOME_UNKNOWN)
+
+        val (swept, lines) = captured { StaleExecutionSweeper(executions, Duration.ofMinutes(60), HEARTBEAT, registry).sweepOnce() }
+
+        swept shouldBe 4
+        val alerts = lines.filter { it.level == Level.ERROR }
+        alerts.size shouldBe 2
+        alerts.all { it.formattedMessage.contains("event=execution.outcome_unknown") } shouldBe true
+        alerts.map { it.formattedMessage }.let { messages ->
+            messages.any { it.contains("execution_id=$unknownA") } shouldBe true
+            messages.any { it.contains("execution_id=$unknownB") } shouldBe true
+        }
+        registry.counter(StaleExecutionSweeper.UNKNOWN_SWEPT_METER).count() shouldBe 2.0
+    }
+
+    @Test
+    fun `a sweep with no unknown outcome raises no alert`() {
+        val registry = SimpleMeterRegistry()
+        val executions = mockk<ExecutionRepository>()
+        every { executions.sweepStaleRunningDetailed(any(), any()) } returns
+            listOf(SweptExecution(UUID.randomUUID(), ExecutionStatus.ABORTED))
+
+        val (_, lines) = captured { StaleExecutionSweeper(executions, Duration.ofMinutes(60), HEARTBEAT, registry).sweepOnce() }
+
+        lines.none { it.level == Level.ERROR } shouldBe true
+        registry.counter(StaleExecutionSweeper.UNKNOWN_SWEPT_METER).count() shouldBe 0.0
+    }
+
+    private fun swept(count: Int) = List(count) { SweptExecution(UUID.randomUUID(), ExecutionStatus.ABORTED) }
 
     private fun failedTicks(registry: SimpleMeterRegistry): Double =
         registry.counter(ScheduledJob.FAILED_TICK_METER, ScheduledJob.JOB_TAG, "stale_sweep").count()

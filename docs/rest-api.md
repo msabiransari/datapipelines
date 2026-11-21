@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.125 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
+**Status:** v2.128 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-20
@@ -856,6 +856,10 @@ The `error` object is the **failure record** (057/T85): one object, completed on
 
 Emitted when execution finishes successfully, immediately before `data_ready`.
 
+**After the commit (#1035).** When the run enrolled a local write transaction ([DAG Executor §16.4](dag-executor.md#164-the-single-registration-local-write-transaction-1033)), `pipeline_completed` — and `data_ready` — are emitted only after the root's commit is confirmed; until then the stream carries node events and nothing that reads as success. A CHILD of such a family never streams its own `pipeline_completed`/`data_ready` before the settle (its record stays `RUNNING`, pending), and none is emitted for it afterwards.
+
+**`result_unavailable` (#1035 r3).** When the commit is confirmed but the caller result cannot be delivered, `pipeline_completed` carries `"result_unavailable": true` and no `data_ready` follows — so a stream client can tell this from a zero-caller run without reading the record. The field is absent on every other `pipeline_completed`.
+
 ```json
 {
   "execution_id": "exec-uuid",
@@ -876,7 +880,7 @@ Emitted when execution finishes successfully, immediately before `data_ready`.
 
 #### 6.4.6 `pipeline_failed`
 
-Emitted when execution halts due to any node failure. Its `error` object is the SAME failure record `node_failed` carried for the failed node (§6.4.4), unchanged — and is also what `pipeline_executions.error_json` stores, so `GET /executions/{id}` and the execution detail page show it after the fact. A timeout or setup failure carries the same shape minus `node`/`sql` (neither exists for it).
+Emitted when execution halts due to any node failure — and when the family's shared commit was attempted and its acknowledgement lost (#1035): then the payload's `status` is **`"OUTCOME_UNKNOWN"`** instead of `"FAILED"`, `failed_node_id` is `null`, and `error.code` is `pipeline.execution.local_write_commit_failed`. The event name does not change — existing stream clients already treat `pipeline_failed` as terminal-and-not-success — and `status` says which; the database may or may not hold the writes, the engine never re-runs them, and the operator checks the target before any deliberate re-run ([DAG Executor §16.5](dag-executor.md#165-the-commit-boundary-and-outcome_unknown-1035)). Its `error` object is the SAME failure record `node_failed` carried for the failed node (§6.4.4), unchanged — and is also what `pipeline_executions.error_json` stores, so `GET /executions/{id}` and the execution detail page show it after the fact. A timeout or setup failure carries the same shape minus `node`/`sql` (neither exists for it).
 
 ```json
 {
@@ -933,6 +937,7 @@ data: {
 
 - `rows` — the first page. For results ≤ one page, `rows` IS the whole result (`has_more: false`) and no cursor read is needed.
 - `result_url` + `expires_at` — cursor for paging the full result within TTL (§7). Always present, small results included — a client may re-fetch or download in another format within the TTL.
+- On a run that enrolled a local write transaction, `data_ready` is emitted only after the commit is confirmed (#1035). If the commit is confirmed and the result then cannot be delivered, the execution is `SUCCESS` and no `data_ready` follows; the record carries `result_unavailable: true` (§10.2) and the cursor answers `503 result.storage_unavailable`. "Cannot be delivered" is decided after the confirmation from the stored result as it is then — the result prepared before the commit is read back from the store, and a result that is gone (or a store failure) is never announced, never served as an empty page and never cached in the event history as `data_ready`.
 - There is no `delivery_mode` field — the delivery model is uniform (v1.3; the former inline/claim-check split is gone).
 
 #### 6.4.8 `execution_aborted`
@@ -998,7 +1003,7 @@ There is no percentage: no operation knows its total. A slow source query is `ex
 Within a single execution stream, events are ordered:
 1. Exactly one `execution_started` (first).
 2. For each node: zero or one `node_started` → zero or more `node_progress` (§6.4.9) → zero or one of (`node_completed` | `node_failed`). A node's terminal `node_progress` sample (`completed`/`failed`/`aborted`) precedes its `node_completed`/`node_failed`; no `node_progress` for a node follows the node's terminal event, and none follows the execution's.
-3. Exactly one terminal sequence: (`pipeline_completed` [→ `data_ready` if a caller node exists]) | `pipeline_failed` | `execution_aborted`.
+3. Exactly one terminal sequence: (`pipeline_completed` [→ `data_ready` if a caller node exists]) | `pipeline_failed` (`status` `FAILED` or `OUTCOME_UNKNOWN`) | `execution_aborted`. On a family sharing a local write transaction the terminal sequence follows the commit's settlement (#1035): a CHILD's history (`GET /executions/{id}/events`, its `format=json` form and the MCP `events` resource) carries no terminal event while its root is open, and then ends in ONE terminal event — `pipeline_completed` after a `SUCCESS` root, `pipeline_failed` (`status` `FAILED` or `OUTCOME_UNKNOWN`) after a failed one, `execution_aborted` after an abort — with the next `event_id` and the same content on every surface.
 4. Stream closes after the terminal event.
 
 For parallel nodes, events are emitted in real-time as they occur (interleaved). Order between parallel nodes is non-deterministic — on the live stream and, independently, in the §10.3 replay, whose order between parallel nodes is the persistence order; a node's own events keep their order in both.
@@ -1114,11 +1119,11 @@ Registry of record: [Pipeline Contract §13.10](pipeline-contract.md#1310-result
 |---|---|---|
 | `result.execution_not_found` | 404 | Execution ID unknown |
 | `result.execution_incomplete` | 409 | Execution has not completed yet |
-| `result.execution_failed` | 410 | Execution ended in failure — no result to retrieve |
+| `result.execution_failed` | 410 | Execution ended in failure — no result to retrieve. Also `OUTCOME_UNKNOWN` (#1035: the commit was attempted and not acknowledged; `details.status: "OUTCOME_UNKNOWN"`) |
 | `result.expired` | 410 | TTL elapsed; result no longer available |
 | `result.format_unsupported` | 400 | Unknown `format` parameter |
 | `result.too_large` | 500 | (During execution) result exceeded the size cap; execution failed |
-| `result.storage_unavailable` | 503 | Redis unavailable: during execution the execution fails; on a read the request is refused (§10.3's replay, `details.reason: event_log_unavailable`) and may be retried. 500 until v2.91 (#487) |
+| `result.storage_unavailable` | 503 | Also (#1035): the execution is `SUCCESS` — its commit is confirmed — but the caller result was never delivered (`details.reason: result_delivery_failed`); the status is not changed by a delivery failure and the business SQL is never re-run. Redis unavailable: during execution the execution fails; on a read the request is refused (§10.3's replay, `details.reason: event_log_unavailable`) and may be retried. 500 until v2.91 (#487) |
 
 ---
 
@@ -1614,7 +1619,7 @@ GET /executions?pipeline_id={id}&status={status}&offset=0&limit=50
 
 Filters:
 - `pipeline_id` — limit to one pipeline.
-- `status` — `RUNNING | SUCCESS | FAILED | ABORTED`.
+- `status` — `RUNNING | SUCCESS | FAILED | ABORTED | OUTCOME_UNKNOWN` (#1035: terminal; the commit was attempted and not acknowledged — see §6.4.6).
 - `started_after` / `started_before` — ISO 8601 timestamp range.
 
 Each page item carries the §10.2 metadata projection minus `result_url` /
@@ -1626,7 +1631,8 @@ result is unexpired):
 | `execution_id` | uuid | The execution's id |
 | `pipeline_id` | uuid | The pipeline that ran |
 | `pipeline_version` | int | The version of the pipeline that ran |
-| `status` | string | `RUNNING` \| `SUCCESS` \| `FAILED` \| `ABORTED` |
+| `status` | string | `RUNNING` \| `SUCCESS` \| `FAILED` \| `ABORTED` \| `OUTCOME_UNKNOWN` (#1035) |
+| `result_unavailable` | bool | #1035: `true` only on a `SUCCESS` whose commit is confirmed but whose caller result was never delivered (instance lost or store failed after the commit); `false` otherwise. Reported beside the status, never as one |
 | `draft_run` | bool | The version that ran was a draft at the time (or still is / was discarded) — an informational history label, never execution behaviour or promotion eligibility ([Versioning §8](versioning.md#8-executing-drafts)) |
 | `parameters` | object | The execution-time parameters the caller sent |
 | `started_at` | timestamp | Start of execution |
@@ -1639,7 +1645,7 @@ result is unexpired):
 | `executed_by` | uuid | The user the run belongs to (D11, 177): the session's user, or a key's OWNER. Was `triggered_by` until 2026-09-20 — renamed, not re-derived; every row kept its actor |
 | `executed_by_key_kind` | string \| null | Which KIND of credential started it when a key did — `user` \| `endpoint` \| `server` ([enums §18A](enums.md#18a-executedbykeykind--which-kind-of-credential-started-an-execution)); `null` for a signed-in session. An `endpoint` run is nobody's OWN: it lists for workspace admins only, and for the endpoint key itself (§19) |
 | `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` \| `ENDPOINT` \| `SCHEDULE` (#9 — a schedule fired it; `executed_by` is then the system identity, [Auth §4.5](auth.md#45-the-system-service-account-r7)) \| `DASHBOARD` (#10 — a dashboard refresh started it; `executed_by` is the refreshing person, [Dashboards §5](dashboards.md#5-the-runtime); it writes no stored result and is cancelled only through its refresh's abort) |
-| `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child |
+| `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child. Written with the terminal status (#1035 r3), and kept — the prepared result's count — on a `SUCCESS` with `result_unavailable: true`, so a run that had a caller result never reads as a zero-caller run |
 | `result_size_bytes` | int \| null | Size of the materialized caller result |
 | `parent_execution_id` | uuid \| null | The execution whose PIPELINE node spawned this one; null for a root ([§10.2](#102-get-execution-metadata)) |
 | `parent_node_id` | string \| null | That node's id; null for a root |
@@ -1675,6 +1681,7 @@ Returns the execution record (without rows — use §7 for result data):
     "result_expires_at": "...",
     "result_row_count": 1204,       // null for a zero-caller pipeline, and for a `direct`-delivered child
     "result_size_bytes": 48213,
+    "result_unavailable": false,          // #1035: SUCCESS, commit confirmed, caller result never delivered
     "executed_by": "user-uuid",           // D11: the run's user — the session's, or the key's OWNER
     "executed_by_key_kind": null,         // "user" | "endpoint" | "server" when a key started it; null for a session
     "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE" | "ENDPOINT" | "SCHEDULE" | "DASHBOARD",
@@ -1685,6 +1692,8 @@ Returns the execution record (without rows — use §7 for result data):
   }
 }
 ```
+
+**Family settlement (#1035).** A child of a family that shares one local write transaction stays `RUNNING` (no result, no `completed_at`) until the root settles, then reports the root's final status — `SUCCESS`, `FAILED`/`ABORTED`, or `OUTCOME_UNKNOWN` — and its error. Its event history is held the same way: no terminal event until then, and one terminal event carrying that outcome afterwards. A `?root_execution_id=` listing therefore never shows a child ahead of its root. A duplicate `Idempotency-Key` inside the reservation TTL returns the same execution, unknown included.
 
 **Composition lineage.** The three lineage fields are the composition family's links ([Pipeline Contract §8.5](pipeline-contract.md#85-pipeline-nodes), [Metadata DB §4.6](metadata-db.md#46-pipeline_executions)) and are always present — `null` on a root rather than omitted, so "this is a root" and "this server does not report lineage" stay distinguishable. They answer the question a client is left with when a `node_completed` names a `child_execution_id` (§6.4.3): fetch that id here, and `parent_execution_id` / `parent_node_id` say where it came from. `root_execution_id` is never null (it is the execution's own id for a root), so grouping a family needs no special case. §10.1's listing carries the same fields — it is the same projection, minus `result_url` / `result_expires_at`.
 
@@ -3122,6 +3131,9 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v2.128 | 1035 r3 (#1035) | **§6.4.5:** `pipeline_completed` carries `result_unavailable: true` (absent otherwise) when the confirmed commit's caller result cannot be delivered. **§6.4.7:** that decision reads the stored result back after the confirmation; a lost result is never announced or served as an empty success. **§10.2:** `result_row_count` is written with the terminal status and kept on an unavailable result. No new code, route or permission. |
+| 2026-11-21 | v2.127 | 1035 r2 (#1035) | **§10.3 / §10.2 family settlement:** a held child's event history (durable record, replay and MCP) carries no terminal event until its root settles, then one terminal event with the root's outcome and the next `event_id`; no route or field changes. |
+| 2026-11-20 | v2.126 | 1035 (#1035) | **Commit outcomes.** §6.4.5/§6.4.7/§6.5: success events follow the root's confirmed commit; a held child streams neither. §6.4.6: `pipeline_failed` also carries `status: "OUTCOME_UNKNOWN"`. §7.6: `result.execution_failed` covers `OUTCOME_UNKNOWN`; `result.storage_unavailable` covers a confirmed SUCCESS whose result was not delivered. §10.1/§10.2: `status` gains `OUTCOME_UNKNOWN`; the record gains `result_unavailable`; family settlement. No new code, no new route, no new permission. |
 | 2026-11-20 | v2.125 | #1037 merge follow-up F1 | **§25:** the API dependency name counts its uppercase mutation method prefix separately from the existing 200-character path limit; other fields and families keep their limit. The request schema and HTTP regression cover every supported method at the path boundary. |
 | 2026-11-19 | v2.124 | 1037 (#1037, published method identities) | **Additive.** §19's routes gain method identity: the intro admits non-GET routes at the same grammar (body/admission/idempotency arrive with #1038/#1039; the operator gate `mutations-enabled` refuses an otherwise-authorized mutation `503 endpoint.mutations_disabled`); §19.1's ambiguity rule and `UNIQUE (path_pattern, method)` are per-method, with the cross-workspace `409` redacted; §19.2's read-only pin rule is a GET rule (a mutation route may pin a writing pipeline; the pin rules themselves run for every method); §19.3 adds the non-GET request rules — session `401` first, exact method grants, opaque visibility (`Allow` = the visible methods, `404` at none); §19.5's management is addressed `?path=&method=` and create takes optional `method` (`400 endpoint.method_invalid` otherwise); §19.6's 405 and 503 rows describe the method era; §19.5's promotion paragraph states that only GET routes and GET grants travel (`409 endpoint.promotion.method_unsupported` on the sender, and on a receiver for an entry naming a non-GET `method`). |
 | 2026-11-15 | v2.123 | 987 (#987, js-rendered F3) | **Deliberate break, decided by the js-rendered charts record O-13:** §23.3's `GET /{id}/runtime/config` answers without `renderer` (its one member, `renderer.bundle`, named the chart library's bundle the page loaded); the visualization preview page's configuration loses the same object. The page loads the chart engine's files itself, from one list. No route, status, permission or other field changed. |

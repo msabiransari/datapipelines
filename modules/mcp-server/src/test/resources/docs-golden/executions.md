@@ -2,7 +2,8 @@
 # Executions — runs, results and failures
 
 An **execution** is one run of a pipeline: the nodes execute in `depends_on` order, each
-staging or shipping its rows, until a terminal state — `SUCCESS`, `FAILED` or `ABORTED`. The
+staging or shipping its rows, until a terminal state — `SUCCESS`, `FAILED`, `ABORTED` or
+`OUTCOME_UNKNOWN` (see "When a write's outcome is unknown"). The
 final result carries `node_stats` (per-node status, durations, row counts, errors) — the
 authoritative per-node record.
 
@@ -38,6 +39,21 @@ cursor. Page the remainder with `executions_get_result` (`offset`/`limit`) **wit
 afterwards the result is gone (`result.expired`); what paging is for and what a truncated tool
 result does to a reply is the pipelines guide's step 6. Zero-caller pipelines return stats
 with no rows — a valid design, not a failure.
+
+## When a write's outcome is unknown
+
+A run whose writes share one database transaction publishes nothing — no result, no
+`SUCCESS` — until its single commit is confirmed. A run that ends **`OUTCOME_UNKNOWN`**
+(`error.code` `pipeline.execution.local_write_commit_failed`) means the commit was attempted
+and its acknowledgement was lost: the writes may or may not exist. **Never re-run the
+pipeline to find out** — a re-run can write twice. Check the target database, or tell the
+person with the execution id, before any deliberate new run. `executions_get_result` answers
+`result.execution_failed` for it. A `SUCCESS` carrying `result_unavailable: true` committed;
+only its result was not delivered (`result.storage_unavailable`; `pipelines_execute` returns
+it as `result_unavailable: true` with no rows), and the writes are not repeated by re-running. Until the root settles, a child run of the same family stays
+`RUNNING` and its event history shows no terminal event; afterwards it ends in one terminal
+event carrying the root's outcome. The wait for a commit is bounded by the run's own time
+budget: a commit that never answers ends the run `OUTCOME_UNKNOWN` at that budget.
 
 ## When a run fails
 

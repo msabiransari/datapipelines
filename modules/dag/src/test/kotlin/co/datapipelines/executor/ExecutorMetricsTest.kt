@@ -234,10 +234,12 @@ class ExecutorMetricsTest {
         ExecutionStatus.entries.forEach { metrics.executionFinished(pipelineId, it, Duration.ofMillis(1)) }
         AbortReason.entries.forEach { metrics.executionAborted(it) }
 
-        registry
-            .find(ExecutorMetrics.EXECUTIONS_TOTAL)
-            .counters()
-            .map { it.id.getTag("status") } shouldContainExactlyInAnyOrder listOf("running", "success", "failed", "aborted")
+        val statusTags =
+            registry
+                .find(ExecutorMetrics.EXECUTIONS_TOTAL)
+                .counters()
+                .map { it.id.getTag("status") }
+        statusTags shouldContainExactlyInAnyOrder listOf("running", "success", "failed", "aborted", "outcome_unknown")
         // observability §4.1: reason ∈ {client_disconnect, cancelled, shutdown} — the wire values.
         registry
             .find(ExecutorMetrics.EXECUTIONS_ABORTED)

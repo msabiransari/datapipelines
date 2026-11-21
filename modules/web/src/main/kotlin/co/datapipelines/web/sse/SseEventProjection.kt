@@ -158,17 +158,25 @@ class SseEventProjection(
             ERROR to errorPayload(event.error),
         )
 
-    private fun completedPayload(event: PipelineCompleted) =
-        mapOf(
-            EXECUTION_ID to event.executionId,
-            PIPELINE_ID to event.pipelineId,
-            PIPELINE_VERSION to event.pipelineVersion,
-            STARTED_AT to event.startedAt,
-            "completed_at" to event.completedAt,
-            DURATION_MS to event.durationMs,
-            STATUS to ExecutionStatus.SUCCESS.name,
-            NODE_STATS to event.nodeStats,
-        )
+    /**
+     * `pipeline_completed` (§6.4.5). #1035: `result_unavailable: true` is added only when the commit is
+     * confirmed but the caller result cannot be delivered — no `data_ready` follows, and a stream client
+     * can tell that from a zero-caller run without reading the record. Absent otherwise (unchanged wire).
+     */
+    private fun completedPayload(event: PipelineCompleted): Map<String, Any?> {
+        val payload =
+            mapOf(
+                EXECUTION_ID to event.executionId,
+                PIPELINE_ID to event.pipelineId,
+                PIPELINE_VERSION to event.pipelineVersion,
+                STARTED_AT to event.startedAt,
+                "completed_at" to event.completedAt,
+                DURATION_MS to event.durationMs,
+                STATUS to ExecutionStatus.SUCCESS.name,
+                NODE_STATS to event.nodeStats,
+            )
+        return if (event.resultUnavailable) payload + (RESULT_UNAVAILABLE to true) else payload
+    }
 
     private fun failedPayload(event: PipelineFailed) =
         mapOf(
@@ -178,7 +186,7 @@ class SseEventProjection(
             STARTED_AT to event.startedAt,
             "failed_at" to event.failedAt,
             DURATION_MS to event.durationMs,
-            STATUS to ExecutionStatus.FAILED.name,
+            STATUS to event.status.name,
             "failed_node_id" to event.failedNodeId,
             ERROR to errorPayload(event.error),
             NODE_STATS to event.nodeStats,
@@ -250,6 +258,7 @@ class SseEventProjection(
         const val DURATION_MS = "duration_ms"
         const val STATUS = "status"
         const val NODE_STATS = "node_stats"
+        const val RESULT_UNAVAILABLE = "result_unavailable"
         const val ERROR = "error"
         const val CORRELATION_ID = "correlation_id"
     }

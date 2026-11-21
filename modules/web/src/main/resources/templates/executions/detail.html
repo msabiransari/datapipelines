@@ -15,7 +15,7 @@
         <div class="u-row u-wrap u-mb-sm">
           <span class="ds-badge"
                 th:classappend="${record.status.name() == 'SUCCESS'} ? 'ds-badge-success' : (${record.status.name() == 'FAILED'} ? 'ds-badge-danger' : (${record.status.name() == 'RUNNING'} ? 'ds-badge-primary' : 'ds-badge-warning'))"
-                th:text="${record.status.name()}">status</span>
+                th:text="${#strings.replace(record.status.name(),'_',' ')}">status</span>
           <span class="u-text-meta u-muted">v<span th:text="${record.pipelineVersion}">1</span></span>
           <!-- versioning §8 / D55: this run's version was a DRAFT when it ran (or still is). -->
           <span class="ds-badge ds-badge-warning" th:if="${draftRun}" th:attr="data-draft-run=true">DRAFT</span>
@@ -149,6 +149,13 @@
       <div class="ds-empty">
         <div class="ds-empty-title">No caller result</div>
         <div class="ds-empty-description">This pipeline has no output node or is a pure write-back pipeline.</div>
+      </div>
+    </th:block>
+
+    <th:block th:if="${resultState == 'unavailable'}">
+      <div class="ds-empty" data-result-state="unavailable">
+        <div class="ds-empty-title">Result unavailable</div>
+        <div class="ds-empty-description">The run succeeded and its writes are committed, but its result could not be delivered. Do not re-run it to recover the result: the writes would run again.</div>
       </div>
     </th:block>
 

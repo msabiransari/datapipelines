@@ -60,6 +60,8 @@ class LocalWritePlanner(
     private val pipelines: PipelineResolver,
     private val datasources: DatasourceRegistry,
     private val maxCompositionDepth: Int,
+    /** (#1035) The durable commit boundary every transaction this planner opens writes to. */
+    private val commitLedger: CommitLedger = CommitLedger.NONE,
 ) {
     /**
      * The plan for [pipeline] as the root of a run in [workspaceId] (§3.1-3.2). Eligibility
@@ -267,6 +269,7 @@ class LocalWritePlanner(
             metrics = metrics,
             dispatcher = dispatcher,
             deadline = deadline,
+            ledger = commitLedger,
         )
 
     private fun eligibleIn(datasource: co.datapipelines.datasources.Datasource?): Boolean =

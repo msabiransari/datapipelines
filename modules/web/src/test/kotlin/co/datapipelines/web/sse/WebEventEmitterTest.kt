@@ -4,6 +4,7 @@ import co.datapipelines.events.DataReady
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.PipelineCompleted
+import co.datapipelines.events.PipelineFailed
 import co.datapipelines.events.SseEventType
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionEventRepository
@@ -12,6 +13,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorMetrics
+import co.datapipelines.executor.MappedError
 import co.datapipelines.web.config.SseProperties
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
@@ -22,7 +24,6 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.slot
 import io.mockk.verify
-import io.mockk.verifyOrder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch

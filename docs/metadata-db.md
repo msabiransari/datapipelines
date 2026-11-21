@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.70 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.72 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-19
+**Last updated:** 2026-11-20
 
 ---
 
@@ -313,7 +313,7 @@ CREATE TABLE pipeline_executions (
     execution_id        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     pipeline_id         UUID        NOT NULL REFERENCES pipelines(id),
     pipeline_version    INTEGER     NOT NULL,        -- snapshot of version at execution time
-    status              TEXT        NOT NULL,        -- 'RUNNING' | 'SUCCESS' | 'FAILED' | 'ABORTED'
+    status              TEXT        NOT NULL,        -- 'RUNNING' | 'SUCCESS' | 'FAILED' | 'ABORTED' | 'OUTCOME_UNKNOWN' (V66)
     parameters_json     JSONB       NOT NULL DEFAULT '{}', -- the FULLY RESOLVED Context (see below)
     executed_by         UUID        NOT NULL REFERENCES users(id), -- the run's user: the session's, or who the key ACTS AS — the member for an MCP key, the key's own identity for an endpoint/server key since V34 (was triggered_by; renamed by V30, D11)
     executed_by_key_kind TEXT,                       -- 'user' | 'mcp' (V37) | 'endpoint' | 'server' | 'dashboard' (V45) when a key started it; NULL = a signed-in session (V30)
@@ -332,7 +332,11 @@ CREATE TABLE pipeline_executions (
     parent_node_id      TEXT,                        -- PIPELINE node id in the parent that spawned this execution; NULL for roots (V3)
     root_execution_id   UUID        NOT NULL,        -- top ancestor; equals execution_id for roots — backfilled = own id (V3)
     heartbeat_at        TIMESTAMPTZ,                 -- the owning instance's liveness stamp while RUNNING; NULL on a pre-V21 row (V21, §8.3)
-    CONSTRAINT chk_status CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED')),
+    commit_attempted_at TIMESTAMPTZ,                 -- V66 (#1035): the customer commit was ATTEMPTED — stamped before it is called; NULL = never attempted
+    commit_confirmed_at TIMESTAMPTZ,                 -- V66 (#1035): the driver CONFIRMED the commit; NULL = not confirmed
+    settlement_pending  BOOLEAN     NOT NULL DEFAULT FALSE, -- V66 (#1035): a child of a shared-transaction family finished its work; the root's terminal write settles it
+    result_unavailable  BOOLEAN     NOT NULL DEFAULT FALSE, -- V66 (#1035): SUCCESS whose commit is confirmed but whose caller result was never delivered
+    CONSTRAINT chk_status CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED', 'OUTCOME_UNKNOWN')),  -- 'OUTCOME_UNKNOWN' added by V66
     CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE', 'ENDPOINT', 'SCHEDULE', 'DASHBOARD')),  -- 'PIPELINE' added by V3, 'ENDPOINT' by V11, 'SCHEDULE' by V38, 'DASHBOARD' by V43
     CONSTRAINT chk_executions_executed_by_key_kind CHECK (executed_by_key_kind IS NULL OR executed_by_key_kind IN ('user', 'mcp', 'endpoint', 'server', 'dashboard')),  -- V30; 'mcp' added by V37, 'dashboard' by V45
     CONSTRAINT fk_executions_pipeline_version
@@ -349,6 +353,8 @@ CREATE INDEX idx_executions_correlation ON pipeline_executions(correlation_id)
 CREATE INDEX idx_executions_root ON pipeline_executions(root_execution_id);   -- family lookup / cancellation (V3)
 CREATE INDEX idx_executions_heartbeat ON pipeline_executions(heartbeat_at)    -- the crash sweep's other access path (V21, §8.3)
     WHERE status = 'RUNNING';
+CREATE INDEX idx_executions_settlement_pending ON pipeline_executions(root_execution_id)  -- the family settlement's access path (V66, #1035)
+    WHERE settlement_pending;
 ```
 
 **Notes:**
@@ -359,6 +365,7 @@ CREATE INDEX idx_executions_heartbeat ON pipeline_executions(heartbeat_at)    --
 - **`parameters_json` holds the FULLY RESOLVED Context, and its name is historical (072).** The row is inserted with the request's `parameters` object as sent, and the terminal UPDATE replaces it with what the nodes actually saw: org configuration (`org_*`), the platform keys (`current_date`, `current_timestamp`, `execution_id`), the declared parameters after defaulting, the execute-time inputs and every `CALCULATOR` node's output ([Calculators design §0.5](superpowers/specs/2026-09-04-calculators-design.md), [DAG Executor §7.3](dag-executor.md#73-the-context-snapshot--pipeline_executionsparameters_json)). The name predates calculators and org config, when parameters WERE the whole Context; it is not renamed because a rename costs a migration and a re-read of every consumer, and this note costs a line. Without the snapshot a completed execution cannot answer "which fiscal quarter did this run report on?" — the caller's parameters do not contain it, and the configuration that produced it may since have changed.
 - **`result_schema_json` (V47, #328)** rides the same `recordResult` write as `result_row_count` / `result_size_bytes` — the stored result's columns, from the driver's `ResultSetMetaData` through the result store. **History, not availability**, exactly like its siblings: durable after the Redis key expires, and what the release flip (§4.5 `caller_output_json`) copies from. The D2 array shape, the 256-column / 128-character bounds (past them: record NULL + `warn`, never fail) and the JSON-null-`nullable` rule are pipeline-contract §3.3.1. Column NAMES and types only — never row values.
 - **Lineage columns (V3).** A PIPELINE node's child execution records `parent_execution_id` + `parent_node_id` (NULL for roots); `root_execution_id` is the top ancestor. The migration backfills `root_execution_id = execution_id` for pre-existing rows and sets it NOT NULL from then on — one indexed query (`idx_executions_root`) returns the whole family and cancellation keys off it, with no NULL special-case anywhere. The repository binds `root_execution_id` as the record's own `execution_id` when the caller leaves it null, so roots never have to repeat their id.
+- **The commit boundary (V66, #1035; [pipeline write transactions design](../../datapipelines-orchestration/design-records/pipeline-write-transactions.md) §3.5/§4).** A family that shares ONE local write transaction settles at one moment, the root's commit. `status` gains **`OUTCOME_UNKNOWN`** — terminal; the commit was attempted and its acknowledgement was lost, so the target may or may not hold the writes and the engine never replays them to find out. `commit_attempted_at` is stamped by an autocommit statement on this table BEFORE the customer commit is called (no metadata transaction is held across customer I/O); `commit_confirmed_at` after the driver confirmed it. The stale sweep ([§8.3](#83-stale-execution-sweep)) reads the pair: confirmed → `SUCCESS` (+ `result_unavailable`), attempted but unconfirmed → `OUTCOME_UNKNOWN`, neither → `ABORTED` `instance_lost` (nothing was ever attempted, so the abort is a fact). `settlement_pending` marks a CHILD of an enrolled family that finished its work: its row stays `RUNNING` (so no reader shows a result for writes that are not durable) until the root's terminal write settles every pending child to the root's final status and error. `result_unavailable` reports a delivery failure after a confirmed commit separately — a transport failure never changes an execution's status. All four are NULL / `FALSE` on every row written before V66 and on every execution that enrolled no transaction. Rolling back: [§7.5](#75-rolling-back-v66-execution-commit-outcomes-1035).
 - **No `result_delivery` column.** Under D9 there is exactly one delivery path (every caller result is materialized in Redis and read through the cursor), so the old `'inline' | 'claim_check'` discriminator describes a fork that no longer exists. `result_row_count` and `result_size_bytes` remain as history/observability facts — they describe a result that is very likely already expired, and they are **not** a claim that the result is still retrievable. Retrievability is a Redis TTL question ([§9](#9-what-is-not-in-this-database)).
 - Both result columns are NULL for pipelines with zero caller nodes (legal under D1 — pure write-back pipelines).
 - `updated_at` is absent by design: the row is inserted on start and receives a terminal UPDATE whose timestamp is `completed_at`; `recordResult` separately fills the result-history columns before or after that UPDATE without changing the completion timestamp ([DAG Executor §10.1](dag-executor.md#101-how-an-emitted-event-becomes-durable-266)).
@@ -2347,6 +2354,7 @@ CREATE TABLE lake_storage_inventory (
 | `pipeline_executions` | `pipeline_executions_pkey` | via PK | Lookup by `execution_id` |
 | `pipeline_executions` | `idx_executions_pipeline` | explicit | List executions for a pipeline, newest first |
 | `pipeline_executions` | `idx_executions_status_running` | explicit (partial) | Find in-flight executions by AGE — the stale sweep's backstop path for rows with no heartbeat ([§8.3](#83-stale-execution-sweep)) |
+| `pipeline_executions` | `idx_executions_settlement_pending` | explicit (partial, `WHERE settlement_pending`) | V66 (#1035): the family settlement's access path — pending children by their root ([§4.6](#46-pipeline_executions)) |
 | `pipeline_executions` | `idx_executions_heartbeat` | explicit (partial) | Find in-flight executions by HEARTBEAT — the stale sweep's primary path since V21, and why a 15-second tick stays cheap ([§8.3](#83-stale-execution-sweep)) |
 | `pipeline_executions` | `idx_executions_user` | explicit | List executions by user |
 | `pipeline_executions` | `idx_executions_correlation` | explicit (partial) | Trace lookup by correlation id |
@@ -2767,6 +2775,49 @@ COMMIT;
 
 A rollback that skips step 3 is refused by the previous binary at startup; do not "repair" the history instead — `flyway repair` or `spring.flyway.ignore-migration-patterns=*:missing` removes exactly the refusal that keeps non-GET metadata away from a binary that would misread it.
 
+### 7.5 Rolling back V66 (execution commit outcomes, #1035)
+
+**The boundary.** A binary built before V66 cannot read what V66 lets the engine write: `OUTCOME_UNKNOWN` is a status its history, stream and scheduler outcome read do not parse, and its stale sweep labels a `RUNNING` row `ABORTED` `instance_lost` with no knowledge of `commit_attempted_at` — the label the design forbids on an execution whose customer commit may have happened. A shipped jar cannot be changed, so the refusal is in the schema's history, by the V65 mechanism ([§7.4](#74-rolling-back-v65-published-method-identities-1037)): `db/downgrade-barrier/R__execution_commit_outcome_downgrade_barrier.sql` is a repeatable migration (a harmless `COMMENT ON COLUMN pipeline_executions.commit_attempted_at`), so every binary without it **refuses to start** with `Detected applied migration not resolved locally: execution commit outcome downgrade barrier`. `ExecutionCommitOutcomeDowngradeBarrierIntegrationTest` pins both halves.
+
+**Rollback is deliberate, and it REFUSES to rewrite an unknown outcome.** Order matters:
+
+1. Take a backup (`pg_dump`). The block drops the four V66 columns, so `result_unavailable` and the commit stamps of settled executions are not recoverable from the schema afterwards.
+2. Drain: stop admitting runs, let admitted executions settle or abort them explicitly ([Deployment §8.3.1](deployment.md)), then stop **every** instance running a V66-aware binary — one left running writes V66 rows after the cleanup.
+3. Run this block on the metadata database, as one transaction. It is the single source: the integration test extracts and executes THIS text. The block **raises and changes nothing** while any `OUTCOME_UNKNOWN` row, any `RUNNING` row with a commit attempt, or any pending child exists: an unknown outcome stays readable in the V66 schema, and no older reader is allowed to invent a label for it. Resolve those executions first — the operator checks the target database per the execution id, exports the row, and removes or rewrites it under their own change control (the product never rewrites an unknown outcome) — or stays on the V66 binary.
+
+<!-- v66-rollback:start -->
+```sql
+BEGIN;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pipeline_executions
+                WHERE status = 'OUTCOME_UNKNOWN'
+                   OR settlement_pending
+                   OR (status = 'RUNNING' AND commit_attempted_at IS NOT NULL)) THEN
+        RAISE EXCEPTION 'V66 rollback refused: OUTCOME_UNKNOWN or unsettled commit-attempt executions exist; an older binary cannot read them';
+    END IF;
+END $$;
+DROP INDEX idx_executions_settlement_pending;
+ALTER TABLE pipeline_executions DROP CONSTRAINT chk_status;
+ALTER TABLE pipeline_executions ADD CONSTRAINT chk_status
+    CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED'));
+ALTER TABLE pipeline_executions
+    DROP COLUMN commit_attempted_at,
+    DROP COLUMN commit_confirmed_at,
+    DROP COLUMN settlement_pending,
+    DROP COLUMN result_unavailable;
+-- Forget V66 and its barrier, so a later upgrade re-applies both.
+DELETE FROM flyway_schema_history
+ WHERE version = '66'
+    OR (version IS NULL AND description = 'execution commit outcome downgrade barrier');
+COMMIT;
+```
+<!-- v66-rollback:end -->
+
+4. Start the previous binary. A V65-aware binary that predates V66 validates cleanly once the history rows are gone.
+
+A rollback that skips step 3 is refused by the previous binary at startup; do not "repair" the history instead — `flyway repair` or `spring.flyway.ignore-migration-patterns=*:missing` removes exactly the refusal that keeps `OUTCOME_UNKNOWN` away from a binary that would mislabel it.
+
 ---
 
 ## 8. Operational Jobs
@@ -2833,6 +2884,10 @@ UPDATE pipeline_executions
 ```
 
 `:staleTimeoutMinutes` ← [`datapipelines.executions.stale-timeout-minutes`](configuration.md#311-execution-history). `:instanceLostError` is the standard error envelope with code `pipeline.execution.instance_lost`. The UPDATE is bounded (#326): a JDBC `queryTimeout` of `SWEEP_STATEMENT_TIMEOUT_SECONDS` (10 s, a code constant beside the 15 s cadence, not a key), so an UPDATE queued behind a lock is cancelled with SQLState `57014`, marks nothing, and the next tick retries.
+
+#### The commit boundary decides the label (V66, #1035)
+
+The sweep no longer has one outcome. It is ONE `UPDATE … SET status = CASE … RETURNING` over the stale predicate (a `settlement_pending` child is skipped: it is judged by its root, never on its own heartbeat), and the label is decided inside that statement from the row's evidence at write time: `commit_confirmed_at IS NOT NULL` → `SUCCESS` with `result_unavailable = TRUE` (the commit is durable; only the delivery was lost); else `commit_attempted_at IS NOT NULL` → `OUTCOME_UNKNOWN` with the `pipeline.execution.local_write_commit_failed` error envelope (the commit may have happened); else `ABORTED` `pipeline.execution.instance_lost`, as before. One statement is what makes the decision safe against a boundary stamp that lands while the sweep runs: Postgres re-evaluates the `WHERE` and the `CASE` against the newest row version once the row lock frees, so a stamp committed meanwhile is read, never overtaken, and a heartbeat that resumes meanwhile leaves the row `RUNNING` for a later tick. The stamps themselves are written only while `status = 'RUNNING'`, so a resumed execution cannot stamp a row the sweep already settled. Then pending children whose root is terminal inherit the root's status. An execution is never labelled `ABORTED` once a commit was attempted, and never `OUTCOME_UNKNOWN` once the confirmation was stamped. Each `OUTCOME_UNKNOWN` it writes is alerted per execution (observability §3.4I).
 
 #### The heartbeat (108 §D, V21)
 
@@ -2919,6 +2974,8 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.72 | V66 follow-up (#1035 r2) | **§8.3** the sweep decides the label in ONE `UPDATE … CASE … RETURNING` (was three ordered UPDATEs that a boundary stamp landing between them could mislabel) and alerts per `OUTCOME_UNKNOWN`; no schema change. |
+| 2026-11-20 | v1.71 | V66 (#1035, execution commit outcomes) | **V66 — the commit boundary.** `pipeline_executions` (§4.6) gains `commit_attempted_at`, `commit_confirmed_at`, `settlement_pending`, `result_unavailable`; `chk_status` widens to include `OUTCOME_UNKNOWN`; new partial `idx_executions_settlement_pending` (§5). **§8.3**: the stale sweep labels by the commit boundary — confirmed → SUCCESS + `result_unavailable`, attempted → OUTCOME_UNKNOWN, never attempted → ABORTED `instance_lost`. **§7.5 Rolling back V66** and the repeatable `R__execution_commit_outcome_downgrade_barrier.sql`: a binary older than V66 cannot read `OUTCOME_UNKNOWN`, so a repeatable it cannot resolve makes it refuse to start; the documented block REFUSES while any unknown or unsettled commit attempt exists. |
 | 2026-11-19 | v1.70 | V65 (#1037, published method identities) | **V65 — method identity for `published_endpoints` (§4.13), exact mutation grants for `endpoint_key_bindings` (§4.14).** `published_endpoints` gains `method` (`GET`/`POST`/`PUT`/`DELETE`, CHECK'd, `DEFAULT 'GET'` is the backfill) and `UNIQUE (path_pattern)` narrows to `uq_published_endpoints_path_method (path_pattern, method)` — V11's table-level constraint was dropped by its Postgres name `published_endpoints_path_pattern_key`. `endpoint_key_bindings` gains `method`, `endpoint_id` (NULL for GET rows, `ON DELETE CASCADE`, shape CHECK'd) and the partial `idx_endpoint_key_bindings_endpoint`; the PK widens to `(path_prefix, api_key_id, method)`. §5's three rows updated. Down path documented in §7.4 (the one text the integration test executes), not shipped. **§7.4 Rolling back V65** and the repeatable `R__published_endpoint_method_downgrade_barrier.sql`: a binary older than V65 would START on this schema (Flyway ignores a future versioned migration) and serve non-GET metadata as GET, so a repeatable it cannot resolve makes every such binary refuse to start; rollback is the documented block, then the previous binary. |
 | 2026-11-14 | v1.69 | 969 (#969, dp-lake P6) — renumbered at the spec merge after #962's v1.67 and #964's v1.68 | **§4.55 `lake_maintenance_runs`**: compaction's own keys in its `parts_json` entry (`committed`, `left_for_fresh_run`, `blocked`, `largest_need_bytes`, `limit_bytes`, `limit_source`, and `groups`, one flat object per committed group). No DDL change, no migration. |
 | 2026-11-14 | v1.68 | V64 (#964, dp-lake P6) | **V64 — the lake storage breakdown.** New **§4.60 `lake_storage_inventory`**: the latest inventory per table, six rows (one per `StorageRow`, V64's CHECK) with their object count, bytes, one time and the run id, replaced by each cleanup in one transaction. §3 ERD, §5 (its primary key) and §5A (derived) updated. Down path documented in the migration header, not shipped. |

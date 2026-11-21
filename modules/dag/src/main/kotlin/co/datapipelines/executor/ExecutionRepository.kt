@@ -95,6 +95,27 @@ const val MAX_RECORDED_SCHEMA_COLUMNS = 256
 /** #328 — the per-column-name half of the record bounds; see [MAX_RECORDED_SCHEMA_COLUMNS]. */
 const val MAX_RECORDED_COLUMN_NAME_LENGTH = 128
 
+/** One root the crash sweep moved out of `RUNNING` (#1035), with the final status the evidence decided. */
+data class SweptExecution(
+    val executionId: UUID,
+    val status: ExecutionStatus,
+)
+
+/** A provisional child that [ExecutionRepository.settleFamiliesDetailed] just settled, as its row now reads (#1035 R2). */
+data class SettledChild(
+    val executionId: UUID,
+    val pipelineId: UUID,
+    val pipelineVersion: Int,
+    val correlationId: UUID?,
+    val startedAt: Instant,
+    val completedAt: Instant,
+    val durationMs: Long,
+    val failedNodeId: String?,
+    val nodeStatsJson: String?,
+    val status: ExecutionStatus,
+    val errorJson: String?,
+)
+
 /**
  * One `pipeline_executions` row (metadata-db §4.6).
  *
@@ -140,6 +161,11 @@ data class ExecutionRecord(
     val rootExecutionId: UUID? = null,
     /** The credential kind behind [executedBy] when a key started the run; null for a session (D11, V30). */
     val executedByKeyKind: ExecutedByKeyKind? = null,
+    /**
+     * #1035 (V66) — the commit is durably confirmed (the status says [ExecutionStatus.SUCCESS]) but the caller
+     * result could not be delivered. Separate from the status: a delivery failure never changes it.
+     */
+    val resultUnavailable: Boolean = false,
 ) {
     /**
      * D11 — is this run [userId]'s OWN, as the own-runs filter defines it.
@@ -276,6 +302,7 @@ class ExecutionRepository(
         resultRowCount: Long? = null,
         resultSizeBytes: Long? = null,
         contextJson: String? = null,
+        resultUnavailable: Boolean = false,
     ): Boolean =
         lifecycleJdbc.update(
             """
@@ -288,11 +315,13 @@ class ExecutionRepository(
                    failed_node_id = :failedNodeId,
                    error_json = CAST(:errorJson AS jsonb),
                    result_row_count = COALESCE(CAST(:resultRowCount AS BIGINT), result_row_count),
-                   result_size_bytes = COALESCE(CAST(:resultSizeBytes AS BIGINT), result_size_bytes)
+                   result_size_bytes = COALESCE(CAST(:resultSizeBytes AS BIGINT), result_size_bytes),
+                   result_unavailable = result_unavailable OR :resultUnavailable
              WHERE execution_id = :executionId
             """.trimIndent(),
             mapOf(
                 "executionId" to executionId,
+                "resultUnavailable" to resultUnavailable,
                 "status" to status.name,
                 "completedAt" to java.sql.Timestamp.from(completedAt),
                 "durationMs" to durationMs,
@@ -304,6 +333,115 @@ class ExecutionRepository(
                 "contextJson" to contextJson,
             ),
         ) == 1
+
+    /**
+     * #1035 — the provisional terminal write of a CHILD in an enrolled family: its work finished,
+     * its writes are not durable until the root settles. The row stays `RUNNING` (every reader
+     * withholds it) with `settlement_pending` set; the stats and resolved Context the terminal
+     * UPDATE would have written are kept so the settled row loses nothing. `completed_at`,
+     * `duration_ms` and the final status arrive with [settleFamilies].
+     *
+     * @return true when a row was updated; false when the execution is unknown or already terminal.
+     */
+    fun completeProvisionally(
+        executionId: UUID,
+        nodeStatsJson: String,
+        contextJson: String? = null,
+    ): Boolean =
+        lifecycleJdbc.update(
+            """
+            UPDATE pipeline_executions
+               SET settlement_pending = TRUE,
+                   parameters_json = COALESCE(CAST(:contextJson AS jsonb), parameters_json),
+                   node_stats_json = CAST(:nodeStatsJson AS jsonb)
+             WHERE execution_id = :executionId AND status = 'RUNNING'
+            """.trimIndent(),
+            mapOf("executionId" to executionId, "nodeStatsJson" to nodeStatsJson, "contextJson" to contextJson),
+        ) == 1
+
+    /**
+     * #1035 — the commit-attempt boundary, written by its own autocommit statement BEFORE the root
+     * calls the customer database's commit (no metadata transaction spans customer I/O). Once this
+     * returns true a stale sweep may no longer label the execution `ABORTED`: the commit may have
+     * landed.
+     *
+     * @return true when the stamp is durable; false when the row is missing or no longer `RUNNING`
+     *   (the caller must then refuse to commit).
+     */
+    fun markCommitAttempt(executionId: UUID): Boolean =
+        lifecycleJdbc.update(
+            "UPDATE pipeline_executions SET commit_attempted_at = NOW() WHERE execution_id = :executionId AND status = 'RUNNING'",
+            mapOf("executionId" to executionId),
+        ) == 1
+
+    /** #1035 — stamps the driver's confirmation of the commit; the sweep reads it as SUCCESS evidence. */
+    fun markCommitConfirmed(executionId: UUID): Boolean =
+        lifecycleJdbc.update(
+            """
+            UPDATE pipeline_executions SET commit_confirmed_at = NOW()
+             WHERE execution_id = :executionId AND status = 'RUNNING' AND commit_attempted_at IS NOT NULL
+            """.trimIndent(),
+            mapOf("executionId" to executionId),
+        ) == 1
+
+    /** #1035 — the confirmed commit's result could not be delivered; the status is unchanged. */
+    fun markResultUnavailable(executionId: UUID): Boolean =
+        lifecycleJdbc.update(
+            "UPDATE pipeline_executions SET result_unavailable = TRUE WHERE execution_id = :executionId",
+            mapOf("executionId" to executionId),
+        ) == 1
+
+    /**
+     * #1035 — settles the provisional children of every family whose ROOT has reached a terminal
+     * status: each pending child inherits the root's final status and error record, is stamped with
+     * the root's completion time and stops being pending. One statement, idempotent — the emitter
+     * calls it right after a root's terminal write, and the stale sweep calls it for a root that a
+     * dead instance never got to settle ([rootExecutionId] null).
+     *
+     * @return the number of children settled.
+     */
+    fun settleFamilies(rootExecutionId: UUID? = null): Int = settleFamiliesDetailed(rootExecutionId).size
+
+    /**
+     * The same settlement, returning every child it settled with the row as it now stands. The emitter
+     * publishes each child's terminal history event from this, so a child's history never claims a terminal
+     * outcome before its root has decided it (#1035 R2).
+     */
+    fun settleFamiliesDetailed(rootExecutionId: UUID? = null): List<SettledChild> =
+        lifecycleJdbc.query(
+            """
+            UPDATE pipeline_executions c
+               SET status = r.status,
+                   settlement_pending = FALSE,
+                   completed_at = COALESCE(r.completed_at, NOW()),
+                   duration_ms = EXTRACT(EPOCH FROM (COALESCE(r.completed_at, NOW()) - c.started_at)) * 1000,
+                   error_json = r.error_json,
+                   failed_node_id = CASE WHEN r.status = 'SUCCESS' THEN NULL ELSE c.failed_node_id END
+              FROM pipeline_executions r
+             WHERE c.settlement_pending
+               AND r.execution_id = c.root_execution_id
+               AND r.status <> 'RUNNING'
+               AND (CAST(:root AS uuid) IS NULL OR c.root_execution_id = CAST(:root AS uuid))
+            RETURNING c.execution_id, c.pipeline_id, c.pipeline_version, c.correlation_id, c.started_at, c.completed_at,
+                      c.duration_ms, c.failed_node_id, c.node_stats_json::TEXT AS node_stats_json, c.status,
+                      c.error_json::TEXT AS error_json
+            """.trimIndent(),
+            mapOf("root" to rootExecutionId),
+        ) { rs, _ ->
+            SettledChild(
+                executionId = rs.getObject("execution_id", UUID::class.java),
+                pipelineId = rs.getObject("pipeline_id", UUID::class.java),
+                pipelineVersion = rs.getInt("pipeline_version"),
+                correlationId = rs.getObject("correlation_id", UUID::class.java),
+                startedAt = rs.getTimestamp("started_at").toInstant(),
+                completedAt = rs.getTimestamp("completed_at").toInstant(),
+                durationMs = rs.getLong("duration_ms"),
+                failedNodeId = rs.getString("failed_node_id"),
+                nodeStatsJson = rs.getString("node_stats_json"),
+                status = ExecutionStatus.valueOf(rs.getString("status")),
+                errorJson = rs.getString("error_json"),
+            )
+        }
 
     /**
      * Fills the §4.6 result-history columns (P7 additive API), before or after [complete] — the
@@ -406,7 +544,7 @@ class ExecutionRepository(
             UPDATE pipeline_executions
                SET node_stats_json = CAST(:nodeStatsJson AS jsonb),
                    heartbeat_at = NOW()
-             WHERE execution_id = :executionId AND status = 'RUNNING'
+             WHERE execution_id = :executionId AND status = 'RUNNING' AND NOT settlement_pending
             """.trimIndent(),
             mapOf("executionId" to executionId, "nodeStatsJson" to nodeStatsJson),
         ) == 1
@@ -660,29 +798,69 @@ class ExecutionRepository(
      * The one statement on the sweep's bound (#326, [sweepStatementTimeoutSeconds]): cancelled at the
      * bound it surfaces as the caller's `DataAccessException` with SQLState `57014`, nothing swept.
      *
-     * @return the number of rows swept.
+     * @return the number of stale rows swept; a pending child settled together with its root is not counted.
      */
     fun sweepStaleRunning(
         olderThan: Instant,
         heartbeatOlderThan: Instant,
-    ): Int =
-        sweepJdbc.update(
-            """
-            UPDATE pipeline_executions
-               SET status = 'ABORTED',
-                   completed_at = NOW(),
-                   duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
-                   error_json = CAST(:errorJson AS jsonb)
-             WHERE status = 'RUNNING'
-               AND (heartbeat_at < :heartbeatOlderThan
-                    OR (heartbeat_at IS NULL AND started_at < :olderThan))
-            """.trimIndent(),
+    ): Int = sweepStaleRunningDetailed(olderThan, heartbeatOlderThan).size
+
+    /**
+     * [sweepStaleRunning] with each swept root's final status (#1035): the caller raises one alert per
+     * [ExecutionStatus.OUTCOME_UNKNOWN] it finds.
+     *
+     * ## One statement decides (#1035 R1)
+     *
+     * The three-way label (confirmed → SUCCESS, attempted but unconfirmed → OUTCOME_UNKNOWN, neither →
+     * ABORTED) is ONE `UPDATE` whose `CASE` reads the row's commit stamps. Three ordered statements let a
+     * stamp written between them classify the row on the evidence of an earlier instant: an attempt stamped
+     * after the "unknown" statement and before the "aborted" one ended ABORTED, a confirmation stamped after
+     * the "success" statement ended unknown. Inside one statement Postgres (READ COMMITTED) re-reads a row a
+     * concurrent writer changed, re-checks the `WHERE` and computes the `SET` list from that NEWEST version —
+     * the label always matches the evidence the row held when it was written, whichever stamp lands first.
+     *
+     * The stamps themselves are written only while the row is `RUNNING` ([markCommitAttempt],
+     * [markCommitConfirmed]), so a stamp that arrives AFTER this statement changed the status updates nothing:
+     * the executing instance sees `false`, refuses to commit (attempt) or leaves the sweep's honest
+     * "may have committed" label standing until its own terminal write (confirmation). A row whose heartbeat
+     * resumed after the scan is no longer stale when the statement re-checks it and is left `RUNNING`.
+     *
+     * @return the swept roots with their final status; a pending child settled together with its root is
+     *   not listed.
+     */
+    fun sweepStaleRunningDetailed(
+        olderThan: Instant,
+        heartbeatOlderThan: Instant,
+    ): List<SweptExecution> {
+        val params =
             mapOf(
                 "olderThan" to java.sql.Timestamp.from(olderThan),
                 "heartbeatOlderThan" to java.sql.Timestamp.from(heartbeatOlderThan),
-                "errorJson" to INSTANCE_LOST_JSON,
-            ),
-        )
+                "unknownJson" to OUTCOME_UNKNOWN_JSON,
+                "lostJson" to INSTANCE_LOST_JSON,
+            )
+        val swept =
+            sweepJdbc.query(
+                """
+                UPDATE pipeline_executions
+                   SET status = CASE WHEN commit_confirmed_at IS NOT NULL THEN 'SUCCESS'
+                                     WHEN commit_attempted_at IS NOT NULL THEN 'OUTCOME_UNKNOWN'
+                                     ELSE 'ABORTED' END,
+                       completed_at = COALESCE(commit_confirmed_at, NOW()),
+                       duration_ms = EXTRACT(EPOCH FROM (COALESCE(commit_confirmed_at, NOW()) - started_at)) * 1000,
+                       error_json = CASE WHEN commit_confirmed_at IS NOT NULL THEN error_json
+                                         WHEN commit_attempted_at IS NOT NULL THEN CAST(:unknownJson AS jsonb)
+                                         ELSE CAST(:lostJson AS jsonb) END,
+                       result_unavailable = result_unavailable OR commit_confirmed_at IS NOT NULL
+                 WHERE status = 'RUNNING' AND NOT settlement_pending
+                   AND $STALE_PREDICATE
+                RETURNING execution_id, status
+                """.trimIndent(),
+                params,
+            ) { rs, _ -> SweptExecution(rs.getObject("execution_id", UUID::class.java), ExecutionStatus.valueOf(rs.getString("status"))) }
+        settleFamilies()
+        return swept
+    }
 
     private companion object {
         const val DEFAULT_PAGE = 50
@@ -716,13 +894,20 @@ class ExecutionRepository(
         /** The one place the crash sweep's error envelope is written (F2). */
         val INSTANCE_LOST_JSON = """{"code":"${PipelineErrorCodes.Execution.INSTANCE_LOST}"}"""
 
+        /** #1035 — the envelope of an execution the sweep found inside its commit window. */
+        val OUTCOME_UNKNOWN_JSON = """{"code":"${PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED}"}"""
+
+        /** The two abandonment conditions of the crash sweep (108 §D), shared by its three branches. */
+        const val STALE_PREDICATE =
+            "(heartbeat_at < :heartbeatOlderThan OR (heartbeat_at IS NULL AND started_at < :olderThan))"
+
         val SELECT_COLUMNS =
             """
             SELECT execution_id, pipeline_id, pipeline_version, status, parameters_json::TEXT AS parameters_json,
                    executed_by, executed_by_key_kind, triggered_via, correlation_id, started_at, completed_at, duration_ms,
                    failed_node_id, error_json::TEXT AS error_json, node_stats_json::TEXT AS node_stats_json,
                    result_row_count, result_size_bytes, result_schema_json::TEXT AS result_schema_json,
-                   parent_execution_id, parent_node_id, root_execution_id
+                   parent_execution_id, parent_node_id, root_execution_id, result_unavailable
               FROM pipeline_executions
             """.trimIndent()
 
@@ -750,6 +935,7 @@ class ExecutionRepository(
                     parentExecutionId = rs.getObject("parent_execution_id", UUID::class.java),
                     parentNodeId = rs.getString("parent_node_id"),
                     rootExecutionId = rs.getObject("root_execution_id", UUID::class.java),
+                    resultUnavailable = rs.getBoolean("result_unavailable"),
                 )
             }
     }
