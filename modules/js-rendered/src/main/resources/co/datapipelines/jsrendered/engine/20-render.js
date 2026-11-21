@@ -7,7 +7,6 @@
   "use strict";
   var P = R.prim, C = R.chrome, D = R.data, look = R.tables.look, cap = R.tables.cap;
   var TYPES = new Map(), ORDER = [];
-  var AXES = { cartesian: true, polar: true, none: true };
   var MEMBERS = { channels: true, model: true, marks: true, axes: true };
   var INPUT = { type: true, document: true, columns: true, types: true, frame: true, theme: true, measure: true, hidden: true };
 
@@ -18,8 +17,13 @@
     if (def === null || typeof def !== "object") throw new Error("type: " + name + " takes {channels, model, marks, axes}");
     for (var k in def) if (Object.prototype.hasOwnProperty.call(def, k) && MEMBERS[k] !== true) throw new Error("type: " + name + ": unknown member " + k);
     for (var m in MEMBERS) if (!Object.prototype.hasOwnProperty.call(def, m)) throw new Error("type: " + name + ": missing member " + m);
-    if (!Array.isArray(def.channels) || typeof def.model !== "function" || typeof def.marks !== "function" || AXES[def.axes] !== true) {
-      throw new Error("type: " + name + ": channels is a list, model and marks are functions, axes is cartesian, polar or none");
+    if (!Array.isArray(def.channels) || typeof def.model !== "function" || typeof def.marks !== "function") {
+      throw new Error("type: " + name + ": channels is a list, model and marks are functions");
+    }
+    // axes names the type's frame: one the frame registry holds (18-frames.js: cartesian, polar, none, and a frame a
+    // later file adds before its type).
+    if (typeof def.axes !== "string" || R.frames.names().indexOf(def.axes) < 0) {
+      throw new Error("type: " + name + ": axes " + def.axes + " is not a frame (" + R.frames.names().join(", ") + ")");
     }
     TYPES.set(name, { channels: JSON.stringify(def.channels), model: def.model, marks: def.marks, axes: def.axes });
     ORDER.push(name);
@@ -84,7 +88,7 @@
 
   /**
    * The data index (§4.3): per series, its marks' centres along the band axis, sorted, with datum and tooltip lines. A
-   * stacked bar's index adds `totals` after it is built (render).
+   * stacked bar's index adds `totals` after it is built (indexOf).
    */
   function index(axis, plot, series, visible, prims) {
     var by = new Map(), out = { axis: axis, plot: plot, series: [] };
@@ -145,6 +149,11 @@
     return P.rect({ role: "guide", x: 0, y: 0, w: W, h: H, fill: "--chart-canvas", color: h.theme.css("--chart-canvas") });
   }
 
+  /**
+   * The one entry. Between the model and the result it holds no rule of its own about a frame, a legend or an index
+   * (brief 1049 D2): the type's frame (R.frames.get(reg.axes)) says whether there is a title block and a legend, gives
+   * the legend's room and lays itself out; legendOf decides the legend; indexOf builds the index.
+   */
   function render(input) {
     var ok = checkInput(input), reg = TYPES.get(input.type), doc = input.document;
     var theme = R.theme.resolve(input.theme), W = input.frame.w, H = input.frame.h, lvl = C.level(W, H, theme);
@@ -169,97 +178,106 @@
       return { id: s.id, title: s.title, hidden: false };
     });
     out.summary.series = series;
-    var t = C.titles(h, doc, lvl, W, h.em("edge"));
+    var frame = R.frames.get(reg.axes), e = h.em("edge");
+    // 1. The title block, when the frame takes one; a frame without it lays itself out from the frame's top.
+    var t = frame.titles ? C.titles(h, doc, lvl, W, e) : { texts: [], bottom: 0 };
     var prims = [canvas(h, W, H)];
+    // 2. The no-data state, under the same title block.
     if (rows === 0 || m.markCount === 0) {
       out.state = "no-data";
-      var e = h.em("edge"), word = look("emptyText"), cy = t.bottom + (H - e - t.bottom) / 2;
+      var word = look("emptyText"), cy = t.bottom + (H - e - t.bottom) / 2;
       var shown = h.fit(word, h.text, 400, W - 2 * e);
       if (shown !== "") prims.push(h.label({ role: "empty", x: W / 2, y: h.middle(cy, h.text), text: word, shown: shown, anchor: "middle", size: h.text, ink: "--chart-muted" }));
       out.primitives = prims.concat(t.texts);
       return finish(out, meter);
     }
-    if (reg.axes !== "cartesian") throw new Error("render: axes " + reg.axes + " are not drawn by this engine version");
-    var place = C.legendPlace(series, ok.hidden, lvl, m.legend, m.direct === true);
+    // 3. The legend, when the frame takes one.
+    var lg = frame.legend ? legendOf(reg, m, series, ok.hidden, lvl) : null;
+    // 4. Which entries are drawn: a series is hidden in this draw when its id is on the list AND its entry is drawn
+    // (look contract §4.2). The legend's layout depends on neither the frame's drawing nor the visibility (only on the
+    // room the frame gives it), so it is laid out first and decides `visible`.
+    if (lg !== null && lg.place !== "direct") lg.drawn = lg.layout(h, W - 2 * e, frame.room(h, lvl, m, lg.place, H - t.bottom - e)).drawn;
+    // 5. Which series are visible.
+    var visible = {};
+    for (var v = 0; v < series.length; v++) {
+      series[v].hidden = lg !== null && lg.drawn[series[v].id] === true && ok.hidden.indexOf(series[v].id) >= 0;
+      if (!series[v].hidden) visible[series[v].id] = true;
+    }
+    // 6. The frame, the template's marks on what the frame hands them, then what the frame draws after them.
+    var geo = frame.lay(h, W, H, lvl, t.bottom, m, series, visible, lg);
+    for (var x = 0; x < series.length; x++) series[x].hidden = lg !== null && lg.drawn[series[x].id] === true && ok.hidden.indexOf(series[x].id) >= 0;
+    var hand = geo.hand;
+    hand.visible = visible;
+    hand.level = lvl;
+    // A template returns its mark primitives (bar), or {primitives, index, count, ends} (the line family): index = per
+    // visible series every data point's {at, datum, tip} as lists, which the index holds, and count = their number,
+    // which summary.marks is (§4.9: thinning never changes either); ends = [{id, y}] of each drawn series' last point.
+    var drawn = reg.marks(m, hand, h);
+    var marks = Array.isArray(drawn) ? drawn : drawn.primitives;
+    var after = typeof geo.after === "function" ? geo.after(drawn) : [];
+    // 7. The primitives in their order, then the index.
+    out.primitives = prims.concat(geo.under, marks, geo.over, geo.axes, after, t.texts);
+    var ix = indexOf(reg, m, geo, series, visible, drawn, marks);
+    out.summary.marks = ix.marks;
+    out.index = ix.index;
+    return finish(out, meter);
+  }
+
+  /**
+   * The legend of a draw: null, or {place, series, drawn, hiddenOf(id), colourOf(id), key, layout(h, boxW, boxH),
+   * prims(h, lay, ox, oy, out)}. The ONE place a draw decides which legend it has (where: C.legendPlace, look contract
+   * §4.2); a legend of series is laid out by C.legendLayout ({place, w, h, items, more, drawn} plus `empty`, nothing to
+   * draw) and written by C.legendPrims. With the names on the lines (`direct`) every entry is drawn (line 4: no id of
+   * the data is on the list, so every series is drawn).
+   */
+  function legendOf(reg, m, series, hidden, lvl) {
+    var place = C.legendPlace(series, hidden, lvl, m.legend, m.direct === true);
+    if (place === null) return null;
     var colourOf = new Map();
     for (var c = 0; c < m.series.length; c++) colourOf.set(m.series[c].id, m.series[c].colour);
-    var lg = place === null ? null : {
+    var lg = {
       place: place,
       series: series,
       drawn: {},
       hiddenOf: function (id) {
-        return ok.hidden.indexOf(id) >= 0;
+        return hidden.indexOf(id) >= 0;
       },
       colourOf: function (id) {
         return colourOf.get(id);
       },
       key: m.legendKey,
+      layout: function (h, boxW, boxH) {
+        var lay = C.legendLayout(h, series, place, boxW, boxH);
+        lay.empty = lay.items.length === 0 && lay.more === null;
+        return lay;
+      },
+      prims: function (h, lay, ox, oy, out) {
+        return C.legendPrims(h, lay, ox, oy, lg.hiddenOf, lg.colourOf, out, lg.key);
+      },
     };
-    // A series is hidden in this draw when its id is on the list AND its entry is drawn (look contract §4.2). The
-    // legend's layout depends on neither the axes' drawing nor the visibility (only on the room the model's layout
-    // part needs, R.cartesian.legendRoom), so it is laid out first and decides `visible`.
-    var visible = {};
-    if (lg !== null && place === "direct") {
-      // Line 4: names on the lines; no id of the data is on the list, so every series is drawn (look contract §4.2).
-      for (var a = 0; a < series.length; a++) lg.drawn[series[a].id] = true;
-    } else if (lg !== null) {
-      var probe = C.legendLayout(h, series, place, W - 2 * h.em("edge"), R.cartesian.legendRoom(h, lvl, m.layout, place, H - t.bottom - h.em("edge")));
-      lg.drawn = probe.drawn;
-    }
-    for (var v = 0; v < series.length; v++) {
-      series[v].hidden = lg !== null && lg.drawn[series[v].id] === true && ok.hidden.indexOf(series[v].id) >= 0;
-      if (!series[v].hidden) visible[series[v].id] = true;
-    }
-    // The labels at the lines' ends (brief 989 D6, D7): the names on the lines (line 4) and the values of `labels:
-    // last`; their room is kept right of the plot before the frame is laid out. None at the minimal level (marks only).
-    var ends = endLabelsOf(m, series, visible, place, lvl);
-    if (ends.length > 0) m.layout.right = C.endRoom(h, ends);
-    var geo = R.cartesian.cartesian(h, W, H, lvl, t.bottom, m.layout, visible, lg);
-    for (var x = 0; x < series.length; x++) series[x].hidden = lg !== null && lg.drawn[series[x].id] === true && ok.hidden.indexOf(series[x].id) >= 0;
-    var drawn = reg.marks(m, { plot: geo.plot, value: geo.value, band: geo.band, x: geo.x, visible: visible, level: lvl }, h);
-    // A template returns its mark primitives (bar), or {primitives, index, count, ends} (the line family): index = per
-    // visible series every data point's {at, datum, tip} as lists, which the index holds, and count = their number,
-    // which summary.marks is (§4.9: thinning never changes either); ends = [{id, y}] of each drawn series' last point.
-    var marks = Array.isArray(drawn) ? drawn : drawn.primitives;
-    var labelled = [];
-    if (ends.length > 0 && !Array.isArray(drawn)) {
-      var el = C.endLabels(h, drawn.ends, ends, geo.plot.x + geo.plot.w + h.em("directGap"), geo.boxTop, geo.labelTop);
-      labelled = el.texts;
-    }
-    prims = prims.concat(geo.under, marks, geo.over, geo.axes, labelled, t.texts);
-    out.primitives = prims;
-    if (Array.isArray(drawn)) {
-      var count = 0;
-      for (var p = 0; p < marks.length; p++) if (marks[p].role === "mark" && marks[p].k !== "group" && marks[p].k !== "text") count++;
-      out.summary.marks = count;
-      out.index = index(m.layout.vertical ? "x" : "y", geo.plot, series, visible, marks);
-      // A stacked bar's index also carries `totals` (brief 990 r2 D1): by datum, the stack's total as the card's text,
-      // or null. A model without the member (every other type, an unstacked or normalized bar) adds nothing.
-      if (typeof m.totals === "function") out.index.totals = m.totals(visible);
-    } else {
-      out.summary.marks = drawn.count;
-      out.index = pointIndex(geo.plot, series, visible, drawn.index);
-    }
-    return finish(out, meter);
+    if (place === "direct") for (var a = 0; a < series.length; a++) lg.drawn[series[a].id] = true;
+    return lg;
   }
 
   /**
-   * The end labels of a draw: for each visible series, its name when the names are on the lines and its last value
-   * when the type writes it (`labels: last`, m.lasts = [{id, value: text | null}]); none at the minimal level.
+   * The index of a draw and summary.marks: {index, marks}. The cartesian frame: a template that returned a list gets
+   * `index` along the band axis (a stacked bar's adds `totals`), the line family pointIndex. Another frame has no band
+   * axis: a template that returns {primitives, index, count} gets its own index; one that returns a list gets an index
+   * that holds the plot, every series and no position.
    */
-  function endLabelsOf(m, series, visible, place, lvl) {
-    var out = [];
-    if (lvl === "minimal" || !Array.isArray(m.lasts)) return out;
-    for (var i = 0; i < m.lasts.length; i++) {
-      var l = m.lasts[i];
-      if (visible[l.id] !== true) continue;
-      var title = null;
-      for (var s = 0; s < series.length; s++) if (series[s].id === l.id) title = series[s].title;
-      var name = place === "direct" ? title : null;
-      if (name === null && l.value === null) continue;
-      out.push({ id: l.id, name: name, value: l.value });
+  function indexOf(reg, m, geo, series, visible, drawn, marks) {
+    if (Array.isArray(drawn)) {
+      var count = 0;
+      for (var p = 0; p < marks.length; p++) if (marks[p].role === "mark" && marks[p].k !== "group" && marks[p].k !== "text") count++;
+      if (reg.axes !== "cartesian") return { marks: count, index: index(null, geo.plot, series, visible, []) };
+      var ix = index(m.layout.vertical ? "x" : "y", geo.plot, series, visible, marks);
+      // A stacked bar's index also carries `totals` (brief 990 r2 D1): by datum, the stack's total as the card's text,
+      // or null. A model without the member (every other type, an unstacked or normalized bar) adds nothing.
+      if (typeof m.totals === "function") ix.totals = m.totals(visible);
+      return { marks: count, index: ix };
     }
-    return out;
+    if (reg.axes !== "cartesian") return { marks: drawn.count, index: drawn.index };
+    return { marks: drawn.count, index: pointIndex(geo.plot, series, visible, drawn.index) };
   }
 
   /**

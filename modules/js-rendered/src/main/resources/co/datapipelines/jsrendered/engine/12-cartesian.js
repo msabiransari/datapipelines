@@ -1,5 +1,5 @@
 // 12-cartesian.js : the cartesian frame (record §4.6; look contract §2 grid, axis; §4.2 legend): from a model's
-// layout part it places the legend, the axis titles, the value axis and the band axis, and returns the plot and its
+// layout part it places the legend (through the shared placement of 18-frames.js), the axis titles, the value axis and the band axis, and returns the plot and its
 // scales for the template's marks with the primitives drawn under and over them. Vertical: bands along x, values up.
 // Horizontal: bands down y (the first category at the top, record §4.5), values along x.
 //
@@ -111,30 +111,6 @@
   function legendRoom(h, lvl, L, place, room) {
     if (place === "left" || place === "right") return room;
     return room - axesNeed(h, lvl, L) - h.em("legendGap");
-  }
-
-  /** Places the legend; returns the box left for the axes {left, right, top, bottom} and pushes its primitives. */
-  function placeLegend(h, lvl, L, box, lg, out) {
-    if (lg === null || lg.place === null || lg.place === "direct") return box;
-    var gap = h.em("legendGap"), place = lg.place;
-    var lay = C.legendLayout(h, lg.series, place, box.right - box.left, legendRoom(h, lvl, L, place, box.bottom - box.top));
-    lg.drawn = lay.drawn;
-    if (lay.items.length === 0 && lay.more === null) return box;
-    var b = { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
-    if (place === "top") {
-      C.legendPrims(h, lay, box.left, box.top, lg.hiddenOf, lg.colourOf, out, lg.key);
-      b.top += lay.h + gap;
-    } else if (place === "bottom" || place === "compact") {
-      C.legendPrims(h, lay, box.left, box.bottom - lay.h, lg.hiddenOf, lg.colourOf, out, lg.key);
-      b.bottom -= lay.h + gap;
-    } else if (place === "left") {
-      C.legendPrims(h, lay, box.left, box.top, lg.hiddenOf, lg.colourOf, out, lg.key);
-      b.left += lay.w + gap;
-    } else {
-      C.legendPrims(h, lay, box.right - lay.w, box.top, lg.hiddenOf, lg.colourOf, out, lg.key);
-      b.right -= lay.w + gap;
-    }
-    return b;
   }
 
   function frameAndZero(h, plot, value, vertical, over) {
@@ -287,15 +263,18 @@
   }
 
   /**
-   * The cartesian frame. lg = null or {place, series, hiddenOf(id), colourOf(id)}; after the call lg.drawn holds the
-   * ids whose entries were drawn. Returns {plot, value: {lo, hi, ticks, scale}, band: {start, step, n}, under, axes,
-   * over, corner, rotated}: under (plot background, grid) goes before the marks; axes (tick labels, axis titles, legend)
-   * and over (frame, zero line) after them.
+   * The cartesian frame's layout. lg = null or the legend object of render's legendOf (placed by the shared placement,
+   * R.frames.legend); after the call lg.drawn holds the ids whose entries were drawn. Returns {plot, value: {lo, hi,
+   * ticks, scale, log}, band: {start, step, n}, x (a continuous x axis or absent), under, axes, over, corner, rotated,
+   * labelTop, boxTop (vertical and minimal)}: under (plot background, grid) goes before the marks; axes (tick labels, axis titles, legend) and
+   * over (frame, zero line) after them; labelTop and boxTop bound the end labels (the frame's after).
    */
   function cartesian(h, W, H, lvl, top, L, visible, lg) {
     var e = h.em("edge"), legendOut = [];
     if (lvl === "minimal") return minimal(h, W, H, e, L, visible);
-    var box = placeLegend(h, lvl, L, { left: e, right: W - e, top: top, bottom: H - e }, lg, legendOut);
+    var box = R.frames.legend(h, { left: e, right: W - e, top: top, bottom: H - e }, lg, function (place, boxH) {
+      return legendRoom(h, lvl, L, place, boxH);
+    }, legendOut);
     var g = { grid: [], ticks: [], titles: [] };
     var geo = L.vertical ? vertical(h, W, H, lvl, box, L, visible, g) : horizontal(h, W, H, lvl, box, L, visible, g);
     var plot = geo.plot, under = [];
@@ -309,5 +288,54 @@
     return geo;
   }
 
-  R.cartesian = { cartesian: cartesian, legendRoom: legendRoom, positionAxis: positionAxis };
+  /**
+   * The end labels of a draw: for each visible series, its name when the names are on the lines and its last value
+   * when the type writes it (`labels: last`, m.lasts = [{id, value: text | null}]); none at the minimal level.
+   */
+  function endLabelsOf(m, series, visible, place, lvl) {
+    var out = [];
+    if (lvl === "minimal" || !Array.isArray(m.lasts)) return out;
+    for (var i = 0; i < m.lasts.length; i++) {
+      var l = m.lasts[i];
+      if (visible[l.id] !== true) continue;
+      var title = null;
+      for (var s = 0; s < series.length; s++) if (series[s].id === l.id) title = series[s].title;
+      var name = place === "direct" ? title : null;
+      if (name === null && l.value === null) continue;
+      out.push({ id: l.id, name: name, value: l.value });
+    }
+    return out;
+  }
+
+  /**
+   * The cartesian frame as the frame registry takes it (18-frames.js adds it as `cartesian`; brief 1049 D2). Its room is
+   * legendRoom over the model's layout part. Its lay keeps the end labels' room right of the plot (brief 989 D6, D7:
+   * the names on the lines and the values of `labels: last`) before the frame is laid out, and hands the template
+   * {plot, value, band, x}; after(drawn) writes those end labels once the template returned its lines' ends.
+   */
+  var frame = {
+    titles: true,
+    legend: true,
+    room: function (h, lvl, m, place, boxH) {
+      return legendRoom(h, lvl, m.layout, place, boxH);
+    },
+    lay: function (h, W, H, lvl, top, m, series, visible, lg) {
+      var ends = endLabelsOf(m, series, visible, lg === null ? null : lg.place, lvl);
+      if (ends.length > 0) m.layout.right = C.endRoom(h, ends);
+      var geo = cartesian(h, W, H, lvl, top, m.layout, visible, lg);
+      return {
+        plot: geo.plot,
+        hand: { plot: geo.plot, value: geo.value, band: geo.band, x: geo.x },
+        under: geo.under,
+        axes: geo.axes,
+        over: geo.over,
+        after: function (drawn) {
+          if (ends.length === 0 || Array.isArray(drawn)) return [];
+          return C.endLabels(h, drawn.ends, ends, geo.plot.x + geo.plot.w + h.em("directGap"), geo.boxTop, geo.labelTop).texts;
+        },
+      };
+    },
+  };
+
+  R.cartesian = { cartesian: cartesian, positionAxis: positionAxis, frame: frame };
 })(JsRendered);
