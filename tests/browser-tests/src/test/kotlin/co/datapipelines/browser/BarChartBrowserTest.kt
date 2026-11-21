@@ -269,6 +269,9 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
      * and those are the steps the fixture expects; the scale's legend is in the DOM with its seven steps and its two end
      * texts, and nothing in the chart is a button; the card shown under the pointer holds the value's line and the
      * shade's. No console error and no page error on the page; the CSP collector is asserted in `closePage`.
+     *
+     * Brief 1057 D5.3: hovering each bar in turn, the card's key is painted in that bar's own fill, both read off the
+     * page (the bars are on three different steps, so a key in the series' first colour is red on two of them).
      */
     @Test
     fun `a bar coloured by value draws the engine's fills, a scale legend that is no button, and the shade's line in the card`() {
@@ -309,6 +312,14 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
                 }
                 val hovered = fixture.expect.getAsJsonArray("hover").sumOf { hoverAndRead(preview, fixture.name, it.asJsonObject) }
                 withClue("bar-shade: the card was read (non-vacuity)") { hovered shouldBe 1 }
+                val keys = (0 until fills.size).map { ci -> keyAgainstBar(preview, ci) }
+                println("bar-shade: each bar's fill against its card's key: $keys")
+                withClue("bar-shade: the bars are on three different fills (non-vacuity) $keys") {
+                    keys.map { it.first }.toSet().size shouldBe 3
+                }
+                withClue("bar-shade: each card's key is painted in its own bar's fill $keys") {
+                    keys.forEach { (bar, key) -> key shouldBe bar }
+                }
             } finally {
                 preview.close()
             }
@@ -316,6 +327,26 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
             agent.close()
         }
         withClue("bar-shade: no console error, no page error") { errors.shouldBeEmpty() }
+    }
+
+    /** Moves the pointer onto the shaded bar of category [ci] and returns its fill and its card's one key's fill, off the page. */
+    private fun keyAgainstBar(
+        preview: Page,
+        ci: Int,
+    ): Pair<String, String> {
+        val at =
+            requireNotNull(preview.evaluate(BAR_CENTRE, mapOf("sel" to CASE, "si" to 0, "ci" to ci)) as Map<*, *>?) {
+                "bar-shade: category $ci has no drawn bar"
+            }
+        preview.mouse().move((at["x"] as Number).toDouble(), (at["y"] as Number).toDouble())
+        preview.waitForFunction("sel => !!document.querySelector(sel + ' svg.dp-chart g.dp-tooltip')", CASE)
+        val read = preview.evaluate(KEY_AND_BAR, mapOf("sel" to CASE, "si" to 0, "ci" to ci)) as Map<*, *>
+        withClue("bar-shade: category $ci: one key in the card, its bar on the page $read") {
+            (read["keys"] as List<*>).size shouldBe 1
+            read["bar"] shouldNotBe null
+        }
+        preview.mouse().move(0.0, 0.0)
+        return read["bar"] as String to (read["keys"] as List<*>).single() as String
     }
 
     /** Opens fixture [name]'s preview when it carries `expect.hover` entries and reads each one; returns how many were read. */
@@ -717,6 +748,28 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
                 legendTexts: legend ? Array.from(legend.querySelectorAll('text')).map(t => t.textContent) : [],
                 buttons: svg.querySelectorAll('[role="button"]').length,
                 switches: svg.querySelectorAll('[data-legend]').length };
+            }"""
+
+        /**
+         * The fill of series [si]'s bar at category [ci] as the page paints it ([BAR_CENTRE]'s choice of the element) and
+         * the fills of the shown card's keys (the card's rects after its surface, the first rect).
+         */
+        const val KEY_AND_BAR =
+            """args => {
+              $INDEX
+              const svg = document.querySelector(args.sel + ' svg.dp-chart');
+              const e = ix.series[args.si];
+              const k = e ? e.datum.indexOf(args.ci) : -1;
+              const vertical = ix.axis === 'x';
+              let bar = null, best = null;
+              if (k >= 0) svg.querySelectorAll('g.dp-mark[data-series="' + CSS.escape(e.id) + '"] > .dp-mark').forEach(b => {
+                const bb = b.getBBox();
+                if (bb.width <= 0 || bb.height <= 0) return;
+                const d = Math.abs((vertical ? bb.x + bb.width / 2 : bb.y + bb.height / 2) - e.at[k]);
+                if (best === null || d < best) { best = d; bar = b; }
+              });
+              const rects = Array.from(svg.querySelectorAll('g.dp-tooltip rect'));
+              return { bar: bar ? bar.getAttribute('fill') : null, keys: rects.slice(1).map(r => r.getAttribute('fill')) };
             }"""
 
         /** The texts of the tooltip card the page shows, one per line. */
