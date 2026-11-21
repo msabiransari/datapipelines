@@ -1,0 +1,79 @@
+{
+ "source": [
+  "lane 1053 make_diverging_fixtures.py (brief 1053 D9)"
+ ],
+ "note": "(12) mid 1e308 with the values -1e308 and 1e308: steps 1 and 4 by the halved form, no legend (c + m is not finite and no exact text gives it), no number that is not finite",
+ "document": {
+  "display_name": "Extreme values",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "delta",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "delta",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "diverging",
+     "mid": 1e+308
+    }
+   },
+   "title": {
+    "text": "Extreme values"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A",
+   "B"
+  ],
+  "amount": [
+   10,
+   15
+  ],
+  "delta": [
+   -1e+308,
+   1e+308
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "delta": "DOUBLE"
+ }
+}

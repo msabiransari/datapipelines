@@ -1,0 +1,78 @@
+{
+ "source": [
+  "lane 1053 make_diverging_fixtures.py (brief 1053 D9)"
+ ],
+ "note": "(9) an exact BIGINTEGER column beyond 2^53, no mid: the low end is the exact mirror -9,007,199,254,740,993",
+ "document": {
+  "display_name": "Exact ends around zero",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "delta",
+      "type": "BIGINTEGER",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "delta",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "diverging"
+    }
+   },
+   "title": {
+    "text": "Exact ends around zero"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A",
+   "B"
+  ],
+  "amount": [
+   10,
+   15
+  ],
+  "delta": [
+   "9007199254740993",
+   "-5"
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "delta": "BIGINTEGER"
+ }
+}

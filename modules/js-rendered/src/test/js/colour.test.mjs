@@ -119,6 +119,8 @@ test("A.3: the end texts come from the exact text beyond 2^53, and of two aggreg
 test("A.4: the legend holds the seven steps in order and the two end texts, at the top by default", () => {
   for (const f of SHADED) {
     if (f.fixture.document.config.encoding.color.legend !== undefined) continue;
+    // The two-sided fixtures (brief 1053) have their own legend's tests (diverging.test.mjs).
+    if (f.fixture.document.config.encoding.color.scale !== "sequential") continue;
     const r = draw(f.fixture, 960, 540);
     const rects = legendRects(r), texts = legendTexts(r);
     assert.deepEqual(rects.map((p) => p.fill), SEQ, f.name);
@@ -247,11 +249,14 @@ test("A.5: every bar has the same mark count and position with a shade as withou
   }
 });
 
-test("A.5 / D6: a diverging scale handed to the engine is refused with its own code", () => {
+test("A.5 / D6, turned round by brief 1053 D9: a diverging scale handed to the engine draws, its bars on the two-sided ramp", () => {
   const r = draw(fx("shade-vertical"), 960, 540, (d) => (d.config.encoding.color.scale = "diverging"));
-  assert.equal(r.state, "refused");
-  assert.equal(r.summary.refusal.code, "chart.rule.shade-diverging");
-  assert.equal(r.primitives.filter((p) => p.role === "mark").length, 0);
+  assert.equal(r.state, "rendered");
+  assert.equal(r.summary.refusal, null);
+  const fills = marksOf(r).map((p) => p.fill);
+  assert.equal(fills.length, 5);
+  for (const f of fills) assert.match(f, /^--chart-div-[1-7]$/);
+  assert.deepEqual(legendRects(r).map((p) => p.fill), [1, 2, 3, 4, 5, 6, 7].map((n) => "--chart-div-" + n));
 });
 
 test("A.5: the I3 oracle reads a shade from the document alone", () => {

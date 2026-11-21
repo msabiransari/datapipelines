@@ -1,0 +1,75 @@
+{
+ "source": [
+  "lane 1053 make_diverging_fixtures.py (brief 1053 D9)"
+ ],
+ "note": "(5) one bar, the value 10: step 7, the legend -10 and 10",
+ "document": {
+  "display_name": "One value away from the middle",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "delta",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "delta",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "diverging"
+    }
+   },
+   "title": {
+    "text": "One value away from the middle"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A"
+  ],
+  "amount": [
+   10
+  ],
+  "delta": [
+   10
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "delta": "DOUBLE"
+ }
+}

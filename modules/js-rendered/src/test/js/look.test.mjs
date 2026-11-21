@@ -146,11 +146,31 @@ test("LA13 (the table's half): with the default tokens 2p + h is no more than 24
 test("LA1 (the engine's half): a light and a dark default for every token it receives, none for the stylesheet's two", () => {
   const light = plain(R.theme.defaults("light")), dark = plain(R.theme.defaults("dark"));
   assert.deepEqual(Object.keys(light), Object.keys(dark));
-  // 43: the contract's valued tokens (§3.1 to §3.6) less the stylesheet's two; the tokens a later type values (its
-  // O-6 to O-8: --chart-positive, -negative, -total, -good, -warn, -bad, the diverging ramp, series 9 to 12) are not
-  // invented here (brief D6).
-  assert.equal(Object.keys(light).length, 43);
-  for (const t of ["--chart-positive", "--chart-good", "--chart-div-1", "--chart-series-9"]) assert.ok(!(t in light), t + " is a later lane's");
+  // 56: the contract's valued tokens (§3.1 to §3.6) less the stylesheet's two. §3.6's thirteen (the colours with a
+  // meaning and the two-sided ramp, the owner's pick L9) are defaults since brief 1053 D4, compared below with the
+  // contract's table written here as numbers; series 9 to 12 are still a later lane's and are not invented here.
+  assert.equal(Object.keys(light).length, 56);
+  for (const t of ["--chart-series-9"]) assert.ok(!(t in light), t + " is a later lane's");
+  const MEANING = {
+    "--chart-positive": [[25, 113, 194], [77, 171, 247]],
+    "--chart-negative": [[217, 72, 15], [255, 146, 43]],
+    "--chart-total": [[52, 58, 64], [222, 226, 230]],
+    "--chart-good": [[0, 117, 90], [66, 174, 142]],
+    "--chart-warn": [[206, 124, 4], [250, 183, 42]],
+    "--chart-bad": [[205, 23, 30], [212, 35, 37]],
+    "--chart-div-1": [[40, 62, 149], [131, 155, 251]],
+    "--chart-div-2": [[98, 121, 182], [99, 117, 181]],
+    "--chart-div-3": [[165, 179, 213], [70, 81, 116]],
+    "--chart-div-4": [[236, 238, 242], [42, 47, 56]],
+    "--chart-div-5": [[215, 166, 153], [103, 76, 59]],
+    "--chart-div-6": [[185, 93, 66], [168, 103, 52]],
+    "--chart-div-7": [[127, 36, 0], [238, 130, 11]],
+  };
+  assert.equal(Object.keys(MEANING).length, 13);
+  for (const [t, [l, d]] of Object.entries(MEANING)) {
+    assert.deepEqual(light[t], l, t + " light");
+    assert.deepEqual(dark[t], d, t + " dark");
+  }
   for (const t of ["--chart-pad", "--chart-tip-shadow"]) {
     assert.ok(!(t in light), t + " is the stylesheet's alone");
     assert.throws(() => R.theme.resolve({ base: "light", tokens: { [t]: 1 } }), new RegExp("unknown token " + t));
