@@ -346,7 +346,7 @@ Execute a pipeline.
         "additionalProperties": true
       },
       "request_body": {
-        "description": "The pipeline's structured request body (pipeline-contract §3.4): one JSON object or array of objects, delivered unchanged to the SCRIPT transformer that binds @request_body. Only for a pipeline that declares request_body; never part of parameters. Send a fraction needing more than double precision as a string.",
+        "description": "The pipeline's structured request body (pipeline-contract §3.4): one JSON object or array of objects, delivered unchanged to the SCRIPT transformer that binds @request_body. Only for a pipeline that declares request_body; never part of parameters. A member repeated anywhere inside it is refused, and every number keeps its exact value.",
         "anyOf": [{"type": "object"}, {"type": "array", "items": {"type": "object"}}]
       }
     }
