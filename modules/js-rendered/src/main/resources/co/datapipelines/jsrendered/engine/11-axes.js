@@ -209,7 +209,8 @@
   /**
    * Where a value lies on an axis {lo, hi, log}, as a share of it from lo (0) to hi (1); 0 on an axis of no width. Two
    * finite ends whose difference a double cannot hold (-1e308 to 1e308) are halved first, as S.linear does: halving a
-   * number that large is exact, so the share is the one the two ends define and never NaN (brief 1051 r3, R2).
+   * number that large is exact, so the share is the one the two ends define and never NaN (brief 1051 r3, R2). An end
+   * that is not finite keeps the plain difference, so such an input fails as it did before.
    */
   function shareOf(ax, v) {
     if (ax.log === true) {
@@ -217,7 +218,7 @@
       return dl > 0 ? (S.log10(v) - l0) / dl : 0;
     }
     var d = ax.hi - ax.lo;
-    if (d < Infinity) return d > 0 ? (v - ax.lo) / d : 0;
+    if (d < Infinity || !finite(ax.lo, ax.hi)) return d > 0 ? (v - ax.lo) / d : 0;
     var d2 = ax.hi / 2 - ax.lo / 2;
     return d2 > 0 ? (v / 2 - ax.lo / 2) / d2 : 0;
   }
@@ -225,11 +226,18 @@
   /**
    * The value at share t of a linear range [lo, hi]. Where hi - lo overflows (two finite ends of opposite signs past
    * half a double's range), it is lo × (1 - t) + hi × t: each term is at most the larger end, the two have opposite
-   * signs, so the sum cannot overflow, and t = 0 and t = 1 give lo and hi exactly (brief 1051 r3, R2).
+   * signs, so the sum cannot overflow, and t = 0 and t = 1 give lo and hi exactly (brief 1051 r3, R2). An end that is
+   * not finite keeps lo + t × (hi - lo): such a domain is refused downstream with the values, and so the message, it
+   * gave before (the save refuses it first, chart.scale.domain_invalid).
    */
   function lerp(lo, hi, t) {
     var d = hi - lo;
-    return d < Infinity ? lo + t * d : lo * (1 - t) + hi * t;
+    return d < Infinity || !finite(lo, hi) ? lo + t * d : lo * (1 - t) + hi * t;
+  }
+
+  /** Both ends are finite numbers. */
+  function finite(lo, hi) {
+    return lo > -Infinity && lo < Infinity && hi > -Infinity && hi < Infinity;
   }
 
   /** The extent of a linear right axis with no domain, widened as S.nice widens one value (or none) first. */

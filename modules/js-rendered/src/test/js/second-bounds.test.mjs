@@ -307,3 +307,17 @@ test("R1-R3 identity, Node's half: second-axis-probes.js evaluated in Node is se
   for (const r of ["r1", "r2", "r3"]) assert.ok(probes.some((p) => p.name.startsWith(r + " ")), r);
   console.log(`R1-R3 identity probes: ${probes.length}, ${text.length} characters`);
 });
+
+test("Security: a right domain with an end that is not finite is refused as before, with its present message", () => {
+  // The messages round 2's engine gave (e5a70c837); the save refuses these domains first (chart.scale.domain_invalid).
+  const L3 = { lo: 0, hi: 1, ticks: [0, 0.5, 1], log: false };
+  const NO_DIGITS = "ticks: no fraction digits write every tick as its own value: ";
+  const cases = [
+    [[NaN, 1], "NaN, 1"],
+    [[0, Infinity], "NaN, Infinity, Infinity"],
+    [[-Infinity, 0], "NaN, NaN, NaN"],
+  ];
+  for (const [domain, values] of cases) {
+    assert.throws(() => R.axes.secondAxis("full", linear(domain), [0, 1], L3, 200), { message: NO_DIGITS + values }, String(domain));
+  }
+});
