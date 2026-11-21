@@ -360,7 +360,9 @@ class PipelineCommitResultLossIntegrationTest {
             c.createStatement().use { s ->
                 s.execute("CREATE TABLE rl_src (id INT PRIMARY KEY)")
                 s.execute("INSERT INTO rl_src SELECT generate_series(1, $ROWS)")
-                listOf("rl_tgt_rest", "rl_tgt_mcp", "rl_tgt_zero", "rl_tgt_rest_rows", "rl_tgt_mcp_rows").forEach { s.execute("CREATE TABLE $it (id INT PRIMARY KEY)") }
+                listOf("rl_tgt_rest", "rl_tgt_mcp", "rl_tgt_zero", "rl_tgt_rest_rows", "rl_tgt_mcp_rows").forEach {
+                    s.execute("CREATE TABLE $it (id INT PRIMARY KEY)")
+                }
             }
         }
         api.registerDatasource(db.jdbcUrl, db.username, db.password)
