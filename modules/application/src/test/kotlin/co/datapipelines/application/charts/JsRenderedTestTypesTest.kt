@@ -76,15 +76,20 @@ class JsRenderedTestTypesTest {
                 if (answers[i] != emitted("$fixture/$frame.output.json")) different += "$fixture/$frame"
             }
         }
-        println("JsRenderedTestTypesTest identity: ${typeNames().size} test types, ${pictures.size} fixtures x $FRAMES frames = $compared pictures")
+        println(
+            "JsRenderedTestTypesTest identity: ${typeNames().size} test types, " +
+                "${pictures.size} fixtures x $FRAMES frames = $compared pictures",
+        )
         different shouldBe emptyList()
         compared shouldBeGreaterThanOrEqual IDENTITY_FLOOR
     }
 
     @Test
     fun `(ii) every test-type fixture at the sweep's 35 widths and 5 heights meets I1 to I5 in the sandbox`() {
+        val sweepText = ChartGuardFiles.resource("${ChartGuardFiles.EMITTED}/sweep.json")
+
         @Suppress("UNCHECKED_CAST")
-        val sweep = JSON.readValue(ChartGuardFiles.resource("${ChartGuardFiles.EMITTED}/sweep.json"), Map::class.java) as Map<String, List<Int>>
+        val sweep = JSON.readValue(sweepText, Map::class.java) as Map<String, List<Int>>
         val widths = sweep.getValue("widths")
         val heights = sweep.getValue("heights")
         // The Node sweep's lists (invariants.test.mjs, types.test.mjs through geometry.mjs), as emit.mjs wrote them.
@@ -147,8 +152,9 @@ class JsRenderedTestTypesTest {
         val source = typeSource("test_plain")
         source.split(G7_ANCHOR).size shouldBe 2
         val input = emitted("test_plain/legend-top/300x180.input.json")
-        val planted = sandbox.evaluate(source.replace(G7_ANCHOR, G7_PLANT) + "\n" + CHECK_ONE, mapOf("input" to input), withInvariants = true)
-        val clean = sandbox.evaluate(source + "\n" + CHECK_ONE, mapOf("input" to input), withInvariants = true)
+        val given = mapOf("input" to input)
+        val planted = sandbox.evaluate(source.replace(G7_ANCHOR, G7_PLANT) + "\n" + CHECK_ONE, given, withInvariants = true)
+        val clean = sandbox.evaluate(source + "\n" + CHECK_ONE, given, withInvariants = true)
 
         @Suppress("UNCHECKED_CAST")
         val bad = planted as List<Map<String, Any?>>
@@ -172,7 +178,14 @@ class JsRenderedTestTypesTest {
     private fun expectedMarks(
         name: String,
         fixture: String,
-    ): Int = JSON.readTree(ChartGuardFiles.repoFile("${ChartGuardFiles.MODULE}/src/test/fixtures/_types/$name/$fixture.json")).path("expect").path("marks").asInt(-1)
+    ): Int {
+        val file = ChartGuardFiles.repoFile("${ChartGuardFiles.MODULE}/src/test/fixtures/_types/$name/$fixture.json")
+        return JSON
+            .readTree(file)
+            .path("expect")
+            .path("marks")
+            .asInt(-1)
+    }
 
     private companion object {
         const val TYPES = "co/datapipelines/jsrendered/test/types"
@@ -247,7 +260,7 @@ class JsRenderedTestTypesTest {
 
         /** types.test.mjs's G7 plant, the same text. */
         const val G7_ANCHOR = "    return out;\n  }\n\n  R.type("
-        val G7_PLANT =
+        const val G7_PLANT =
             "    if (out.length > 0 && plot.x + plot.w === 294) { var q = out.pop(); out.push(P.rect({ role: \"mark\", x: q.x, y: q.y, " +
                 "w: 302 - q.x, h: q.h, fill: q.fill, color: q.color, series: q.series })); }\n" + G7_ANCHOR
     }
