@@ -189,12 +189,16 @@ class JsRenderedTestTypesTest {
 
     private companion object {
         const val TYPES = "co/datapipelines/jsrendered/test/types"
-        const val TYPE_FLOOR = 3
+        /** Brief 1049's three test types and brief 1055's test_web. */
+        const val TYPE_FLOOR = 4
         const val FRAMES = 7
 
-        /** 23 fixtures × 7 frames, and × 35 × 5; the rendered, text and mark floors as the Node sweep's (types.test.mjs). */
-        const val IDENTITY_FLOOR = 23 * 7
-        const val SWEEP_FLOOR = 23 * 35 * 5
+        /**
+         * 33 fixtures (brief 1049's 23 and test_web's 10, brief 1055) × 7 frames, and × 35 × 5; the rendered, text and
+         * mark floors as the Node sweep's (types.test.mjs).
+         */
+        const val IDENTITY_FLOOR = 33 * 7
+        const val SWEEP_FLOOR = 33 * 35 * 5
         const val RENDERED_FLOOR = 3000
         const val TEXT_FLOOR = 9000
         const val MARK_FLOOR = 15000
