@@ -1,6 +1,7 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.LogicalType
 
 /**
  * The runtime qualification matrix of the single-database pipeline transaction
@@ -43,6 +44,30 @@ object LocalWriteQualification {
             .maxByOrNull { it.ordinal }
             ?: QualificationStatus.REFUSED
 
+    /**
+     * The status of an insert on [dialect] whose declared key is [keyType] (#1036 R2): the worst of the
+     * generated and supplied key modes among the rows that cover that type. A row with no key type covers
+     * EVERY type (a refusal or an unavailable engine does not depend on the key's type); a qualified row
+     * covers only the type it was measured with. A type no row covers was never measured, so it is
+     * REFUSED — an unmeasured key type is never admitted under another type's evidence.
+     */
+    fun insertStatus(
+        dialect: Dialect,
+        keyType: LogicalType,
+    ): QualificationStatus {
+        val covering =
+            rowsFor(dialect).filter {
+                it.operation == LocalWriteOperation.INSERT && it.defaultStorage && (it.keyType == null || it.keyType == keyType)
+            }
+        val modes = covering.map { it.keyMode }.toSet()
+        val complete = KeyMode.GENERATED in modes && KeyMode.SUPPLIED in modes
+        return if (!complete) QualificationStatus.REFUSED else covering.maxOf { it.status }
+    }
+
+    /** The key types measured QUALIFIED for an insert on [dialect], both key modes each, in declaration order. */
+    fun qualifiedKeyTypes(dialect: Dialect): List<LogicalType> =
+        LogicalType.entries.filter { insertStatus(dialect, it) == QualificationStatus.QUALIFIED }
+
     /** The rows of [operation] on [dialect] under its default storage mode — the reasons a refusal names. */
     fun rows(
         dialect: Dialect,
@@ -79,7 +104,8 @@ object LocalWriteQualification {
             keyMode: KeyMode,
             reason: String,
             status: QualificationStatus = QualificationStatus.QUALIFIED,
-        ) = LocalWriteCapability(dialect, driver, server, storage, operation, keyMode, status, reason)
+            keyType: LogicalType? = null,
+        ) = LocalWriteCapability(dialect, driver, server, storage, operation, keyMode, status, reason, keyType = keyType)
 
         fun refusedInsert(
             keyMode: KeyMode,
@@ -92,12 +118,16 @@ object LocalWriteQualification {
     private val MS = Engine(Dialect.MSSQL, MSSQL_JDBC, "SQL Server 2022 16.0.4275 (pinned digest)", "rowstore table")
     private val ORA = Engine(Dialect.ORACLE, OJDBC, "Oracle Database (no environment)", "heap table")
 
+    /** The key types an insert on PostgreSQL was measured with, each in both key modes (dag-executor.md §16.6). */
+    private val PG_KEY_TYPES = listOf(LogicalType.INTEGER, LogicalType.BIGINTEGER, LogicalType.STRING)
+
     private fun postgres(): List<LocalWriteCapability> =
         qualifiedEngine(PG) +
-            listOf(
-                PG.row(LocalWriteOperation.INSERT, KeyMode.GENERATED, QUALIFIED_KEY),
-                PG.row(LocalWriteOperation.INSERT, KeyMode.SUPPLIED, QUALIFIED_KEY),
-            )
+            PG_KEY_TYPES.flatMap { type ->
+                listOf(KeyMode.GENERATED, KeyMode.SUPPLIED).map { mode ->
+                    PG.row(LocalWriteOperation.INSERT, mode, QUALIFIED_KEY, keyType = type)
+                }
+            }
 
     private fun mysql(): List<LocalWriteCapability> =
         qualifiedEngine(MY) +
@@ -164,7 +194,8 @@ object LocalWriteQualification {
     private const val QUALIFIED_COUNT = "qualified: affected_rows observed for zero and several matches, rolled back with the family"
     private const val QUALIFIED_WRITEBACK = "qualified: appended rows committed with the family and rolled back with it"
     private const val QUALIFIED_REPLACE = "qualified: cleared with a transactional DELETE; old rows survive a later failure"
-    private const val QUALIFIED_KEY = "qualified: the driver returns the declared column under its own label, correlated per row"
+    private const val QUALIFIED_KEY =
+        "qualified: the driver returns the declared column under its own label, correlated per row, for the key type of the row"
 }
 
 /** One cell of the matrix — see [LocalWriteQualification]. */
@@ -183,6 +214,11 @@ data class LocalWriteCapability(
     val reason: String,
     /** False for a storage mode recorded as a limitation; the runtime reads only the default storage. */
     val defaultStorage: Boolean = true,
+    /**
+     * The declared canonical key type an insert row was measured with (#1036 R2), or null when the row
+     * covers every type or has no key. A qualified insert row covers its own type only.
+     */
+    val keyType: LogicalType? = null,
 )
 
 /** What the transaction does on the engine: the transaction itself, a DML operation, or a write-back mode. */

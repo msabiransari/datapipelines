@@ -254,7 +254,12 @@ class LocalTransactionDialectQualificationTest {
                     it.setString(2, "s")
                 }
             report(engine, "insert", "generated=$generated supplied=$supplied")
-            val expected = LocalWriteQualification.rows(engine.dialect, LocalWriteOperation.INSERT).associate { it.keyMode to it.status }
+            // The probe declares an INTEGER key: the rows that cover INTEGER are the ones it can speak to.
+            val expected =
+                LocalWriteQualification
+                    .rows(engine.dialect, LocalWriteOperation.INSERT)
+                    .filter { it.keyType == null || it.keyType == LogicalType.INTEGER }
+                    .associate { it.keyMode to it.status }
             (generated.startsWith("key=")) shouldBe (expected[KeyMode.GENERATED] == QualificationStatus.QUALIFIED)
             (supplied == "key=$SUPPLIED_ID") shouldBe (expected[KeyMode.SUPPLIED] == QualificationStatus.QUALIFIED)
         }
@@ -278,7 +283,7 @@ class LocalTransactionDialectQualificationTest {
             )
         val pipeline = Fixtures.pipeline(nodes, parameters = mapOf("note" to Parameter(LogicalType.STRING, required = true)))
         val request = Fixtures.request(pipeline).copy(parameters = mapOf("note" to TextNode("g")))
-        val qualified = LocalWriteQualification.status(engine.dialect, LocalWriteOperation.INSERT) == QualificationStatus.QUALIFIED
+        val qualified = LocalWriteQualification.insertStatus(engine.dialect, LogicalType.INTEGER) == QualificationStatus.QUALIFIED
 
         runBlocking {
             harness(counter, SimpleMeterRegistry()).use { h ->

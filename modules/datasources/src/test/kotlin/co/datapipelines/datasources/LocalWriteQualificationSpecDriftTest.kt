@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 /**
  * #1036 — the qualification matrix table of dag-executor.md §16.6 (the one table whose header is
  * [HEADER]) cannot drift from [LocalWriteQualification.ROWS]: the same rows, in the same order,
- * every cell equal — engine, pinned driver, server, storage, operation, key mode, status and
+ * every cell equal — engine, pinned driver, server, storage, operation, key mode, key type, status and
  * reason. A row added, removed or re-statused in the code without the doc (or the reverse) is red,
  * naming the first differing row.
  */
@@ -24,6 +24,7 @@ class LocalWriteQualificationSpecDriftTest {
                     row.storage,
                     row.operation.wire,
                     row.keyMode.wire,
+                    row.keyType?.wire ?: if (row.keyMode == KeyMode.NONE) "-" else "any",
                     row.status.wire,
                     row.reason,
                 )
@@ -58,7 +59,7 @@ class LocalWriteQualificationSpecDriftTest {
 
     private companion object {
         const val SPEC_PATH = "docs/dag-executor.md"
-        const val HEADER = "| Engine | Driver | Server | Storage | Operation | Key mode | Status | Reason |"
-        const val COLUMNS = 8
+        const val HEADER = "| Engine | Driver | Server | Storage | Operation | Key mode | Key type | Status | Reason |"
+        const val COLUMNS = 9
     }
 }

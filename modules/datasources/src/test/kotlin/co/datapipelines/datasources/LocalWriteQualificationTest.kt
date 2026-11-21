@@ -2,7 +2,9 @@ package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.DmlInsertQualification
+import co.datapipelines.typesystem.LogicalType
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -60,6 +62,50 @@ class LocalWriteQualificationTest {
         Dialect.entries.filter(LocalWriteQualification::inScope).forEach { dialect ->
             (LocalWriteQualification.status(dialect, LocalWriteOperation.INSERT) == QualificationStatus.QUALIFIED) shouldBe
                 DmlInsertQualification.isQualified(dialect)
+        }
+    }
+
+    @Test
+    fun `PostgreSQL qualifies exactly the measured key types, each in both key modes`() {
+        LocalWriteQualification.qualifiedKeyTypes(Dialect.POSTGRES) shouldContainExactly
+            listOf(LogicalType.INTEGER, LogicalType.BIGINTEGER, LogicalType.STRING)
+        listOf(LogicalType.INTEGER, LogicalType.BIGINTEGER, LogicalType.STRING).forEach { type ->
+            LocalWriteQualification
+                .rowsFor(Dialect.POSTGRES)
+                .filter { it.operation == LocalWriteOperation.INSERT && it.keyType == type }
+                .map { it.keyMode to it.status } shouldContainExactly
+                listOf(
+                    KeyMode.GENERATED to QualificationStatus.QUALIFIED,
+                    KeyMode.SUPPLIED to QualificationStatus.QUALIFIED,
+                )
+        }
+    }
+
+    @Test
+    fun `a key type no row measured is refused, never admitted under another type's evidence`() {
+        val measured = setOf(LogicalType.INTEGER, LogicalType.BIGINTEGER, LogicalType.STRING)
+        LogicalType.entries.filterNot { it in measured }.forEach { type ->
+            LocalWriteQualification.insertStatus(Dialect.POSTGRES, type) shouldBe QualificationStatus.REFUSED
+        }
+    }
+
+    @Test
+    fun `a qualified row covers its own key type only, so removing one type's rows refuses that type`() {
+        // The covering rule, on the matrix as shipped: STRING and BIGINTEGER are separate rows.
+        val postgres = LocalWriteQualification.rowsFor(Dialect.POSTGRES).filter { it.operation == LocalWriteOperation.INSERT }
+        postgres.map { it.keyType }.toSet() shouldBe setOf(LogicalType.INTEGER, LogicalType.BIGINTEGER, LogicalType.STRING)
+        postgres.none { it.keyType == null } shouldBe true
+    }
+
+    @Test
+    fun `MySQL and SQL Server refuse and Oracle is unavailable for every key type`() {
+        LogicalType.entries.forEach { type ->
+            LocalWriteQualification.insertStatus(Dialect.MYSQL, type) shouldBe QualificationStatus.REFUSED
+            LocalWriteQualification.insertStatus(Dialect.MSSQL, type) shouldBe QualificationStatus.REFUSED
+            LocalWriteQualification.insertStatus(Dialect.ORACLE, type) shouldBe QualificationStatus.UNAVAILABLE
+        }
+        listOf(Dialect.MYSQL, Dialect.MSSQL, Dialect.ORACLE).forEach {
+            LocalWriteQualification.qualifiedKeyTypes(it).shouldBeEmpty()
         }
     }
 
