@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.79
+**Status:** v1.80
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-21
@@ -1090,8 +1090,10 @@ with the instruction to stop every other instance on the database. The success l
    ./scripts/local-write-compatibility-report.sh <new datapipelines-app.jar>`. It starts no
    application and opens no customer connection. It prints one line per current, schedule-pinned
    and API-pinned version (`unchanged`, `enrolled`, `refused` with its reason, or `unreadable`) and a
-   `SUMMARY` line. A `refused` line is refused after the upgrade with the same reason; fix it or
-   accept it before deploying. What it inspects, its exit codes and how to act on each line:
+   `SUMMARY` line. It runs BEFORE the migrations of step 7, so it reads the schema the previous
+   release still owns: a route stored before V65 is reported as a `GET` route, none dropped. A
+   `refused` line is refused after the upgrade with the same reason; fix it or accept it before
+   deploying. What it inspects, its exit codes and how to act on each line:
    [DAG Executor §16.7](dag-executor.md#167-operating-the-transaction-1036). The engines and
    operations the transaction admits: [§16.6](dag-executor.md#166-engine-qualification-1036).
 6. Signal shutdown and let the instance drain (§8.3.1 — this is automatic, not a manual step).
@@ -1706,6 +1708,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.80 | 1036 r2 (#1036) | **§8.3 step 5:** the report runs before the migrations, so it reads the previous release's schema — a route stored before V65 is reported as a `GET` route (held by `LocalWriteCompatibilityPackagedIntegrationTest`: the packaged command on V64, then on the current schema). |
 | 2026-11-21 | v1.79 | 1036 (#1036) | **§8.3** gains step 5, the pre-deploy check for the single-database write transaction: run `scripts/local-write-compatibility-report.sh` (offline, read-only, no customer connection) with the new jar over current, schedule-pinned and API-pinned versions, and act on each `refused` line before deploying (DAG Executor §16.6/§16.7). The later steps renumber. **§8.4:** the V66 older-image boundary. The image refuses to start on the barrier; a deliberate rollback drains, preserves and settles every `OUTCOME_UNKNOWN`, then runs Metadata DB §7.5's block. |
 | 2026-11-20 | v1.78 | #1037 round 2 | **§8.4:** the V65 older-image boundary — an image older than V65 refuses to start on a migrated database (the repeatable downgrade-barrier migration); a deliberate rollback is Metadata DB §7.4's documented block after a drain; never `flyway repair`. |
 | 2026-11-17 | v1.77 | 1023 (#1023, static file cache). Renumbered after #997's v1.76 | **What the edge sets:** the `Cache-Control` row gains the static files' two rules (the owner's ruling of 2026-11-16): font files kept a year (`max-age=31536000, public, immutable`), every other file under `/css/`, `/js/` and `/vendor/` kept and re-checked by a content `ETag` (`no-cache`); the font rule's consequence for an operator (a new file name and ledger line per font upgrade, guarded by `FontPathLedgerTest` with the repository's history). The security chain writes no `Cache-Control`, `Pragma` or `Expires` of its own on a font file (Chromium treats `Pragma: no-cache` as `no-cache` and would re-check each font on every page); every other answer keeps all three, and an error answer on a font path (404, 416) carries all three as before. §6.7 needed no edit: `/`, `/site/**` and the docs keep their windows. |
