@@ -52,6 +52,16 @@ pinned contract: `inputs` maps each contract input to a staged table or a `"$con
 }
 ```
 
+**Request body** — a pipeline that takes one JSON object or array of objects declares
+top-level `"request_body": {"required": true}` (or `false`; omitted = no body). A SCRIPT node
+whose pinned contract declares a body input binds it as `"inputs": {"order": "@request_body"}`
+and turns it into rows; the body never enters `parameters`, a `:name` bind or a SQL template. The
+caller sends it as `request_body` beside `parameters` (on `pipelines_execute` too); `parameters`
+may not name a body reader's `context_key`. Malformed JSON, a duplicate member, a scalar root
+or a body the pipeline does not accept is refused before any node runs
+(`pipeline.execution.request_body_invalid`). Send an exact id or a long fraction as a string.
+See `pipeline-contract` §3.4.
+
 **Timeouts** — a pipeline may declare `settings.query_timeout_seconds` (the default SQL
 statement timeout for every DQL/DML/DDL node that sets none of its own), and any DQL/DML/DDL
 node may declare its own `settings.query_timeout_seconds`, overriding the pipeline's.

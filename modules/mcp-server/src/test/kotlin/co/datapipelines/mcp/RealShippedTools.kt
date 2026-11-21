@@ -13,6 +13,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import io.mockk.every
 import io.mockk.mockk
 import org.springframework.beans.factory.ObjectProvider
@@ -90,5 +91,6 @@ fun realShippedTools(): List<McpTool> {
         visualizationTestLinks = co.datapipelines.visualization.TestSessionLinks(null),
         // #877 §C — the ONE TemplateUsage bean the tools take; the tools under these tests never reach it.
         usage = mockk<co.datapipelines.application.templates.TemplateUsage>(),
+        bodyDecoder = mockk { every { getIfAvailable(any()) } returns StructuredBodyDecoder() },
     )
 }

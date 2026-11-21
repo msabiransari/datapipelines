@@ -16,6 +16,7 @@ import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.RequestBodyAdmission
 import co.datapipelines.staging.Staging
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
@@ -173,6 +174,10 @@ class PipelineExecutor(
         // declared parameters resolved against the request's inputs. LIVE — a CALCULATOR node
         // writes tier 5 into this same map at its DAG position, and every node scheduled after
         // it renders and binds against the value (RunContext's KDoc).
+        // #1038: the request body is admitted on the same footing as the parameters — before the
+        // stream opens, so a missing required body or a body the pipeline does not take is a 400
+        // with no execution at all. Every surface also checks it earlier; this is the last line.
+        RequestBodyAdmission.check(request.pipeline, request.requestBody, request.parameters.keys)
         val context = RunContext.create(config.orgContext, request.pipeline, request.parameters, executionId, startedAt, calculatorKinds)
         val run = ExecutionRun(executionId, request, plan, startedAt, context)
 
@@ -1383,6 +1388,7 @@ class PipelineExecutor(
             lakeDeliveryNodeId = resources.deliveryNodeId,
             readOnly = request.readOnly,
             pipelineAdmission = request.pipelineAdmission,
+            requestBody = request.requestBody,
             // §3.3: the family's transaction — a child inherits the root's through its request;
             // a root uses the one its planning gate enrolled. Null on ordinary runs.
             localWriteTransaction = request.localWriteTransaction ?: run.localWriteTransaction,

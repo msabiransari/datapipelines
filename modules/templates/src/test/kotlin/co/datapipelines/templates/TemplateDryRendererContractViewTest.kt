@@ -42,6 +42,12 @@ class TemplateDryRendererContractViewTest {
             output = ScriptOutput.Obj(),
             rejects = true,
         )
+    private val bodyContract =
+        ScriptContract(
+            mode = ScriptMode.TABLE,
+            inputs = mapOf("order" to ScriptInput.Body(), "channel" to ScriptInput.Value(LogicalType.STRING)),
+            output = ScriptOutput.Table(listOf(ContractColumn("sku", LogicalType.STRING, nullable = false))),
+        )
     private val registry =
         InMemoryTemplateRegistry(
             listOf(
@@ -49,6 +55,7 @@ class TemplateDryRendererContractViewTest {
                 script("test/row.jsonata", rowContract),
                 script("test/value.jsonata", valueContract),
                 script("test/obj.jsonata", objContract),
+                script("test/body.jsonata", bodyContract),
             ),
         )
     private val engine = TemplateEngine(registry, 10, 5_000, 1_000_000)
@@ -62,6 +69,13 @@ class TemplateDryRendererContractViewTest {
 
     @AfterEach
     fun tearDown() = engine.close()
+
+    @Test
+    fun `a body input projects as the view's body input beside a value input (#1038)`() {
+        val view = requireNotNull(dryRenderer.scriptContract(workspaceId, TemplateRef("test/body.jsonata", 1)))
+        view.inputs shouldBe
+            mapOf("order" to ScriptContractView.Input.Body, "channel" to ScriptContractView.Input.Value(LogicalType.STRING))
+    }
 
     @Test
     fun `a SQL template has no script contract`() {

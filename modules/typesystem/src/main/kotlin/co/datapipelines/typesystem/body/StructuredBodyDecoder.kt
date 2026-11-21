@@ -31,7 +31,7 @@ import java.nio.charset.StandardCharsets
  * The decoder never closes the caller's stream and never puts a supplied value into a refusal.
  */
 class StructuredBodyDecoder(
-    private val limits: StructuredBodyLimits = StructuredBodyLimits(),
+    val limits: StructuredBodyLimits = StructuredBodyLimits(),
 ) {
     private val factory: JsonFactory =
         JsonFactory
@@ -85,6 +85,42 @@ class StructuredBodyDecoder(
             if (bytes > limits.maxBytes) throw Refusal(StructuredBodyRefusalReason.TOO_MANY_BYTES)
             body
         }
+
+    /**
+     * Decodes the top-level [member] of the JSON object [json] as a fixture — the form framework
+     * execute carries (`{"parameters": {...}, "request_body": ...}`). An absent member is
+     * [StructuredBody.Absent]; a member given twice is [StructuredBodyRefusalReason.DUPLICATE_MEMBER]
+     * (a lenient reader would keep the last copy silently); `null` is an invalid root, never absence.
+     * The enclosing request's other members are skipped unread.
+     */
+    fun decodeMember(
+        json: String,
+        member: String,
+    ): StructuredBodyDecoding {
+        var found: StructuredBodyDecoding = StructuredBodyDecoding.Decoded(StructuredBody.Absent)
+        val outer =
+            refusing(offsetOf = { it?.currentLocation()?.charOffset }) { hold ->
+                factory.createParser(json).use { parser ->
+                    hold(parser)
+                    if (parser.nextToken() != JsonToken.START_OBJECT) throw Refusal(StructuredBodyRefusalReason.MALFORMED)
+                    var seen = false
+                    while (parser.nextToken() == JsonToken.FIELD_NAME) {
+                        val name = parser.currentName()
+                        parser.nextToken()
+                        if (name != member) {
+                            parser.skipChildren()
+                            continue
+                        }
+                        if (seen) throw Refusal(StructuredBodyRefusalReason.DUPLICATE_MEMBER)
+                        seen = true
+                        found = decodeEmbedded(parser)
+                        if (found is StructuredBodyDecoding.Refused) return@refusing StructuredBody.Absent
+                    }
+                    StructuredBody.Absent
+                }
+            }
+        return outer as? StructuredBodyDecoding.Refused ?: found
+    }
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     // Every failure maps to one bounded reason; the cause's message may quote supplied text.

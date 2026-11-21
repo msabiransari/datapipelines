@@ -6,7 +6,9 @@ import co.datapipelines.executor.IdempotencyStore
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.RequestBodyAdmission
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.body.StructuredBody
 import com.fasterxml.jackson.databind.JsonNode
 import org.slf4j.LoggerFactory
 import java.util.UUID
@@ -27,6 +29,13 @@ data class ExecutionLaunch(
     val parameters: Map<String, JsonNode>,
     val parametersJson: String,
     val idempotencyKey: String?,
+    /**
+     * The structured request-body fixture (#1038), already decoded by the surface's bounded
+     * decoder — separate from [parameters], never part of [parametersJson]. Admitted here by
+     * [RequestBodyAdmission] and, when present, joined to the idempotency fingerprint in its
+     * canonical form.
+     */
+    val requestBody: StructuredBody = StructuredBody.Absent,
 )
 
 /** What the launcher decided a surface should do (dag-executor.md §11.2). */
@@ -137,8 +146,12 @@ class ExecutionLauncher(
             launch.pipeline.calculatorOutputGroups(),
             // 7c (#7): a value-mode SCRIPT's `context_key` binds as an implicit optional
             // input on the same rule — supplied, the child's node is skipped.
-            launch.pipeline.scriptOutputKeys(),
+            launch.pipeline.callerScriptKeys(),
         ).bindOrThrow(launch.parameters)
+        // #1038: the body is admitted beside the parameters and before the reservation — a missing
+        // required body, a body the pipeline does not take, or a parameter naming a body reader's
+        // output costs no execution and burns no key.
+        RequestBodyAdmission.check(launch.pipeline, launch.requestBody, launch.parameters.keys)
 
         val key = launch.idempotencyKey ?: return LaunchDecision.Start(null)
         return when (val outcome = reserve(key, launch)) {
@@ -161,7 +174,7 @@ class ExecutionLauncher(
             idempotencyStore.reserve(
                 launch.userId,
                 key,
-                IdempotencyKeys.requestHash(launch.pipelineId, launch.pipelineVersion, launch.parametersJson),
+                IdempotencyKeys.requestHash(launch.pipelineId, launch.pipelineVersion, launch.parametersJson, launch.requestBody),
                 UUID.randomUUID(),
                 idempotencyTtlSeconds,
             )

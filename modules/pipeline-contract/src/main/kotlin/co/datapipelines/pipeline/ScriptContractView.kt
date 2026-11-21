@@ -43,6 +43,12 @@ data class ScriptContractView(
         data class Value(
             val type: LogicalType,
         ) : Input
+
+        /**
+         * The structured request body (#1038): any JSON object or array of objects, bound only by
+         * `"@request_body"` on a pipeline that declares `request_body` (§3.4, §12.13).
+         */
+        data object Body : Input
     }
 
     /** The contract's declared output — a table of rows, one value, or one object (R4). */

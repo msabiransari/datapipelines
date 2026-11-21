@@ -431,7 +431,7 @@ class SubPipelineExecutionRunner(
         child: Pipeline,
         ctx: NodeExecutionContext,
     ): Map<String, JsonNode> {
-        val childOutputKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
+        val childOutputKeys = child.calculatorOutputs() + child.callerScriptKeys().associateWith { null }
         return node.parameters.orEmpty().mapValues { (key, value) ->
             val reference =
                 value.takeIf { it.isTextual }?.asText()?.let(PARAMETER_REFERENCE::matchEntire)

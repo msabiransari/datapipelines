@@ -619,7 +619,7 @@ class PipelineJobExecutor(
             pipeline.parameters,
             pipeline.calculatorOutputs(),
             pipeline.calculatorOutputGroups(),
-            pipeline.scriptOutputKeys(),
+            pipeline.callerScriptKeys(),
         ).bindOrThrow(parameters)
     }
 

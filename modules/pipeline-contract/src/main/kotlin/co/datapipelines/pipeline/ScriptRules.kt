@@ -198,9 +198,13 @@ internal object ScriptRules {
                         Validation.SCRIPT_INPUT_CONTRACT,
                         path,
                         "SCRIPT node '${node.id.truncateForError()}' input '$name' must be a string: " +
-                            "a staged table name, or \"\$key\" naming a Context key.",
+                            "a staged table name, \"\$key\" naming a Context key, or \"${RequestBodyDeclaration.REFERENCE}\".",
                         mapOf("node" to node.id.truncateForError(), "input" to name),
                     )
+                }
+
+                reference == RequestBodyDeclaration.REFERENCE || input is ScriptContractView.Input.Body -> {
+                    checkBodyInput(path, node, name, input, reference, ruleContext.pipeline, into)
                 }
 
                 reference.startsWith("$") && reference.length > 1 -> {
@@ -212,6 +216,45 @@ internal object ScriptRules {
                 }
             }
         }
+    }
+
+    /**
+     * §12.13 (#1038): a body input binds exactly [RequestBodyDeclaration.REFERENCE], that reference
+     * binds only a body input, and only on a pipeline that declares `request_body`. Any other
+     * pairing is the contract refusal, so the body can never reach a value or table input and no
+     * Context key or staged table can stand in for it.
+     */
+    private fun checkBodyInput(
+        path: String,
+        node: Node,
+        name: String,
+        input: ScriptContractView.Input,
+        reference: String,
+        pipeline: Pipeline,
+        into: FailureCollector,
+    ) {
+        val nodeId = node.id.truncateForError()
+        val message =
+            when {
+                input !is ScriptContractView.Input.Body -> {
+                    "SCRIPT node '$nodeId' binds \"${RequestBodyDeclaration.REFERENCE}\" to input '$name', which the contract " +
+                        "does not declare a body input — only a `body` input reads the request body."
+                }
+
+                reference != RequestBodyDeclaration.REFERENCE -> {
+                    "SCRIPT node '$nodeId' input '$name' is a body input, which binds only \"${RequestBodyDeclaration.REFERENCE}\"."
+                }
+
+                pipeline.requestBody == null -> {
+                    "SCRIPT node '$nodeId' input '$name' reads the request body, which this pipeline does not declare: " +
+                        "add `request_body` to the pipeline."
+                }
+
+                else -> {
+                    return
+                }
+            }
+        into.add(Validation.SCRIPT_INPUT_CONTRACT, path, message, mapOf("node" to nodeId, "input" to name))
     }
 
     private fun checkValueInput(

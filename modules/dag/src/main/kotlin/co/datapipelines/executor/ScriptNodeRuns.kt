@@ -801,11 +801,52 @@ internal class ScriptRun(
         }
 
     /**
+     * The value inputs and the body input, keyed by contract input name — what the evaluation
+     * receives as `inputs` beside the loaded tables. An absent request body leaves its input out
+     * entirely, so a transformer sees it undefined: never null, never `{}` or `[]` (#1038).
+     */
+    private fun resolveValueInputs(): Map<String, Any?> = resolveScalarAndObjectInputs() + resolveBodyInputs()
+
+    /**
+     * The body input (#1038; pipeline-contract §3.4): the execution's decoded request body, gated
+     * by [TypeGate.gateBody] — any object or array of objects under the value byte cap — and handed
+     * over as the decoder's native value. §12.13 already proved the input binds `@request_body` on
+     * a pipeline that declares one; the gate is the defensive second check.
+     */
+    private fun resolveBodyInputs(): Map<String, Any?> {
+        val body = ctx.requestBody
+        if (!body.present) return emptyMap()
+        return contract.inputs
+            .filterValues { it is ScriptInput.Body }
+            .mapValues { (name, _) ->
+                when (
+                    val verdict =
+                        TypeGate.over(emptyList(), support.maxStringBytes).gateBody(body.value, support.maxValueBytes)
+                ) {
+                    is TypeGate.GateResult.Refuse -> {
+                        val detail = "input '$name': ${ScriptNodeRuns.describe(verdict.refusal)}"
+                        // An admitted body past the transformer's own byte cap is the engine-limit
+                        // failure (published-mutation-apis §5); any other refusal is the contract.
+                        throw if (verdict.refusal is co.datapipelines.scripting.GateRefusal.ValueTooLarge) {
+                            ScriptFailures.tooLarge(node, detail)
+                        } else {
+                            ScriptFailures.inputContract(node, detail, "body_shape")
+                        }
+                    }
+
+                    is TypeGate.GateResult.Pass -> {
+                        verdict.value
+                    }
+                }
+            }
+    }
+
+    /**
      * The value inputs, resolved from the live Context and converted to wire form (§6). A Map
      * value is an object-valued key (R4): it binds only to a SCRIPT input, and crosses as
      * the object itself under the byte cap — the one input shape no `LogicalType` names.
      */
-    private fun resolveValueInputs(): Map<String, Any?> =
+    private fun resolveScalarAndObjectInputs(): Map<String, Any?> =
         contract.inputs
             .filterValues { it is ScriptInput.Value }
             .mapValues { (name, input) ->

@@ -2,6 +2,7 @@ package co.datapipelines.executor
 
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.typesystem.TypeMappingWarning
+import co.datapipelines.typesystem.body.StructuredBody
 import com.fasterxml.jackson.databind.JsonNode
 import java.time.Instant
 import java.time.ZoneId
@@ -157,6 +158,14 @@ data class ExecuteRequest(
      * transaction itself. Inherited by a PIPELINE node's child request like [readOnly].
      */
     val localWriteTransaction: LocalWriteTransaction? = null,
+    /**
+     * #1038 (pipeline-contract §3.4): the execution's structured request body, decoded by the
+     * surface's bounded decoder — [StructuredBody.Absent] when none was supplied. Admitted by
+     * `RequestBodyAdmission` before any node runs and read only by the SCRIPT inputs that bind
+     * `@request_body`; never a parameter, a Context key or part of `parameters_json`. A PIPELINE
+     * node's child request does NOT inherit it: a child receives no body.
+     */
+    val requestBody: StructuredBody = StructuredBody.Absent,
 )
 
 /**

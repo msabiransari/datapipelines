@@ -303,6 +303,15 @@ class VisualizationValidator(
                 declared is ScriptContractView.Input.Table -> {
                     columnsEqual(path, declared.columns, input, failures)
                 }
+
+                declared is ScriptContractView.Input.Body -> {
+                    bindingInvalid(
+                        path,
+                        "body_input",
+                        "The contract's input is a request body, which only a pipeline execution supplies; an input is rows.",
+                        failures,
+                    )
+                }
             }
         }
         (body.inputs.keys - transform.inputs.values.toSet()).forEach { unused ->

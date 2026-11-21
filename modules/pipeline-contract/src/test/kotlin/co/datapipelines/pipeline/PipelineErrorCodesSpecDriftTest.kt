@@ -264,6 +264,8 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Endpoint.PATH_CONFLICT,
                 PipelineErrorCodes.Endpoint.PATH_VARIABLE_UNKNOWN,
                 PipelineErrorCodes.Endpoint.PIPELINE_NOT_READONLY,
+                // #1038 — the GET pin of a body-requiring pipeline, a publish-time sibling of the read-only rule.
+                PipelineErrorCodes.Endpoint.REQUEST_BODY_INCOMPATIBLE,
                 PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED,
                 PipelineErrorCodes.Endpoint.NOT_FOUND,
                 PipelineErrorCodes.Endpoint.METHOD_NOT_ALLOWED,

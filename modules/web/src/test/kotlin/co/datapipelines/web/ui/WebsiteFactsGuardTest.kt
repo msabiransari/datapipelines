@@ -14,6 +14,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import co.datapipelines.web.TestRepoFiles
 import co.datapipelines.web.ui.site.SiteFacts
 import co.datapipelines.web.ui.site.SitePages
@@ -187,10 +188,8 @@ class WebsiteFactsGuardTest {
 
     /** The REAL mcpTools bean method's output size — the list the server actually ships. */
     private fun productionToolCount(): Int {
-        val executionRunner = mockk<ObjectProvider<McpExecutionRunner>>()
-        every { executionRunner.getIfAvailable() } returns null
-        val launcher = mockk<ObjectProvider<co.datapipelines.application.ExecutionLauncher>>()
-        every { launcher.getIfAvailable() } returns null
+        val executionRunner = mockk<ObjectProvider<McpExecutionRunner>> { every { getIfAvailable() } returns null }
+        val launcher = mockk<ObjectProvider<co.datapipelines.application.ExecutionLauncher>> { every { getIfAvailable() } returns null }
         return McpServerAutoConfiguration()
             .mcpTools(
                 pipelines = mockk<PipelineRepository>(),
@@ -248,6 +247,7 @@ class WebsiteFactsGuardTest {
                 visualizationTestLinks = co.datapipelines.visualization.TestSessionLinks(null),
                 // #877 §C — the ONE TemplateUsage bean the tools take; never queried here.
                 usage = mockk<co.datapipelines.application.templates.TemplateUsage>(),
+                bodyDecoder = mockk { every { getIfAvailable(any()) } returns StructuredBodyDecoder() },
             ).size
     }
 

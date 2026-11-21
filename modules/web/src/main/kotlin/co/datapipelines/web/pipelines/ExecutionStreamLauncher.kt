@@ -32,6 +32,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.body.StructuredBody
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.sse.ExecutionContext
@@ -67,6 +68,8 @@ data class ExecuteLaunch(
     val idempotencyKey: String?,
     val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
     val lakeExecutionMetadata: co.datapipelines.pipeline.LakeExecutionMetadata? = null,
+    /** The decoded `request_body` fixture (#1038) — never part of [parametersJson]. */
+    val requestBody: StructuredBody = StructuredBody.Absent,
 ) {
     /** The surface-free half this launch carries into `application` (056/D6). */
     internal fun toLaunch(): ExecutionLaunch =
@@ -78,6 +81,7 @@ data class ExecuteLaunch(
             parameters = parameters,
             parametersJson = parametersJson,
             idempotencyKey = idempotencyKey,
+            requestBody = requestBody,
         )
 }
 
@@ -369,6 +373,7 @@ class ExecutionStreamLauncher(
                         lakeAppendGrant = request.lakeAppendGrant,
                         lakeExecutionMetadata = request.lakeExecutionMetadata,
                         executionId = executionId,
+                        requestBody = request.requestBody,
                     ),
                 )
             recordResultColumns(result, emitter)

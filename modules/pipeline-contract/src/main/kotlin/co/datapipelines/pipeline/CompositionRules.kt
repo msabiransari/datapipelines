@@ -247,7 +247,7 @@ internal object CompositionRules {
         // 7c (#7): a value-mode SCRIPT's `context_key` is an implicit optional input on the
         // same rule as a calculator key — suppliable here, typed by the pinned contract the
         // body does not carry, so null (ANY) in this map exactly like an ANY-output kind.
-        val childOutputKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
+        val childOutputKeys = child.calculatorOutputs() + child.callerScriptKeys().associateWith { null }
         child.parameters
             .filterValues { it.required && !it.hasDefault }
             .keys

@@ -111,7 +111,7 @@ class RunContext private constructor(
             // carry each node's key set, and a proper subset is refused here, BEFORE any node
             // runs, with the same rejected-bind shape as an ill-typed parameter.
             val calculatorOutputs = pipeline.calculatorOutputs(kinds)
-            val scriptKeys = pipeline.scriptOutputKeys()
+            val scriptKeys = pipeline.callerScriptKeys()
             val bound =
                 ParameterBinder(pipeline.parameters, calculatorOutputs, pipeline.calculatorOutputGroups(kinds), scriptKeys)
                     .bindOrThrow(inputs)

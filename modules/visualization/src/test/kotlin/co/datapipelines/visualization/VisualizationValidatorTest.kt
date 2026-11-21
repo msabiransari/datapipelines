@@ -62,6 +62,10 @@ class VisualizationValidatorTest {
         val valueInput = ValidatorFakes.CONTRACT.copy(inputs = mapOf("rows" to ScriptContractView.Input.Value(LogicalType.DATE)))
         reasons({ it.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.Transform(PipelineVersionStatus.RELEASED, valueInput) }) shouldBe
             listOf("transform.inputs.rows" to "value_input")
+        // #1038: a body input is fed only by a pipeline execution's request body, never by a visualization's rows.
+        val bodyInput = ValidatorFakes.CONTRACT.copy(inputs = mapOf("rows" to ScriptContractView.Input.Body))
+        reasons({ it.templates[ValidatorFakes.TRANSFORM_REF] = TemplatePin.Transform(PipelineVersionStatus.RELEASED, bodyInput) }) shouldBe
+            listOf("transform.inputs.rows" to "body_input")
         reasons(mutate = { it.obj("inputs").set<ObjectNode>("target", it.obj("inputs.revenue").deepCopy()) }) shouldContainExactlyInAnyOrder
             listOf("inputs.target" to "input_unused", "tests.cases[0].fixtures.target" to "fixture_missing")
         val twoInputsNoTransform: (ObjectNode) -> Unit = { tree ->

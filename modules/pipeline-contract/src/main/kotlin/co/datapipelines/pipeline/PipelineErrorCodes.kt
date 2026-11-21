@@ -532,6 +532,17 @@ object PipelineErrorCodes {
         const val INSTANCE_LOST = "pipeline.execution.instance_lost"
 
         /**
+         * §13.3 (#1038) — the execution's structured request body is refused before any node runs:
+         * a fixture that is not one bounded JSON object or array of objects, a missing body the
+         * pipeline requires, a body on a pipeline that declares none, or a `parameters` key naming
+         * the output of a SCRIPT node that reads the body. `details.reason` names which
+         * (`malformed_json`, `invalid_encoding`, `duplicate_member`, `invalid_root`,
+         * `number_out_of_range`, `too_many_bytes`, `too_deep`, `token_too_large`, `required`,
+         * `not_accepted`, `override_refused`); a supplied value is never echoed. HTTP 400.
+         */
+        const val REQUEST_BODY_INVALID = "pipeline.execution.request_body_invalid"
+
+        /**
          * §13.3 (121) — the caller supplied a PROPER SUBSET of a multi-output node's keys.
          * Override is all-or-nothing per node: every key supplied and the node is skipped
          * (`provided_by: "caller"` on its stats), none and it computes; some is refused before
@@ -1510,6 +1521,13 @@ object PipelineErrorCodes {
         const val PIPELINE_NOT_READONLY = "endpoint.pipeline_not_readonly"
 
         /**
+         * #1038 (published-mutation-apis §3.3) — the route's method cannot deliver the pinned pipeline's structured
+         * request body: a GET route pinning a pipeline whose `request_body` is `required` (a GET carries no body, so
+         * every call would be refused). Raised at publish, draft save, release, current switch and import. 409.
+         */
+        const val REQUEST_BODY_INCOMPATIBLE = "endpoint.request_body_incompatible"
+
+        /**
          * §5.1 — the published pipeline has no servable version: nothing the pointer names is
          * eligible (RELEASED always; a DRAFT only under development posture — D63).
          */
@@ -1691,6 +1709,25 @@ object PipelineErrorCodes {
 
         /** §5.3 — a single parameter value over 4 KB. */
         const val VALUE_TOO_LARGE = "endpoint.request.value_too_large"
+
+        /**
+         * #1038 — one entry of [INVALID]'s `details.errors[]` for the structured request body: malformed JSON, a
+         * duplicate member, an invalid root or array element, invalid UTF-8, a missing body the route requires, or a
+         * body on a route that takes none. `parameter` is null; `reason` names which; no value is echoed.
+         */
+        const val BODY_INVALID = "endpoint.request.body_invalid"
+
+        /**
+         * #1038 — the request body exceeds `body-max-bytes` (counted while reading, chunked included) or `body-max-depth`.
+         * 413.
+         */
+        const val TOO_LARGE = "endpoint.request.too_large"
+
+        /**
+         * #1038 — a body whose media type is not `application/json` (charset absent or UTF-8), or a content encoding
+         * other than identity. 415.
+         */
+        const val UNSUPPORTED_MEDIA_TYPE = "endpoint.request.unsupported_media_type"
     }
 
     /**
