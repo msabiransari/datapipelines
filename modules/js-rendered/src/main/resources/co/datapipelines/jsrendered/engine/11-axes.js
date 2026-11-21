@@ -262,9 +262,10 @@
    */
   function caseA(ext, n, f0, df, format) {
     var e = linearExtent(ext), e0 = e[0], e1 = e[1], tol = SAME * (e1 - e0);
-    if (!(tol < Infinity)) return null;
     var s = S.niceStep((e1 - e0) * df);
     for (var c = 0; c < LADDER_CLIMB && s > 0 && s < Infinity; c++, s = nextStep(s)) {
+      // k: the largest multiple whose bottom-edge value holds e0; the next one is taken where only rounding of the
+      // division put it out (0.3 / 0.1 is 2.9999999999999996, and 3 × 0.1 holds 0.3 within tol).
       var span = s / df, k = Math.floor((e0 + f0 * span) / s);
       if ((k + 1) * s - f0 * span <= e0 + tol) k++;
       var lo = k * s - f0 * span, hi = lo + span;

@@ -76,6 +76,14 @@ test("R1: two left ticks on the plot's edges beside -1..1 (the verdict's input):
   assert.notEqual(ax.lo, 0);
 });
 
+test("R1: the range starts at the LARGEST multiple that holds the low end, also where the division rounds below it (0.3 / 0.1)", () => {
+  // 0.3..0.7 beside five equally spaced left ticks: the step 0.1 holds it from 0.3 (= 3 x 0.1 up to rounding) to 0.7.
+  const ax = R.axes.secondAxis("full", linear(null), [0.3, 0.7], L5, 200);
+  assert.equal(ax.rule, "a");
+  assert.deepEqual([...ax.ticks], [0.3, 0.4, 0.5, 0.6, 0.7]);
+  assert.ok(holds(ax, 0.3, 0.7), `${ax.lo}..${ax.hi}`);
+});
+
 test("R1 rendered: the verdict's 240 x 140 picture (A, B; left domain and values 0..1; right values -1, 1): both dots inside the plot, apart, the lower value lower", () => {
   const { r, hand } = draw(R, twoAxes({ x: ["A", "B"], y: [0, 1], yDomain: [0, 1], y2: [-1, 1] }), 240, 140);
   assert.equal(r.state, "rendered");
