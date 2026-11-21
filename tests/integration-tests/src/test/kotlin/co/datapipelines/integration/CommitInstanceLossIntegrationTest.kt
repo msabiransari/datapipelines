@@ -2,9 +2,9 @@ package co.datapipelines.integration
 
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
+import co.datapipelines.logcapture.SnapshotListAppender
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -371,10 +371,16 @@ class CommitInstanceLossIntegrationTest {
 
     private fun assertAlerts(
         runs: Runs,
-        log: ListAppender<ILoggingEvent>,
+        log: SnapshotListAppender,
         meterBefore: Double,
     ) {
-        val lines = log.list.filter { it.level.toString() == "ERROR" && it.formattedMessage.contains("event=execution.outcome_unknown") }
+        val lines =
+            log.events().filter {
+                it.level.toString() == "ERROR" &&
+                    it.formattedMessage.contains(
+                        "event=execution.outcome_unknown",
+                    )
+            }
         // One line per unknown ROOT: two, each carrying its own id and never the other families' ids or any SQL.
         lines.map { it.formattedMessage.substringAfter("execution_id=").substringBefore(" ") } shouldContainExactlyIgnoringOrder
             listOf(runs.s2a.id, runs.s2b.id)
@@ -475,8 +481,8 @@ class CommitInstanceLossIntegrationTest {
         return type.getMethod("sweepOnce").invoke(context.getBean(type)) as Int
     }
 
-    private fun captureSweeperLog(): ListAppender<ILoggingEvent> {
-        val appender = ListAppender<ILoggingEvent>().also { it.start() }
+    private fun captureSweeperLog(): SnapshotListAppender {
+        val appender = SnapshotListAppender()
         (LoggerFactory.getLogger(SWEEPER_LOGGER) as Logger).addAppender(appender)
         return appender
     }
