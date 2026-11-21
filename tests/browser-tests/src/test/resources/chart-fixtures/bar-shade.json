@@ -1,0 +1,120 @@
+{
+ "variant": "shade",
+ "note": "brief 1050 A.6: a bar coloured by value (color: shade, sum of units); one row per region, so the shades are 3, 9 and 6: steps 1, 7 and 4",
+ "spec": {
+  "display_name": "Shade",
+  "description": "Amount per region, coloured by units.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "units",
+      "type": "INTEGER"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "units",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "Amount by region, coloured by units"
+   }
+  }
+ },
+ "bindings": {
+  "region": [
+   "North",
+   "South",
+   "East"
+  ],
+  "amount": [
+   100,
+   250,
+   40
+  ],
+  "units": [
+   3,
+   9,
+   6
+  ]
+ },
+ "expect": {
+  "vertical": true,
+  "stack": null,
+  "categories": [
+   "East",
+   "North",
+   "South"
+  ],
+  "categories_full": [
+   "East",
+   "North",
+   "South"
+  ],
+  "bars": 3,
+  "data_warnings": 0,
+  "fills": [
+   "--chart-seq-4",
+   "--chart-seq-1",
+   "--chart-seq-7"
+  ],
+  "legend_texts": [
+   "3",
+   "9"
+  ],
+  "hover": [
+   {
+    "si": 0,
+    "ci": 1,
+    "contains": [
+     "North",
+     "100",
+     "units"
+    ],
+    "tip": [
+     "units: 3"
+    ],
+    "card": [
+     "amount\n100",
+     "units\n3"
+    ]
+   }
+  ],
+  "label_texts": []
+ }
+}
