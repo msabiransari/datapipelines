@@ -55,6 +55,7 @@
     legendKeyGap: f(0.42, "render", "em: between a legend key and its name"),
     legendEntryGap: f(1, "render", "em: between two legend entries"),
     legendGap: f(0.67, "render", "em: between the legend and the plot"),
+    legendStepRatio: f(1.6, "render", "§3.3 and the first look study (16 × 10 px): a step of a colour scale's legend is legendKey high and this many times as wide in a row, the other way round in a column"),
     valueLabelGap: f(0.25, "render", "em of --chart-text-small: between a bar's end and its value label"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)

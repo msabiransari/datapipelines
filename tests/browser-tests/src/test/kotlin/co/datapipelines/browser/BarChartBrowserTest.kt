@@ -263,6 +263,61 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         withClue("the five hover expectations were read from the shown card (non-vacuity floor)") { read shouldBe HOVER_EXPECTATIONS }
     }
 
+    /**
+     * Brief 1050 A.6: a bar coloured by value (`bar-shade`, not in [ChartBrowserFixtures.NAMES], so no other case sees it).
+     * The DOM's marks carry the fills of the engine's primitives of the same draw (captured by [SHADE_DRAW]), in order,
+     * and those are the steps the fixture expects; the scale's legend is in the DOM with its seven steps and its two end
+     * texts, and nothing in the chart is a button; the card shown under the pointer holds the value's line and the
+     * shade's. No console error and no page error on the page; the CSP collector is asserted in `closePage`.
+     */
+    @Test
+    fun `a bar coloured by value draws the engine's fills, a scale legend that is no button, and the shade's line in the card`() {
+        startTrace()
+        val root = ready("vbarshade")
+        val agent = newYorkContext()
+        val errors = mutableListOf<String>()
+        agent.onPage { page ->
+            page.onConsoleMessage { m -> if (m.type() == "error") errors += "${page.url()}: console ${m.text()}" }
+            page.onPageError { e -> errors += "${page.url()}: page error $e" }
+        }
+        try {
+            val fixture = ChartBrowserFixtures.fixture("bar-shade")
+            val preview = open(agent, "$root/charts/bar_shade", fixture)
+            try {
+                assertDrawn(preview, fixture)
+                preview.evaluate(SHADE_DRAW)
+                val read = preview.evaluate(SHADE_READ, CASE) as Map<*, *>
+                println("bar-shade: $read")
+                val fills = fixture.expect.getAsJsonArray("fills").map { it.asString }
+                withClue("bar-shade: the captured draw $read") { read["error"] shouldBe null }
+                withClue("bar-shade: the DOM's marks are painted in the primitives' colours $read") {
+                    (read["colours"] as List<*>).size shouldBe fills.size
+                    read["dom"] shouldBe read["colours"]
+                }
+                withClue("bar-shade: each bar's fill is its shade's step $read") { read["prims"] shouldBe fills }
+                withClue("bar-shade: the scale's legend, step 1 to step 7, painted on the page as drawn $read") {
+                    read["legend"] shouldBe (1..7).map { "--chart-seq-$it" }
+                    read["legendDom"] shouldBe read["legendColours"]
+                    (read["legendColours"] as List<*>).toSet().size shouldBe 7
+                }
+                withClue("bar-shade: the legend's end texts $read") {
+                    read["legendTexts"] shouldBe fixture.expect.getAsJsonArray("legend_texts").map { it.asString }
+                }
+                withClue("bar-shade: nothing in the chart is a button, no group names a legend entry $read") {
+                    (read["buttons"] as Number).toInt() shouldBe 0
+                    (read["switches"] as Number).toInt() shouldBe 0
+                }
+                val hovered = fixture.expect.getAsJsonArray("hover").sumOf { hoverAndRead(preview, fixture.name, it.asJsonObject) }
+                withClue("bar-shade: the card was read (non-vacuity)") { hovered shouldBe 1 }
+            } finally {
+                preview.close()
+            }
+        } finally {
+            agent.close()
+        }
+        withClue("bar-shade: no console error, no page error") { errors.shouldBeEmpty() }
+    }
+
     /** Opens fixture [name]'s preview when it carries `expect.hover` entries and reads each one; returns how many were read. */
     private fun readHovers(
         agent: BrowserContext,
@@ -297,6 +352,10 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
         println("$fixture: series $si, category $ci: the shown card reads $shown")
         e.getAsJsonArray("contains").map { it.asString }.forEach { part ->
             withClue("$fixture: the card shown over series $si, category $ci: $shown") { shown shouldContain part }
+        }
+        // `card` (optional): runs of the shown card's lines, where the card writes a detail's name and value as two texts.
+        e.getAsJsonArray("card")?.map { it.asString }?.forEach { run ->
+            withClue("$fixture: the card shown over series $si, category $ci, line by line: $shown") { shown shouldContain run }
         }
         preview.mouse().move(0.0, 0.0)
         return 1
@@ -381,7 +440,8 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
             val lines = tooltipLines(preview, e.get("si").asInt, e.get("ci").asInt)
             withClue("${fixture.name}: series ${e.get("si")}, category ${e.get("ci")} has tooltip lines") { lines shouldNotBe null }
             val shown = lines.orEmpty().joinToString("\n")
-            e.getAsJsonArray("contains").map { it.asString }.forEach { part ->
+            // `tip` (optional): whole lines the engine's tip carries, as the card does not show them (a name and a value).
+            (e.getAsJsonArray("contains") + (e.getAsJsonArray("tip") ?: JsonArray())).map { it.asString }.forEach { part ->
                 withClue("${fixture.name}: the tooltip lines of series ${e.get("si")}, category ${e.get("ci")}: $lines") {
                     shown shouldContain part
                 }
@@ -609,6 +669,54 @@ class BarChartBrowserTest : VisualizationBrowserSuite() {
               best.b.scrollIntoView({ block: 'center', inline: 'center' });
               const r = best.b.getBoundingClientRect();
               return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+            }"""
+
+        /**
+         * One redraw of the case's chart (`resize`, the next animation frame) with the engine's result of that draw kept in
+         * `window.__drawn` (`{error}` when it threw or never came): the pattern of `ChartPageSuite.REDRAW`, whose companion
+         * this class does not see.
+         */
+        const val SHADE_DRAW =
+            """() => new Promise(function (resolve) {
+              var R = window.JsRendered, original = R.render, last = null, frames = 0;
+              R.render = function () {
+                try { var out = original.apply(this, arguments); last = out; return out; } catch (e) { last = { error: String(e), primitives: [] }; throw e; }
+              };
+              var o = window.DatapipelinesPreview.instances[0]._occurrences;
+              o[Object.keys(o)[0]].renderer.resize();
+              var wait = function () {
+                if (last === null && ++frames > 120) last = { error: 'no draw reached the engine in 120 frames', primitives: [] };
+                if (last === null) { requestAnimationFrame(wait); return; }
+                requestAnimationFrame(function () { R.render = original; window.__drawn = last; resolve(true); });
+              };
+              requestAnimationFrame(wait);
+            })"""
+
+        /**
+         * The shaded bar's page against the captured draw. The page writes literal colours (`writeDom` is the plan's
+         * standalone form), so each DOM mark's fill is read against its primitive's resolved colour, and the tokens are
+         * read off the primitives: the marks' fills, in order; the scale legend's step tokens, its rects' colours on the
+         * page and in the draw, and its texts; the elements of role button and the groups naming a legend entry
+         * (`data-legend`) in the chart.
+         */
+        const val SHADE_READ =
+            """sel => {
+              const svg = document.querySelector(sel + ' svg.dp-chart');
+              const fill = el => el.getAttribute('fill');
+              const drawn = window.__drawn;
+              const legend = svg.querySelector('g.dp-legend');
+              const marks = drawn.primitives.filter(p => p.role === 'mark' && p.k !== 'group');
+              const steps = drawn.primitives.filter(p => p.role === 'legend' && p.k === 'rect');
+              return { error: drawn.error || null,
+                dom: Array.from(svg.querySelectorAll('g.dp-mark[data-series] > .dp-mark')).map(fill),
+                colours: marks.map(p => p.color),
+                prims: marks.map(p => p.fill),
+                legend: steps.map(p => p.fill),
+                legendDom: legend ? Array.from(legend.querySelectorAll('rect')).map(fill) : null,
+                legendColours: steps.map(p => p.color),
+                legendTexts: legend ? Array.from(legend.querySelectorAll('text')).map(t => t.textContent) : [],
+                buttons: svg.querySelectorAll('[role="button"]').length,
+                switches: svg.querySelectorAll('[data-legend]').length };
             }"""
 
         /** The texts of the tooltip card the page shows, one per line. */
