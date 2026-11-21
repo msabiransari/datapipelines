@@ -937,8 +937,8 @@ renderer shows the resolved value" for this case only).
   engine primitives appended through the engine's DOM writer, with the colours of the look's tokens; it writes no
   markup string, no `style` attribute and no event attribute.
   - **Hover.** The pointer over a mark highlights that mark's series and dims every other series to `--chart-dim`;
-    a card beside the pointer shows the mark's heading (its category or x value), its value row with the series key,
-    and its detail fields. On a grouped or stacked bar the card lists every series at that category (a stack top
+    a card beside the pointer shows the mark's heading (its category or x value), its value row with the series key
+    (on a bar coloured by value, the key shows that bar's own colour), and its detail fields. On a grouped or stacked bar the card lists every series at that category (a stack top
     segment first) with the hovered row in bold. A bar stacked at zero heads its card with the category and the
     stack's total (`Q1 · 90`): the sum of its visible segments, written in the chart's own format and unit as a row's value is; when
     that heading is wider than the card's content width, the card heads with the category alone. A normalized stack
