@@ -221,19 +221,20 @@ class JsRenderedTestTypesTest {
 
         /**
          * Brief 1049's three test types, brief 1052's test_marks, brief 1051's five (test_points, test_grid, test_two_axes,
-         * test_bins, test_bare) and brief 1055's test_web.
+         * test_bins, test_bare), brief 1055's test_web and brief 1053's test_tones.
          */
-        const val TYPE_FLOOR = 10
+        const val TYPE_FLOOR = 11
         const val FRAMES = 7
 
         /**
          * 23 fixtures × 7 frames, and × 35 × 5; the rendered, text and mark floors as the Node sweep's (types.test.mjs).
          *
          * Brief 1052 adds the type test_marks and its 11 fixtures; brief 1051 adds five types and their 45 fixtures (44,
-         * and round 3's signed-two-ticks); brief 1055 adds test_web and its 10 fixtures: 89 fixtures in all.
+         * and round 3's signed-two-ticks); brief 1055 adds test_web and its 10 fixtures; brief 1053 adds test_tones and its
+         * one fixture: 90 fixtures in all.
          */
-        const val IDENTITY_FLOOR = (23 + 11 + 45 + 10) * 7
-        const val SWEEP_FLOOR = (23 + 11 + 45 + 10) * 35 * 5
+        const val IDENTITY_FLOOR = (23 + 11 + 45 + 10 + 1) * 7
+        const val SWEEP_FLOOR = (23 + 11 + 45 + 10 + 1) * 35 * 5
         const val RENDERED_FLOOR = 3000
         const val TEXT_FLOOR = 9000
         const val MARK_FLOOR = 15000
