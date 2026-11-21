@@ -190,7 +190,7 @@
     ],
     "sha256": {
       "js/datapipelines-dashboard.js": "2e175286823e60f7cc7980ec8e22b223174d3e2f279a60f1553b7c9a438fb24f",
-      "js/datapipelines-chart-interactions.js": "96cfeea1ba501a1ea35711be904a1d721ee8e0c8e8a09ae1bb0d210110a927e5",
+      "js/datapipelines-chart-interactions.js": "fb2b68b846269244093c2c0195bfd3cfa27e1a8f1d7830bd9eb0358850bb27c3",
       "js/datapipelines-dashboard-chart.js": "c1d54d91114230d3646b69302195189b7cb0037e8f859e10e8d74511d1871117",
       "js/datapipelines-dashboard-table.js": "3412e46ba63d4e045ac33fc7d3305352ab9da5bff015863b5dc96d4e56ce9e39",
       "js/datapipelines-dashboard-kpi.js": "1de1ea45789aebece9397f7c87622eb7cd27705874ce009b4623ce28f3bbcb28"

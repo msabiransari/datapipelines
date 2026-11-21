@@ -460,7 +460,8 @@
     var box = null;
     for (var i = at + 1; i <= at + n && i < prims.length; i++) {
       var p = prims[i];
-      var b = p.k === "text" ? textBox(R, p, width) : p.k === "rect" ? { x: p.x, y: p.y, w: p.w, h: p.h } : null;
+      // A dot key (brief 1054 D7) counts with the square around its circle, so an entry is found by its key too.
+      var b = p.k === "text" ? textBox(R, p, width) : p.k === "rect" ? { x: p.x, y: p.y, w: p.w, h: p.h } : p.k === "circle" ? { x: p.cx - p.r, y: p.cy - p.r, w: 2 * p.r, h: 2 * p.r } : null;
       if (b === null) continue;
       box = box === null ? { x: b.x, y: b.y, w: b.w, h: b.h } : union(box, b);
     }
