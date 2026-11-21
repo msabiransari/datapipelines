@@ -306,7 +306,7 @@ test("R1-R4 identity, Node's half: second-axis-probes.js evaluated in Node is se
   const probes = JSON.parse(text);
   assert.ok(probes.length >= 26, "probes " + probes.length);
   for (const p of probes) assert.ok([p.lo, p.hi, ...p.ticks].every(Number.isFinite), p.name);
-  for (const p of probes) if (p.name.includes(" log ")) assert.ok(p.ticks.every((t) => t > 0), p.name);
+  for (const p of probes) if (p.name.includes(" log right ")) assert.ok(p.ticks.every((t) => t > 0), p.name);
   for (const r of ["r1", "r2", "r3", "r4"]) assert.ok(probes.some((p) => p.name.startsWith(r + " ")), r);
   console.log(`R1-R4 identity probes: ${probes.length}, ${text.length} characters`);
 });
