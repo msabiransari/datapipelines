@@ -142,6 +142,13 @@ test("A.1: through the test types: a fixture naming a bad field or a bad token i
   empty.columns.s = [];
   empty.document.config.test.keysAlone = 2;
   assert.throws(() => draw(empty, 960, 540), /keysAlone true or false/);
+  // G3: a fourth value put into a copy's key field is named by the throw, before any primitive is written.
+  const ring = engineWith(TYPES, (srcs) => {
+    const old = 'legendKeyPoint: f("dot", "render"';
+    assert.equal(srcs["06-tables.js"].split(old).length - 1, 1, "the copy's anchor stands once");
+    srcs["06-tables.js"] = srcs["06-tables.js"].replace(old, 'legendKeyPoint: f("ring", "render"');
+  });
+  assert.throws(() => draw(sw("three-forms"), 960, 540, {}, ring), /legend: series string:East: legendKey legendKeyPoint holds ring, not a key form \(square, line, dot\)/);
 });
 
 // ---------------------------------------------------------------- A.2 the switch with a key per entry (test_switch)
