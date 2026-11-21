@@ -19,7 +19,12 @@ class ChartMarkPolicyTest {
             ChartChannel(
                 "layers",
                 required = false,
-                node = ChannelNode.ListOf(min = 1, max = 4, of = ChannelNode.ObjectOf(mapOf("y" to ChannelNode.Shape("value")), layer = "mark")),
+                node =
+                    ChannelNode.ListOf(
+                        min = 1,
+                        max = 4,
+                        of = ChannelNode.ObjectOf(mapOf("y" to ChannelNode.Shape("value")), layer = "mark"),
+                    ),
             ),
         )
 
@@ -69,14 +74,21 @@ class ChartMarkPolicyTest {
 
     @Test
     fun `a layer mark that names no row is a descriptor error, not a document refusal`() {
-        val error = shouldThrow<IllegalArgumentException> { refusals("""{"layers": [{"mark": "pie", "y": ${value("""{"type": "log"}""")}}]}""", null) }
+        val error =
+            shouldThrow<IllegalArgumentException> {
+                refusals(
+                    """{"layers": [{"mark": "pie", "y": ${value("""{"type": "log"}""")}}]}""",
+                    null,
+                )
+            }
         error.message shouldBe "no mark policy for the layer mark pie"
     }
 
     @Test
     fun `an object node carries layer in its wire form only when it is set, so the registered descriptors are unchanged`() {
         val members = mapOf("y" to ChannelNode.Shape("value"))
-        ChannelNode.ObjectOf(members).wire() shouldBe mapOf("node" to "object", "members" to mapOf("y" to mapOf("node" to "shape", "name" to "value")))
+        ChannelNode.ObjectOf(members).wire() shouldBe
+            mapOf("node" to "object", "members" to mapOf("y" to mapOf("node" to "shape", "name" to "value")))
         ChannelNode.ObjectOf(members, layer = "mark").wire() shouldBe
             mapOf("node" to "object", "members" to mapOf("y" to mapOf("node" to "shape", "name" to "value")), "layer" to "mark")
         shouldThrow<IllegalArgumentException> { ChannelNode.ObjectOf(members, layer = "y") }
@@ -84,9 +96,11 @@ class ChartMarkPolicyTest {
 
     private fun value(scale: String): String = """{"field": "amount", "type": "quantitative", "aggregate": "sum", "scale": $scale}"""
 
-    private fun layers(scale: String): String = """{"layers": [${marks.joinToString(", ") { """{"mark": "$it", "y": ${value(scale)}}""" }}]}"""
+    private fun layers(scale: String): String =
+        """{"layers": [${marks.joinToString(", ") { """{"mark": "$it", "y": ${value(scale)}}""" }}]}"""
 
-    private fun config(encoding: String): JsonNode = ArtifactJson.mapper.readTree("""{"mark": {"type": "test_layers"}, "encoding": $encoding}""")
+    private fun config(encoding: String): JsonNode =
+        ArtifactJson.mapper.readTree("""{"mark": {"type": "test_layers"}, "encoding": $encoding}""")
 
     private fun refusals(
         encoding: String,

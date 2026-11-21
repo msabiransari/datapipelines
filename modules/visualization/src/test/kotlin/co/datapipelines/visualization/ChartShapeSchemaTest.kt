@@ -16,20 +16,36 @@ class ChartShapeSchemaTest {
         val ok = """{"field": "v", "aggregate": "sum", "type": "quantitative", "scale": "sequential"}"""
         valid("shade", ok)
         valid("shade", """{"field": "v", "aggregate": "count", "type": "quantitative", "scale": "sequential", "legend": null}""")
-        valid("shade", """{"field": "v", "aggregate": "mean", "type": "quantitative", "scale": "diverging", "mid": -2.5, "legend": {"orient": "right"}}""")
+        valid(
+            "shade",
+            """{"field": "v", "aggregate": "mean", "type": "quantitative", "scale": "diverging", """ +
+                """"mid": -2.5, "legend": {"orient": "right"}}""",
+        )
         valid("shade", """{"field": "v", "aggregate": "max", "type": "quantitative", "scale": "diverging"}""")
         for (member in listOf("field", "aggregate", "type", "scale")) invalid("shade", without(ok, member), "without $member")
         // A shade always carries its field, with every aggregate (the record's row; a value with count carries none).
         for (aggregate in listOf("sum", "mean", "min", "max", "count")) {
             invalid("shade", """{"aggregate": "$aggregate", "type": "quantitative", "scale": "sequential"}""", "$aggregate without field")
         }
-        invalid("shade", """{"field": "v", "aggregate": "sum", "type": "quantitative", "scale": "sequential", "mid": 0}""", "mid beside sequential")
-        invalid("shade", """{"field": "v", "aggregate": "sum", "type": "quantitative", "scale": "sequential", "sort": null}""", "an unknown member")
+        invalid(
+            "shade",
+            """{"field": "v", "aggregate": "sum", "type": "quantitative", "scale": "sequential", "mid": 0}""",
+            "mid beside sequential",
+        )
+        invalid(
+            "shade",
+            """{"field": "v", "aggregate": "sum", "type": "quantitative", "scale": "sequential", "sort": null}""",
+            "an unknown member",
+        )
         invalid("shade", """{"field": "v", "aggregate": "sum", "type": "nominal", "scale": "sequential"}""", "type nominal")
         invalid("shade", """{"field": "v", "aggregate": "share", "type": "quantitative", "scale": "sequential"}""", "aggregate share")
         invalid("shade", """{"field": "v", "aggregate": "sum", "type": "quantitative", "scale": "log"}""", "scale log")
         invalid("shade", """{"field": "v", "aggregate": "sum", "type": "quantitative", "scale": "diverging", "mid": "0"}""", "mid as text")
-        invalid("shade", """{"field": "v", "aggregate": "sum", "type": "quantitative", "scale": "sequential", "legend": {"orient": "direct"}}""", "legend direct")
+        invalid(
+            "shade",
+            """{"field": "v", "aggregate": "sum", "type": "quantitative", "scale": "sequential", "legend": {"orient": "direct"}}""",
+            "legend direct",
+        )
     }
 
     @Test
@@ -90,7 +106,9 @@ class ChartShapeSchemaTest {
         instance: String,
     ): List<ChartSchemaProblem> {
         val id = ChartSchemas.ID_PREFIX + "test-$shape.schema.json"
-        val test = """{"${'$'}schema": "https://json-schema.org/draft/2020-12/schema", "${'$'}id": "$id", "${'$'}ref": "skeleton.schema.json#/${'$'}defs/$shape"}"""
+        val test =
+            """{"${'$'}schema": "https://json-schema.org/draft/2020-12/schema", "${'$'}id": "$id", """ +
+                """"${'$'}ref": "skeleton.schema.json#/${'$'}defs/$shape"}"""
         val resources = ChartSchemas.FILES.associate { ChartSchemas.ID_PREFIX + it to String(ChartSchemas.bytes(it)) } + (id to test)
         return ChartSchemaValidator(resources, id).validate(ArtifactJson.mapper.readTree(instance))
     }

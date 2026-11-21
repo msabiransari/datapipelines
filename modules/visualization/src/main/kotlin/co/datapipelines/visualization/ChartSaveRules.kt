@@ -221,7 +221,8 @@ object ChartSaveRules {
     ) {
         val mid = shade.node.get("mid") ?: return
         if (!mid.isNumber || !mid.asDouble().isFinite()) {
-            refusals += ChartRefusal("chart.shade.mid_invalid", "${shade.pointer}/mid", "The middle of a colour scale must be a finite number.")
+            refusals +=
+                ChartRefusal("chart.shade.mid_invalid", "${shade.pointer}/mid", "The middle of a colour scale must be a finite number.")
         }
     }
 

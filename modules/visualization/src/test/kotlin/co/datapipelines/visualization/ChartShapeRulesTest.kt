@@ -123,7 +123,8 @@ class ChartShapeRulesTest {
         return """{"field": "$field", "aggregate": "$aggregate", "type": "quantitative", "scale": "$scale"$midPart}"""
     }
 
-    private fun config(encoding: String): JsonNode = ArtifactJson.mapper.readTree("""{"mark": {"type": "test_shapes"}, "encoding": $encoding}""")
+    private fun config(encoding: String): JsonNode =
+        ArtifactJson.mapper.readTree("""{"mark": {"type": "test_shapes"}, "encoding": $encoding}""")
 
     private fun refusals(encoding: String): List<Pair<String, String>> {
         val body = ArtifactJson.mapper.createObjectNode()
