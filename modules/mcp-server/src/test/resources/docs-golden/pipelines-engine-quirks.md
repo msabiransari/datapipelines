@@ -106,3 +106,17 @@ is a syntax error again. Choose a non-reserved alias (`yr`, `mo`, `dy`, `val`, `
 tempdb node and in every table a downstream node reads. Measured on H2 2.3.232, 2026-10-02, with
 `sql_probe {"name": "tempdb"}`; the nine refused and two accepted words above are the whole
 list measured, not a catalogue of the engine's reserved words.
+
+### 6.10 A writing run on Oracle is refused; a MyISAM table is not rolled back
+
+A run whose durable writes all go to ONE registration commits them once, together, and rolls
+them all back if any node fails — the single-database transaction. It is qualified on
+PostgreSQL, MySQL (InnoDB) and SQL Server; on Oracle no test environment exists yet, so a run
+that would enroll an Oracle registration is refused before its first write:
+`pipeline.execution.local_write_refused` with `details.reason: unqualified_transactional_target`.
+Reads from Oracle are unaffected, and so is a run that writes nowhere. Do not split the writes
+across runs to get past it — that is exactly the partial commit the refusal prevents; write to a
+qualified registration, or report the refusal. On MySQL the rollback reaches InnoDB tables only:
+a MyISAM table keeps the rows a failed run wrote to it, and nothing warns you — ask whoever owns
+the database before writing to a table whose engine you have not seen. Measured on MySQL 8.4.11
+with Connector/J 9.7.0, 2026-11-21.
