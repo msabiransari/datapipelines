@@ -1,0 +1,86 @@
+{
+ "note": "eight entries with long names: the compact level folds them into +n",
+ "document": {
+  "display_name": "Test type test_keys",
+  "config": {
+   "mark": {
+    "type": "test_keys"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Eight long keys"
+   },
+   "test": {
+    "keys": [
+     {
+      "id": "e0",
+      "title": "Northern territories and islands",
+      "key": "legendKeyBar",
+      "colour": "--chart-series-1"
+     },
+     {
+      "id": "e1",
+      "title": "Southern coastal provinces",
+      "key": "legendKeyLine",
+      "colour": "--chart-series-2"
+     },
+     {
+      "id": "e2",
+      "title": "Eastern mountain districts",
+      "key": "legendKeyPoint",
+      "colour": "--chart-series-3"
+     },
+     {
+      "id": "e3",
+      "title": "Western river valleys",
+      "key": "legendKeyBar",
+      "colour": "--chart-series-4"
+     },
+     {
+      "id": "e4",
+      "title": "Central plains and lakes",
+      "key": "legendKeyLine",
+      "colour": "--chart-seq-2"
+     },
+     {
+      "id": "e5",
+      "title": "Far north tundra region",
+      "key": "legendKeyPoint",
+      "colour": "--chart-seq-4"
+     },
+     {
+      "id": "e6",
+      "title": "Deep south desert basin",
+      "key": "legendKeyBar",
+      "colour": "--chart-seq-7"
+     },
+     {
+      "id": "e7",
+      "title": "Offshore island chains",
+      "key": "legendKeyLine",
+      "colour": "--chart-ink"
+     }
+    ],
+    "keysAlone": false
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Amount",
+   "Amount",
+   "Amount"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 3
+ }
+}

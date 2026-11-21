@@ -1,0 +1,51 @@
+{
+ "note": "the hidden list's trap: an entry's id equals the id of the series North",
+ "document": {
+  "display_name": "Test type test_keys",
+  "config": {
+   "mark": {
+    "type": "test_keys"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Trap"
+   },
+   "test": {
+    "keys": [
+     {
+      "id": "string:North",
+      "title": "North as a key",
+      "key": "legendKeyBar",
+      "colour": "--chart-seq-5"
+     },
+     {
+      "id": "other",
+      "title": "Other",
+      "key": "legendKeyLine",
+      "colour": "--chart-ink-2"
+     }
+    ],
+    "keysAlone": false
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "North",
+   "South"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 4
+ }
+}

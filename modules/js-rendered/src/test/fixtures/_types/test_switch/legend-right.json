@@ -1,0 +1,46 @@
+{
+ "note": "the legend written at right, keys mixed",
+ "document": {
+  "display_name": "Test type test_switch",
+  "config": {
+   "mark": {
+    "type": "test_switch"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": {
+      "orient": "right"
+     }
+    }
+   },
+   "title": {
+    "text": "Legend right"
+   },
+   "test": {
+    "keys": {
+     "North": "legendKeyBar",
+     "South": "legendKeyLine",
+     "East": "legendKeyPoint"
+    }
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East",
+   "North",
+   "South",
+   "East"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 6
+ }
+}

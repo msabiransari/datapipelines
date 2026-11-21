@@ -182,6 +182,7 @@
       return { id: s.id, title: s.title, hidden: false };
     });
     out.summary.series = series;
+    C.legendKeys(m, out.summary);
     var frame = R.frames.get(reg.axes), e = h.em("edge");
     // 1. The title block, when the frame takes one; a frame without it lays itself out from the frame's top.
     var t = frame.titles ? C.titles(h, doc, lvl, W, e) : { texts: [], bottom: 0 };
@@ -230,14 +231,21 @@
   /**
    * The legend of a draw: null, or {place, series, drawn, hiddenOf(id), colourOf(id), key, layout(h, boxW, boxH),
    * prims(h, lay, ox, oy, out)}. The ONE place a draw decides which legend it has (where: C.legendPlace, look contract
-   * §4.2); a legend of series is laid out by C.legendLayout ({place, w, h, items, more, drawn} plus `empty`, nothing to
-   * draw) and written by C.legendPrims. With the names on the lines (`direct`) every entry is drawn (line 4: no id of
-   * the data is on the list, so every series is drawn). A model that hands a colour scale (m.shade = {scale, legend,
-   * title}, brief 1050 D5) gets the scale's legend instead (R.colour.legend, placed by R.colour.place): no type has both,
-   * `color` is a series or a shade. Its `drawn` is empty, so it hides no series.
+   * §4.2), in this order (brief 1054 D3):
+   *   1. a model that hands a colour scale (m.shade = {scale, legend, title}, brief 1050 D5) gets the scale's legend
+   *      (R.colour.legend, placed by R.colour.place): no type has both, `color` is a series or a shade;
+   *   2. a model that hands `keys` (C.legendModel, brief 1054 D2) gets a legend of keys: no entry a switch, none for an
+   *      empty list, placed by C.legendPlace with no hidden id and the model's keysAlone; its `drawn` is always empty,
+   *      so no id on the hidden list hides a series;
+   *   3. else the legend of its series, each entry's key the look field the series names (`legendKey`) or the model's.
+   * A legend of series is laid out by C.legendLayout ({place, w, h, items, more, drawn} plus `empty`, nothing to draw)
+   * and written by C.legendPrims. With the names on the lines (`direct`) every entry is drawn (line 4: no id of the
+   * data is on the list, so every series is drawn). The scale's `drawn` is empty too, so it hides no series.
    */
   function legendOf(reg, m, series, hidden, lvl) {
+    var lm = C.legendModel(m);
     if (m.shade) return R.colour.legend(m.shade.scale, { place: R.colour.place(lvl, m.shade.legend), label: m.shade.title });
+    if (lm.keys !== null) return keysLegend(m, lm, lvl);
     var place = C.legendPlace(series, hidden, lvl, m.legend, m.direct === true);
     if (place === null) return null;
     var colourOf = new Map();
@@ -252,7 +260,7 @@
       colourOf: function (id) {
         return colourOf.get(id);
       },
-      key: m.legendKey,
+      key: lm.keyOf,
       layout: function (h, boxW, boxH) {
         var lay = C.legendLayout(h, series, place, boxW, boxH);
         lay.empty = lay.items.length === 0 && lay.more === null;
@@ -263,6 +271,46 @@
       },
     };
     if (place === "direct") for (var a = 0; a < series.length; a++) lg.drawn[series[a].id] = true;
+    return lg;
+  }
+
+  /** The legend of keys (brief 1054 D3, D4): null for an empty list or where C.legendPlace gives none. */
+  function keysLegend(m, lm, lvl) {
+    var entries = lm.keys.map(function (e) {
+      return { id: e.id, title: e.title };
+    });
+    if (entries.length === 0) return null;
+    var place = C.legendPlace(entries, [], lvl, m.legend, false, lm.alone);
+    if (place === null) return null;
+    var colourOf = new Map(), keyOf = new Map();
+    for (var k = 0; k < lm.keys.length; k++) {
+      colourOf.set(lm.keys[k].id, lm.keys[k].colour);
+      keyOf.set(lm.keys[k].id, lm.keys[k].key);
+    }
+    var lg = {
+      place: place,
+      series: entries,
+      drawn: {},
+      hiddenOf: function () {
+        return false;
+      },
+      colourOf: function (id) {
+        return colourOf.get(id);
+      },
+      key: function (id) {
+        return keyOf.get(id);
+      },
+      layout: function (h, boxW, boxH) {
+        var lay = C.legendLayout(h, entries, place, boxW, boxH);
+        lay.empty = lay.items.length === 0 && lay.more === null;
+        // No entry is a switch: the draw reads no hidden list (render hides a series only where lg.drawn holds it).
+        lay.drawn = {};
+        return lay;
+      },
+      prims: function (h, lay, ox, oy, out) {
+        return C.legendPrims(h, lay, ox, oy, lg.hiddenOf, lg.colourOf, out, lg.key, true);
+      },
+    };
     return lg;
   }
 

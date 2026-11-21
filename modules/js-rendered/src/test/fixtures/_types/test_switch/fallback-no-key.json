@@ -1,0 +1,42 @@
+{
+ "note": "East names no key and the model hands no legendKey: legendKeyBar, a square",
+ "document": {
+  "display_name": "Test type test_switch",
+  "config": {
+   "mark": {
+    "type": "test_switch"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "No model key"
+   },
+   "test": {
+    "keys": {
+     "North": "legendKeyLine",
+     "South": "legendKeyPoint"
+    }
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East",
+   "North",
+   "South",
+   "East"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 6
+ }
+}
