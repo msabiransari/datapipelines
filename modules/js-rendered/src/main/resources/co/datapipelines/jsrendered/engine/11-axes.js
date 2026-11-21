@@ -226,13 +226,32 @@
   /**
    * The value at share t of a linear range [lo, hi]. Where hi - lo overflows (two finite ends of opposite signs past
    * half a double's range), it is lo × (1 - t) + hi × t: each term is at most the larger end, the two have opposite
-   * signs, so the sum cannot overflow, and t = 0 and t = 1 give lo and hi exactly (brief 1051 r3, R2). An end that is
-   * not finite keeps lo + t × (hi - lo): such a domain is refused downstream with the values, and so the message, it
-   * gave before (the save refuses it first, chart.scale.domain_invalid).
+   * signs, so the sum cannot overflow, and t = 0 and t = 1 give lo and hi exactly (brief 1051 r3, R2). Otherwise lo + t ×
+   * (hi - lo), and at t = 1 hi itself: lo + (hi - lo) need not read hi (-MAX + (MAX - 1) is 0, not -1), and an
+   * author's end is returned as written (brief 1051 r4, the boundary bank). An end that is not finite keeps lo + t ×
+   * (hi - lo): such a domain is refused downstream with the values, and so the message, it gave before (the save
+   * refuses it first, chart.scale.domain_invalid).
    */
   function lerp(lo, hi, t) {
     var d = hi - lo;
-    return d < Infinity || !finite(lo, hi) ? lo + t * d : lo * (1 - t) + hi * t;
+    if (!finite(lo, hi)) return lo + t * d;
+    if (t === 1) return hi;
+    return d < Infinity ? lo + t * d : lo * (1 - t) + hi * t;
+  }
+
+  /**
+   * The value at share t of a log range [lo, hi] (0 < lo < hi, both finite): lo and hi themselves at t = 0 and t = 1,
+   * else 10^(log lo + t × (log hi − log lo)) bounded to [lo, hi]. The bound matters only within a few units in the last
+   * place of an end, where the approximate inverse can step past it: past the largest double that read Infinity, and
+   * below the smallest subnormal 0 (brief 1051 r4, R4: [1e308, MAX] and [MIN_VALUE, 1e-322], ranges the save admits).
+   * So every value is positive and finite, the authored ends come back exactly, and each lies within one double of
+   * the exact value at its share (a subnormal has few doubles near it: there that one step is the format's).
+   */
+  function logLerp(lo, hi, l0, l1, t) {
+    if (t === 0) return lo;
+    if (t === 1) return hi;
+    var v = S.exp10(l0 + t * (l1 - l0));
+    return v < lo ? lo : v > hi ? hi : v;
   }
 
   /** Both ends are finite numbers. */
@@ -279,9 +298,13 @@
       var lo = k * s - f0 * span, hi = lo + span;
       if (!(lo > -Infinity && hi < Infinity)) return null;
       if (lo > e0 + tol || hi < e1 - tol) continue;
-      var decimals = Math.max(0, 1 - S.decade(s)), scale = S.pow10(decimals > 308 ? 308 : decimals), ticks = [];
+      // The tick rule's rounding to the step's decimals takes off a product's last-place noise (3 × 0.1); a step below
+      // 10^-307 has more decimals than the power table can scale by, and rounding at 10^308 instead would cut every
+      // value to a multiple of 10^-308 (2.2e-308 read 3e-308, a subnormal 0): there the multiple is kept as it is
+      // (brief 1051 r4, the boundary bank).
+      var decimals = Math.max(0, 1 - S.decade(s)), scale = decimals > 308 ? 0 : S.pow10(decimals), ticks = [];
       for (var j = 0; j < n; j++) {
-        var t = Math.round((k + j) * s * scale) / scale + 0;
+        var t = scale > 0 ? Math.round((k + j) * s * scale) / scale + 0 : (k + j) * s + 0;
         if (!(t > -Infinity && t < Infinity)) return null;
         ticks.push(t);
       }
@@ -337,7 +360,7 @@
   function caseC(lvl, S2, ext, length, shares) {
     var own = S2.log === true ? logAxis(lvl, ext, S2.domain, length, S2.format) : valueAxis(lvl, ext, S2.domain, length, S2.format, 0);
     var lo = own.lo, hi = own.hi, l0 = S2.log === true ? S.log10(lo) : 0, l1 = S2.log === true ? S.log10(hi) : 0, ticks = [];
-    for (var j = 0; j < shares.length; j++) ticks.push(S2.log === true ? S.exp10(l0 + shares[j] * (l1 - l0)) : lerp(lo, hi, shares[j]));
+    for (var j = 0; j < shares.length; j++) ticks.push(S2.log === true ? logLerp(lo, hi, l0, l1, shares[j]) : lerp(lo, hi, shares[j]));
     var rounded = [];
     for (var d = 3; d <= 17; d++) {
       rounded = [];

@@ -225,20 +225,28 @@
     };
   }
 
-  /** Terms of the series below: y ≤ ln 10 / 16 < 0.144, so 24 terms leave 0.144^24 / 24!, far below a double's last bit. */
+  /** Terms of the series below: |y| ≤ ln 10 / 16 < 0.144, so 24 terms leave 0.144^24 / 24!, far below a double's last bit. */
   var EXP_TERMS = 24;
 
   /**
    * 10^x for a number x, without a power or exponential function (brief 1051 D5: the value a log axis has at a position
    * between its ticks; O-16): 10^x = 10^k × e^(f ln 10) for the integer k = floor(x) and f = x − k in [0, 1); e^y by its
    * series on y / 16, then squared four times. Four operations and comparisons only, so the runtimes agree to the bit
-   * (I6). A whole x gives the table's power exactly; NaN gives NaN; past the table's range Infinity or 0.
+   * (I6). A whole x gives the table's power exactly; NaN gives NaN. It is log10's inverse on the same table: log10 reads
+   * a value's power from POW10, so exp10 multiplies by that same entry (a subnormal entry is the double nearest 10^k,
+   * and the two agree on it). Below the table's smallest power, x in [-324, -323), k stays -323 and f is negative, as
+   * log10 writes a value under 10^-323 (down to the smallest subnormal, -323.3): such a value is no longer cut to 0
+   * (brief 1051 r4, R4). Below -324, 0; at or past 309, Infinity. The series is accurate to a few units in the last
+   * place, so a value next to the largest double can still read Infinity: a caller that needs a value inside a range
+   * bounds it to the range (the second axis does).
    */
   function exp10(x) {
     if (x !== x) return x;
     if (!(x < 309)) return Infinity;
-    if (!(x >= -323)) return 0;
-    var k = Math.floor(x), f = x - k;
+    if (!(x >= -324)) return 0;
+    var k = Math.floor(x);
+    if (k < -323) k = -323;
+    var f = x - k;
     if (f === 0) return pow10(k);
     var y = (f * LN10) / 16, term = 1, sum = 1;
     for (var n = 1; n < EXP_TERMS; n++) {
