@@ -17,11 +17,13 @@
 # The connection settings are read from the environment ONLY — never from arguments — so the
 # password never appears in a process listing or shell history. The same variable names the
 # application reads; DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH is honoured when set.
+# DATAPIPELINES_REPORT_JAVA_OPTS, when set, holds extra JVM options placed before the class
+# (for example -Djava.io.tmpdir=<dir>); they are split on whitespace, so they carry no value that does.
 set -euo pipefail
 
 main() {
     if [[ $# -gt 1 || ${1:-} == "-h" || ${1:-} == "--help" ]]; then
-        sed -n '3,19p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'
         return 2
     fi
     local root jar
@@ -35,7 +37,9 @@ main() {
         echo "local-write-compatibility-report: SPRING_DATASOURCE_URL is not set" >&2
         return 2
     fi
-    java -Dloader.main=co.datapipelines.application.compatibility.LocalWriteCompatibilityCli -jar "$jar"
+    local -a jvm_opts=()
+    read -r -a jvm_opts <<<"${DATAPIPELINES_REPORT_JAVA_OPTS:-}"
+    java ${jvm_opts[@]+"${jvm_opts[@]}"} -Dloader.main=co.datapipelines.application.compatibility.LocalWriteCompatibilityCli -jar "$jar"
 }
 
 main "$@"

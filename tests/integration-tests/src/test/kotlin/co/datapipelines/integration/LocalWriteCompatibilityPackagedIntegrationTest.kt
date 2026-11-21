@@ -110,10 +110,14 @@ class LocalWriteCompatibilityPackagedIntegrationTest {
     ): Report {
         val script = File(repoRoot(), "scripts/local-write-compatibility-report.sh")
         check(script.isFile) { "the report wrapper is missing at ${script.absolutePath}" }
+        // The wrapper's JVM keeps its temp files below this test JVM's own (DEVELOPMENT.md 9.7): a fixed child name.
+        val childTmp = File(System.getProperty("java.io.tmpdir"), "cr1036-report")
+        check(childTmp.isDirectory || childTmp.mkdirs()) { "cannot create the report JVM's temp directory ${childTmp.absolutePath}" }
         val process =
-            ProcessBuilder(script.absolutePath, jar().absolutePath)
+            ProcessBuilder("bash", script.absolutePath, jar().absolutePath)
                 .directory(repoRoot())
                 .apply {
+                    environment()["DATAPIPELINES_REPORT_JAVA_OPTS"] = "-Djava.io.tmpdir=${childTmp.absolutePath}"
                     environment()["SPRING_DATASOURCE_URL"] = jdbcUrl
                     environment()["SPRING_DATASOURCE_USERNAME"] = user
                     environment()["SPRING_DATASOURCE_PASSWORD"] = password
