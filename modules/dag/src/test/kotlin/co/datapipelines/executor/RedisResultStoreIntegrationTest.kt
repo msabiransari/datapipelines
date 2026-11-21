@@ -383,7 +383,9 @@ class RedisResultStoreIntegrationTest {
 
         override fun hasKey(key: String): Boolean {
             val observed = super.hasKey(key)
-            if (observed && armed.compareAndSet(key, null)) {
+            // compareAndSet compares by identity: disarm with the armed instance once the key is equal.
+            val target = armed.get()
+            if (observed && target == key && armed.compareAndSet(target, null)) {
                 val base = key.removeSuffix(":rows")
                 lost = delete(suffixes.map { "$base:$it" })
             }
