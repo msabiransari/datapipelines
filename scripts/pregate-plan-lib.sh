@@ -236,6 +236,7 @@ GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.DatasourceAuditEv
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.DatasourceErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ManagedLakeErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ReadOnlyEnforcementSpecDriftTest"  # inventory 995: reads docs/dag-executor.md
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.LocalWriteQualificationSpecDriftTest"  # 1036: reads docs/dag-executor.md
 GUARDS[":modules:dag"]="co.datapipelines.executor.StaleSweepCommitEvidenceIntegrationTest"  # reads the Flyway migrations under modules/app (1035 r2): the sweep classifies on the real schema
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ShippedMigrationsTest"  # inventory 995: reads README.md modules/app/src/main/resources/db/migration
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.semantics.LearnedFactKindSpecDriftTest"  # inventory 995: reads docs/enums.md modules/app/src/main/resources/db/migration/V25__learned_facts.sql
