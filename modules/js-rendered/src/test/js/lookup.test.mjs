@@ -313,6 +313,23 @@ const CHECKS = {
 
 for (const [name, check] of Object.entries(CHECKS)) test("A.1: " + name, () => check(R));
 
+test("A.1: a zero-span sector holds its own ray and not the opposite ray", () => {
+  const plot = { x: 0, y: 0, w: 200, h: 200 };
+  for (const [angle, dx, dy] of [[0, 0, -1], [90, 1, 0], [180, 0, 1], [270, -1, 0], [-90, -1, 0], [360, 0, -1]]) {
+    for (const r0 of [0, 20]) {
+      const entry = { series: null, datum: "zero", shape: { kind: "sector", cx: 100, cy: 100, r0, r1: 60, from: angle, to: angle }, card: { rows: [{ name: "Zero", value: "0" }], keep: 0 } };
+      const ix = R.lookup.index(plot, [], {}, [entry], [R.prim.circle({ role: "mark", cx: 100, cy: 100, r: 60, datum: "zero" })]);
+      for (const radius of [20, 40, 60]) {
+        assert.equal(R.lookup.at(ix, 100 + dx * radius, 100 + dy * radius, REACH), 0, `${angle}: on its ray at radius ${radius}`);
+        assert.equal(R.lookup.at(ix, 100 - dx * radius, 100 - dy * radius, REACH), -1, `${angle}: opposite ray at radius ${radius}`);
+      }
+      assert.equal(R.lookup.at(ix, 100, 100, REACH), r0 === 0 ? 0 : -1, `${angle}: the centre follows the inner radius`);
+      assert.equal(R.lookup.at(ix, 100 + dx * 60.01, 100 + dy * 60.01, REACH), -1, `${angle}: beyond the outer radius`);
+      assert.equal(R.lookup.at(ix, 100 - dy * 40, 100 + dx * 40, REACH), -1, `${angle}: beside the ray`);
+    }
+  }
+});
+
 // ------------------------------------------------------------------------------------------ A.2, the second form
 
 test("A.2: for every fixture at three frames the index's marks are the test's own, member by member; series and summary", () => {

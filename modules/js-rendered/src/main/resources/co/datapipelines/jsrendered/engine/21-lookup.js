@@ -197,6 +197,8 @@
   function within(s, vx, vy) {
     var span = s.to - s.from;
     if (span >= 360 || (vx === 0 && vy === 0)) return true;
+    // Equal edges describe one ray; their side tests alone would also admit the opposite direction.
+    if (span === 0) return side(s.from, vx, vy) === 0 && T.sin(s.from) * vx - T.cos(s.from) * vy >= 0;
     if (span <= 180) return side(s.from, vx, vy) >= 0 && side(s.to, vx, vy) <= 0;
     // Above a half turn: the place is outside only strictly inside the part that is left out, from `to` to `from`.
     return !(side(s.to, vx, vy) > 0 && side(s.from, vx, vy) < 0);
