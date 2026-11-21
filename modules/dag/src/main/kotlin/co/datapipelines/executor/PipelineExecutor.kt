@@ -194,7 +194,8 @@ class PipelineExecutor(
         var lakeSession: co.datapipelines.pipeline.LakeAppendSession? = null
         var localWrite: LocalWriteTransaction? = null
         val handle = cancellationRegistry.register(executionId)
-        try {
+        // One expression, one return: every catch below passes through [settledOr] first (#1035).
+        return try {
             // (write-transactions §4 row 1, §7; pipeline-contract §12.4, #1034) Every execution —
             // root or child, writable or read-only — re-applies the DML shape rules to the PINNED
             // body before any business write.
@@ -252,7 +253,7 @@ class PipelineExecutor(
             // dispatches its result back "with a prompt cancellation guarantee" — a caller cancelled
             // by then gets CancellationException and the result is discarded (its KDoc) — so an
             // assignment after the call would never run and the database would leak (#795 F5).
-            return withTimeout(config.executionTimeoutSeconds.seconds) {
+            withTimeout(config.executionTimeoutSeconds.seconds) {
                 handle.bind(coroutineContext.job)
                 val opened =
                     withContext(dispatcher.context) {
@@ -284,30 +285,33 @@ class PipelineExecutor(
                 }
             }
         } catch (e: NodeExecutionException) {
-            settleCommitWindow(run, e)?.let { return it }
-            lakeSession?.failed(e.errorCode)
-            failWithNode(run, e)
+            settledOr(run, e) {
+                lakeSession?.failed(e.errorCode)
+                failWithNode(run, e)
+            }
         } catch (e: TimeoutCancellationException) {
-            settleCommitWindow(run, e)?.let { return it }
-            // Ours, or an ancestor's? kotlinx passes a cancellation cause that is ALREADY a
-            // `CancellationException` down to children **verbatim** (`getChildJobCancellationCause`),
-            // so a parent's expired deadline arrives here as this exact type — see [cancelledByAncestor].
-            if (cancelledByAncestor()) abortStructurally(run, e) else failWithTimeout(run, e)
+            settledOr(run, e) {
+                // Ours, or an ancestor's? kotlinx passes a cancellation cause that is ALREADY a
+                // `CancellationException` down to children **verbatim** (`getChildJobCancellationCause`),
+                // so a parent's expired deadline arrives here as this exact type — see [cancelledByAncestor].
+                if (cancelledByAncestor()) abortStructurally(run, e) else failWithTimeout(run, e)
+            }
         } catch (e: ExecutionAbortedException) {
-            settleCommitWindow(run, e)?.let { return it }
-            abort(run, e)
+            settledOr(run, e) { abort(run, e) }
         } catch (e: DatapipelinesException) {
-            settleCommitWindow(run, e)?.let { return it }
-            lakeSession?.failed(e.code)
-            // A catalogued setup failure — staging creation is the one §8.2 names (F9). It reaches
-            // the stream as `pipeline_failed` on the execution the caller is already watching.
-            failWithSetup(run, e)
+            settledOr(run, e) {
+                lakeSession?.failed(e.code)
+                // A catalogued setup failure — staging creation is the one §8.2 names (F9). It reaches
+                // the stream as `pipeline_failed` on the execution the caller is already watching.
+                failWithSetup(run, e)
+            }
         } catch (e: CancellationException) {
-            settleCommitWindow(run, e)?.let { return it }
-            // Everything ABOVE this clause is a cancellation this execution decided for itself.
-            // This one is decided by the machinery: our scope was cancelled by an ANCESTOR — see
-            // [abortStructurally].
-            abortStructurally(run, e)
+            settledOr(run, e) {
+                // Everything ABOVE this clause is a cancellation this execution decided for itself.
+                // This one is decided by the machinery: our scope was cancelled by an ANCESTOR — see
+                // [abortStructurally].
+                abortStructurally(run, e)
+            }
         } finally {
             cleanup(executionId, staging, lakeSession, localWrite)
         }
@@ -836,6 +840,16 @@ class PipelineExecutor(
         val failure = settleOutcomeUnknown(run, cause)
         throw if (unwoundByAncestor) cause else failure
     }
+
+    /**
+     * (#1035) The funnel every `catch` of [runExecution] passes through: the commit boundary decides first
+     * ([settleCommitWindow]); only when it was not crossed does the ordinary handler [ordinary] run.
+     */
+    private suspend inline fun settledOr(
+        run: ExecutionRun,
+        cause: Throwable,
+        ordinary: () -> Nothing,
+    ): ExecutionResult = settleCommitWindow(run, cause) ?: ordinary()
 
     /** Terminal OUTCOME_UNKNOWN: the commit was attempted and its acknowledgement never arrived. */
     private suspend fun settleOutcomeUnknown(

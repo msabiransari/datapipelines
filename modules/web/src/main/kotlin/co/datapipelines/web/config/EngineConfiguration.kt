@@ -208,7 +208,8 @@ class EngineConfiguration {
             pipelineResolver,
             datasourceRegistry,
             config.maxCompositionDepth,
-            co.datapipelines.executor.CommitLedger.over(executionRepository),
+            co.datapipelines.executor.CommitLedger
+                .over(executionRepository),
         )
 
     /**

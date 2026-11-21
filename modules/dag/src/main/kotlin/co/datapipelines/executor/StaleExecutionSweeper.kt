@@ -97,7 +97,8 @@ class StaleExecutionSweeper(
         if (swept > 0) {
             LOG.info(
                 "event=execution.swept count={} cutoff={} heartbeat_cutoff={} " +
-                    "message=\"stale RUNNING executions settled by their commit boundary (SUCCESS / OUTCOME_UNKNOWN / ABORTED instance_lost)\"",
+                    "message=\"stale RUNNING executions settled by their commit boundary " +
+                    "(SUCCESS / OUTCOME_UNKNOWN / ABORTED instance_lost)\"",
                 swept,
                 cutoff,
                 heartbeatCutoff,

@@ -156,7 +156,10 @@ class PipelineCommitSettlementTest {
                 val completedAt = types.indexOf(SseEventType.PIPELINE_COMPLETED)
                 val dataReadyAt = types.indexOf(SseEventType.DATA_READY)
                 (completedAt in 0 until dataReadyAt) shouldBe true
-                harness.emitter.allOf<PipelineCompleted>().single().settlesFamily shouldBe true
+                harness.emitter
+                    .allOf<PipelineCompleted>()
+                    .single()
+                    .settlesFamily shouldBe true
                 rows(source) shouldBe 1L
             }
         }

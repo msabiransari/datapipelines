@@ -1149,13 +1149,19 @@ class FlywayMigrationIntegrationTest {
                 "result_unavailable|boolean|NO|false",
                 "settlement_pending|boolean|NO|false",
             )
-        query("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'pipeline_executions'::regclass AND conname = 'chk_status'") {
+        query(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint " +
+                "WHERE conrelid = 'pipeline_executions'::regclass AND conname = 'chk_status'",
+        ) {
             it.getString(1)
         } shouldContainExactly
             listOf(
-                "CHECK ((status = ANY (ARRAY['RUNNING'::text, 'SUCCESS'::text, 'FAILED'::text, 'ABORTED'::text, 'OUTCOME_UNKNOWN'::text])))",
+                "CHECK ((status = ANY (ARRAY['RUNNING'::text, 'SUCCESS'::text, 'FAILED'::text, 'ABORTED'::text, " +
+                    "'OUTCOME_UNKNOWN'::text])))",
             )
-        query("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_executions_settlement_pending'") {
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_executions_settlement_pending'",
+        ) {
             it.getString(1)
         } shouldContainExactly
             listOf(

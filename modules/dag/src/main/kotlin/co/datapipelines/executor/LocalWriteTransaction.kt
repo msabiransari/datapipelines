@@ -205,7 +205,11 @@ class LocalWriteTransaction(
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: RuntimeException,
             ) {
-                LOG.error("Commit attempt of local write transaction {} could not be recorded ({})", rootExecutionId, e.javaClass.simpleName)
+                LOG.error(
+                    "Commit attempt of local write transaction {} could not be recorded ({})",
+                    rootExecutionId,
+                    e.javaClass.simpleName,
+                )
                 false
             }
         if (!durable) {
@@ -237,7 +241,11 @@ class LocalWriteTransaction(
         } catch (
             @Suppress("TooGenericExceptionCaught") e: RuntimeException,
         ) {
-            LOG.warn("Commit confirmation of local write transaction {} could not be recorded ({})", rootExecutionId, e.javaClass.simpleName)
+            LOG.warn(
+                "Commit confirmation of local write transaction {} could not be recorded ({})",
+                rootExecutionId,
+                e.javaClass.simpleName,
+            )
         }
     }
 

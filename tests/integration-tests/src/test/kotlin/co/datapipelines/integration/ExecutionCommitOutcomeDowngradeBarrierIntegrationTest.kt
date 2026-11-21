@@ -107,7 +107,9 @@ class ExecutionCommitOutcomeDowngradeBarrierIntegrationTest {
 
         history() shouldContainExactly listOf("66|execution commit outcomes", "R|execution commit outcome downgrade barrier")
         columnsOf("pipeline_executions").containsAll(V66_COLUMNS) shouldBe true
-        query("SELECT settlement_pending::TEXT || result_unavailable::TEXT FROM pipeline_executions WHERE execution_id = '$confirmed'") shouldContainExactly
+        query(
+            "SELECT settlement_pending::TEXT || result_unavailable::TEXT FROM pipeline_executions WHERE execution_id = '$confirmed'",
+        ) shouldContainExactly
             listOf("falsefalse")
         validate(db, allShipped, allBarriers) shouldBe null
     }
@@ -220,7 +222,12 @@ class ExecutionCommitOutcomeDowngradeBarrierIntegrationTest {
     private fun scratch(
         prefix: String,
         fill: (File) -> Unit,
-    ): File = Files.createTempDirectory(prefix).toFile().also { it.deleteOnExit() }.also(fill)
+    ): File =
+        Files
+            .createTempDirectory(prefix)
+            .toFile()
+            .also { it.deleteOnExit() }
+            .also(fill)
 
     /** Copies the shipped versioned scripts [keep] admits into [target] — never the repeatable ones. */
     private fun copyVersioned(

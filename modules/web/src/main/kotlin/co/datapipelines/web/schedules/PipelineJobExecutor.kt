@@ -893,7 +893,6 @@ class PipelineJobExecutor(
          */
         const val OUTCOME_UNREADABLE = "outcome_unreadable"
 
-
         /** #1035 — the family's shared commit was attempted and not acknowledged (execution status `OUTCOME_UNKNOWN`). Blocks. */
         const val COMMIT_OUTCOME_UNKNOWN = "outcome_unknown"
         const val VERSION_LATEST_REFUSED = "version_latest_refused"

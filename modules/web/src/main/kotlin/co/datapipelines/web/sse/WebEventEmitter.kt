@@ -389,54 +389,73 @@ class WebEventEmitter(
                     return
                 }
             }
-        val nodeStats =
-            when (event) {
-                is PipelineCompleted -> event.nodeStats
-                is PipelineFailed -> event.nodeStats
-                is ExecutionAborted -> event.nodeStats
-            }
         // 072 §0.5: the row's `parameters_json` becomes the FULLY RESOLVED Context the nodes saw —
         // org config, platform keys, parameters, inputs and every calculator output. SseJson's
         // mapper, not ExecutorJson's: the Context holds java.time values, and the one that cannot
         // serialize them is exactly how execution_started went missing from the durable record
         // once before (T36). A serialization failure leaves the insert-time value in place rather
         // than losing the terminal UPDATE with it.
-        val contextJson =
-            when (event) {
-                is PipelineCompleted -> event.contextSnapshot
-                is PipelineFailed -> event.contextSnapshot
-                is ExecutionAborted -> event.contextSnapshot
-            }.takeIf { it.isNotEmpty() }?.let { serializedContext(event.executionId, it) }
+        val contextJson = contextSnapshotOf(event).takeIf { it.isNotEmpty() }?.let { serializedContext(event.executionId, it) }
         // Everything that can throw — the stats serialization, the aborted duration's row read — runs
         // where the UPDATE runs (inside the bound's runCatching, or deferred after the late insert
         // has landed), so it can never escape emit.
-        val update: () -> Boolean =
-            if (event.isProvisional()) {
-                // #1035: a child of an enrolled family — stats and Context are kept, the row stays RUNNING
-                // (pending) until the root's terminal write settles the whole family at once.
-                { executionRepository.completeProvisionally(event.executionId, SseJson.mapper.writeValueAsString(nodeStats), contextJson) }
-            } else {
-                {
-                    val updated =
-                        executionRepository.complete(
-                            executionId = event.executionId,
-                            status = status,
-                            completedAt = event.timestamp,
-                            durationMs = durationMsOf(event),
-                            nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
-                            failedNodeId = failedNodeId,
-                            errorJson = errorJson,
-                            contextJson = contextJson,
-                            resultUnavailable = (event as? PipelineCompleted)?.resultUnavailable == true,
-                        )
-                    // The root's terminal write is the family's one settlement moment; the sweep repeats it for a
-                    // root whose instance died before this line.
-                    if (updated && event.settlesFamilyOnWrite()) executionRepository.settleFamilies(event.executionId)
-                    updated
-                }
-            }
-        writeTerminalRow(event.executionId, update)
+        writeTerminalRow(event.executionId, terminalUpdate(event, status, failedNodeId, errorJson, contextJson))
     }
+
+    private fun nodeStatsOf(event: ExecutionEvent) =
+        when (event) {
+            is PipelineCompleted -> event.nodeStats
+            is PipelineFailed -> event.nodeStats
+            is ExecutionAborted -> event.nodeStats
+            else -> emptyList()
+        }
+
+    private fun contextSnapshotOf(event: ExecutionEvent) =
+        when (event) {
+            is PipelineCompleted -> event.contextSnapshot
+            is PipelineFailed -> event.contextSnapshot
+            is ExecutionAborted -> event.contextSnapshot
+            else -> emptyMap()
+        }
+
+    /** The terminal write of [completeExecutionRow], deferred so everything that can throw runs where the UPDATE runs. */
+    private fun terminalUpdate(
+        event: ExecutionEvent,
+        status: ExecutionStatus,
+        failedNodeId: String?,
+        errorJson: String?,
+        contextJson: String?,
+    ): () -> Boolean =
+        if (event.isProvisional()) {
+            // #1035: a child of an enrolled family — stats and Context are kept, the row stays RUNNING
+            // (pending) until the root's terminal write settles the whole family at once.
+            {
+                executionRepository.completeProvisionally(
+                    event.executionId,
+                    SseJson.mapper.writeValueAsString(nodeStatsOf(event)),
+                    contextJson,
+                )
+            }
+        } else {
+            {
+                val updated =
+                    executionRepository.complete(
+                        executionId = event.executionId,
+                        status = status,
+                        completedAt = event.timestamp,
+                        durationMs = durationMsOf(event),
+                        nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStatsOf(event)),
+                        failedNodeId = failedNodeId,
+                        errorJson = errorJson,
+                        contextJson = contextJson,
+                        resultUnavailable = (event as? PipelineCompleted)?.resultUnavailable == true,
+                    )
+                // The root's terminal write is the family's one settlement moment; the sweep repeats it for a
+                // root whose instance died before this line.
+                if (updated && event.settlesFamilyOnWrite()) executionRepository.settleFamilies(event.executionId)
+                updated
+            }
+        }
 
     /**
      * The terminal UPDATE's dispatch: bounded, as #311 made it — or, behind a RUNNING insert that outlived

@@ -84,7 +84,8 @@ class ExecutionMetadataProjection(
             put("parent_execution_id", parentExecutionId?.toString())
             put("parent_node_id", parentNodeId)
             put("root_execution_id", rootExecutionId?.toString())
-            if (includeResult && status == ExecutionStatus.SUCCESS && !resultUnavailable && resultRowCount != null) {
+            val resultFetchable = status == ExecutionStatus.SUCCESS && !resultUnavailable && resultRowCount != null
+            if (includeResult && resultFetchable) {
                 // Present only while the result is actually fetchable (§10.2).
                 resultStore.describe(resultStore.keyFor(executionId))?.let { view ->
                     put("result_url", resultUrls.urlFor(executionId))

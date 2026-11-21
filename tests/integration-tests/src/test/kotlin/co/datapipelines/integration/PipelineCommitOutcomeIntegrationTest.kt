@@ -30,6 +30,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.security.SecureRandom
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.time.Duration
 import java.util.Base64
 import java.util.UUID
@@ -84,7 +85,10 @@ class PipelineCommitOutcomeIntegrationTest {
 
         val events = stream(pipelineId)
 
-        withClue(describe(events)) { events.names().filter { it != "node_progress" } shouldContainExactly listOf("execution_started", "node_started", "node_completed", "pipeline_completed") }
+        withClue(describe(events)) {
+            events.names().filter { it != "node_progress" } shouldContainExactly
+                listOf("execution_started", "node_started", "node_completed", "pipeline_completed")
+        }
         val row = executionRow(executionIdOf(events))
         row["status"] shouldBe "SUCCESS"
         row["commit_attempted_at"].shouldNotBeNull()
@@ -117,7 +121,8 @@ class PipelineCommitOutcomeIntegrationTest {
                 // The second client, while the family is still open: the customer's rows, the child's record and its cursor.
                 observed["rows"] = scalar("SELECT count(*) FROM co_tgt_child")
                 observed["childStatus"] = metaScalar("SELECT status FROM pipeline_executions WHERE execution_id = '$child'")
-                observed["childCompletedAt"] = metaScalar("SELECT completed_at::text FROM pipeline_executions WHERE execution_id = '$child'")
+                observed["childCompletedAt"] =
+                    metaScalar("SELECT completed_at::text FROM pipeline_executions WHERE execution_id = '$child'")
                 val cursor = get("/api/v1/executions/$child/result")
                 observed["cursorStatus"] = cursor.statusCode().toString()
                 observed["cursorCode"] = cursor.jsonPath().getString("error.code")
@@ -168,7 +173,11 @@ class PipelineCommitOutcomeIntegrationTest {
         val events = stream(pipelineId)
 
         withClue(describe(events)) { events.names().last() shouldBe "pipeline_failed" }
-        events.last().second.path("status").asText() shouldBe "FAILED"
+        events
+            .last()
+            .second
+            .path("status")
+            .asText() shouldBe "FAILED"
         val rootId = executionIdOf(events)
         val root = executionRow(rootId)
         root["status"] shouldBe "FAILED"
@@ -186,32 +195,7 @@ class PipelineCommitOutcomeIntegrationTest {
     @Test
     fun `a refused commit ends OUTCOME_UNKNOWN with no result, no replay and the same execution on a duplicate key`() {
         prepare()
-        val pipelineId =
-            createPipeline(
-                "test/co_unknown",
-                "Commit refused",
-                listOf(
-                    mapOf(
-                        "id" to "write_deferred",
-                        "description" to "Writes a row whose deferred foreign key the COMMIT will refuse",
-                        "type" to "DML",
-                        "source" to DATASOURCE,
-                        "template" to mapOf("id" to "test/co_deferred.sql", "version" to 1),
-                        "operation" to "update",
-                        "output" to mapOf("target" to "discard"),
-                        "depends_on" to emptyList<String>(),
-                    ),
-                    mapOf(
-                        "id" to "read_one",
-                        "description" to "The caller result that must never be exposed",
-                        "type" to "DQL",
-                        "source" to DATASOURCE,
-                        "template" to mapOf("id" to "test/co_read_one.sql", "version" to 1),
-                        "output" to mapOf("target" to "caller"),
-                        "depends_on" to emptyList<String>(),
-                    ),
-                ),
-            )
+        val pipelineId = createCommitRefusedPipeline()
         val key = "co1035-" + UUID.randomUUID()
         val before = localWriteOutcomes()
 
@@ -240,7 +224,48 @@ class PipelineCommitOutcomeIntegrationTest {
             delta(before, after, "committed") shouldBe 0.0
         }
 
-        // Every surface: the record, the history filter and the cursor.
+        assertEverySurfaceReportsUnknown(pipelineId, executionId)
+
+        // The same Idempotency-Key within the reservation TTL: the same execution, and the SQL is not run again.
+        val duplicate = stream(pipelineId, idempotencyKey = key)
+        executionIdOf(duplicate) shouldBe executionId
+        scalar("SELECT last_value || '/' || is_called FROM co_runs_seq") shouldBe "1/true"
+        metaScalar("SELECT count(*) FROM pipeline_executions WHERE pipeline_id = '$pipelineId'") shouldBe "1"
+    }
+
+    /** Two nodes: a DML whose deferred foreign key the COMMIT refuses, and a caller read that must never be exposed. */
+    private fun createCommitRefusedPipeline(): String =
+        createPipeline(
+            "test/co_unknown",
+            "Commit refused",
+            listOf(
+                mapOf(
+                    "id" to "write_deferred",
+                    "description" to "Writes a row whose deferred foreign key the COMMIT will refuse",
+                    "type" to "DML",
+                    "source" to DATASOURCE,
+                    "template" to mapOf("id" to "test/co_deferred.sql", "version" to 1),
+                    "operation" to "update",
+                    "output" to mapOf("target" to "discard"),
+                    "depends_on" to emptyList<String>(),
+                ),
+                mapOf(
+                    "id" to "read_one",
+                    "description" to "The caller result that must never be exposed",
+                    "type" to "DQL",
+                    "source" to DATASOURCE,
+                    "template" to mapOf("id" to "test/co_read_one.sql", "version" to 1),
+                    "output" to mapOf("target" to "caller"),
+                    "depends_on" to emptyList<String>(),
+                ),
+            ),
+        )
+
+    /** The record, the history filter and the cursor all report the OUTCOME_UNKNOWN execution - none invents a result. */
+    private fun assertEverySurfaceReportsUnknown(
+        pipelineId: String,
+        executionId: String,
+    ) {
         val record = get("/api/v1/executions/$executionId")
         record.jsonPath().getString("data.status") shouldBe "OUTCOME_UNKNOWN"
         record.jsonPath().getString("data.error.code") shouldBe "pipeline.execution.local_write_commit_failed"
@@ -251,12 +276,6 @@ class PipelineCommitOutcomeIntegrationTest {
         cursor.statusCode() shouldBe 410
         cursor.jsonPath().getString("error.code") shouldBe "result.execution_failed"
         cursor.jsonPath().getString("error.details.status") shouldBe "OUTCOME_UNKNOWN"
-
-        // The same Idempotency-Key within the reservation TTL: the same execution, and the SQL is not run again.
-        val duplicate = stream(pipelineId, idempotencyKey = key)
-        executionIdOf(duplicate) shouldBe executionId
-        scalar("SELECT last_value || '/' || is_called FROM co_runs_seq") shouldBe "1/true"
-        metaScalar("SELECT count(*) FROM pipeline_executions WHERE pipeline_id = '$pipelineId'") shouldBe "1"
     }
 
     // ---------------------------------------------------------------- 5: a dead instance, swept by another
@@ -337,8 +356,10 @@ class PipelineCommitOutcomeIntegrationTest {
     private fun awaitPendingChild(rootId: String): String {
         val deadline = System.currentTimeMillis() + POLL_BUDGET_MS
         while (System.currentTimeMillis() < deadline) {
-            metaScalar("SELECT execution_id FROM pipeline_executions WHERE root_execution_id = '$rootId' AND parent_execution_id IS NOT NULL AND settlement_pending")
-                ?.let { return it }
+            metaScalar(
+                "SELECT execution_id FROM pipeline_executions WHERE root_execution_id = '$rootId' " +
+                    "AND parent_execution_id IS NOT NULL AND settlement_pending",
+            )?.let { return it }
             Thread.sleep(POLL_INTERVAL_MS)
         }
         throw AssertionError("no held child ever appeared under root $rootId")
@@ -381,8 +402,10 @@ class PipelineCommitOutcomeIntegrationTest {
         sql: String,
     ): String? =
         DriverManager.getConnection(url, user, password).use { connection ->
-            connection.createStatement().use { statement -> statement.executeQuery(sql).use { rows -> if (rows.next()) rows.getString(1) else null } }
+            connection.createStatement().use { it.executeQuery(sql).use(::firstColumn) }
         }
+
+    private fun firstColumn(rows: ResultSet): String? = if (rows.next()) rows.getString(1) else null
 
     private fun meta(sql: String) {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
@@ -390,7 +413,13 @@ class PipelineCommitOutcomeIntegrationTest {
         }
     }
 
-    private fun get(path: String): Response = given().port(port).asSession(ADMIN_SESSION).`when`().get(path).thenReturn()
+    private fun get(path: String): Response =
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .get(path)
+            .thenReturn()
 
     private fun localWriteOutcomes(): Map<String, Double> {
         val registry: Any = context.getBean(Class.forName("io.micrometer.core.instrument.MeterRegistry"))
@@ -411,7 +440,12 @@ class PipelineCommitOutcomeIntegrationTest {
 
     private fun List<Pair<String, JsonNode>>.names(): List<String> = map { it.first }
 
-    private fun executionIdOf(events: List<Pair<String, JsonNode>>): String = events.first { it.first == "execution_started" }.second["execution_id"].asText()
+    private fun executionIdOf(events: List<Pair<String, JsonNode>>): String =
+        events
+            .first {
+                it.first == "execution_started"
+            }.second["execution_id"]
+            .asText()
 
     private fun describe(events: List<Pair<String, JsonNode>>): String =
         events.joinToString(prefix = "[", postfix = "]") { (name, payload) ->
@@ -457,7 +491,14 @@ class PipelineCommitOutcomeIntegrationTest {
     }
 
     private fun registerDatasource() {
-        val existing = given().port(port).asSession(ADMIN_SESSION).`when`().get("/api/v1/datasources/$DATASOURCE").then().extract()
+        val existing =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .`when`()
+                .get("/api/v1/datasources/$DATASOURCE")
+                .then()
+                .extract()
         if (existing.statusCode() == 200) return
         given()
             .port(port)
@@ -568,8 +609,21 @@ class PipelineCommitOutcomeIntegrationTest {
                     "nodes" to nodes,
                 ),
             )
-        val response = given().port(port).contentType(ContentType.JSON).asSession(ADMIN_SESSION).body(bodyJson).`when`().post("/api/v1/pipelines").thenReturn()
-        if (response.statusCode() != 201) throw AssertionError("Pipeline '$name' creation failed (${response.statusCode()}): ${response.body().asString()}")
+        val response =
+            given()
+                .port(
+                    port,
+                ).contentType(ContentType.JSON)
+                .asSession(ADMIN_SESSION)
+                .body(bodyJson)
+                .`when`()
+                .post("/api/v1/pipelines")
+                .thenReturn()
+        if (response.statusCode() !=
+            201
+        ) {
+            throw AssertionError("Pipeline '$name' creation failed (${response.statusCode()}): ${response.body().asString()}")
+        }
         return response.jsonPath().getString("data.id")
     }
 
@@ -583,7 +637,15 @@ class PipelineCommitOutcomeIntegrationTest {
         }
         val id = createPipeline(name, displayName, nodes)
         val hash = get("/api/v1/pipelines/$id").jsonPath().getString("data.body_hash")
-        given().port(port).asSession(ADMIN_SESSION).header("If-Match", hash).`when`().post("/api/v1/pipelines/$id/release").then().statusCode(200)
+        given()
+            .port(
+                port,
+            ).asSession(ADMIN_SESSION)
+            .header("If-Match", hash)
+            .`when`()
+            .post("/api/v1/pipelines/$id/release")
+            .then()
+            .statusCode(200)
         synchronized(created) { createdChildren += name }
     }
 
@@ -617,8 +679,14 @@ class PipelineCommitOutcomeIntegrationTest {
                 var observed = false
                 for (line in reader.lines()) {
                     when {
-                        line.startsWith("event:") -> currentEvent = line.removePrefix("event:").trim()
-                        line.startsWith("data:") -> events += (currentEvent ?: "unknown") to mapper.readTree(line.removePrefix("data:").trim())
+                        line.startsWith("event:") -> {
+                            currentEvent = line.removePrefix("event:").trim()
+                        }
+
+                        line.startsWith("data:") -> {
+                            events +=
+                                (currentEvent ?: "unknown") to mapper.readTree(line.removePrefix("data:").trim())
+                        }
                     }
                     if (!observed && onStarted != null && events.any { it.first == "execution_started" }) {
                         observed = true
