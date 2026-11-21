@@ -60,6 +60,8 @@ class PipelineCommitOutcomeIntegrationTest {
 
     private val mapper = ObjectMapper()
 
+    private val history by lazy { CommitHistoryReader(port, ADMIN_SESSION, MCP_KEY.plaintext) }
+
     // ---------------------------------------------------------------- 1: the confirmed commit leaves its evidence
 
     @Test
@@ -113,6 +115,7 @@ class PipelineCommitOutcomeIntegrationTest {
                 ),
             )
         val observed = mutableMapOf<String, String?>()
+        var heldHistoryFailure: Throwable? = null
 
         val events =
             stream(pipelineId) { rootId ->
@@ -127,6 +130,10 @@ class PipelineCommitOutcomeIntegrationTest {
                 observed["cursorStatus"] = cursor.statusCode().toString()
                 observed["cursorCode"] = cursor.jsonPath().getString("error.code")
                 observed["rootStatus"] = metaScalar("SELECT status FROM pipeline_executions WHERE execution_id = '$rootId'")
+                // R2: the held child's history, on every surface, claims nothing terminal while its root is open.
+                // Captured, not thrown: the reader thread must keep draining the stream; the failure is rethrown below.
+                heldHistoryFailure =
+                    runCatching { history.assertNothingTerminal(child, "held child before the root commits") }.exceptionOrNull()
             }
 
         withClue("observed=$observed ${describe(events)}") {
@@ -138,6 +145,7 @@ class PipelineCommitOutcomeIntegrationTest {
             observed["rootStatus"] shouldBe "RUNNING"
         }
         events.names() shouldNotContain "pipeline_failed"
+        heldHistoryFailure?.let { throw it }
         val child = observed.getValue("child")
         // Settled together with the root: the child inherits SUCCESS and the rows are durable.
         executionRow(child!!)["status"] shouldBe "SUCCESS"
@@ -145,6 +153,8 @@ class PipelineCommitOutcomeIntegrationTest {
         executionRow(child)["completed_at"].shouldNotBeNull()
         scalar("SELECT count(*) FROM co_tgt_child") shouldBe "2500"
         executionRow(executionIdOf(events))["status"] shouldBe "SUCCESS"
+        // R2: after the root's SUCCESS the child's history ends in its one pipeline_completed, identical on all three surfaces.
+        history.assertSettledAs(child, "pipeline_completed", "SUCCESS", "child after a SUCCESS root")
     }
 
     // ---------------------------------------------------------------- 3: before the attempt, a rollback
@@ -188,6 +198,8 @@ class PipelineCommitOutcomeIntegrationTest {
         childRow["status"] shouldBe "FAILED"
         childRow["settlement_pending"] shouldBe "false"
         childRow["completed_at"].shouldNotBeNull()
+        // R2: the rolled-back child never claimed success anywhere — its history ends pipeline_failed with the root's status.
+        history.assertSettledAs(child, "pipeline_failed", "FAILED", "child after a rolled-back root")
     }
 
     // ---------------------------------------------------------------- 4: inside the window, OUTCOME_UNKNOWN and no replay
@@ -276,6 +288,43 @@ class PipelineCommitOutcomeIntegrationTest {
         cursor.statusCode() shouldBe 410
         cursor.jsonPath().getString("error.code") shouldBe "result.execution_failed"
         cursor.jsonPath().getString("error.details.status") shouldBe "OUTCOME_UNKNOWN"
+    }
+
+    @Test
+    fun `a child of a family whose commit ends OUTCOME_UNKNOWN reads pipeline_failed OUTCOME_UNKNOWN and never success`() {
+        prepare()
+        val pipelineId =
+            createPipeline(
+                "test/co_unknown_family",
+                "Commit refused with a child",
+                listOf(
+                    pipelineNodeToDatasource("ap", "test/co_child_append", "co_tgt_child", "append", emptyList()),
+                    mapOf(
+                        "id" to "write_deferred",
+                        "description" to "Writes a row whose deferred foreign key the COMMIT will refuse",
+                        "type" to "DML",
+                        "source" to DATASOURCE,
+                        "template" to mapOf("id" to "test/co_deferred.sql", "version" to 1),
+                        "operation" to "update",
+                        "output" to mapOf("target" to "discard"),
+                        "depends_on" to listOf("ap"),
+                    ),
+                ),
+            )
+
+        val events = stream(pipelineId)
+
+        withClue(describe(events)) { events.names().last() shouldBe "pipeline_failed" }
+        events
+            .last()
+            .second
+            .path("status")
+            .asText() shouldBe "OUTCOME_UNKNOWN"
+        val rootId = executionIdOf(events)
+        val child = metaScalar("SELECT execution_id FROM pipeline_executions WHERE parent_execution_id = '$rootId'")!!
+        executionRow(child)["status"] shouldBe "OUTCOME_UNKNOWN"
+        executionRow(child)["settlement_pending"] shouldBe "false"
+        history.assertSettledAs(child, "pipeline_failed", "OUTCOME_UNKNOWN", "child after an OUTCOME_UNKNOWN root")
     }
 
     // ---------------------------------------------------------------- 5: a dead instance, swept by another
@@ -556,6 +605,17 @@ class PipelineCommitOutcomeIntegrationTest {
             ON CONFLICT DO NOTHING
             """.trimIndent(),
         )
+        // The MCP reader of the history surfaces: a workspace-admin key, so it reads executions another identity ran.
+        meta(
+            """
+            INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind)
+            VALUES ('$MCP_IDENTITY_ID', '${MCP_KEY.id.lowercase()}@keys.invalid', '${MCP_KEY.name}', 'key', '${MCP_KEY.id}', TRUE, FALSE, 'service')
+            ON CONFLICT (id) DO NOTHING;
+            INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)
+            VALUES ('${MCP_KEY.id}', '$MCP_IDENTITY_ID', '$ADMIN_USER_ID', '${MCP_KEY.name}', '${MCP_KEY.hash}', '$DEFAULT_WORKSPACE', 'mcp', 'workspace_admin')
+            ON CONFLICT (id) DO NOTHING
+            """.trimIndent(),
+        )
     }
 
     private fun createTemplate(
@@ -707,6 +767,8 @@ class PipelineCommitOutcomeIntegrationTest {
         private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
         private const val ADMIN_EMAIL = "e2e-co1035@datapipelines.test"
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
+        private val MCP_KEY = E2eAuth.generateKey("co1035-mcp-reader")
+        private val MCP_IDENTITY_ID: String = UUID.randomUUID().toString()
         private val JWT_SECRET = E2eSession.newSecret()
         private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, ADMIN_EMAIL)
         private val postgres get() = SharedE2e.postgres

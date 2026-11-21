@@ -137,7 +137,8 @@ class StaleExecutionSweeperTest {
         val registry = SimpleMeterRegistry()
         val unknownA = UUID.randomUUID()
         val unknownB = UUID.randomUUID()
-        val others = listOf(SweptExecution(UUID.randomUUID(), ExecutionStatus.ABORTED), SweptExecution(UUID.randomUUID(), ExecutionStatus.SUCCESS))
+        val others =
+            listOf(SweptExecution(UUID.randomUUID(), ExecutionStatus.ABORTED), SweptExecution(UUID.randomUUID(), ExecutionStatus.SUCCESS))
         val executions = mockk<ExecutionRepository>()
         every { executions.sweepStaleRunningDetailed(any(), any()) } returns
             others + SweptExecution(unknownA, ExecutionStatus.OUTCOME_UNKNOWN) + SweptExecution(unknownB, ExecutionStatus.OUTCOME_UNKNOWN)
@@ -159,7 +160,8 @@ class StaleExecutionSweeperTest {
     fun `a sweep with no unknown outcome raises no alert`() {
         val registry = SimpleMeterRegistry()
         val executions = mockk<ExecutionRepository>()
-        every { executions.sweepStaleRunningDetailed(any(), any()) } returns listOf(SweptExecution(UUID.randomUUID(), ExecutionStatus.ABORTED))
+        every { executions.sweepStaleRunningDetailed(any(), any()) } returns
+            listOf(SweptExecution(UUID.randomUUID(), ExecutionStatus.ABORTED))
 
         val (_, lines) = captured { StaleExecutionSweeper(executions, Duration.ofMinutes(60), HEARTBEAT, registry).sweepOnce() }
 

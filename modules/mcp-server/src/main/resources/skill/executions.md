@@ -56,7 +56,9 @@ person with the execution id, before any deliberate new run. `executions_get_res
 `result.execution_failed` for it. A `SUCCESS` carrying `result_unavailable: true` committed;
 only its result was not delivered (`result.storage_unavailable`), and the writes are not
 repeated by re-running. Until the root settles, a child run of the same family stays
-`RUNNING`.
+`RUNNING` and its event history shows no terminal event; afterwards it ends in one terminal
+event carrying the root's outcome. The wait for a commit is bounded by the run's own time
+budget: a commit that never answers ends the run `OUTCOME_UNKNOWN` at that budget.
 
 ## When a run fails
 

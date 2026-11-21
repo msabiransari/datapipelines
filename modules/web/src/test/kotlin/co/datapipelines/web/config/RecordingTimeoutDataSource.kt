@@ -19,6 +19,7 @@ import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.Statement
+import java.sql.Timestamp
 import java.time.OffsetDateTime
 import java.util.UUID
 import javax.sql.DataSource
@@ -120,6 +121,12 @@ internal class RecordingTimeoutDataSource(
             every { getString("referencing_table") } returns "executions"
             every { getString("referencing_column") } returns "executed_by"
             every { getObject("id", UUID::class.java) } returns UUID.randomUUID()
+            // #1035 R2: the family settlement's RETURNING row (SettledChild) and the sweep's (SweptExecution).
+            listOf("execution_id", "pipeline_id", "correlation_id").forEach { column ->
+                every { getObject(column, UUID::class.java) } returns UUID.randomUUID()
+            }
+            listOf("started_at", "completed_at").forEach { column -> every { getTimestamp(column) } returns Timestamp(0) }
+            every { getString("status") } returns "ABORTED"
             // #841 R4: the guarded repair's discovery read finds one workspace lacking the grant, so every phase runs.
             every { getObject(1, UUID::class.java) } returns LACKING_WORKSPACE
             every { getArray("namespace").array } returns arrayOf(lakeName, "sales")

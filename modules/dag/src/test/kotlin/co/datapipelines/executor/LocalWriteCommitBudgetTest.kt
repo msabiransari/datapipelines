@@ -202,9 +202,22 @@ class LocalWriteCommitBudgetTest {
         runBlocking {
             val source = source()
             val registry = blockingRegistry(source)
-            val config = ExecutorConfig(maxParallelNodes = 4, executionTimeoutSeconds = 1, maxConcurrentExecutionsPerUser = 1, maxConcurrentExecutionsPerInstance = 1)
+            val config =
+                ExecutorConfig(
+                    maxParallelNodes = 4,
+                    executionTimeoutSeconds = 1,
+                    maxConcurrentExecutionsPerUser = 1,
+                    maxConcurrentExecutionsPerInstance = 1,
+                )
             ExecutorHarness(
-                templateEngine = Fixtures.templateEngine(mapOf("write" to "INSERT INTO tgt VALUES (1)", "read" to "SELECT id FROM tgt", "ping" to "SELECT 1 AS one")),
+                templateEngine =
+                    Fixtures.templateEngine(
+                        mapOf(
+                            "write" to "INSERT INTO tgt VALUES (1)",
+                            "read" to "SELECT id FROM tgt",
+                            "ping" to "SELECT 1 AS one",
+                        ),
+                    ),
                 registry = registry,
                 config = config,
                 localWritePlanner = LocalWritePlanner(PipelineResolver { _, _, _ -> null }, registry, 8, ledger),
@@ -252,7 +265,11 @@ class LocalWriteCommitBudgetTest {
         }
     }
 
-    private fun failed(harness: ExecutorHarness): UUID = harness.emitter.allOf<PipelineFailed>().single().executionId
+    private fun failed(harness: ExecutorHarness): UUID =
+        harness.emitter
+            .allOf<PipelineFailed>()
+            .single()
+            .executionId
 
     private fun outcomes(): Map<String, Double> =
         meterRegistry

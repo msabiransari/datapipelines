@@ -101,6 +101,21 @@ data class SweptExecution(
     val status: ExecutionStatus,
 )
 
+/** A provisional child that [ExecutionRepository.settleFamiliesDetailed] just settled, as its row now reads (#1035 R2). */
+data class SettledChild(
+    val executionId: UUID,
+    val pipelineId: UUID,
+    val pipelineVersion: Int,
+    val correlationId: UUID?,
+    val startedAt: Instant,
+    val completedAt: Instant,
+    val durationMs: Long,
+    val failedNodeId: String?,
+    val nodeStatsJson: String?,
+    val status: ExecutionStatus,
+    val errorJson: String?,
+)
+
 /**
  * One `pipeline_executions` row (metadata-db §4.6).
  *
@@ -385,8 +400,15 @@ class ExecutionRepository(
      *
      * @return the number of children settled.
      */
-    fun settleFamilies(rootExecutionId: UUID? = null): Int =
-        lifecycleJdbc.update(
+    fun settleFamilies(rootExecutionId: UUID? = null): Int = settleFamiliesDetailed(rootExecutionId).size
+
+    /**
+     * The same settlement, returning every child it settled with the row as it now stands. The emitter
+     * publishes each child's terminal history event from this, so a child's history never claims a terminal
+     * outcome before its root has decided it (#1035 R2).
+     */
+    fun settleFamiliesDetailed(rootExecutionId: UUID? = null): List<SettledChild> =
+        lifecycleJdbc.query(
             """
             UPDATE pipeline_executions c
                SET status = r.status,
@@ -400,9 +422,26 @@ class ExecutionRepository(
                AND r.execution_id = c.root_execution_id
                AND r.status <> 'RUNNING'
                AND (CAST(:root AS uuid) IS NULL OR c.root_execution_id = CAST(:root AS uuid))
+            RETURNING c.execution_id, c.pipeline_id, c.pipeline_version, c.correlation_id, c.started_at, c.completed_at,
+                      c.duration_ms, c.failed_node_id, c.node_stats_json::TEXT AS node_stats_json, c.status,
+                      c.error_json::TEXT AS error_json
             """.trimIndent(),
             mapOf("root" to rootExecutionId),
-        )
+        ) { rs, _ ->
+            SettledChild(
+                executionId = rs.getObject("execution_id", UUID::class.java),
+                pipelineId = rs.getObject("pipeline_id", UUID::class.java),
+                pipelineVersion = rs.getInt("pipeline_version"),
+                correlationId = rs.getObject("correlation_id", UUID::class.java),
+                startedAt = rs.getTimestamp("started_at").toInstant(),
+                completedAt = rs.getTimestamp("completed_at").toInstant(),
+                durationMs = rs.getLong("duration_ms"),
+                failedNodeId = rs.getString("failed_node_id"),
+                nodeStatsJson = rs.getString("node_stats_json"),
+                status = ExecutionStatus.valueOf(rs.getString("status")),
+                errorJson = rs.getString("error_json"),
+            )
+        }
 
     /**
      * Fills the §4.6 result-history columns (P7 additive API), before or after [complete] — the

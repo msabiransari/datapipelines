@@ -121,7 +121,11 @@ class StaleSweepCommitEvidenceIntegrationTest {
 
         connection().use { holder ->
             holder.autoCommit = false
-            holder.createStatement().use { it.execute("UPDATE pipeline_executions SET result_unavailable = FALSE WHERE execution_id = '$id'") }
+            holder.createStatement().use {
+                it.execute(
+                    "UPDATE pipeline_executions SET result_unavailable = FALSE WHERE execution_id = '$id'",
+                )
+            }
             CompletableFuture.runAsync { first.complete(sweepNow()) }
             CompletableFuture.runAsync { second.complete(sweepNow()) }
             awaitWaiters(2)
@@ -220,22 +224,26 @@ class StaleSweepCommitEvidenceIntegrationTest {
     private fun awaitWaiters(count: Int) {
         val deadline = System.currentTimeMillis() + WAIT_S * MILLIS
         while (System.currentTimeMillis() < deadline) {
-            // Its own connection per poll: pg_stat_activity inside an open transaction is a frozen snapshot.
-            val waiting =
-                connection().use { c ->
-                    c.createStatement().use { s ->
-                        s
-                            .executeQuery(
-                                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' " +
-                                    "AND query LIKE 'UPDATE pipeline_executions%' AND pid <> pg_backend_pid()",
-                            ).use { rs -> rs.next().let { rs.getInt(1) } }
-                    }
-                }
-            if (waiting >= count) return
+            if (lockWaiters() >= count) return
             Thread.sleep(POLL_MS)
         }
         throw AssertionError("fewer than $count backends ever waited on the row lock")
     }
+
+    /** One poll, on its own connection per call: pg_stat_activity inside an open transaction is a frozen snapshot. */
+    private fun lockWaiters(): Int =
+        connection().use { c ->
+            c.createStatement().use { s ->
+                s
+                    .executeQuery(
+                        "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' " +
+                            "AND query LIKE 'UPDATE pipeline_executions%' AND pid <> pg_backend_pid()",
+                    ).use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+            }
+        }
 
     private fun rowOf(id: String): Map<String, String?> =
         connection().use { c ->
