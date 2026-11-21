@@ -210,7 +210,10 @@
    * Where a value lies on an axis {lo, hi, log}, as a share of it from lo (0) to hi (1); 0 on an axis of no width. Two
    * finite ends whose difference a double cannot hold (-1e308 to 1e308) are halved first, as S.linear does: halving a
    * number that large is exact, so the share is the one the two ends define and never NaN (brief 1051 r3, R2). An end
-   * that is not finite keeps the plain difference, so such an input fails as it did before.
+   * that is not finite keeps the plain difference, so such an input fails as it did before. A finite tick whose own
+   * distance from lo overflows on a finite span (a tick past hi beside lo = -MAX) is halved too (brief 1051 r5, D3: the
+   * left scale admits ticks a hair past its ends; valueAxis cannot hand this one today, and the second axis does not
+   * rely on that).
    */
   function shareOf(ax, v) {
     if (ax.log === true) {
@@ -218,7 +221,7 @@
       return dl > 0 ? (S.log10(v) - l0) / dl : 0;
     }
     var d = ax.hi - ax.lo;
-    if (d < Infinity || !finite(ax.lo, ax.hi)) return d > 0 ? (v - ax.lo) / d : 0;
+    if ((d < Infinity && !(v - ax.lo === Infinity || v - ax.lo === -Infinity)) || !finite(ax.lo, ax.hi) || !finite(v, v)) return d > 0 ? (v - ax.lo) / d : 0;
     var d2 = ax.hi / 2 - ax.lo / 2;
     return d2 > 0 ? (v / 2 - ax.lo / 2) / d2 : 0;
   }
@@ -236,7 +239,27 @@
     var d = hi - lo;
     if (!finite(lo, hi)) return lo + t * d;
     if (t === 1) return hi;
+    if (t < 0 || t > 1) return pastEnd(lo, hi, d, t);
     return d < Infinity ? lo + t * d : lo * (1 - t) + hi * t;
+  }
+
+  /** The largest and the smallest positive double: where the second axis's value past an end of its range stops. */
+  var MAX = Number.MAX_VALUE, MIN = Number.MIN_VALUE;
+
+  /**
+   * The value at a share t below 0 or above 1 of a finite linear range [lo, hi] (d = hi - lo, Infinity where it
+   * overflows): the scale extended past the end t passes, end + u × span, u = t (below) or t - 1 (above), the span
+   * halved where it overflows; a value past the doubles reads as the nearest one, ±MAX. The left scale admits a tick
+   * within its own tolerance past an end of its domain (S.within keeps ticks up to 1e-9 of the span outside it), so a
+   * share can lie a little below 0 or above 1; both lerp formulas then overflow where the range reaches ±MAX (brief
+   * 1051 r5, R6: left [0, 0.9999999999] beside right [-MAX, MAX] or [1e308, MAX] threw), and lo + t × d reads Infinity
+   * on [-MAX, -1], whose value there is 1.8e298. Measured from the passed end, u × span is a hair of the span, so the
+   * sum overflows only where the exact value lies past the doubles. Inside [0, 1] neither lerp formula can overflow,
+   * and a share there keeps the value it had.
+   */
+  function pastEnd(lo, hi, d, t) {
+    var u = t < 0 ? t : t - 1, v = (t < 0 ? lo : hi) + (d < Infinity ? u * d : 2 * u * (hi / 2 - lo / 2));
+    return v === Infinity ? MAX : v === -Infinity ? -MAX : v;
   }
 
   /**
@@ -245,13 +268,16 @@
    * place of an end, where the approximate inverse can step past it: past the largest double that read Infinity, and
    * below the smallest subnormal 0 (brief 1051 r4, R4: [1e308, MAX] and [MIN_VALUE, 1e-322], ranges the save admits).
    * So every value is positive and finite, the authored ends come back exactly, and each lies within one double of
-   * the exact value at its share (a subnormal has few doubles near it: there that one step is the format's).
+   * the exact value at its share (a subnormal has few doubles near it: there that one step is the format's). A share
+   * past an end (the left scale's tolerance, see pastEnd) is read on the scale extended past that end, bounded to
+   * the positive finite doubles, MIN_VALUE to MAX, so a tick a hair outside the left domain stands on its own position
+   * and not on the edge's (brief 1051 r5, R6).
    */
   function logLerp(lo, hi, l0, l1, t) {
     if (t === 0) return lo;
     if (t === 1) return hi;
-    var v = S.exp10(l0 + t * (l1 - l0));
-    return v < lo ? lo : v > hi ? hi : v;
+    var v = S.exp10(l0 + t * (l1 - l0)), a = t < 0 ? MIN : lo, b = t > 1 ? MAX : hi;
+    return v < a ? a : v > b ? b : v;
   }
 
   /** Both ends are finite numbers. */

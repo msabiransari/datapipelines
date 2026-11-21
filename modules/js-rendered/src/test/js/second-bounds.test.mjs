@@ -295,20 +295,21 @@ test("R3 rendered: a log left axis 1..10 beside a right domain 1e-322..1e-321, e
   assert.ok(pictures >= 10, "pictures " + pictures);
 });
 
-// ---- the Node half of the identity on R1 to R3 ----
+// ---- the Node half of the identity on R1 to R6 ----
 
-test("R1-R4 identity, Node's half: second-axis-probes.js evaluated in Node is second-axis-probes.json byte for byte (the sandbox's half: JsRenderedTestTypesTest)", () => {
+test("R1-R6 identity, Node's half: second-axis-probes.js evaluated in Node is second-axis-probes.json byte for byte (the sandbox's half: JsRenderedTestTypesTest)", () => {
   const script = readFileSync(path.join(HERE, "second-axis-probes.js"), "utf8");
   const expected = readFileSync(path.join(HERE, "second-axis-probes.json"), "utf8");
   // The engine without the test types: the sandbox evaluates the product's program alone.
   const text = new Function("R", script + "\nreturn secondAxisProbes(R);")(engineWith([]));
   assert.equal(text + "\n", expected);
   const probes = JSON.parse(text);
-  assert.ok(probes.length >= 26, "probes " + probes.length);
+  // Round 4 had 26 probes; round 5 adds ten on R6 (left ticks a hair past an edge of the left domain).
+  assert.ok(probes.length >= 36, "probes " + probes.length);
   for (const p of probes) assert.ok([p.lo, p.hi, ...p.ticks].every(Number.isFinite), p.name);
   for (const p of probes) if (p.name.includes(" log right ")) assert.ok(p.ticks.every((t) => t > 0), p.name);
-  for (const r of ["r1", "r2", "r3", "r4"]) assert.ok(probes.some((p) => p.name.startsWith(r + " ")), r);
-  console.log(`R1-R4 identity probes: ${probes.length}, ${text.length} characters`);
+  for (const r of ["r1", "r2", "r3", "r4", "r5"]) assert.ok(probes.some((p) => p.name.startsWith(r + " ")), r);
+  console.log(`R1-R6 identity probes: ${probes.length}, ${text.length} characters`);
 });
 
 test("Security: a right domain with an end that is not finite is refused as before, with its present message", () => {

@@ -21,8 +21,8 @@ import org.junit.jupiter.api.TestInstance
  * (iii) the engine's own sine and cosine (`trig.json`, 5,761 angles) recomputed in the sandbox, byte for byte.
  *
  * Also in the sandbox: the checker's arc bounds (A.3) and G7's planted rectangle 2 px beyond the frame, on test_plain
- * (brief 1049) and on test_grid (brief 1051); and the second value axis on the inputs of brief 1051's round-3 and
- * round-4 corrections, which no picture can carry (`second-axis-probes.js`, compared with Node's `second-axis-probes.json`). A
+ * (brief 1049) and on test_grid (brief 1051); and the second value axis on the inputs of brief 1051's round-3, round-4
+ * and round-5 corrections, which no picture can carry (`second-axis-probes.js`, compared with Node's `second-axis-probes.json`). A
  * process without the isolate fails at [JsRenderedSandbox]'s construction; nothing here skips.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -183,7 +183,7 @@ class JsRenderedTestTypesTest {
     }
 
     @Test
-    fun `rounds 3 and 4 - the second value axis on R1 to R4's inputs in the sandbox is Node's, byte for byte`() {
+    fun `rounds 3 to 5 - the second value axis on R1 to R6's inputs in the sandbox is Node's, byte for byte`() {
         val probes = ChartGuardFiles.repoFile("${ChartGuardFiles.MODULE}/src/test/js/second-axis-probes.js").readText()
         val node = ChartGuardFiles.repoFile("${ChartGuardFiles.MODULE}/src/test/js/second-axis-probes.json").readText().removeSuffix("\n")
         val sandboxText = sandbox.evaluate(probes + "\nreturn secondAxisProbes(JsRendered);", null) as String
@@ -241,9 +241,10 @@ class JsRenderedTestTypesTest {
 
         /**
          * The probes of `second-axis-probes.js`: five of R1, eight of R2, five of R3 (brief 1051 round 3), and eight of
-         * round 4 (R4's log domains at both ends of the number range, and the boundary bank's own-code fixes).
+         * round 4 (R4's log domains at both ends of the number range, and the boundary bank's own-code fixes), and ten of
+         * round 5 (R6: left axes made by the real producers whose ticks stand a hair past an edge of their domain).
          */
-        const val PROBE_FLOOR = 26
+        const val PROBE_FLOOR = 36
 
         val JSON = JsonMapper()
 
