@@ -75,10 +75,26 @@ class PipelineCommitResultLossIntegrationTest {
             val confirmed =
                 metaScalar("SELECT commit_confirmed_at IS NOT NULL FROM pipeline_executions WHERE execution_id = '$executionId'")
             check(confirmed == "t") { "the loss must happen AFTER the durable confirmation (was $confirmed)" }
-            val deleted = SharedE2e.redis.execInContainer("redis-cli", "DEL", "dp:result:$executionId:rows", "dp:result:$executionId:meta")
-            check(deleted.exitCode == 0 && deleted.stdout.trim() == "2") { "both actual result keys must exist and be removed: $deleted" }
+            val mode = MODE.get()
+            val keys = mode.keys.map { "dp:result:$executionId:$it" }
+            val deleted = SharedE2e.redis.execInContainer("redis-cli", "DEL", *keys.toTypedArray())
+            check(deleted.exitCode == 0 && deleted.stdout.trim() == keys.size.toString()) {
+                "the actual result keys ${mode.keys} must exist and be removed: $deleted"
+            }
+            if (mode == Loss.ROWS_ONLY) {
+                val header = SharedE2e.redis.execInContainer("redis-cli", "EXISTS", "dp:result:$executionId:meta")
+                check(header.exitCode == 0 && header.stdout.trim() == "1") { "the header must survive a rows-only loss: $header" }
+            }
             LOST.set(executionId)
         }
+    }
+
+    /** Which of the result's two real Redis keys the loss removes; the header (`meta`) survives a rows-only loss. */
+    enum class Loss(
+        val keys: List<String>,
+    ) {
+        BOTH_KEYS(listOf("rows", "meta")),
+        ROWS_ONLY(listOf("rows")),
     }
 
     @LocalServerPort
@@ -91,6 +107,7 @@ class PipelineCommitResultLossIntegrationTest {
     @Test
     fun `a stored result lost after the confirmed commit is SUCCESS with the result unavailable on every surface`() {
         seedOnce()
+        MODE.set(Loss.BOTH_KEYS)
         val pipelineId = callerPipeline("test/rl_rest", "rl_tgt_rest")
         val key = "rl1035-${UUID.randomUUID()}"
         ARMED.set(true)
@@ -118,6 +135,7 @@ class PipelineCommitResultLossIntegrationTest {
     @Test
     fun `an MCP run whose stored result is lost after the confirmed commit answers SUCCESS with the result unavailable`() {
         seedOnce()
+        MODE.set(Loss.BOTH_KEYS)
         val pipelineId = callerPipeline("test/rl_mcp", "rl_tgt_mcp", released = true)
         ARMED.set(true)
 
@@ -140,6 +158,62 @@ class PipelineCommitResultLossIntegrationTest {
             assertRecordUnavailable(body["execution_id"].asText())
         }
         count("rl_tgt_mcp") shouldBe ROWS
+    }
+
+    @Test
+    fun `a result whose rows are lost while its header survives is SUCCESS with the result unavailable on every surface`() {
+        seedOnce()
+        MODE.set(Loss.ROWS_ONLY)
+        val pipelineId = callerPipeline("test/rl_rest_rows", "rl_tgt_rest_rows")
+        val key = "rl1035-${UUID.randomUUID()}"
+        ARMED.set(true)
+
+        val events = stream(pipelineId, key)
+
+        val executionId = events.first { it.first == "execution_started" }.second["execution_id"].asText()
+        LOST.get() shouldBe executionId
+        val names = events.map { it.first }.filter { it != "node_progress" }
+        withClue("the stream after the loss: $names") {
+            names.last() shouldBe "pipeline_completed"
+            names.contains("data_ready") shouldBe false
+            events.last().second["result_unavailable"]?.asBoolean() shouldBe true
+        }
+        assertRecordUnavailable(executionId)
+        assertReadersReportUnavailable(executionId)
+        history.assertCompletedWithoutResult(executionId, "rows lost after the confirmation, header kept")
+
+        val duplicate = stream(pipelineId, key).map { it.first }
+        withClue("same-key duplicate: $duplicate") { duplicate.contains("data_ready") shouldBe false }
+        count("rl_tgt_rest_rows") shouldBe ROWS
+        metaScalar("SELECT count(*) FROM pipeline_executions WHERE pipeline_id = '$pipelineId'") shouldBe "1"
+    }
+
+    @Test
+    fun `an MCP run whose result rows are lost while the header survives answers SUCCESS with the result unavailable`() {
+        seedOnce()
+        MODE.set(Loss.ROWS_ONLY)
+        val pipelineId = callerPipeline("test/rl_mcp_rows", "rl_tgt_mcp_rows", released = true)
+        ARMED.set(true)
+
+        val payload =
+            history.mcpCall(
+                "tools/call",
+                mapOf(
+                    "name" to "pipelines_execute",
+                    "arguments" to mapOf("id" to pipelineId, "parameters" to emptyMap<String, Any>()),
+                ),
+            )
+
+        withClue("pipelines_execute after the loss: $payload") {
+            payload.path("isError").asBoolean(false) shouldBe false
+            val body = mapper.readTree(payload["content"][0]["text"].asText())
+            body["status"].asText() shouldBe "SUCCESS"
+            body["result_unavailable"]?.asBoolean() shouldBe true
+            body.has("rows") shouldBe false
+            LOST.get() shouldBe body["execution_id"].asText()
+            assertRecordUnavailable(body["execution_id"].asText())
+        }
+        count("rl_tgt_mcp_rows") shouldBe ROWS
     }
 
     @Test
@@ -286,7 +360,7 @@ class PipelineCommitResultLossIntegrationTest {
             c.createStatement().use { s ->
                 s.execute("CREATE TABLE rl_src (id INT PRIMARY KEY)")
                 s.execute("INSERT INTO rl_src SELECT generate_series(1, $ROWS)")
-                listOf("rl_tgt_rest", "rl_tgt_mcp", "rl_tgt_zero").forEach { s.execute("CREATE TABLE $it (id INT PRIMARY KEY)") }
+                listOf("rl_tgt_rest", "rl_tgt_mcp", "rl_tgt_zero", "rl_tgt_rest_rows", "rl_tgt_mcp_rows").forEach { s.execute("CREATE TABLE $it (id INT PRIMARY KEY)") }
             }
         }
         api.registerDatasource(db.jdbcUrl, db.username, db.password)
@@ -333,6 +407,7 @@ class PipelineCommitResultLossIntegrationTest {
         private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
         private const val ADMIN_EMAIL = "e2e-rl1035@datapipelines.test"
         private val ARMED = AtomicBoolean(false)
+        private val MODE = AtomicReference(Loss.BOTH_KEYS)
         private val SEEDED = AtomicBoolean(false)
         private val LOST = AtomicReference<String?>()
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()

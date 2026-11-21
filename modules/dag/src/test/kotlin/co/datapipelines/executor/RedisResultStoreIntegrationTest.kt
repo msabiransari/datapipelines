@@ -157,6 +157,33 @@ class RedisResultStoreIntegrationTest {
     }
 
     @Test
+    fun `a surviving header whose rows key is gone reads as absent, never as an empty page (1035 R4)`() =
+        runBlocking<Unit> {
+            val store = store()
+            val stored = store.materialize(UUID.randomUUID(), rows(1, 5), Dialect.H2, TTL_SECONDS)
+            store.describe(stored.key).shouldNotBeNull()
+
+            redis.delete("${stored.key}:rows") shouldBe true
+
+            redis.hasKey("${stored.key}:meta") shouldBe true
+            store.describe(stored.key).shouldBeNull()
+            store.page(stored.key, 0, 10).shouldBeNull()
+        }
+
+    @Test
+    fun `a legitimate zero-row result has no rows key and still reads as an empty result (1035 R4)`() =
+        runBlocking<Unit> {
+            val store = store()
+            val stored = store.materialize(UUID.randomUUID(), rows(1, 0), Dialect.H2, TTL_SECONDS)
+
+            redis.hasKey("${stored.key}:rows") shouldBe false
+            val view = store.describe(stored.key).shouldNotBeNull()
+            view.totalRows shouldBe 0L
+            view.firstPage shouldBe emptyList()
+            store.page(stored.key, 0, 10).shouldNotBeNull().rows shouldBe emptyList()
+        }
+
+    @Test
     fun `discard removes both keys`() =
         runBlocking<Unit> {
             val store = store()
