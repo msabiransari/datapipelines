@@ -95,6 +95,12 @@ const val MAX_RECORDED_SCHEMA_COLUMNS = 256
 /** #328 — the per-column-name half of the record bounds; see [MAX_RECORDED_SCHEMA_COLUMNS]. */
 const val MAX_RECORDED_COLUMN_NAME_LENGTH = 128
 
+/** One root the crash sweep moved out of `RUNNING` (#1035), with the final status the evidence decided. */
+data class SweptExecution(
+    val executionId: UUID,
+    val status: ExecutionStatus,
+)
+
 /**
  * One `pipeline_executions` row (metadata-db §4.6).
  *
@@ -758,56 +764,63 @@ class ExecutionRepository(
     fun sweepStaleRunning(
         olderThan: Instant,
         heartbeatOlderThan: Instant,
-    ): Int {
+    ): Int = sweepStaleRunningDetailed(olderThan, heartbeatOlderThan).size
+
+    /**
+     * [sweepStaleRunning] with each swept root's final status (#1035): the caller raises one alert per
+     * [ExecutionStatus.OUTCOME_UNKNOWN] it finds.
+     *
+     * ## One statement decides (#1035 R1)
+     *
+     * The three-way label (confirmed → SUCCESS, attempted but unconfirmed → OUTCOME_UNKNOWN, neither →
+     * ABORTED) is ONE `UPDATE` whose `CASE` reads the row's commit stamps. Three ordered statements let a
+     * stamp written between them classify the row on the evidence of an earlier instant: an attempt stamped
+     * after the "unknown" statement and before the "aborted" one ended ABORTED, a confirmation stamped after
+     * the "success" statement ended unknown. Inside one statement Postgres (READ COMMITTED) re-reads a row a
+     * concurrent writer changed, re-checks the `WHERE` and computes the `SET` list from that NEWEST version —
+     * the label always matches the evidence the row held when it was written, whichever stamp lands first.
+     *
+     * The stamps themselves are written only while the row is `RUNNING` ([markCommitAttempt],
+     * [markCommitConfirmed]), so a stamp that arrives AFTER this statement changed the status updates nothing:
+     * the executing instance sees `false`, refuses to commit (attempt) or leaves the sweep's honest
+     * "may have committed" label standing until its own terminal write (confirmation). A row whose heartbeat
+     * resumed after the scan is no longer stale when the statement re-checks it and is left `RUNNING`.
+     *
+     * @return the swept roots with their final status; a pending child settled together with its root is
+     *   not listed.
+     */
+    fun sweepStaleRunningDetailed(
+        olderThan: Instant,
+        heartbeatOlderThan: Instant,
+    ): List<SweptExecution> {
         val params =
             mapOf(
                 "olderThan" to java.sql.Timestamp.from(olderThan),
                 "heartbeatOlderThan" to java.sql.Timestamp.from(heartbeatOlderThan),
+                "unknownJson" to OUTCOME_UNKNOWN_JSON,
+                "lostJson" to INSTANCE_LOST_JSON,
             )
-        // #1035: the three branches run in THIS order — a row with commit evidence must never reach the
-        // ABORTED branch, which takes everything the first two left. A pending child is never judged on its
-        // own heartbeat (it finished; its fate is its root's) — [settleFamilies] below settles it.
-        val confirmed =
-            sweepJdbc.update(
+        val swept =
+            sweepJdbc.query(
                 """
                 UPDATE pipeline_executions
-                   SET status = 'SUCCESS',
-                       completed_at = commit_confirmed_at,
-                       duration_ms = EXTRACT(EPOCH FROM (commit_confirmed_at - started_at)) * 1000,
-                       result_unavailable = TRUE
-                 WHERE status = 'RUNNING' AND NOT settlement_pending AND commit_confirmed_at IS NOT NULL
-                   AND $STALE_PREDICATE
-                """.trimIndent(),
-                params,
-            )
-        val unknown =
-            sweepJdbc.update(
-                """
-                UPDATE pipeline_executions
-                   SET status = 'OUTCOME_UNKNOWN',
-                       completed_at = NOW(),
-                       duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
-                       error_json = CAST(:errorJson AS jsonb)
-                 WHERE status = 'RUNNING' AND NOT settlement_pending AND commit_attempted_at IS NOT NULL
-                   AND $STALE_PREDICATE
-                """.trimIndent(),
-                params + mapOf("errorJson" to OUTCOME_UNKNOWN_JSON),
-            )
-        val aborted =
-            sweepJdbc.update(
-                """
-                UPDATE pipeline_executions
-                   SET status = 'ABORTED',
-                       completed_at = NOW(),
-                       duration_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
-                       error_json = CAST(:errorJson AS jsonb)
+                   SET status = CASE WHEN commit_confirmed_at IS NOT NULL THEN 'SUCCESS'
+                                     WHEN commit_attempted_at IS NOT NULL THEN 'OUTCOME_UNKNOWN'
+                                     ELSE 'ABORTED' END,
+                       completed_at = COALESCE(commit_confirmed_at, NOW()),
+                       duration_ms = EXTRACT(EPOCH FROM (COALESCE(commit_confirmed_at, NOW()) - started_at)) * 1000,
+                       error_json = CASE WHEN commit_confirmed_at IS NOT NULL THEN error_json
+                                         WHEN commit_attempted_at IS NOT NULL THEN CAST(:unknownJson AS jsonb)
+                                         ELSE CAST(:lostJson AS jsonb) END,
+                       result_unavailable = result_unavailable OR commit_confirmed_at IS NOT NULL
                  WHERE status = 'RUNNING' AND NOT settlement_pending
                    AND $STALE_PREDICATE
+                RETURNING execution_id, status
                 """.trimIndent(),
-                params + mapOf("errorJson" to INSTANCE_LOST_JSON),
-            )
+                params,
+            ) { rs, _ -> SweptExecution(rs.getObject("execution_id", UUID::class.java), ExecutionStatus.valueOf(rs.getString("status"))) }
         settleFamilies()
-        return confirmed + unknown + aborted
+        return swept
     }
 
     private companion object {
