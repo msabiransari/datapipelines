@@ -68,6 +68,10 @@ class LocalWritePlanner(
      * save-time validation. A later repoint cannot change this verdict retroactively; enlist
      * snapshots what the registration points to THEN.
      *
+     * The same walk is DML run admission for the whole pinned family ([admitDml]): a body whose
+     * DML nodes break the shape rules, or an insert on a known-unqualified dialect, throws the
+     * catalogued refusal here — before the verdict is read and before any business write.
+     *
      * `NestedBlockDepth` is suppressed for this function: the walk IS one iterative loop whose
      * depth is the graph's — stack + node + branch, `ReadOnlyPipelineRule`'s shape.
      */
@@ -82,10 +86,11 @@ class LocalWritePlanner(
         val unreadableChildren = mutableListOf<String>()
         val expandedAt = HashMap<PipelineNodeRef, Int>()
         val stack = ArrayDeque<Walked>()
-        stack.addLast(Walked(pipeline, depth = 1, trail = emptyList()))
+        stack.addLast(Walked(pipeline, depth = 1, trail = emptyList(), ref = null))
 
         while (stack.isNotEmpty()) {
             val current = stack.removeLast()
+            admitDml(current, workspaceId)
             for (node in current.pipeline.nodes) {
                 when (node.type) {
                     NodeType.PIPELINE -> {
@@ -125,6 +130,34 @@ class LocalWritePlanner(
                 .toSet()
                 .associateWith { name -> eligibleIn(datasources.getVisible(name, workspaceId)) }
         return verdict(writers, rowWrites, externalDdl, unreadableChildren, eligibility)
+    }
+
+    /**
+     * DML run admission for one walked body (write-transactions §4 row 1; #1034): the stable
+     * shape rules and the CURRENT insert qualification, before any business write anywhere in
+     * the family. The root body's shape was checked by the executor already — repeating it is
+     * cheap and keeps this walk self-contained — but a child is reached here first, so an
+     * operation-less or unqualified node in a child refuses the run while an earlier writer in
+     * the parent (excluded engines included, which never enroll) has written nothing.
+     * Destinations are resolved against the LIVE registry, workspace-scoped; one that cannot be
+     * resolved is left to its node's own `datasource_not_found`.
+     */
+    private fun admitDml(
+        current: Walked,
+        workspaceId: UUID,
+    ) {
+        DmlAdmission.refuseInvalidShape(current.pipeline, current.ref, current.trail)
+        DmlAdmission.refuseUnqualifiedInsert(
+            current.pipeline,
+            dialectOf = { node ->
+                when (val source = node.resolvedSource) {
+                    is NodeSource.Tempdb -> current.pipeline.settings.tempdb.engine.dialect
+                    is NodeSource.Datasource -> datasources.getVisible(source.name, workspaceId)?.dialect
+                }
+            },
+            child = current.ref,
+            via = current.trail,
+        )
     }
 
     /**
@@ -208,7 +241,7 @@ class LocalWritePlanner(
         // the depth bound caps the whole walk at `references × maxDepth` resolutions.
         if ((expandedAt[ref] ?: 0) >= childDepth) return null
         expandedAt[ref] = childDepth
-        return Walked(child, childDepth, current.trail + node.id)
+        return Walked(child, childDepth, current.trail + node.id, ref)
     }
 
     /**
@@ -257,6 +290,8 @@ class LocalWritePlanner(
         val pipeline: Pipeline,
         val depth: Int,
         val trail: List<String>,
+        /** The pinned reference this body was reached through; null for the root. */
+        val ref: PipelineNodeRef?,
     )
 
     companion object {

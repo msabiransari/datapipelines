@@ -6,6 +6,7 @@ import co.datapipelines.pipeline.Node
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
+import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineNodeRef
 import co.datapipelines.pipeline.TemplateRef
@@ -71,13 +72,26 @@ data class ExecutableNode(
     val queryTimeoutSeconds: Int? = null,
     /** SCRIPT nodes only (§4.12): fail the node when the rejects table is non-empty. */
     val strict: Boolean? = null,
+    /**
+     * DML nodes only (pipeline-contract §4.4, #1034): the declared operation, an insert's key
+     * and input, and the declarations of a scalar input's parameters. Null on every other type.
+     */
+    val dml: DmlSpec? = null,
 ) {
     /** True when this node's ResultSet is the pipeline's result (§4.1). */
     val isCallerNode: Boolean get() = output == NodeOutput.Caller
 
     companion object {
-        /** Projects one wire [Node] onto its executable form. */
-        fun from(node: Node): ExecutableNode =
+        /**
+         * Projects one wire [Node] onto its executable form.
+         *
+         * @param parameters the pipeline's declared parameters — a DML insert's scalar input
+         *   takes its column types from the declarations it names (§4.4).
+         */
+        fun from(
+            node: Node,
+            parameters: Map<String, Parameter> = emptyMap(),
+        ): ExecutableNode =
             ExecutableNode(
                 id = node.id,
                 description = node.description,
@@ -95,6 +109,7 @@ data class ExecutableNode(
                 timeoutSeconds = node.settings?.timeoutSeconds,
                 queryTimeoutSeconds = node.settings?.queryTimeoutSeconds,
                 strict = node.strict,
+                dml = DmlSpec.of(node, parameters),
             )
     }
 }
@@ -122,7 +137,7 @@ class ExecutablePipeline private constructor(
          * forget to run.
          */
         fun from(pipeline: Pipeline): ExecutablePipeline {
-            val nodes = pipeline.nodes.map(ExecutableNode::from)
+            val nodes = pipeline.nodes.map { ExecutableNode.from(it, pipeline.parameters) }
             val dag =
                 Dag.build<ExecutableNode> {
                     nodes.forEach { addNode(it.id, it) }

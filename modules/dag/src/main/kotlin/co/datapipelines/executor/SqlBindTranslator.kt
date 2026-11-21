@@ -5,6 +5,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import org.springframework.dao.InvalidDataAccessApiUsageException
 import org.springframework.jdbc.core.SqlTypeValue
 import org.springframework.jdbc.core.StatementCreatorUtils
+import org.springframework.jdbc.core.namedparam.EmptySqlParameterSource
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterUtils
 import java.sql.PreparedStatement
@@ -86,6 +87,31 @@ internal object SqlBindTranslator {
                 cause = e,
             )
         }
+    }
+
+    /**
+     * The `:name` references in [sql], in order of appearance (duplicates kept) — Spring's own
+     * parser, so the names are exactly the ones [translate] would bind.
+     */
+    fun parameterNames(sql: String): List<String> =
+        NamedParameterUtils
+            .buildSqlParameterList(NamedParameterUtils.parseSqlStatement(sql), EmptySqlParameterSource.INSTANCE)
+            .mapNotNull { it.name }
+
+    /**
+     * A DML insert's pre-input translation (pipeline-contract §4.4, #1034): its template binds
+     * per-ROW names — the input row's fields and `id` — that exist only once the input is
+     * loaded, so every reference [values] does not declare is translated as a null here. The
+     * result serves the CONNECT-time gates (table references) and is NEVER executed: the insert
+     * re-translates each row strictly through [translate], where an unknown name still fails
+     * `sql_parameter_missing`.
+     */
+    fun translateForRowScope(
+        sql: String,
+        values: Map<String, Any?>,
+    ): BoundSql {
+        val rowNames = parameterNames(sql).filterNot { values.containsKey(it) }
+        return translate(sql, if (rowNames.isEmpty()) values else values + rowNames.associateWith { null })
     }
 
     /**

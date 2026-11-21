@@ -61,7 +61,7 @@ internal object EnvPortabilityRule {
                 if (!managedReference) scan(output.table, "nodes[$index].output.table", into)
             }
 
-            NodeOutput.Caller, null -> {
+            NodeOutput.Caller, NodeOutput.Discard, null -> {
                 // No table or datasource name to scan.
             }
         }

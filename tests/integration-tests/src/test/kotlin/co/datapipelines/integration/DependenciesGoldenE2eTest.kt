@@ -234,7 +234,7 @@ class DependenciesGoldenE2eTest {
                   {"id": "read", "type": "DQL", "source": "$READONLY_DATASOURCE", "template": {"id": "${query.name}", "version": 1},
                    "output": {"target": "tempdb", "table": "golden_rows"}, "depends_on": []},
                   {"id": "write", "type": "DML", "source": "$DATASOURCE", "template": {"id": "${write.name}", "version": 1},
-                   "depends_on": []},
+                   "operation": "update", "output": {"target": "discard"}, "depends_on": []},
                   {"id": "child", "type": "PIPELINE", "pipeline": {"name": "${child.name}", "version": 1}, "depends_on": []}]}
                 """.trimIndent()
             fx.send("POST", "/api/v1/pipelines", document).expect("pipeline $name", HTTP_CREATED)

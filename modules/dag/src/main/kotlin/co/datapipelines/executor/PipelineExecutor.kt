@@ -195,6 +195,10 @@ class PipelineExecutor(
         var localWrite: LocalWriteTransaction? = null
         val handle = cancellationRegistry.register(executionId)
         try {
+            // (write-transactions §4 row 1, §7; pipeline-contract §12.4, #1034) Every execution —
+            // root or child, writable or read-only — re-applies the DML shape rules to the PINNED
+            // body before any business write.
+            DmlAdmission.refuseInvalidShape(request.pipeline)
             // (write-transactions §3.1/§3.4) Run admission's write-set gate — ROOT executions of
             // writable runs only. `rootExecutionId == null` marks a root structurally (a child
             // carries it even when the family enrolled nothing), so a planner wired into a child

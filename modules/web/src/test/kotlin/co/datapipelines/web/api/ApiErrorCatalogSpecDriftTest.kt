@@ -420,8 +420,13 @@ class ApiErrorCatalogSpecDriftTest {
          * `endpoint.promotion.method_unsupported` (409, the promotion family default), landed in
          * the SAME commit as their constants and `PipelineErrorCodesSpecDriftTest`'s
          * `KNOWN_TWO_SEGMENT_CODES` additions.
+         *
+         * 525 → 528 with #1034: §13.4 gains `pipeline.node.dml_key_correlation_failed`,
+         * `pipeline.node.dml_affected_rows_mismatch` and `pipeline.node.dml_insert_unqualified`,
+         * all 500 through the `pipeline.node.` family default (no explicit catalog row), landed
+         * in the SAME commit as their constants.
          */
-        const val SECTION_13_ROW_COUNT = 525
+        const val SECTION_13_ROW_COUNT = 528
 
         /**
          * §12's distinct validation codes.
@@ -471,7 +476,12 @@ class ApiErrorCatalogSpecDriftTest {
          * `default_invalid`, 400 through the family default (which is why the brief's
          * `SECTION_13_ROW_COUNT` does not move: a §12 row carries no HTTP column), landed in
          * the SAME commit as its constant. Re-derived from the document's own parse.
+         *
+         * 85 → 91 with #1034: §12.4's DML shape rules (`dml_output_required`,
+         * `dml_operation_required`, `dml_operation_invalid`, `dml_key_invalid`,
+         * `dml_input_invalid`, `dml_field_forbidden`) — all 400 through the family default,
+         * landed in the SAME commit as their constants.
          */
-        const val SECTION_12_CODE_COUNT = 85
+        const val SECTION_12_CODE_COUNT = 91
     }
 }

@@ -10,6 +10,7 @@ import co.datapipelines.datasources.ReadOnlyConnectionMode
 import co.datapipelines.datasources.ResultRowReader
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.CalculatorInputResolver
+import co.datapipelines.pipeline.DmlOperation
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
@@ -356,7 +357,18 @@ class NodeRunner(
             // 042 C1/C2: translate the rendered SQL once, before any connection is leased — a
             // `:name` the context does not declare fails loudly HERE (`sql_parameter_missing`),
             // never on a statement that half-executed with a silent null.
-            val bound = phase(ctx, NodePhase.RENDER, node.id) { SqlBindTranslator.translate(sql, ctx.values) }
+            //
+            // A DML insert binds per-ROW names (#1034) that exist only once its input is loaded:
+            // this translation serves the CONNECT gates only, and [DmlNodeRuns] re-translates
+            // every row strictly before anything executes.
+            val bound =
+                phase(ctx, NodePhase.RENDER, node.id) {
+                    if (node.dml?.operation == DmlOperation.INSERT) {
+                        SqlBindTranslator.translateForRowScope(sql, ctx.values)
+                    } else {
+                        SqlBindTranslator.translate(sql, ctx.values)
+                    }
+                }
             // 149: the operation's kind and real destination are decided from the node's shape,
             // before any connection is leased; every boundary below reports onto this tracker.
             val (kind, destination) = NodeOperations.operationFor(node)
@@ -443,7 +455,11 @@ class NodeRunner(
                 tempdbQuery(node, bound, ctx, startedAt, resolved)
             }
 
-            NodeType.DML, NodeType.DDL -> {
+            NodeType.DML -> {
+                DmlNodeRuns.run(node, ctx, startedAt, bound.originalSql, tempdbDmlTarget(node, ctx, resolved), resultStore)
+            }
+
+            NodeType.DDL -> {
                 tempdbWrite(node, bound, ctx, startedAt, resolved)
             }
 
@@ -463,6 +479,10 @@ class NodeRunner(
         when (val output = requireOutput(node)) {
             is NodeOutput.Tempdb -> {
                 tempdbCreateTableAs(node, output, bound, ctx, startedAt, resolved)
+            }
+
+            NodeOutput.Discard -> {
+                discardUnreachable(node)
             }
 
             is NodeOutput.Caller -> {
@@ -664,7 +684,7 @@ class NodeRunner(
             StreamedReadGuard.oneRow(rs, TEMPDB_COUNT_READER) { it.getLong(1) }
         }
 
-    /** DML/DDL against tempdb — same timeout and cancellation reasoning as [tempdbCreateTableAs]. */
+    /** DDL against tempdb — same timeout and cancellation reasoning as [tempdbCreateTableAs]; DML runs in [DmlNodeRuns]. */
     private suspend fun tempdbWrite(
         node: ExecutableNode,
         bound: SqlBindTranslator.BoundSql,
@@ -682,13 +702,7 @@ class NodeRunner(
                         ctx.handle.withStatement(node.id, statement) {
                             op.phase(OperationPhase.EXECUTING)
                             withQueryTimeoutSource(resolved) {
-                                ctx.handle.whileExecuting(node.id, statement) {
-                                    if (node.type == NodeType.DML) {
-                                        BoundStatements.update(statement, bound).toLong()
-                                    } else {
-                                        BoundStatements.executeDdl(statement, bound)
-                                    }
-                                }
+                                ctx.handle.whileExecuting(node.id, statement) { BoundStatements.executeDdl(statement, bound) }
                             }
                         }
                     }
@@ -698,6 +712,23 @@ class NodeRunner(
         recordStatement(op, node, affected)
         return NodeResult.of(node.id, affected, startedAt)
     }
+
+    /** A DML node on tempdb (#1034): one staging lease, the budget re-checked after the write. */
+    private fun tempdbDmlTarget(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        resolved: ResolvedQueryTimeout,
+    ): DmlTarget =
+        object : DmlTarget {
+            override val dialect = ctx.tempdbDialect
+            override val resolved = resolved
+            override val participant = false
+            override val connectPhase = NodePhase.EXECUTE
+
+            override suspend fun <T> withConnection(block: suspend (Connection) -> T): T = ctx.staging.withConnection(block)
+
+            override suspend fun afterWrite() = checkStagingBudget(node, ctx)
+        }
 
     /**
      * The measured-footprint check staging performs after each of its own writes (staging §8.2),
@@ -815,22 +846,14 @@ class NodeRunner(
         // (write-transactions §3.3) A node whose resolved datasource IS the family's registration
         // runs as a participant — see [runAsParticipant].
         val participant = ctx.localWriteTransaction?.takeIf { it.registration == datasource.name }
+        if (node.type == NodeType.DML) {
+            val target = datasourceDmlTarget(node, datasource, bound, ctx, resolved, participant)
+            return DmlNodeRuns.run(node, ctx, startedAt, bound.originalSql, target, resultStore)
+        }
         if (participant != null) {
             return runAsParticipant(participant, node, bound, ctx, startedAt, resolved, datasource)
         }
-        val connection =
-            phase(ctx, NodePhase.CONNECT, node.id) {
-                // B5: `poolFor` must be INSIDE `withCause`. `pool_build` is emitted from inside
-                // `poolFor`'s `computeIfAbsent`, not from `leaseConnection` — resolving the pool
-                // first meant the ThreadLocal was still unset when the event fired, so
-                // `DatasourceAuditEvent.cause` was null on every executor-triggered pool build and
-                // the whole carry-forward was inert. The audit trail could not answer "which
-                // execution caused this credential to be decrypted", which is the one question
-                // datasources §7.4 exists to answer.
-                auditSink?.withCause(ctx.executionId, node.id) {
-                    ManagedLakeTableGate.leaseServing(datasourceRegistry, datasource, bound)
-                } ?: ManagedLakeTableGate.leaseServing(datasourceRegistry, datasource, bound)
-            }
+        val connection = lease(node, datasource, bound, ctx)
         return connection.use { conn ->
             when (node.type) {
                 // #463: on a read-only run the per-lease mode encloses datasourceQuery whole and owns the restore;
@@ -847,15 +870,12 @@ class NodeRunner(
                     ) { datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect) }
                 }
 
-                NodeType.DML -> {
-                    datasourceUpdate(node, conn, bound, ctx, startedAt, resolved)
-                }
-
                 NodeType.DDL -> {
                     datasourceDdl(node, conn, bound, ctx, startedAt, resolved)
                 }
 
-                NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.SCRIPT -> {
+                // DML left above for [DmlNodeRuns]; the other three never reach source resolution.
+                NodeType.DML, NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.SCRIPT -> {
                     error("unreachable: ${node.type.wire} dispatched before source resolution")
                 }
             }
@@ -892,19 +912,60 @@ class NodeRunner(
                         datasourceQuery(node, conn, bound, ctx, startedAt, resolved, datasource.dialect)
                     }
 
-                    NodeType.DML -> {
-                        datasourceUpdate(node, conn, bound, ctx, startedAt, resolved, participant = true)
-                    }
-
                     NodeType.DDL -> {
                         datasourceDdl(node, conn, bound, ctx, startedAt, resolved, participant = true)
                     }
 
-                    NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.SCRIPT -> {
+                    NodeType.DML, NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.SCRIPT -> {
                         error("unreachable: ${node.type.wire} dispatched before source resolution")
                     }
                 }
             }
+        }
+
+    /** One ordinary pooled lease of [datasource] for [node], under the audit cause (B5). */
+    private suspend fun lease(
+        node: ExecutableNode,
+        datasource: Datasource,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+    ): Connection =
+        phase(ctx, NodePhase.CONNECT, node.id) {
+            // B5: `poolFor` must be INSIDE `withCause`. `pool_build` is emitted from inside
+            // `poolFor`'s `computeIfAbsent`, not from `leaseConnection` — resolving the pool
+            // first meant the ThreadLocal was still unset when the event fired, so
+            // `DatasourceAuditEvent.cause` was null on every executor-triggered pool build and
+            // the whole carry-forward was inert. The audit trail could not answer "which
+            // execution caused this credential to be decrypted", which is the one question
+            // datasources §7.4 exists to answer.
+            auditSink?.withCause(ctx.executionId, node.id) {
+                ManagedLakeTableGate.leaseServing(datasourceRegistry, datasource, bound)
+            } ?: ManagedLakeTableGate.leaseServing(datasourceRegistry, datasource, bound)
+        }
+
+    /**
+     * A DML node on a datasource (#1034): the family's transaction connection when [participant]
+     * is set (§3.3 — the root settles, the connection is never closed here), else one ordinary
+     * lease closed when the statement returns. Either way the result is delivered after.
+     */
+    @Suppress("LongParameterList") // the resolved leg's fixed facts
+    private fun datasourceDmlTarget(
+        node: ExecutableNode,
+        datasource: Datasource,
+        bound: SqlBindTranslator.BoundSql,
+        ctx: NodeExecutionContext,
+        resolved: ResolvedQueryTimeout,
+        participant: LocalWriteTransaction?,
+    ): DmlTarget =
+        object : DmlTarget {
+            override val dialect = datasource.dialect
+            override val resolved = resolved
+            override val participant = participant != null
+            override val connectPhase = NodePhase.CONNECT
+            override val preparesAlways = true
+
+            override suspend fun <T> withConnection(block: suspend (Connection) -> T): T =
+                participant?.withParticipant(block) ?: lease(node, datasource, bound, ctx).use { block(it) }
         }
 
     /** The DML/DDL source leg of the layer-2a backstop — see [ReadonlyBackstop] for the semantics. */
@@ -1020,6 +1081,10 @@ class NodeRunner(
                 NodeResult.of(node.id, staged.rowsStaged, startedAt)
             }
 
+            NodeOutput.Discard -> {
+                discardUnreachable(node)
+            }
+
             is NodeOutput.Caller -> {
                 phase(ctx, NodePhase.MATERIALIZE, node.id) { deliverToCaller(node, rs, ctx, startedAt, dialect) }
             }
@@ -1115,38 +1180,6 @@ class NodeRunner(
         )
     }
 
-    /**
-     * @param participant true when [conn] is the family's local write transaction connection
-     *   (§3.3): the statement's effects stay uncommitted when it returns — the root settles.
-     */
-    private suspend fun datasourceUpdate(
-        node: ExecutableNode,
-        conn: Connection,
-        bound: SqlBindTranslator.BoundSql,
-        ctx: NodeExecutionContext,
-        startedAt: Instant,
-        resolved: ResolvedQueryTimeout,
-        participant: Boolean = false,
-    ): NodeResult =
-        conn.prepareStatement(bound.sql).use { statement ->
-            statement.queryTimeout = resolved.seconds
-            // This path always prepared even before the round, so the statement shape is
-            // unchanged; binding is the one thing the parameter case adds (042 C1/C4).
-            if (bound.hasBindParameters) SqlBindTranslator.bind(statement, bound.bindValues)
-            ctx.handle.withStatement(node.id, statement) {
-                val op = ctx.operations.observerFor(node.id)
-                op.phase(OperationPhase.EXECUTING)
-                val affected =
-                    phase(ctx, NodePhase.EXECUTE, node.id) {
-                        withQueryTimeoutSource(resolved) {
-                            ctx.handle.whileExecuting(node.id, statement) { statement.executeUpdate().toLong() }
-                        }
-                    }
-                recordStatement(op, node, affected, participant)
-                NodeResult.of(node.id, affected, startedAt)
-            }
-        }
-
     private suspend fun datasourceDdl(
         node: ExecutableNode,
         conn: Connection,
@@ -1188,6 +1221,9 @@ class NodeRunner(
         if (node.type == NodeType.DML) op.written(affected)
         if (!participant) op.committed()
     }
+
+    /** `discard` is a DML target only — §12.4 refuses it on a DQL node at save AND at run admission. */
+    private fun discardUnreachable(node: ExecutableNode): Nothing = error("unreachable: DQL node '${node.id}' declares a discard output")
 
     /** DQL always has a concrete output by deserialization time (§4.1). */
     private fun requireOutput(node: ExecutableNode): NodeOutput =
@@ -1597,7 +1633,7 @@ internal object TempdbReadGuard {
  * precedence tier resolved it; this call site does. Same "decorate only what is still null"
  * shape as `NodeRunner.decorateWithDialect`. A file-level function: the class and [TempdbReadGuard] both call it.
  */
-private suspend fun <T> withQueryTimeoutSource(
+internal suspend fun <T> withQueryTimeoutSource(
     resolved: ResolvedQueryTimeout,
     block: suspend () -> T,
 ): T =

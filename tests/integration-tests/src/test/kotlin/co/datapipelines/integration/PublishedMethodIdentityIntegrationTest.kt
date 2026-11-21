@@ -415,7 +415,7 @@ class PublishedMethodIdentityIntegrationTest {
                      "description": "1037 E2E — the other workspace's pipeline.", "parameters": {},
                      "nodes": [{"id": "write", "description": "A write", "type": "DML",
                                 "source": "ep-source-mi-other", "template": {"id": "test/mi_other_write.sql", "version": 1},
-                                "depends_on": []}]}
+                                "operation": "update", "output": {"target": "discard"}, "depends_on": []}]}
                     """.trimIndent(),
                 ).`when`()
                 .post("/api/v1/pipelines")
@@ -1650,7 +1650,7 @@ class PublishedMethodIdentityIntegrationTest {
              "description": "1037 E2E — the mutation identities' pipeline.", "parameters": {},
              "nodes": [{"id": "write", "description": "A write", "type": "DML",
                         "source": "ep-source-mi", "template": {"id": "test/mi_write.sql", "version": 1},
-                        "depends_on": []}]}
+                        "operation": "update", "output": {"target": "discard"}, "depends_on": []}]}
             """.trimIndent(),
         )
         // The same-path lifecycle's second generation: distinct pipelines (so distinct pins) over the same templates.
@@ -1671,7 +1671,7 @@ class PublishedMethodIdentityIntegrationTest {
                  "description": "1037 E2E — the POST identity's v2 pin.", "parameters": {},
                  "nodes": [{"id": "write", "description": "A write", "type": "DML",
                             "source": "ep-source-mi", "template": {"id": "test/mi_write.sql", "version": 1},
-                            "depends_on": []}]}
+                            "operation": "update", "output": {"target": "discard"}, "depends_on": []}]}
                 """.trimIndent(),
             )
     }

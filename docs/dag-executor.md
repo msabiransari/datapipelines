@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.43 (revised — see Change Log)
+**Status:** v1.45 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-20
 
 ---
 
@@ -1714,12 +1714,36 @@ operator checks the target before any deliberate re-run (the stale-run surface c
 [observability §4.1](observability.md): at most one `started` per run (the first enlist) and at
 most one terminal outcome. An `unknown` is alertable on its own.
 
+**DML results inside the transaction (#1034).** A DML node declares its operation
+([pipeline contract §4.4](pipeline-contract.md#44-json-structure-dml-node)). An `insert` executes
+once per input row on the participant connection and reads each row's key back from the driver; a
+missing, extra or rewritten key fails the node, and the root's rollback removes every row the
+family wrote. Its result rows (each input row plus `id`, or one `affected_rows` row) are staged or
+materialized under the ordinary staging and result limits BEFORE the commit — so a dependent
+line-item node can read a staged order `id` — and stay unpublished until the settle (#1035 owns
+what publishes after it). Off the transaction — tempdb, H2, DuckDB, and any run with no enrolled
+writer — a multi-row insert runs in its own node-local transaction, so an uncorrelated set still
+leaves no row behind.
+
+**DML admission over the pinned family (#1034).** The write-set walk above is also DML run
+admission: for the root and every pinned child it reaches (same workspace-scoped resolution, same
+depth bound and shared-child rule), `LocalWritePlanner.plan` applies the DML shape rules and the
+CURRENT insert qualification ([pipeline contract §4.4](pipeline-contract.md#44-json-structure-dml-node))
+before the verdict is read. A refusal throws the catalogued code, which ends the run as a §5.1
+setup failure (`pipeline_failed`, no failed node) before any lease, staging allocation or
+`node_started` — so an operation-less or unqualified node in a child can no longer surface only
+when that child starts, after an excluded parent writer (which never enrolls) has already
+committed. The refusal names the child (`details.child`, `details.via`). Excluded engines are not
+enrolled to achieve this, and nothing is rolled back after a late detection: there is none. Each
+execution's own body re-check and the insert node's live qualification check remain as backstops.
+
 ---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-20 | v1.45 | 1034 (#1034) | §16.4 gains **DML results inside the transaction**: an insert's per-row execution and key correlation on the participant connection, its result staged/materialized before the commit and unpublished until the settle, and the node-local transaction a multi-row insert takes off the family transaction; and **DML admission over the pinned family**: the write-set walk applies the DML shape rules and the current insert qualification to the root and every reachable pinned child before any business write, the refusal naming the child, with the per-execution and per-node checks kept as backstops. |
 | 2026-11-18 | v1.44 | 1033 (#1033) | §16 gains the exception the blockquote now carries and **§16.4: the single-registration local write transaction** — automatic root-only planning of the durable write set (DML-with-datasource source, DQL/PIPELINE `output.target: "datasource"`, external DDL counted separately; registrations unique by name; POSTGRES/MYSQL/MSSQL/ORACLE eligible), refusal with `pipeline.execution.local_write_refused` before any business write, the lazy one-connection lease with participant writes withholding committed evidence, root-only single commit after result materialization (terminal success after it), rollback on every other terminal path, the unknown-outcome honesty on a refused/lost commit ack (`pipeline.execution.local_write_commit_failed`, no re-run), and the §4.1 meter `datapipelines.executions.local_write_transactions`. The §16.1 seam table row and §16.2's atomic-parts paragraph carry the pointer; §16.3's rejections stand. |
 | 2026-11-12 | v1.43 | #905 review F1 | §10.1 shutdown and crash: the result-history write deferred behind an unconfirmed insert is also an in-memory continuation that can remain pending after the execution finishes and be lost on process exit. |
 | 2026-11-12 | v1.42 | #905 result columns survive write ordering | §10.1 "lifecycle writes are bounded too" paragraph: the result-history write (`recordResult`) is ordered behind an unconfirmed RUNNING insert like the terminal UPDATE, and the terminal UPDATE keeps recorded result columns (writes them only when given values); a result write matching no row is one WARN. |
