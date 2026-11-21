@@ -15,6 +15,7 @@ import co.datapipelines.scripting.ScriptingException
 import co.datapipelines.scripting.TypeGate
 import co.datapipelines.scripting.TypeGate.GateResult
 import co.datapipelines.typesystem.ColumnSchema
+import co.datapipelines.typesystem.body.StructuredBodyLimits
 import java.time.Duration
 import java.time.Instant
 
@@ -48,6 +49,13 @@ class ScriptTestRunner(
     private val maxStatements: Long? = null,
     private val maxResultBytes: Long? = null,
     private val maxInputBytes: Long? = null,
+    /**
+     * The shared request-body budget (`datapipelines.endpoints.body-max-bytes` / `body-max-depth`,
+     * #1038) an authored `body` fixture must also fit: the same two numbers framework execute, MCP
+     * and the published codec apply to a body on the wire, so a fixture the editor accepts is a
+     * body the live surfaces accept. Placed before [nanoClock], the trailing function parameter.
+     */
+    private val bodyLimits: StructuredBodyLimits = StructuredBodyLimits(),
     private val nanoClock: () -> Long = System::nanoTime,
 ) {
     /** One invariant's verdict on one evaluation (record §9.1's `{ name, passed, message }`). */
@@ -443,8 +451,16 @@ class ScriptTestRunner(
                 // object or an array of objects under the value byte cap (#1038).
                 if (!inputs.containsKey(name)) return null
                 val verdict = TypeGate.over(emptyList(), maxStringBytes).gateBody(inputs[name], maxValueBytes)
-                return (verdict as? GateResult.Refuse)?.let {
-                    RunOutcome.Refused(PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION, "input '$name': ${describe(it.refusal)}")
+                (verdict as? GateResult.Refuse)?.let {
+                    return RunOutcome.Refused(PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION, "input '$name': ${describe(it.refusal)}")
+                }
+                // The shared body policy (depth, then bytes), after the root shape: the bounded
+                // reason word only, never a member name or value.
+                return bodyLimits.refusalOf(inputs[name])?.let {
+                    RunOutcome.Refused(
+                        PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION,
+                        "input '$name': body ${it.wire} (budget ${bodyLimits.maxBytes} bytes, depth ${bodyLimits.maxDepth})",
+                    )
                 }
             }
 

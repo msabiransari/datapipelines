@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.restassured.RestAssured.given
@@ -270,6 +271,240 @@ class StructuredPublishedInputIntegrationTest {
         executionCount(linesId) shouldBe before + 1
     }
 
+    // ------------------------------------------------------------ round 2: R1 — the raw /mcp fixture contract
+
+    @Test
+    fun `a duplicate member in a pipelines_execute request_body is refused at the real mcp endpoint before anything runs`() {
+        prepare()
+        val pipelineId = linesPipeline(JSONATA)
+        truncate()
+        val before = executionCount(pipelineId)
+        val cases =
+            listOf(
+                """{"sku":"secret-a","qty":1,"sku":"secret-b"}""",
+                """{"lines":[{"sku":"A","qty":1},{"sku":"secret-a","qty":1,"qty":2}]}""",
+                """[{"sku":"A","qty":1},{"meta":{"k":"secret-a","k":"secret-b"},"sku":"B","qty":1}]""",
+            )
+        cases.forEach { body ->
+            val response = rawToolCall("pipelines_execute", """{"id":"$pipelineId","parameters":{},"request_body":$body}""")
+            withClue("duplicate in $body -> ${response.statusCode()} ${response.body().take(300)}") {
+                val refusedAtTransport = response.statusCode() != 200
+                val refusedByTool =
+                    response.statusCode() == 200 &&
+                        mapper
+                            .readTree(response.body())
+                            .path("result")
+                            .path("isError")
+                            .asBoolean(false)
+                (refusedAtTransport || refusedByTool) shouldBe true
+                response.body() shouldNotContain "secret"
+            }
+        }
+        // A repeated request_body member is the same ambiguity one level up.
+        val twice =
+            rawToolCall(
+                "pipelines_execute",
+                """{"id":"$pipelineId","parameters":{},"request_body":{"sku":"secret-a"},"request_body":{"sku":"secret-b"}}""",
+            )
+        withClue("repeated request_body -> ${twice.statusCode()} ${twice.body().take(300)}") {
+            (
+                twice.statusCode() != 200 ||
+                    mapper
+                        .readTree(twice.body())
+                        .path("result")
+                        .path("isError")
+                        .asBoolean(false)
+            ) shouldBe true
+            twice.body() shouldNotContain "secret"
+        }
+        lines().shouldBeEmpty()
+        executionCount(pipelineId) shouldBe before
+    }
+
+    @Test
+    fun `a fraction needing more than double precision reaches the transformer exactly through the real mcp endpoint`() {
+        prepare()
+        val pipelineId = pricePipeline()
+        val fixture = """{"price":$LONG_FRACTION}"""
+
+        val framework = executeStream(pipelineId, """{"parameters":{},"request_body":$fixture}""")
+        withClue(describe(framework)) { framework.last().first shouldBe "data_ready" }
+        val viaFramework = resultOf(framework.first().second["execution_id"].asText())["rows"][0][0].asText()
+
+        val response = rawToolCall("pipelines_execute", """{"id":"$pipelineId","parameters":{},"request_body":$fixture}""")
+        withClue(response.body().take(400)) { response.statusCode() shouldBe 200 }
+        val result = mapper.readTree(response.body())["result"]
+        withClue(response.body().take(400)) { result.path("isError").asBoolean(false) shouldBe false }
+        val viaMcp = mapper.readTree(result["content"][0]["text"].asText())["rows"][0][0].asText()
+
+        withClue("framework=$viaFramework mcp=$viaMcp") {
+            // Non-vacuity: the framework run is itself exact, so equality below is not two lossy doubles agreeing.
+            viaFramework shouldBe LONG_FRACTION
+            viaMcp shouldBe viaFramework
+        }
+    }
+
+    @Test
+    fun `every body shape reaches both transformers the same way through framework execute and the real mcp endpoint`() {
+        prepare()
+        val fixtures =
+            listOf(
+                ORDER_OBJECT to 2,
+                HETEROGENEOUS to 2,
+                """{"sku":"E-5","qty":7}""" to 1,
+                "{}" to 0,
+                "[]" to 0,
+            )
+        for (language in listOf(JSONATA, JAVASCRIPT)) {
+            val pipelineId = linesPipeline(language)
+            fixtures.forEach { (fixture, expectedRows) ->
+                truncate()
+                val framework = executeStream(pipelineId, """{"parameters":{},"request_body":$fixture}""")
+                withClue("$language $fixture ${describe(framework)}") { framework.last().first shouldBe "data_ready" }
+                val viaFramework = lines()
+                viaFramework.size shouldBe expectedRows
+
+                truncate()
+                val response = rawToolCall("pipelines_execute", """{"id":"$pipelineId","parameters":{},"request_body":$fixture}""")
+                val result = mapper.readTree(response.body())["result"]
+                withClue("$language $fixture mcp ${response.body().take(300)}") { result.path("isError").asBoolean(false) shouldBe false }
+                withClue("$language $fixture") { lines() shouldBe viaFramework }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ round 2: R2 — the shared budget on authored fixtures
+
+    @Test
+    fun `authored body fixtures obey the shared depth and byte budget through REST and MCP evaluation and the release test fixtures`() {
+        prepare()
+        linesPipeline(JSONATA)
+        val template = "test/body1038_lines.$JSONATA"
+        val atDepth = nested(DEFAULT_BODY_DEPTH)
+        val pastDepth = nested(DEFAULT_BODY_DEPTH + 1)
+        val pastBytes = """{"note":"secret-${"x".repeat(BODY_MAX_BYTES)}"}"""
+
+        fun rest(order: String): Response =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .contentType(ContentType.JSON)
+                .body("""{"name":"$template","input":{"inputs":{"order":$order}}}""")
+                .`when`()
+                .post("/api/v1/templates/evaluate")
+                .thenReturn()
+
+        fun mcp(order: String): Pair<JsonNode, Boolean> =
+            callTool("templates_evaluate", mapOf("id" to template, "input" to mapOf("inputs" to mapOf("order" to mapper.readTree(order)))))
+
+        // Depth 32 is inside the budget on every authored surface.
+        rest(atDepth).statusCode() shouldBe 200
+        mcp(atDepth).second shouldBe false
+        // Depth 33 and an over-byte fixture are refused on both, with the same code, naming no value.
+        listOf(pastDepth to "too_deep", pastBytes to "too_many_bytes").forEach { (order, reason) ->
+            val response = rest(order)
+            withClue("REST $reason ${response.body().asString().take(300)}") {
+                // The catalogued status of the code (pipeline-contract 13.18), the one every script input refusal has.
+                response.statusCode() shouldNotBe 200
+                response.jsonPath().getString("error.code") shouldBe "pipeline.script.input_contract_violation"
+                response.body().asString() shouldContain reason
+                response.body().asString() shouldNotContain "secret"
+            }
+            val (payload, isError) = mcp(order)
+            withClue("MCP $reason $payload") {
+                isError shouldBe true
+                payload.toString() shouldContain reason
+                payload.toString() shouldNotContain "secret"
+            }
+        }
+
+        // The release/test fixtures: a case at the budget passes the save-time run, a case past it makes the save refuse.
+        fun create(
+            id: String,
+            order: String,
+        ) = callTool(
+            "templates_create",
+            mapOf(
+                "id" to id,
+                "display_name" to id,
+                "description" to "#1038 fixture budget",
+                "type" to JSONATA,
+                "body" to LINES_JSONATA,
+                "contract" to linesContract(),
+                "invariants" to emptyList<Any>(),
+                "tests" to
+                    listOf(
+                        mapOf(
+                            "name" to "nested",
+                            "input" to mapOf("inputs" to mapOf("order" to mapper.readTree(order))),
+                            "expect" to mapOf("output" to emptyList<Any>()),
+                        ),
+                    ),
+            ),
+        )
+        val (accepted, acceptedError) = create("test/body1038_fixture_ok.jsonata", atDepth)
+        withClue("fixture at depth $DEFAULT_BODY_DEPTH: $accepted") { acceptedError shouldBe false }
+        val (refused, refusedError) = create("test/body1038_fixture_deep.jsonata", pastDepth)
+        withClue("fixture past the depth: $refused") {
+            refusedError shouldBe true
+            refused.toString() shouldContain "too_deep"
+        }
+    }
+
+    // ------------------------------------------------------------ round 2: R3 — default diagnostics
+
+    @Test
+    fun `a failing body execution discloses codes and metadata only, on every surface that carries a failure`() {
+        prepare()
+        val pipelineId = failPipeline()
+        truncate()
+        val cases =
+            listOf(
+                """{"boom":true,"secret":"$CANARY_BODY"}""" to "pipeline.script.evaluation_failed",
+                """{"row":true,"secret":"$CANARY_BODY"}""" to "pipeline.script.invariant_failed",
+                """{"reject":true,"secret":"$CANARY_BODY"}""" to "pipeline.script.rejects_strict",
+            )
+        cases.forEach { (fixture, code) ->
+            val key = "k1038f-${UUID.randomUUID()}"
+            val events = executeStream(pipelineId, """{"parameters":{},"request_body":$fixture}""", key)
+            val executionId = events.first().second["execution_id"].asText()
+            val replay = executeStream(pipelineId, """{"parameters":{},"request_body":$fixture}""", key)
+            val surfaces =
+                mapOf(
+                    "live stream" to events.joinToString { it.second.toString() },
+                    "replayed stream" to replay.joinToString { it.second.toString() },
+                    "stored rows" to storedRows(executionId),
+                    "stored events (json)" to restText("/api/v1/executions/$executionId/events?format=json"),
+                    "execution record" to restText("/api/v1/executions/$executionId"),
+                    "mcp executions_get" to callTool("executions_get", mapOf("id" to executionId)).first.toString(),
+                )
+            withClue("$code ${describe(events)}") { events.lifecycleNames().last() shouldBe "pipeline_failed" }
+            surfaces.forEach { (surface, text) ->
+                withClue("$code on $surface") {
+                    text shouldNotContain CANARY_BODY
+                    text shouldNotContain CANARY_AUTHOR
+                }
+            }
+            // Non-vacuity: the failure itself is on every surface that was scanned.
+            withClue("$code on stored rows") { surfaces.getValue("stored rows") shouldContain code }
+            withClue("$code on the live stream") { surfaces.getValue("live stream") shouldContain code }
+        }
+        lines().shouldBeEmpty()
+    }
+
+    @Test
+    fun `the input body and a transformed value are persisted nowhere but where the access rules already put the context`() {
+        prepare()
+        val countId = countPipeline()
+        val events =
+            executeStream(countId, """{"parameters":{},"request_body":{"note":"$CANARY_BODY","lines":[{"sku":"A"},{"sku":"B"}]}}""")
+        withClue(describe(events)) { events.last().first shouldBe "data_ready" }
+        val executionId = events.first().second["execution_id"].asText()
+        // The raw request body is stored on no surface of a successful run either: not the execution row, not an event.
+        storedRows(executionId) shouldNotContain CANARY_BODY
+        events.joinToString { it.second.toString() } shouldNotContain CANARY_BODY
+    }
+
     // ------------------------------------------------------------ pipelines
 
     private fun linesPipeline(language: String): String {
@@ -345,9 +580,10 @@ class StructuredPublishedInputIntegrationTest {
         return createPipeline("test/body1038_plain", listOf(read), null)
     }
 
-    private fun linesContract() =
+    private fun linesContract(rejects: Boolean = false) =
         mapOf(
             "mode" to "table",
+            "rejects" to rejects,
             "inputs" to mapOf("order" to mapOf("kind" to "body")),
             "output" to
                 mapOf(
@@ -460,6 +696,8 @@ class StructuredPublishedInputIntegrationTest {
         body: String,
         contract: Map<String, Any?>,
         language: String,
+        invariants: List<Map<String, Any?>> = emptyList(),
+        tests: List<Map<String, Any?>>? = null,
     ) {
         synchronized(createdTemplates) { if (!createdTemplates.add(id)) return }
         val emptyCase = mapOf("name" to "empty body", "input" to mapOf("inputs" to mapOf("order" to emptyList<Any>())))
@@ -474,8 +712,8 @@ class StructuredPublishedInputIntegrationTest {
                     "type" to language,
                     "body" to body,
                     "contract" to contract,
-                    "invariants" to emptyList<Any>(),
-                    "tests" to listOf(emptyCase + mapOf("expect" to mapOf("output" to expectEmpty))),
+                    "invariants" to invariants,
+                    "tests" to (tests ?: listOf(emptyCase + mapOf("expect" to mapOf("output" to expectEmpty)))),
                 ),
             )
         withClue("templates_create $id: $payload") { isError shouldBe false }
@@ -635,6 +873,119 @@ class StructuredPublishedInputIntegrationTest {
         return payload to result.path("isError").asBoolean(false)
     }
 
+    /** The fraction a double cannot hold: 30 significant digits. */
+    private fun pricePipeline(): String {
+        createScriptTemplate(PRICE_TEMPLATE, PRICE_JSONATA, priceContract(), JSONATA)
+        val shape =
+            mapOf(
+                "id" to "price",
+                "description" to "Echoes the price as text",
+                "type" to "SCRIPT",
+                "template" to mapOf("id" to PRICE_TEMPLATE, "version" to 1),
+                "inputs" to mapOf("order" to "@request_body"),
+                "output" to mapOf("target" to "caller"),
+                "depends_on" to emptyList<String>(),
+            )
+        return createPipeline("test/body1038_price", listOf(shape), mapOf("required" to true))
+    }
+
+    /** One strict SCRIPT node that fails three ways on demand (engine text, invariant author text, strict reject reason). */
+    private fun failPipeline(): String {
+        createScriptTemplate(
+            FAIL_TEMPLATE,
+            FAIL_JSONATA,
+            linesContract(rejects = true),
+            JSONATA,
+            invariants = listOf(mapOf("name" to "no_rows", "expr" to "\$count(rows) = 0", "message" to "no rows allowed $CANARY_AUTHOR")),
+            tests =
+                listOf(
+                    mapOf(
+                        "name" to "quiet",
+                        "input" to mapOf("inputs" to mapOf("order" to emptyMap<String, Any>())),
+                        "expect" to mapOf("output" to mapOf("rows" to emptyList<Any>(), "rejects" to emptyList<Any>())),
+                    ),
+                ),
+        )
+        val shape =
+            mapOf(
+                "id" to "shape",
+                "description" to "Fails on demand",
+                "type" to "SCRIPT",
+                "template" to mapOf("id" to FAIL_TEMPLATE, "version" to 1),
+                "inputs" to mapOf("order" to "@request_body"),
+                "output" to mapOf("target" to "tempdb", "table" to "lines_in", "rejects" to "lines_rejected"),
+                "strict" to true,
+                "depends_on" to emptyList<String>(),
+            )
+        return createPipeline("test/body1038_fail", listOf(shape), mapOf("required" to true))
+    }
+
+    private fun priceContract() =
+        mapOf(
+            "mode" to "table",
+            "inputs" to mapOf("order" to mapOf("kind" to "body")),
+            "output" to mapOf("kind" to "table", "columns" to listOf(mapOf("name" to "price_text", "type" to "STRING"))),
+        )
+
+    /** A JSON object nested to [depth] containers (the root counts as one). */
+    private fun nested(depth: Int): String = "{\"a\":".repeat(depth - 1) + "{}" + "}".repeat(depth - 1)
+
+    /** One JSON-RPC tools/call with the arguments text exactly as written — a duplicate member stays a duplicate. */
+    private fun rawToolCall(
+        name: String,
+        argumentsJson: String,
+    ): HttpResponse<String> =
+        http.send(
+            HttpRequest
+                .newBuilder(URI.create("http://localhost:$port/mcp"))
+                .header("DP-API-Key", MCP_KEY.plaintext)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        """{"jsonrpc":"2.0","id":${mcpCounter++},"method":"tools/call",""" +
+                            """"params":{"name":"$name","arguments":$argumentsJson}}""",
+                    ),
+                ).build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+
+    private fun restText(path: String): String =
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .get(path)
+            .then()
+            .statusCode(200)
+            .extract()
+            .body()
+            .asString()
+
+    /** Every stored row a run leaves — the execution record and its events — as text, whole rows, not chosen columns. */
+    private fun storedRows(executionId: String): String =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT to_jsonb(e)::text FROM pipeline_executions e WHERE execution_id = ?::uuid " +
+                        "UNION ALL SELECT to_jsonb(v)::text FROM execution_events v WHERE execution_id = ?::uuid",
+                ).use { statement ->
+                    statement.setString(1, executionId)
+                    statement.setString(2, executionId)
+                    statement.executeQuery().use { rs ->
+                        generateSequence {
+                            if (rs.next()) {
+                                rs.getString(
+                                    1,
+                                )
+                            } else {
+                                null
+                            }
+                        }.toList().also { it.isNotEmpty() shouldBe true }.joinToString("\n")
+                    }
+                }
+        }
+
     // ------------------------------------------------------------ reads (a connection of this test's own)
 
     private data class Line(
@@ -717,6 +1068,25 @@ class StructuredPublishedInputIntegrationTest {
             """{"order_no":"O-1","lines":[{"sku":"A-1","qty":2},{"sku":"B-2","qty":1,"ext_id":"$EXACT_ID"}],"meta":{"channel":"web"}}"""
         private const val HETEROGENEOUS =
             """[{"sku":"C-3","qty":4},{"comment":"no sku","tags":["x"]},{"sku":"D-4","qty":5,"ext_id":"$EXACT_ID","extra":{"k":null}}]"""
+
+        private const val DEFAULT_BODY_DEPTH = 32
+        private const val LONG_FRACTION = "0.123456789012345678901234567890"
+        private const val CANARY_BODY = "CANARY-body-7f3a91"
+        private const val CANARY_AUTHOR = "CANARY-author-52c0de"
+        private const val PRICE_TEMPLATE = "test/body1038_price.jsonata"
+        private const val FAIL_TEMPLATE = "test/body1038_fail.jsonata"
+
+        private const val PRICE_JSONATA =
+            """${'$'}exists(inputs.order.price) ? [{"price_text": ${'$'}string(inputs.order.price)}] : []"""
+
+        /** Engine text (an error quoting a body value), a row the invariant refuses, or a reject the strict node refuses. */
+        private const val FAIL_JSONATA =
+            """
+            (${'$'}o := inputs.order;
+             ${'$'}exists(${'$'}o.boom) ? ${'$'}error("engine says " & ${'$'}o.secret) :
+             {"rows": ${'$'}exists(${'$'}o.row) ? [{"sku": "A", "qty": 1, "ext_id": null, "ext_number": null}] : [],
+              "rejects": ${'$'}exists(${'$'}o.reject) ? [{"row": {"sku": "A", "qty": 1, "ext_id": null, "ext_number": null}, "reason": "rejected " & ${'$'}o.secret}] : []})
+            """
 
         private const val INSERT_TEMPLATE = "test/body1038_insert_line.sql"
         private const val COUNT_TEMPLATE = "test/body1038_count.jsonata"

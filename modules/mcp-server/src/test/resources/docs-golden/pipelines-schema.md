@@ -59,8 +59,11 @@ and turns it into rows; the body never enters `parameters`, a `:name` bind or a 
 caller sends it as `request_body` beside `parameters` (on `pipelines_execute` too); `parameters`
 may not name a body reader's `context_key`. Malformed JSON, a duplicate member, a scalar root
 or a body the pipeline does not accept is refused before any node runs
-(`pipeline.execution.request_body_invalid`). Send an exact id or a long fraction as a string.
-See `pipeline-contract` §3.4.
+(`pipeline.execution.request_body_invalid`); `pipelines_execute` refuses a repeated member too and
+keeps every number exact, like framework execute. A test or evaluation fixture for a body input
+obeys the same depth and size budget as a real body. A failed run that read a body reports its code
+and node only — never a value from the body, a transformer's message or a rejection reason. Send an
+identifier that JavaScript must not round as a string. See `pipeline-contract` §3.4.
 
 **Timeouts** — a pipeline may declare `settings.query_timeout_seconds` (the default SQL
 statement timeout for every DQL/DML/DDL node that sets none of its own), and any DQL/DML/DDL

@@ -286,7 +286,19 @@ delivers, unchanged, to the SCRIPT transformers that bind it (#1038; published-m
   number tokens bounded to 1000 digits — and capped by `datapipelines.endpoints.body-max-bytes`
   (default 1 MiB, counted on the received bytes or, for a fixture, on its canonical encoding) and
   `datapipelines.endpoints.body-max-depth` (default 32, the root container counting 1). The
-  transformer's own byte cap for a value input also applies.
+  transformer's own byte cap for a value input also applies. An **authored fixture** — a template
+  test case, a release/test run, `POST /api/v1/templates/evaluate` and `templates_evaluate` — obeys
+  the same two numbers, depth first and then bytes, refused as `pipeline.script.input_contract_violation`
+  with the bounded reason word (`too_deep`, `too_many_bytes`) and no value, so a fixture the editor
+  accepts is a body the live surfaces accept. Legacy table and value fixtures and map-only object
+  outputs are unchanged.
+- **Diagnostics.** An execution that carries a body — and every child pipeline it runs — discloses a
+  failure as its code and node metadata only (`node`, `phase`, `rule`, `reason`, counts, `sql_state`,
+  `vendor_code`): no engine or driver text, no transformer author text (invariant message, strict
+  rejection reasons), no SQL and no exception chain, on the `node_failed` and `pipeline_failed`
+  events, the live and replayed stream, the stored `error_json`, `node_stats_json` and events, and
+  the logs; a script `console` line keeps its level and loses its text. Private capture for
+  support is #1043's, not this default. The Context snapshot keeps its existing access rules.
 - **Surfaces.** Framework execute (`POST /api/v1/pipelines/{id}/execute`, REST API §6.1) and
   `pipelines_execute` take the body as a separate `request_body` fixture beside `parameters`. The
   raw body is never stored in `parameters_json`, never logged and never echoed in an error; where
@@ -2149,6 +2161,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.108 | 1038 r2 (#1038) | **§3.4 (additive):** an authored body fixture (template test case, release/test run, evaluate) obeys the shared depth and byte budget; an execution that carries a body — and its children — discloses a failure as code and node metadata only (bounded diagnostics); the MCP `request_body` refuses a repeated member and keeps exact numbers. |
 | 2026-11-20 | v1.107 | 1035 (#1035) | **Commit outcomes.** §4.4: a DML caller result is held until the commit settles. §8.1/§8.2/§8.5/§9.1: `data_ready`, result URLs, child results and zero-caller stats appear only after the root's confirmed commit; a child's record stays `RUNNING` (pending) and takes the root's final status. §12.4: no new validation (runtime facts). §13.3: `local_write_commit_failed` now ends the run `OUTCOME_UNKNOWN`; `local_write_refused` gains the reason `commit_evidence_unavailable`; `instance_lost` is recorded only when no commit was attempted. No new code, no field change. |
 | 2026-11-20 | v1.106 | 1034 (#1034) | **DML operation results.** A DML node declares `operation` (`insert`/`update`/`delete`), an insert its `key` and `input`, and every DML node an `output` (`tempdb`, `caller` or the new DML-only target `discard`) — §4.4, §4.6, §4.7, §8.2, §9.2. An insert returns each input row plus its logical `id`; update/delete return one `affected_rows` row. §12.4 gains `dml_output_required`, `dml_operation_required`, `dml_operation_invalid`, `dml_key_invalid`, `dml_input_invalid` and `dml_field_forbidden`; `dml_has_output` (frozen name) now refuses a `datasource` target; `output_target_invalid` admits `discard` on DML only. §13.4 gains `pipeline.node.dml_key_correlation_failed`, `dml_affected_rows_mismatch` and `dml_insert_unqualified` (500, the `pipeline.node.` family default) and `standalone_execution_refused` the `staged_input` reason. Run admission re-applies the DML shape rules and the insert qualification to the pinned root and every reachable pinned child, so an operation-less DML node saved earlier, or an unqualified insert anywhere in the family, is refused before any business write (owner waiver; the refusal names the child). Landed with the constants (§12 code count 85 → 91, §13 row count 525 → 528). Additive per §15.2 except the waived operation-less DML. |
 | 2026-11-18 | v1.105 | 1033 (#1033) | **§13.3 gains two rows**: `pipeline.execution.local_write_refused` (400 — the write-set plan's refusal of a run whose durable writes cannot share one local transaction; deterministic and author-side, so 400 against the family's 500 default) and `pipeline.execution.local_write_commit_failed` (502 — the root's settle of the family's shared local write transaction was refused after the last node succeeded), landed in the SAME commit as their `PipelineErrorCodes.Execution` constants, the `ApiErrorCatalog` rows and the §4.1 meter row in observability.md (§13 row count 520 → 522). Additive per §15.2. |

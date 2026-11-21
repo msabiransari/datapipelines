@@ -47,4 +47,38 @@ class StructuredBodyTest {
     fun `a null member differs from a missing member`() {
         body("""{"a":null}""").sameRequestBodyAs(body("{}")) shouldBe false
     }
+
+    private fun nested(depth: Int): Map<String, Any?> {
+        var value: Map<String, Any?> = emptyMap()
+        repeat(depth - 1) { value = mapOf("a" to value) }
+        return value
+    }
+
+    @Test
+    fun `a value tree meets the budget exactly at the depth cap and is refused one past it`() {
+        val limits = StructuredBodyLimits(maxDepth = 3)
+        limits.refusalOf(nested(3)) shouldBe null
+        limits.refusalOf(nested(4)) shouldBe StructuredBodyRefusalReason.TOO_DEEP
+        limits.refusalOf(listOf(nested(2))) shouldBe null
+        limits.refusalOf(listOf(nested(3))) shouldBe StructuredBodyRefusalReason.TOO_DEEP
+    }
+
+    @Test
+    fun `a value tree meets the byte cap exactly and is refused one byte past it`() {
+        val tree = mapOf("k" to "é")
+        val bytes =
+            StructuredBody
+                .ObjectRoot(tree)
+                .canonical()!!
+                .toByteArray()
+                .size
+                .toLong()
+        StructuredBodyLimits(maxBytes = bytes).refusalOf(tree) shouldBe null
+        StructuredBodyLimits(maxBytes = bytes - 1).refusalOf(tree) shouldBe StructuredBodyRefusalReason.TOO_MANY_BYTES
+    }
+
+    @Test
+    fun `a hand-built tree far past the cap is refused without overflowing the stack`() {
+        StructuredBodyLimits().refusalOf(nested(50_000)) shouldBe StructuredBodyRefusalReason.TOO_DEEP
+    }
 }

@@ -754,6 +754,11 @@ Every refusal is `400 pipeline.execution.request_body_invalid` with a `details.r
 (`required`, `not_accepted`, `override_refused` with `details.keys`) — and never a value or a member name.
 Every refusal is decided before any node runs, so nothing is written.
 
+A run that carries a `request_body` (and every child pipeline it starts) reports a failure as its code and node
+metadata only — on the `node_failed`/`pipeline_failed` events, the live and replayed stream, the stored execution
+record and `GET /api/v1/executions/{id}/events` — never a value from the body, an engine or driver message, a
+transformer's rejection reason or invariant text ([pipeline-contract §3.4](pipeline-contract.md#34-structured-request-body)).
+
 ### 6.2 Why SSE, not WebSocket
 
 - SSE is unidirectional server → client, which is exactly what we need (the client sends one request, the server streams progress).
@@ -3175,6 +3180,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v2.130 | 1038 r2 (#1038) | **§6.1.4 (additive):** a failure of a run that carries a `request_body` (and of its children) is reported as code and node metadata only on every event, stream, replay and stored-error surface. |
 | 2026-11-21 | v2.129 | 1038 (#1038) | **§6.1 / §6.1.4 (additive):** the execute body takes an optional `request_body` — one JSON object or array of objects for a pipeline that declares `request_body` (pipeline-contract §3.4), decoded by the shared bounded decoder, part of the idempotency fingerprint, never stored in parameters; refusals `400 pipeline.execution.request_body_invalid` with `details.reason`. **§19.2 / §19.3 / §19.6:** a `GET` pin of a body-requiring pipeline is `409 endpoint.request_body_incompatible`; the mutation-route body rules (400 `endpoint.request.body_invalid` entries, 413 `endpoint.request.too_large`, 415 `endpoint.request.unsupported_media_type`) are stated for the codec #1039's serve path applies. |
 | 2026-11-21 | v2.128 | 1035 r3 (#1035) | **§6.4.5:** `pipeline_completed` carries `result_unavailable: true` (absent otherwise) when the confirmed commit's caller result cannot be delivered. **§6.4.7:** that decision reads the stored result back after the confirmation; a lost result is never announced or served as an empty success. **§10.2:** `result_row_count` is written with the terminal status and kept on an unavailable result. No new code, route or permission. |
 | 2026-11-21 | v2.127 | 1035 r2 (#1035) | **§10.3 / §10.2 family settlement:** a held child's event history (durable record, replay and MCP) carries no terminal event until its root settles, then one terminal event with the root's outcome and the next `event_id`; no route or field changes. |

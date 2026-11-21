@@ -42,7 +42,7 @@ private const val PARAMETERS_DESC =
 private const val REQUEST_BODY_DESC =
     "The pipeline's structured request body (pipeline-contract §3.4): one JSON object or array of objects, delivered " +
         "unchanged to the SCRIPT transformer that binds @request_body. Only for a pipeline that declares request_body; " +
-        "never part of parameters. Send a fraction needing more than double precision as a string."
+        "never part of parameters. A member repeated anywhere inside it is refused, and every number keeps its exact value."
 
 /**
  * `pipelines_execute` (mcp-server.md §6.2.3). Permission: `pipeline.execute`.
@@ -371,15 +371,18 @@ class PipelineExecuteTool(
     /**
      * The optional `request_body` argument (#1038), re-serialized and decoded by [bodyDecoder]. A
      * member that is present is decoded even when it is JSON `null` — `null` is an invalid root,
-     * never absence, exactly as on framework execute. The JSON-RPC transport has already parsed
-     * the arguments, so a member repeated inside the value reached this tool collapsed and a
-     * fractional number beyond double precision rounded: the published codec and framework
-     * execute, which read the raw text, refuse or keep those (mcp-server §6.2.3).
+     * never absence, exactly as on framework execute.
+     *
+     * The JSON-RPC transport has already parsed the arguments, but [ExactRequestBodyJsonMapper]
+     * refused a repeated member and rebuilt the value with exact fractions first, so what arrives
+     * here is the client's value. It is written back with a mapper that keeps a `BigDecimal` in
+     * its short form: [ExecutorJson]'s plain form would expand `1e999999999` into a gigabyte string
+     * before the decoder could refuse it as out of range.
      */
     private fun requestBody(args: McpArguments): StructuredBody {
         val raw = args.rawMap()
         if (!raw.containsKey(REQUEST_BODY_ARG)) return StructuredBody.Absent
-        return when (val decoded = bodyDecoder.decode(ExecutorJson.mapper.writeValueAsBytes(raw[REQUEST_BODY_ARG]))) {
+        return when (val decoded = bodyDecoder.decode(bodyWriter.writeValueAsBytes(raw[REQUEST_BODY_ARG]))) {
             is StructuredBodyDecoding.Decoded -> decoded.body
             is StructuredBodyDecoding.Refused -> throw RequestBodyAdmission.decodeRefused(decoded.refusal)
         }
@@ -442,5 +445,10 @@ class PipelineExecuteTool(
 
         /** The structured request-body argument (#1038). */
         const val REQUEST_BODY_ARG = "request_body"
+
+        /** Writes the argument back as JSON text: `BigDecimal` in its short form, never the plain expansion. */
+        val bodyWriter: com.fasterxml.jackson.databind.ObjectMapper =
+            com.fasterxml.jackson.databind
+                .ObjectMapper()
     }
 }

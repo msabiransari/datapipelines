@@ -298,6 +298,8 @@ class SubPipelineExecutionRunner(
         // its invoker runs, so its datasource resolution scopes identically (025 A5).
         workspaceId = ctx.workspaceId,
         parameters = resolveParameters(node, child, ctx),
+        // #1038: a child of a body execution keeps the parent's bounded diagnostics.
+        inheritedBoundedDiagnostics = ctx.boundedDiagnostics,
         triggeredVia = ExecutionTrigger.PIPELINE,
         executionId = childExecutionId,
         directSink = sinkFor(node, ctx, outcome),

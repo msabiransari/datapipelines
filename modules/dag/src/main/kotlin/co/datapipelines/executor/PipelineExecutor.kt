@@ -589,7 +589,7 @@ class PipelineExecutor(
         cancellation: CancellationException,
     ) {
         val original = cancellation.suppressed.firstOrNull() ?: return
-        val mapped = (original as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(original, NodePhase.EXECUTE, node.id)
+        val mapped = disclosed(run, (original as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(original, NodePhase.EXECUTE, node.id))
         run.stats.abortedWithCause(node.id, mapped)
     }
 
@@ -624,7 +624,8 @@ class PipelineExecutor(
         run: ExecutionRun,
         cause: Exception,
     ): Exception {
-        val mapped = (cause as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(cause, NodePhase.EXECUTE, node.id)
+        val mapped = disclosed(run, (cause as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(cause, NodePhase.EXECUTE, node.id))
+        val bounded = run.request.boundedDiagnostics
 
         // F8: the reason is recorded on EVERY path, including the two suppressed ones — only the
         // *event* is suppressed. On those two the node is `ABORTED`-with-cause rather than `FAILED`:
@@ -650,23 +651,36 @@ class PipelineExecutor(
         // terminal `pipeline_failed` and `error_json`. The node runner attached the node
         // context and rendered SQL at the failure site; the recorder fills anything still
         // missing and adds the exception detail under `error-detail=full`.
-        val failure = completeRecord(mapped, node, ctx, cause)
+        val failure = completeRecord(mapped, node, ctx, cause, bounded)
         // The log half of the page↔log pair: one ERROR line whose correlation id is the
         // join key the screen now shows, and whose throwable prints the SAME chain the
         // record transports. A streamed failure previously logged nothing at all — the
         // record was in the event and error_json only, so grepping the log by the
         // correlation id the UI displayed found silence (found on the 057 gate stack).
-        LOG.error(
-            "node {} failed ({}) execution_id={} correlation_id={}",
-            node.id,
-            failure.code,
-            run.executionId,
-            run.request.correlationId,
-            cause.cause ?: cause,
-        )
+        // #1038: a body execution's line carries the code and no throwable — its message and
+        // chain can quote the body, an extracted value or author text (BoundedFailure).
+        if (bounded) {
+            LOG.error(
+                "node {} failed ({}) execution_id={} correlation_id={}",
+                node.id,
+                failure.code,
+                run.executionId,
+                run.request.correlationId,
+            )
+        } else {
+            LOG.error(
+                "node {} failed ({}) execution_id={} correlation_id={}",
+                node.id,
+                failure.code,
+                run.executionId,
+                run.request.correlationId,
+                cause.cause ?: cause,
+            )
+        }
         flushOperation(node, ctx, run, OperationOutcome.FAILED)
         emit(NodeFailed(run.executionId, node.id, failure, run.stats.snapshot(listOf(node.id)).first()))
-        return NodeExecutionException(node.id, mapped.code, mapped.details, cause.cause ?: cause, failure)
+        val thrownCause = if (bounded) BoundedFailure.Cause(mapped.code) else cause.cause ?: cause
+        return NodeExecutionException(node.id, mapped.code, mapped.details, thrownCause, failure)
     }
 
     /**
@@ -680,10 +694,12 @@ class PipelineExecutor(
         node: ExecutableNode,
         ctx: NodeExecutionContext,
         cause: Exception,
+        bounded: Boolean,
     ): MappedError {
         val original = cause.cause ?: cause
         val base = mapped.copy(node = mapped.node ?: NodeErrorContext.of(node, dialectOf(node, ctx)))
-        return if (config.errorDetail == ErrorDetail.FULL) {
+        // A bounded record never carries the exception chain, whatever `error-detail` says (#1038).
+        return if (config.errorDetail == ErrorDetail.FULL && !bounded) {
             base.copy(exception = ExceptionDetail.of(original))
         } else {
             base
@@ -928,13 +944,16 @@ class PipelineExecutor(
         cause: Throwable,
     ): DatapipelinesException {
         val failedAt = Instant.now()
+        // #1038: a body execution's failure keeps no driver text or cause chain (BoundedFailure).
+        val bounded = run.request.boundedDiagnostics
         val failure =
-            (cause as? DatapipelinesException)?.takeIf { it.code == PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED }
+            (cause as? DatapipelinesException)
+                ?.takeIf { it.code == PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED && !bounded }
                 ?: DatapipelinesException(
                     code = PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED,
                     message = "The pipeline's local write transaction could not be committed; its outcome is unknown",
                     details = mapOf("execution_id" to run.executionId.toString()),
-                    cause = cause,
+                    cause = cause.takeUnless { bounded },
                 )
         val record =
             MappedError(failure.code, failure.message.orEmpty(), failure.details)
@@ -1152,6 +1171,15 @@ class PipelineExecutor(
             .firstOrNull()
             ?.reason
 
+    /**
+     * [error] as the execution may disclose it: unchanged, or — for an execution that carries a
+     * structured request body or is a child of one — the bounded form ([BoundedFailure]).
+     */
+    private fun disclosed(
+        run: ExecutionRun,
+        error: MappedError,
+    ): MappedError = if (run.request.boundedDiagnostics) BoundedFailure.of(error) else error
+
     private fun pipelineFailed(
         run: ExecutionRun,
         failedAt: Instant,
@@ -1165,7 +1193,7 @@ class PipelineExecutor(
         failedAt = failedAt,
         durationMs = run.elapsedMsAt(failedAt),
         failedNodeId = failedNodeId,
-        error = error,
+        error = disclosed(run, error),
         nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
         contextSnapshot = run.context.snapshot(),
         settlesFamily = run.localWriteTransaction != null,
@@ -1389,6 +1417,7 @@ class PipelineExecutor(
             readOnly = request.readOnly,
             pipelineAdmission = request.pipelineAdmission,
             requestBody = request.requestBody,
+            boundedDiagnostics = request.boundedDiagnostics,
             // §3.3: the family's transaction — a child inherits the root's through its request;
             // a root uses the one its planning gate enrolled. Null on ordinary runs.
             localWriteTransaction = request.localWriteTransaction ?: run.localWriteTransaction,

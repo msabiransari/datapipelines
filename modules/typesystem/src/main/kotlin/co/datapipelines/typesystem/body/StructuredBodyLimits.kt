@@ -18,6 +18,46 @@ data class StructuredBodyLimits(
         require(maxDepth in MIN_DEPTH..MAX_DEPTH) { "body-max-depth must be in $MIN_DEPTH..$MAX_DEPTH, was $maxDepth" }
     }
 
+    /**
+     * The budget verdict on a body that is already a value tree — the form an authored fixture
+     * (a template test case, `templates_evaluate`, a release re-run) arrives in after its own
+     * request was parsed. Applies the same two numbers the decoder applies to a raw entity: the
+     * nesting cap first (the root container counts 1), then the byte cap over the tree's
+     * [StructuredBody.canonical] UTF-8 form. Returns the bounded reason, or null within budget.
+     * It judges the budget only; the root rule stays with the caller's own gate.
+     */
+    fun refusalOf(value: Any?): StructuredBodyRefusalReason? {
+        if (depthOf(value) > maxDepth) return StructuredBodyRefusalReason.TOO_DEEP
+        val bytes =
+            StructuredBodyCanonical
+                .write(value)
+                .toByteArray(Charsets.UTF_8)
+                .size
+                .toLong()
+        return if (bytes > maxBytes) StructuredBodyRefusalReason.TOO_MANY_BYTES else null
+    }
+
+    /** Container nesting of [root] by an explicit stack, so a hand-built deep tree cannot overflow. */
+    private fun depthOf(root: Any?): Int {
+        var deepest = 0
+        val pending = ArrayDeque<Pair<Any?, Int>>()
+        pending.addLast(root to 0)
+        while (pending.isNotEmpty()) {
+            val (node, depth) = pending.removeLast()
+            val children =
+                when (node) {
+                    is Map<*, *> -> node.values
+                    is List<*> -> node
+                    else -> continue
+                }
+            deepest = maxOf(deepest, depth + 1)
+            // Past the cap nothing deeper changes the verdict: stop descending.
+            if (deepest > maxDepth) return deepest
+            children.forEach { pending.addLast(it to depth + 1) }
+        }
+        return deepest
+    }
+
     companion object {
         /** `datapipelines.endpoints.body-max-bytes`'s default: 1 MiB. */
         const val DEFAULT_MAX_BYTES: Long = 1_048_576L

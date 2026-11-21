@@ -9,6 +9,7 @@ import co.datapipelines.scripting.ScriptLanguage
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import co.datapipelines.typesystem.body.StructuredBodyDecoding
+import co.datapipelines.typesystem.body.StructuredBodyLimits
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -242,5 +243,67 @@ class ScriptBodyInputTest {
                 ).output shouldBe "present"
             }
         }
+    }
+
+    /** An object nested [depth] containers deep (the root counts 1), with one string leaf at the bottom. */
+    private fun nested(depth: Int): Any? {
+        var value: Any? = mapOf("leaf" to "x")
+        repeat(depth - 1) { value = mapOf("a" to value) }
+        return value
+    }
+
+    private fun runWith(
+        limits: StructuredBodyLimits,
+        body: Any?,
+    ): ScriptTestRunner.RunOutcome {
+        val engine = engines.getValue(ScriptLanguage.JSONATA)
+        return ScriptTestRunner(engines, pool, Duration.ofSeconds(10), Duration.ofSeconds(30), bodyLimits = limits)
+            .runCase(
+                "budget",
+                engine,
+                engine.compile(programs.getValue(ScriptLanguage.JSONATA)),
+                contract,
+                emptyList(),
+                ScriptTestInput(inputs = mapOf("order" to body, "channel" to "web")),
+            )
+    }
+
+    @Test
+    fun `an authored body fixture meets the shared depth cap exactly at 32 and refuses at 33`() {
+        runWith(StructuredBodyLimits(), nested(StructuredBodyLimits.DEFAULT_MAX_DEPTH))
+            .shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Evaluated>()
+        val refused =
+            runWith(StructuredBodyLimits(), nested(StructuredBodyLimits.DEFAULT_MAX_DEPTH + 1))
+                .shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Refused>()
+        refused.code shouldBe PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION
+        refused.message shouldContain "too_deep"
+        refused.message shouldNotContain "leaf"
+    }
+
+    @Test
+    fun `an operator-adjusted depth and byte budget moves the authored fixture boundary with it`() {
+        val shallow = StructuredBodyLimits(maxDepth = 2)
+        runWith(shallow, nested(2)).shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Evaluated>()
+        runWith(shallow, nested(3)).shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Refused>().message shouldContain "too_deep"
+
+        val deep = StructuredBodyLimits(maxDepth = StructuredBodyLimits.MAX_DEPTH)
+        runWith(deep, nested(StructuredBodyLimits.DEFAULT_MAX_DEPTH + 1))
+            .shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Evaluated>()
+
+        val body = mapOf("lines" to listOf(mapOf("sku" to "A".repeat(200), "qty" to 1)))
+        val canonicalBytes =
+            co.datapipelines.typesystem.body.StructuredBody
+                .ObjectRoot(body)
+                .canonical()!!
+                .toByteArray()
+                .size
+                .toLong()
+        runWith(StructuredBodyLimits(maxBytes = canonicalBytes), body).shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Evaluated>()
+        val over =
+            runWith(StructuredBodyLimits(maxBytes = canonicalBytes - 1), body)
+                .shouldBeInstanceOf<ScriptTestRunner.RunOutcome.Refused>()
+        over.code shouldBe PipelineErrorCodes.Script.INPUT_CONTRACT_VIOLATION
+        over.message shouldContain "too_many_bytes"
+        over.message shouldNotContain "AAAA"
     }
 }

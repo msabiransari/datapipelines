@@ -279,6 +279,9 @@ internal object ScriptNodeRuns {
             console =
                 ConsoleSink { line ->
                     val event = org.slf4j.LoggerFactory.getLogger("script.js.console")
+                    // #1038: author text can quote the body or a value taken from it; a body
+                    // execution logs the level and the position, never the text (BoundedFailure).
+                    val text = if (ctx.boundedDiagnostics) WITHHELD_CONSOLE_TEXT else line.text
                     val builder =
                         when (line.level) {
                             ConsoleLevel.WARN, ConsoleLevel.ERROR -> event.atWarn()
@@ -290,7 +293,7 @@ internal object ScriptNodeRuns {
                         .addKeyValue("node", node.id)
                         .addKeyValue("execution", ctx.executionId)
                         .addKeyValue("level", line.level.name.lowercase())
-                        .addKeyValue("text", line.text)
+                        .addKeyValue("text", text)
                         .log(
                             "script.js.console template={} version={} node={} execution={} level={} text={}",
                             node.template.id,
@@ -298,7 +301,7 @@ internal object ScriptNodeRuns {
                             node.id,
                             ctx.executionId,
                             line.level.name.lowercase(),
-                            line.text,
+                            text,
                         )
                 },
         )
@@ -1169,6 +1172,9 @@ internal fun List<ContractColumn>.toColumnSchemas(): List<ColumnSchema> =
 
 /** The read batch's initial capacity hint — the batch grows to the configured batch size, never past it. */
 private const val WIRE_BATCH_CAPACITY = 1_024
+
+/** What a body execution logs in place of a script console line (#1038). */
+private const val WITHHELD_CONSOLE_TEXT = "withheld"
 
 /**
  * One batch of a cursor, decoded and converted to the wire forms the engine sees (§6) —

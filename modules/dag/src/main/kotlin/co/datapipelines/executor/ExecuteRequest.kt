@@ -166,7 +166,22 @@ data class ExecuteRequest(
      * node's child request does NOT inherit it: a child receives no body.
      */
     val requestBody: StructuredBody = StructuredBody.Absent,
-)
+    /**
+     * #1038 (published-mutation requirement §4, §6): true on a child request whose parent is a body
+     * execution, so the whole family reports failures in the bounded form. Set only by a PIPELINE
+     * node's child request, from [NodeExecutionContext.boundedDiagnostics]; a root request leaves it
+     * false and [boundedDiagnostics] derives the policy from its body.
+     */
+    val inheritedBoundedDiagnostics: Boolean = false,
+) {
+    /**
+     * #1038: whether this execution reports a failure as a bounded code and metadata only ([BoundedFailure]):
+     * every execution that carries a structured request body, and every child of one. Engine
+     * messages, driver text, author free text and rendered SQL then reach no event, stored error,
+     * stats row, replay or log; the legacy form is unchanged for every other execution.
+     */
+    val boundedDiagnostics: Boolean get() = requestBody.present || inheritedBoundedDiagnostics
+}
 
 /**
  * What one execution produced (§5.2).
