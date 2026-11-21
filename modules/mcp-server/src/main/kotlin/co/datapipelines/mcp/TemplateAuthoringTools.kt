@@ -504,7 +504,7 @@ class TemplatesUpdateTool(
         stored: Template,
         written: TemplateVersionDetail,
     ): ObjectNode {
-        val node = TemplateJson.objectMapper().valueToTree<ObjectNode>(stored)
+        val node = TemplateJson.toTree(stored)
         if (written.status == PipelineVersionStatus.DRAFT) {
             node.putObject("draft").apply {
                 put("version", written.version)

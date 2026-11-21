@@ -796,7 +796,7 @@ class TemplatesController(
         template: Template,
         draft: co.datapipelines.templates.TemplateVersionDetail?,
     ): JsonNode {
-        val node = MAPPER.valueToTree<JsonNode>(template) as ObjectNode
+        val node = TemplateJson.toTree(template)
         if (draft != null) {
             val pointer = node.putObject("draft")
             pointer.put("version", draft.version)

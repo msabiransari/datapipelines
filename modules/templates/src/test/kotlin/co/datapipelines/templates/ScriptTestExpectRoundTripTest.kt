@@ -42,7 +42,7 @@ class ScriptTestExpectRoundTripTest {
 
     @Test
     fun `a stored refusal case reads back as refusal-only - the writer's output null is absent on read`() {
-        val stored = requireNotNull(ScriptBlocks.writeTests(listOf(refusalCase)))
+        val stored = requireNotNull(ScriptBlocks.writeTests(listOf(refusalCase), null))
         // The storage text is what it always was — the hash is computed over it.
         stored shouldContain "\"output\":null"
 
@@ -55,7 +55,7 @@ class ScriptTestExpectRoundTripTest {
 
     @Test
     fun `the stored blocks re-validate - no expect_shape on release's re-validation`() {
-        val stored = requireNotNull(ScriptBlocks.readTests(ScriptBlocks.writeTests(listOf(emptyCase, refusalCase))))
+        val stored = requireNotNull(ScriptBlocks.readTests(ScriptBlocks.writeTests(listOf(emptyCase, refusalCase), null)))
         val draft =
             TemplateFixtures.draft(
                 id = "test/xform.jsonata",

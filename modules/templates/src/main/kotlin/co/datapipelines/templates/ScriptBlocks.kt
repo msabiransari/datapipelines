@@ -313,8 +313,26 @@ object ScriptBlocks {
     /** Serializes the invariants block; an empty list serializes as `[]` (never null). */
     fun writeInvariants(invariants: List<ScriptInvariant>?): String? = invariants?.let { mapper.writeValueAsString(it) }
 
-    /** Serializes the tests block. */
-    fun writeTests(tests: List<ScriptTestCase>?): String? = tests?.let { mapper.writeValueAsString(it) }
+    /**
+     * Serializes the tests block to its stored form (#1038, review C2). [contract] names the body inputs
+     * whose exact fixture text the stored `jsonb` could not keep (member order, a repeated member at any
+     * depth, a repeated input name): each is stored with its occurrences' exact text beside the ordinary
+     * value ([FixtureInputs]). A contract with no body input stores what it always did. [contract] has no
+     * default, so a caller cannot forget it.
+     */
+    fun writeTests(
+        tests: List<ScriptTestCase>?,
+        contract: ScriptContract?,
+    ): String? {
+        if (tests == null) return null
+        val bodyInputs =
+            contract
+                ?.inputs
+                ?.filterValues { it is ScriptInput.Body }
+                ?.keys
+                .orEmpty()
+        return mapper.writer().withAttribute(FixtureInputs.STORAGE_BODY_INPUTS, bodyInputs).writeValueAsString(tests)
+    }
 
     /** Reads one stored `contract_json` back. */
     fun readContract(json: String?): ScriptContract? = json?.let { mapper.readValue(it, ScriptContract::class.java) }
@@ -325,6 +343,13 @@ object ScriptBlocks {
             mapper.readValue(it, Array<ScriptInvariant>::class.java).toList()
         }
 
-    /** Reads one stored `tests_json` back. */
-    fun readTests(json: String?): List<ScriptTestCase>? = json?.let { mapper.readValue(it, Array<ScriptTestCase>::class.java).toList() }
+    /** Reads one stored `tests_json` back, restoring the exact body fixtures [writeTests] stored beside the ordinary values. */
+    fun readTests(json: String?): List<ScriptTestCase>? =
+        json?.let {
+            mapper
+                .readerFor(Array<ScriptTestCase>::class.java)
+                .withAttribute(FixtureInputs.STORAGE_READ, true)
+                .readValue<Array<ScriptTestCase>>(it)
+                .toList()
+        }
 }

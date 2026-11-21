@@ -49,7 +49,7 @@ class TemplateExactTestsBindingTest {
     @Test
     fun `the stored tests round trip keeps the exact text`() {
         val draft = TemplateDeserializer().read(payload).shouldBeInstanceOf<TemplateDeserializationOutcome.Parsed>().draft
-        val stored = ScriptBlocks.writeTests(draft.tests)!!
+        val stored = ScriptBlocks.writeTests(draft.tests, draft.contract)!!
         stored shouldContain """{"price":$LONG_FRACTION}"""
         stored shouldContain """{"a":1,"a":2}"""
         val reread = ScriptBlocks.readTests(stored)

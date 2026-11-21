@@ -762,7 +762,10 @@ transformer's rejection reason or invariant text ([pipeline-contract §3.4](pipe
 The byte budget counts the fixture's canonical encoding, so the same body costs the same bytes here and on
 `pipelines_execute` however it is spelled. An authored body fixture (`POST /api/v1/templates/evaluate`, a template
 create or update) is read from the request's own text in the same way: a repeated member is refused and fractions
-stay exact. An authored body case reports its evaluation and suite verdict with the same bounded diagnostics: code,
+stay exact. A saved fixture keeps its member order, every repeated member and its exact numbers through the stored
+tests, `GET` read-back (the `tests` of a template read repeat a member as the author wrote it), re-save, export and
+release, so a case that expects a duplicate's refusal, or an order-dependent result, judges the same at release as
+at save (#1080). An authored body case reports its evaluation and suite verdict with the same bounded diagnostics: code,
 safe details, the case's rule word and `reason`, with console and invariant text withheld
 ([pipeline-contract §3.4](pipeline-contract.md#34-structured-request-body)).
 
@@ -3187,6 +3190,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v2.132 | 1038 r4 (#1038) | **§6.1.4 (additive):** a saved body fixture keeps member order, repeated members and exact numbers through stored tests, template read-back, re-save, export and release (#1080). |
 | 2026-11-21 | v2.131 | 1038 r3 (#1038) | **§6.1.4 (additive):** the fixture budget counts canonical bytes on both full-run surfaces; an authored body fixture on evaluate and template save is read from the request's own text (a repeated member refused, exact fractions); an authored body case's evaluation and suite verdict use the bounded diagnostics. |
 | 2026-11-21 | v2.130 | 1038 r2 (#1038) | **§6.1.4 (additive):** a failure of a run that carries a `request_body` (and of its children) is reported as code and node metadata only on every event, stream, replay and stored-error surface. |
 | 2026-11-21 | v2.129 | 1038 (#1038) | **§6.1 / §6.1.4 (additive):** the execute body takes an optional `request_body` — one JSON object or array of objects for a pipeline that declares `request_body` (pipeline-contract §3.4), decoded by the shared bounded decoder, part of the idempotency fingerprint, never stored in parameters; refusals `400 pipeline.execution.request_body_invalid` with `details.reason`. **§19.2 / §19.3 / §19.6:** a `GET` pin of a body-requiring pipeline is `409 endpoint.request_body_incompatible`; the mutation-route body rules (400 `endpoint.request.body_invalid` entries, 413 `endpoint.request.too_large`, 415 `endpoint.request.unsupported_media_type`) are stated for the codec #1039's serve path applies. |

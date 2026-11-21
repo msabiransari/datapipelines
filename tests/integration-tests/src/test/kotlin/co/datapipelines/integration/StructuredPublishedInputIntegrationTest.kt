@@ -2,6 +2,9 @@ package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
+import com.fasterxml.jackson.core.JsonFactory
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.core.JsonToken
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -20,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.io.StringWriter
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -55,6 +59,7 @@ class StructuredPublishedInputIntegrationTest {
     private var port: Int = 0
 
     private val mapper = ObjectMapper()
+
     private val http: HttpClient = HttpClient.newHttpClient()
 
     @Test
@@ -697,6 +702,84 @@ class StructuredPublishedInputIntegrationTest {
         withClue(rounded.body().asString().take(400)) {
             rounded.statusCode() shouldNotBe 201
             rounded.body().asString() shouldContain "output_differs"
+        }
+    }
+
+    // ------------------------------------------------------------ round 4: C2 — durable fixture storage
+
+    @Test
+    fun `a body fixture with a nested duplicate or a repeated input name is saved, read back and released on both save surfaces`() {
+        prepare()
+        val refusal = """"expect":{"refusal":"pipeline.script.input_contract_violation"}"""
+        listOf(
+            Triple("nested", """{"order":{"a":1,"a":2}}""", listOf("""{"a":1,"a":2}""")),
+            Triple("named_twice", """{"order":{"a":1},"order":{"a":2}}""", listOf("""{"a":1}""", """{"a":2}""")),
+        ).forEach { (label, inputs, occurrences) ->
+            val tests = """[{"name":"dup","input":{"inputs":$inputs},$refusal}]"""
+            listOf("rest", "mcp").forEach { surface ->
+                val id = "test/body1038_stored_${label}_$surface.jsonata"
+                val payload = scriptPayload(id, ORDER_KEYS_JSONATA, stringValueContract(), tests)
+                saveOn(surface, payload) shouldBe true
+                // The stored column, as the real database holds it: the envelope names every occurrence in order.
+                val stored = storedDraft(id)
+                withClue("$surface $label stored: ${stored.testsJson}") {
+                    val envelope = mapper.readTree(stored.testsJson)[0]["input"]["inputs"]["\$exact"]["order"]
+                    envelope.map { it.asText() } shouldBe occurrences
+                }
+                // Read-back, on this surface's own read shape: every occurrence, as written.
+                val readBack = readBackTests(surface, id)
+                withClue("$surface $label read-back: $readBack") {
+                    readBack shouldContain occurrences.joinToString(",") { """"order":$it""" }
+                }
+                // Re-save the read-back text: the same stored occurrences, the same verdict on release.
+                val again = "test/body1038_stored_${label}_${surface}_again.jsonata"
+                saveOn(surface, scriptPayload(again, ORDER_KEYS_JSONATA, stringValueContract(), readBack)) shouldBe true
+                withClue("$surface $label re-saved") {
+                    mapper.readTree(storedDraft(again).testsJson)[0]["input"]["inputs"]["\$exact"]["order"].map { it.asText() } shouldBe
+                        occurrences
+                    release(again, storedDraft(again).bodyHash)
+                }
+                // Release re-runs the suite from the stored tests: the refusal must still be the verdict.
+                withClue("$surface $label release") { release(id, stored.bodyHash) }
+            }
+        }
+    }
+
+    @Test
+    fun `a saved body fixture keeps the order of its members through save, read-back, re-save and release on both save surfaces`() {
+        prepare()
+        val text = """{"zeta":0.123456789012345678901234567890,"alpha":[3,2,1],"mid":{"z":1,"b":2.50}}"""
+        val tests = """[{"name":"order","input":{"inputs":{"order":$text}},"expect":{"output":"zeta,alpha,mid"}}]"""
+        listOf("rest", "mcp").forEach { surface ->
+            val id = "test/body1038_stored_order_$surface.jsonata"
+            val payload = scriptPayload(id, ORDER_KEYS_JSONATA, stringValueContract(), tests)
+            saveOn(surface, payload) shouldBe true
+            val stored = storedDraft(id)
+            withClue("$surface stored: ${stored.testsJson}") {
+                val inputs = mapper.readTree(stored.testsJson)[0]["input"]["inputs"]
+                // jsonb really did reorder the ordinary view; the exact text is what keeps the author's order.
+                inputs["order"].fieldNames().asSequence().toList() shouldBe listOf("mid", "zeta", "alpha")
+                inputs["\$exact"]["order"][0].asText() shouldBe text
+            }
+            // Read-back on this surface's own read shape: the author's order and every digit.
+            val readBack = readBackTests(surface, id)
+            withClue("$surface read-back $readBack") { readBack shouldContain text }
+            // Re-save the read-back text under a new name: the same stored fixture (same exact text, same verdict).
+            val again = "test/body1038_stored_order_again_$surface.jsonata"
+            saveOn(surface, scriptPayload(again, ORDER_KEYS_JSONATA, stringValueContract(), readBack)) shouldBe true
+            withClue("$surface re-saved") {
+                mapper.readTree(storedDraft(again).testsJson)[0]["input"]["inputs"]["\$exact"]["order"][0].asText() shouldBe text
+            }
+            release(id, stored.bodyHash)
+            release(again, storedDraft(again).bodyHash)
+        }
+        // Non-vacuity: the order jsonb would have stored is a different verdict, refused at save.
+        val wrong = """[{"name":"order","input":{"inputs":{"order":$text}},"expect":{"output":"mid,zeta,alpha"}}]"""
+        val refused =
+            restCreate(scriptPayload("test/body1038_stored_order_wrong.jsonata", ORDER_KEYS_JSONATA, stringValueContract(), wrong))
+        withClue(refused.body().asString().take(400)) {
+            refused.statusCode() shouldNotBe 201
+            refused.body().asString() shouldContain "output_differs"
         }
     }
 
@@ -1449,6 +1532,73 @@ class StructuredPublishedInputIntegrationTest {
             "output" to mapOf("kind" to "value", "type" to "STRING"),
         )
 
+    /** Saves a template on [surface] ("rest": `POST /api/v1/templates`; "mcp": `templates_create`); true when the save was accepted. */
+    private fun saveOn(
+        surface: String,
+        payload: String,
+    ): Boolean = if (surface == "rest") restCreate(payload).statusCode() == 201 else !mcpCreate(payload).second
+
+    /**
+     * The `tests` block exactly as [surface] ("rest" or "mcp") reads the template back: the response is copied
+     * token by token, so a repeated member the server wrote is still there for a client that re-saves it.
+     */
+    private fun readBackTests(
+        surface: String,
+        id: String,
+    ): String {
+        val document =
+            if (surface == "rest") {
+                restText("/api/v1/templates?name=$id")
+            } else {
+                mapper.readTree(rawToolCall("templates_get", """{"id":"$id"}""").body())["result"]["content"][0]["text"].asText()
+            }
+        return testsMemberText(document) ?: error("no tests member in $document")
+    }
+
+    /** The exact text of the `tests` member of [document], copied token by token; null when it has none. */
+    private fun testsMemberText(document: String): String? {
+        val factory = JsonFactory()
+        factory.createParser(document).use { parser ->
+            while (parser.nextToken() != null) {
+                if (parser.currentToken() == JsonToken.FIELD_NAME && parser.currentName() == "tests") {
+                    parser.nextToken()
+                    return copyExact(factory, parser)
+                }
+            }
+        }
+        return null
+    }
+
+    private fun copyExact(
+        factory: JsonFactory,
+        parser: JsonParser,
+    ): String {
+        val out = StringWriter()
+        factory.createGenerator(out).use { it.copyCurrentStructureExact(parser) }
+        return out.toString()
+    }
+
+    /** One stored template version's `tests_json` as the real column prints it, and its hash. */
+    private data class StoredDraft(
+        val testsJson: String,
+        val bodyHash: String,
+    )
+
+    private fun storedDraft(id: String): StoredDraft =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection
+                .prepareStatement(
+                    "SELECT v.tests_json::text, v.body_hash FROM template_versions v JOIN templates t ON t.id = v.template_id " +
+                        "WHERE t.name = ? ORDER BY v.version DESC LIMIT 1",
+                ).use { statement ->
+                    statement.setString(1, id)
+                    statement.executeQuery().use { rs ->
+                        check(rs.next()) { "no stored version for $id" }
+                        StoredDraft(rs.getString(1), rs.getString(2))
+                    }
+                }
+        }
+
     private fun restText(path: String): String =
         given()
             .port(port)
@@ -1597,6 +1747,9 @@ class StructuredPublishedInputIntegrationTest {
 
         private val FAIL_INVARIANTS =
             listOf(mapOf("name" to "no_rows", "expr" to "\$count(rows) = 0", "message" to "no rows allowed $CANARY_AUTHOR"))
+
+        /** The member names in the order the transformer sees them: order-sensitive, so a reordered fixture is a different verdict. */
+        private const val ORDER_KEYS_JSONATA = """${'$'}join(${'$'}keys(inputs.order), ',')"""
         private const val PRICE_TEMPLATE = "test/body1038_price.jsonata"
         private const val FAIL_TEMPLATE = "test/body1038_fail.jsonata"
 
