@@ -219,6 +219,24 @@ test("R6 helper: beside left ticks valueAxis keeps past an edge ([0, 0.999999999
   assert.ok(past >= axes, "past " + past);
 });
 
+/**
+ * D3 row 4, the share's own arithmetic: a finite left tick past hi whose distance from lo overflows on a finite span.
+ * No producer hands one today (valueAxis's ticks past an end stand within 1e-9 of the span), so this left axis is
+ * written by hand on purpose: it pins shareOf's halving for v - lo, which the second axis must not leave to the
+ * producer. Without it the share reads Infinity and the right tick is the end of the number range, not its position.
+ */
+test("R6 share: a left tick past hi whose distance from lo overflows on a finite span ([-MAX, 0], tick 1e299) keeps its own position on a linear and a log right domain", () => {
+  const left = { lo: -MAX, hi: 0, ticks: [-MAX, 0, 1e299], log: false }, want = shareOf(R, left, 1e299);
+  assert.ok(want > 1 && want < 1 + 1e-9, "the oracle's share " + want);
+  for (const [log, rd] of [[false, [0, 1]], [true, [1, 10]]]) {
+    const ax = R.axes.secondAxis("full", { domain: rd, format: null, log }, rd, left, 200), at = `${log ? "log" : "linear"} [${rd}]`;
+    assert.deepEqual([ax.lo, ax.hi, ax.ticks.length], [rd[0], rd[1], 3], at);
+    assert.deepEqual([...ax.ticks.slice(0, 2)], rd, at);
+    assert.ok(Number.isFinite(ax.ticks[2]) && ax.ticks[2] > rd[1] && ax.ticks[2] < rd[1] * 1.0001, `${at}: tick 2 = ${ax.ticks[2]}`);
+    assert.ok(onPosition(R, ax, ax.ticks[2], want), `${at}: tick 2 = ${ax.ticks[2]} off the share ${want}`);
+  }
+});
+
 /** The existing test type with a left domain ld (its values the domain's ends) and a right domain rd. */
 function edgeFixture(ld, rd, log) {
   const fx = structuredClone(fixture("test_two_axes", "case-a-linear"));
