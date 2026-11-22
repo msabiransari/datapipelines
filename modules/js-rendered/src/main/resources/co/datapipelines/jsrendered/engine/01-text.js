@@ -148,22 +148,42 @@
     return plain(round({ neg: x.neg, d: x.d, p: x.d === "0" ? 1 : x.p + 2 }, maxFrac), 0) + "%";
   }
 
-  /** A value at the document's named format (record §4.4): integer | decimal(n) | percent | compact | currency(XXX). */
+  /** The fraction digits at which a number keeps `sig` significant digits (0.0046 at 2: four). */
+  function digitsFor(x, sig) {
+    return x.d === "0" ? 0 : Math.max(0, sig - x.p);
+  }
+
+  /**
+   * A value at the document's named format (record §4.4): integer | decimal(n) | percent | compact | currency(XXX).
+   * At the ends of the number range a value is written as an axis writes a tick (owner 2026-11-22, #1088; SCI_FROM,
+   * SCI_BELOW and scientific are lane 1059's, below, read when this runs): from 10^15 up a number takes the e form at
+   * every format, with at most two fraction digits (1.23e18, USD 1e18, 1e20%); an exact text (BIGINT, DECIMAL) keeps
+   * every digit its format writes today and is never read through a float. Below 10^-5 the formats that name no digits
+   * (none, compact, percent) take the e form, exact text included. Between the two such a format never writes a number
+   * that is not zero as zero: it takes the fraction digits that keep two significant digits (none) or one (compact,
+   * percent). A format that names its digits (integer, decimal(n), currency) keeps them: they are the author's word.
+   * A value that is not finite is the empty text.
+   */
   function value(v, format) {
     if (v === null || v === undefined) return "";
-    if (typeof v === "number" && v !== v) return "";
-    if (format === null || format === undefined || format === "" || format === "default") return fixed(v, 0, 2);
-    if (format === "integer") return fixed(v, 0, 0);
-    if (format === "compact") return compact(v, 1);
-    if (format === "percent") return percent(v, 1);
+    var exact = typeof v === "string" && EXACT.test(v);
+    if (!exact && !isFinite(v)) return "";
+    var none = format === null || format === undefined || format === "" || format === "default";
+    var pct = format === "percent", auto = none || pct || format === "compact";
+    var x = decimal(v), power = x.p - 1 + (pct ? 2 : 0);
+    var sci = x.d !== "0" && ((!exact && power >= SCI_FROM) || (auto && power < SCI_BELOW));
+    if (none) return sci ? scientific(v, 2, false) : fixed(v, 0, Math.max(2, digitsFor(x, 2)));
+    if (format === "integer") return sci ? scientific(v, 2, false) : fixed(v, 0, 0);
+    if (format === "compact") return sci ? scientific(v, 2, false) : compact(v, Math.max(1, digitsFor(x, 1)));
+    if (pct) return sci ? scientific(v, 2, true) : percent(v, Math.max(1, digitsFor({ d: x.d, p: x.p + 2 }, 1)));
     if (format.length === 10 && format.slice(0, 8) === "decimal(" && format.charAt(9) === ")") {
       var n = format.charCodeAt(8) - 48;
-      if (n >= 0 && n <= 6) return fixed(v, n, n);
+      if (n >= 0 && n <= 6) return sci ? scientific(v, 2, false) : fixed(v, n, n);
     }
     if (format.length === 13 && format.slice(0, 9) === "currency(" && format.charAt(12) === ")") {
       var code = format.slice(9, 12);
       var digits = Object.prototype.hasOwnProperty.call(CURRENCY_DIGITS, code) ? CURRENCY_DIGITS[code] : 2;
-      return code + " " + fixed(v, digits, digits);
+      return code + " " + (sci ? scientific(v, 2, false) : fixed(v, digits, digits));
     }
     throw new Error("not a named number format: " + format);
   }
