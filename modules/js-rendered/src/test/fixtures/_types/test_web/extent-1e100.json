@@ -1,5 +1,5 @@
 {
- "note": "values up to 1e100: a tick text wider than the frame, so no ring number fits (D5's example)",
+ "note": "values up to 1e100, written in the e form (5e99, 1e100; #1059): the ring number fits; condition (a) of D5 is read on a copy of the engine with the e form's start points out of reach (radial.test.mjs)",
  "document": {
   "display_name": "Test type test_web",
   "config": {
