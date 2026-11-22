@@ -732,6 +732,274 @@ class PromotionTwoDeploymentE2eTest {
         )
     }
 
+    // ------------------------------------------------------------------ #1040 method routes travel exactly pinned
+
+    /**
+     * #1040 (published-mutation-apis §7) — a GET and a POST at ONE path promote together: the GET as the legacy entry
+     * (uat's current pin, its GET node grants), the POST on dev's EXACT pin with its grant by key NAME bound on uat as
+     * an exact POST grant on uat's own POST entity. Asserted on uat's database.
+     */
+    @Test
+    @Order(70)
+    fun `a GET and a POST at one path promote - the POST on its exact pin, its grant bound by name as a POST grant`() {
+        createPipelineOn(portDev, API_PIPELINE, dqlNode("read", DATASOURCE, LEAF_TEMPLATE))
+        publishOn(portDev, API_PATH, "GET", API_PIPELINE, 1)
+        val devPost = publishOn(portDev, API_PATH, "POST", API_PIPELINE, 1)
+        // Keys are environment-local: the same NAME on both deployments, never minted by a promotion.
+        val devWriter = mintOn(portDev, API_WRITER)
+        mintOn(portUat, API_WRITER)
+        grantOn(portDev, devWriter, API_PATH, "POST")
+        assertEquals(devPost, devJdbc.scalar("SELECT endpoint_id::text FROM endpoint_key_bindings WHERE api_key_id = '$devWriter'"))
+
+        promoteOrExplain(API_PIPELINE)
+
+        val routes =
+            uatJdbc.row(
+                "SELECT string_agg(method || '@' || current_version, ',' ORDER BY method) AS routes " +
+                    "FROM published_endpoints WHERE path_pattern = '$API_PATH'",
+            )
+        assertAll(
+            { assertEquals("GET@1,POST@1", routes["routes"], "both routes, each with its own version 1") },
+            { assertEquals("RELEASED:1", uatPin("POST"), "the POST pins dev's exact pipeline version, RELEASED") },
+            { assertEquals(devPipelineHash(API_PIPELINE), uatPipelineHash(API_PIPELINE), "the pinned version's content") },
+            {
+                assertEquals(
+                    "POST:true",
+                    uatJdbc.scalar(
+                        "SELECT string_agg(b.method || ':' || (b.endpoint_id = e.id)::text, ',') FROM endpoint_key_bindings b " +
+                            "JOIN api_keys k ON k.id = b.api_key_id JOIN published_endpoints e ON e.path_pattern = b.path_prefix " +
+                            "AND e.method = 'POST' WHERE k.name = '$API_WRITER'",
+                    ),
+                    "exactly one grant: POST, on uat's own POST entity — never a GET node grant",
+                )
+            },
+        )
+    }
+
+    /** #1040 — a moved pin on dev travels as a NEW released version on uat's route, made current; the GET is untouched. */
+    @Test
+    @Order(71)
+    fun `a POST route whose pin moved on dev gains a new released version on uat, the GET sibling untouched`() {
+        bumpAndRelease(API_PIPELINE)
+        val devPost = devJdbc.scalar("SELECT id::text FROM published_endpoints WHERE path_pattern = '$API_PATH' AND method = 'POST'")
+        movePinOn(portDev, devPost, API_PIPELINE, 2)
+
+        promoteOrExplain(API_PIPELINE)
+
+        assertAll(
+            { assertEquals("RELEASED:2", uatPin("POST"), "the new current version pins exactly v2") },
+            {
+                assertEquals(
+                    "2",
+                    uatJdbc.scalar(
+                        "SELECT current_version::text FROM published_endpoints WHERE path_pattern = '$API_PATH' AND method = 'POST'",
+                    ),
+                    "uat's own version number advanced",
+                )
+            },
+            {
+                assertEquals(
+                    "1",
+                    uatJdbc.scalar(
+                        "SELECT current_version::text FROM published_endpoints WHERE path_pattern = '$API_PATH' AND method = 'GET'",
+                    ),
+                    "the GET sibling is an existing legacy route — skipped",
+                )
+            },
+            {
+                assertEquals(
+                    "1",
+                    uatJdbc.scalar(
+                        "SELECT count(*)::text FROM endpoint_key_bindings b JOIN api_keys k ON k.id = b.api_key_id " +
+                            "WHERE k.name = '$API_WRITER'",
+                    ),
+                    "the grant is the same one grant",
+                )
+            },
+        )
+    }
+
+    /**
+     * #1040 — the SENDER refuses before anything is sent when the target does not advertise exact method import: a
+     * receiver built before #1040 answers an inventory with no `endpoint_capabilities`. The stand-in serves exactly that
+     * inventory and counts pushes; dev's target is pointed at it for this case only.
+     */
+    @Test
+    @Order(72)
+    fun `the sender refuses a method route to a target that does not advertise exact method import, pushing nothing`() {
+        bumpAndRelease(API_PIPELINE)
+        val pushes =
+            java.util.concurrent.atomic
+                .AtomicInteger()
+        val stub =
+            com.sun.net.httpserver.HttpServer
+                .create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
+        stub.createContext("/api/v1/promotion/inventory") { exchange ->
+            val body =
+                """{"data":{"deployment":"pre-1040","authoring_enabled":false,"workspace":"$WORKSPACE","datasources":["$DATASOURCE"]}}"""
+                    .toByteArray()
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        stub.createContext("/api/v1/promotion/push") { exchange ->
+            pushes.incrementAndGet()
+            exchange.sendResponseHeaders(500, -1)
+            exchange.close()
+        }
+        stub.start()
+        val target = devPromotionTarget()
+        val original =
+            org.springframework.test.util.ReflectionTestUtils
+                .getField(target, "baseUrl")
+        try {
+            org.springframework.test.util.ReflectionTestUtils
+                .setField(target, "baseUrl", "http://127.0.0.1:${stub.address.port}")
+            val refused = runCatching { promote(API_PIPELINE) }.exceptionOrNull()
+            assertTrue(refused != null, "the promotion must be refused")
+            val error = checkNotNull(refused)
+            assertEquals("endpoint.promotion.method_unsupported", codeOf(error), "code; details=${detailsOf(error)}")
+            assertEquals(
+                listOf(mapOf("method" to "POST", "path" to API_PATH)),
+                (detailsOf(error) as Map<*, *>)["unsupported_routes"],
+                "names the sender's own route",
+            )
+            assertEquals(0, pushes.get(), "nothing was sent")
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils
+                .setField(target, "baseUrl", original)
+            stub.stop(0)
+        }
+        assertEquals("RELEASED:2", uatPin("POST"), "uat is unchanged")
+    }
+
+    /** dev's configured promotion target (the shared properties' nested Target) — swapped only by Order 72. */
+    private fun devPromotionTarget(): Any {
+        val properties = checkNotNull(dev).getBean(Class.forName("co.datapipelines.auth.PromotionProperties"))
+        return checkNotNull(
+            org.springframework.test.util.ReflectionTestUtils
+                .getField(properties, "target"),
+        )
+    }
+
+    /** uat's current version of the route at [API_PATH] for [method], as `STATUS:pipeline_version`. */
+    private fun uatPin(method: String): String =
+        uatJdbc.scalar(
+            "SELECT v.status || ':' || v.pipeline_version FROM published_endpoints e JOIN published_endpoint_versions v " +
+                "ON v.endpoint_id = e.id AND v.version = e.current_version WHERE e.path_pattern = '$API_PATH' AND e.method = '$method'",
+        )
+
+    /** Publishes [path]/[method] on [port] pinning [pipeline]@[version] and releases it; the entity id. */
+    private fun publishOn(
+        port: Int,
+        path: String,
+        method: String,
+        pipeline: String,
+        version: Int,
+    ): String {
+        val id =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(adminSession())
+                .body("""{"path": "$path", "method": "$method", "pipeline": "$pipeline", "pipeline_version": $version}""")
+                .`when`()
+                .post("/api/v1/endpoints")
+                .then()
+                .statusCode(201)
+                .extract()
+                .jsonPath()
+                .getString("data.id")
+        val hash =
+            given()
+                .port(
+                    port,
+                ).asSession(adminSession())
+                .get("/api/v1/endpoints/$id/versions/1")
+                .jsonPath()
+                .getString("data.body_hash")
+        given()
+            .port(port)
+            .asSession(adminSession())
+            .header("If-Match", hash)
+            .post("/api/v1/endpoints/$id/release")
+            .then()
+            .statusCode(200)
+        return id
+    }
+
+    /** Saves a draft on [entityId] pinning [pipeline]@[version] and releases it (it becomes current). */
+    private fun movePinOn(
+        port: Int,
+        entityId: String,
+        pipeline: String,
+        version: Int,
+    ) {
+        val current =
+            given()
+                .port(port)
+                .asSession(adminSession())
+                .get("/api/v1/endpoints/$entityId/versions")
+                .jsonPath()
+                .getString("data.find { it.is_current }.body_hash")
+        val saved =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(adminSession())
+                .header("If-Match", current)
+                .body("""{"pipeline": "$pipeline", "pipeline_version": $version}""")
+                .put("/api/v1/endpoints/$entityId/draft")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+                .getString("data.body_hash")
+        given()
+            .port(
+                port,
+            ).asSession(adminSession())
+            .header("If-Match", saved)
+            .post("/api/v1/endpoints/$entityId/release")
+            .then()
+            .statusCode(200)
+    }
+
+    /** Mints an `endpoint` key named [name] with no GET node binding on [port]; its id. */
+    private fun mintOn(
+        port: Int,
+        name: String,
+    ): String =
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(adminSession())
+            .body("""{"name": "$name", "kind": "endpoint", "bindings": []}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(201)
+            .extract()
+            .jsonPath()
+            .getString("data.id")
+
+    private fun grantOn(
+        port: Int,
+        keyId: String,
+        path: String,
+        method: String,
+    ) {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(adminSession())
+            .body("""{"api_key_id": "$keyId", "path_prefix": "$path", "method": "$method"}""")
+            .`when`()
+            .post("/api/v1/endpoints/bindings")
+            .then()
+            .statusCode(201)
+    }
+
     // ------------------------------------------------------------------ content on dev
 
     /** A parent that runs a child through a PIPELINE node and pins a template that imports a library. */
@@ -1484,6 +1752,11 @@ class PromotionTwoDeploymentE2eTest {
 
         /** #841 R3 — the busy-receive case's own pipeline (Order 46), and its named allowances. */
         private const val TX_GUARDED = "test/promo_e2e_tx_guarded"
+
+        /** #1040 — the method routes' fixtures (Orders 70–72): one pipeline, one path, one write-only key name. */
+        private const val API_PIPELINE = "test/promo_e2e_api"
+        private const val API_PATH = "/promo/v1/applications"
+        private const val API_WRITER = "promo-e2e-writer"
         private const val GUARD_PROBE_SECONDS = 4L
         private const val GUARD_PROBE_INTERVAL_MS = 20L
         private const val GUARD_WRITER_TIMEOUT_SECONDS = 30L

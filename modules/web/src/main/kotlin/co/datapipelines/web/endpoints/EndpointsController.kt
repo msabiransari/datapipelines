@@ -306,7 +306,9 @@ class EndpointsController(
      * `method` (#1037) is the route's HTTP method — the identity half that makes a GET and a POST
      * at one pattern two routes, each with its own bindings and its own `Allow` answer. The
      * `bindings` list stays the GET grants (the ancestor walk's nodes); a mutation route's grants
-     * name it exactly, and the key surfaces show them.
+     * name it exactly, and the key surfaces show them. `request_body` (#1040) is the current version's EXACT pin's body
+     * contract — the mode a caller must send and the transformers that read it — null with no current version or a pin
+     * that no longer resolves; the MCP tools answer the same spelling ([co.datapipelines.application.endpoints.EndpointBodyContract.wire]).
      */
     private fun PublishedEndpoint.toResponse(): Map<String, Any?> =
         mapOf(
@@ -318,6 +320,7 @@ class EndpointsController(
             "current_version" to current?.version,
             "timeout_seconds" to current?.body?.timeoutSeconds,
             "description" to current?.body?.description,
+            "request_body" to publishing.bodyContract(this)?.wire(),
             "enabled" to isEnabled,
             "path_variables" to pathVariables,
             "url" to "/api$pathPattern",

@@ -84,7 +84,7 @@
       <div class="app-card-b" th:if="${#lists.isEmpty(endpoints)}">
         <div class="app-empty">
           <b>No published endpoints</b>
-          A published endpoint turns one pipeline into a GET URL under <span class="ds-mono">/api/&lt;category&gt;/&lt;version&gt;/…</span>.
+          A published endpoint turns one pipeline into an HTTP route &mdash; a GET read, or a POST, PUT or DELETE write &mdash; under <span class="ds-mono">/api/&lt;category&gt;/&lt;version&gt;/…</span>.
           Publish one with the <span class="ds-mono">endpoints_create</span> MCP tool or
           <span class="ds-mono">POST /api/v1/endpoints</span>.
         </div>

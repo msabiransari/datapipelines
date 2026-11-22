@@ -106,6 +106,21 @@ class EndpointPinValidator(
         return Resolved(record, detail.status, executable)
     }
 
+    /**
+     * The request-body contract of [pipelineName]@[pipelineVersion] in [workspaceId] (#1040) — what the authoring
+     * surfaces show beside the exact pin before a save; null when the pipeline or that exact version is gone. A read,
+     * never a check: refusals stay [check]'s.
+     */
+    fun bodyContract(
+        workspaceId: UUID,
+        pipelineName: String,
+        pipelineVersion: Int,
+    ): EndpointBodyContract? {
+        val record = pipelineRepository.findByName(workspaceId, pipelineName) ?: return null
+        val executable = pipelines.findExecutable(workspaceId, ReadLens.Everything, record, pipelineVersion) ?: return null
+        return EndpointBodyContract.of(executable.pipeline)
+    }
+
     /** §4.2 — the rule that makes serving over GET defensible, re-checked on every serve too. */
     private fun requireReadOnly(
         version: PipelineService.ExecutablePipeline,

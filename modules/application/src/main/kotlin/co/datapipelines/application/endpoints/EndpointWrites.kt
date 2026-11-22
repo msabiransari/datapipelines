@@ -86,6 +86,26 @@ internal class EndpointWrites(
         return entity.copy(current = CurrentVersion(FIRST_VERSION, status, body))
     }
 
+    /**
+     * Appends a RELEASED version with [body] to the existing entity [endpointId] at `max(existing) + 1` and points the
+     * entity at it — the receiver's exact-pin import of a mutation route whose pin moved on the sender (#1040). Inside
+     * the caller's transaction, after the registry guard, under the entity's row lock; the registry is invalidated after
+     * the owning transaction commits. Numbers are the receiver's own: an API version's number is local, its pin is not.
+     */
+    fun appendReleasedCurrent(
+        endpointId: UUID,
+        body: EndpointVersionBody,
+        actor: UUID,
+    ): Int {
+        writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
+        versions.lockEntity(endpointId)
+        val next = (versions.list(endpointId).maxOfOrNull { it.version } ?: 0) + 1
+        versions.insert(endpointId, next, PipelineVersionStatus.RELEASED, body, actor)
+        versions.setCurrent(endpointId, next)
+        invalidateAfterCommit()
+        return next
+    }
+
     companion object {
         const val FIRST_VERSION = 1
 

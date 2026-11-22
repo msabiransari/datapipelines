@@ -66,7 +66,10 @@ class PromotionEndpointKeysTest {
     private val bindings = mockk<EndpointKeyBindingRepository>()
     private val pipelines = mockk<PipelineRepository>()
 
-    private val promotion = EndpointPromotion(publishing, importer, endpointKeys, endpoints, bindings, apiKeys, pipelines)
+    // #1040: a GET-only batch never reads a pin; strict so a regression that did would fail here.
+    private val pins = mockk<co.datapipelines.application.endpoints.EndpointPinValidator>()
+
+    private val promotion = EndpointPromotion(publishing, importer, endpointKeys, endpoints, bindings, apiKeys, pipelines, pins)
 
     private val service =
         PromotionReceiveService(
@@ -195,9 +198,9 @@ class PromotionEndpointKeysTest {
 
     @Test
     fun `a batch entry naming a non-GET method is refused whole, before anything is imported or bound`() {
-        // #1037: this receiver imports every entry as a GET route with GET tree grants. A newer,
-        // method-aware sender's POST entry would be reinterpreted as a read route; the batch is
-        // refused instead — even though its key exists, so the key check would have passed.
+        // #1037, #1040: a POST entry without its exact pin (the shape a #1037-era entry would
+        // have) cannot be imported exactly; importing it would reinterpret the route, so the
+        // batch is refused instead — even though its key exists, so the key check would pass.
         stubContext()
         every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, "ci-lending") } returns listOf(key("dpk_AAAAAAAAAAAA", "ci-lending"))
         every { publishing.get(any(), any()) } returns null

@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.endpoints.EndpointBodyContract
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointPinValidator
 import co.datapipelines.application.endpoints.EndpointPublishService
@@ -57,6 +58,8 @@ class EndpointVersionsPageModel(
         val boundKeyNames: List<String>,
         val versions: List<Row>,
         val selected: Row?,
+        /** #1040: the selected version's pinned body contract — what a caller must send, and which transformers read it. */
+        val selectedBody: BodyView?,
         val currentVersion: Int?,
         val hasDraft: Boolean,
         val authoringEnabled: Boolean,
@@ -84,17 +87,41 @@ class EndpointVersionsPageModel(
         val isDiscarded: Boolean get() = status == PipelineVersionStatus.DISCARDED.name
     }
 
-    /** One exact pipeline version the draft dialog's picker offers, with its status and eligibility here. */
+    /**
+     * #1040 — one exact pipeline version's request-body contract as the console shows it: the declared mode (`none`,
+     * `optional`, `required`) and each SCRIPT transformer that reads the body, as `node (template@version)`.
+     */
+    data class BodyView(
+        val mode: String,
+        val readers: List<String>,
+    ) {
+        /** One line for a picker option: `body required · read by shape`. */
+        val summary: String
+            get() = "body $mode" + if (readers.isEmpty()) "" else " · read by " + readers.joinToString(", ") { it.substringBefore(' ') }
+
+        companion object {
+            fun of(contract: EndpointBodyContract): BodyView =
+                BodyView(contract.mode.wire, contract.readers.map { "${it.nodeId} (${it.template})" })
+        }
+    }
+
+    /**
+     * One exact pipeline version the draft dialog's picker offers, with its status and eligibility here, and (#1040) its
+     * body contract — so the body a caller must send is visible beside the pin before the draft is saved.
+     */
     data class PinOption(
         val version: Int,
         val status: String,
         val eligible: Boolean,
         val isCurrent: Boolean,
+        val body: BodyView? = null,
     )
 
     /** The draft dialog: a new draft from the current version, or the working draft itself. */
     data class DraftDialog(
         val id: UUID,
+        /** #1040: the route's method, shown and never editable — it is half of the route's identity. */
+        val method: String,
         val isNew: Boolean,
         val ifMatch: String,
         val pipelines: List<String>,
@@ -166,6 +193,7 @@ class EndpointVersionsPageModel(
             boundKeyNames = bound,
             versions = rows,
             selected = selected,
+            selectedBody = selected?.let { bodyOf(workspace.id, it.pipeline, it.pipelineVersion) },
             currentVersion = endpoint.current?.version,
             hasDraft = rows.any { it.isDraft },
             authoringEnabled = authoring.developmentPosture,
@@ -198,12 +226,21 @@ class EndpointVersionsPageModel(
                 ?.let { pipelines.listVersions(workspaceId, it.id) }
                 .orEmpty()
                 .filter { it.status != PipelineVersionStatus.DISCARDED }
-                .map { PinOption(it.version, it.status.name, pins.eligible(it.status), it.version == record?.currentVersion) }
+                .map {
+                    PinOption(
+                        version = it.version,
+                        status = it.status.name,
+                        eligible = pins.eligible(it.status),
+                        isCurrent = it.version == record?.currentVersion,
+                        body = bodyOf(workspaceId, chosen, it.version),
+                    )
+                }
         val keep =
             base.version.body.pipelineVersion
                 .takeIf { chosen == base.version.body.pipelineName }
         return DraftDialog(
             id = id,
+            method = endpoint.method.name,
             isNew = draft == null,
             ifMatch = base.version.bodyHash,
             pipelines = (names + base.version.body.pipelineName).distinct().sorted(),
@@ -270,6 +307,13 @@ class EndpointVersionsPageModel(
             isSoleVersion = listed.size == 1,
         )
     }
+
+    /** The body contract of [pipeline]@[version] as the console shows it; null when that exact version is gone. */
+    private fun bodyOf(
+        workspaceId: UUID,
+        pipeline: String,
+        version: Int,
+    ): BodyView? = pins.bodyContract(workspaceId, pipeline, version)?.let(BodyView::of)
 
     private fun visible(
         principal: AuthenticatedPrincipal,

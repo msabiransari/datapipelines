@@ -221,6 +221,16 @@ class EndpointPublishService(
         id: java.util.UUID,
     ): PublishedEndpoint? = visibleOrNull(principal, endpoints.findById(id))
 
+    /**
+     * The request-body contract of [endpoint]'s CURRENT version's exact pin (#1040) — the mode and the reading
+     * transformers the authoring surfaces show; null when the API has no current version or its pin no longer resolves.
+     * [endpoint] is one this service already answered under the caller's visibility ([list], [get], [create]).
+     */
+    fun bodyContract(endpoint: PublishedEndpoint): EndpointBodyContract? {
+        val body = endpoint.current?.body ?: return null
+        return pins.bodyContract(endpoint.workspaceId, body.pipelineName, body.pipelineVersion)
+    }
+
     private fun visibleOrNull(
         principal: AuthenticatedPrincipal,
         endpoint: PublishedEndpoint?,

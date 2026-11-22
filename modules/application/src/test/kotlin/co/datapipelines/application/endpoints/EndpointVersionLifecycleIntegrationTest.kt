@@ -151,6 +151,37 @@ class EndpointVersionLifecycleIntegrationTest {
     }
 
     @Test
+    fun `a POST route walks release, draft, discard, restore and switch on its own versions - the GET sibling is untouched`() {
+        // #1040: a method route's versions are its own; every verb addresses the entity, never the path.
+        pipeline("acme/rides/apply", current = 2, PipelineVersionStatus.RELEASED, PipelineVersionStatus.RELEASED)
+        val service = service()
+        val get = publishing().create(principal(), "/acme/v1/rides", "acme/rides/apply", 1, 30, "Read")
+        val post = publishing().create(principal(), "/acme/v1/rides", "acme/rides/apply", 1, 30, "Apply", EndpointMethod.POST)
+        val getBefore = versions.list(get.id).map { it.version to it.bodyHash }
+
+        val v1 = release(post.id, versions.find(post.id, 1).shouldNotBeNull().bodyHash)
+        val v2 = service.saveDraft(principal(), post.id, input(pipelineVersion = 2), v1.bodyHash)
+        release(post.id, v2.bodyHash)
+        service.discardVersion(principal(), post.id, 2) shouldBe EndpointVersionService.Moved(2, currentBefore = 2, currentAfter = 1)
+        service.restoreVersion(principal(), post.id, 2) shouldBe EndpointVersionService.Moved(2, currentBefore = 1, currentAfter = 2)
+        service.switchCurrent(principal(), post.id, 1) shouldBe EndpointVersionService.Moved(1, currentBefore = 2, currentAfter = 1)
+
+        withClue("the POST route's own history: v1 current, v2 restored RELEASED on pin 2") {
+            endpoints.findByPath("/acme/v1/rides", EndpointMethod.POST).shouldNotBeNull().id shouldBe post.id
+            pointer(post.id) shouldBe 1
+            versions.find(post.id, 2).shouldNotBeNull().let {
+                it.status shouldBe PipelineVersionStatus.RELEASED
+                it.body.pipelineVersion shouldBe 2
+            }
+        }
+        withClue("the GET sibling at the same path: same versions, same hashes, still a DRAFT v1 current") {
+            versions.list(get.id).map { it.version to it.bodyHash } shouldBe getBefore
+            versions.find(get.id, 1).shouldNotBeNull().status shouldBe PipelineVersionStatus.DRAFT
+            pointer(get.id) shouldBe 1
+        }
+    }
+
+    @Test
     fun `each verb refuses the version state it does not apply to, and another workspace's API is not found`() {
         pipeline("acme/rides/states", current = 1, PipelineVersionStatus.RELEASED)
         val service = service()

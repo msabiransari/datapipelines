@@ -59,6 +59,14 @@ class EndpointVersionsPageRenderTest {
         post.select("[data-api-url]").text() shouldBe "/api/finance/v1/revenue"
         post.select("[data-dp-deps]").attr("data-name") shouldBe "POST /finance/v1/revenue"
         post.select("[data-dp-deps]").attr("data-family") shouldBe "api_endpoint"
+        // #1040: the version card shows the pinned body contract; the API card names the grants of THIS method.
+        post.select("[data-api-body-mode]").text() shouldBe "required"
+        post.select("[data-api-body-readers] .app-chip").eachText() shouldContainExactly listOf("shape (finance/shape.py@2)")
+        post.select("[data-api-keys-label]").text() shouldBe "API keys granted POST on this route:"
+        get.select("[data-api-keys-label]").text() shouldBe "API keys bound at this path:"
+        val gone = page(page(selected = 2).copy(method = "POST", selectedBody = null))
+        gone.select("[data-api-body-mode]").text() shouldBe "unknown (the pinned version is gone)"
+        gone.select("[data-api-body-readers]").text() shouldBe "—"
     }
 
     @Test
@@ -129,6 +137,7 @@ class EndpointVersionsPageRenderTest {
         val dialog =
             EndpointVersionsPageModel.DraftDialog(
                 id = id,
+                method = "PUT",
                 isNew = false,
                 ifMatch = "h3",
                 pipelines = listOf("finance/costs", "finance/revenue"),
@@ -136,7 +145,13 @@ class EndpointVersionsPageRenderTest {
                 options =
                     listOf(
                         EndpointVersionsPageModel.PinOption(4, "DRAFT", eligible = false, isCurrent = false),
-                        EndpointVersionsPageModel.PinOption(3, "RELEASED", eligible = true, isCurrent = true),
+                        EndpointVersionsPageModel.PinOption(
+                            3,
+                            "RELEASED",
+                            eligible = true,
+                            isCurrent = true,
+                            body = EndpointVersionsPageModel.BodyView("required", listOf("shape (finance/shape.py@2)")),
+                        ),
                         EndpointVersionsPageModel.PinOption(2, "RELEASED", eligible = true, isCurrent = false),
                     ),
                 selectedVersion = 2,
@@ -152,6 +167,11 @@ class EndpointVersionsPageRenderTest {
         options.single { it.hasAttr("disabled") }.attr("value") shouldBe "4"
         doc.select("[data-api-pipeline] option[selected]").attr("value") shouldBe "finance/revenue"
         doc.select("[data-api-pipeline]").attr("hx-get") shouldBe "/partials/endpoints/$id/lifecycle/draft"
+        // #1040: the method is shown and is not a form field; each option names its body before the save.
+        doc.select("[data-api-draft-method]").text() shouldBe "PUT"
+        doc.select("form [name=method]").size shouldBe 0
+        options.single { it.attr("value") == "3" }.text() shouldBe "v3 · RELEASED · current · body required · read by shape"
+        options.single { it.attr("value") == "3" }.attr("data-api-body-mode") shouldBe "required"
     }
 
     @Test
@@ -262,6 +282,7 @@ class EndpointVersionsPageRenderTest {
             boundKeyNames = listOf("ci", "nightly"),
             versions = rows,
             selected = (rows + extra).single { it.version == selected },
+            selectedBody = EndpointVersionsPageModel.BodyView("required", listOf("shape (finance/shape.py@2)")),
             currentVersion = 2,
             hasDraft = true,
             authoringEnabled = authoringEnabled,

@@ -2,7 +2,9 @@
      version (If-Match is that base's body hash either way — a stale base answers endpoint.version.conflict). The
      picker lists the chosen pipeline's live versions with their status and whether they are eligible HERE; the base's
      own pin is preselected, so reopening a draft keeps a noncurrent pin. Changing the pipeline re-renders the picker
-     for that pipeline (hx-get), it saves nothing. The POST re-runs every check in EndpointVersionService. -->
+     for that pipeline (hx-get), it saves nothing. The POST re-runs every check in EndpointVersionService.
+     #1040: the route's method is shown (fixed) and every option names its body mode and reading transformers, so the
+     body a caller must send is visible beside the pin before the draft is saved. -->
 <div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" data-lifecycle-dialog="endpoint-draft">
   <div class="ds-card app-modal app-modal-md" role="dialog" aria-modal="true" aria-labelledby="axd-title">
     <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
@@ -12,6 +14,9 @@
     <h2 class="ds-title u-m0 u-mb-md" id="axd-title" th:text="${dlg.isNew} ? 'New draft' : 'Edit draft'">Edit draft</h2>
     <form th:attr="hx-post=@{'/partials/endpoints/{id}/lifecycle/draft'(id=${dlg.id})}" hx-swap="none">
       <input type="hidden" name="ifMatch" th:value="${dlg.ifMatch}">
+      <!-- #1040: the method is half of the route's identity — shown, never editable; a draft changes the pin only. -->
+      <p class="u-text-sm">Method <span class="app-method" th:text="${dlg.method}" data-api-draft-method>GET</span>
+        <span class="u-secondary">fixed for this route</span></p>
       <label class="u-text-sm" for="axd-pipeline">Pipeline</label>
       <select id="axd-pipeline" name="pipeline" class="ds-input" data-api-pipeline
               th:attr="hx-get=@{'/partials/endpoints/{id}/lifecycle/draft'(id=${dlg.id})}"
@@ -22,7 +27,8 @@
       <select id="axd-version" name="pipelineVersion" class="ds-input" data-api-pipeline-version>
         <option th:each="o : ${dlg.options}" th:value="${o.version}" th:selected="${o.version == dlg.selectedVersion}"
                 th:disabled="${!o.eligible}"
-                th:text="'v' + ${o.version} + ' · ' + ${o.status} + (${o.isCurrent} ? ' · current' : '') + (${o.eligible} ? '' : ' · not eligible here')">v3 · RELEASED</option>
+                th:attr="data-api-body-mode=${o.body != null ? o.body.mode : null}"
+                th:text="'v' + ${o.version} + ' · ' + ${o.status} + (${o.isCurrent} ? ' · current' : '') + (${o.body != null} ? ' · ' + ${o.body.summary} : '') + (${o.eligible} ? '' : ' · not eligible here')">v3 · RELEASED · body none</option>
       </select>
       <label class="u-text-sm" for="axd-timeout">Timeout (seconds)</label>
       <input id="axd-timeout" class="ds-input" type="number" name="timeoutSeconds" min="1" th:value="${dlg.timeoutSeconds}">

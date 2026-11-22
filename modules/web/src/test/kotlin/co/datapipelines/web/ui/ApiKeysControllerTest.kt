@@ -302,16 +302,19 @@ class ApiKeysAdminControllerTest {
             listOf(publishedAt("/nyc/v1/revenue/{borough}"), publishedAt("/lending/v1/summary"))
     }
 
-    private fun publishedAt(pattern: String) =
-        co.datapipelines.application.endpoints.PublishedEndpoint.of(
-            id = UUID.randomUUID(),
-            workspaceId = workspaceId,
-            pathPattern = pattern,
-            isEnabled = true,
-            createdBy = userId,
-            createdAt = Instant.now(),
-            updatedAt = Instant.now(),
-        )
+    private fun publishedAt(
+        pattern: String,
+        method: co.datapipelines.application.endpoints.EndpointMethod = co.datapipelines.application.endpoints.EndpointMethod.GET,
+    ) = co.datapipelines.application.endpoints.PublishedEndpoint.of(
+        id = UUID.randomUUID(),
+        workspaceId = workspaceId,
+        pathPattern = pattern,
+        isEnabled = true,
+        createdBy = userId,
+        createdAt = Instant.now(),
+        updatedAt = Instant.now(),
+        method = method,
+    )
 
     @Test
     fun `create mints through the shared service and returns the once-shown panel`() {
@@ -511,7 +514,7 @@ class ApiKeysAdminControllerTest {
                     .EndpointKeyBinding("/old", "dpk_abc123", workspaceId, userId, Instant.now()),
             )
 
-        controller.associate("dpk_abc123", listOf("/nyc", "/lending"), ExtendedModelMap())
+        controller.associate("dpk_abc123", listOf("/nyc", "/lending"), null, null, ExtendedModelMap())
 
         // /nyc was already bound (idempotent), /lending is added, /old is removed.
         verify(exactly = 1) { bindingRepository.insert(match { it.pathPrefix == "/lending" }) }
@@ -541,7 +544,7 @@ class ApiKeysAdminControllerTest {
                 ),
             )
 
-        controller.associate("dpk_abc123", listOf("/nyc", "/lending/v1/summary"), ExtendedModelMap())
+        controller.associate("dpk_abc123", listOf("/nyc", "/lending/v1/summary"), null, null, ExtendedModelMap())
 
         verify(exactly = 1) {
             bindingRepository.insert(
@@ -550,10 +553,143 @@ class ApiKeysAdminControllerTest {
         }
 
         // Leaving the path out of the form is a GET-only delta too: the POST grant is not the form's to remove.
-        controller.associate("dpk_abc123", listOf("/nyc"), ExtendedModelMap())
+        controller.associate("dpk_abc123", listOf("/nyc"), null, null, ExtendedModelMap())
 
         verify(exactly = 0) { bindingRepository.delete("/lending/v1/summary", any(), any(), any()) }
     }
+
+    @Test
+    fun `associate writes the method-grant delta over the OFFERED routes only, each grant on exactly its route`() {
+        // #1040: the form's method grants. POST is checked (bind it, with its method, on that route), DELETE is offered
+        // but unchecked (unbind it), and the PUT grant on a route the form never offered is not the form's to remove.
+        authenticate()
+        stubPageReads()
+        val post = publishedAt("/lending/v1/applications", co.datapipelines.application.endpoints.EndpointMethod.POST)
+        every { apiKeyRepository.findById("dpk_abc123") } returns sampleKey()
+        every {
+            publishedEndpoints.findByPath(
+                "/lending/v1/applications",
+                co.datapipelines.application.endpoints.EndpointMethod.POST,
+            )
+        } returns
+            post
+        every { bindingRepository.findByKey("dpk_abc123") } returns
+            listOf(
+                grant("/lending/v1/applications/{id}", co.datapipelines.application.endpoints.EndpointMethod.DELETE),
+                grant("/lending/v1/other", co.datapipelines.application.endpoints.EndpointMethod.PUT),
+            )
+
+        controller.associate(
+            "dpk_abc123",
+            null,
+            listOf("POST /lending/v1/applications", "PUT /lending/v1/not-offered"),
+            listOf("POST /lending/v1/applications", "DELETE /lending/v1/applications/{id}"),
+            ExtendedModelMap(),
+        )
+
+        verify(exactly = 1) {
+            bindingRepository.insert(
+                match {
+                    it.pathPrefix == "/lending/v1/applications" &&
+                        it.method == co.datapipelines.application.endpoints.EndpointMethod.POST &&
+                        it.endpointId == post.id
+                },
+            )
+        }
+        verify(exactly = 1) {
+            bindingRepository.delete(
+                "/lending/v1/applications/{id}",
+                "dpk_abc123",
+                workspaceId,
+                co.datapipelines.application.endpoints.EndpointMethod.DELETE,
+            )
+        }
+        // A checked value the form did not offer is ignored, and the grant on a route it did not show survives.
+        verify(exactly = 0) { bindingRepository.insert(match { it.pathPrefix == "/lending/v1/not-offered" }) }
+        verify(exactly = 0) { bindingRepository.delete("/lending/v1/other", any(), any(), any()) }
+        // No GET node grant was created or removed by a grant save.
+        verify(exactly = 0) { bindingRepository.insert(match { it.method == co.datapipelines.application.endpoints.EndpointMethod.GET }) }
+    }
+
+    @Test
+    fun `a hand-crafted grant that is not a mutation route is refused before anything is written`() {
+        authenticate()
+        stubPageReads()
+        every { apiKeyRepository.findById("dpk_abc123") } returns sampleKey()
+        every { bindingRepository.findByKey("dpk_abc123") } returns emptyList()
+        listOf("GET /nyc/v1/revenue", "PATCH /lending/v1/applications", "POST").forEach { raw ->
+            val refused =
+                shouldThrow<DatapipelinesException> {
+                    controller.associate("dpk_abc123", null, listOf(raw), listOf(raw), ExtendedModelMap())
+                }
+            refused.code shouldBe PipelineErrorCodes.Endpoint.METHOD_INVALID
+        }
+        verify(exactly = 0) { bindingRepository.insert(any()) }
+        verify(exactly = 0) { bindingRepository.delete(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `the redrawn associations form offers each published mutation route as a method grant, checked when held`() {
+        // #1040: the redraw after a save carries the pickers (before, a redrawn form had none until a reload). A
+        // write-only key shows its POST grant checked and no GET node checked; the GET route is never a method grant.
+        authenticate()
+        stubPageReads()
+        every { publishing.list(any()) } returns
+            listOf(
+                publishedAt("/lending/v1/applications"),
+                publishedAt("/lending/v1/applications", co.datapipelines.application.endpoints.EndpointMethod.DELETE),
+                publishedAt("/lending/v1/applications", co.datapipelines.application.endpoints.EndpointMethod.POST),
+            )
+        every { apiKeyRepository.findById("dpk_abc123") } returns sampleKey()
+        every { bindingRepository.findByKey("dpk_abc123") } returns
+            listOf(grant("/lending/v1/applications", co.datapipelines.application.endpoints.EndpointMethod.POST))
+        val offered = listOf("POST /lending/v1/applications", "DELETE /lending/v1/applications")
+
+        val model = ExtendedModelMap()
+        val view = controller.associate("dpk_abc123", null, listOf("POST /lending/v1/applications"), offered, model)
+        val html = engine().process(view, webContext().apply { model.forEach { (k, v) -> setVariable(k, v) } })
+        val doc = org.jsoup.Jsoup.parse("<table><tbody>$html</tbody></table>")
+
+        doc.select("input[name=grantsOffered]").eachAttr("value") shouldBe offered
+        doc.select("input[name=grants][checked]").eachAttr("value") shouldBe listOf("POST /lending/v1/applications")
+        doc.select("input[name=bindings]").eachAttr("value") shouldBe listOf("/", "/lending", "/lending/v1", "/lending/v1/applications")
+        doc.select("input[name=bindings][checked]").size shouldBe 0
+        // Already held: nothing re-bound.
+        verify(exactly = 0) { bindingRepository.insert(any()) }
+    }
+
+    @Test
+    fun `the create and delete redraws carry the same pickers as the page - a redrawn form is never empty`() {
+        // #1040: before, both redraws rendered every row's associations form with no node and no grant until a reload.
+        authenticate()
+        stubPageReads()
+        every { publishing.list(any()) } returns
+            listOf(publishedAt("/lending/v1/applications", co.datapipelines.application.endpoints.EndpointMethod.POST))
+        every { apiKeyService.issue(any(), any(), any(), any(), ApiKeyKind.ENDPOINT, null) } returns sampleIssued()
+        every { apiKeyRepository.findById("dpk_abc123") } returns sampleKey()
+        every { apiKeyService.revokeAs(any(), "dpk_abc123") } returns true
+
+        val created = ExtendedModelMap().also { controller.create("endpoint", null, "ci", null, null, null, it) }
+        val deleted = ExtendedModelMap().also { controller.revoke("dpk_abc123", it) }
+
+        listOf(created, deleted).forEach { model ->
+            model["methodRoutes"] shouldBe listOf("POST /lending/v1/applications")
+            model["bindingNodes"] shouldBe listOf("/", "/lending", "/lending/v1", "/lending/v1/applications")
+        }
+    }
+
+    private fun grant(
+        path: String,
+        method: co.datapipelines.application.endpoints.EndpointMethod,
+    ) = co.datapipelines.application.endpoints.EndpointKeyBinding(
+        path,
+        "dpk_abc123",
+        workspaceId,
+        userId,
+        Instant.now(),
+        method,
+        UUID.randomUUID(),
+    )
 
     @Test
     fun `associate refuses a key of another kind or workspace as not found`() {
@@ -563,7 +699,7 @@ class ApiKeysAdminControllerTest {
 
         val refused =
             shouldThrow<DatapipelinesException> {
-                controller.associate("dpk_user1", listOf("/nyc"), ExtendedModelMap())
+                controller.associate("dpk_user1", listOf("/nyc"), null, null, ExtendedModelMap())
             }
         refused.code shouldBe PipelineErrorCodes.Endpoint.NOT_FOUND
     }

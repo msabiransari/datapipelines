@@ -44,7 +44,7 @@ class EndpointPromotionMethodRefusalTest {
     private val pipelines = mockk<PipelineRepository>()
     private val bindings = mockk<EndpointKeyBindingRepository> { every { findByWorkspace(WORKSPACE_ID) } returns emptyList() }
     private val apiKeys = mockk<ApiKeyRepository>()
-    private val promotion = EndpointPromotion(mockk(), mockk(), mockk(), endpoints, bindings, apiKeys, pipelines)
+    private val promotion = EndpointPromotion(mockk(), mockk(), mockk(), endpoints, bindings, apiKeys, pipelines, mockk())
 
     @Test
     fun `a non-GET route over a promoted pipeline refuses the whole batch with its method and path`() {
