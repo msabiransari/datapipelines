@@ -84,8 +84,10 @@ class ConfigValidator(
          * max-concurrent-maintenance + 2 with the lake and the scheduler enabled).
          * 50 since #819 added `ProcessMemoryAdmission.checkProcessMemoryAdmission` (§7 / §3.36 — the process memory
          * sum against the container limit, its two keys judged whether or not the lake is enabled).
+         * 51 since #1043 added `EndpointCaptureRules.checkEndpointsCaptureDurations` (§3.22 / §7 — the capture window and
+         * detail retention are positive integers whose deadlines are representable).
          */
-        internal const val CHECK_COUNT = 50
+        internal const val CHECK_COUNT = 51
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -138,6 +140,8 @@ class ConfigValidator(
             AuthProviderRules.checkProviderReadTimeout(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
             checkEndpointsTimeoutOrdering(snapshot, violations)
+            // §3.22 (#1043) — the runtime capture window and detail retention, judged on the raw text.
+            EndpointCaptureRules.checkEndpointsCaptureDurations(snapshot, violations)
             DemoApiRules.enforceDemoApiRules(snapshot, violations)
             // §3.23 (075) — the posture rules live in their own file (PostureRules); the
             // CHECK_COUNT guard counts `check*` across both, so moving them cannot hide one.
@@ -853,6 +857,8 @@ class ConfigValidator(
                     environment.getProperty("datapipelines.endpoints.key-request-budget.window-seconds", Int::class.java),
                 endpointsKeyRequestBudgetMaxRequests =
                     environment.getProperty("datapipelines.endpoints.key-request-budget.max-requests", Int::class.java),
+                endpointsCaptureWindowSeconds = environment.getProperty("datapipelines.endpoints.capture-window-seconds"),
+                endpointsCaptureDetailRetentionHours = environment.getProperty("datapipelines.endpoints.capture-detail-retention-hours"),
                 workspacesProvisioningMode = environment.getProperty("datapipelines.workspaces.provisioning-mode"),
                 // Whether the key is PRESENT, not what it says: a removed key is refused for
                 // being set at all, and `open-join: false` is still a deployment that believes
@@ -1106,6 +1112,9 @@ internal data class ConfigSnapshot(
     /** §3.22 (#224) — the serve path's per-key request budget; null = key absent, the binder default applies. */
     val endpointsKeyRequestBudgetWindowSeconds: Int? = null,
     val endpointsKeyRequestBudgetMaxRequests: Int? = null,
+    /** §3.22 (#1043) — the capture window and detail retention, raw so a bad value is a NAMED violation; null = key absent. */
+    val endpointsCaptureWindowSeconds: String? = null,
+    val endpointsCaptureDetailRetentionHours: String? = null,
     val workspacesProvisioningMode: String?,
     /** §3.17 — read here only for the open-join/closed cross-key rule; auth owns its semantics. */
     val workspacesOpenJoinSet: Boolean = false,

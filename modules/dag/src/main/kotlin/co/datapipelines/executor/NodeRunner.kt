@@ -182,6 +182,10 @@ data class NodeExecutionContext(
     val requestBody: StructuredBody = StructuredBody.Absent,
     /** [ExecuteRequest.boundedDiagnostics] (#1038): failures and script console text leave only bounded metadata; children inherit it. */
     val boundedDiagnostics: Boolean = false,
+    /** [ExecuteRequest.privateNodeValues] (#1043): node values stay out of ordinary history; children inherit it. */
+    val privateNodeValues: Boolean = false,
+    /** [ExecuteRequest.valueCapture] (#1043): the root execution's administrator capture, or null; never inherited. */
+    val valueCapture: NodeValueCapture? = null,
 )
 
 /**

@@ -44,6 +44,7 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ResolvedNode
 import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import co.datapipelines.web.endpoints.CaptureRecorders
 import co.datapipelines.web.endpoints.MutationRequestRules
 import co.datapipelines.web.endpoints.PublishedEndpointServeService
 import co.datapipelines.web.endpoints.PublishedExecutionPagingService
@@ -319,8 +320,10 @@ class EndpointsConfiguration {
 
     /** #1039 — the durable reservation + origin store of published mutations (Metadata DB §4.61). */
     @Bean
-    fun publishedMutationReservationRepository(jdbc: NamedParameterJdbcTemplate): PublishedMutationReservationRepository =
-        PublishedMutationReservationRepository(jdbc)
+    fun publishedMutationReservationRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        transactionManager: PlatformTransactionManager,
+    ): PublishedMutationReservationRepository = PublishedMutationReservationRepository(jdbc, TransactionTemplate(transactionManager))
 
     /**
      * #1039 — the keyed replay digests, under their own subkey of the deployment's signing secret: a stored digest
@@ -368,6 +371,8 @@ class EndpointsConfiguration {
         audit: AuditEventSink,
         executionScope: WebSurfaceConfiguration.ExecutionCoroutineScope,
         meters: MeterRegistry,
+        // #1043 — the recorder of a captured admission (ExecutionCaptureConfiguration).
+        captureRecorders: CaptureRecorders,
     ): PublishedMutationService =
         PublishedMutationService(
             reservations = reservations,
@@ -385,6 +390,7 @@ class EndpointsConfiguration {
                     audit = audit,
                     scope = executionScope,
                     meters = meters,
+                    captures = captureRecorders,
                 ),
             readOnlyRule = readOnlyRule,
             endpointsProperties = endpointsProperties,

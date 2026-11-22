@@ -179,6 +179,20 @@ data class ExecuteRequest(
      * inherit the policy through [NodeExecutionContext.boundedDiagnostics] like a body execution's.
      */
     val boundedDiagnosticsRequired: Boolean = false,
+    /**
+     * #1043 (published-mutation-apis §6, §7 "Runtime capture"): true on a published POST, PUT or DELETE and every child it
+     * composes. Such a run's ordinary history — the node stats' `context_value`/`context_values`, the lifecycle events
+     * and the terminal Context snapshot in `parameters_json` — keeps no value a node computed: status, codes, timing,
+     * counts and the declared keys stay, while the values themselves are only ever retained by an administrator's
+     * capture ([valueCapture]). The run's own inputs (org config, platform keys, typed parameters) stay in the snapshot.
+     * Every other surface leaves it false and keeps its history contract unchanged.
+     */
+    val privateNodeValues: Boolean = false,
+    /**
+     * #1043: the capture an administrator's session decided at this execution's admission, or null (every run that was
+     * not captured — the default). Root only: a PIPELINE node's child request does not inherit it.
+     */
+    val valueCapture: NodeValueCapture? = null,
 ) {
     /**
      * #1038: whether this execution reports a failure as a bounded code and metadata only ([BoundedFailure]):

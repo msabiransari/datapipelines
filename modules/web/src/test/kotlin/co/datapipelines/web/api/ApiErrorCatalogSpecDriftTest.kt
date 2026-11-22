@@ -435,8 +435,13 @@ class ApiErrorCatalogSpecDriftTest {
          * catalog row), `endpoint.dependency_unavailable` (503, explicit catalog row) and
          * `endpoint.request.idempotency_key_invalid` (400 through the `endpoint.request.` family
          * default), landed in the SAME commit as their constants.
+         *
+         * 536 → 540 with #1043: §13.27 gains `execution.capture.already_active` (409),
+         * `execution.capture.not_found` (404), `execution.capture.expired` (410) and
+         * `execution.capture.invalid` (400), each an explicit catalog row landed in the SAME commit
+         * as its constant.
          */
-        const val SECTION_13_ROW_COUNT = 536
+        const val SECTION_13_ROW_COUNT = 540
 
         /**
          * §12's distinct validation codes.

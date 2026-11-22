@@ -29,6 +29,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.config.EndpointsProperties
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import co.datapipelines.web.pipelines.executedByKeyKind
@@ -316,7 +317,10 @@ class PublishedEndpointServeService(
                 .match(path, requested)
                 ?.pathVariables
                 .orEmpty()
-        return service.serve(MutationCall(endpoint, requested, path, pathVariables, principal, request, input), mutationPins)
+        return service.serve(
+            MutationCall(endpoint, requested, path, pathVariables, principal, request, input, CorrelationId.currentUuid()),
+            mutationPins,
+        )
     }
 
     /** The pins a mutation may run, under the same D63 eligibility rule as GET (see [pointedVersion]). */

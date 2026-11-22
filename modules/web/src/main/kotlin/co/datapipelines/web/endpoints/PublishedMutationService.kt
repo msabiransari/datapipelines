@@ -1,5 +1,6 @@
 package co.datapipelines.web.endpoints
 
+import co.datapipelines.application.endpoints.AdmissionStamp
 import co.datapipelines.application.endpoints.PublishedMutationDigests
 import co.datapipelines.application.endpoints.PublishedMutationReservation
 import co.datapipelines.application.endpoints.PublishedMutationReservationRepository
@@ -141,14 +142,29 @@ class PublishedMutationService(
                 createdAt = now,
                 expiresAt = now.plus(windows.replay),
             )
-        val won = durable { reservations.reserve(reservation) } ?: return reservationUnavailable(call)
-        if (won.value != true) {
-            // Another request — on this replica or another — reserved the scope first: one execution per scope.
-            val winner = durable { reservations.findLive(scope) }?.value ?: return reservationUnavailable(call)
-            return replay(call, pins, winner, body, now)
-        }
-        val request = PublishedMutationLauncher.requestOf(call.principal, reservation, current, admitted)
-        return launcher.start(call.endpoint, call.principal, reservation, request, current.timeoutSeconds, admitted.pageRows)
+        // #1043: the reserving transaction takes the capture decision AND the admission instant together, reading the
+        // clock only while it holds the capture window's lock: `created_at`, the replay expiry and the detail expiry are
+        // all measured from that one instant — never from `now` above, sampled before the pin and validation ran — so a
+        // later configuration change cannot extend them and a slow preflight cannot move an admission across a window
+        // boundary. The candidate's own timestamps are placeholders the repository replaces.
+        val stamp =
+            AdmissionStamp(
+                clock = clock,
+                replay = windows.replay,
+                captureRetention = Duration.ofHours(endpointsProperties.captureDetailRetentionHours.toLong()),
+            )
+        val won =
+            durable { reservations.reserveDeciding(reservation, call.correlationId, stamp) }
+                ?: return reservationUnavailable(call)
+        val decided =
+            won.value ?: run {
+                // Another request — on this replica or another — reserved the scope first: one execution per scope,
+                // and the winner's capture decision is the only one (a retry never re-decides it).
+                val winner = durable { reservations.findLive(scope) }?.value ?: return reservationUnavailable(call)
+                return replay(call, pins, winner, body, now)
+            }
+        val request = PublishedMutationLauncher.requestOf(call.principal, decided, current, admitted)
+        return launcher.start(call.endpoint, call.principal, decided, request, current.timeoutSeconds, admitted.pageRows)
     }
 
     @Suppress("ReturnCount") // each stage answers on its own terms
@@ -225,6 +241,7 @@ class PublishedMutationService(
                 is Admission.Refused -> return handBack(call, claimed, admission.outcome)
                 is Admission.Admitted -> admission.admitted
             }
+        // The claimed copy carries the stored capture decision: a takeover never re-decides it.
         val request = PublishedMutationLauncher.requestOf(call.principal, claimed, pin, admitted)
         return launcher.start(call.endpoint, call.principal, claimed, request, pin.timeoutSeconds, admitted.pageRows)
     }

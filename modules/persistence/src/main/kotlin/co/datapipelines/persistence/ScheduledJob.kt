@@ -34,6 +34,9 @@ enum class ScheduledJob(
 
     /** The finished parameter evaluations' retention (`web`'s `ParameterEvaluationRetention`, hourly; #636). */
     PARAMETER_EVALUATION_RETENTION("parameter_evaluation_retention"),
+
+    /** Expired runtime capture detail's physical purge (`web`'s `ExecutionCaptureRetention`, hourly; #1043). */
+    CAPTURE_RETENTION("capture_retention"),
     ;
 
     companion object {

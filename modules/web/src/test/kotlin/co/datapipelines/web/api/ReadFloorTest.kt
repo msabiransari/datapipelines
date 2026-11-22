@@ -63,6 +63,15 @@ class ReadFloorTest {
         familyOf("/api/v1/dependencies/pipeline") shouldBeFamily Family.DEPENDENCY_TREES
     }
 
+    /** #1043 — a captured run's detail is the capture family's, never the executions family's every-role read. */
+    @Test
+    fun `the runtime capture routes classify as their own family`() {
+        familyOf("/api/v1/executions/{id}/capture") shouldBeFamily Family.RUNTIME_CAPTURE
+        familyOf("/executions/{id}/capture") shouldBeFamily Family.RUNTIME_CAPTURE
+        familyOf("/api/v1/endpoints/{id}/captures") shouldBeFamily Family.RUNTIME_CAPTURE
+        familyOf("/partials/endpoints/{id}/capture") shouldBeFamily Family.RUNTIME_CAPTURE
+    }
+
     /** Non-vacuity: every family classifies the handlers it exists for. */
     @Test
     fun `every family actually classifies handlers`() {
@@ -178,6 +187,18 @@ class ReadFloorTest {
                     Permission.DATASOURCE_READ,
                 ),
             matches = { path -> path.startsWith("/api/v1/dependencies/") },
+        ),
+
+        /**
+         * #1043 — runtime capture of published mutations: the route's capture card and list (`execution.capture.manage`)
+         * and a captured run's private detail (`execution.capture.read`), both workspace-admin, session-only rows. BEFORE
+         * the executions family, whose substring would otherwise claim the detail reads and floor them at an every-role
+         * read; the floor is the four GETs.
+         */
+        RUNTIME_CAPTURE(
+            floor = 4,
+            permissions = setOf(Permission.EXECUTION_CAPTURE_MANAGE, Permission.EXECUTION_CAPTURE_READ),
+            matches = { path -> path.endsWith("/capture") || path.endsWith("/captures") },
         ),
 
         /** D11: own unless workspace admin, promoter none — never READ_RESOURCES. */

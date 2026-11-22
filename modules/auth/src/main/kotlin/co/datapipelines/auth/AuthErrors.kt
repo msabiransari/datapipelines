@@ -267,6 +267,8 @@ object AuthErrorCodes {
             "lake." to "1325-managed-lake",
             // #875 — the dependency trees' refusals (§13.26), anchored with the family (the 194b lesson).
             "dependencies." to "1326-dependency-trees",
+            // #1043 — runtime capture's refusals (§13.27), anchored with the family (the 194b lesson).
+            "execution.capture." to "1327-runtime-capture",
         )
 }
 

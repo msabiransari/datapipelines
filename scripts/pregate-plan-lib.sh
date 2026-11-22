@@ -214,6 +214,7 @@ GUARDS[":modules:web"]+=" co.datapipelines.web.dashboards.runtime.DashboardAudit
 GUARDS[":modules:web"]+=" co.datapipelines.web.dependencies.DependencyFamilyTransportTest"  # inventory 995: reads docs/pipeline-contract.md
 GUARDS[":modules:web"]+=" co.datapipelines.web.dependencies.DependencyTreeProjectionTest"  # inventory 995: reads modules/dependency-contract/src/main/resources${}
 GUARDS[":modules:web"]+=" co.datapipelines.web.endpoints.EndpointAuditEventsSpecDriftTest"  # inventory 995: reads docs/enums.md
+GUARDS[":modules:web"]+=" co.datapipelines.web.endpoints.ExecutionCaptureAuditEventsSpecDriftTest"  # #1043: reads docs/enums.md
 GUARDS[":modules:web"]+=" co.datapipelines.web.parameters.ParameterSetAuditEventsSpecDriftTest"  # inventory 995: reads docs/enums.md
 GUARDS[":modules:web"]+=" co.datapipelines.web.pipelines.EndpointPromotionImportReachabilityTest"  # inventory 995: walks the tree (git ls-files)
 GUARDS[":modules:web"]+=" co.datapipelines.web.release.ReleaseCodeSwitchGuardTest"  # inventory 995: walks the tree (git ls-files)

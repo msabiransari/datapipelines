@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.72 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.75 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-20
+**Last updated:** 2026-11-22
 
 ---
 
@@ -89,9 +89,13 @@ lake_tables_managed ──1:N── lake_storage_usage (one row per UTC day, ON 
 lake_tables_managed ──1:0..6── lake_storage_inventory (the latest storage breakdown, six rows, ON DELETE CASCADE — §4.60)
 workspaces ──1:N── published_mutation_reservations (one per admitted published mutation, ON DELETE CASCADE — §4.61)
 api_keys ──1:N── published_mutation_reservations (the admitting credential, ON DELETE CASCADE — §4.61)
+workspaces ──1:N── execution_capture_sessions (an administrator's capture windows, ON DELETE CASCADE — §4.62)
+execution_capture_sessions ──1:N── published_mutation_reservations (capture_session_id: the window that admitted the run for capture, nullable — §4.61)
+published_mutation_reservations ──1:N── execution_capture_values (a captured run's private values, ON DELETE CASCADE — §4.63)
+published_mutation_reservations ──1:0..1── execution_capture_runs (a captured run's closing summary, ON DELETE CASCADE — §4.64)
 ```
 
-Not shown, because they are not foreign keys: `published_mutation_reservations.endpoint_id` and `.execution_id` (the origin outlives the route, and the reservation precedes the execution row — §4.61); `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
+Not shown, because they are not foreign keys: `execution_capture_sessions.endpoint_id` (a window belongs to one route ENTITY; a route unpublished and published again is a new entity and inherits nothing — §4.62), `published_mutation_reservations.endpoint_id` and `.execution_id` (the origin outlives the route, and the reservation precedes the execution row — §4.61); `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
 
 ---
 
@@ -2356,7 +2360,108 @@ CREATE INDEX idx_published_mutation_reservations_key ON published_mutation_reser
 - **The origin.** `endpoint_id`, `api_version`, `pipeline_id`/`pipeline_version` (the exact pin that ran), `method`, `business_path` and `api_key_id` are what polling under `<business path>/executions/{id}` checks: same credential, same concrete path, the route still live with that method, and the credential still holding that route's mutation grant — otherwise the opaque 404. `has_caller` records whether the pinned version has a caller output, which decides `200` with a result versus `200`/`204` without one. A retired row keeps the origin, as long as the execution row lives.
 - **The start claim.** `owner_token` is the admitting replica's claim on starting the run. A retry that finds the reservation with no execution row after the start window takes it over with a compare-and-set on the token and starts the ORIGINAL pin; the execution row's primary key (the run records fail-closed, before its first node) is the fence, so two starters never both run business SQL. A run refused before it starts (concurrency limit, unwritable record) deletes its own reservation (`WHERE execution_id = ? AND owner_token = ?` and no execution row), so the same key may be retried.
 - **No foreign keys** to `published_endpoints` (deleting a route must not erase the origin of runs it admitted) or `pipeline_executions` (the reservation precedes the row). The credential and the workspace cascade.
+- **The capture decision (V68, #1043).** `capture_session_id UUID NULL REFERENCES execution_capture_sessions(id)` and `capture_expires_at TIMESTAMPTZ NULL`, both NULL or both set (`chk_published_mutation_reservations_capture`), partial index `idx_published_mutation_reservations_capture`. They are written in ONE transaction with the reserving `INSERT` and the decision (r3 of #1043), whose every lock is taken before the admission clock is read: the `INSERT … ON CONFLICT (scope_digest) DO NOTHING` runs first with a provisional stamp no other transaction can see (any wait on a table lock, a racing replica's uncommitted row or a referenced row happens there; a loser writes nothing); then the route entity's and method's open windows are selected `FOR SHARE` (any wait on a concurrent stop happens there); THEN the admission clock is read — so the instant is taken after every database wait of the admission — and the transaction's own uncommitted row is updated with the stamp and decision (an update that cannot wait: the row is its own and the only foreign-key check reads the window row it already holds). It admits under a window iff `started_at <= instant < deadline_at` and the window has no filter or a filter equal to the request's correlation UUID. That one instant is stored as `created_at` and is the origin of both `expires_at` (the replay window) and `capture_expires_at`: the stored timestamp, decision and retention deadline describe one admission. A stop locks the same row `FOR UPDATE`, so the two are ordered by the database; a preflight timestamp taken before the transaction never decides. A retry, a replay and a start takeover read the stored decision and never re-decide. `capture_expires_at` is `created_at` plus `datapipelines.endpoints.capture-detail-retention-hours` at admission — later configuration never extends it.
 
+
+### 4.62 `execution_capture_sessions`
+
+**One row per runtime capture window an administrator opened on a published mutation route** (V68; #1043, published-mutation-apis §6, §7; [REST API §26](rest-api.md#26-runtime-capture-of-published-mutations)).
+
+```sql
+CREATE TABLE execution_capture_sessions (
+    id              UUID        PRIMARY KEY,
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    endpoint_id     UUID        NOT NULL,
+    method          TEXT        NOT NULL,
+    path_pattern    TEXT        NOT NULL,
+    correlation_id  UUID        NULL,
+    started_by      UUID        NOT NULL REFERENCES users(id),
+    started_at      TIMESTAMPTZ NOT NULL,
+    deadline_at     TIMESTAMPTZ NOT NULL,
+    stopped_at      TIMESTAMPTZ NULL,
+    stopped_by      UUID        NULL REFERENCES users(id),
+    end_reason      TEXT        NULL,
+    CONSTRAINT chk_execution_capture_sessions_method CHECK (method IN ('POST', 'PUT', 'DELETE')),
+    CONSTRAINT chk_execution_capture_sessions_window CHECK (deadline_at > started_at),
+    CONSTRAINT chk_execution_capture_sessions_end CHECK (
+        (stopped_at IS NULL AND end_reason IS NULL AND stopped_by IS NULL)
+        OR (stopped_at IS NOT NULL AND end_reason IN ('STOPPED', 'EXPIRED')
+            AND stopped_at >= started_at AND stopped_at <= deadline_at)
+    )
+);
+
+CREATE UNIQUE INDEX uq_execution_capture_sessions_open
+    ON execution_capture_sessions (workspace_id, endpoint_id, method) WHERE stopped_at IS NULL;
+CREATE INDEX idx_execution_capture_sessions_endpoint
+    ON execution_capture_sessions (workspace_id, endpoint_id, started_at DESC);
+```
+
+**Notes:**
+- **One open window per route entity and method.** The partial unique index is the arbiter across replicas: a second start is `409 execution.capture.already_active`. A window past `deadline_at` that nobody stopped is closed as `EXPIRED` at its deadline by the next start, in the same transaction, before the insert.
+- **The deadline is stored at start** (`started_at + capture-window-seconds`); later configuration never extends it. The admission predicate compares the reservation's `created_at` with it, so a window is half-open: `[started_at, coalesce(stopped_at, deadline_at))`.
+- **A stop names its window by id** (`SELECT … WHERE id = :id AND workspace_id AND endpoint_id AND stopped_at IS NULL FOR UPDATE`, then the `UPDATE`): a delayed stop can never close a newer window. The lock waits for every admission already holding the row; the stop then reads its clock and records `stopped_at` no earlier than `started_at` and strictly after the last admission it captured (`max(created_at) + 1 µs`), never later than `deadline_at` — so a replica whose clock lags cannot end a window before a run it admitted. At or after the deadline it records `EXPIRED`.
+- **`endpoint_id` is not a foreign key.** A window belongs to one route entity: unpublishing and republishing the same path is a new entity that matches no older window. `path_pattern` is the route's path at start, kept for the console's history.
+- **No values, no expiry.** A row holds identities and times only (the filter UUID included, never shown in audit) and is not purged; it is small, bounded by administrator actions, and is the audit's anchor. It goes with its workspace.
+
+### 4.63 `execution_capture_values`
+
+**One row per declared value-mode output a captured execution kept (or an omission marker in its place)** (V68; #1043).
+
+```sql
+CREATE TABLE execution_capture_values (
+    execution_id    UUID        NOT NULL REFERENCES published_mutation_reservations(execution_id) ON DELETE CASCADE,
+    node_id         TEXT        NOT NULL,
+    output_key      TEXT        NOT NULL,
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    state           TEXT        NOT NULL,
+    omitted_reason  TEXT        NULL,
+    value_text      TEXT        NULL,
+    value_bytes     BIGINT      NULL,
+    recorded_at     TIMESTAMPTZ NOT NULL,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (execution_id, node_id, output_key),
+    CONSTRAINT chk_execution_capture_values_state CHECK (
+        (state = 'CAPTURED' AND value_text IS NOT NULL AND omitted_reason IS NULL AND value_bytes IS NOT NULL)
+        OR (state = 'OMITTED' AND value_text IS NULL
+            AND omitted_reason IN ('byte_budget_exhausted', 'unserializable'))
+    )
+);
+
+CREATE INDEX idx_execution_capture_values_expires ON execution_capture_values (expires_at);
+```
+
+**Notes:**
+- **Private diagnostic storage.** Written only for an execution whose reservation carries a `capture_session_id`, by the run's recorder, each row in its own short metadata transaction OUTSIDE the business transaction: a capture write never takes part in, delays the commit of, or changes the result or idempotency decision of the business work. The run only hands a value to a bounded per-run queue (256) and never waits; the deployment's capture writers (two, on the IO dispatcher) drain it on the `lifecycle-write-timeout-seconds` statement bound and write the summary after the last value, so slow or unavailable diagnostic storage delays neither a node nor the answer. A transformer that succeeded is kept even if a later node's business work rolls back. A failed write is counted (`datapipelines.executions.capture.values{outcome=failed}`) and logged value-free, never retried, never surfaced to the caller.
+- **`value_text` is TEXT, not JSONB** (§2: only a JSONB column carries the `_json` suffix): it holds the exact JSON text the output serialized to — the bytes `value_bytes` counts against the budget and the read returns verbatim (REST `value_json`); JSONB would re-key and re-space it.
+- **What a value is.** The JSON text of a SCRIPT node's declared `context_key` output after its gate, invariants and strict check — never an input, a table output, a rejection or another Context value. `value_bytes` is its UTF-8 size; the run's values together never exceed `datapipelines.script.max-value-bytes`; one that does not fit is an `OMITTED` row with no preview.
+- **Reads are bounded by `expires_at`** (copied from the reservation's `capture_expires_at`) and by `workspace_id`: an expired row is never returned, whether or not §8.6 has deleted it. **A write is judged when it reaches storage, not when it was produced:** its transaction locks the execution's captured reservation in the same workspace `FOR KEY SHARE`, reads the clock (refusing at once at or after that reservation's `capture_expires_at`), runs the `INSERT`, and reads the clock AGAIN once the `INSERT` returns — the insert can itself wait on a lock on its own table, so a deadline that passed during that wait rolls the transaction back and reports the write refused. A value or summary queued, delayed or blocked past the deadline (and past a purge) therefore inserts nothing. No lock is taken after the second read; only a deadline falling between it and the commit can leave a row past its deadline, unreadable, until the next §8.6 batch. `recorded_at` is metadata, never expiry authority.
+
+### 4.64 `execution_capture_runs`
+
+**A captured execution's closing summary** (V68; #1043) — written once when the run ends however it ended (success, failure, cancel, timeout), so an empty value list is never ambiguous.
+
+```sql
+CREATE TABLE execution_capture_runs (
+    execution_id     UUID        PRIMARY KEY REFERENCES published_mutation_reservations(execution_id) ON DELETE CASCADE,
+    workspace_id     UUID        NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    session_id       UUID        NOT NULL REFERENCES execution_capture_sessions(id),
+    values_captured  INT         NOT NULL,
+    values_omitted   INT         NOT NULL,
+    write_failures   INT         NOT NULL,
+    bytes_used       BIGINT      NOT NULL,
+    sealed_at        TIMESTAMPTZ NOT NULL,
+    expires_at       TIMESTAMPTZ NOT NULL,
+    CONSTRAINT chk_execution_capture_runs_counts CHECK (
+        values_captured >= 0 AND values_omitted >= 0 AND write_failures >= 0 AND bytes_used >= 0
+    )
+);
+
+CREATE INDEX idx_execution_capture_runs_expires ON execution_capture_runs (expires_at);
+```
+
+**Notes:**
+- **The capture status** ([REST API §26.4](rest-api.md#264-read-a-captured-execution)) is derived: no summary and a running (or not yet recorded) execution → `recording`; a summary with `write_failures = 0` → `complete`; a summary with failures, or a finished execution with no summary → `incomplete`. The summary is written by the capture writers after the run's last value, so for a moment after a run ends it may not be there yet (a re-read shows it); one that never arrives means the seal failed (`execution.capture.seal_failed`) or reached storage after the detail deadline.
+- Same expiry and workspace bounds as §4.63; purged by §8.6.
 
 ## 5. Index Strategy Summary
 
@@ -2437,6 +2542,14 @@ CREATE INDEX idx_published_mutation_reservations_key ON published_mutation_reser
 | `published_mutation_reservations` | `published_mutation_reservations_pkey` | via PK | V67 (#1039): the run's origin by execution id — what polling and the answer read ([§4.61](#461-published_mutation_reservations)) |
 | `published_mutation_reservations` | `uq_published_mutation_reservations_scope` | via UNIQUE | V67: one live reservation per scope digest — the admission race's arbiter and the replay lookup (retired rows carry NULL) |
 | `published_mutation_reservations` | `idx_published_mutation_reservations_key` | explicit | V67: the credential cascade's lookup |
+| `published_mutation_reservations` | `idx_published_mutation_reservations_capture` | explicit, partial | V68 (#1043): the captured runs of a window — the console's history (`WHERE capture_session_id IS NOT NULL`) |
+| `execution_capture_sessions` | `execution_capture_sessions_pkey` | via PK | V68: a window by id — the stop and the admission's `FOR SHARE` |
+| `execution_capture_sessions` | `uq_execution_capture_sessions_open` | unique, partial | V68: one open window per (workspace, route entity, method) — the second start's `409` (§4.62) |
+| `execution_capture_sessions` | `idx_execution_capture_sessions_endpoint` | explicit | V68: a route's recent windows, newest first |
+| `execution_capture_values` | `execution_capture_values_pkey` | via PK | V68: a captured run's values by execution |
+| `execution_capture_values` | `idx_execution_capture_values_expires` | explicit | V68: §8.6's oldest-first purge batches |
+| `execution_capture_runs` | `execution_capture_runs_pkey` | via PK | V68: a captured run's summary |
+| `execution_capture_runs` | `idx_execution_capture_runs_expires` | explicit | V68: §8.6's oldest-first purge batches |
 | `dashboard_key_bindings` | `dashboard_key_bindings_pkey` | via PK | `(name_prefix, api_key_id)` — one key binds a folder once (§4.36) |
 | `dashboard_key_bindings` | `idx_dashboard_key_bindings_key` | explicit | Which folders a key binds — the Keys page's editor and a revoke's blast radius |
 | `lake_tables` | `lake_tables_pkey` | via PK | Lookup by surrogate id |
@@ -2578,6 +2691,9 @@ table and the test's expected-table list in the same commit.
 | `published_endpoint_versions` | promotable | PublishedEndpoint | `version` (per API) | `(path_pattern, version)` | An API version is authored content (#786). Until follow-up #879 carries exact versions on the wire, promotion keeps today's by-path transfer: the receiver's import creates an absent API's v1 pinned to the TARGET pipeline's CURRENT, never a transmitted version or hash |
 | `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
 | `published_mutation_reservations` | derived | Execution | — | `execution_id` | Produced by admitting a published mutation in THIS environment: its replay reservation and its run's origin, keyed under this deployment's secret; never authored, never promoted |
+| `execution_capture_sessions` | derived | ExecutionCapture | — | — | An administrator's capture windows on THIS deployment's route entities (§4.62): operational diagnosis of local traffic, never authored, never promoted — a promoted route arrives with capture off |
+| `execution_capture_values` | derived | ExecutionCapture | — | `(execution_id, node_id, output_key)` | Private copies of what THIS deployment's captured runs computed (§4.63), bounded by their own expiry; never authored, never transferred |
+| `execution_capture_runs` | derived | ExecutionCapture | — | `execution_id` | A captured run's closing summary on THIS deployment (§4.64); follows its values |
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
 | `dashboard_key_bindings` | promotable | DashboardKeyBinding | — | — | The `endpoint_key_bindings` twin's OWN class, by the same reasoning (L5 #367's lane decision, recorded in the handback): a folder binding is authored topology. TODAY it has no promotion carrier (no batch row, no entity registered with the transfer) — the class states what it WOULD travel as; when a batch carries it, it travels by key NAME exactly like its twin |
 | `learned_facts` | environment-local | LearnedFact | — | — | A fact is about an environment-local [`datasources`](#410-datasources) row and was validated against THAT database's live schema (§4.18); the target environment's data may have a different shape, and a fact that has not been checked against it is exactly what the store refuses to start with. Round 2 may export facts as OSI; nothing promotes them |
@@ -2882,11 +2998,30 @@ COMMIT;
 
 Dropping the table forgets every replay reservation and run origin: a client retry after a later re-upgrade is a NEW request.
 
+### 7.7 Rolling back V68 (runtime capture, #1043)
+
+**No barrier.** A V67-era binary never reads the capture tables or the two reservation columns (nullable, and its inserts name their columns), so it starts on V68 metadata and serves mutations uncaptured. It also never PURGES captured detail: before running it for longer than the detail retention, remove the schema — or at least the stored values — so private detail does not outlive its expiry. Stop every V68-aware instance, take a backup, then
+
+```sql
+BEGIN;
+DROP TABLE execution_capture_values;
+DROP TABLE execution_capture_runs;
+ALTER TABLE published_mutation_reservations
+    DROP CONSTRAINT chk_published_mutation_reservations_capture,
+    DROP COLUMN capture_expires_at,
+    DROP COLUMN capture_session_id;
+DROP TABLE execution_capture_sessions;
+DELETE FROM flyway_schema_history WHERE version = '68';
+COMMIT;
+```
+
+Dropping the columns drops `idx_published_mutation_reservations_capture` with them. Reservations, replay and polling are untouched: a retry after the rollback replays its original execution exactly as before.
+
 ---
 
 ## 8. Operational Jobs
 
-Four scheduled jobs act on this schema (the hourly retention tick carries several steps — §8.1 and [§8.5](#85-stale-parameter-evaluation-sweep)). **None of them hard-codes an interval literal.** Every retention and timeout bound is a bind parameter fed from a config key owned by [Configuration §3](configuration.md#3-optional-configuration-with-defaults) (D8) — the SQL below shows the parameterized form, because an `INTERVAL '7 days'` written into a query is a config key that silently stopped working.
+Four scheduled jobs act on this schema (the hourly retention tick carries several steps — §8.1, [§8.5](#85-stale-parameter-evaluation-sweep) and [§8.6](#86-runtime-capture-detail)). **None of them hard-codes an interval literal.** Every retention and timeout bound is a bind parameter fed from a config key owned by [Configuration §3](configuration.md#3-optional-configuration-with-defaults) (D8) — the SQL below shows the parameterized form, because an `INTERVAL '7 days'` written into a query is a config key that silently stopped working.
 
 The `make_interval()` form is used rather than string concatenation: it takes an integer bind parameter, so there is no interval literal to build and nothing to inject.
 
@@ -3010,6 +3145,22 @@ RETURNING id;
 
 `:staleAfterSeconds` = [`datapipelines.parameters.evaluate-timeout-seconds`](configuration.md#330-parameter-engine-194) plus a 60-second margin (`ParameterEvaluationSweeper.MARGIN_SECONDS`, a code constant: the instance's clock stamps `started_at`, the database's `NOW()` judges it). Every evaluate is bounded by that deadline, so a row past it is not running anywhere. It writes `INCOMPLETE`, never `TIMEOUT` — nobody knows how the lost attempt ended — and leaves the record's query rows as they were. The `status = 'RUNNING'` guard keeps a terminal write that lands as the sweep runs; the scan reads the partial `idx_parameter_evaluations_running`. A step that fails is logged by class and SQLState only (`parameter.evaluation_sweep_failed`; each record it closes is one `parameter.evaluation_swept` line — [Observability §3.4M](observability.md#34m-the-parameter-evaluation-events-376)) and retried the next hour. The `UPDATE` carries the retention tick's bound (#636): a JDBC `queryTimeout` of `RETENTION_STATEMENT_TIMEOUT_SECONDS` (25 s, §8.1), so an `UPDATE` queued behind a lock is cancelled with SQLState `57014` — one statement, so it closes nothing — and the next hourly tick retries.
 
+### 8.6 Runtime capture detail
+
+The hourly retention tick's `capture_detail` step (`ExecutionCaptureRetention`, #1043) physically deletes capture rows past their stored expiry — in batches, oldest first through the `expires_at` indexes, each batch one statement on the tick's 25 s bound:
+
+```sql
+DELETE FROM execution_capture_values
+ WHERE (execution_id, node_id, output_key) IN (
+     SELECT execution_id, node_id, output_key FROM execution_capture_values
+      WHERE expires_at <= :now ORDER BY expires_at LIMIT :batch);
+DELETE FROM execution_capture_runs
+ WHERE execution_id IN (
+     SELECT execution_id FROM execution_capture_runs WHERE expires_at <= :now ORDER BY expires_at LIMIT :batch);
+```
+
+`:batch` is 1000 and a tick runs at most 20 batches (code constants beside the job, not configuration); a backlog drains over the following ticks. Nothing is remembered between ticks, so a restart or a failed batch is continued by the next tick from the same predicate. The expiry itself is not a bind of configuration here — it was fixed per execution at admission (§4.61). Reads refuse an expired row whether or not this has run (§4.63), so the purge only reclaims space. A failed batch logs `execution.capture_retention_failed` (class and SQLSTATE) and counts `datapipelines.scheduled_jobs.tick_failed{job=capture_retention}` ([Observability §3.4AA](observability.md)). Windows (§4.62) are not purged; reservations follow their own retirement (§4.61), and deleting one cascades its capture rows.
+
 ---
 
 ## 9. What Is NOT In This Database
@@ -3038,6 +3189,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.75 | V68 (#1043, runtime capture) | **V68 — runtime capture of published mutations.** New **§4.62 `execution_capture_sessions`** (administrator windows; one open per route entity and method by a partial unique index; deadline stored at start; stop by window id), **§4.63 `execution_capture_values`** (a captured run's private declared outputs or omission markers, outside the business transaction, bounded by the run's byte budget) and **§4.64 `execution_capture_runs`** (the closing summary the capture status derives from). **§4.61** gains `capture_session_id` / `capture_expires_at`, written by the reserving `INSERT`, whose CTE takes the open window `FOR SHARE` so a stop orders against admission. **§3** ERD lines, **§5** eight index rows, **§7.7** the rollback, **§8.6** the batched purge. Status line follows the changelog (was a stale v1.72). |
 | 2026-11-21 | v1.74 | V67 (#1039, published mutations) | **V67 — published mutation reservations.** New **§4.61 `published_mutation_reservations`**: one row per admitted published POST/PUT/DELETE, written before the run starts; keyed scope and request digests (no raw key, no body; the request digest over the typed values the original pin binds), the live/retired CHECK, the run's origin (route entity, API version, exact pin, method, business path, credential) and the start claim. §3 ERD, §5 (PK, the scope UNIQUE, the credential index) and §5A (derived) updated. **§7.6 Rolling back V67**: no barrier — an older binary refuses every mutation and never reads the table. |
 | 2026-11-21 | v1.73 | 1038 r4 (#1038) | **§ template_versions:** a body fixture's exact text (member order, repeated members, exact numbers) is stored beside the `jsonb` view in a reserved `$exact` member of `tests_json` `input.inputs`; no schema change, no migration (#1080). |
 | 2026-11-21 | v1.72 | V66 follow-up (#1035 r2) | **§8.3** the sweep decides the label in ONE `UPDATE … CASE … RETURNING` (was three ordered UPDATEs that a boundary stamp landing between them could mislabel) and alerts per `OUTCOME_UNKNOWN`; no schema change. |

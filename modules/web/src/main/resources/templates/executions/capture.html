@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layouts/default :: page(~{::content})}">
+<th:block th:fragment="content">
+  <!-- #1043 (ui-screens §4.18d) — the private diagnostic view of ONE captured published mutation. Workspace
+       administrators only (execution.capture.read, interactive session); served no-store. Every value is printed as
+       escaped text (th:text), exactly the JSON the run's declared output serialized to. -->
+  <div class="app-page-h">
+    <div>
+      <h1 class="ds-headline">Captured run <span class="ds-mono" th:text="${detail.executionId}" data-capture-execution>id</span></h1>
+      <p class="app-page-sub">The declared outputs this run's transformer nodes wrote, kept privately until
+        <span class="u-mono" data-capture-expires th:text="${detail.expiresAt}">2026-11-23T10:00:00Z</span>.</p>
+    </div>
+    <div class="app-page-actions">
+      <a class="ds-button ds-button-ghost" th:href="@{'/api-console/endpoints/{id}'(id=${detail.endpointId})}">Back to the API</a>
+    </div>
+  </div>
+
+  <div class="app-alert app-alert-warning u-mb-md" role="note" data-capture-warning>These values are copies of what the
+    pipeline computed and can contain personal data. Do not paste them into tickets or chats.</div>
+
+  <div class="ds-card">
+    <div class="app-card-h">
+      <h2 class="ds-title">Status</h2>
+    </div>
+    <div class="app-card-b">
+      <p class="u-text-sm">
+        <span class="app-chip" data-capture-status th:text="${detail.status.wire}">complete</span>
+        <span>Run: <span class="u-mono" data-capture-execution-status
+                         th:text="${detail.executionStatus != null} ? ${detail.executionStatus} : 'not started'">SUCCESS</span></span>
+        · <span th:text="${detail.method}">POST</span>
+        · admitted <span class="u-mono" th:text="${detail.admittedAt}">…</span>
+      </p>
+      <p class="u-text-sm u-secondary" th:if="${detail.summary != null}" data-capture-summary
+         th:text="${detail.summary.valuesCaptured} + ' kept, ' + ${detail.summary.valuesOmitted} + ' omitted, ' + ${detail.summary.writeFailures} + ' failed writes, ' + ${detail.summary.bytesUsed} + ' bytes'">2 kept</p>
+      <p class="u-text-sm u-secondary" th:if="${detail.status.wire == 'recording'}">The run is still going: more values may arrive.</p>
+      <p class="u-text-sm u-secondary" th:if="${detail.status.wire == 'incomplete'}">Some values may be missing: a
+        diagnostic write failed or the run's closing summary was not written. The business run was not affected.</p>
+      <p class="u-text-sm u-secondary" th:if="${#lists.isEmpty(detail.values) and detail.status.wire == 'complete'}"
+         data-capture-empty>The run finished without writing any declared value output.</p>
+    </div>
+  </div>
+
+  <div class="ds-card" th:if="${not #lists.isEmpty(detail.values)}">
+    <div class="app-card-h">
+      <h2 class="ds-title">Declared outputs</h2>
+    </div>
+    <div class="dt-frame dt-flush">
+      <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table" data-capture-values>
+          <thead>
+          <tr>
+            <th>Node</th>
+            <th>Output</th>
+            <th>Value</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr th:each="v : ${detail.values}" th:attr="data-capture-node=${v.nodeId}">
+            <td class="u-mono" th:text="${v.nodeId}">node</td>
+            <td class="u-mono" th:text="${v.outputKey}">key</td>
+            <td>
+              <pre class="u-mono u-m0" th:if="${v.valueJson != null}" data-capture-value th:text="${v.valueJson}">{}</pre>
+              <span class="app-chip app-chip-warn" th:if="${v.valueJson == null}" data-capture-omitted
+                    th:text="'omitted: ' + ${v.omittedReason}">omitted</span>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</th:block>
+</html>

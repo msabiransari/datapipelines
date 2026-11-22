@@ -43,6 +43,11 @@ class MutationCall(
     val principal: AuthenticatedPrincipal,
     val request: EndpointRequestValidator.Request,
     val input: MutationInput,
+    /**
+     * The request's effective correlation id (rest-api §3.4) — what an administrator's exact capture filter compares
+     * at admission (#1043). Null outside a servlet request; a null never matches a filtered capture.
+     */
+    val correlationId: UUID? = null,
 ) {
     init {
         require(method.isMutation) { "a mutation call: $method" }

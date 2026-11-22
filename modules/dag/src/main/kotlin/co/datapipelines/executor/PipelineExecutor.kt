@@ -597,7 +597,8 @@ class PipelineExecutor(
         run: ExecutionRun,
         startedAt: Instant,
     ): NodeResult {
-        val result = runWithNodeDeadline(node, ctx, run, startedAt)
+        // #1043: a published mutation's ordinary history keeps no node-computed value (ExecuteRequest.privateNodeValues).
+        val result = runWithNodeDeadline(node, ctx, run, startedAt).let { if (run.request.privateNodeValues) it.withoutValues() else it }
         run.stats.completed(result)
         metrics.nodeFinished(run.request.pipelineId, node.id, node.source, Duration.ofMillis(result.durationMs), result.rowsOut)
         // 149: the terminal progress sample precedes the node's own terminal event, always.
@@ -763,7 +764,7 @@ class PipelineExecutor(
                     completedAt = completedAt,
                     durationMs = run.elapsedMsAt(completedAt),
                     nodeStats = stats,
-                    contextSnapshot = run.context.snapshot(),
+                    contextSnapshot = historySnapshot(run),
                     provisional = provisional,
                     // (#1035) The terminal row carries the caller result's counts: a reader can never see a
                     // SUCCESS that had a caller result as one with none, whatever later happens to the store.
@@ -807,7 +808,7 @@ class PipelineExecutor(
                     completedAt = completedAt,
                     durationMs = run.elapsedMsAt(completedAt),
                     nodeStats = stats,
-                    contextSnapshot = run.context.snapshot(),
+                    contextSnapshot = historySnapshot(run),
                     resultUnavailable = unavailable,
                     settlesFamily = true,
                     resultRowCount = delivery.prepared?.totalRows,
@@ -1076,7 +1077,7 @@ class PipelineExecutor(
                     reason = e.reason,
                     abortedAt = abortedAt,
                     nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
-                    contextSnapshot = run.context.snapshot(),
+                    contextSnapshot = historySnapshot(run),
                     settlesFamily = run.localWriteTransaction != null,
                 ),
             )
@@ -1138,7 +1139,7 @@ class PipelineExecutor(
                     reason = reason,
                     abortedAt = abortedAt,
                     nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
-                    contextSnapshot = run.context.snapshot(),
+                    contextSnapshot = historySnapshot(run),
                     settlesFamily = run.localWriteTransaction != null,
                 ),
             )
@@ -1178,6 +1179,14 @@ class PipelineExecutor(
         error: MappedError,
     ): MappedError = if (run.request.boundedDiagnostics) BoundedFailure.of(error) else error
 
+    /**
+     * The Context snapshot the terminal events carry into ordinary history: the whole resolved Context, or — on a run
+     * whose node values are private (#1043, [ExecuteRequest.privateNodeValues]) — only the run's inputs (org config,
+     * platform keys, typed parameters), never a value a node computed.
+     */
+    private fun historySnapshot(run: ExecutionRun): Map<String, Any?> =
+        if (run.request.privateNodeValues) run.context.inputSnapshot() else run.context.snapshot()
+
     private fun pipelineFailed(
         run: ExecutionRun,
         failedAt: Instant,
@@ -1193,7 +1202,7 @@ class PipelineExecutor(
         failedNodeId = failedNodeId,
         error = disclosed(run, error),
         nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
-        contextSnapshot = run.context.snapshot(),
+        contextSnapshot = historySnapshot(run),
         settlesFamily = run.localWriteTransaction != null,
     )
 
@@ -1416,6 +1425,8 @@ class PipelineExecutor(
             pipelineAdmission = request.pipelineAdmission,
             requestBody = request.requestBody,
             boundedDiagnostics = request.boundedDiagnostics,
+            privateNodeValues = request.privateNodeValues,
+            valueCapture = request.valueCapture,
             // §3.3: the family's transaction — a child inherits the root's through its request;
             // a root uses the one its planning gate enrolled. Null on ordinary runs.
             localWriteTransaction = request.localWriteTransaction ?: run.localWriteTransaction,

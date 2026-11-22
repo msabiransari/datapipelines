@@ -300,6 +300,8 @@ class SubPipelineExecutionRunner(
         parameters = resolveParameters(node, child, ctx),
         // #1038: a child of a body execution keeps the parent's bounded diagnostics.
         inheritedBoundedDiagnostics = ctx.boundedDiagnostics,
+        // #1043: a published mutation's child keeps node values out of ordinary history too; it records no capture.
+        privateNodeValues = ctx.privateNodeValues,
         triggeredVia = ExecutionTrigger.PIPELINE,
         executionId = childExecutionId,
         directSink = sinkFor(node, ctx, outcome),

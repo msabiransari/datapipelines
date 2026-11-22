@@ -68,6 +68,9 @@ class WebPropertiesSpecDriftTest {
         // #1038 — the structured request body's envelope budget, shared by every body-accepting surface.
         documented.getValue("datapipelines.endpoints.body-max-bytes") shouldBe props.bodyMaxBytes.toString()
         documented.getValue("datapipelines.endpoints.body-max-depth") shouldBe props.bodyMaxDepth.toString()
+        // #1043 — the runtime capture window and the captured detail's retention from admission.
+        documented.getValue(CaptureDurations.WINDOW_KEY) shouldBe props.captureWindowSeconds.toString()
+        documented.getValue(CaptureDurations.RETENTION_KEY) shouldBe props.captureDetailRetentionHours.toString()
     }
 
     @Test

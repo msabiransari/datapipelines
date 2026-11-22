@@ -31,6 +31,8 @@ import co.datapipelines.auth.Permission.ENDPOINT_UNPUBLISH
 import co.datapipelines.auth.Permission.ENDPOINT_VERSION_MANAGE
 import co.datapipelines.auth.Permission.EXECUTION_CANCEL
 import co.datapipelines.auth.Permission.EXECUTION_CANCEL_ALL
+import co.datapipelines.auth.Permission.EXECUTION_CAPTURE_MANAGE
+import co.datapipelines.auth.Permission.EXECUTION_CAPTURE_READ
 import co.datapipelines.auth.Permission.EXECUTION_READ
 import co.datapipelines.auth.Permission.EXECUTION_READ_ALL
 import co.datapipelines.auth.Permission.EXECUTION_RESULT_READ
@@ -293,6 +295,10 @@ object RolePermissions {
                 // deployment exports, the workspace admin imports. SUPER_ADMIN holds both automatically.
                 VISUALIZATION_IMPORT,
                 DASHBOARD_IMPORT,
+                // #1043 — runtime capture of a published mutation: open/list/stop a window, inspect its private
+                // details. SESSION_ONLY: the key-role column of the same name does not carry them.
+                EXECUTION_CAPTURE_MANAGE,
+                EXECUTION_CAPTURE_READ,
             )
 
     /**
@@ -342,6 +348,14 @@ object RolePermissions {
     val SYSTEM_ONLY: Set<Permission> = setOf(LAKE_MAINTAIN)
 
     /**
+     * #1043 — the permissions only an interactive SESSION may hold: a workspace admin's and a super admin's, never a key's.
+     * [of] a [KeyRole] subtracts them from the member column it reads (an administrator-role `mcp` key holds neither), and
+     * `ScopeMatrix` refuses them to every key principal before it asks the resolver. auth.md §7.6 marks every key-role cell
+     * of their rows ✗ (`ScopeMatrixSpecDriftTest`).
+     */
+    val SESSION_ONLY: Set<Permission> = setOf(EXECUTION_CAPTURE_MANAGE, EXECUTION_CAPTURE_READ)
+
+    /**
      * D7: a super admin holds every permission in every workspace — except the [FENCED] ones, which are nobody's, and the
      * [SYSTEM_ONLY] ones, which are the system identity's alone (#957).
      */
@@ -374,7 +388,10 @@ object RolePermissions {
             WorkspaceRole.WORKSPACE_ADMIN -> WORKSPACE_ADMIN
         }
 
-    /** Every permission a key of [role] holds — one key-role column of the table (keys v2 B1: the union enum). */
+    /**
+     * Every permission a key of [role] holds — one key-role column of the table (keys v2 B1: the union enum). A member key
+     * role reads its member column minus the [SESSION_ONLY] permissions (#1043).
+     */
     fun of(role: KeyRole): Set<Permission> =
         when (role) {
             KeyRole.API_CALLER -> API_CALLER
@@ -382,7 +399,7 @@ object RolePermissions {
             KeyRole.DASHBOARD_VIEWER -> DASHBOARD_VIEWER
             KeyRole.AUTHOR -> AUTHOR
             KeyRole.PROMOTER -> PROMOTER
-            KeyRole.WORKSPACE_ADMIN -> WORKSPACE_ADMIN
+            KeyRole.WORKSPACE_ADMIN -> WORKSPACE_ADMIN - SESSION_ONLY
         }
 
     /**

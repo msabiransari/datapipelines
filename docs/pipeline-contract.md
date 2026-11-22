@@ -1938,6 +1938,17 @@ The session-only dependency tree routes' refusals (#875; [REST API §25](rest-ap
 | `dependencies.metadata.unavailable` | 503 | the metadata walk ran past its `metadata-timeout-seconds` deadline, a statement hit its bound, or a provider's read failed, so no tree is answered. Retryable: `Retry-After: 5`. Logged at WARN without a stack; no `details` |
 | `dependencies.response.too_large` | 503 | the projected tree is still larger than `max-wire-bytes` after it was reduced to its roots. No partial tree is answered. Logged at ERROR with the stack (a server-side configuration defect) |
 
+### 13.27 Runtime capture
+
+A workspace administrator's temporary capture of a published mutation's declared transformer outputs (#1043; [REST API §26](rest-api.md#26-runtime-capture-of-published-mutations), published-mutation-apis design record §6, §7). Every route answers interactive sessions only (`execution.capture.manage` / `execution.capture.read`, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)); a key is refused before these codes are reached. No captured value, filter text or route input is ever echoed in an error.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `execution.capture.already_active` | 409 | A capture window is already active for this route entity and method in the workspace. `details.capture_id` names it; stop it before opening another. A window past its deadline does not count — the next start closes it as expired |
+| `execution.capture.not_found` | 404 | No capture window with that id on that route, or no captured detail for that execution, in the selected workspace. An execution that was never captured, another workspace's execution and an unknown id answer the same |
+| `execution.capture.expired` | 410 | The execution was captured, but its private details passed `expires_at` (admission + `datapipelines.endpoints.capture-detail-retention-hours`). Refused on every read from that instant, whether or not the retention tick has deleted the rows yet; `details.expired_at` carries the instant |
+| `execution.capture.invalid` | 400 | The start is refused before anything is written: the route is a `GET` (`details.reason` = `method_not_capturable`), the correlation filter is not one UUID (`correlation_id_invalid`), or the body cannot be read: not JSON, or past the [§13.21](#1321-request-limits) bounds (`malformed_json`) |
+
 ---
 ## 14. Pipeline Lifecycle Operations
 
@@ -2181,6 +2192,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.114 | 1043 (#1043) | New **§13.27 Runtime capture**: `execution.capture.already_active` (409), `execution.capture.not_found` (404), `execution.capture.expired` (410) and `execution.capture.invalid` (400). Landed in the SAME commit as the constants and `ApiErrorCatalog` rows (§13 row count 536 → 540). |
 | 2026-11-22 | v1.113 | 1040 (#1040) | §13.14 `endpoint.promotion.method_unsupported` narrowed: a method route now travels exactly pinned (REST §18.2), so the code refuses only what cannot travel exactly — on the sender a target that does not advertise `endpoint_capabilities` for the route (`details.target_advertises` added beside `unsupported_routes`), on the receiver an entry lacking its pin, hash or a known body mode, or carrying node bindings. No code added or removed; the catalog's status is unchanged (§13 row count unchanged). |
 | 2026-11-21 | v1.112 | 1036 r2 (#1036) | **§4.4 qualification (additive):** an insert is also refused `dml_insert_unqualified` when its declared key type was not measured on the dialect (`details.key_type`); PostgreSQL measured `INTEGER`, `BIGINTEGER` and `STRING`. The error catalog row names the new detail. No new code, status or field. |
 | 2026-11-21 | v1.111 | 1036 (#1036) | **§13.3 (additive):** `pipeline.execution.local_write_refused` names two more `details.reason` values from run admission's engine qualification (dag-executor §16.6) — `unqualified_transactional_target` (the plan's registration is on an engine whose transaction is not qualified; Oracle today) and `unqualified_write_operation` (an enrolled write's operation is not qualified on the engine) — and `registration_ineligible` also covers a registration repointed to an unqualified engine. No new code, status or field. The Status line, left at v1.107 by the three #1038 rounds, now reads the latest version. |

@@ -91,6 +91,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/ExecutorRules.kt",
                 // #957 — the scheduler-threads rule for lake maintenance (D9), split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/SchedulerThreadsRules.kt",
+                // #1043 — the §3.22 capture window and detail retention, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/EndpointCaptureRules.kt",
             )
     }
 }
