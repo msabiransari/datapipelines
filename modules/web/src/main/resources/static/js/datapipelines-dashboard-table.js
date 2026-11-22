@@ -20,6 +20,26 @@
 
   var FORMATS = ["text", "number", "integer", "percent", "date", "datetime"];
 
+  // A DATE cell arrives as date-only text, `uuuu-MM-dd` (the server's JsonEncoder): a calendar day, not an instant.
+  var DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+  // #1081: the text of a date-only value naming a real day, as that day in the viewer's locale — or null.
+  // `new Date("2026-09-01")` is midnight UTC, which a viewer west of UTC reads as the day before; the day is
+  // built in UTC and written with the zone fixed to UTC. `setUTCFullYear`, never `Date.UTC`: the latter reads
+  // a year of 0 to 99 as 1900 + that year. A text with a time (an instant), or naming no real day
+  // (`2026-02-31`), returns null and keeps the path it always had.
+  function dateOnlyText(value) {
+    var match = typeof value === "string" ? DATE_ONLY.exec(value) : null;
+    if (!match) return null;
+    var year = Number(match[1]);
+    var month = Number(match[2]) - 1;
+    var day = Number(match[3]);
+    var date = new Date(0);
+    date.setUTCFullYear(year, month, day);
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month || date.getUTCDate() !== day) return null;
+    return date.toLocaleDateString(undefined, { timeZone: "UTC" });
+  }
+
   function format(value, format) {
     if (value === null || value === undefined || value === "") return "";
     switch (format) {
@@ -29,8 +49,10 @@
         return Math.round(Number(value)).toLocaleString();
       case "percent":
         return (Number(value) * 100).toLocaleString() + "%";
-      case "date":
-        return new Date(value).toLocaleDateString();
+      case "date": {
+        var dayText = dateOnlyText(value);
+        return dayText !== null ? dayText : new Date(value).toLocaleDateString();
+      }
       case "datetime":
         return new Date(value).toLocaleString();
       default:
