@@ -3,7 +3,7 @@
 **Status:** v1.28 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** (all other specs — this spec operationalizes them into code structure)
-**Last updated:** 2026-11-21
+**Last updated:** 2026-11-22
 
 ---
 
