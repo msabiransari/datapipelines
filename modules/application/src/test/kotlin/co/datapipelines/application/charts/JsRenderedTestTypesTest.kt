@@ -22,7 +22,8 @@ import org.junit.jupiter.api.TestInstance
  *
  * Also in the sandbox: the checker's arc bounds (A.3) and G7's planted rectangle 2 px beyond the frame, on test_plain
  * (brief 1049) and on test_grid (brief 1051); and the second value axis on the inputs of brief 1051's round-3, round-4
- * and round-5 corrections, which no picture can carry (`second-axis-probes.js`, compared with Node's `second-axis-probes.json`). A
+ * and round-5 corrections (`second-axis-probes.js`, compared with Node's `second-axis-probes.json`). Since #1059,
+ * their extreme numbers fit in pictures too; `tick-texts.test.mjs` A.7 checks whole charts at those ends. A
  * process without the isolate fails at [JsRenderedSandbox]'s construction; nothing here skips.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
