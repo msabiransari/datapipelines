@@ -225,7 +225,8 @@ class ScopedStylesheetTest {
     ) {
         val refusal = shouldThrow<ScopedStylesheet.Refusal> { ScopedStylesheet.scope(source, SCOPE) }
         println("1065|R4|gated|$label|${refusal.message}")
-        val words = if (codePoint == "U+005C") "an escape outside a quoted string" else "a character the scoping refuses outside a quoted string"
+        val words =
+            if (codePoint == "U+005C") "an escape outside a quoted string" else "a character the scoping refuses outside a quoted string"
         refusal.message.orEmpty() shouldContain "$words ($codePoint, line 1): "
     }
 
@@ -364,7 +365,9 @@ class ScopedStylesheetTest {
          * round wrote it (the label names the test it came from), and the code point the gate names, all on line 1.
          */
         @JvmStatic
-        fun gated(): List<Arguments> =
+        fun gated(): List<Arguments> = GATED
+
+        private val GATED: List<Arguments> =
             listOf(
                 Arguments.of("R2 beginning: html\\.x", "html\\.x .y { c: d }", "U+005C"),
                 Arguments.of("R2 beginning: bodyé", "bodyé { c: d }", "U+00E9"),
@@ -398,7 +401,11 @@ class ScopedStylesheetTest {
                     ".a { width: 1REM; height: 1Rem; margin: 1\\72 em; padding: 1e1rem }",
                     "U+005C",
                 ),
-                Arguments.of("R3 text: C2 a name with an escaped digit before rem", ".a { animation-name: a\\31rem; width: 1rem }", "U+005C"),
+                Arguments.of(
+                    "R3 text: C2 a name with an escaped digit before rem",
+                    ".a { animation-name: a\\31rem; width: 1rem }",
+                    "U+005C",
+                ),
                 Arguments.of(
                     "R3 text: C2 the same name in a keyframes prelude and its use",
                     "@keyframes a\\31rem { to { width: 1rem } } .a { animation: a\\31rem 1s }",

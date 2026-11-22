@@ -109,7 +109,9 @@ class ScopedStylesheetSheetsTest {
         println("1065|R4|sheets|six bytes=${six.toByteArray().size} sha256=${sha256(six)} (round 3: 146006, 022b545f…5d3d5f)|$themes")
         assertSoftly {
             withClue("quoted strings (floor 1)") { totals.strings shouldBeGreaterThanOrEqual 1 }
-            withClue("comments holding a non-ASCII character (floor 1: the walk sees them)") { totals.nonAsciiInComments shouldBeGreaterThanOrEqual 1 }
+            withClue("non-ASCII characters inside comments (floor 1: the walk sees them)") {
+                totals.nonAsciiInComments shouldBeGreaterThanOrEqual 1
+            }
             withClue("backslashes anywhere") { totals.backslashes shouldBe 0 }
             withClue("characters outside comments and strings beyond the alphabet") { totals.outsideAlphabet shouldBe 0 }
             withClue("non-ASCII characters outside comments") { totals.nonAsciiOutsideComments shouldBe 0 }
@@ -352,42 +354,55 @@ class ScopedStylesheetSheetsTest {
                     )
                 var i = 0
                 while (i < text.length) {
-                    val c = text[i]
-                    when {
-                        text.startsWith("/*", i) -> {
-                            val end = text.indexOf("*/", i + 2)
-                            val comment = if (end < 0) text.substring(i) else text.substring(i, end)
-                            counted = counted.copy(nonAsciiInComments = counted.nonAsciiInComments + comment.count { it.code > ASCII_LAST })
-                            if (end < 0) return counted.copy(unterminated = counted.unterminated + 1)
-                            i = end + 2
+                    val (next, part) =
+                        when {
+                            text.startsWith("/*", i) -> comment(text, i)
+                            text[i] == '"' || text[i] == '\'' -> string(text, i)
+                            else -> i + 1 to outside(text[i])
                         }
-
-                        c == '"' || c == '\'' -> {
-                            val end = text.indexOf(c, i + 1)
-                            if (end < 0) return counted.copy(unterminated = counted.unterminated + 1)
-                            val inner = text.substring(i + 1, end)
-                            val plain = inner.none { it == '\n' || it == '\r' || it == '\u000C' || it == '\\' || it.code > ASCII_LAST }
-                            counted =
-                                counted.copy(
-                                    strings = counted.strings + 1,
-                                    stringsNotPlain = counted.stringsNotPlain + if (plain) 0 else 1,
-                                    nonAsciiOutsideComments = counted.nonAsciiOutsideComments + inner.count { it.code > ASCII_LAST },
-                                )
-                            i = end + 1
-                        }
-
-                        else -> {
-                            val inAlphabet = (c in ' '..'~' && c != '\\') || c == '\t' || c == '\n' || c == '\r'
-                            counted =
-                                counted.copy(
-                                    outsideAlphabet = counted.outsideAlphabet + if (inAlphabet) 0 else 1,
-                                    nonAsciiOutsideComments = counted.nonAsciiOutsideComments + if (c.code > ASCII_LAST) 1 else 0,
-                                )
-                            i += 1
-                        }
-                    }
+                    counted = counted.plus(part)
+                    if (part.unterminated > 0) return counted
+                    i = next
                 }
                 return counted
+            }
+
+            /** The comment at [at]: the index after it and its non-ASCII characters (or the end, unterminated). */
+            private fun comment(
+                text: String,
+                at: Int,
+            ): Pair<Int, SheetAlphabet> {
+                val end = text.indexOf("*/", at + 2)
+                val inner = if (end < 0) text.substring(at) else text.substring(at, end)
+                val part = SheetAlphabet(nonAsciiInComments = inner.count { it.code > ASCII_LAST }, unterminated = if (end < 0) 1 else 0)
+                return (if (end < 0) text.length else end + 2) to part
+            }
+
+            /** The quoted string at [at] (the sheets hold no backslash, so its end is the next same quote). */
+            private fun string(
+                text: String,
+                at: Int,
+            ): Pair<Int, SheetAlphabet> {
+                val end = text.indexOf(text[at], at + 1)
+                if (end < 0) return text.length to SheetAlphabet(unterminated = 1)
+                val inner = text.substring(at + 1, end)
+                val plain = inner.none { it == '\n' || it == '\r' || it == '\u000C' || it == '\\' || it.code > ASCII_LAST }
+                val part =
+                    SheetAlphabet(
+                        strings = 1,
+                        stringsNotPlain = if (plain) 0 else 1,
+                        nonAsciiOutsideComments = inner.count { it.code > ASCII_LAST },
+                    )
+                return end + 1 to part
+            }
+
+            /** One character outside comments and strings. */
+            private fun outside(c: Char): SheetAlphabet {
+                val inAlphabet = (c in ' '..'~' && c != '\\') || c == '\t' || c == '\n' || c == '\r'
+                return SheetAlphabet(
+                    outsideAlphabet = if (inAlphabet) 0 else 1,
+                    nonAsciiOutsideComments = if (c.code > ASCII_LAST) 1 else 0,
+                )
             }
 
             private const val ASCII_LAST = 0x7F

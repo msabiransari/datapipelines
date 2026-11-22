@@ -126,10 +126,18 @@ class ScopedStylesheetGateTest {
                 Arguments.of("a lone low surrogate", ".a\uDC00 { b: c }", "$OUTSIDE (U+DC00, line 1): .a\uDC00 { b: c }"),
                 Arguments.of("a surrogate pair names its code point", ".a😀 { b: c }", "$OUTSIDE (U+1F600, line 1): .a😀 { b: c }"),
                 Arguments.of("a backslash at the end of the source", ".a { b: c } \\", "$ESCAPE (U+005C, line 1): .a { b: c } \\"),
-                Arguments.of("an unquoted url holding a non-ASCII letter", ".a { background: url(/i/é.svg) }", "$OUTSIDE (U+00E9, line 1): .a { background: url(/i/é.svg) }"),
+                Arguments.of(
+                    "an unquoted url holding a non-ASCII letter",
+                    ".a { background: url(/i/é.svg) }",
+                    "$OUTSIDE (U+00E9, line 1): .a { background: url(/i/é.svg) }",
+                ),
                 Arguments.of("a raw LF in a string", ".a { content: \"a\nb\" }", "$BREAK (U+000A, line 1): .a { content: \"a"),
                 Arguments.of("a raw CR in a string", ".a { content: 'a\rb' }", "$BREAK (U+000D, line 1): .a { content: 'a"),
-                Arguments.of("a raw form feed in a string", ".a { content: \"a\u000Cb\" }", "$BREAK (U+000C, line 1): .a { content: \"a\u000Cb\" }"),
+                Arguments.of(
+                    "a raw form feed in a string",
+                    ".a { content: \"a\u000Cb\" }",
+                    "$BREAK (U+000C, line 1): .a { content: \"a\u000Cb\" }",
+                ),
                 Arguments.of(
                     "the line is counted over LF",
                     ".a { b: c }\n.b { d: e }\n.c .d { f: g }\n",
@@ -171,7 +179,11 @@ class ScopedStylesheetGateTest {
                 Arguments.of("an unterminated string", ".a { content: \"abc }", "an unterminated string"),
                 Arguments.of("an unterminated string holding a non-ASCII letter", ".a { content: 'é }", "an unterminated string"),
                 Arguments.of("an unterminated comment", ".a { b: c } /* open", "an unterminated comment at offset 12"),
-                Arguments.of("an unterminated comment holding a non-ASCII letter", ".a { b: c } /* é", "an unterminated comment at offset 12"),
+                Arguments.of(
+                    "an unterminated comment holding a non-ASCII letter",
+                    ".a { b: c } /* é",
+                    "an unterminated comment at offset 12",
+                ),
             )
 
         /** Admitted (item 4): an escape or a non-ASCII character inside a string or a comment, the string byte for byte. */

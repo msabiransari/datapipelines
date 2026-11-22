@@ -28,11 +28,19 @@ import java.math.RoundingMode
  *   does the text of a string, of a name or of a `url(…)` token, which is not a length: it leaves byte for byte as it
  *   entered. The value is read as a run of tokens ([CssText.mapDimension]): only a number whose unit is `rem` changes.
  *
+ * The gate comes first (#1065 round 4; owner ruling 2026-11-22, "Refuse at entry"): "The transform refuses, at build
+ * and naming the place, any backslash escape or non-ASCII character outside comments and quoted strings."
+ * [CssText.gate] reads the source ONCE, before any rule is read: outside a comment and a quoted string only U+0020 to
+ * U+007E without the backslash, tab, LF and CR pass; a string holding an unescaped line break (LF, CR or form feed) is
+ * refused; a string or a comment that never ends is refused as before. The refusal names the code point, the line and
+ * that line's text. Inside a comment or a string anything passes (a glyph or an escape in `content: "…"` leaves byte for
+ * byte). So the reader below meets only that alphabet outside strings, where Kotlin's whitespace, digit and letter are
+ * CSS's (ScopedStylesheetAlphabetTest walks it).
+ *
  * Every decision made by a CSS name, keyword or unit (a root form, a page element, a pseudo-class, an at-rule, a
- * property on the page element, `url`, the unit `rem`) is made on the token's DECODED value, ASCII case folded, read by
- * the one name reader [CssText.name] (#1065 round 3): `\62ody` is `body`, `u\72l(` opens a url, `1REM` is a length,
- * `:ROOT` is `:root`. What the reader cannot classify with certainty (an escape before a line break, an at-rule name
- * written with an escape) is refused, naming it: never a guess toward admitting a selector or rewriting text.
+ * property on the page element, `url`, the unit `rem`) is made on the whole token, ASCII case folded, read by the one
+ * name reader [CssText.name]: `1REM` is a length, `:ROOT` is `:root`, `html-view` is not `html`. What the reader cannot
+ * classify with certainty is refused, naming it: never a guess toward admitting a selector or rewriting text.
  *
  * A refusal ([Refusal]) is a refusal of the build's own input: the real sheets are scoped by a test, so a sheet this
  * cannot scope is a red test naming the rule, never a wrong stylesheet in front of a host.
@@ -107,6 +115,7 @@ object ScopedStylesheet {
         source: String,
         scope: String,
     ): Scoped {
+        CssText.gate(source)
         val run = Run()
         val (inner, hoisted) = run.rules(CssText.stripComments(source), top = true)
         val text = hoisted.joinToString("") { it + "\n" } + scope + " {\n" + inner.joinToString("\n") + "\n}\n"
@@ -253,15 +262,13 @@ object ScopedStylesheet {
             }
     }
 
-    /** The at-rule's name, decoded and case folded; a name written with an escape is refused, as before round 3. */
+    /** The at-rule's name, ASCII case folded. */
     private fun atName(prelude: String): String {
         if (prelude.length < 2 || !CssText.startsName(prelude, 1)) throw Refusal("an at-rule without a name: $prelude")
-        val end = CssText.name(prelude, 1).second
-        if ('\\' in prelude.substring(1, end)) throw Refusal("an at-rule whose name holds an escape: ${prelude.take(PRELUDE_SHOWN)}")
-        return CssText.fold(prelude.substring(1, end))
+        return CssText.fold(CssText.name(prelude, 1).first)
     }
 
-    /** Whether [selector] is exactly `:root`, `html` or `body`, read as a token (escapes decoded, ASCII case folded). */
+    /** Whether [selector] is exactly `:root`, `html` or `body`, read as a token (ASCII case folded). */
     private fun exactRoot(selector: String): Boolean = rootStart(selector) == selector.length
 
     /** Whether [selector] is exactly `html` or `body`, read as a token: a rule on the page element. */
@@ -270,8 +277,8 @@ object ScopedStylesheet {
     /**
      * The combinator that follows the root's own compound in [rest] (what is written onto the root without a space):
      * null when nothing follows, `descendant`, `child`, or the sibling forms `+`, `~`, `||`. Brackets and parentheses
-     * are skipped whole, so `[data-a~="b"]` and `:has(+ .x)` are part of the compound; so is an escape, read by the name
-     * reader, so the escaped space of `.a\ b` and the space that ends `\31 ` never read as a combinator.
+     * are skipped whole, so `[data-a~="b"]` and `:has(+ .x)` are part of the compound; so is a quoted string, so a space
+     * inside `"a b"` never reads as a combinator.
      */
     internal fun firstCombinator(rest: String): String? {
         var i = 0
@@ -279,7 +286,7 @@ object ScopedStylesheet {
             i =
                 when (rest[i]) {
                     '[', '(' -> CssText.closing(rest, i)
-                    '\\' -> CssText.name(rest, i).second
+                    '"', '\'' -> CssText.stringEnd(rest, i) + 1
                     else -> i + 1
                 }
         }
@@ -321,7 +328,7 @@ object ScopedStylesheet {
     /**
      * Whether [selector] holds `:root`, `html` or `body` as a selector token (D2), at any depth of the parentheses of a
      * [SELECTOR_FUNCTIONS] function. Read token by token: an attribute selector and a string are skipped whole, a class
-     * or an id is a name and never a root, and an escaped name is read unescaped.
+     * or an id is a name and never a root.
      */
     internal fun namesRoot(selector: String): Boolean {
         var i = 0
@@ -369,8 +376,8 @@ object ScopedStylesheet {
     }
 
     /**
-     * The index just after the root form [source] begins with, as a whole token (`:root`, `html` or `body`, escapes
-     * decoded, ASCII case folded), or null: `html-view`, `body|a` (a namespace prefix) and `:root-x` begin with none.
+     * The index just after the root form [source] begins with, as a whole token (`:root`, `html` or `body`, ASCII case
+     * folded), or null: `html-view`, `body|a` (a namespace prefix) and `:root-x` begin with none.
      */
     private fun rootStart(source: String): Int? {
         val end =
@@ -393,7 +400,7 @@ object ScopedStylesheet {
     /**
      * The pseudo-class or pseudo-element at [colon]: whether it is or holds a root form, and the index after it. The
      * argument of a [SELECTOR_FUNCTIONS] function is read whole, an nth function's too: its An+B part (`odd`, `2n+1`)
-     * holds no root form, so its `of`, however written (`\6f f`, `of:root`), needs no finding.
+     * holds no root form, so its `of`, however written (`of .x`, `of:root`), needs no finding.
      */
     private fun pseudo(
         selector: String,
@@ -422,6 +429,70 @@ internal object CssText {
         val prelude: String,
         val body: String?,
     )
+
+    /**
+     * The gate (#1065 round 4; owner ruling 2026-11-22): outside a comment and a quoted string every character of [css]
+     * is in the alphabet ([inAlphabet]), and a string holds no unescaped line break, where the reader and a browser would
+     * disagree on its end. A comment and the rest of a string may hold anything. A string or a comment that never ends is
+     * left to [stripComments], which refuses it as before. The first offence is refused, naming its code point, its line
+     * and that line's text.
+     */
+    fun gate(css: String) {
+        var i = 0
+        while (i < css.length) {
+            i =
+                when {
+                    css.startsWith("/*", i) -> css.indexOf("*/", i + 2).takeIf { it >= 0 }?.plus(2) ?: return
+                    css[i] == '"' || css[i] == '\'' -> quotedEnd(css, i) ?: return
+                    inAlphabet(css[i]) -> i + 1
+                    css[i] == '\\' -> throw offence(css, i, "an escape outside a quoted string")
+                    else -> throw offence(css, i, "a character the scoping refuses outside a quoted string")
+                }
+        }
+    }
+
+    /** The gate's alphabet: U+0020 to U+007E without the backslash, and tab, LF and CR (a Windows checkout). */
+    fun inAlphabet(c: Char): Boolean = (c in ' '..'~' && c != '\\') || c == '\t' || c == '\n' || c == '\r'
+
+    /** The index after the quote that closes the string opened at [open], or null when none does; a raw line break is refused. */
+    private fun quotedEnd(
+        css: String,
+        open: Int,
+    ): Int? {
+        var i = open + 1
+        while (i < css.length) {
+            val c = css[i]
+            i =
+                when {
+                    c == css[open] -> return i + 1
+                    c in LINE_BREAKS -> throw offence(css, i, "a line break inside a quoted string")
+                    c == '\\' && css.startsWith("\r\n", i + 1) -> i + ESCAPED_CRLF
+                    c == '\\' -> i + 2
+                    else -> i + 1
+                }
+        }
+        return null
+    }
+
+    /** The gate's refusal of the character at [at]: what it is, its code point, its line, and that line's text. */
+    private fun offence(
+        css: String,
+        at: Int,
+        what: String,
+    ): ScopedStylesheet.Refusal {
+        var line = 1
+        var start = 0
+        for (k in 0 until at) {
+            if (css[k] == '\n' || (css[k] == '\r' && !css.startsWith("\n", k + 1))) {
+                line += 1
+                start = k + 1
+            }
+        }
+        var end = start
+        while (end < css.length && css[end] != '\n' && css[end] != '\r') end += 1
+        val codePoint = "U+" + "%04X".format(css.codePointAt(at))
+        return ScopedStylesheet.Refusal("$what ($codePoint, line $line): ${css.substring(start, end).take(PRELUDE_SHOWN)}")
+    }
 
     /** [css] with every comment replaced by one space; a comment marker inside a string is text. */
     fun stripComments(css: String): String {
@@ -615,11 +686,10 @@ internal object CssText {
     }
 
     /**
-     * [text] read as a run of tokens, with every number whose unit (decoded, ASCII case folded) is [unit] written as its
-     * sign and [convert] of its magnitude. Every other token leaves byte for byte: a string; a name, never looked into
-     * (`a\31rem`, `x-1rem`); a name followed by `(` that decodes to `url` (`url(`, `URL(`, `u\72l(`), with the address
-     * up to its `)`, quoted or not; a hash (`#a1rem`); a number with another unit (`1remx`, `1em`); any other character.
-     * A backslash that begins no escape is refused.
+     * [text] read as a run of tokens, with every number whose unit (ASCII case folded) is [unit] written as its sign and
+     * [convert] of its magnitude. Every other token leaves byte for byte: a string; a name, never looked into (`a1rem`,
+     * `x-1rem`); a name followed by `(` that folds to `url` (`url(`, `URL(`), with the address up to its `)`, quoted or
+     * not; a hash (`#a1rem`); a number with another unit (`1remx`, `1em`); any other character.
      */
     fun mapDimension(
         text: String,
@@ -639,8 +709,7 @@ internal object CssText {
                 when {
                     c == '"' || c == '\'' -> stringEnd(text, i) + 1
                     startsIdent(text, i) -> identEnd(text, i)
-                    c == '#' && i + 1 < text.length && (isNameChar(text[i + 1]) || text[i + 1] == '\\') -> name(text, i + 1).second
-                    c == '\\' -> throw unreadable(text, i)
+                    c == '#' && i + 1 < text.length && isNameChar(text[i + 1]) -> name(text, i + 1).second
                     else -> i + 1
                 }.coerceAtMost(text.length)
             out.append(text, i, end)
@@ -650,7 +719,7 @@ internal object CssText {
     }
 
     /**
-     * The number at [from] (ending at [number]) and its unit, written to [out]: converted when the unit decodes to
+     * The number at [from] (ending at [number]) and its unit, written to [out]: converted when the unit folds to
      * [unit], byte for byte otherwise. Returns the index after the token.
      */
     private fun dimension(
@@ -672,7 +741,7 @@ internal object CssText {
         return after
     }
 
-    /** The index after the name at [from]; for a name that decodes to `url` followed by `(`, after the url token's `)`. */
+    /** The index after the name at [from]; for a name that folds to `url` followed by `(`, after the url token's `)`. */
     private fun identEnd(
         text: String,
         from: Int,
@@ -724,29 +793,14 @@ internal object CssText {
         if (at >= text.length) return false
         val c = text[at]
         return when (c) {
-            '-' -> at + 1 < text.length && (text[at + 1] == '-' || nameStart(text[at + 1]) || validEscape(text, at + 1))
-            '\\' -> validEscape(text, at)
+            '-' -> at + 1 < text.length && (text[at + 1] == '-' || nameStart(text[at + 1]))
             else -> nameStart(c)
         }
     }
 
     private fun nameStart(c: Char): Boolean = isNameChar(c) && c != '-' && !c.isDigit()
 
-    /** Whether the backslash at [at] begins an escape: anything but a line break or the end follows it. */
-    private fun validEscape(
-        text: String,
-        at: Int,
-    ): Boolean = text[at] == '\\' && at + 1 < text.length && text[at + 1] !in LINE_BREAKS
-
-    private fun unreadable(
-        text: String,
-        at: Int,
-    ) = ScopedStylesheet.Refusal(
-        "an escape the scoping cannot read (a backslash before a line break or at the end): " +
-            text.substring((at - SHOWN_AROUND).coerceAtLeast(0), (at + SHOWN_AROUND).coerceAtMost(text.length)),
-    )
-
-    /** The index just after the `)` that closes a `url(` whose content starts at [from] (a string or an escape skipped). */
+    /** The index just after the `)` that closes a `url(` whose content starts at [from] (a string skipped). */
     private fun urlEnd(
         text: String,
         from: Int,
@@ -756,61 +810,36 @@ internal object CssText {
             i =
                 when (text[i]) {
                     '"', '\'' -> stringEnd(text, i) + 1
-                    '\\' -> i + 2
                     else -> i + 1
                 }
         }
         return i + 1
     }
 
-    /** Whether a CSS name (an identifier) starts at [at]: a letter, `_`, `-`, a non-ASCII character or an escape. */
+    /** Whether a CSS name (an identifier) starts at [at]: a letter, `_` or `-` (the gate lets no escape or non-ASCII through). */
     fun startsName(
         text: String,
         at: Int,
-    ): Boolean = (isNameChar(text[at]) && !text[at].isDigit()) || text[at] == '\\'
+    ): Boolean = isNameChar(text[at]) && !text[at].isDigit()
 
-    /** The CSS name starting at [from], its escapes resolved, and the index just after it. */
+    /** The CSS name starting at [from] (letters, digits, `-` and `_`) and the index just after it. */
     fun name(
         text: String,
         from: Int,
     ): Pair<String, Int> {
-        val out = StringBuilder()
         var i = from
-        while (i < text.length && (isNameChar(text[i]) || text[i] == '\\')) {
-            if (text[i] != '\\') {
-                out.append(text[i])
-                i += 1
-                continue
-            }
-            if (!validEscape(text, i)) throw unreadable(text, i)
-            val hex = HEX_ESCAPE.matchAt(text, i + 1)
-            if (hex != null) {
-                out.appendCodePoint(codePoint(hex.groupValues[1].toInt(HEX)))
-                i = hex.range.last + 1
-            } else {
-                out.append(text[i + 1])
-                i += 2
-            }
-        }
-        return out.toString() to i.coerceAtMost(text.length)
+        while (i < text.length && isNameChar(text[i])) i += 1
+        return text.substring(from, i) to i
     }
 
-    /** The code point an escape names; zero, a surrogate and one beyond Unicode name U+FFFD (CSS Syntax §4.3.7). */
-    private fun codePoint(value: Int): Int =
-        if (value == 0 || value > Character.MAX_CODE_POINT || value in Character.MIN_SURROGATE.code..Character.MAX_SURROGATE.code) {
-            REPLACEMENT_CHARACTER
-        } else {
-            value
-        }
-
-    /** The CSS name that is the whole of [text], decoded, or null when [text] is not exactly one name. */
+    /** The CSS name that is the whole of [text], or null when [text] is not exactly one name. */
     fun wholeName(text: String): String? =
         if (text.isNotEmpty() && startsName(text, 0)) name(text, 0).takeIf { it.second == text.length }?.first else null
 
     /** [text] with ASCII upper case letters lowered and nothing else changed: how CSS compares a name or a keyword. */
     fun fold(text: String): String = buildString(text.length) { for (c in text) append(if (c in 'A'..'Z') c + ('a' - 'A') else c) }
 
-    private fun isNameChar(c: Char): Boolean = c.isLetterOrDigit() || c == '-' || c == '_' || c.code >= NON_ASCII
+    private fun isNameChar(c: Char): Boolean = c.isLetterOrDigit() || c == '-' || c == '_'
 
     /** [text] with the content of every string removed (the quotes kept), for structural checks. */
     fun outsideStrings(text: String): String {
@@ -830,12 +859,6 @@ internal object CssText {
     }
 
     private const val PRELUDE_SHOWN = 80
-    private const val NON_ASCII = 0x80
-    private const val HEX = 16
-    private const val SHOWN_AROUND = 40
-    private const val REPLACEMENT_CHARACTER = 0xFFFD
+    private const val ESCAPED_CRLF = 3
     private const val LINE_BREAKS = "\n\r\u000C"
-
-    /** A hex escape's digits and the one whitespace that may end it (a CR LF pair counts as one, CSS Syntax §3.3). */
-    private val HEX_ESCAPE = Regex("""([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\u000C])?""")
 }

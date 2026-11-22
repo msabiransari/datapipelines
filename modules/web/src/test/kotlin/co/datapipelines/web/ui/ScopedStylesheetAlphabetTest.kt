@@ -15,9 +15,16 @@ import org.junit.jupiter.api.Test
  */
 class ScopedStylesheetAlphabetTest {
     @Test
+    fun `the gate's alphabet is the ruling's, character for character`() {
+        val wrong = (Char.MIN_VALUE..Char.MAX_VALUE).filter { CssText.inAlphabet(it) != inRulingAlphabet(it) }
+        wrong.map { "U+%04X".format(it.code) }.shouldBeEmpty()
+    }
+
+    @Test
     fun `on the alphabet, each character-category call of the class answers as CSS Syntax 4_2 does`() {
         val alphabet = alphabet()
-        println("1065|R4|alphabet|size=${alphabet.size}|${alphabet.joinToString("") { if (it.code < SPACE) "\\u%04X".format(it.code) else "$it" }}")
+        val shown = alphabet.joinToString("") { if (it.code < SPACE) "\\u%04X".format(it.code) else "$it" }
+        println("1065|R4|alphabet|size=${alphabet.size}|$shown")
         alphabet shouldContainAll listOf(' ', '\t', '\n', '\r', '0', '9', 'a', 'Z', '_', '-', '(')
         val wrong =
             alphabet.flatMap { c ->
@@ -41,12 +48,19 @@ class ScopedStylesheetAlphabetTest {
     @Test
     fun `the class's source holds only the character-category and trimming calls the theorem covers`() {
         val source = TestRepoFiles.read(SOURCE)
-        val found = VOCABULARY.findAll(source).map { it.groupValues[1] }.groupingBy { it }.eachCount()
+        val found =
+            VOCABULARY
+                .findAll(source)
+                .map { it.groupValues[1] }
+                .groupingBy { it }
+                .eachCount()
         println("1065|R4|source-guard|found=$found|covered=${COVERED.keys}")
         val uncovered = found.keys - COVERED.keys
         val stale = COVERED.keys - found.keys
-        (uncovered.map { "$it: a call the theorem does not cover (add it to COVERED with its assertion)" } +
-            stale.map { "$it: listed in COVERED but no longer in the source (remove it)" }).shouldBeEmpty()
+        (
+            uncovered.map { "$it: a call the theorem does not cover (add it to COVERED with its assertion)" } +
+                stale.map { "$it: listed in COVERED but no longer in the source (remove it)" }
+        ).shouldBeEmpty()
     }
 
     @Test
@@ -71,8 +85,10 @@ class ScopedStylesheetAlphabetTest {
         VOCABULARY.findAll("a.isWhitespace() b.trim() c.trimStart() d.isDigit() e.isLetterOrDigit()").count() shouldBe 5
     }
 
-    private fun alphabet(): List<Char> = (Char.MIN_VALUE..Char.MAX_VALUE).filter(::inRulingAlphabet)
+    /** The production gate's alphabet, so that a character added to it is walked here. */
+    private fun alphabet(): List<Char> = (Char.MIN_VALUE..Char.MAX_VALUE).filter(CssText::inAlphabet)
 
+    /** The ruling's alphabet, written here: U+0020 to U+007E without the backslash, tab, LF, CR. */
     private fun inRulingAlphabet(c: Char): Boolean = (c in ' '..'~' && c != '\\') || c == '\t' || c == '\n' || c == '\r'
 
     /** CSS Syntax §4.2 on one character of the alphabet (where a CR has become a newline by preprocessing). */
