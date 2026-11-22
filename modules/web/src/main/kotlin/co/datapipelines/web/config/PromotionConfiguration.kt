@@ -224,6 +224,7 @@ class PromotionConfiguration {
             bindings,
             apiKeys,
             pipelines,
+            pins,
         )
 
     /** 178 — the lens's inventory counter rides the real registry; the cache's clock is the JVM's. */

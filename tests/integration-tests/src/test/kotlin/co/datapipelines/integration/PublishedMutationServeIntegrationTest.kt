@@ -10,6 +10,7 @@ import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import io.restassured.RestAssured.given
@@ -105,6 +106,28 @@ class PublishedMutationServeIntegrationTest {
     // -----------------------------------------------------------------------------------------
     // Commit once; GET unchanged
     // -----------------------------------------------------------------------------------------
+
+    @Test
+    fun `the REST management read answers each route's exact pin and its body contract - the GET sibling reads none`() {
+        // #1040: what an author must see before acting on a route, on the REST surface (the MCP tools answer the same).
+        fun read(method: String) =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .queryParam("path", ORDERS)
+                .queryParam("method", method)
+                .get("/api/v1/endpoints")
+                .then()
+                .statusCode(200)
+                .extract()
+                .jsonPath()
+        val post = read("POST")
+        post.getString("data.method") shouldBe "POST"
+        post.getInt("data.pipeline_version") shouldBe 1
+        post.getMap<String, Any?>("data.request_body") shouldBe
+            mapOf("mode" to "required", "readers" to listOf(mapOf("node_id" to "shape", "template" to "$LINES_TEMPLATE@1")))
+        read("GET").getMap<String, Any?>("data.request_body") shouldBe mapOf("mode" to "none", "readers" to emptyList<Any>())
+    }
 
     @Test
     fun `a write-capable POST commits once, answers 200 with its result, and a retry replays it without rerunning`() {
@@ -716,6 +739,18 @@ class PublishedMutationServeIntegrationTest {
             it shouldNotContain CANARY_BODY
             it shouldNotContain CANARY_KEY
         }
+        // #1040: nor the execution row (its parameters_json, error and stats) or its replayable event stream. Both
+        // reads are non-vacuous: the row and at least one event exist and carry the execution's id.
+        text("SELECT row_to_json(e)::text FROM pipeline_executions e WHERE execution_id = '$id'").let {
+            it shouldContain id
+            it shouldNotContain CANARY_BODY
+            it shouldNotContain CANARY_KEY
+        }
+        text("SELECT coalesce(string_agg(row_to_json(v)::text, ' '), '') FROM execution_events v WHERE execution_id = '$id'").let {
+            it shouldContain id
+            it shouldNotContain CANARY_BODY
+            it shouldNotContain CANARY_KEY
+        }
         output.all shouldNotContain CANARY_KEY
         output.all shouldNotContain CANARY_BODY
     }
@@ -834,6 +869,136 @@ class PublishedMutationServeIntegrationTest {
         replay.jsonPath().getString("execution_id") shouldBe id
         hits(HITS) shouldBe after
     }
+
+    /**
+     * #1040 — the same contract through an EXTERNAL HTTP client on the application's own listener, the supported ingress
+     * (there is no bundled proxy: an operator's edge forwards to this listener). The JDK's `java.net.http.HttpClient` is
+     * another client stack than RestAssured's, and it sends what real integrators send: a POST whose nested body streams
+     * CHUNKED (no Content-Length), a repeated PUT under distinct keys, a bodyless DELETE and a DELETE that carries a
+     * declared body (RFC 9110 §9.3.5: content on DELETE has no generally defined semantics — this API defines it per
+     * route, and the JDK client sends it with a Content-Length), a run past the timeout answered 202 and polled to its
+     * result from the originating grant only, and a revoked grant refused.
+     */
+    @Test
+    fun `an external HTTP client posts chunked nested input, repeats PUT, deletes with and without a body, and polls`() {
+        // A nested POST body streamed CHUNKED: a publisher of unknown length makes the client omit Content-Length.
+        val nested = """{"order_no":"ING-1","lines":[{"sku":"ING-1","qty":2},{"sku":"ING-1B","qty":1}]}"""
+        val chunked =
+            java.net.http.HttpRequest.BodyPublishers.fromPublisher(
+                java.net.http.HttpRequest.BodyPublishers
+                    .ofString(nested),
+            )
+        chunked.contentLength() shouldBe -1L
+        val posted = ingress(writer, "POST", "/api$ORDERS", "ingress-post-1", chunked, json = true)
+        withClue(posted.body()) { posted.statusCode() shouldBe 200 }
+        val postedId = jsonOf(posted).path("execution_id").asText()
+        posted.headers().firstValue("DP-Execution-Id").orElse(null) shouldBe postedId
+        skus("ING-1") shouldBe 1
+        skus("ING-1B") shouldBe 1
+
+        // Polling from the originating grant: the status and result URLs the answer handed out.
+        val statusUrl = jsonOf(posted).path("status_url").asText()
+        val resultUrl = jsonOf(posted).path("result_url").asText()
+        ingress(writer, "GET", statusUrl, null).statusCode() shouldBe 200
+        ingress(writer, "GET", resultUrl, null).statusCode() shouldBe 200
+        // Another key of the workspace holding the same POST grant and a GET walk: not found — never the original's
+        // state (the 404 echoes only the id the caller itself sent; no status, no result, no link).
+        ingress(reader, "GET", statusUrl, null).let { other ->
+            other.statusCode() shouldBe 404
+            jsonOf(other).path("error").path("code").asText() shouldBe "result.execution_not_found"
+            other.body() shouldNotContain "\"status\""
+            other.body() shouldNotContain "result_url"
+        }
+
+        // A repeated PUT under distinct keys: two audited executions, one stable final state.
+        val puts = listOf("ingress-put-1", "ingress-put-2").map { ingress(writer, "PUT", "/api$STABLE", it) }
+        puts.forEach { withClue(it.body()) { it.statusCode() shouldBe 200 } }
+        puts.map { jsonOf(it).path("execution_id").asText() }.toSet() shouldHaveSize 2
+        targetCount("SELECT count(*) FROM mut_state WHERE name = 'put-target' AND state = 'set'") shouldBe 1
+
+        // A bodyless DELETE (no Content-Length, no body) and a DELETE carrying its route's declared body.
+        val beforeHits = hits(HITS)
+        val bodyless = ingress(writer, "DELETE", "/api$HITS", "ingress-delete-1")
+        withClue(bodyless.body()) { bodyless.statusCode() shouldBe 200 }
+        hits(HITS) shouldBe beforeHits + 1
+        val withBody =
+            ingress(
+                writer,
+                "DELETE",
+                "/api$ORDERS",
+                "ingress-delete-2",
+                java.net.http.HttpRequest.BodyPublishers
+                    .ofString("""{"order_no":"ING-2","lines":[{"sku":"ING-2","qty":5}]}"""),
+                json = true,
+            )
+        withClue(withBody.body()) { withBody.statusCode() shouldBe 200 }
+        skus("ING-2") shouldBe 1
+    }
+
+    /** #1040 — the external client's long run (202, polled by its originating grant) and a revoked grant's 405. */
+    @Test
+    fun `an external HTTP client polls a run past the timeout and is refused a revoked method`() {
+        // Past the route's timeout: 202 with the business status URL, polled by the originating grant until done.
+        val accepted = ingress(writer, "POST", "/api$SLOW", "ingress-slow-1")
+        withClue(accepted.body()) { accepted.statusCode() shouldBe 202 }
+        val slowId = jsonOf(accepted).path("execution_id").asText()
+        val slowStatus = jsonOf(accepted).path("status_url").asText()
+        slowStatus shouldBe "/api$SLOW/executions/$slowId"
+        awaitStatus(slowId, "SUCCESS")
+        val done = ingress(writer, "GET", slowStatus, null)
+        withClue(done.body()) { done.statusCode() shouldBe 200 }
+        jsonOf(done).path("data").path("status").asText() shouldBe "SUCCESS"
+
+        // Revocation: the key keeps PUT on the path, so DELETE is now 405 naming only PUT, and nothing runs.
+        revoke(writer, HITS, "DELETE")
+        try {
+            val afterRevoke = hits(HITS)
+            val refused = ingress(writer, "DELETE", "/api$HITS", "ingress-delete-revoked")
+            withClue(refused.body()) {
+                refused.statusCode() shouldBe 405
+                refused.headers().firstValue("Allow").orElse("") shouldBe "PUT"
+            }
+            hits(HITS) shouldBe afterRevoke
+        } finally {
+            grant(writer, HITS, "DELETE")
+        }
+    }
+
+    private val ingressClient: java.net.http.HttpClient by lazy {
+        java.net.http.HttpClient
+            .newBuilder()
+            .version(java.net.http.HttpClient.Version.HTTP_1_1)
+            .connectTimeout(java.time.Duration.ofSeconds(CLIENT_TIMEOUT_S))
+            .build()
+    }
+
+    /** One call from the JDK client to the application's own listener (the supported ingress). */
+    private fun ingress(
+        key: Key,
+        method: String,
+        path: String,
+        idempotencyKey: String?,
+        body: java.net.http.HttpRequest.BodyPublisher =
+            java.net.http.HttpRequest.BodyPublishers
+                .noBody(),
+        json: Boolean = false,
+    ): java.net.http.HttpResponse<String> {
+        val request =
+            java.net.http.HttpRequest
+                .newBuilder(java.net.URI.create("http://localhost:$port$path"))
+                .timeout(java.time.Duration.ofSeconds(CLIENT_TIMEOUT_S))
+                .header(API_KEY_HEADER, key.plaintext)
+                .method(method, body)
+        idempotencyKey?.let { request.header(IDEMPOTENCY_HEADER, it) }
+        if (json) request.header("Content-Type", "application/json")
+        return ingressClient.send(
+            request.build(),
+            java.net.http.HttpResponse.BodyHandlers
+                .ofString(),
+        )
+    }
+
+    private fun jsonOf(response: java.net.http.HttpResponse<String>) = mapper.readTree(response.body())
 
     @Test
     fun `the audit records the route, method, version, execution and outcome of every mutation answer`() {
@@ -1614,6 +1779,7 @@ class PublishedMutationServeIntegrationTest {
         private const val QTY_TEXT_TEMPLATE = "test/mut1039_qty_text.sql"
 
         private const val TIMEOUT_S = 60
+        private const val CLIENT_TIMEOUT_S = 60L
         private const val SLOW_SECONDS = 3
         private const val SLEEPY_SECONDS = 30
         private const val BODY_MAX_BYTES = 4096

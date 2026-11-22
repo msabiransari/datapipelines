@@ -78,6 +78,18 @@
           <dl class="u-text-sm">
             <dt>Pipeline</dt>
             <dd class="ds-mono" th:text="${page.selected.pinLabel}" data-api-pin>finance/revenue@3</dd>
+            <!-- #1040: the pinned version's request-body contract — what a caller must send and which transformers
+                 read it. Derived from the exact pin, never stored, so it cannot disagree with what the serve path admits. -->
+            <dt>Request body</dt>
+            <dd th:text="${page.selectedBody != null ? page.selectedBody.mode : 'unknown (the pinned version is gone)'}"
+                data-api-body-mode>none</dd>
+            <dt>Body read by</dt>
+            <dd data-api-body-readers>
+              <span class="app-chips" th:if="${page.selectedBody != null and not #lists.isEmpty(page.selectedBody.readers)}">
+                <span class="app-chip app-chip-mono" th:each="r : ${page.selectedBody.readers}" th:text="${r}">shape (lending/shape.py@2)</span>
+              </span>
+              <span th:if="${page.selectedBody == null or #lists.isEmpty(page.selectedBody.readers)}">—</span>
+            </dd>
             <dt>Timeout</dt>
             <dd th:text="${page.selected.timeoutSeconds} + ' s'">30 s</dd>
             <dt>Description</dt>
@@ -148,7 +160,10 @@
             <span class="app-chip" th:if="${page.enabled}" data-api-enabled>enabled</span>
             <span class="app-chip app-chip-warn" th:unless="${page.enabled}" data-api-enabled><i class="ds-status"></i>disabled</span>
           </p>
-          <p class="u-text-sm u-mb-xs">API keys bound at this path:</p>
+          <!-- #1037/#1040: a GET route lists the keys bound at its node; a mutation route lists the keys holding an
+               exact grant of ITS method on this one route (a grant never covers a sibling method at the path). -->
+          <p class="u-text-sm u-mb-xs" data-api-keys-label
+             th:text="${page.method == 'GET'} ? 'API keys bound at this path:' : 'API keys granted ' + ${page.method} + ' on this route:'">API keys bound at this path:</p>
           <span class="app-chips" th:if="${not #lists.isEmpty(page.boundKeyNames)}" data-api-keys>
             <span class="app-chip app-chip-mono" th:each="k : ${page.boundKeyNames}" th:text="${k}">ci</span>
           </span>

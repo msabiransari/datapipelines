@@ -24,6 +24,12 @@ deployment the draft is the entity's current version and serves under the normal
 checks — the entity is enabled, the caller's key is bound, and the pinned pipeline version is
 eligible. The pin never moves when the pipeline's current version moves.
 
+Every answer of `endpoints_create`, `endpoints_list` and `endpoints_get` carries the current
+version's `pipeline_version` and its `request_body`: `mode` (`none`, `optional` or `required`)
+and `readers` (the SCRIPT transformers that read the body, `node_id` + `template@version`).
+Read it before you tell a caller what to send — it is derived from the exact pin, so it is what
+the route admits; `null` means there is no current version or the pin no longer resolves.
+
 A route of the SAME method that could match the same URL as an existing one is refused
 (`endpoint.path_conflict`), never resolved by precedence; another workspace's route at a
 matching pattern is refused the same way with a redacted body naming nothing but your own
@@ -83,7 +89,8 @@ at `/finance` authorises everything beneath it — until some node deeper down c
 binding, which then decides for that subtree alone. A mutation grant names exactly ONE route
 entity (`method` + pattern): a sibling method at the same pattern, or a recreated route at the
 same one, is NOT covered — the grant follows the entity. **An endpoint with no grant for the
-caller's method cannot be called**: serving is by key only, so ask an admin to bind one. An
+caller's method cannot be called**: serving is by key only, so ask a person to grant it — a
+mutation grant is a ticked `METHOD /path` box on the Keys page's association form. An
 `endpoint` key with no binding authorises nothing at all. An
 endpoint key reaches published endpoints and the status and cursor of executions it started,
 and nothing else: not `/mcp`, and no other `/api/v1` route.

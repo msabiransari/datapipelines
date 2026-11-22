@@ -1605,11 +1605,12 @@ object PipelineErrorCodes {
         const val PROMOTION_KEY_MISSING = "endpoint.promotion.key_missing"
 
         /**
-         * #1037 (published-mutation-apis §3.4) — 409: a promotion batch covers a pipeline with a
-         * published non-GET endpoint or a non-GET key grant over it. The transfer wire carries
-         * no method identity, so a batch that carried one would arrive as GET — a silent
-         * narrowing of the route. The whole batch is refused before anything is pushed, like
-         * every other promotion pre-validation, so the target is left byte-unchanged.
+         * #1037, narrowed by #1040 (published-mutation-apis §7) — 409: a method-bearing route cannot travel EXACTLY. On
+         * the sender, the target's inventory does not advertise the route's method, exact pins, its body mode or
+         * method grants (a receiver that predates #1040 advertises none), so the batch is refused before anything is
+         * pushed; on the receiver, an entry lacks its pin, hash or a known body mode, carries node bindings, or names
+         * a method outside POST/PUT/DELETE, so the batch is refused before anything is imported. Either way the
+         * target is left byte-unchanged — a route is never reinterpreted as GET or on another pin.
          */
         const val PROMOTION_METHOD_UNSUPPORTED = "endpoint.promotion.method_unsupported"
 

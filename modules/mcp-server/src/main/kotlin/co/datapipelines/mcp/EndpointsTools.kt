@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.endpoints.EndpointBodyContract
 import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
@@ -61,19 +62,29 @@ object EndpointsTools {
      * `method` since #1037 (the route's identity half): `pipeline`, `timeout_seconds` and `description` are the API's
      * CURRENT version's, the pipeline by NAME — the portable identity (pipeline-contract §11.1) — so an agent reading
      * this can act on it in any environment. An API with no current version answers them null.
+     *
+     * #1040 adds what an author must see before acting on a route: `pipeline_version` (the current version's EXACT pin)
+     * and `request_body` — the pinned version's body [EndpointBodyContract.Mode] (`none`, `optional`, `required`) and the
+     * SCRIPT transformers that read the body (`node_id`, `template` as `id@version`); null when there is no current
+     * version or its pin no longer resolves.
      */
-    @Suppress("UnusedParameter") // the receiver shape every caller passes; the pin is the version's own name now
-    internal fun PublishedEndpoint.toResponse(): Map<String, Any?> =
+    internal fun PublishedEndpoint.toResponse(contract: EndpointBodyContract?): Map<String, Any?> =
         mapOf(
             "path" to pathPattern,
             "method" to method.name,
             "pipeline" to current?.body?.pipelineName,
+            "pipeline_version" to current?.body?.pipelineVersion,
             "timeout_seconds" to current?.body?.timeoutSeconds,
             "description" to current?.body?.description,
+            "request_body" to contract?.wire(),
             "enabled" to isEnabled,
             "path_variables" to pathVariables,
             "url" to "/api$pathPattern",
         )
+
+    /** One endpoint's wire shape with its body contract read through [publishing] (#1040). */
+    internal fun PublishedEndpoint.toResponse(publishing: EndpointPublishService): Map<String, Any?> =
+        toResponse(publishing.bodyContract(this))
 
     /**
      * The wire shape of one LEGACY row (#274) — a stored path today's grammar refuses, retired
@@ -148,7 +159,7 @@ object EndpointsTools {
                         args.rawMap()["timeout_seconds"]?.let { args.int("timeout_seconds", MIN_TIMEOUT, MIN_TIMEOUT, MAX_TIMEOUT) },
                     description = args.string("description").orEmpty(),
                     method = methodOf(args),
-                ).toResponse()
+                ).toResponse(publishing)
 
         private companion object {
             const val MIN_TIMEOUT = 1
@@ -198,7 +209,7 @@ object EndpointsTools {
             mapOf(
                 "endpoints" to
                     (
-                        publishing.list(ctx.principal).map { it.toResponse() } +
+                        publishing.list(ctx.principal).map { it.toResponse(publishing) } +
                             publishing.listLegacy(ctx.principal).map { it.toLegacyResponse() }
                     ),
             )
@@ -231,7 +242,7 @@ object EndpointsTools {
                         message = "No endpoint published at '$path'.",
                         details = mapOf("path" to path),
                     )
-            return endpoint.toResponse()
+            return endpoint.toResponse(publishing)
         }
     }
 

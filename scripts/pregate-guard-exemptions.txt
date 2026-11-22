@@ -106,6 +106,7 @@ waived-for-cost co.datapipelines.application.dependencies.datasource.DatasourceD
 waived-for-cost co.datapipelines.application.dependencies.prerequisites.ReleasePrerequisitesPostgresTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.dependencies.schedule.ScheduleDependencyProviderPostgresTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointPersistenceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.EndpointPromotionImportExactIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointPromotionImportIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointVersionBodyHashIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointVersionConversionIntegrationTest  starts a container or context: PostgreSQLContainer

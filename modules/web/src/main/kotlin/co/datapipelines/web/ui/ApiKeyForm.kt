@@ -1,9 +1,12 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.DatapipelinesException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -143,6 +146,40 @@ object ApiKeyForm {
         }
         return listOf(ROOT) + nodes
     }
+
+    /**
+     * #1040 — the method-grant picker's routes: every published POST, PUT or DELETE route of the workspace as
+     * `METHOD /pattern` — the same spelling the key's card shows a grant in — sorted by path, then method. A mutation
+     * grant names exactly one route (published-mutation-apis §2), so the picker offers routes, never tree nodes, and a
+     * GET route is never here (its grant is a node of the tree above).
+     */
+    fun methodRoutes(routes: Collection<Pair<EndpointMethod, String>>): List<String> =
+        routes
+            .filter { (method, _) -> method.isMutation }
+            .sortedWith(compareBy({ it.second }, { it.first.ordinal }))
+            .map { (method, path) -> "${method.name} $path" }
+            .distinct()
+
+    /**
+     * One posted `METHOD /pattern` grant value as (method, path), refusing anything else — a GET, an unknown method or
+     * a value without a path — as `endpoint.method_invalid`: the form only ever posts what [methodRoutes] rendered, so
+     * anything else is hand-crafted and is refused rather than reinterpreted. Whether the route exists in the caller's
+     * workspace is `EndpointKeyService.bind`'s check.
+     */
+    fun parseGrant(raw: String): Pair<EndpointMethod, String> {
+        val (method, path) = raw.trim().split(' ', limit = 2).let { it.first() to it.getOrNull(1)?.trim().orEmpty() }
+        val parsed = EndpointMethod.of(method)?.takeIf { it.isMutation && path.isNotEmpty() }
+        return (parsed ?: throw invalidGrant(raw)) to path
+    }
+
+    private fun invalidGrant(raw: String) =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Endpoint.METHOD_INVALID,
+            message = "A method grant is 'POST /path', 'PUT /path' or 'DELETE /path' naming one published route.",
+            details = mapOf("grant" to raw.take(MAX_ECHOED_GRANT_CHARS)),
+        )
+
+    private const val MAX_ECHOED_GRANT_CHARS = 300
 
     /**
      * The dashboard binding picker's folders (L5), derived from the workspace's dashboard FQN
