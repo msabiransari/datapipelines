@@ -1,0 +1,63 @@
+{
+ "note": "a log x with the largest radius (32) at the smallest value",
+ "document": {
+  "display_name": "Test type test_bubbles",
+  "config": {
+   "mark": {
+    "type": "test_bubbles"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "log"
+    },
+    "y": {
+     "field": "y"
+    },
+    "size": {
+     "field": "r"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1.0,
+   2.0,
+   5.0,
+   10.0,
+   30.0,
+   100.0,
+   300.0,
+   1000.0
+  ],
+  "y": [
+   10.0,
+   40.0,
+   25.0,
+   60.0,
+   35.0,
+   80.0,
+   55.0,
+   70.0
+  ],
+  "r": [
+   32.0,
+   4.0,
+   12.0,
+   2.0,
+   20.0,
+   6.0,
+   16.0,
+   8.0
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE",
+  "r": "DOUBLE"
+ },
+ "expect": {
+  "marks": 8
+ }
+}

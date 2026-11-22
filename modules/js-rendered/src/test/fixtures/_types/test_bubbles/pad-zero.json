@@ -1,0 +1,55 @@
+{
+ "note": "the layout part hands pad 0 (the document's pad), radii 1 to 2: the picture is the one of the part without the member (a larger radius would cross the plot on purpose and leave small frames: I2)",
+ "document": {
+  "display_name": "Test type test_bubbles",
+  "config": {
+   "mark": {
+    "type": "test_bubbles"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "linear"
+    },
+    "y": {
+     "field": "y"
+    },
+    "size": {
+     "field": "r"
+    },
+    "pad": 0
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0.0,
+   100.0,
+   0.0,
+   100.0,
+   50.0
+  ],
+  "y": [
+   0.0,
+   0.0,
+   50.0,
+   50.0,
+   25.0
+  ],
+  "r": [
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   1.0
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE",
+  "r": "DOUBLE"
+ },
+ "expect": {
+  "marks": 5
+ }
+}
