@@ -37,7 +37,7 @@ test("named number formats: grouping, decimals, percent, compact, currency with 
   assert.equal(v(-1234.5, "currency(USD)"), "USD " + M + "1,234.50");
   assert.equal(v(1234.5, "currency(JPY)"), "JPY 1,234", "a currency's own digits: half to even 1234.5 → 1234");
   assert.equal(v(1.2345, "currency(KWD)"), "KWD 1.234", "three digits for KWD, half to even");
-  assert.equal(v(1e21, null), "1,000,000,000,000,000,000,000");
+  assert.equal(v(1e21, null), "1e21", "from 10^15 up a float takes the e form (#1088 D1)");
   assert.equal(v(1.5e-7, "decimal(6)"), "0.000000");
   assert.equal(v(null, null), "");
   assert.equal(v(NaN, null), "");

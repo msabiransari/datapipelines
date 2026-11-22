@@ -356,11 +356,11 @@ test("A.3 the same ends through the second axis (case c, three significant digit
 
 // ---------------------------------------------------------------- A.4 the value form is not the axis's text
 
-test("A.4 a value read elsewhere (tooltip, value label) keeps its form: T.value does not change (D6; lane 1088's)", () => {
-  assert.equal(T.value(1e18, null), "1,000,000,000,000,000,000");
+test("A.4 a value read elsewhere (tooltip, value label) follows the axis's start points: T.value writes the e form at the ends (lane 1088's D1, D3)", () => {
+  assert.equal(T.value(1e18, null), "1e18");
   assert.equal(T.value(1234.5, null), "1,234.5");
-  assert.equal(T.value(1e-9, null), "0");
-  assert.equal(T.value(2.5e18, "compact"), "2,500,000T");
+  assert.equal(T.value(1e-9, null), "1e" + MINUS + "9");
+  assert.equal(T.value(2.5e18, "compact"), "2.5e18");
 });
 
 // ---------------------------------------------------------------- A.7 whole charts at the ends of the range
