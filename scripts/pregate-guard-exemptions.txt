@@ -57,12 +57,14 @@ own-module      co.datapipelines.web.ui.FontPathLedgerTest  reaches the root (ma
 own-module      co.datapipelines.web.ui.ShellPageGuardTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/kotlin
 own-module      co.datapipelines.web.ui.StaticJsCsrfAuditTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources
 own-module      co.datapipelines.web.ui.TemplateHtmxRenderAuditTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources
+own-module      co.datapipelines.web.ui.ThemeSheetsReplaceLightTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources/static/vendor/design-system/themes
 own-module      co.datapipelines.web.ui.VendoredNonTextContrastTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources
 own-module      co.datapipelines.web.ui.VendoredThemeScopingTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources
 own-module      co.datapipelines.web.ui.site.SiteBatch2ContentTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources/templates/${}.html
 own-module      co.datapipelines.browser.DashboardStatusPollingBrowserTest  resolves its own module from Path.of("") to read only tests/browser-tests/src/test/kotlin; the scan's one path, config, is a JSON key
 own-module      co.datapipelines.jsrendered.JsRenderedEngineFilesTest  walks up to settings.gradle.kts only to read modules/js-rendered/src/main/resources and compare its own classpath resources
 waived-for-cost co.datapipelines.browser.JsRenderedLineAreaBrowserTest  starts a container or context: GenericContainer, PostgreSQLContainer; deferred coverage tracked by #1003
+waived-for-cost co.datapipelines.browser.ClientLibraryEmbedBrowserTest  starts a container or context: GenericContainer, PostgreSQLContainer; deferred coverage tracked by #1003
 own-module      co.datapipelines.datasources.DuckDbMemoryFormParityTest  lists the working directory (Path.of("")) before and after only to prove nothing was written there; reads no repository file
 own-module      co.datapipelines.datasources.ReadOnlyConnectionModeMssqlIntegrationTest  reaches the root only to read its own module (modules/datasources/src/test/.../MssqlConnectivityIntegrationTest.kt)
 own-module      co.datapipelines.datasources.pooling.H2InProcessPoolTest  walks the working directory (File(".")) only for .mv.db files the driver must not create; reads no repository file

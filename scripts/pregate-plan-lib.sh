@@ -227,6 +227,7 @@ GUARDS[":modules:web"]+=" co.datapipelines.web.ui.InlineWidthAuditTest"  # inven
 GUARDS[":modules:web"]+=" co.datapipelines.web.ui.NativeDialogBanTest"  # inventory 995: reads tests/browser-tests/src
 GUARDS[":modules:web"]+=" co.datapipelines.web.ui.ScriptVocabularyGuardTest"  # inventory 995: walks the tree (git ls-files)
 GUARDS[":modules:web"]+=" co.datapipelines.web.ui.ChartInteractionsLoadOrderTest"  # walks the tree (git ls-files)
+GUARDS[":modules:web"]+=" co.datapipelines.web.ui.ClientLibraryTest"  # reads modules/js-rendered (the engine's LOAD-ORDER.txt and files, to build the expected client library)
 GUARDS[":modules:web"]+=" co.datapipelines.web.ui.UiScreensTransportVocabularyTest"  # inventory 995: reads docs/ui-screens.md
 GUARDS[":modules:web"]+=" co.datapipelines.web.ui.WebsiteFactsGuardTest"  # inventory 995: reads scripts/sample-data-trade/content/examples.json scripts/sample-data/content/examples-lake.json
 GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteDemoDataGuardsTest"  # inventory 995: reads deploy/env/defaults.env
