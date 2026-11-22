@@ -1193,7 +1193,10 @@ class PublishedMutationCaptureIntegrationTest {
         throw AssertionError("execution $id never reached $status")
     }
 
-    /** Waits until a freshly published route answers on the primary replica (the route registry reloads on publish). */
+    /**
+     * Waits for the primary replica's POST route using a request without an Idempotency-Key: its named refusal proves
+     * readiness without admitting an execution. GET on this POST-only route deliberately answers an opaque 404.
+     */
     private fun awaitRoute(path: String) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(AWAIT_S)
         while (System.nanoTime() < deadline) {
@@ -1201,9 +1204,16 @@ class PublishedMutationCaptureIntegrationTest {
                 given()
                     .port(port)
                     .header(API_KEY_HEADER, writer.plaintext)
-                    .get("/api$path")
+                    .contentType(ContentType.JSON)
+                    .body("{}")
+                    .post("/api$path")
                     .thenReturn()
-            if (probe.statusCode() == 405) return
+            if (probe.statusCode() == 400 &&
+                probe.jsonPath().getString("error.details.errors[0].code") == "endpoint.request.idempotency_key_invalid" &&
+                probe.jsonPath().getString("error.details.errors[0].reason") == "missing"
+            ) {
+                return
+            }
             Thread.sleep(POLL_MS)
         }
         throw AssertionError("route $path never became available on the primary replica")
