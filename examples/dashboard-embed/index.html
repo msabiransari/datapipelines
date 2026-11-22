@@ -9,8 +9,8 @@
     2. data-dp-proxy-base   — YOUR relay's base (here the placeholder https://app.example.co/dp)
     3. data-dp-dashboard-id — the dashboard's UUID (here the all-zero placeholder)
     4. the theme            — datapipelines.css carries the light theme; for another,
-       link /vendor/design-system/themes/<name>.css AFTER it and set
-       data-theme="<name>" on <html>
+       link /css/datapipelines-theme-<name>.css AFTER it and set
+       data-theme="<name>" on the two elements below (#dashboard, #parameters)
 
   The dashboard key never appears in this file: the relay attaches it server-side
   (examples/dashboard-proxy/). Run the relay behind your own authentication.
