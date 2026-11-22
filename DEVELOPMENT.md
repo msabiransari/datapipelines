@@ -1093,7 +1093,8 @@ observed equivalent runs before claiming faster wall time. Retained task statuse
 fresh, cached or missing provenance; inventories from different stages are never summed.
 
 **Local resource protection (#472, #485).** Pregate runs serial Gradle tasks with
-`--no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1`. Every wrapper takes a
+`--no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 -Pdp.test.heap=2g`: one
+test JVM at a time, so its 2g ceiling is not multiplied by forks (#1058, §9.5). Every wrapper takes a
 nonblocking `flock` under `${XDG_CACHE_HOME:-~/.cache}/datapipelines/` before touching logs or
 starting Gradle, and every refusal exits 75 naming each live holder's slot, kind, PID, checkout
 and start time. Two slot files, `verification.slot.0` and `verification.slot.1`, admit two
@@ -1206,7 +1207,7 @@ UI assertions lose their race. One gate step stands outside these knobs entirely
 | `org.gradle.workers.max` (or `--max-workers=N`) | 6 | tasks running at once across modules — compile, lint and test tasks overlap | one JVM per running test task; Docker load when several are integration modules |
 | `dp.test.forks` | 3 | test classes of an ordinary module split across N JVMs | N × `dp.test.heap` per test task that is running |
 | `dp.test.forks.e2e` | 2 | the same for `tests/integration-tests` and `tests/browser-tests` (CI's browser shards run one JVM each) | each fork boots its **own** containers, Spring contexts and Chromium — the expensive one |
-| `dp.test.heap` | 1g | the ordinary test JVM's `-Xmx` (integration-tests keeps 6g) | RAM, only when the JVM actually needs it |
+| `dp.test.heap` | 1g | the ordinary test JVM's `-Xmx` (integration-tests keeps 6g); the pregate passes `-Pdp.test.heap=2g`, because its one test JVM runs a touched module's whole suite (the web suite outgrew 1g, #1058) | RAM, only when the JVM actually needs it |
 | `versionLifecycle.sequences` | 2000 (no property passed) | sizes `VersionLifecycleModelTest`'s random sweep; the pregate passes `-PversionLifecycle.sequences=200`, cutting that case from ~100 s to ~10 s | fewer random sequences in that pregate — only Gate A/CI run 2000 and are the bank |
 
 Both e2e suites pin their test-class order to alphabetical

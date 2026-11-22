@@ -60,10 +60,12 @@ grep -q 'status=deferred' "$F"/.pregate-logs/runs/*/MANIFEST.txt || fail 'deferr
 while IFS= read -r args; do
   [[ "$args" == *'--no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1'* ]] || fail 'unbounded Gradle invocation'
   [[ " $args " == *' --build-cache '* ]] || fail "pregate invocation without --build-cache (#480): $args"
+  [[ " $args " == *' -Pdp.test.heap=2g '* ]] || fail "pregate invocation without -Pdp.test.heap=2g (#1058): $args"
 done < "$F/pregate-argv.log"
 [ "$(wc -l < "$F/pregate-argv.log")" -ge 4 ] || fail 'too few recorded Gradle invocations to check'
 ok 'real pregate defers browser coverage and limits every Gradle invocation'
 ok 'every pregate Gradle invocation passes --build-cache (#480)'
+ok 'every pregate Gradle invocation passes -Pdp.test.heap=2g (#1058)'
 
 # #596: console and retained manifest must name the module's actual full-run home.
 for module in browser-tests integration-tests; do
