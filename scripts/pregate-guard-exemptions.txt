@@ -55,6 +55,7 @@ own-module      co.datapipelines.scripting.ScriptingPurityTest  reaches the root
 own-module      co.datapipelines.web.parameters.stream.ParameterEvaluationEventProjectionTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/kotlin/co/datapipelines/web/parameters/stream
 own-module      co.datapipelines.web.ui.ClientLibraryThemesTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources/static/vendor/design-system/themes
 own-module      co.datapipelines.web.ui.FontPathLedgerTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources/static/vendor/fonts, modules/web/src/test/resources/fonts/font-path-ledger.txt and that ledger's git history
+own-module      co.datapipelines.web.ui.ScopedStylesheetAlphabetTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/kotlin/co/datapipelines/web/ui/ScopedStylesheet.kt
 own-module      co.datapipelines.web.ui.ShellPageGuardTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/kotlin
 own-module      co.datapipelines.web.ui.StaticJsCsrfAuditTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources
 own-module      co.datapipelines.web.ui.TemplateHtmxRenderAuditTest  reaches the root (marker,user.dir) to read only its own module: modules/web/src/main/resources modules/web/src/test/resources

@@ -157,12 +157,9 @@ class ScopedStylesheetTest {
     }
 
     @Test
-    fun `R2 the beginning is read as a token too, an escaped root form included`() {
+    fun `R2 the beginning is read as a token too`() {
         scoped("body|a { c: d }") shouldBe block("& body|a { c: d }")
-        scoped("html\\.x .y { c: d }") shouldBe block("& html\\.x .y { c: d }")
-        scoped("bodyé { c: d }") shouldBe block("& bodyé { c: d }")
         scoped(":root-x .y { c: d }") shouldBe block("& :root-x .y { c: d }")
-        scoped("\\62 ody .y { c: d }") shouldBe block("&:is(&) .y { c: d }")
         scoped("BODY.dark .y { c: d }") shouldBe block("&:is(&).dark .y { c: d }")
     }
 
@@ -175,8 +172,8 @@ class ScopedStylesheetTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @MethodSource("escapedTexts")
-    fun `R3 a name, a url or a unit is read by its decoded value, the address and the name kept byte for byte`(
+    @MethodSource("plainTexts")
+    fun `R3 a unit in any case or after an exponent is rem, a hash or a name holding rem is kept byte for byte`(
         label: String,
         source: String,
         expected: String,
@@ -189,8 +186,8 @@ class ScopedStylesheetTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @MethodSource("escapedRootTokens")
-    fun `R3 a root form behind an escaped or unspaced of, or a sibling behind an escaped space, is refused`(
+    @MethodSource("unspacedOfRootTokens")
+    fun `R3 a root form behind an unspaced of is refused`(
         selector: String,
         message: String,
     ) {
@@ -200,35 +197,36 @@ class ScopedStylesheetTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @MethodSource("escapedLookalikes")
-    fun `R3 an escaped keyword or name before a lookalike is admitted under the scope`(selector: String) {
+    @MethodSource("nthWithoutSelector")
+    fun `R3 an nth function without a selector argument is admitted under the scope`(selector: String) {
         val output = scoped("$selector { color: red }")
         println("1065|R3|admitted|$selector|$output")
         output shouldBe block("& $selector { color: red }")
     }
 
     @Test
-    fun `R3 the page element and the root are read decoded and case folded, as their plain spelling`() {
-        scoped("\\68tml { font-size: 14px }") shouldBe scoped("html { font-size: 14px }")
-        scoped("\\68tml { font-size: 14px }") shouldBe block("& { font-size: 14px; }")
-        scoped("html, \\62ody { color: red }") shouldBe block("&, & { color: red; }")
-        scoped("body { \\63olor: red }") shouldBe block("& { \\63olor: red; }")
+    fun `R3 the root is read case folded, as its plain spelling`() {
         scoped(":ROOT { --a: 1rem }") shouldBe scoped(":root { --a: 1rem }")
         scoped(":ROOT { --a: 1rem }") shouldBe block("& { --a: 16px }")
         scoped(":ROOT .x { color: red }") shouldBe block("&:is(&) .x { color: red }")
-        ScopedStylesheet.scope("\\68tml, \\62ody { color: red }", SCOPE).counts.rootExact shouldBe 2
     }
 
+    /**
+     * Every input of rounds 2 and 3 that holds a backslash or a non-ASCII character outside a quoted string, kept as it
+     * was written, now refused by the gate (round 4, owner ruling 2026-11-22) naming the character and its line; the
+     * gate's own cases are [ScopedStylesheetGateTest]'s.
+     */
     @ParameterizedTest(name = "{0}")
-    @MethodSource("escapedRefusals")
-    fun `R3 an escaped page element, an escaped at-rule name or an unreadable escape is refused, naming it`(
+    @MethodSource("gated")
+    fun `R4 every escaped or non-ASCII input of rounds 2 and 3 is refused by the gate, naming the character and the line`(
         label: String,
         source: String,
-        message: String,
+        codePoint: String,
     ) {
         val refusal = shouldThrow<ScopedStylesheet.Refusal> { ScopedStylesheet.scope(source, SCOPE) }
-        println("1065|R3|refusal|$label|${refusal.message}")
-        refusal.message.orEmpty() shouldContain message
+        println("1065|R4|gated|$label|${refusal.message}")
+        val words = if (codePoint == "U+005C") "an escape outside a quoted string" else "a character the scoping refuses outside a quoted string"
+        refusal.message.orEmpty() shouldContain "$words ($codePoint, line 1): "
     }
 
     private fun scoped(source: String): String = ScopedStylesheet.scope(source, SCOPE).text
@@ -295,9 +293,6 @@ class ScopedStylesheetTest {
                 ".card:is(:root)",
                 ".a body",
                 ".a > html",
-                ".card:is(b\\6f dy)",
-                ".card:is(\\62 ody)",
-                ".card:is(h\\tml)",
                 ".card:is(*|body)",
                 ".card::slotted(body)",
                 ".card:-webkit-any(html)",
@@ -321,61 +316,24 @@ class ScopedStylesheetTest {
                 ".a:has(> .my-body)",
                 ".a:nth-child(2n of .body)",
                 ".a:nth-child(odd)",
-                ".b\\6f dy",
                 ".a body|x",
                 ".a::part(body)",
                 ".a:dir(ltr) :state(html)",
             )
 
         /**
-         * R3 (D3): a source, its whole scoped text and its count of `rem` lengths. A `url` written with an escape is a url
-         * token, its address kept; a unit in any case, escaped or after an exponent is `rem`; a name holding digits and
-         * `rem` is a name, kept byte for byte in a declaration and in a keyframes prelude and its use alike.
+         * R3 (D3): a plain ASCII source, its whole scoped text and its count of `rem` lengths. A unit in any case or after
+         * an exponent is `rem`; a hash, a name holding `rem` and a number with another unit are kept byte for byte. (Round
+         * 3's escaped spellings of these rows are [gated]'s since round 4.)
          */
         @JvmStatic
-        fun escapedTexts(): List<Arguments> =
+        fun plainTexts(): List<Arguments> =
             listOf(
                 Arguments.of(
-                    "R1 u\\72l in a declaration",
-                    ".card { background: u\\72l(/img/1rem.svg); width: 1rem }",
-                    "$SCOPE {\n& .card { background: u\\72l(/img/1rem.svg); width: 16px }\n}\n",
-                    1,
-                ),
-                Arguments.of(
-                    "R1 \\75rl in a declaration",
-                    ".card { background: \\75rl(/img/1rem.svg); width: 1rem }",
-                    "$SCOPE {\n& .card { background: \\75rl(/img/1rem.svg); width: 16px }\n}\n",
-                    1,
-                ),
-                Arguments.of(
-                    "R1 u\\72l in a keyframes body",
-                    "@keyframes k { to { background: u\\72l(/img/1rem.svg); width: 1rem } }",
-                    "@keyframes k { to { background: u\\72l(/img/1rem.svg); width: 16px } }\n$SCOPE {\n\n}\n",
-                    1,
-                ),
-                Arguments.of(
-                    "R1 \\75rl in a keyframes body",
-                    "@keyframes k { to { background: \\75rl(/img/1rem.svg); width: 1rem } }",
-                    "@keyframes k { to { background: \\75rl(/img/1rem.svg); width: 16px } }\n$SCOPE {\n\n}\n",
-                    1,
-                ),
-                Arguments.of(
-                    "C1 upper case, mixed case, escaped unit, exponent",
-                    ".a { width: 1REM; height: 1Rem; margin: 1\\72 em; padding: 1e1rem }",
-                    "$SCOPE {\n& .a { width: 16px; height: 16px; margin: 16px; padding: 160px }\n}\n",
-                    4,
-                ),
-                Arguments.of(
-                    "C2 a name with an escaped digit before rem",
-                    ".a { animation-name: a\\31rem; width: 1rem }",
-                    "$SCOPE {\n& .a { animation-name: a\\31rem; width: 16px }\n}\n",
-                    1,
-                ),
-                Arguments.of(
-                    "C2 the same name in a keyframes prelude and its use",
-                    "@keyframes a\\31rem { to { width: 1rem } } .a { animation: a\\31rem 1s }",
-                    "@keyframes a\\31rem { to { width: 16px } }\n$SCOPE {\n& .a { animation: a\\31rem 1s }\n}\n",
-                    1,
+                    "C1 upper case, mixed case, exponent",
+                    ".a { width: 1REM; height: 1Rem; padding: 1e1rem }",
+                    "$SCOPE {\n& .a { width: 16px; height: 16px; padding: 160px }\n}\n",
+                    3,
                 ),
                 Arguments.of(
                     "a hash and a name holding rem stay, a length after a name converts",
@@ -385,53 +343,102 @@ class ScopedStylesheetTest {
                 ),
             )
 
-        /** R3 (D2): a root form behind an escaped or unspaced `of`, or a sibling combinator behind an escaped space. */
+        /** R3 (D2): a root form behind an `of` written without a space after it; each is refused. */
         @JvmStatic
-        fun escapedRootTokens(): List<Arguments> =
+        fun unspacedOfRootTokens(): List<Arguments> =
             listOf(
-                Arguments.of(".card:nth-child(2n \\6f f body)", "a root selector the scoping does not know"),
-                Arguments.of(".card:nth-last-child(2n o\\66  html)", "a root selector the scoping does not know"),
-                Arguments.of(":root:nth-child(2n \\6f f body) .x", "a root selector the scoping does not know"),
                 Arguments.of(".card:nth-child(2n of:root)", "a root selector the scoping does not know"),
                 Arguments.of(".card:nth-child(even of:is(body))", "a root selector the scoping does not know"),
-                Arguments.of(":root.a\\ b + .x", "a root selector that selects a sibling of the container (combinator +)"),
-                Arguments.of(":root.a\\31  ~ .x", "a root selector that selects a sibling of the container (combinator ~)"),
             )
 
-        /** R3: the same escaped keyword before a lookalike, and escapes that only read like a root; each admitted. */
+        /** R3: an nth function whose argument holds no selector; each admitted. */
         @JvmStatic
-        fun escapedLookalikes(): List<String> =
+        fun nthWithoutSelector(): List<String> =
             listOf(
-                ".card:nth-child(2n \\6f f .body)",
-                ".card:nth-last-child(2n o\\66  #html)",
                 ".card:nth-child(odd)",
                 ".card:nth-of-type(2n)",
-                ".a\\110000",
             )
 
-        /** R3: an escaped page element is refused as its plain spelling is; an escaped at-rule name and an unreadable escape. */
+        /**
+         * R4: each input of rounds 2 and 3 that holds a backslash or a non-ASCII character outside a quoted string, as the
+         * round wrote it (the label names the test it came from), and the code point the gate names, all on line 1.
+         */
         @JvmStatic
-        fun escapedRefusals(): List<Arguments> =
+        fun gated(): List<Arguments> =
             listOf(
-                Arguments.of("C3 escaped body", "\\62ody { margin: 0 }", "neither carried nor dropped: \\62ody { margin: 0 }"),
-                Arguments.of("C3 html and escaped body", "html, \\62ody { margin: 0 }", "neither carried nor dropped: html, \\62ody"),
+                Arguments.of("R2 beginning: html\\.x", "html\\.x .y { c: d }", "U+005C"),
+                Arguments.of("R2 beginning: bodyé", "bodyé { c: d }", "U+00E9"),
+                Arguments.of("R2 beginning: \\62 ody", "\\62 ody .y { c: d }", "U+005C"),
+                Arguments.of("R2 root token: .card:is(b\\6f dy)", ".card:is(b\\6f dy) { color: red }", "U+005C"),
+                Arguments.of("R2 root token: .card:is(\\62 ody)", ".card:is(\\62 ody) { color: red }", "U+005C"),
+                Arguments.of("R2 root token: .card:is(h\\tml)", ".card:is(h\\tml) { color: red }", "U+005C"),
+                Arguments.of("R2 lookalike: .b\\6f dy", ".b\\6f dy { color: red }", "U+005C"),
                 Arguments.of(
-                    "C3 escaped body beside another selector",
-                    "\\62ody, .a { color: red }",
-                    "html or body listed beside another selector: \\62ody, .a",
+                    "R3 text: R1 u\\72l in a declaration",
+                    ".card { background: u\\72l(/img/1rem.svg); width: 1rem }",
+                    "U+005C",
                 ),
                 Arguments.of(
-                    "an escaped at-rule name",
-                    "@\\6d edia (x) { .a { b: c } }",
-                    "an at-rule whose name holds an escape: @\\6d edia",
+                    "R3 text: R1 \\75rl in a declaration",
+                    ".card { background: \\75rl(/img/1rem.svg); width: 1rem }",
+                    "U+005C",
                 ),
                 Arguments.of(
-                    "an at-rule name that only begins like media",
-                    "@mediaé (x) { .a { b: c } }",
-                    "an at-rule the scoping does not know: @mediaé",
+                    "R3 text: R1 u\\72l in a keyframes body",
+                    "@keyframes k { to { background: u\\72l(/img/1rem.svg); width: 1rem } }",
+                    "U+005C",
                 ),
-                Arguments.of("an escape before a line break in a name", ".a\\\nb { c: d }", "an escape the scoping cannot read"),
-                Arguments.of("an escape before a line break in a value", ".a { width: 1rem \\\n }", "an escape the scoping cannot read"),
+                Arguments.of(
+                    "R3 text: R1 \\75rl in a keyframes body",
+                    "@keyframes k { to { background: \\75rl(/img/1rem.svg); width: 1rem } }",
+                    "U+005C",
+                ),
+                Arguments.of(
+                    "R3 text: C1 upper case, mixed case, escaped unit, exponent",
+                    ".a { width: 1REM; height: 1Rem; margin: 1\\72 em; padding: 1e1rem }",
+                    "U+005C",
+                ),
+                Arguments.of("R3 text: C2 a name with an escaped digit before rem", ".a { animation-name: a\\31rem; width: 1rem }", "U+005C"),
+                Arguments.of(
+                    "R3 text: C2 the same name in a keyframes prelude and its use",
+                    "@keyframes a\\31rem { to { width: 1rem } } .a { animation: a\\31rem 1s }",
+                    "U+005C",
+                ),
+                Arguments.of("R3 root token: .card:nth-child(2n \\6f f body)", ".card:nth-child(2n \\6f f body) { color: red }", "U+005C"),
+                Arguments.of(
+                    "R3 root token: .card:nth-last-child(2n o\\66  html)",
+                    ".card:nth-last-child(2n o\\66  html) { color: red }",
+                    "U+005C",
+                ),
+                Arguments.of(
+                    "R3 root token: :root:nth-child(2n \\6f f body) .x",
+                    ":root:nth-child(2n \\6f f body) .x { color: red }",
+                    "U+005C",
+                ),
+                Arguments.of("R3 root token: :root.a\\ b + .x", ":root.a\\ b + .x { color: red }", "U+005C"),
+                Arguments.of("R3 root token: :root.a\\31  ~ .x", ":root.a\\31  ~ .x { color: red }", "U+005C"),
+                Arguments.of(
+                    "R3 lookalike: .card:nth-child(2n \\6f f .body)",
+                    ".card:nth-child(2n \\6f f .body) { color: red }",
+                    "U+005C",
+                ),
+                Arguments.of(
+                    "R3 lookalike: .card:nth-last-child(2n o\\66  #html)",
+                    ".card:nth-last-child(2n o\\66  #html) { color: red }",
+                    "U+005C",
+                ),
+                Arguments.of("R3 lookalike: .a\\110000", ".a\\110000 { color: red }", "U+005C"),
+                Arguments.of("R3 decoded: \\68tml", "\\68tml { font-size: 14px }", "U+005C"),
+                Arguments.of("R3 decoded: html, \\62ody", "html, \\62ody { color: red }", "U+005C"),
+                Arguments.of("R3 decoded: body { \\63olor }", "body { \\63olor: red }", "U+005C"),
+                Arguments.of("R3 decoded: \\68tml, \\62ody", "\\68tml, \\62ody { color: red }", "U+005C"),
+                Arguments.of("R3 refusal: C3 escaped body", "\\62ody { margin: 0 }", "U+005C"),
+                Arguments.of("R3 refusal: C3 html and escaped body", "html, \\62ody { margin: 0 }", "U+005C"),
+                Arguments.of("R3 refusal: C3 escaped body beside another selector", "\\62ody, .a { color: red }", "U+005C"),
+                Arguments.of("R3 refusal: an escaped at-rule name", "@\\6d edia (x) { .a { b: c } }", "U+005C"),
+                Arguments.of("R3 refusal: an at-rule name that only begins like media", "@mediaé (x) { .a { b: c } }", "U+00E9"),
+                Arguments.of("R3 refusal: an escape before a line break in a name", ".a\\\nb { c: d }", "U+005C"),
+                Arguments.of("R3 refusal: an escape before a line break in a value", ".a { width: 1rem \\\n }", "U+005C"),
             )
 
         /** Each refusal of D2 with its input and the words its message must hold (A.1). */

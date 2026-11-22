@@ -8,6 +8,7 @@ import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.security.MessageDigest
 
 /**
  * The scoping over the REAL sheets (#1065 A.2, D2, D3, D8): the six sheets of the client library's stylesheet, read
@@ -84,6 +85,37 @@ class ScopedStylesheetSheetsTest {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * The fourteen sheet files are inside the gate's alphabet (#1065 round 4, owner ruling 2026-11-22): counted by THIS
+     * test's own walk, never the scoping's. No backslash anywhere, no non-ASCII character outside a comment, no CR or form
+     * feed, and every quoted string ends on its line and holds no backslash or non-ASCII character. The scoped output's
+     * SHA-256 is printed beside round 3's (`022b545f…` for the six, 146,006 bytes), so a changed byte is read, not pinned.
+     */
+    @Test
+    fun `the fourteen sheet files pass the gate, every quoted string inside the alphabet`() {
+        val files = SIX + ClientLibrary.THEMES.map { "vendor/design-system/themes/$it.css" }
+        withClue("fourteen sheet files") { files.toSet().size shouldBe FOURTEEN }
+        val totals = files.map { SheetAlphabet.count(TestRepoFiles.read("$STATIC/$it")) }.reduce(SheetAlphabet::plus)
+        val six = ScopedStylesheet.scope(SIX.joinToString("") { TestRepoFiles.read("$STATIC/$it") + "\n" }, ClientLibrary.SCOPE).text
+        val themes =
+            ClientLibrary.THEMES.joinToString(" ") { name ->
+                val text = TestRepoFiles.read("$STATIC/vendor/design-system/themes/$name.css")
+                "$name=${sha256(ScopedStylesheet.scope(text, ClientLibrary.themeScope(name)).text)}"
+            }
+        println("1065|R4|sheets|files=${files.size}|$totals (brief: 0 backslashes, 0 non-ASCII outside comments, 438 inside, 178 strings)")
+        println("1065|R4|sheets|six bytes=${six.toByteArray().size} sha256=${sha256(six)} (round 3: 146006, 022b545f…5d3d5f)|$themes")
+        assertSoftly {
+            withClue("quoted strings (floor 1)") { totals.strings shouldBeGreaterThanOrEqual 1 }
+            withClue("comments holding a non-ASCII character (floor 1: the walk sees them)") { totals.nonAsciiInComments shouldBeGreaterThanOrEqual 1 }
+            withClue("backslashes anywhere") { totals.backslashes shouldBe 0 }
+            withClue("characters outside comments and strings beyond the alphabet") { totals.outsideAlphabet shouldBe 0 }
+            withClue("non-ASCII characters outside comments") { totals.nonAsciiOutsideComments shouldBe 0 }
+            withClue("strings holding a line break, a backslash or a non-ASCII character") { totals.stringsNotPlain shouldBe 0 }
+            withClue("unterminated strings or comments") { totals.unterminated shouldBe 0 }
+            withClue("CR and form feed characters") { totals.crOrFormFeed shouldBe 0 }
         }
     }
 
@@ -288,7 +320,85 @@ class ScopedStylesheetSheetsTest {
         }
     }
 
+    /** This test's own walk of one sheet: comments, quoted strings and the rest, counted (the gate's oracle). */
+    private data class SheetAlphabet(
+        val strings: Int = 0,
+        val stringsNotPlain: Int = 0,
+        val backslashes: Int = 0,
+        val outsideAlphabet: Int = 0,
+        val nonAsciiOutsideComments: Int = 0,
+        val nonAsciiInComments: Int = 0,
+        val unterminated: Int = 0,
+        val crOrFormFeed: Int = 0,
+    ) {
+        fun plus(other: SheetAlphabet) =
+            SheetAlphabet(
+                strings + other.strings,
+                stringsNotPlain + other.stringsNotPlain,
+                backslashes + other.backslashes,
+                outsideAlphabet + other.outsideAlphabet,
+                nonAsciiOutsideComments + other.nonAsciiOutsideComments,
+                nonAsciiInComments + other.nonAsciiInComments,
+                unterminated + other.unterminated,
+                crOrFormFeed + other.crOrFormFeed,
+            )
+
+        companion object {
+            fun count(text: String): SheetAlphabet {
+                var counted =
+                    SheetAlphabet(
+                        backslashes = text.count { it == '\\' },
+                        crOrFormFeed = text.count { it == '\r' || it == '\u000C' },
+                    )
+                var i = 0
+                while (i < text.length) {
+                    val c = text[i]
+                    when {
+                        text.startsWith("/*", i) -> {
+                            val end = text.indexOf("*/", i + 2)
+                            val comment = if (end < 0) text.substring(i) else text.substring(i, end)
+                            counted = counted.copy(nonAsciiInComments = counted.nonAsciiInComments + comment.count { it.code > ASCII_LAST })
+                            if (end < 0) return counted.copy(unterminated = counted.unterminated + 1)
+                            i = end + 2
+                        }
+
+                        c == '"' || c == '\'' -> {
+                            val end = text.indexOf(c, i + 1)
+                            if (end < 0) return counted.copy(unterminated = counted.unterminated + 1)
+                            val inner = text.substring(i + 1, end)
+                            val plain = inner.none { it == '\n' || it == '\r' || it == '\u000C' || it == '\\' || it.code > ASCII_LAST }
+                            counted =
+                                counted.copy(
+                                    strings = counted.strings + 1,
+                                    stringsNotPlain = counted.stringsNotPlain + if (plain) 0 else 1,
+                                    nonAsciiOutsideComments = counted.nonAsciiOutsideComments + inner.count { it.code > ASCII_LAST },
+                                )
+                            i = end + 1
+                        }
+
+                        else -> {
+                            val inAlphabet = (c in ' '..'~' && c != '\\') || c == '\t' || c == '\n' || c == '\r'
+                            counted =
+                                counted.copy(
+                                    outsideAlphabet = counted.outsideAlphabet + if (inAlphabet) 0 else 1,
+                                    nonAsciiOutsideComments = counted.nonAsciiOutsideComments + if (c.code > ASCII_LAST) 1 else 0,
+                                )
+                            i += 1
+                        }
+                    }
+                }
+                return counted
+            }
+
+            private const val ASCII_LAST = 0x7F
+        }
+    }
+
+    private fun sha256(text: String): String =
+        MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+
     private companion object {
+        const val FOURTEEN = 14
         const val STATIC = "modules/web/src/main/resources/static"
         const val SKILL = "modules/mcp-server/src/main/resources/skill/dashboards-embedding.md"
         val SENTENCE_SIX = Regex("""font family names \(([^)]*)\) and \w+ animation names \(([^)]*)\)""")
