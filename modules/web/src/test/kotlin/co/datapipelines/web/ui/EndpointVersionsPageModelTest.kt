@@ -198,7 +198,7 @@ class EndpointVersionsPageModelTest {
         val dialog = model.draft(principal, id, null)
         dialog.method shouldBe "POST"
         dialog.options.map { it.version to it.body?.summary } shouldContainExactly
-            listOf(4 to "body required · read by shape", 2 to "body none")
+            listOf(4 to "body required · read by shape (finance/shape.py@2)", 2 to "body none")
     }
 
     @Test

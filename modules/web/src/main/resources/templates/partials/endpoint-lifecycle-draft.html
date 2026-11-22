@@ -17,6 +17,10 @@
       <!-- #1040: the method is half of the route's identity — shown, never editable; a draft changes the pin only. -->
       <p class="u-text-sm">Method <span class="app-method" th:text="${dlg.method}" data-api-draft-method>GET</span>
         <span class="u-secondary">fixed for this route</span></p>
+      <p class="u-text-sm u-secondary" th:if="${dlg.method == 'PUT' or dlg.method == 'DELETE'}" data-api-repeat-semantics>
+        For PUT and DELETE, author the pipeline so identical requests have the same intended business effect
+        even with different Idempotency-Key values. A new key starts a new execution.
+      </p>
       <label class="u-text-sm" for="axd-pipeline">Pipeline</label>
       <select id="axd-pipeline" name="pipeline" class="ds-input" data-api-pipeline
               th:attr="hx-get=@{'/partials/endpoints/{id}/lifecycle/draft'(id=${dlg.id})}"

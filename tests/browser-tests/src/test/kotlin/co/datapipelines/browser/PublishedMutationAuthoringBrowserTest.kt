@@ -95,7 +95,8 @@ class PublishedMutationAuthoringBrowserTest : BrowserSuite() {
         openDialog("new-draft", "endpoint-draft")
         withClue("the draft dialog: the method is the route's, fixed; each version names its body contract") {
             page.locator("#ax-dialog [data-api-draft-method]").innerText() shouldBe "POST"
-            page.locator("#ax-dialog [data-api-pipeline-version]").innerText() shouldContain "body required · read by shape"
+            page.locator("#ax-dialog [data-api-pipeline-version]").innerText() shouldContain
+                "body required · read by shape (${template(suffix, "lines")}@1)"
         }
         page.locator("#ax-dialog [data-lifecycle-close]").first().click()
 

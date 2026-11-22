@@ -170,8 +170,28 @@ class EndpointVersionsPageRenderTest {
         // #1040: the method is shown and is not a form field; each option names its body before the save.
         doc.select("[data-api-draft-method]").text() shouldBe "PUT"
         doc.select("form [name=method]").size shouldBe 0
-        options.single { it.attr("value") == "3" }.text() shouldBe "v3 · RELEASED · current · body required · read by shape"
+        options.single { it.attr("value") == "3" }.text() shouldBe
+            "v3 · RELEASED · current · body required · read by shape (finance/shape.py@2)"
         options.single { it.attr("value") == "3" }.attr("data-api-body-mode") shouldBe "required"
+        doc.select("[data-api-repeat-semantics]").text() shouldBe REPEAT_SEMANTICS
+        partial("partials/endpoint-lifecycle-draft", dialog.copy(method = "DELETE"))
+            .select("[data-api-repeat-semantics]")
+            .text() shouldBe REPEAT_SEMANTICS
+        listOf("GET", "POST").forEach { method ->
+            partial("partials/endpoint-lifecycle-draft", dialog.copy(method = method))
+                .select("[data-api-repeat-semantics]")
+                .size shouldBe 0
+        }
+    }
+
+    @Test
+    fun `PUT and DELETE authoring explains the business effect of repeated requests under different keys`() {
+        listOf("PUT", "DELETE").forEach { method ->
+            page(page(selected = 2).copy(method = method)).select("[data-api-repeat-semantics]").text() shouldBe REPEAT_SEMANTICS
+        }
+        listOf("GET", "POST").forEach { method ->
+            page(page(selected = 2).copy(method = method)).select("[data-api-repeat-semantics]").size shouldBe 0
+        }
     }
 
     @Test
@@ -333,5 +353,11 @@ class EndpointVersionsPageRenderTest {
         val context = context()
         context.setVariable("dlg", dialog)
         return Jsoup.parse(engine.process(view, context))
+    }
+
+    private companion object {
+        const val REPEAT_SEMANTICS =
+            "For PUT and DELETE, author the pipeline so identical requests have the same intended business effect " +
+                "even with different Idempotency-Key values. A new key starts a new execution."
     }
 }

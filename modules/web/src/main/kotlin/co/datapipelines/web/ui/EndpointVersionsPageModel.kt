@@ -95,9 +95,9 @@ class EndpointVersionsPageModel(
         val mode: String,
         val readers: List<String>,
     ) {
-        /** One line for a picker option: `body required · read by shape`. */
+        /** One line for a picker option, including each reader's exact template pin. */
         val summary: String
-            get() = "body $mode" + if (readers.isEmpty()) "" else " · read by " + readers.joinToString(", ") { it.substringBefore(' ') }
+            get() = "body $mode" + if (readers.isEmpty()) "" else " · read by " + readers.joinToString(", ")
 
         companion object {
             fun of(contract: EndpointBodyContract): BodyView =

@@ -2251,7 +2251,9 @@ transformer that reads the body, `node (template@version)`, or `—`). The API c
 route lists "API keys bound at this path:", a POST, PUT or DELETE route "API keys granted <METHOD> on this route:" — the keys
 holding an exact grant of that method on this one route. The draft dialog shows the method as fixed ("fixed for this
 route": a draft changes the pin only) and every pipeline-version option names its body mode and readers beside its
-status, so the body a caller must send is visible before the draft is saved. Creating a route stays a REST/MCP action
+status, including the readers' exact template pins, so the body a caller must send is visible before the draft is saved.
+For PUT and DELETE, both the version page and draft dialog remind the author to preserve the intended business effect
+of identical requests under different request keys; a new key starts a new execution. Creating a route stays a REST/MCP action
 (rest-api [§19.5a](rest-api.md#195a-authoring-a-mutation-route-1040)). Guards: `EndpointVersionsPageModelTest`,
 `PublishedMutationAuthoringBrowserTest`.
 

@@ -97,6 +97,10 @@
             <dt>Body hash</dt>
             <dd class="ds-mono u-text-meta u-break" th:text="${page.selected.bodyHash}">9f2c…</dd>
           </dl>
+          <p class="u-text-sm u-secondary" th:if="${page.method == 'PUT' or page.method == 'DELETE'}" data-api-repeat-semantics>
+            For PUT and DELETE, author the pipeline so identical requests have the same intended business effect
+            even with different Idempotency-Key values. A new key starts a new execution.
+          </p>
           <div class="app-page-actions" data-api-verbs>
             <th:block th:if="${page.selected.isDraft}">
               <button type="button" class="ds-button ds-button-sm" data-api-verb="edit"
