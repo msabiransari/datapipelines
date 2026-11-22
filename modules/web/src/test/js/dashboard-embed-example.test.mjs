@@ -6,13 +6,15 @@
  *
  * What it proves:
  * - the REAL index.html loads every Datapipelines asset from ONE Datapipelines origin
- *   placeholder, never from the host page's own origin (856b correction 1);
+ *   placeholder, never from the host page's own origin (856b correction 1), and those assets
+ *   are exactly the client library's ONE stylesheet and ONE script (#1064, record §8 A12);
  * - embed.js mounts every [data-dp-embed] container AUTOMATICALLY at load — there is no
  *   window.dpEmbedBoot global (856b correction 2) — through `window.dpEmbed.ready` with
  *   `version: "released"` and proxy credentials only;
  * - the `chart` kind (#869) bootstraps with no chart library declared at init, the real
- *   chart adapter registered over the js-rendered engine, and index.html loads the
- *   engine's files in the engine's own load order (#987);
+ *   chart adapter registered over the js-rendered engine — all of it evaluated as ONE script,
+ *   the client library's text built here from the same two lists the application joins (the
+ *   engine's load order, then the vendor manifest's runtime block; #1064 A.4);
  * - the runtime's requests reach the STUB only through the proxy: the proxy attached the
  *   dashboard key server-side (the client never carries it), and no cookie or CSRF header
  *   travels;
@@ -33,12 +35,12 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
-import { engineFiles, loadEngine } from "./support/js-rendered.mjs";
+import vm from "node:vm";
+import { ENGINE_DIR, STATIC_JS, engineFiles } from "./support/js-rendered.mjs";
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
-const runtimePath = path.resolve(here, "../../main/resources/static/js/datapipelines-dashboard.js");
-const chartAdapterPath = path.resolve(here, "../../main/resources/static/js/datapipelines-dashboard-chart.js");
+const manifestPath = path.resolve(here, "../../main/resources/static/vendor/design-system/vendor-manifest.json");
 const embedPath = path.resolve(here, "../../../../../examples/dashboard-embed/embed.js");
 const indexPath = path.resolve(here, "../../../../../examples/dashboard-embed/index.html");
 const readmePath = path.resolve(here, "../../../../../examples/dashboard-embed/README.md");
@@ -49,6 +51,25 @@ const proxyPath = path.resolve(here, "../../../../../examples/dashboard-proxy/pr
 const KEY = "embed-test-key-0001";
 const LISTENING_TIMEOUT_MS = 10_000;
 const DASHBOARD_ID = "00000000-0000-0000-0000-000000000000";
+
+// ------------------------------------------------------------------------- client library
+
+/** The runtime's five files after the engine: the vendor manifest's runtime block, paths under static/ (#1064 D2). */
+function runtimeFiles() {
+  const files = JSON.parse(fs.readFileSync(manifestPath, "utf8"))["datapipelines-dashboard-runtime"].files;
+  assert.ok(Array.isArray(files) && files.length > 0, "the manifest's runtime block lists its files");
+  return files;
+}
+
+/**
+ * The client library's script as /js/datapipelines.js answers it: every engine file in load order, then the
+ * runtime's five, each followed by one newline (#1064 D2) — built here from the two lists, never from the server.
+ */
+function libraryText() {
+  const engine = engineFiles().map((n) => fs.readFileSync(path.join(ENGINE_DIR, n), "utf8") + "\n");
+  const runtime = runtimeFiles().map((f) => fs.readFileSync(path.join(STATIC_JS, "..", f), "utf8") + "\n");
+  return engine.join("") + runtime.join("");
+}
 
 // -------------------------------------------------------------------------------- fake DOM
 
@@ -248,21 +269,16 @@ before(async (t) => {
   t.diagnostic(`dashboard-embed test ports: upstream ${upstream.address().port}, proxy ${port}`);
   await waitReady(PROXY_BASE, "the proxy");
   installDom();
-  // The engine's files, run as index.html runs them before the adapter.
-  loadEngine();
-  const runtime = require(runtimePath);
-  // The chart kind's REAL adapter: loaded like index.html loads it (after the runtime),
-  // which auto-registers the kind through the fake window. Registered again explicitly
-  // for the Node path, idempotently (the adapter's own contract).
-  const chartApi = require(chartAdapterPath);
-  chartApi.register(runtime);
-  if (!runtime._internal.renderers().chart) throw new Error("the chart adapter did not register the chart kind");
-  // The browser gets its table and KPI renderers from the adapter files' load-time
-  // registration; the tests register stand-ins for the same kinds and majors
-  // (dashboard-runtime.test.mjs).
+  // The client library, evaluated as ONE classic script the way index.html's one tag runs it:
+  // the engine, the runtime (publishing window.DatapipelinesDashboard), the interaction layer
+  // and the three adapters, each registering its kind through the fake window at load.
+  vm.runInThisContext(libraryText(), { filename: "datapipelines.js" });
+  const runtime = window.DatapipelinesDashboard;
+  if (!runtime) throw new Error("the client library did not publish window.DatapipelinesDashboard");
   const registered = runtime._internal.renderers();
-  if (!registered.table) runtime.registerRenderer({ kind: "table", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
-  if (!registered.kpi) runtime.registerRenderer({ kind: "kpi", version: "1", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+  for (const kind of ["chart", "table", "kpi"]) {
+    if (!registered[kind]) throw new Error(`the client library did not register the ${kind} kind at load`);
+  }
 });
 
 after(async () => {
@@ -318,7 +334,7 @@ function mountExample() {
   return require(embedPath);
 }
 
-test("every Datapipelines asset in index.html resolves to the one Datapipelines origin, not the host's", () => {
+test("index.html loads ONE stylesheet and ONE script from the one Datapipelines origin, then embed.js", () => {
   const HOST_ORIGIN = "https://host.example/page.html"; // where the host page itself lives
   const DP_ORIGIN = "https://dp.example.co"; // the ONE placeholder the example writes
   const html = fs.readFileSync(indexPath, "utf8");
@@ -328,10 +344,6 @@ test("every Datapipelines asset in index.html resolves to the one Datapipelines 
   const dpAssets = urls
     .map((u) => new URL(u, HOST_ORIGIN))
     .filter((u) => /^\/(vendor|css|js)\//.test(u.pathname));
-  // Non-vacuity: the example loads 6 stylesheets + 5 scripts (the runtime, the interaction layer, three adapters)
-  // + the engine's files.
-  const expected = 11 + engineFiles().length;
-  assert.equal(dpAssets.length, expected, `non-vacuity: expected ${expected} Datapipelines assets, found ${dpAssets.length}`);
   for (const asset of dpAssets) {
     assert.equal(
       asset.origin,
@@ -339,33 +351,33 @@ test("every Datapipelines asset in index.html resolves to the one Datapipelines 
       `Datapipelines asset ${asset.pathname} loads from ${asset.origin}, not the Datapipelines origin — a root-relative URL resolves to the HOST page's origin`,
     );
   }
-  // ONE origin placeholder value across the whole file.
-  const origins = [...new Set(dpAssets.map((a) => a.origin))];
-  assert.deepEqual(origins, [DP_ORIGIN], "the example writes exactly ONE Datapipelines origin value");
-  // The engine's files: every one of them, in the engine's load order, before the runtime
-  // and the chart adapter (#987 D11).
-  const paths = dpAssets.map((a) => a.pathname);
-  const engine = paths.filter((p) => p.startsWith("/js/js-rendered/"));
-  assert.deepEqual(engine, engineFiles().map((n) => "/js/js-rendered/" + n), "index.html loads the engine's files in load order");
-  const lastEngine = paths.indexOf(engine[engine.length - 1]);
-  assert.ok(lastEngine < paths.indexOf("/js/datapipelines-dashboard.js"), "the engine loads before the runtime");
-  assert.ok(lastEngine < paths.indexOf("/js/datapipelines-dashboard-chart.js"), "the engine loads before the chart adapter");
-  // The page's whole script list is the engine, the runtime, the three adapters and the
-  // glue: absence proved by what IS there (#987 A.4). embed.js declares no charts option.
-  const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => new URL(m[1], HOST_ORIGIN).pathname);
-  assert.deepEqual(scripts, [
-    ...engineFiles().map((n) => "/js/js-rendered/" + n),
-    "/js/datapipelines-dashboard.js",
-    "/js/datapipelines-chart-interactions.js",
-    "/js/datapipelines-dashboard-chart.js",
-    "/js/datapipelines-dashboard-table.js",
-    "/js/datapipelines-dashboard-kpi.js",
-    "/embed.js",
-  ]);
+  // The client library (#1064 D8, record §8 A12): the Datapipelines stylesheet links are
+  // exactly the one file, and the page's scripts are exactly the library, then the host's glue.
+  const sheets = [...html.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*>/g)].map((m) => /href="([^"]+)"/.exec(m[0])[1]);
+  assert.deepEqual(
+    sheets.map((u) => new URL(u, HOST_ORIGIN)).filter((u) => u.origin === DP_ORIGIN).map((u) => u.pathname),
+    ["/css/datapipelines.css"],
+    `index.html's Datapipelines stylesheets are exactly the library's one: ${JSON.stringify(sheets)}`,
+  );
+  assert.equal(sheets.length, 1, `index.html links exactly one stylesheet: ${JSON.stringify(sheets)}`);
+  const scripts = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => new URL(m[1], HOST_ORIGIN));
+  assert.deepEqual(
+    scripts.map((u) => (u.origin === DP_ORIGIN ? u.href : u.pathname)),
+    [DP_ORIGIN + "/js/datapipelines.js", "/embed.js"],
+    `index.html's scripts are exactly the library, then embed.js: ${JSON.stringify(scripts.map((u) => u.href))}`,
+  );
+  // ONE origin placeholder value across the whole file, and nothing else of the Datapipelines origin.
+  assert.deepEqual(dpAssets.map((a) => a.pathname), ["/css/datapipelines.css", "/js/datapipelines.js"]);
   assert.equal(/\bcharts\s*:/.test(fs.readFileSync(embedPath, "utf8")), false, "embed.js declares no charts option");
-  // The README tells the reader to replace it — stated once.
+  // The README tells the reader to replace the origin — stated once — and names no source file
+  // the library joins: neither the engine's directory nor a runtime file.
   const readme = fs.readFileSync(readmePath, "utf8");
   assert.equal(readme.split(DP_ORIGIN).length - 1, 1, "the README names the origin placeholder exactly once");
+  assert.equal(readme.includes("js-rendered/"), false, "the README names no engine file path");
+  for (const file of runtimeFiles()) {
+    const name = path.basename(file);
+    assert.equal(readme.includes(name), false, `the README names the runtime source file ${name}`);
+  }
 });
 
 test("embed.js mounts the example automatically through the reference proxy: real fetch, key server-side only, clean dispose", async () => {

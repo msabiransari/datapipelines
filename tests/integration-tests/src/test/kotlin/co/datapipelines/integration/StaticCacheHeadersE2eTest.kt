@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -42,6 +43,11 @@ import java.util.UUID
  * The files are a LIST THIS TEST BUILDS by walking the classpath locations the handlers serve, never a hand-picked
  * sample, with floors so a walk that finds nothing is red, not green over nothing. Set up as
  * [DraftFirstGoldenPathE2eTest] is: the whole application on a random port, plain HTTP requests with no session.
+ *
+ * The client library's two files (#1064 D1) are on no classpath location, so the walk adds them by name; their own
+ * case holds that each is the join of its sources fetched one by one (A.2). A font file's successful answer allows any
+ * origin and only a font file's successful answer does (#1064 D4): every font case below sends a foreign `Origin`
+ * and reads `Access-Control-Allow-Origin` beside the cache headers (A.3).
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -72,14 +78,15 @@ class StaticCacheHeadersE2eTest {
         val css = walk(STATIC_ROOT, "css/").map { "/$it" }
         val js = walk(STATIC_ROOT, "js/").map { "/$it" }
         val vendor = walk(STATIC_ROOT, "vendor/").filterNot { it.startsWith("vendor/fonts/") }.map { "/$it" }
+        val library = LIBRARY_FILES.map { it.first }
         val engineOnClasspath = walk(engineRoot(), "").toSet()
         val engine = engineNames().map { name -> name.also { check(it in engineOnClasspath) { "engine file $it not on the classpath" } } }
         val enginePaths = engine.map { ENGINE_PREFIX + it }
         println(
             "1023|others|css=${css.size} js=${js.size} vendor-outside-fonts=${vendor.size} engine=${enginePaths.size} " +
-                "total=${css.size + js.size + vendor.size + enginePaths.size}",
+                "library=${library.size} total=${css.size + js.size + vendor.size + enginePaths.size + library.size}",
         )
-        css + js + vendor + enginePaths
+        css + js + vendor + enginePaths + library
     }
 
     @Test
@@ -112,9 +119,10 @@ class StaticCacheHeadersE2eTest {
     fun `every font file is kept a year, public and immutable, and its own validator answers 304`() {
         assertSoftly {
             for (path in fonts) {
-                val first = get(path)
+                val first = get(path, FOREIGN_ORIGIN)
                 withClue("$path first answer") {
                     first.statusCode() shouldBe 200
+                    first.shouldAllowAnyOrigin()
                     val cacheControl = first.header("Cache-Control")
                     cacheControl.split(", ").toSet() shouldBe FONT_DIRECTIVES
                     // #1023 round 2: the security chain writes none of its cache headers on a font file.
@@ -123,9 +131,10 @@ class StaticCacheHeadersE2eTest {
                 }
                 val etag = first.header("ETag")
                 withClue("$path ETag") { etag shouldNotBe "" }
-                val again = get(path, "If-None-Match" to etag)
+                val again = get(path, "If-None-Match" to etag, FOREIGN_ORIGIN)
                 withClue("$path asked with its own validator") {
                     again.statusCode() shouldBe 304
+                    again.shouldAllowAnyOrigin()
                     again.body().size shouldBe 0
                     again.header("Pragma") shouldBe ""
                     again.header("Expires") shouldBe ""
@@ -133,6 +142,14 @@ class StaticCacheHeadersE2eTest {
             }
         }
         println("1023|font-header|${get(fonts.first()).header("Cache-Control")}")
+        val first = get(fonts.first(), FOREIGN_ORIGIN).originHeaders()
+        println("1064|D4|a|walk|fonts=${fonts.size} GET 200 and 304, each with Origin ${FOREIGN_ORIGIN.second}|$first")
+        val noOrigin = get(fonts.first())
+        println("1064|D4|a|GET ${fonts.first()} with no Origin|${noOrigin.originHeaders()}")
+        withClue("a GET with no Origin header: the star all the same (it does not depend on the request)") {
+            noOrigin.statusCode() shouldBe 200
+            noOrigin.shouldAllowAnyOrigin()
+        }
         printCacheHeaders("font", fonts.first())
     }
 
@@ -259,25 +276,15 @@ class StaticCacheHeadersE2eTest {
                 Near("a dot segment", "/vendor/fonts/../css/app.css", 400, FIREWALL_ON_FONT_PATH_CACHE),
                 Near("an encoded slash", "/vendor/fonts/noto-sans%2fnoto-sans-latin-wght-normal.woff2", 400, REFUSED_CACHE),
             )
-        val head =
-            client.send(
-                HttpRequest
-                    .newBuilder(URI.create("http://localhost:$port${fonts.first()}"))
-                    .method("HEAD", HttpRequest.BodyPublishers.noBody())
-                    .build(),
-                HttpResponse.BodyHandlers.discarding(),
-            )
-        println("1023|font-rule-reach|HEAD ${fonts.first()}|status=${head.statusCode()}|${CHAIN_HEADER_NAMES.map { head.header(it) }}")
-        withClue("HEAD of a font file: the year alone") {
-            head.statusCode() shouldBe 200
-            head.header("Cache-Control").split(", ").toSet() shouldBe FONT_DIRECTIVES
-            head.header("Pragma") shouldBe ""
-            head.header("Expires") shouldBe ""
-        }
+        headOfAFontFileKeepsTheYearAndAllowsAnyOrigin()
         assertSoftly {
             for (row in rows) {
-                val response = send(row.method, row.path, *row.headers.toTypedArray())
+                // A foreign Origin on every row of the font path (D4 row b); off it, none (an API route would take it
+                // as a cross-origin request of its own rule).
+                val origin = if (row.path.startsWith(FONT_PREFIX)) listOf(FOREIGN_ORIGIN) else emptyList()
+                val response = send(row.method, row.path, *(row.headers + origin).toTypedArray())
                 val seen = CHAIN_HEADER_NAMES.map { response.header(it) }
+                println("1064|D4|b|${row.label}|${row.method} ${row.path} origin=${origin.isNotEmpty()}|${response.originHeaders()}")
                 println(
                     "1023|font-rule-reach|${row.label}|${row.method} ${row.path} ${row.headers}|status=${response.statusCode()}|" +
                         "${CHAIN_HEADER_NAMES.zip(seen)}",
@@ -285,10 +292,33 @@ class StaticCacheHeadersE2eTest {
                 withClue("${row.label}: ${row.method} ${row.path} (an error answer: the chain's no-store policy, never the year)") {
                     response.statusCode() shouldBe row.status
                     seen shouldBe row.cache
+                    response.header(ACAO) shouldBe ""
                     response.header("Cache-Control") shouldNotContain "max-age=31536000"
                     response.header("Cache-Control") shouldNotContain "public"
                 }
             }
+        }
+    }
+
+    /** HEAD of a font file, with a foreign `Origin`: the year alone, and D4's header (row a). */
+    private fun headOfAFontFileKeepsTheYearAndAllowsAnyOrigin() {
+        val head =
+            client.send(
+                HttpRequest
+                    .newBuilder(URI.create("http://localhost:$port${fonts.first()}"))
+                    .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                    .header(FOREIGN_ORIGIN.first, FOREIGN_ORIGIN.second)
+                    .build(),
+                HttpResponse.BodyHandlers.discarding(),
+            )
+        println("1023|font-rule-reach|HEAD ${fonts.first()}|status=${head.statusCode()}|${CHAIN_HEADER_NAMES.map { head.header(it) }}")
+        println("1064|D4|a|HEAD ${fonts.first()}|${head.originHeaders()}")
+        withClue("HEAD of a font file: the year alone") {
+            head.statusCode() shouldBe 200
+            head.shouldAllowAnyOrigin()
+            head.header("Cache-Control").split(", ").toSet() shouldBe FONT_DIRECTIVES
+            head.header("Pragma") shouldBe ""
+            head.header("Expires") shouldBe ""
         }
     }
 
@@ -310,11 +340,13 @@ class StaticCacheHeadersE2eTest {
         assertSoftly {
             for ((label, headers, status) in successes) {
                 for (method in listOf("GET", "HEAD")) {
-                    val response = send(method, woff2, *headers.toTypedArray())
+                    val response = send(method, woff2, *(headers + FOREIGN_ORIGIN).toTypedArray())
                     val seen = CHAIN_HEADER_NAMES.map { response.header(it) }
                     println("1023|font-outcome|$label|$method $woff2|status=${response.statusCode()}|$seen")
+                    println("1064|D4|a|$label|$method $woff2|${response.originHeaders()}")
                     withClue("$label: $method $woff2 (a success: the year alone)") {
                         response.statusCode() shouldBe status
+                        response.shouldAllowAnyOrigin()
                         response.header("Cache-Control").split(", ").toSet() shouldBe FONT_DIRECTIVES
                         response.header("Pragma") shouldBe ""
                         response.header("Expires") shouldBe ""
@@ -323,12 +355,67 @@ class StaticCacheHeadersE2eTest {
             }
         }
         val key = seedMcpKey()
-        val refused = send("GET", woff2, API_KEY_HEADER to key.plaintext)
+        val refused = send("GET", woff2, API_KEY_HEADER to key.plaintext, FOREIGN_ORIGIN)
         val seen = CHAIN_HEADER_NAMES.map { refused.header(it) }
+        println("1064|D4|b|an MCP key off its surface|GET $woff2|${refused.originHeaders()}")
         println("1023|font-outcome|an MCP key off its surface|GET $woff2|status=${refused.statusCode()}|${CHAIN_HEADER_NAMES.zip(seen)}")
         withClue("an MCP key off its surface: GET $woff2 (the chain's own error answer: no-store, never the year)") {
             refused.statusCode() shouldBe 403
             seen shouldBe MISSING_FONT_CACHE
+            refused.header(ACAO) shouldBe ""
+        }
+    }
+
+    /**
+     * The client library's two files through the whole application (#1064 A.2, Security): no session, the content type
+     * and `nosniff` of their kind (read from a source file's answer, not written here), the re-check rule and the
+     * content validator (the walk holds both as well), and the body equal to the join of every listed source fetched
+     * one by one from its own URL, each followed by one newline: the engine's files in the engine's order (read from
+     * the engine's own object), the runtime's five from the vendor manifest, the six sheets from this test's list.
+     */
+    @Test
+    fun `the client library's two files are the join of their sources fetched one by one, and nothing else answers`() {
+        val runtime =
+            ObjectMapper()
+                .readTree(get("/vendor/design-system/vendor-manifest.json").body())
+                .path("datapipelines-dashboard-runtime")
+                .path("files")
+                .map { "/" + it.asText() }
+        val sources =
+            mapOf(
+                LIBRARY_FILES[0].first to engineNames().map { ENGINE_PREFIX + it } + runtime,
+                LIBRARY_FILES[1].first to LIBRARY_SHEETS,
+            )
+        assertSoftly {
+            for ((path, kindOf) in LIBRARY_FILES) {
+                val answer = get(path, FOREIGN_ORIGIN)
+                val sibling = get(kindOf)
+                val parts = sources.getValue(path)
+                val bodies = parts.map { it to get(it).also { r -> check(r.statusCode() == 200) { it } }.body() + NEWLINE }
+                val shown = (CACHE_HEADERS + LIBRARY_HEADERS).joinToString(" ") { "$it=${answer.header(it)}" }
+                println("1064|A2|$path|status=${answer.statusCode()} bytes=${answer.body().size} sources=${parts.size} $shown")
+                withClue("$path through the application, no session") {
+                    answer.statusCode() shouldBe 200
+                    answer.header("Content-Type") shouldBe sibling.header("Content-Type")
+                    answer.header("X-Content-Type-Options") shouldBe "nosniff"
+                    answer.header("Cache-Control") shouldBe RECHECK_HEADER
+                    answer.header("ETag") shouldBe "\"${sha256(answer.body())}\""
+                    answer.header("Last-Modified") shouldBe ""
+                    answer.header(ACAO) shouldBe ""
+                    firstDifference(bodies, answer.body()) shouldBe null
+                }
+                val queried = get("$path?v=2&name=../app.css")
+                withClue("$path with a query string: the same bytes") {
+                    queried.statusCode() shouldBe 200
+                    queried.body().toList() shouldBe answer.body().toList()
+                }
+            }
+            for (path in LIBRARY_NEAR_MISSES + "/css/app.css" + "/api/v1/executions") {
+                val response = get(path, FOREIGN_ORIGIN)
+                println("1064|D4|c|GET $path|${response.originHeaders()}")
+                withClue("off the font path: $path") { response.header(ACAO) shouldBe "" }
+                if (path in LIBRARY_NEAR_MISSES) withClue("$path is not one of the two names") { response.statusCode() shouldBe 404 }
+            }
         }
     }
 
@@ -434,6 +521,28 @@ class StaticCacheHeadersE2eTest {
 
     private fun HttpResponse<*>.header(name: String): String = headers().allValues(name).joinToString(", ")
 
+    /** Null when [actual] is every part's bytes in order and nothing else; otherwise the first part whose bytes differ. */
+    private fun firstDifference(
+        parts: List<Pair<String, ByteArray>>,
+        actual: ByteArray,
+    ): String? {
+        var offset = 0
+        for ((path, bytes) in parts) {
+            val end = offset + bytes.size
+            if (end > actual.size || !actual.copyOfRange(offset, end).contentEquals(bytes)) return "the first differing source is $path"
+            offset = end
+        }
+        return if (offset == actual.size) null else "${actual.size - offset} bytes after the last source"
+    }
+
+    private fun HttpResponse<*>.originHeaders(): String = "status=${statusCode()} $ACAO=${header(ACAO)} $ACAC=${header(ACAC)}"
+
+    /** #1064 D4: exactly one `Access-Control-Allow-Origin: *`, and never a credentials header beside it. */
+    private fun HttpResponse<*>.shouldAllowAnyOrigin() {
+        headers().allValues(ACAO) shouldBe listOf("*")
+        header(ACAC) shouldBe ""
+    }
+
     /** Every readable file under `classpath*:<root>/<sub>`, as paths relative to [root]; sorted, no duplicates. */
     private fun walk(
         root: String,
@@ -506,6 +615,27 @@ class StaticCacheHeadersE2eTest {
         const val OTHER_FLOOR = 100
         const val SHA256_HEX_LENGTH = 64
         const val RECHECK_HEADER = "no-cache"
+        const val FONT_PREFIX = "/vendor/fonts/"
+        const val ACAO = "Access-Control-Allow-Origin"
+        const val ACAC = "Access-Control-Allow-Credentials"
+        val FOREIGN_ORIGIN = "Origin" to "https://host.example"
+        val NEWLINE = "\n".toByteArray()
+
+        /** The client library's two files (#1064 D1), each with a source file of its kind whose content type it shares. */
+        val LIBRARY_FILES = listOf("/js/datapipelines.js" to "/js/datapipelines-dashboard.js", "/css/datapipelines.css" to "/css/app.css")
+
+        /** The stylesheet's six sources in the example's order (#1064 D2), written here and not read from the class. */
+        val LIBRARY_SHEETS =
+            listOf(
+                "/vendor/design-system/tokens.css",
+                "/vendor/design-system/themes/light.css",
+                "/vendor/design-system/base.css",
+                "/vendor/design-system/primitives.css",
+                "/css/app.css",
+                "/css/dashboards.css",
+            )
+        val LIBRARY_HEADERS = listOf("Content-Type", "X-Content-Type-Options", ACAO)
+        val LIBRARY_NEAR_MISSES = listOf("/js/datapipelines.js.map", "/css/datapipelines.min.css")
         val FONT_DIRECTIVES = setOf("max-age=31536000", "public", "immutable")
         val STATIC_PREFIXES = listOf("/css/", "/js/", "/vendor/")
         val OTHER_STATIC_ROOTS = listOf("META-INF/resources", "resources", "public")
