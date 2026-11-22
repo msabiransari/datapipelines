@@ -276,24 +276,7 @@ class StaticCacheHeadersE2eTest {
                 Near("a dot segment", "/vendor/fonts/../css/app.css", 400, FIREWALL_ON_FONT_PATH_CACHE),
                 Near("an encoded slash", "/vendor/fonts/noto-sans%2fnoto-sans-latin-wght-normal.woff2", 400, REFUSED_CACHE),
             )
-        val head =
-            client.send(
-                HttpRequest
-                    .newBuilder(URI.create("http://localhost:$port${fonts.first()}"))
-                    .method("HEAD", HttpRequest.BodyPublishers.noBody())
-                    .header(FOREIGN_ORIGIN.first, FOREIGN_ORIGIN.second)
-                    .build(),
-                HttpResponse.BodyHandlers.discarding(),
-            )
-        println("1023|font-rule-reach|HEAD ${fonts.first()}|status=${head.statusCode()}|${CHAIN_HEADER_NAMES.map { head.header(it) }}")
-        println("1064|D4|a|HEAD ${fonts.first()}|${head.originHeaders()}")
-        withClue("HEAD of a font file: the year alone") {
-            head.statusCode() shouldBe 200
-            head.shouldAllowAnyOrigin()
-            head.header("Cache-Control").split(", ").toSet() shouldBe FONT_DIRECTIVES
-            head.header("Pragma") shouldBe ""
-            head.header("Expires") shouldBe ""
-        }
+        headOfAFontFileKeepsTheYearAndAllowsAnyOrigin()
         assertSoftly {
             for (row in rows) {
                 // A foreign Origin on every row of the font path (D4 row b); off it, none (an API route would take it
@@ -314,6 +297,28 @@ class StaticCacheHeadersE2eTest {
                     response.header("Cache-Control") shouldNotContain "public"
                 }
             }
+        }
+    }
+
+    /** HEAD of a font file, with a foreign `Origin`: the year alone, and D4's header (row a). */
+    private fun headOfAFontFileKeepsTheYearAndAllowsAnyOrigin() {
+        val head =
+            client.send(
+                HttpRequest
+                    .newBuilder(URI.create("http://localhost:$port${fonts.first()}"))
+                    .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                    .header(FOREIGN_ORIGIN.first, FOREIGN_ORIGIN.second)
+                    .build(),
+                HttpResponse.BodyHandlers.discarding(),
+            )
+        println("1023|font-rule-reach|HEAD ${fonts.first()}|status=${head.statusCode()}|${CHAIN_HEADER_NAMES.map { head.header(it) }}")
+        println("1064|D4|a|HEAD ${fonts.first()}|${head.originHeaders()}")
+        withClue("HEAD of a font file: the year alone") {
+            head.statusCode() shouldBe 200
+            head.shouldAllowAnyOrigin()
+            head.header("Cache-Control").split(", ").toSet() shouldBe FONT_DIRECTIVES
+            head.header("Pragma") shouldBe ""
+            head.header("Expires") shouldBe ""
         }
     }
 

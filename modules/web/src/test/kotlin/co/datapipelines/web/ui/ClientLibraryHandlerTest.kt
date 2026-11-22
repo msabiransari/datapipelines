@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
-import org.springframework.web.context.support.StaticWebApplicationContext
 import org.springframework.web.HttpRequestHandler
+import org.springframework.web.context.support.StaticWebApplicationContext
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry
 import org.springframework.web.servlet.handler.SimpleUrlHandlerMapping
 import java.security.MessageDigest

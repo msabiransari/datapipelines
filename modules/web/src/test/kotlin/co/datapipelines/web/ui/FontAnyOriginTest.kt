@@ -36,19 +36,33 @@ class FontAnyOriginTest {
     ) {
         response.setHeader("Cache-Control", "max-age=31536000, public, immutable")
         when (outcome) {
-            Outcome.BODY -> response.outputStream.write(BYTES)
+            Outcome.BODY -> {
+                response.outputStream.write(BYTES)
+            }
+
             Outcome.PARTIAL -> {
                 response.status = 206
                 response.outputStream.write(BYTES, 0, 4)
             }
-            Outcome.NOT_MODIFIED -> response.status = 304
-            Outcome.HEAD_FLUSHED -> response.flushBuffer()
-            Outcome.MISSING -> response.sendError(404)
+
+            Outcome.NOT_MODIFIED -> {
+                response.status = 304
+            }
+
+            Outcome.HEAD_FLUSHED -> {
+                response.flushBuffer()
+            }
+
+            Outcome.MISSING -> {
+                response.sendError(404)
+            }
+
             Outcome.UNSATISFIABLE -> {
                 response.status = 206
                 response.setHeader("Content-Range", "bytes */${BYTES.size}")
                 response.sendError(416)
             }
+
             Outcome.REFUSED_WITH_BODY -> {
                 response.status = 403
                 response.writer.write("{\"error\":{}}")

@@ -58,8 +58,7 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
     private fun policy(
         pageOrigin: String,
         styleSource: String = libraryOrigin,
-    ): String =
-        "script-src $pageOrigin $libraryOrigin; style-src $styleSource; font-src $libraryOrigin; connect-src $pageOrigin"
+    ): String = "script-src $pageOrigin $libraryOrigin; style-src $styleSource; font-src $libraryOrigin; connect-src $pageOrigin"
 
     @Test
     fun `the example draws every tile on another origin under its enforced policy, with the library's fonts`() {
@@ -255,6 +254,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
 
         private fun fromLibrary(url: String): Boolean = URI(url).origin() == libraryOrigin
 
+        /** One of the four runtime routes the reference relay passes through. */
+        private fun isRuntimeRoute(
+            method: String,
+            path: String,
+        ): Boolean = RUNTIME_ROUTES.any { (m, pattern) -> m == method && pattern.matches(path) }
+
         /** The reference relay's rule: the four runtime routes only, three request headers through, the key added. */
         private fun relay(
             route: Route,
@@ -262,9 +267,15 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             query: String?,
         ) {
             val method = route.request().method()
-            if (board == null || key == null || RUNTIME_ROUTES.none { (m, pattern) -> m == method && pattern.matches(path) }) {
+            if (board == null || key == null || !isRuntimeRoute(method, path)) {
                 relayed += "$method $path=404(not relayed)"
-                route.fulfill(Route.FulfillOptions().setStatus(404).setContentType("application/json").setBody(NOT_RELAYED))
+                route.fulfill(
+                    Route
+                        .FulfillOptions()
+                        .setStatus(404)
+                        .setContentType("application/json")
+                        .setBody(NOT_RELAYED),
+                )
                 return
             }
             val forwarded = route.request().headers().filterKeys { it.lowercase() in FORWARDED_HEADERS } + ("DP-API-Key" to key)
@@ -301,7 +312,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
     }
 
     /** The board container's text, one line, cut (a bootstrap refusal shows its code there). */
-    private fun boardText(page: Page): String = page.locator("#dashboard").innerText().replace('\n', ' ').take(DIAGNOSTIC_CHARS)
+    private fun boardText(page: Page): String =
+        page
+            .locator("#dashboard")
+            .innerText()
+            .replace('\n', ' ')
+            .take(DIAGNOSTIC_CHARS)
 
     private fun exampleFile(name: String): ByteArray = File(repoRoot(), "$EXAMPLE_DIR/$name").readBytes()
 
