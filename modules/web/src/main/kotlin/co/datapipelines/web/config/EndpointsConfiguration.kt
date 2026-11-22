@@ -19,10 +19,14 @@ import co.datapipelines.application.endpoints.EndpointServeAudit
 import co.datapipelines.application.endpoints.EndpointVersionService
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
+import co.datapipelines.application.endpoints.PublishedMutationDigests
+import co.datapipelines.application.endpoints.PublishedMutationReservationRepository
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.auth.AuthProperties
+import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
@@ -40,14 +44,21 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ResolvedNode
 import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import co.datapipelines.web.endpoints.MutationRequestRules
 import co.datapipelines.web.endpoints.PublishedEndpointServeService
 import co.datapipelines.web.endpoints.PublishedExecutionPagingService
+import co.datapipelines.web.endpoints.PublishedMutationAnswers
+import co.datapipelines.web.endpoints.PublishedMutationLauncher
+import co.datapipelines.web.endpoints.PublishedMutationOrigins
+import co.datapipelines.web.endpoints.PublishedMutationService
+import co.datapipelines.web.endpoints.PublishedMutationUrls
 import co.datapipelines.web.endpoints.PublishedRequestBodyCodec
 import co.datapipelines.web.executions.ExecutionMetadataProjection
 import co.datapipelines.web.executions.ExecutionVisibility
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
@@ -62,6 +73,7 @@ import org.springframework.data.redis.listener.RedisMessageListenerContainer
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Duration
 
 /**
  * Every bean of the published-endpoint feature that `web` owns (074) — the registry, its
@@ -301,7 +313,90 @@ class EndpointsConfiguration {
         metadata: ExecutionMetadataProjection,
         authorizer: EndpointAuthorizer,
         bindings: EndpointKeyBindingRepository,
-    ): PublishedExecutionPagingService = PublishedExecutionPagingService(executions, cursor, visibility, metadata, authorizer, bindings)
+        mutationOrigins: PublishedMutationOrigins,
+    ): PublishedExecutionPagingService =
+        PublishedExecutionPagingService(executions, cursor, visibility, metadata, authorizer, bindings, mutationOrigins)
+
+    /** #1039 — the durable reservation + origin store of published mutations (Metadata DB §4.61). */
+    @Bean
+    fun publishedMutationReservationRepository(jdbc: NamedParameterJdbcTemplate): PublishedMutationReservationRepository =
+        PublishedMutationReservationRepository(jdbc)
+
+    /**
+     * #1039 — the keyed replay digests, under their own subkey of the deployment's signing secret: a stored digest
+     * reveals neither a client key nor an input, and no other MAC key is derivable from it.
+     */
+    @Bean
+    fun publishedMutationDigests(jwtService: JwtService): PublishedMutationDigests =
+        PublishedMutationDigests(jwtService.deriveSubkey(PublishedMutationDigests.SUBKEY_LABEL))
+
+    /** #1039 — status and result URLs under the business path; the host from `datapipelines.auth.base-url` only. */
+    @Bean
+    fun publishedMutationUrls(authProperties: AuthProperties): PublishedMutationUrls = PublishedMutationUrls(authProperties.baseUrl)
+
+    /** #1039 — the published-mutation terminal table, one shaping for first answers and retries. */
+    @Bean
+    fun publishedMutationAnswers(
+        resultStore: ResultStore,
+        urls: PublishedMutationUrls,
+    ): PublishedMutationAnswers = PublishedMutationAnswers(resultStore, urls)
+
+    /** #1039 — the polling rule of a mutation-started run: only through its initiating grant. */
+    @Bean
+    fun publishedMutationOrigins(
+        reservations: PublishedMutationReservationRepository,
+        registry: EndpointRegistry,
+        bindings: EndpointKeyBindingRepository,
+        workspaceLiveness: WorkspaceLiveness,
+        urls: PublishedMutationUrls,
+    ): PublishedMutationOrigins = PublishedMutationOrigins(reservations, registry, bindings, workspaceLiveness, urls)
+
+    /** #1039 — admission, replay and start of a published POST, PUT or DELETE, in the application's execution scope. */
+    @Bean
+    @Suppress("LongParameterList") // one composition root for one request path
+    fun publishedMutationService(
+        reservations: PublishedMutationReservationRepository,
+        digests: PublishedMutationDigests,
+        executions: ExecutionRepository,
+        codec: PublishedRequestBodyCodec,
+        answers: PublishedMutationAnswers,
+        runner: RecordingExecutionRunner,
+        readOnlyRule: ReadOnlyPipelineRule,
+        resultConfig: ResultConfig,
+        endpointsProperties: EndpointsProperties,
+        idempotency: IdempotencyProperties,
+        audit: AuditEventSink,
+        executionScope: WebSurfaceConfiguration.ExecutionCoroutineScope,
+        meters: MeterRegistry,
+    ): PublishedMutationService =
+        PublishedMutationService(
+            reservations = reservations,
+            digests = digests,
+            executions = executions,
+            codec = codec,
+            answers = answers,
+            launcher =
+                PublishedMutationLauncher(
+                    runner = runner,
+                    reservations = reservations,
+                    executions = executions,
+                    answers = answers,
+                    endpointsProperties = endpointsProperties,
+                    audit = audit,
+                    scope = executionScope,
+                    meters = meters,
+                ),
+            readOnlyRule = readOnlyRule,
+            endpointsProperties = endpointsProperties,
+            requests = MutationRequestRules(resultConfig),
+            windows =
+                PublishedMutationService.Windows(
+                    replay = Duration.ofSeconds(idempotency.ttlSeconds),
+                    start = Duration.ofSeconds(endpointsProperties.mutationStartWindowSeconds),
+                ),
+            audit = audit,
+            meters = meters,
+        )
 
     /** The §5.2 hierarchical decision. Pure and stateless — one instance serves every request. */
     @Bean
@@ -345,6 +440,7 @@ class EndpointsConfiguration {
         // 180 (D15): `WorkspaceService` is the one implementation — the auth liveness cache
         // answers, so a deactivated workspace's endpoint is unknown within the same TTL as its keys.
         workspaceLiveness: WorkspaceLiveness,
+        mutations: PublishedMutationService,
     ): PublishedEndpointServeService =
         PublishedEndpointServeService(
             registry = registry,
@@ -363,6 +459,7 @@ class EndpointsConfiguration {
             authoring = authoringGuard,
             scope = executionScope,
             workspaceLiveness = workspaceLiveness,
+            mutations = mutations,
         )
 
     private fun timeoutBounds(properties: EndpointsProperties) =

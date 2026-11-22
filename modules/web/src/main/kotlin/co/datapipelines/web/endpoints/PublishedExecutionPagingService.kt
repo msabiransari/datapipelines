@@ -49,6 +49,13 @@ import java.util.UUID
  *    `404 result.execution_not_found`: the URL is not a capability.
  * 3. Then the identical semantics the framework route serves: the §10.2 metadata projection
  *    (shared, never re-derived), and the §7 result cursor's format/status/TTL table.
+ *
+ * ## A run a published mutation started (#1039)
+ *
+ * Decided FIRST, before rule 1: when [PublishedMutationOrigins] finds this key's reservation for the id, the run is
+ * read only through its initiating grant (a write-only key holds no GET binding, so rule 1 would refuse it), with a
+ * status projection that relays no parameters or failure text and a `204` result for a zero-caller run. Every other
+ * id takes rules 1–3 unchanged, whose ownership check refuses another key's mutation run as not found.
  */
 class PublishedExecutionPagingService(
     private val executions: ExecutionRepository,
@@ -57,6 +64,8 @@ class PublishedExecutionPagingService(
     private val metadata: ExecutionMetadataProjection,
     private val authorizer: EndpointAuthorizer,
     private val bindings: EndpointKeyBindingRepository,
+    /** #1039 — the mutation-origin rule; null only where a test builds the GET reads alone. */
+    private val mutationOrigins: PublishedMutationOrigins? = null,
 ) {
     /**
      * `GET …/executions/{id}` — the §10.2 metadata of a run the key started, under the business
@@ -67,6 +76,14 @@ class PublishedExecutionPagingService(
         executionId: UUID,
         principal: AuthenticatedPrincipal,
     ): ResponseEntity<Any> {
+        mutationOriginOf(executionId, principal)?.let { origin ->
+            val origins = requireNotNull(mutationOrigins)
+            origins.requireInitiatingGrant(origin, businessPath, principal)
+            val workspaceId = principal.requireWorkspace().id
+            val record = executions.findById(workspaceId, executionId)
+            val projection = record?.let { metadata.project(it, workspaceId, includeResult = false) }
+            return ResponseEntity.ok(ApiResponse.of(origins.statusOf(origin, record, projection)))
+        }
         requireBound(businessPath, principal)
         val record = ownExecution(executionId, principal)
         val projection = metadata.project(record, principal.requireWorkspace().id, includeResult = true)
@@ -86,9 +103,16 @@ class PublishedExecutionPagingService(
         limit: Int?,
         format: String?,
     ): ResponseEntity<Any> {
-        requireBound(businessPath, principal)
+        val origin = mutationOriginOf(executionId, principal)
+        if (origin != null) {
+            requireNotNull(mutationOrigins).requireInitiatingGrant(origin, businessPath, principal)
+        } else {
+            requireBound(businessPath, principal)
+        }
         val chosen = cursor.formatOf(format)
         val record = cursor.readable(executionId, principal)
+        // A zero-caller mutation succeeded and produced no rows by design: nothing to page (published-mutation-apis §4).
+        if (origin != null && !origin.hasCaller) return ResponseEntity.noContent().build()
         return if (chosen == ResultCursor.FORMAT_CSV) {
             val body = StreamingResponseBody { out -> cursor.writeCsv(record, out) }
             ResponseEntity.ok().contentType(MediaType.parseMediaType("text/csv")).body<Any>(body)
@@ -128,6 +152,11 @@ class PublishedExecutionPagingService(
             )
         }
     }
+
+    private fun mutationOriginOf(
+        executionId: UUID,
+        principal: AuthenticatedPrincipal,
+    ) = if (principal.authMethod == AuthMethod.API_KEY) mutationOrigins?.originOf(executionId, principal) else null
 
     /**
      * Rule 2 — OWN. The run must live in the key's pinned workspace and be one the key started;

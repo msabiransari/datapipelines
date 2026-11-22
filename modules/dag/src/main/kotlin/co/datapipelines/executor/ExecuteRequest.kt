@@ -173,14 +173,21 @@ data class ExecuteRequest(
      * false and [boundedDiagnostics] derives the policy from its body.
      */
     val inheritedBoundedDiagnostics: Boolean = false,
+    /**
+     * #1039 (published-mutation requirement §4, §6): true on the ROOT request of a published POST, PUT or DELETE, so a
+     * mutation reports its failures in the bounded form even when it carries no body (a bodyless DELETE). Children
+     * inherit the policy through [NodeExecutionContext.boundedDiagnostics] like a body execution's.
+     */
+    val boundedDiagnosticsRequired: Boolean = false,
 ) {
     /**
      * #1038: whether this execution reports a failure as a bounded code and metadata only ([BoundedFailure]):
-     * every execution that carries a structured request body, and every child of one. Engine
+     * every execution that carries a structured request body, every published mutation (#1039), and every child of
+     * either. Engine
      * messages, driver text, author free text and rendered SQL then reach no event, stored error,
      * stats row, replay or log; the legacy form is unchanged for every other execution.
      */
-    val boundedDiagnostics: Boolean get() = requestBody.present || inheritedBoundedDiagnostics
+    val boundedDiagnostics: Boolean get() = requestBody.present || inheritedBoundedDiagnostics || boundedDiagnosticsRequired
 }
 
 /**

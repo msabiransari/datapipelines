@@ -87,9 +87,11 @@ users ──0:N── lake_profiles (created_by / updated_by; NULL = written by 
 lake_tables_managed ──1:0..1── lake_table_measurements (the planner's figures, ON DELETE CASCADE — §4.57)
 lake_tables_managed ──1:N── lake_storage_usage (one row per UTC day, ON DELETE CASCADE — §4.58)
 lake_tables_managed ──1:0..6── lake_storage_inventory (the latest storage breakdown, six rows, ON DELETE CASCADE — §4.60)
+workspaces ──1:N── published_mutation_reservations (one per admitted published mutation, ON DELETE CASCADE — §4.61)
+api_keys ──1:N── published_mutation_reservations (the admitting credential, ON DELETE CASCADE — §4.61)
 ```
 
-Not shown, because they are not foreign keys: `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
+Not shown, because they are not foreign keys: `published_mutation_reservations.endpoint_id` and `.execution_id` (the origin outlives the route, and the reservation precedes the execution row — §4.61); `audit_log.key_id` names an `api_keys` row without referencing it (the audit trail outlives the key), and `template_versions.imports_json` references other template versions inside a JSONB array (validated at save time, D2 — a JSONB array cannot carry an FK). The `{id, version}` entries in that array — and the `template` refs inside `pipeline_versions.body_json` — name a template by its human id (`templates.name` since V4), never by the surrogate `templates.id`.
 
 ---
 
@@ -2313,6 +2315,48 @@ CREATE TABLE lake_storage_inventory (
 - **Replaced, never appended.** A cleanup deletes the table's rows and inserts its six in one transaction. A refused cleanup (no listing) writes nothing; a purge deletion writes nothing, so a purged table keeps its last inventory.
 - **Read** in one statement by table id (the primary key): the six rows with their time, or "not measured yet" when there is none — never zero. It is not summed with the planner's figures ([§4.57](#457-lake_table_measurements), [§4.58](#458-lake_storage_usage)): two sources, two times.
 
+### 4.61 `published_mutation_reservations`
+
+**One row per admitted published `POST`, `PUT` or `DELETE`: the durable Idempotency-Key reservation, and the origin of the run it admits** (V67; #1039, published-mutation-apis design record §2, §4, §6). The row is written BEFORE the execution starts — before any business SQL — and its primary key IS the execution id.
+
+```sql
+CREATE TABLE published_mutation_reservations (
+    execution_id         UUID        PRIMARY KEY,
+    workspace_id         UUID        NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    api_key_id           TEXT        NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+    endpoint_id          UUID        NOT NULL,
+    api_version          INT         NOT NULL,
+    pipeline_id          UUID        NOT NULL,
+    pipeline_version     INT         NOT NULL,
+    has_caller           BOOLEAN     NOT NULL,
+    method               TEXT        NOT NULL,
+    business_path        TEXT        NOT NULL,
+    scope_digest         TEXT        NULL,
+    request_fingerprint  TEXT        NULL,
+    body_bytes           BIGINT      NULL,
+    owner_token          UUID        NOT NULL,
+    created_at           TIMESTAMPTZ NOT NULL,
+    expires_at           TIMESTAMPTZ NOT NULL,
+    retired_at           TIMESTAMPTZ NULL,
+    CONSTRAINT uq_published_mutation_reservations_scope UNIQUE (scope_digest),
+    CONSTRAINT chk_published_mutation_reservations_method CHECK (method IN ('POST', 'PUT', 'DELETE')),
+    CONSTRAINT chk_published_mutation_reservations_live CHECK (
+        (retired_at IS NULL AND scope_digest IS NOT NULL AND request_fingerprint IS NOT NULL)
+        OR (retired_at IS NOT NULL AND scope_digest IS NULL AND request_fingerprint IS NULL)
+    )
+);
+
+CREATE INDEX idx_published_mutation_reservations_key ON published_mutation_reservations (api_key_id);
+```
+
+**Notes:**
+- **No raw key, no body.** `scope_digest` is HMAC-SHA256, under a purpose-bound subkey of the deployment secret, over (workspace, credential, route entity, method, concrete business path, client `Idempotency-Key`). `request_fingerprint` is the same keyed digest over (method, concrete path, the typed path and query values the reservation's ORIGINAL pin binds — its declared types, its declared defaults applied — and the canonical JSON body, absent distinct from `{}`); no raw value is stored to compare them. Neither can be reversed into the key or the body, and neither is ever read back out over any surface.
+- **One execution per scope, across replicas.** Admission is `INSERT … ON CONFLICT (scope_digest) DO NOTHING` then a read of the live row: the replica whose insert won runs; every other request with that scope answers from the winner's execution. A fingerprint mismatch is `409 idempotency.key_reused_for_different_request`.
+- **Retirement, never deletion, after the window.** `expires_at` is `created_at` plus `datapipelines.idempotency.ttl-seconds`. A request that finds an EXPIRED live row retires it (`scope_digest`, `request_fingerprint` := NULL, `retired_at` := now, conditional on the digest it read) and reserves afresh. NULLs are distinct under `UNIQUE`, so retired rows coexist with the one live reservation; the CHECK keeps the two states exclusive.
+- **The origin.** `endpoint_id`, `api_version`, `pipeline_id`/`pipeline_version` (the exact pin that ran), `method`, `business_path` and `api_key_id` are what polling under `<business path>/executions/{id}` checks: same credential, same concrete path, the route still live with that method, and the credential still holding that route's mutation grant — otherwise the opaque 404. `has_caller` records whether the pinned version has a caller output, which decides `200` with a result versus `200`/`204` without one. A retired row keeps the origin, as long as the execution row lives.
+- **The start claim.** `owner_token` is the admitting replica's claim on starting the run. A retry that finds the reservation with no execution row after the start window takes it over with a compare-and-set on the token and starts the ORIGINAL pin; the execution row's primary key (the run records fail-closed, before its first node) is the fence, so two starters never both run business SQL. A run refused before it starts (concurrency limit, unwritable record) deletes its own reservation (`WHERE execution_id = ? AND owner_token = ?` and no execution row), so the same key may be retried.
+- **No foreign keys** to `published_endpoints` (deleting a route must not erase the origin of runs it admitted) or `pipeline_executions` (the reservation precedes the row). The credential and the workspace cascade.
+
 
 ## 5. Index Strategy Summary
 
@@ -2390,6 +2434,9 @@ CREATE TABLE lake_storage_inventory (
 | `endpoint_key_bindings` | `pk_endpoint_key_bindings` | via PK | `(path_prefix, api_key_id, method)` — one key holds each (node, method) grant once; V65 (#1037) widened V11's `(path_prefix, api_key_id)` |
 | `endpoint_key_bindings` | `idx_endpoint_key_bindings_key` | explicit | Which nodes a key binds — the key detail view and a revoke's blast radius |
 | `endpoint_key_bindings` | `idx_endpoint_key_bindings_endpoint` | explicit (partial) | V65 (#1037): "which keys may call THIS route entity" — the mutation grant's entity lookup, partial on `endpoint_id IS NOT NULL` |
+| `published_mutation_reservations` | `published_mutation_reservations_pkey` | via PK | V67 (#1039): the run's origin by execution id — what polling and the answer read ([§4.61](#461-published_mutation_reservations)) |
+| `published_mutation_reservations` | `uq_published_mutation_reservations_scope` | via UNIQUE | V67: one live reservation per scope digest — the admission race's arbiter and the replay lookup (retired rows carry NULL) |
+| `published_mutation_reservations` | `idx_published_mutation_reservations_key` | explicit | V67: the credential cascade's lookup |
 | `dashboard_key_bindings` | `dashboard_key_bindings_pkey` | via PK | `(name_prefix, api_key_id)` — one key binds a folder once (§4.36) |
 | `dashboard_key_bindings` | `idx_dashboard_key_bindings_key` | explicit | Which folders a key binds — the Keys page's editor and a revoke's blast radius |
 | `lake_tables` | `lake_tables_pkey` | via PK | Lookup by surrogate id |
@@ -2530,6 +2577,7 @@ table and the test's expected-table list in the same commit.
 | `audit_log` | derived | AuditEvent | — | — | Records local activity; not authored, not transferable |
 | `published_endpoint_versions` | promotable | PublishedEndpoint | `version` (per API) | `(path_pattern, version)` | An API version is authored content (#786). Until follow-up #879 carries exact versions on the wire, promotion keeps today's by-path transfer: the receiver's import creates an absent API's v1 pinned to the TARGET pipeline's CURRENT, never a transmitted version or hash |
 | `published_endpoints` | promotable | PublishedEndpoint | — (follows the pipeline it publishes) | `path_pattern` | The URL contract is authored, and an endpoint that exists in dev and not in prod is the whole point of promoting it. The row references its pipeline by NAME in the batch, like everything promoted; `workspace_id`, `created_by` and the timestamps are resolved locally on the target |
+| `published_mutation_reservations` | derived | Execution | — | `execution_id` | Produced by admitting a published mutation in THIS environment: its replay reservation and its run's origin, keyed under this deployment's secret; never authored, never promoted |
 | `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
 | `dashboard_key_bindings` | promotable | DashboardKeyBinding | — | — | The `endpoint_key_bindings` twin's OWN class, by the same reasoning (L5 #367's lane decision, recorded in the handback): a folder binding is authored topology. TODAY it has no promotion carrier (no batch row, no entity registered with the transfer) — the class states what it WOULD travel as; when a batch carries it, it travels by key NAME exactly like its twin |
 | `learned_facts` | environment-local | LearnedFact | — | — | A fact is about an environment-local [`datasources`](#410-datasources) row and was validated against THAT database's live schema (§4.18); the target environment's data may have a different shape, and a fact that has not been checked against it is exactly what the store refuses to start with. Round 2 may export facts as OSI; nothing promotes them |
@@ -2819,6 +2867,21 @@ COMMIT;
 
 A rollback that skips step 3 is refused by the previous binary at startup; do not "repair" the history instead — `flyway repair` or `spring.flyway.ignore-migration-patterns=*:missing` removes exactly the refusal that keeps `OUTCOME_UNKNOWN` away from a binary that would mislabel it.
 
+### 7.6 Rolling back V67 (published mutation reservations, #1039)
+
+**No barrier.** A binary older than V67 predates mutation serving: it refuses every published `POST`, `PUT` and `DELETE` with `503 endpoint.mutations_disabled` whatever the flag says, and never reads `published_mutation_reservations`, so starting it on V67 metadata cannot misread a row. Polling of a mutation-origin execution under its business path becomes the opaque 404 on such a binary (it knows no mutation origin), which fails closed.
+
+To remove the schema as well (optional; the previous binary runs with it present): drain mutations first (`datapipelines.endpoints.mutations-enabled=false`, let admitted runs settle), stop every V67-aware instance, take a backup, then
+
+```sql
+BEGIN;
+DROP TABLE published_mutation_reservations;
+DELETE FROM flyway_schema_history WHERE version = '67';
+COMMIT;
+```
+
+Dropping the table forgets every replay reservation and run origin: a client retry after a later re-upgrade is a NEW request.
+
 ---
 
 ## 8. Operational Jobs
@@ -2975,6 +3038,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.74 | V67 (#1039, published mutations) | **V67 — published mutation reservations.** New **§4.61 `published_mutation_reservations`**: one row per admitted published POST/PUT/DELETE, written before the run starts; keyed scope and request digests (no raw key, no body; the request digest over the typed values the original pin binds), the live/retired CHECK, the run's origin (route entity, API version, exact pin, method, business path, credential) and the start claim. §3 ERD, §5 (PK, the scope UNIQUE, the credential index) and §5A (derived) updated. **§7.6 Rolling back V67**: no barrier — an older binary refuses every mutation and never reads the table. |
 | 2026-11-21 | v1.73 | 1038 r4 (#1038) | **§ template_versions:** a body fixture's exact text (member order, repeated members, exact numbers) is stored beside the `jsonb` view in a reserved `$exact` member of `tests_json` `input.inputs`; no schema change, no migration (#1080). |
 | 2026-11-21 | v1.72 | V66 follow-up (#1035 r2) | **§8.3** the sweep decides the label in ONE `UPDATE … CASE … RETURNING` (was three ordered UPDATEs that a boundary stamp landing between them could mislabel) and alerts per `OUTCOME_UNKNOWN`; no schema change. |
 | 2026-11-20 | v1.71 | V66 (#1035, execution commit outcomes) | **V66 — the commit boundary.** `pipeline_executions` (§4.6) gains `commit_attempted_at`, `commit_confirmed_at`, `settlement_pending`, `result_unavailable`; `chk_status` widens to include `OUTCOME_UNKNOWN`; new partial `idx_executions_settlement_pending` (§5). **§8.3**: the stale sweep labels by the commit boundary — confirmed → SUCCESS + `result_unavailable`, attempted → OUTCOME_UNKNOWN, never attempted → ABORTED `instance_lost`. **§7.5 Rolling back V66** and the repeatable `R__execution_commit_outcome_downgrade_barrier.sql`: a binary older than V66 cannot read `OUTCOME_UNKNOWN`, so a repeatable it cannot resolve makes it refuse to start; the documented block REFUSES while any unknown or unsettled commit attempt exists. |

@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.128 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
+**Status:** v2.133 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-20
@@ -2223,10 +2223,11 @@ The whole batch rolls back on any of the above. The sender's own refusals — `p
 One exact version of a read-only pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
 response is the `data_ready` payload — the first page plus the cursor — with no event handling on
 the client (this section is the contract). Since #1037 a route's identity is **method + path**: a
-`POST`, `PUT` or `DELETE` route may be published at the same grammar (its body, admission and
-idempotency semantics arrive with #1038/#1039 — until the operator gate
-[`mutations-enabled`](configuration.md#322-published-endpoints) is on, an otherwise-authorized
-mutation answers `503 endpoint.mutations_disabled` before any durable work). Ruling R-EP5: the
+`POST`, `PUT` or `DELETE` route may be published at the same grammar — its body arrives with #1038, and
+since #1039 it is SERVED: one `Idempotency-Key` per request, one durable reservation before any business
+SQL, and one execution per reservation however many replicas the retries reach (§19.3a). While the operator
+gate [`mutations-enabled`](configuration.md#322-published-endpoints) is off (the default) a FRESH mutation
+answers `503 endpoint.mutations_disabled` before any reservation. Ruling R-EP5: the
 **category** is the engineer's
 namespace — a business domain, a team, a product line — and the product's own API is simply its
 reserved namespace: a category matching `v[0-9]+` (`/api/v1/…` today, any `v<n>` tomorrow) or the
@@ -2326,10 +2327,10 @@ it, and a mutation route iff the key holds that route's **exact grant** (one ent
 full pattern; never inherited, never the sibling method's). The refusal discipline is opaque: a
 method that is not visible is simply absent — a `405 endpoint.method_not_allowed`'s `Allow` lists
 only the VISIBLE methods, and a path where NO method is visible answers the ordinary `404`
-`endpoint.not_found` with no `Allow`. A visible, granted mutation is then gated by
-[`datapipelines.endpoints.mutations-enabled`](configuration.md#322-published-endpoints): off (the
-default) answers `503 endpoint.mutations_disabled` before any durable work; a route pinned to a
-non-servable version answers the pin's own `503` first.
+`endpoint.not_found` with no `Allow`. A visible, granted mutation is then admitted as §19.3a states; the gate
+[`datapipelines.endpoints.mutations-enabled`](configuration.md#322-published-endpoints) off (the
+default) withholds only a FRESH request — `503 endpoint.mutations_disabled` before any reservation —
+never the replay of an admitted one or its polling.
 
 The accepted parameters are the pinned pipeline version's declared ones: **path variables** bind by
 name, and the **query string** supplies the rest. Validation is strict and **reports every defect
@@ -2351,14 +2352,15 @@ at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carrie
   (v2.45, #268) — the pipeline must be re-saved;
 - a value over 4 KB is `endpoint.request.value_too_large`.
 
-**The request body of a mutation route (#1038; reached once #1039 serves mutations — until then the gate
-above answers first).** A mutation route whose pinned pipeline declares `request_body` reads the entity as one
+**The request body of a mutation route (#1038; served since #1039).** A mutation route whose pinned pipeline declares `request_body` reads the entity as one
 JSON object or array of objects through the same bounded decoder as framework execute's `request_body` fixture
 (§6.1.4), so both surfaces decode one document to the same value. In order: no entity is absent — refused with
 reason `required` when the declaration requires one; a `Content-Encoding` other than identity, a `Content-Type`
 other than `application/json`, or a charset other than UTF-8 is `415 endpoint.request.unsupported_media_type`
 (`details.reason` `content_encoding`, `media_type` or `charset`, never the header's value); a body on a `GET` or
-on a route whose pin declares none is reason `not_accepted`; more than
+on a route whose pin declares none is reason `not_accepted`; a form or multipart body (`application/x-www-form-urlencoded`,
+`multipart/form-data`) is `415` even when the container has already consumed it, unless the request declares
+`Content-Length: 0` — a declared zero length sent nothing and reads as no body (#1039); more than
 [`datapipelines.endpoints.body-max-bytes`](configuration.md#322-published-endpoints) entity bytes (counted while
 reading, so a chunked body stops at the cap), more nesting than `body-max-depth`, or one oversized token is
 `413 endpoint.request.too_large` with `details.reason` and `details.limit`; malformed JSON, invalid UTF-8, a
@@ -2381,6 +2383,89 @@ SESSION is refused here exactly as it is on the serve route — this is a machin
 session gets the same `401 auth.session.required` shape. The routes are delegated from the serve
 catch-all (the business path is variable-length, so no separate mapping can exist), and
 `EndpointAuthorizer`'s bound-walk runs before any read.
+
+### 19.3a Serving a mutation: one key, one reservation, one execution (#1039)
+
+**Every published `POST`, `PUT` and `DELETE` carries an `Idempotency-Key`** — a bodyless `DELETE` and a mutation
+route over a read-only pipeline included. Its grammar is 1–128 characters of `A–Z a–z 0–9 . _ : -`; a missing or
+malformed key is an `endpoint.request.idempotency_key_invalid` entry (`reason` `missing` or `malformed`, the value
+never echoed) of the `400 endpoint.request.invalid` above, listed with any body defect, before anything is
+looked up or run. A `GET` ignores the header and keeps every behaviour of §19.3–§19.4.
+
+**The replay scope** is the workspace, the presenting key, the method, the concrete business path and the client
+key; the **fingerprint** is the method, the concrete path, the typed path and query values and the canonical
+body (object member order immaterial, array order material, an absent body distinct from an empty one). The
+values are the ones the reservation's ORIGINAL pin binds — its declared types, with its declared defaults applied —
+so `quantity=01` and `quantity=1` on an `INTEGER` parameter are one request, an omitted optional parameter equals
+its explicit default, and a `DECIMAL` keeps its scale (`1.0` is not `1.00`). Both are
+stored only as keyed digests (Metadata DB §4.61) — never the client key, a value or the body. A reservation
+lives for [`datapipelines.idempotency.ttl-seconds`](configuration.md) (default `86400`); after that the scope is
+free and the same key is a fresh request. A new key — and a rotated API key — is a different scope: a new `POST`
+may deliberately send identical JSON twice under two keys.
+
+**Admission, in order** (published-mutation-apis §3–§4):
+
+1. the envelope — key, media type, body bounds (`400`/`413`/`415` above), before any lookup;
+2. the live reservation for the scope: when one exists the request is a **retry**. A different fingerprint is
+   `409 idempotency.key_reused_for_different_request` with no details; an identical one is answered from the
+   ORIGINAL execution by the table below, validated against the version the reservation pinned — a later release
+   never changes how a retry is judged, and nothing reruns. A retry meets the same result negotiation as a first
+   call — an `Accept` that admits no JSON is `406 endpoint.not_acceptable` (§19.6) at any state of the original
+   run, and the reservation stays — and a retry the original pin's parameter rules refuse is that pin's `400`;
+3. a fresh request only: the operator gate (`503 endpoint.mutations_disabled` while off), the route's current
+   pin (its own `503`), the pin's parameter and body rules (§19.3) and its read-only posture;
+4. one atomic reservation under the scope, with the execution id fixed before any business SQL. Two identical
+   requests racing — on one replica or on several — reserve once; the loser answers from the winner's execution;
+5. the run, with bounded diagnostics: a failure leaves only its code, never engine text or a supplied value.
+
+A reservation store that cannot be read or written, or a reservation whose state is indeterminate, is
+`503 idempotency.reservation_unavailable` before any new business SQL — the same key may be retried. That
+includes a release the store did not confirm and an execution record it could not read: only CONFIRMED state
+answers (a recorded run its row, a confirmed lost release `202`), never an assumed one. A metadata read that
+fails while the pin resolves — the current pin of a fresh request, or the original pin of a retry or takeover —
+is `503 endpoint.dependency_unavailable`, distinct from a pin confirmed absent or unservable (its own refusal,
+`endpoint.pipeline_not_released`); neither runs SQL, and the reservation stays. If the admitting replica stops
+after reserving and before the execution row exists, an identical retry after
+[`mutation-start-window-seconds`](configuration.md#322-published-endpoints) (default `60`) takes the start claim
+over and starts the ORIGINAL pin under the ORIGINAL execution id; the execution row's primary key fences the
+start, so the window decides how long such a request waits, never whether it can run twice. A delivery failure
+— a client that never read its answer — never clears a reservation: the retry reads the stored outcome.
+
+**The terminal-state table** — one shaping for the first answer and every identical retry:
+
+| Execution state | Answer |
+|---|---|
+| running, or not yet recorded | `202` — `execution_id`, `status: RUNNING`, `status_url`, `result_url` |
+| `SUCCESS` with a caller result | `200` — the §19.4 payload plus `status_url`; a retry pages the stored result, it does not rerun |
+| `SUCCESS`, no caller node | `200` — `status: SUCCESS`, `status_url` and a `node_stats` summary (node id, status, row count) |
+| `SUCCESS`, result expired | `410 result.expired` with `status: SUCCESS`, the id and `status_url` |
+| `SUCCESS`, result storage unreadable | `503 result.storage_unavailable`, likewise |
+| `FAILED` | `409` with the run's bounded cause code (`pipeline.script.rejects_strict`, a pool or concurrency code, …) |
+| `ABORTED` | `409 pipeline.execution.aborted` |
+| `OUTCOME_UNKNOWN` | `409` with `status: OUTCOME_UNKNOWN`, its code and `status_url` — reconcile; never replay automatically |
+
+A failed or aborted execution keeps its reservation: a deliberate new attempt takes a new key. No copy of an
+answer is stored — a retry re-reads the execution and the result store, so result TTL (§7.4) and replay
+retention are independent; terminal status polling outlives the result.
+
+**Polling a mutation-started run.** `status_url` and `result_url` are the §19.3 paging routes under the concrete
+business path the client called. They serve only the INITIATING key, and only while it still holds the
+originating route-and-method grant — a write-only key polls its own run without any `GET` grant, and a `GET`
+grant on another route never substitutes. Another key, another route, another workspace, a revoked grant or a
+disabled route is the ordinary opaque `404`. The status projection relays no parameter values and no failure
+text; a zero-caller run's result route answers `204`. A retry is re-authorised like a new request and reveals
+no prior result: a disabled or unpublished route is the opaque `404`, and so is a revoked grant when the key holds
+no other method on the path; when it still holds another, the retry is `405 endpoint.method_not_allowed` whose
+`Allow` names only the methods the key may call there (the §19.3 method rule). Polling never answers `405` — every
+mismatch there stays the opaque `404`. Turning `mutations-enabled` off withholds fresh
+requests only: retries and polling of admitted runs keep working while writes drain.
+
+**Metrics and audit.** Every served mutation counts once on `datapipelines.endpoints.mutations{method,outcome}`
+(`outcome` one of `accepted`, `completed`, `failed`, `not_started`, `replayed`, `refused`, `disabled`,
+`key_reused`, `reservation_unavailable` — [Observability](observability.md)). An admitted run writes the serve audit
+row with outcome `started` and then one terminal row (`completed`, `failed`, `accepted` on a `202`, `not_started`);
+a retry writes `replayed`. The rows carry the endpoint, method, API version and execution id — never a body, a
+value or a key.
 
 ### 19.4 The response
 
@@ -2503,24 +2588,27 @@ The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool
 
 | Code | When |
 |---|---|
-| 200 | Result inline — the first page plus the cursor |
-| 202 | The endpoint's timeout elapsed; the execution continues (R-EP3) |
-| 400 | Request validation — every defect at once in `details.errors[]` |
+| 200 | Result inline — the first page plus the cursor; for a mutation also a zero-caller `SUCCESS` summary, and every identical retry of a stored success (§19.3a) |
+| 202 | The endpoint's timeout elapsed; the execution continues (R-EP3) — for a mutation also a retry of a run still in progress |
+| 204 | The result route of a mutation-started run with no caller node (§19.3a) |
+| 400 | Request validation — every defect at once in `details.errors[]`; a mutation without a well-formed `Idempotency-Key` included (#1039) |
 | 401 | No or invalid API key; a browser session |
 | 403 | Key not bound / wrong workspace / wrong key kind |
 | 404 | No endpoint matches. **The same body whether the path is unknown or the endpoint is disabled** — otherwise the registry is enumerable one URL at a time |
 | 405 | A method the addressed path does not serve THIS caller (#1037): some method is visible (a live route plus a grant the presenting key holds) but the requested one is not published there or not granted — `Allow` carries exactly the visible methods |
 | 406 | An `Accept` this surface cannot satisfy |
+| 409 | A mutation's `Idempotency-Key` reused with a different request (`idempotency.key_reused_for_different_request`); a mutation run that ended `FAILED`, `ABORTED` or `OUTCOME_UNKNOWN`, with its bounded code (§19.3a); a `GET` route whose pin is not side-effect-free at publish (`endpoint.pipeline_not_readonly`) |
+| 410 | A mutation run that succeeded and whose result has expired — `result.expired` with `status: SUCCESS` (#1039) |
 | 413 | A mutation's request body over the byte, depth or token bound — `endpoint.request.too_large` (#1038) |
-| 415 | A mutation's request body with an unsupported media type, charset or content encoding — `endpoint.request.unsupported_media_type` (#1038) |
+| 415 | A mutation's request body with an unsupported media type, charset or content encoding — `endpoint.request.unsupported_media_type` (#1038); a form or multipart body unless it declares `Content-Length: 0` (#1039) |
 | 429 | Rate limit or concurrency limit, with `Retry-After` |
 | 500 / 502 | Pipeline failure, mapped by [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) (datasource connection failures are `502`) |
-| 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version. Since #1037 also `endpoint.mutations_disabled`: an otherwise-authorized mutation refused by the operator gate `datapipelines.endpoints.mutations-enabled` before any durable work |
+| 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version. Since #1037 also `endpoint.mutations_disabled`: an otherwise-authorized FRESH mutation refused by the operator gate `datapipelines.endpoints.mutations-enabled` before any reservation (since #1039 a retry of an admitted request is answered regardless). Since #1039 also `idempotency.reservation_unavailable` (the reservation store unreadable or indeterminate — nothing new ran), `endpoint.dependency_unavailable` (the metadata store while the pin resolves) and `result.storage_unavailable` (a succeeded mutation whose result cannot be read) |
 
 ### 19.7 Not in v1
 
-`POST` endpoints (parameters in a body, side-effecting pipelines — the read-only rule is what
-makes `GET` safe, and a write surface needs its own ruling); anonymous or embed tokens for public
+A `PATCH` route, form or multipart bodies, vendor `+json` media types and non-UTF-8 charsets (the `POST`,
+`PUT` and `DELETE` surface is served since #1039 under §19.3a's key-and-reservation rule); anonymous or embed tokens for public
 dashboards; response caching across callers (results are per execution by design); CSV/Arrow by
 `Accept` (the cursor's `format` already serves them); custom domains.
 
@@ -3190,6 +3278,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v2.133 | 1039 (#1039) | **§19 (additive — the mutation surface answered only `503` before):** published `POST`, `PUT` and `DELETE` are served (new §19.3a): a required `Idempotency-Key` (`400 endpoint.request.idempotency_key_invalid` entry), a durable reservation before any business SQL, replay from the original execution and pin, `409 idempotency.key_reused_for_different_request`, `503 idempotency.reservation_unavailable` (also a release or execution record the store did not confirm) / `endpoint.dependency_unavailable` (also the original pin's lookup on a retry or takeover), the fingerprint over the typed values the ORIGINAL pin binds (defaults applied), a retry's `406` result negotiation, the start-window takeover, the terminal-state table (`200`/`202`/`409`/`410`/`503`), polling from the initiating grant only (`204` for a zero-caller result; a retry under a revoked grant `404`, or `405` with a bounded `Allow` while another method stays visible) and `mutations-enabled` withholding fresh requests only. A form or multipart body is `415` unless it declares zero length. §19.6 gains the `204`, `409` and `410` rows; §19.7 no longer lists `POST`. The Status line, left at v2.128 by later rows, now reads the latest version. |
 | 2026-11-21 | v2.132 | 1038 r4 (#1038) | **§6.1.4 (additive):** a saved body fixture keeps member order, repeated members and exact numbers through stored tests, template read-back, re-save, export and release (#1080). |
 | 2026-11-21 | v2.131 | 1038 r3 (#1038) | **§6.1.4 (additive):** the fixture budget counts canonical bytes on both full-run surfaces; an authored body fixture on evaluate and template save is read from the request's own text (a repeated member refused, exact fractions); an authored body case's evaluation and suite verdict use the bounded diagnostics. |
 | 2026-11-21 | v2.130 | 1038 r2 (#1038) | **§6.1.4 (additive):** a failure of a run that carries a `request_body` (and of its children) is reported as code and node metadata only on every event, stream, replay and stored-error surface. |

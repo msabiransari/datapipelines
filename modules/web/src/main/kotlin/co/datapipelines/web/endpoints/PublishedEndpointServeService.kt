@@ -10,6 +10,7 @@ import co.datapipelines.application.endpoints.EndpointServeAudit
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.PublishedEndpointVersion
 import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
+import co.datapipelines.application.endpoints.PublishedMutationReservation
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
@@ -120,6 +121,11 @@ class PublishedEndpointServeService(
      * question is asked here, where the endpoint row is in hand.
      */
     private val workspaceLiveness: WorkspaceLiveness,
+    /**
+     * #1039 — admission, replay and start of a published POST, PUT or DELETE. Null only where a test builds the GET
+     * surface alone; a mutation then answers `503 endpoint.mutations_disabled` and nothing runs.
+     */
+    private val mutations: PublishedMutationService? = null,
 ) {
     private val log = LoggerFactory.getLogger(PublishedEndpointServeService::class.java)
 
@@ -161,6 +167,7 @@ class PublishedEndpointServeService(
         method: EndpointMethod?,
         principal: AuthenticatedPrincipal,
         request: EndpointRequestValidator.Request,
+        mutation: MutationInput = MutationInput.none(),
     ): Outcome {
         // §5.2 — a machine surface, on every branch: a browser session learns nothing, not even
         // which methods a path serves, so the 401 carries no Allow (§4.4) whatever the verb.
@@ -170,7 +177,7 @@ class PublishedEndpointServeService(
         return if (method == EndpointMethod.GET) {
             serveGet(path, principal, request)
         } else {
-            serveMutation(path, method, principal)
+            serveMutation(path, method, principal, request, mutation)
         }
     }
 
@@ -256,15 +263,18 @@ class PublishedEndpointServeService(
     }
 
     /**
-     * The non-GET branch (#1037 §4.4) — visibility, then 404/405, then the pin, then the mutations gate. Nothing
-     * runs in this build: [method] null is a verb this surface cannot publish (PATCH, OPTIONS, …) and follows the
-     * same rule, so it can never appear in `Allow` and never reaches the gates.
+     * The non-GET branch (#1037 §4.4, #1039) — visibility, then 404/405, then [PublishedMutationService]: the key and
+     * the body, the reservation (a replay answers from the ORIGINAL execution, before any newer current version is
+     * read), the mutations flag, the pin and the run. [method] null is a verb this surface cannot publish (PATCH,
+     * OPTIONS, …) and follows the same rule, so it can never appear in `Allow` and never reaches admission.
      */
     @Suppress("ReturnCount") // §4.4's order IS the refusal order; each stage refuses on its own terms
     private fun serveMutation(
         path: String,
         method: EndpointMethod?,
         principal: AuthenticatedPrincipal,
+        request: EndpointRequestValidator.Request,
+        input: MutationInput,
     ): Outcome {
         val visible = visibleMethods(path, principal)
 
@@ -292,33 +302,58 @@ class PublishedEndpointServeService(
         // Authorized for this method: the entity is in hand, and the eligibility checks run only now
         // (§4.4 — after authorization, so an ungranted caller learns no version facts).
         val endpoint = visible.getValue(requested)
-        pointedVersion(endpoint) ?: return notReleased(endpoint)
+        val service =
+            mutations ?: return Outcome.Refused(
+                HTTP_SERVICE_UNAVAILABLE,
+                PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED,
+                "Serving mutation routes is not configured on this surface. Nothing was written.",
+                mapOf("method" to requested.name),
+            )
+        // The path variables come from the MATCH, as on GET: only the matcher knows which pattern won.
+        val pathVariables =
+            registry
+                .matcher()
+                .match(path, requested)
+                ?.pathVariables
+                .orEmpty()
+        return service.serve(MutationCall(endpoint, requested, path, pathVariables, principal, request, input), mutationPins)
+    }
 
-        // §7 — the mutations gate, BEFORE any durable business work. Both branches answer the
-        // catalogued 503 with distinct messages until #1039 replaces this gate with the real
-        // admission path (flag off: the operator withheld it; flag on: this build cannot serve it).
-        return when {
-            !endpointsProperties.mutationsEnabled -> {
-                Outcome.Refused(
-                    HTTP_SERVICE_UNAVAILABLE,
-                    PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED,
-                    "Mutation routes are disabled on this deployment (datapipelines.endpoints.mutations-enabled=false). " +
-                        "The route and the grant are valid; ask the operator to enable them.",
-                    mapOf("method" to requested.name),
-                )
-            }
+    /** The pins a mutation may run, under the same D63 eligibility rule as GET (see [pointedVersion]). */
+    private val mutationPins =
+        object : MutationPins {
+            override fun current(endpoint: PublishedEndpoint): MutationPin? =
+                pointedVersion(endpoint)?.let { pointed ->
+                    MutationPin(pointed.api.version, pointed.api.body.timeoutSeconds, pointed.pipelineId, pointed.executable)
+                }
 
-            else -> {
-                Outcome.Refused(
-                    HTTP_SERVICE_UNAVAILABLE,
-                    PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED,
-                    "Serving mutation routes is not available in this build. The route and the grant are valid; " +
-                        "nothing was written.",
-                    mapOf("method" to requested.name),
-                )
+            override fun original(
+                endpoint: PublishedEndpoint,
+                reservation: PublishedMutationReservation,
+            ): MutationPin? = pinOf(endpoint, reservation, servableOnly = true)
+
+            override fun admittedUnder(
+                endpoint: PublishedEndpoint,
+                reservation: PublishedMutationReservation,
+            ): MutationPin? = pinOf(endpoint, reservation, servableOnly = false)
+
+            /** The reservation's exact pin; [servableOnly] applies D63 (to run it), otherwise its rules are enough. */
+            @Suppress("ReturnCount") // one early null per link of the resolution chain, in its order
+            private fun pinOf(
+                endpoint: PublishedEndpoint,
+                reservation: PublishedMutationReservation,
+                servableOnly: Boolean,
+            ): MutationPin? {
+                val api = versions.find(endpoint.id, reservation.apiVersion) ?: return null
+                if (servableOnly && !servable(api.status)) return null
+                val record = pipelineRepository.findById(endpoint.workspaceId, reservation.pipelineId) ?: return null
+                val detail =
+                    pipelineRepository.findVersionDetail(endpoint.workspaceId, record.id, reservation.pipelineVersion) ?: return null
+                if (servableOnly && !servable(detail.status)) return null
+                val executable = pipelines.findExecutable(endpoint.workspaceId, ReadLens.Everything, record, detail.version) ?: return null
+                return MutationPin(api.version, api.body.timeoutSeconds, record.id, executable)
             }
         }
-    }
 
     /**
      * The methods THIS key can call at [path]: a live route of the method whose grant the key holds — the GET

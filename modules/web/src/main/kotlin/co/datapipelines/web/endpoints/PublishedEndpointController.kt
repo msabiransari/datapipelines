@@ -6,6 +6,7 @@ import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.appPath
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiErrorResponse
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.config.WebHeaders
@@ -15,6 +16,8 @@ import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 /**
@@ -86,7 +89,16 @@ class PublishedEndpointController(
             }
         }
 
-        return when (val outcome = serveService.serve(path, method, currentPrincipal(), validatorRequest(request))) {
+        val outcome =
+            if (method == EndpointMethod.GET) {
+                serveService.serve(path, method, currentPrincipal(), validatorRequest(request))
+            } else {
+                // #1039 — the query string is read from the URI itself, never through the parameter map: on a PUT or
+                // DELETE the container's form filter would read (and consume) a form body to build that map.
+                val query = queryOf(request.queryString) ?: return malformedQuery()
+                serveService.serve(path, method, currentPrincipal(), validatorRequest(request, query), mutationInput(request))
+            }
+        return when (outcome) {
             is PublishedEndpointServeService.Outcome.Served -> {
                 ResponseEntity
                     .ok()
@@ -131,14 +143,49 @@ class PublishedEndpointController(
      * `pathVariables` is empty here on purpose: only the MATCHER knows which pattern won, and
      * therefore what `{borough}` was bound to. The service fills them in from its own match.
      */
-    private fun validatorRequest(request: HttpServletRequest) =
-        EndpointRequestValidator.Request(
-            pathVariables = emptyMap(),
-            queryParameters = request.parameterMap.mapValues { (_, values) -> values.toList() },
-            accept = request.getHeader(HttpHeaders.ACCEPT),
-            resultTtlSecondsHeader = request.getHeader(WebHeaders.RESULT_TTL),
-            resultPageRowsHeader = request.getHeader(WebHeaders.RESULT_PAGE_ROWS),
+    private fun validatorRequest(
+        request: HttpServletRequest,
+        query: Map<String, List<String>> = request.parameterMap.mapValues { (_, values) -> values.toList() },
+    ) = EndpointRequestValidator.Request(
+        pathVariables = emptyMap(),
+        queryParameters = query,
+        accept = request.getHeader(HttpHeaders.ACCEPT),
+        resultTtlSecondsHeader = request.getHeader(WebHeaders.RESULT_TTL),
+        resultPageRowsHeader = request.getHeader(WebHeaders.RESULT_PAGE_ROWS),
+    )
+
+    /** The raw mutation inputs (#1039), handed to the service unread; nothing here is logged or echoed. */
+    private fun mutationInput(request: HttpServletRequest) =
+        MutationInput(
+            idempotencyKey = request.getHeader(WebHeaders.IDEMPOTENCY_KEY),
+            contentType = request.contentType,
+            contentEncoding = request.getHeader(HttpHeaders.CONTENT_ENCODING),
+            entity = request.inputStream,
+            declaredLength = request.contentLengthLong,
         )
+
+    /** A query string that is not valid percent-encoding: refused, never half-read — a dropped parameter would run. */
+    private fun malformedQuery(): ResponseEntity<Any> =
+        ResponseEntity
+            .badRequest()
+            .headers(baseHeaders())
+            .body(
+                ApiErrorResponse.of(
+                    PipelineErrorCodes.EndpointRequest.INVALID,
+                    "The request has 1 problem(s); details.errors lists them (at most 20).",
+                    mapOf(
+                        "errors" to
+                            listOf(
+                                mapOf(
+                                    "parameter" to null,
+                                    "code" to PipelineErrorCodes.EndpointRequest.INVALID,
+                                    "message" to "The query string is not valid percent-encoded UTF-8.",
+                                ),
+                            ),
+                        "truncated" to false,
+                    ),
+                ),
+            )
 
     /**
      * `Cache-Control: no-store` on every answer (§5.4), refusals included.
@@ -186,6 +233,30 @@ class PublishedEndpointController(
             val executionId: UUID,
             val isResult: Boolean,
         )
+
+        /**
+         * The query string as name → values in order (`+` is a space, as the servlet container reads it); null when
+         * any part is not valid percent-encoded UTF-8. An empty or absent query string is an empty map.
+         */
+        internal fun queryOf(raw: String?): Map<String, List<String>>? {
+            if (raw.isNullOrEmpty()) return emptyMap()
+            val result = LinkedHashMap<String, MutableList<String>>()
+            for (pair in raw.split('&')) {
+                if (pair.isEmpty()) continue
+                val cut = pair.indexOf('=')
+                val name = decoded(if (cut < 0) pair else pair.substring(0, cut)) ?: return null
+                val value = if (cut < 0) "" else decoded(pair.substring(cut + 1)) ?: return null
+                result.getOrPut(name) { mutableListOf() } += value
+            }
+            return result
+        }
+
+        private fun decoded(part: String): String? =
+            try {
+                URLDecoder.decode(part, StandardCharsets.UTF_8)
+            } catch (_: IllegalArgumentException) {
+                null
+            }
 
         fun parse(path: String): Paged? {
             val match = PAGING.matchEntire(path) ?: return null
