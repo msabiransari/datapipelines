@@ -9,8 +9,9 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 
 /**
- * The gate of the scoping (#1065 round 4; owner ruling 2026-11-22, "Refuse at entry"): "The transform refuses, at build
- * and naming the place, any backslash escape or non-ASCII character outside comments and quoted strings." Literal input,
+ * The gate of the scoping (#1065 round 4; owner ruling 2026-11-22, "Refuse at entry", quoted with this class's noun):
+ * "The scoping refuses, at build and naming the place, any backslash escape or non-ASCII character outside comments and
+ * quoted strings." Literal input,
  * literal expected output or the whole message. A raw character is written with a Kotlin escape (` `), so the CSS
  * holds the character itself; a CSS escape is written `\\` (one backslash in the CSS).
  */

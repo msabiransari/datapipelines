@@ -28,8 +28,9 @@ import java.math.RoundingMode
  *   does the text of a string, of a name or of a `url(…)` token, which is not a length: it leaves byte for byte as it
  *   entered. The value is read as a run of tokens ([CssText.mapDimension]): only a number whose unit is `rem` changes.
  *
- * The gate comes first (#1065 round 4; owner ruling 2026-11-22, "Refuse at entry"): "The transform refuses, at build
- * and naming the place, any backslash escape or non-ASCII character outside comments and quoted strings."
+ * The gate comes first (#1065 round 4; owner ruling 2026-11-22, "Refuse at entry"; quoted with this class's noun, the
+ * ruling's being the one the vocabulary guard retires): "The scoping refuses, at build and naming the place, any
+ * backslash escape or non-ASCII character outside comments and quoted strings."
  * [CssText.gate] reads the source ONCE, before any rule is read: outside a comment and a quoted string only U+0020 to
  * U+007E without the backslash, tab, LF and CR pass; a string holding an unescaped line break (LF, CR or form feed) is
  * refused; a string or a comment that never ends is refused as before. The refusal names the code point, the line and
