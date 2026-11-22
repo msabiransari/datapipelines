@@ -65,17 +65,23 @@ class CaptureDurationsTest {
     @Test
     fun `a retention whose expiry is past the representable range is refused - the window's largest value is not`() {
         // Int.MAX_VALUE hours is ~245,000 years: no admission could store that expiry.
-        CaptureDurations.problemOfText(CaptureDurations.RETENTION_KEY, Int.MAX_VALUE.toString(), now).shouldNotBeNull() shouldContain "not representable"
+        CaptureDurations.problemOfText(CaptureDurations.RETENTION_KEY, Int.MAX_VALUE.toString(), now).shouldNotBeNull() shouldContain
+            "not representable"
         // Int.MAX_VALUE seconds is ~68 years: representable, so allowed.
         CaptureDurations.problemOfText(CaptureDurations.WINDOW_KEY, Int.MAX_VALUE.toString(), now).shouldBeNull()
         CaptureDurations.problems(Int.MAX_VALUE.toLong(), 1, now).shouldBeEmpty()
-        shouldThrow<IllegalArgumentException> { EndpointsProperties(captureDetailRetentionHours = Int.MAX_VALUE) }.message.shouldNotBeNull() shouldContain
+        shouldThrow<IllegalArgumentException> {
+            EndpointsProperties(captureDetailRetentionHours = Int.MAX_VALUE)
+        }.message.shouldNotBeNull() shouldContain
             CaptureDurations.RETENTION_KEY
     }
 
     @Test
     fun `the boundary - the last representable expiry is allowed, one hour past it is refused`() {
-        val lastHours = java.time.Duration.between(now, CaptureDurations.MAX_DEADLINE).toHours()
+        val lastHours =
+            java.time.Duration
+                .between(now, CaptureDurations.MAX_DEADLINE)
+                .toHours()
         CaptureDurations.problems(1, lastHours, now).shouldBeEmpty()
         CaptureDurations.problems(1, lastHours + 1, now).single() shouldContain CaptureDurations.RETENTION_KEY
     }

@@ -55,7 +55,7 @@ class ExecutionCaptureStore(
         jdbc.update(
             """
             INSERT INTO execution_capture_values (
-                execution_id, node_id, output_key, workspace_id, state, omitted_reason, value_json, value_bytes,
+                execution_id, node_id, output_key, workspace_id, state, omitted_reason, value_text, value_bytes,
                 recorded_at, expires_at)
             SELECT r.execution_id, :nodeId, :outputKey, r.workspace_id, :state, :omittedReason, :valueJson, :valueBytes,
                    :recordedAt, r.capture_expires_at
@@ -110,7 +110,7 @@ class ExecutionCaptureStore(
     ): List<StoredCaptureValue> =
         jdbc.query(
             """
-            SELECT node_id, output_key, value_json, value_bytes, omitted_reason, recorded_at, expires_at
+            SELECT node_id, output_key, value_text, value_bytes, omitted_reason, recorded_at, expires_at
               FROM execution_capture_values
              WHERE execution_id = :executionId AND workspace_id = :workspaceId AND expires_at > :now
              ORDER BY recorded_at, node_id, output_key
@@ -178,7 +178,7 @@ class ExecutionCaptureStore(
                 StoredCaptureValue(
                     nodeId = rs.getString("node_id"),
                     outputKey = rs.getString("output_key"),
-                    valueJson = rs.getString("value_json"),
+                    valueJson = rs.getString("value_text"),
                     valueBytes = rs.getObject("value_bytes") as Long?,
                     omittedReason = rs.getString("omitted_reason"),
                     recordedAt = rs.getTimestamp("recorded_at").toInstant(),

@@ -9,7 +9,9 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.currentPrincipal
+import com.fasterxml.jackson.core.JacksonException
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.http.CacheControl
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -53,12 +55,16 @@ class ExecutionCaptureController(
         )
     }
 
-    /** §26.2 — open a window; the optional body `{"correlation_id": "<uuid>"}` restricts it to one exact request. */
+    /**
+     * §26.2 — open a window; the optional body `{"correlation_id": "<uuid>"}` restricts it to one exact request. The
+     * body is read as text and parsed here (the EndpointVersionsController release pattern), so a POST with no body,
+     * whatever Content-Type its client sends, opens an unfiltered window instead of failing the message converter.
+     */
     @PostMapping("/api/v1/endpoints/{id}/captures")
     @RequiredScope(Permission.EXECUTION_CAPTURE_MANAGE)
     fun start(
         @PathVariable id: UUID,
-        @RequestBody(required = false) body: JsonNode?,
+        @RequestBody(required = false) body: String? = null,
     ): ResponseEntity<ApiResponse<Map<String, Any?>>> {
         val principal = requireCaptureSession()
         val opened = captures.start(principal, principal.requireWorkspace().id, id, correlationOf(body))
@@ -150,8 +156,17 @@ class ExecutionCaptureController(
                     },
             )
 
-        private fun correlationOf(body: JsonNode?): String? {
-            if (body == null || body.isNull || body.isMissingNode) return null
+        private val JSON = ObjectMapper()
+
+        private fun correlationOf(text: String?): String? {
+            if (text.isNullOrBlank()) return null
+            val body: JsonNode =
+                try {
+                    JSON.readTree(text)
+                } catch (e: JacksonException) {
+                    throw invalidBody()
+                }
+            if (body.isNull || body.isMissingNode) return null
             if (!body.isObject || body.fieldNames().asSequence().any { it != FIELD_CORRELATION }) {
                 throw invalidBody()
             }

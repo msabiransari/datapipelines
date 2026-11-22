@@ -90,7 +90,10 @@ class ExecutionCaptureServiceTest {
         audit.rows.single()["capture_id"] shouldBe session.id.toString()
         audit.rows.single()["correlation_filtered"] shouldBe true
         // The filter value itself is not an audit fact: only that one was set.
-        audit.rows.single().values.joinToString() shouldNotContain filter.toString()
+        audit.rows
+            .single()
+            .values
+            .joinToString() shouldNotContain filter.toString()
     }
 
     @Test
@@ -175,7 +178,10 @@ class ExecutionCaptureServiceTest {
         detail.status shouldBe CaptureStatus.COMPLETE
         detail.values.single().valueJson shouldBe "\"MARKER\""
         audit.events() shouldBe listOf(ExecutionCaptureService.AUDIT_INSPECTED)
-        audit.rows.single().values.joinToString() shouldNotContain "MARKER"
+        audit.rows
+            .single()
+            .values
+            .joinToString() shouldNotContain "MARKER"
 
         now = expiresAt
         shouldThrow<ApiException> { service.inspect(admin, workspaceId, captured.executionId) }.let {

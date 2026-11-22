@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.244
+**Status:** v1.245
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-11-22
@@ -2261,6 +2261,22 @@ of identical requests under different request keys; a new key starts a new execu
 
 ---
 
+### 4.18c Runtime capture card on the API versions page (#1043)
+
+The versions page (§4.18b) of a published `POST`, `PUT` or `DELETE` route shows a **Runtime capture** card to a caller holding `execution.capture.manage` in the selected workspace (a workspace administrator or super admin, interactive session — [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)); a `GET` route, and every other role, renders no card and no placeholder. The card (`partials/endpoint-capture.html`, `ExecutionCaptureUiController`) loads itself with `hx-get /partials/endpoints/{id}/capture` on page load and replaces itself on every action (`hx-target="#api-capture"`, `outerHTML`); every partial answers `Cache-Control: no-store`.
+
+| State | What the card shows |
+|---|---|
+| disabled (no open window) | a `disabled` status chip; a one-line warning that a capture keeps this API's declared transformer outputs — which can contain personal data — privately for the configured retention; an optional **Correlation ID** text field (one UUID: only the request carrying that `DP-Correlation-Id` is captured); **Start capture** (`hx-post`, the session's CSRF token) |
+| active | an `active` chip, the remaining time (`14 min`, `45 s`), the filter or "every request", and **Stop** (`hx-post …/capture/{captureId}/stop` — the window's own id, so a stale card can never stop a newer window) |
+| refused | the catalogued refusal's message inside the re-rendered card (`409 execution.capture.already_active`, `400 execution.capture.invalid`, `404`), the card's state re-read |
+
+Below the controls, the recent windows (newest first, ten at most) list their start, end and end reason (`stopped`, `expired`) and the executions each captured; each execution links to its diagnostic view (§4.18d). The window length and the detail retention come from configuration (§3.22 of [Configuration](configuration.md#322-published-endpoints)) and are stated on the card. Selectors: `[data-api-capture-card]`, `[data-capture-state]`, `[data-api-capture-warning]`, `[data-api-capture-history]`, `[data-api-capture-run]`.
+
+### 4.18d Captured execution diagnostic view (#1043)
+
+`GET /executions/{id}/capture` (`execution.capture.read`; `executions/capture.html`) — the private detail of one captured execution, reached from the card's history (§4.18c), readable until its expiry even after the window stopped. The page opens with a warning that the values are the declared outputs of the API's transformers and may contain personal data, then the execution's status, the capture status (`recording`, `complete`, `incomplete` — [REST API §26.4](rest-api.md#264-read-a-captured-execution)), the admission and expiry instants, and the counts (captured, omitted, store failures, bytes). The values table lists node, output key and the stored JSON text, each value in a `<pre>` rendered as escaped TEXT (never as markup, never re-parsed); an omitted value shows an `omitted` chip and its reason with no preview. An execution whose finished run kept no value shows "The run finished without writing any declared value output.", never an empty table that could mean data was lost. An uncaptured, foreign or unknown execution renders the application's 404 page; an expired one its 410 page. The response is `Cache-Control: no-store`, and each view is audited (`execution.capture.inspected`, no values). Selectors: `[data-capture-warning]`, `[data-capture-status]`, `[data-capture-execution-status]`, `[data-capture-summary]`, `[data-capture-values]`, `[data-capture-value]`, `[data-capture-omitted]`, `[data-capture-empty]`.
+
 ### 4.19 API keys (keys v2 — the ONE creation path for every kind)
 
 | Attribute | Value |
@@ -3228,6 +3244,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.245 | 1043 (#1043, runtime capture) | New **§4.18c** the API versions page's Runtime capture card (administrators, mutation routes only: disabled/active, remaining time, optional exact correlation UUID, start, stop by window id, the personal-data warning, recent windows with their captured executions) and **§4.18d** the captured execution diagnostic view (escaped text values, omission chips, capture status, no-store, audited). |
 | 2026-11-22 | v1.244 | 1040 (#1040, authoring published mutations) | **§4.18b:** the versions page names its route's method; the version card shows the selected version's request-body mode and reading transformers; the key list is labelled by method; the draft dialog shows the method as fixed and each option's body. **§4.19:** method grants on the Keys page (one checkbox per POST/PUT/DELETE route, offered-only delta on `api_key.bind`); the create and delete redraws fill the same pickers as the page. No route or permission added. |
 | 2026-11-15 | v1.243 | 990 (#990, js-rendered F6) | **§4.21, §4.22, §4.24** the JS rows: the chart interaction layer `datapipelines-chart-interactions.js` loads directly before the chart adapter (dashboards §6.3). |
 | 2026-11-15 | v1.242 | 987 (#987, js-rendered F3) | **§3.4** the prepared-navigation paragraph, **§4.21** (the Design primitives, JS, htmx and "Grid rows" rows, the shell-loader paragraph and the guards; Grid rows: a small chart body, the chart's padding and the 2-row slot's compact level replace the Plotly body and `automargin`), **§4.22** (Design primitives, JS), **§4.24** (the panel's loader sentence, the Overview tab, Design primitives, JS, htmx and the guards): the pages load the product's own chart engine's files from one list (dashboards §6.4) instead of a chart library bundle, its converter and its stylesheet; the board's glue passes no `charts` option; the Overview names the renderer without a bundle. |

@@ -618,7 +618,8 @@ object CaptureDurations {
         raw: String,
         now: Instant = Instant.now(),
     ): String? {
-        val value = raw.trim().toIntOrNull() ?: return "$key ('${raw.take(MAX_ECHO)}') must be a positive integer of at most ${Int.MAX_VALUE}"
+        val value =
+            raw.trim().toIntOrNull() ?: return "$key ('${raw.take(MAX_ECHO)}') must be a positive integer of at most ${Int.MAX_VALUE}"
         val seconds = if (key == RETENTION_KEY) value.toLong() * SECONDS_PER_HOUR else value.toLong()
         return problem(key, value.toLong(), seconds, now)
     }
@@ -630,10 +631,17 @@ object CaptureDurations {
         now: Instant,
     ): String? =
         when {
-            value <= 0 -> "$key ($value) must be a positive integer"
-            seconds > Duration.between(now, MAX_DEADLINE).seconds ->
+            value <= 0 -> {
+                "$key ($value) must be a positive integer"
+            }
+
+            seconds > Duration.between(now, MAX_DEADLINE).seconds -> {
                 "$key ($value) produces a deadline after $MAX_DEADLINE, which is not representable"
-            else -> null
+            }
+
+            else -> {
+                null
+            }
         }
 
     private const val MAX_ECHO = 32

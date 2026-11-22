@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.134 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
+**Status:** v2.135 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-22
@@ -2775,6 +2775,8 @@ and bound only while a budget stands behind it (`max-requests` > 0).
 
 ---
 
+**Node values stay private (#1043).** A published mutation's execution — and every child it composes — keeps no value a node computed in its ordinary history: the node statistics (`context_value` / `context_values`), the lifecycle events and the terminal Context snapshot in the execution row carry status, codes, timing, counts and the declared keys, never the values; the run's own inputs (org config, platform keys, typed parameters) stay. Polling, execution reads and the replay answer therefore never show a transformer's output. The only place such a value is kept is an administrator's capture (§26).
+
 ## 20. Schedules
 
 A **schedule** runs a registered executor's job — in v1 the `pipeline` executor, which runs a pipeline — at the occurrences of a five-field cron in an IANA timezone (#9; behaviour in [Scheduler](scheduler.md), the one owner of these semantics). Schedules are not versioned artifacts: no draft, no release, never promoted. Every route is under `/api/v1/schedules`, works in the caller's active workspace, and is **session-only in slice 1** — every key kind is refused here by §3.2's confinement (an application credential is a later slice). Permissions are [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)'s `schedule.*` rows: every member reads; authors, workspace admins and super admins create, edit, pause/resume/unblock, delete and Run now. A schedule fires as the **system identity**, never as its creator — a creator later demoted to viewer, or removed, does not stop it. Errors are [Pipeline Contract §13.19](pipeline-contract.md#1319-schedules)'s `schedule.*` codes; an id from another workspace (or one the promoter lens hides) is `404 schedule.not_found`.
@@ -3384,10 +3386,75 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 ---
 
+## 26. Runtime capture of published mutations
+
+A workspace administrator's temporary, private capture of what a published `POST`, `PUT` or `DELETE` route's transformers produced (#1043; published-mutation-apis design record §6, §7). Capture is **off** for every route until an administrator opens a window, and there is no configuration switch or request header that turns it on: a request's `DP-Correlation-Id` can only *narrow* a window an administrator opened.
+
+**Who.** Every route below declares a session-only permission ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)): `execution.capture.manage` (§26.1–§26.3) and `execution.capture.read` (§26.4), held by the workspace administrator and the super admin. Every key kind and key role is refused `403 auth.role_required` before the handler — an administrator-role `mcp` key included — and the handler checks the interactive session again (`403 auth.session.required`). Current membership and role are re-read on every request, so a demoted administrator loses these routes on the next call. Writes are `POST`s under the session's CSRF protection. Every answer, refusals included, is `Cache-Control: no-store`; every refusal uses the §4.2 envelope and is catalogued in [pipeline-contract §13.27](pipeline-contract.md#1327-runtime-capture). Nothing here grants execution, datasource or ordinary history access.
+
+**What is kept.** Only the declared value-mode outputs of SCRIPT transformers (`context_key`), after their gate, invariants and strict check passed, keyed by node and output key, as the JSON text they were written to the Context with. Never a request body or header, an input envelope, a credential, a rejection reason, a table output or staging row, external SQL, or another Context value. A declared output can itself contain personal data; the administrator screen says so. The run's total stored bytes are bounded by `datapipelines.script.max-value-bytes` (default `1048576`) across all its nodes; a value that does not fit is stored as an omission marker with its reason and no preview. Captured runs keep **no** node value in their ordinary history either: a published mutation's node statistics, lifecycle events and terminal Context snapshot carry status, codes, timing, counts and declared keys, never the values (§19.3a).
+
+**When.** The decision is taken once, in the statement that writes the mutation's reservation (§19.3a): a window is applied when it is open at the admission instant (half-open: from `started_at` until `ended_at` or `deadline_at`), names the same route ENTITY and method, and either has no filter or its filter equals the request's effective correlation UUID. A stop and an admission are ordered by the database: whichever commits first decides. Identical retries, replays and start takeovers reuse the stored decision whatever the window does later and whatever correlation they carry; a run admitted inside a window may finish after it. A route unpublished and published again at the same path is a new entity and inherits no window. The detail expiry is fixed at admission (`admitted_at + capture-detail-retention-hours`, [Configuration §3.22](configuration.md#322-published-endpoints)) and later configuration never extends it.
+
+### 26.1 List a route's windows
+
+`GET /api/v1/endpoints/{id}/captures` → `200`
+
+```json
+{ "data": {
+  "endpoint_id": "8d6f…", "method": "POST",
+  "active": { "capture_id": "c41a…", "endpoint_id": "8d6f…", "method": "POST", "path_pattern": "/shop/v1/orders",
+              "correlation_id": null, "started_at": "2026-11-22T10:00:00Z", "deadline_at": "2026-11-22T10:15:00Z",
+              "ended_at": null, "end_reason": null, "active": true },
+  "captures": [ { "capture_id": "c41a…", "…": "…", "execution_ids": ["0f3e…"] } ] } }
+```
+
+`active` is the open window or `null`; `captures` is the ten most recent windows, newest first, each with the executions it captured (newest first, bounded). `end_reason` is `stopped`, `expired` (the deadline passed, whether or not anything recorded it) or `null`. An unknown route, or another workspace's, is `404 endpoint.not_found`.
+
+### 26.2 Open a window
+
+`POST /api/v1/endpoints/{id}/captures` with no body (any `Content-Type`), `{}`, or `{"correlation_id": "<uuid>"}` → `201` with the window (§26.1 shape). The deadline is `started_at + datapipelines.endpoints.capture-window-seconds` (default 900), stored now. Audited as `execution.capture.started` ([Auth §10.1](auth.md)).
+
+| Refusal | Answer |
+|---|---|
+| a `GET` route | `400 execution.capture.invalid`, `details.reason = method_not_capturable` |
+| a filter that is not one UUID, a non-string filter, any other body field, a body that is not JSON | `400 execution.capture.invalid`, `details.reason = correlation_id_invalid` (the value is never echoed) |
+| unknown route, or another workspace's | `404 endpoint.not_found` |
+| a window is already open for this route and method | `409 execution.capture.already_active`, `details.capture_id` and `details.deadline_at` name it; a window past its deadline does not count — this start closes it as `expired` |
+
+### 26.3 Stop a window
+
+`POST /api/v1/endpoints/{id}/captures/{captureId}/stop` → `200` with the window. It names ONE window, so a delayed stop can never close a newer one. Idempotent: an already ended window answers its own state and writes no audit row; a stop at or after the deadline records `expired`. Unknown window on that route: `404 execution.capture.not_found`. Audited as `execution.capture.stopped`.
+
+### 26.4 Read a captured execution
+
+`GET /api/v1/executions/{executionId}/capture` → `200`
+
+```json
+{ "data": {
+  "execution_id": "0f3e…", "capture_id": "c41a…", "endpoint_id": "8d6f…", "method": "POST",
+  "admitted_at": "2026-11-22T10:01:12Z", "expires_at": "2026-11-23T10:01:12Z",
+  "execution_status": "SUCCESS", "capture_status": "complete",
+  "values_captured": 2, "values_omitted": 1, "write_failures": 0, "bytes_used": 412,
+  "values": [
+    { "node_id": "shape", "output_key": "order_total", "state": "captured", "value_json": "1250.5",
+      "value_bytes": 6, "omitted_reason": null, "recorded_at": "2026-11-22T10:01:13Z" },
+    { "node_id": "notes", "output_key": "note", "state": "omitted", "value_json": null,
+      "value_bytes": null, "omitted_reason": "byte_budget_exhausted", "recorded_at": "2026-11-22T10:01:13Z" } ] } }
+```
+
+`value_json` is the stored JSON text as a string — never re-parsed or rendered; a client displays it as text. `capture_status`: `recording` (the run has not finished), `complete` (finished and its closing summary was written with no store failure: `values` is the whole set — an empty list then means the pipeline declared no value-mode output), `incomplete` (a value write failed, or the closing summary was not written: the set may be partial). Readable after the window stopped, until `expires_at`. Audited as `execution.capture.inspected`.
+
+| Refusal | Answer |
+|---|---|
+| an execution never captured, another workspace's, or an unknown id | `404 execution.capture.not_found` — the same answer for all three |
+| a captured execution at or after `expires_at` | `410 execution.capture.expired`, `details.expired_at` — from that instant, whether or not the retention tick has deleted the rows ([Metadata DB §8.6](metadata-db.md#86-runtime-capture-detail)) |
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v2.135 | 1043 (#1043) | **Additive.** New **§26 Runtime capture of published mutations**: `GET`/`POST /api/v1/endpoints/{id}/captures`, `POST …/captures/{captureId}/stop` and `GET /api/v1/executions/{id}/capture`, session-only (`execution.capture.manage` / `execution.capture.read`; every key refused), `Cache-Control: no-store`, the admission-time decision and its retry/replay reuse, the byte budget and omission markers, `capture_status` (`recording` / `complete` / `incomplete`) and the four `execution.capture.*` refusals. A published mutation's ordinary history keeps no node value (§19.3a's run) — status, codes, timing, counts and keys only. |
 | 2026-11-22 | v2.134 | 1040 (#1040) | **Additive.** §18.1's inventory gains `endpoint_capabilities` (methods, `exact_pin`, `request_body_modes`, `method_grants`); a receiver that predates it answers none and the sender refuses a method route before building the batch. §18.2's `endpoints` arm documents the method entry (`method`, `pipeline_version`, `pipeline_body_hash`, `request_body`, `grants`; `bindings` empty) imported on the EXACT pipeline version — absent route → v1 RELEASED, same pin → unchanged, another pin → a new RELEASED current version — and its refusals (`pipeline.import.version_conflict`, `endpoint.pipeline_version.not_found` / `.not_eligible`, `endpoint.promotion.key_missing`, `endpoint.promotion.method_unsupported`). §19.5's promotion paragraph replaces #1037's "only GET routes travel". New §19.5a: the authoring surface (`request_body` on every management read, REST and MCP; the version page and draft dialog; the Keys page's exact method grants), rollout, recovery, limits, repeat semantics and `DELETE` content under RFC 9110 §9.3.5 (supported: the application's own listener; no proxy promised). No route, permission or status added. |
 | 2026-11-21 | v2.133 | 1039 (#1039) | **§19 (additive — the mutation surface answered only `503` before):** published `POST`, `PUT` and `DELETE` are served (new §19.3a): a required `Idempotency-Key` (`400 endpoint.request.idempotency_key_invalid` entry), a durable reservation before any business SQL, replay from the original execution and pin, `409 idempotency.key_reused_for_different_request`, `503 idempotency.reservation_unavailable` (also a release or execution record the store did not confirm) / `endpoint.dependency_unavailable` (also the original pin's lookup on a retry or takeover), the fingerprint over the typed values the ORIGINAL pin binds (defaults applied), a retry's `406` result negotiation, the start-window takeover, the terminal-state table (`200`/`202`/`409`/`410`/`503`), polling from the initiating grant only (`204` for a zero-caller result; a retry under a revoked grant `404`, or `405` with a bounded `Allow` while another method stays visible) and `mutations-enabled` withholding fresh requests only. A form or multipart body is `415` unless it declares zero length. §19.6 gains the `204`, `409` and `410` rows; §19.7 no longer lists `POST`. The Status line, left at v2.128 by later rows, now reads the latest version. |
 | 2026-11-21 | v2.132 | 1038 r4 (#1038) | **§6.1.4 (additive):** a saved body fixture keeps member order, repeated members and exact numbers through stored tests, template read-back, re-save, export and release (#1080). |

@@ -13,7 +13,6 @@ import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
-import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -38,7 +37,6 @@ class ExecutionCaptureControllerTest {
     private val workspaceId = UUID.randomUUID()
     private val service = mockk<ExecutionCaptureService>()
     private val controller = ExecutionCaptureController(service)
-    private val json = ObjectMapper()
     private val workspace = WorkspaceContext(workspaceId, "w", WorkspaceRole.WORKSPACE_ADMIN)
     private val session =
         AuthenticatedPrincipal(
@@ -95,10 +93,12 @@ class ExecutionCaptureControllerTest {
         every { service.start(session, workspaceId, endpointId, filter) } returns opened
         every { service.start(session, workspaceId, endpointId, null) } returns opened
 
-        val answered = controller.start(endpointId, json.readTree("""{"correlation_id": "$filter"}"""))
+        val answered = controller.start(endpointId, """{"correlation_id": "$filter"}""")
+        // No body, a blank one, an empty object and an explicit null all open an unfiltered window.
         controller.start(endpointId, null)
-        controller.start(endpointId, json.readTree("{}"))
-        controller.start(endpointId, json.readTree("""{"correlation_id": null}"""))
+        controller.start(endpointId, "  ")
+        controller.start(endpointId, "{}")
+        controller.start(endpointId, """{"correlation_id": null}""")
 
         answered.statusCode shouldBe HttpStatus.CREATED
         answered.headers.cacheControl shouldBe "no-store"
@@ -106,11 +106,11 @@ class ExecutionCaptureControllerTest {
         answered.body?.data?.get("correlation_id") shouldBe filter
         answered.body?.data?.get("active") shouldBe true
         verify(exactly = 1) { service.start(session, workspaceId, endpointId, filter) }
-        verify(exactly = 3) { service.start(session, workspaceId, endpointId, null) }
+        verify(exactly = 4) { service.start(session, workspaceId, endpointId, null) }
     }
 
     @Test
-    fun `a start body with any other field, a non-object or a non-string filter is refused before the service`() {
+    fun `a start body with any other field, a non-object, a non-string filter or broken JSON is refused before the service`() {
         signIn(session)
         val endpointId = UUID.randomUUID()
         listOf(
@@ -119,8 +119,9 @@ class ExecutionCaptureControllerTest {
             """["correlation_id"]""",
             """{"correlation_id": 42}""",
             "\"text\"",
+            "{not json",
         ).forEach { body ->
-            val refused = shouldThrow<DatapipelinesException> { controller.start(endpointId, json.readTree(body)) }
+            val refused = shouldThrow<DatapipelinesException> { controller.start(endpointId, body) }
             refused.code shouldBe PipelineErrorCodes.ExecutionCapture.INVALID
             refused.details["reason"] shouldBe ExecutionCaptureService.REASON_CORRELATION
         }

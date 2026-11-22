@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.64 (living document — updated as enums evolve)
+**Status:** v1.65 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -432,6 +432,9 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `endpoint.version_restored` (#786) | A DISCARDED API version was restored after its pin was rechecked |
 | `endpoint.version_purged` (#786) | An API DRAFT version was purged |
 | `endpoint.current_switched` (#786) | The API's runtime current version was switched; `details.from` and `details.to` carry both numbers |
+| `execution.capture.started` | (#1043) A workspace administrator or super admin opened a runtime capture window on a published mutation route ([Auth §10.1](auth.md#101-events)); `details` carry identities and times, never the correlation filter, a request or a captured output |
+| `execution.capture.stopped` | (#1043) The window was stopped (`details.end_reason`: `STOPPED` / `EXPIRED`); a repeated stop of an ended window writes no row |
+| `execution.capture.inspected` | (#1043) An administrator read a captured execution's private details; a refused read (absent, expired) writes no row, and `details` never carry a value |
 
 > Password and lockout events exist only for the optional local accounts ([Auth §5A](auth.md#5a-local-password-accounts-optional)); an OIDC-only deployment never writes them. No event in this table ever carries credential material.
 
@@ -1426,6 +1429,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.65 | 1043 (#1043) | **§15:** the three runtime capture audit events `execution.capture.started`, `.stopped` and `.inspected`, mirrored from [Auth §10.1](auth.md#101-events). |
 | 2026-11-20 | v1.64 | 1035 (#1035) | **§10 `ExecutionStatus`:** gains `OUTCOME_UNKNOWN` (V66) — terminal; the family's shared commit was attempted and not acknowledged. Carried on `pipeline_failed`'s `status`; the metric tag `status` gains `outcome_unknown`. |
 | 2026-11-21 | v1.63 | #1034 review F1 | §3 scopes the omitted-output `caller` default to DQL; DML always declares its output explicitly. |
 | 2026-11-20 | v1.62 | 1034 (#1034) | **§3 `OutputTarget`:** gains `discard`, the DML-only target whose write is the node's only effect (pipeline contract §4.4). |

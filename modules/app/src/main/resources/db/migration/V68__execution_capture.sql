@@ -86,14 +86,14 @@ CREATE TABLE execution_capture_values (
     workspace_id    UUID        NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     state           TEXT        NOT NULL,
     omitted_reason  TEXT        NULL,
-    value_json      TEXT        NULL,
+    value_text      TEXT        NULL,
     value_bytes     BIGINT      NULL,
     recorded_at     TIMESTAMPTZ NOT NULL,
     expires_at      TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (execution_id, node_id, output_key),
     CONSTRAINT chk_execution_capture_values_state CHECK (
-        (state = 'CAPTURED' AND value_json IS NOT NULL AND omitted_reason IS NULL AND value_bytes IS NOT NULL)
-        OR (state = 'OMITTED' AND value_json IS NULL
+        (state = 'CAPTURED' AND value_text IS NOT NULL AND omitted_reason IS NULL AND value_bytes IS NOT NULL)
+        OR (state = 'OMITTED' AND value_text IS NULL
             AND omitted_reason IN ('byte_budget_exhausted', 'unserializable'))
     )
 );
