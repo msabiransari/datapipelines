@@ -42,17 +42,21 @@ data class StoredCaptureRun(
  * so a diagnostic write can neither join nor roll back the run's business work.
  *
  * **The store refuses what was not admitted, at the time the write reaches storage.** A write first locks the
- * execution's reservation in the same workspace (`FOR KEY SHARE` — the lock the detail rows' foreign key takes anyway,
- * so nothing later in the transaction can wait), requires it to have been captured, and only THEN reads [clock]: the
- * write inserts iff that instant is before the reservation's `capture_expires_at`. A value or seal produced before the
- * deadline but queued, delayed or blocked until after it is refused (false) — its own `recorded_at`/`sealed_at` is kept
- * as metadata, never as expiry authority. The stored `expires_at` is the reservation's, never the caller's. So an
+ * execution's reservation in the same workspace (`FOR KEY SHARE`, the lock the detail rows' foreign key takes anyway),
+ * requires it to have been captured and reads [clock] once — refusing at once a write already past the deadline. The
+ * INSERT itself can still wait (a lock on its own detail table, a conflicting uncommitted row), so [clock] is read
+ * AGAIN after the INSERT returns, and a write whose deadline passed during that wait rolls its transaction back and
+ * reports false: no lock the write takes comes after that second read, so an expiry purge that completed while the
+ * INSERT waited is never followed by the insertion of the expired row. A value or seal produced before the deadline
+ * but queued, delayed or blocked until after it is refused (false) — its own `recorded_at`/`sealed_at` is kept as
+ * metadata, never as expiry authority. The stored `expires_at` is the reservation's, never the caller's. So an
  * uncaptured execution, another workspace's execution, or a write after expiry inserts nothing.
  *
  * **Reads refuse what has expired**, whether or not the retention tick has deleted it yet: every read is bounded by
  * `expires_at > :now`. [purgeExpired] deletes physically in bounded batches; it holds no state between ticks, so a
- * restart simply resumes with the next tick's batch. A write that passed its deadline check commits within its own
- * bounded transaction, so a row can outlive its deadline only until the next purge batch — and is never readable.
+ * restart simply resumes with the next tick's batch. A write that passed its second deadline check has no lock left to
+ * wait for and commits at once; only a deadline falling between that check and the commit can leave a row past it,
+ * until the next purge batch — and such a row is never readable.
  */
 class ExecutionCaptureStore(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -114,8 +118,9 @@ class ExecutionCaptureStore(
 
     /**
      * Runs [insert] with the reservation's detail deadline, in one transaction, iff [executionId] in [workspaceId] was
-     * captured (by window [sessionId] when given) and [clock] — read AFTER the reservation row is locked — is still
-     * before that deadline. False otherwise, with nothing written.
+     * captured (by window [sessionId] when given) and [clock] is before that deadline both when read after the
+     * reservation row is locked AND when read again after [insert] returns. False otherwise, with nothing written: a
+     * deadline that passed while the insert waited rolls the transaction back.
      */
     private fun beforeDeadline(
         executionId: UUID,
@@ -123,7 +128,7 @@ class ExecutionCaptureStore(
         sessionId: UUID?,
         insert: (Instant) -> Boolean,
     ): Boolean =
-        checkNotNull(transactions) { "a purge-only capture store does not write" }.execute { _ ->
+        checkNotNull(transactions) { "a purge-only capture store does not write" }.execute { status ->
             val expiresAt =
                 jdbc
                     .query(
@@ -137,7 +142,12 @@ class ExecutionCaptureStore(
                         mapOf("executionId" to executionId, "workspaceId" to workspaceId, "sessionId" to sessionId?.toString()),
                     ) { rs, _ -> rs.getTimestamp("capture_expires_at").toInstant() }
                     .firstOrNull()
-            expiresAt != null && clock.instant().isBefore(expiresAt) && insert(expiresAt)
+            if (expiresAt == null || !clock.instant().isBefore(expiresAt)) return@execute false
+            if (!insert(expiresAt)) return@execute false
+            // The insert may have waited on a lock; its deadline is judged again now that it holds every lock it takes.
+            if (clock.instant().isBefore(expiresAt)) return@execute true
+            status.setRollbackOnly()
+            false
         } == true
 
     /** The unexpired captured values of [executionId] in [workspaceId] at [now], in recording order. */

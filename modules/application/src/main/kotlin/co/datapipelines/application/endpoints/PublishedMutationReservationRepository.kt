@@ -61,7 +61,7 @@ data class PublishedMutationReservation(
  */
 class PublishedMutationReservationRepository(
     private val jdbc: NamedParameterJdbcTemplate,
-    /** #1043 — the metadata transactions [reserveDeciding] runs in (its window lock is held until the insert commits). */
+    /** #1043 — the metadata transactions [reserveDeciding] runs in (its row and window locks are held until it commits). */
     private val transactions: TransactionOperations,
 ) {
     /**
@@ -73,39 +73,32 @@ class PublishedMutationReservationRepository(
         require(candidate.retiredAt == null && candidate.scopeDigest != null && candidate.requestFingerprint != null) {
             "only a live reservation is inserted"
         }
-        return jdbc.update(
-            """
-            INSERT INTO published_mutation_reservations (
-                execution_id, workspace_id, api_key_id, endpoint_id, api_version, pipeline_id, pipeline_version,
-                has_caller, method, business_path, scope_digest, request_fingerprint, body_bytes, owner_token,
-                created_at, expires_at)
-            VALUES (
-                :executionId, :workspaceId, :apiKeyId, :endpointId, :apiVersion, :pipelineId, :pipelineVersion,
-                :hasCaller, :method, :businessPath, :scopeDigest, :requestFingerprint, :bodyBytes, :ownerToken,
-                :createdAt, :expiresAt)
-            ON CONFLICT (scope_digest) DO NOTHING
-            """.trimIndent(),
-            params(candidate),
-        ) == 1
+        return jdbc.update(INSERT_LIVE, params(candidate)) == 1
     }
 
     /**
-     * #1043 — [reserve] that also DECIDES runtime capture and stamps the ONE admission instant, in one transaction:
+     * #1043 — [reserve] that also DECIDES runtime capture and stamps the ONE admission instant, in one transaction whose
+     * every lock is taken BEFORE the clock is read:
      *
-     * 1. the route entity's and method's not-stopped capture window is read under `FOR SHARE`, so a concurrent stop
+     * 1. the reservation row is inserted (`ON CONFLICT (scope_digest) DO NOTHING`) with a provisional stamp no other
+     *    transaction can see — every wait the durable write can meet (a table lock, a racing replica's uncommitted row
+     *    under the same digest, a referenced row's lock) happens HERE; a loser writes nothing and returns null;
+     * 2. the route entity's and method's not-stopped capture window is read under `FOR SHARE`, so a concurrent stop
      *    (which takes `FOR UPDATE` on that row, see [ExecutionCaptureSessionRepository.stop]) is ordered by the database
      *    strictly before this admission (the window reads stopped) or after its commit;
-     * 2. only then is [AdmissionStamp.clock] read — the admission instant `T`, taken while the window's state is held,
-     *    never a timestamp sampled earlier during the caller's preflight, pin resolution or validation;
-     * 3. the window captures iff `started_at <= T < deadline_at` (both bounds of the half-open window) and its
+     * 3. only then is [AdmissionStamp.clock] read — the admission instant `T`, taken after every database wait of the
+     *    admission and while the window's state is held, never a timestamp sampled earlier during the caller's
+     *    preflight, pin resolution, validation or a blocked write;
+     * 4. the window captures iff `started_at <= T < deadline_at` (both bounds of the half-open window) and its
      *    correlation filter is absent or equals [correlationId];
-     * 4. the reservation is inserted with `created_at = T`, `expires_at = T + replay` and, when captured,
-     *    `capture_session_id` and `capture_expires_at = T + captureRetention` — so the persisted admission time, the
-     *    decision and the detail deadline all describe the same admission.
+     * 5. the transaction's own uncommitted row is stamped with `created_at = T`, `expires_at = T + replay` and, when
+     *    captured, `capture_session_id` and `capture_expires_at = T + captureRetention` — an update of a row this
+     *    transaction inserted, whose only foreign-key check reads the window row it already holds `FOR SHARE`, so it
+     *    cannot wait; the persisted admission time, the decision and both deadlines describe the same admission.
      *
      * The candidate's own `createdAt`, `expiresAt` and capture fields are ignored. Returns the reservation as stored
      * when this call's row was written; null when another request already holds the scope (its row carries ITS stamp
-     * and decision — read it with [findLive]). A start committing after step 1 is not seen: such an admission is not
+     * and decision — read it with [findLive]). A start committing after step 2 is not seen: such an admission is not
      * captured (a window captures only once its start is visible — never an admission it did not see).
      */
     fun reserveDeciding(
@@ -117,27 +110,14 @@ class PublishedMutationReservationRepository(
             "only a live reservation is inserted"
         }
         return transactions.execute { _ ->
-            val windows =
-                jdbc.query(
-                    """
-                    SELECT id, started_at, deadline_at, correlation_id FROM execution_capture_sessions
-                     WHERE workspace_id = :workspaceId AND endpoint_id = :endpointId AND method = :method
-                       AND stopped_at IS NULL
-                       FOR SHARE
-                    """.trimIndent(),
-                    mapOf(
-                        "workspaceId" to candidate.workspaceId,
-                        "endpointId" to candidate.endpointId,
-                        "method" to candidate.method.name,
-                    ),
-                ) { rs, _ ->
-                    OpenWindow(
-                        rs.getObject("id", UUID::class.java),
-                        rs.getTimestamp("started_at").toInstant(),
-                        rs.getTimestamp("deadline_at").toInstant(),
-                        rs.getObject("correlation_id", UUID::class.java),
-                    )
-                }
+            val provisional = stamp.clock.instant()
+            val written =
+                jdbc.update(
+                    INSERT_LIVE,
+                    params(candidate.copy(createdAt = provisional, expiresAt = provisional.plus(stamp.replay))),
+                ) == 1
+            if (!written) return@execute null
+            val windows = openWindows(candidate)
             val admittedAt = stamp.clock.instant()
             val window = windows.firstOrNull { it.admits(admittedAt, correlationId) }
             val stamped =
@@ -147,28 +127,47 @@ class PublishedMutationReservationRepository(
                     captureSessionId = window?.id,
                     captureExpiresAt = window?.let { admittedAt.plus(stamp.captureRetention) },
                 )
-            val written =
-                jdbc.update(
-                    """
-                    INSERT INTO published_mutation_reservations (
-                        execution_id, workspace_id, api_key_id, endpoint_id, api_version, pipeline_id, pipeline_version,
-                        has_caller, method, business_path, scope_digest, request_fingerprint, body_bytes, owner_token,
-                        created_at, expires_at, capture_session_id, capture_expires_at)
-                    VALUES (
-                        :executionId, :workspaceId, :apiKeyId, :endpointId, :apiVersion, :pipelineId, :pipelineVersion,
-                        :hasCaller, :method, :businessPath, :scopeDigest, :requestFingerprint, :bodyBytes, :ownerToken,
-                        :createdAt, :expiresAt, :captureSessionId, :captureExpiresAt)
-                    ON CONFLICT (scope_digest) DO NOTHING
-                    """.trimIndent(),
-                    params(stamped) +
-                        mapOf(
-                            "captureSessionId" to stamped.captureSessionId,
-                            "captureExpiresAt" to stamped.captureExpiresAt?.let(Timestamp::from),
-                        ),
-                ) == 1
-            stamped.takeIf { written }
+            jdbc.update(
+                """
+                UPDATE published_mutation_reservations
+                   SET created_at = :createdAt, expires_at = :expiresAt,
+                       capture_session_id = :captureSessionId, capture_expires_at = :captureExpiresAt
+                 WHERE execution_id = :executionId
+                """.trimIndent(),
+                mapOf(
+                    "executionId" to stamped.executionId,
+                    "createdAt" to Timestamp.from(stamped.createdAt),
+                    "expiresAt" to Timestamp.from(stamped.expiresAt),
+                    "captureSessionId" to stamped.captureSessionId,
+                    "captureExpiresAt" to stamped.captureExpiresAt?.let(Timestamp::from),
+                ),
+            )
+            stamped
         }
     }
+
+    /** The not-stopped capture windows of [candidate]'s route entity and method, held `FOR SHARE` until commit. */
+    private fun openWindows(candidate: PublishedMutationReservation): List<OpenWindow> =
+        jdbc.query(
+            """
+            SELECT id, started_at, deadline_at, correlation_id FROM execution_capture_sessions
+             WHERE workspace_id = :workspaceId AND endpoint_id = :endpointId AND method = :method
+               AND stopped_at IS NULL
+               FOR SHARE
+            """.trimIndent(),
+            mapOf(
+                "workspaceId" to candidate.workspaceId,
+                "endpointId" to candidate.endpointId,
+                "method" to candidate.method.name,
+            ),
+        ) { rs, _ ->
+            OpenWindow(
+                rs.getObject("id", UUID::class.java),
+                rs.getTimestamp("started_at").toInstant(),
+                rs.getTimestamp("deadline_at").toInstant(),
+                rs.getObject("correlation_id", UUID::class.java),
+            )
+        }
 
     /** A not-stopped capture window as the reserving transaction read it. */
     private data class OpenWindow(
@@ -281,6 +280,20 @@ class PublishedMutationReservationRepository(
         )
 
     private companion object {
+        /** A live reservation's insert; the loser of a scope-digest race writes nothing. */
+        val INSERT_LIVE =
+            """
+            INSERT INTO published_mutation_reservations (
+                execution_id, workspace_id, api_key_id, endpoint_id, api_version, pipeline_id, pipeline_version,
+                has_caller, method, business_path, scope_digest, request_fingerprint, body_bytes, owner_token,
+                created_at, expires_at)
+            VALUES (
+                :executionId, :workspaceId, :apiKeyId, :endpointId, :apiVersion, :pipelineId, :pipelineVersion,
+                :hasCaller, :method, :businessPath, :scopeDigest, :requestFingerprint, :bodyBytes, :ownerToken,
+                :createdAt, :expiresAt)
+            ON CONFLICT (scope_digest) DO NOTHING
+            """.trimIndent()
+
         const val SELECT =
             "SELECT execution_id, workspace_id, api_key_id, endpoint_id, api_version, pipeline_id, pipeline_version, " +
                 "has_caller, method, business_path, scope_digest, request_fingerprint, body_bytes, owner_token, created_at, " +
@@ -314,9 +327,10 @@ class PublishedMutationReservationRepository(
 }
 
 /**
- * #1043 — how [PublishedMutationReservationRepository.reserveDeciding] stamps an admission: [clock] is read ONCE, under
- * the capture window's lock, and the replay window ([replay], `datapipelines.idempotency.ttl-seconds`) and the capture
- * detail retention ([captureRetention], `datapipelines.endpoints.capture-detail-retention-hours`) are measured from it.
+ * #1043 — how [PublishedMutationReservationRepository.reserveDeciding] stamps an admission: [clock] is read for the
+ * admission instant ONCE, after the durable insert and under the capture window's lock, and the replay window
+ * ([replay], `datapipelines.idempotency.ttl-seconds`) and the capture detail retention ([captureRetention],
+ * `datapipelines.endpoints.capture-detail-retention-hours`) are measured from it.
  */
 data class AdmissionStamp(
     val clock: Clock,

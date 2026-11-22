@@ -212,6 +212,9 @@ class PublishedMutationCaptureIntegrationTest {
             }
             withClue("ERROR marker on the private read") { read.asString() shouldNotContain ERROR_MARKER }
             withClue("ERROR marker in the private tables") { captureText(id) shouldNotContain ERROR_MARKER }
+            for ((surface, text) in surfaces(id, answered, read, output)) {
+                withClue("ERROR marker on $surface") { text shouldNotContain ERROR_MARKER }
+            }
         } finally {
             stop(FAILING, capture)
         }

@@ -33,7 +33,13 @@ import java.util.concurrent.TimeUnit
  * unfiltered correlation, the half-open deadline, route identity, workspace scope), the database's ordering of a stop
  * against an admission (each side held open in turn), and the private store's own refusals, expiry-bounded reads and
  * batched purge. Each is a property of SQL that a mocked template could never falsify.
+ *
+ * The write-wait cases (r3) hold a table lock so the reserving INSERT, or a value or seal INSERT that already passed
+ * its reservation lock and first deadline check, waits while the clock crosses a boundary (and a purge completes);
+ * they need this class's shipped-schema fixture and lock-wait probe, so the class is kept whole rather than split
+ * into files that would each re-seed the same schema.
  */
+@Suppress("LargeClass") // one storage contract over one shipped schema; see the KDoc
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ExecutionCaptureIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
@@ -528,6 +534,225 @@ class ExecutionCaptureIntegrationTest {
         count("execution_capture_runs") shouldBe 0
         // The reservation keeps its decision and expiry, so a later read still knows it expired.
         reservations.findLive(c.scopeDigest!!).shouldNotBeNull().captureExpiresAt shouldBe expiresAt
+    }
+
+    @Test
+    fun `an admission INSERT blocked beyond the natural expiry is decided at the durable instant - not captured`() {
+        val s = session()
+        sessions.start(s)
+        val clock = MutableClock(s.deadlineAt.minusSeconds(1))
+        val c = candidate(createdAt = s.deadlineAt.minusSeconds(1))
+        heldInsertAdmission(c, clock, advanceTo = s.deadlineAt).let {
+            it.createdAt shouldBe s.deadlineAt
+            it.captureSessionId.shouldBeNull()
+        }
+        stored(c).let {
+            it.createdAt shouldBe s.deadlineAt
+            it.expiresAt shouldBe s.deadlineAt.plus(replay)
+            it.captureSessionId.shouldBeNull()
+            it.captureExpiresAt.shouldBeNull()
+        }
+    }
+
+    @Test
+    fun `an admission INSERT blocked across the start is captured at the durable instant, both deadlines measured from it`() {
+        val s = session(startedAt = now.plusSeconds(10))
+        sessions.start(s)
+        val clock = MutableClock(s.startedAt.minusSeconds(1))
+        val c = candidate(createdAt = s.startedAt.minusSeconds(1))
+        heldInsertAdmission(c, clock, advanceTo = s.startedAt).captureSessionId shouldBe s.id
+        stored(c).let {
+            it.createdAt shouldBe s.startedAt
+            it.expiresAt shouldBe s.startedAt.plus(replay)
+            it.captureSessionId shouldBe s.id
+            it.captureExpiresAt shouldBe s.startedAt.plus(retention)
+        }
+    }
+
+    @Test
+    fun `an admission INSERT blocked and released before the natural expiry is captured - the successful control`() {
+        val s = session()
+        sessions.start(s)
+        val clock = MutableClock(s.deadlineAt.minusSeconds(2))
+        val c = candidate(createdAt = s.deadlineAt.minusSeconds(2))
+        val releasedAt = s.deadlineAt.minus(1, ChronoUnit.MICROS)
+        heldInsertAdmission(c, clock, advanceTo = releasedAt).captureSessionId shouldBe s.id
+        stored(c).let {
+            it.createdAt shouldBe releasedAt
+            it.expiresAt shouldBe releasedAt.plus(replay)
+            it.captureSessionId shouldBe s.id
+            it.captureExpiresAt shouldBe releasedAt.plus(retention)
+        }
+    }
+
+    @Test
+    fun `two replicas blocked at the INSERT on one key - one winner stamped after the wait, every retry reads its decision`() {
+        val s = session()
+        sessions.start(s)
+        val clock = MutableClock(s.deadlineAt.minusSeconds(2))
+        val c = candidate(createdAt = s.deadlineAt.minusSeconds(2))
+        // Replica B carries the same Idempotency-Key scope under its own execution id and claim.
+        val replicaB = c.copy(executionId = UUID.randomUUID(), ownerToken = UUID.randomUUID())
+        val releasedAt = s.deadlineAt.minusSeconds(1)
+        val results =
+            withHeldReservationTable { held ->
+                val a = CompletableFuture.supplyAsync { reservations.reserveDeciding(c, null, AdmissionStamp(clock, replay, retention)) }
+                val b =
+                    CompletableFuture.supplyAsync {
+                        reservations.reserveDeciding(replicaB, null, AdmissionStamp(clock, replay, retention))
+                    }
+                awaitLockWaits(2)
+                a.isDone shouldBe false
+                b.isDone shouldBe false
+                clock.set(releasedAt)
+                held.jdbcTemplate.execute("COMMIT")
+                listOfNotNull(a.get(30, TimeUnit.SECONDS), b.get(30, TimeUnit.SECONDS))
+            }
+        val winner = results.single()
+        winner.createdAt shouldBe releasedAt
+        winner.captureSessionId shouldBe s.id
+        count("published_mutation_reservations") shouldBe 1
+        // A retry from either replica after the window's natural expiry and a stop: no row, and the original decision.
+        clock.set(s.deadlineAt.plusSeconds(5))
+        sessions.stop(workspaceId, endpointId, s.id, userId, clock)
+        for (retry in listOf(c, replicaB)) {
+            reservations.reserveDeciding(retry, null, AdmissionStamp(clock, replay, retention)).shouldBeNull()
+        }
+        stored(c).let {
+            it.executionId shouldBe winner.executionId
+            it.ownerToken shouldBe winner.ownerToken
+            it.createdAt shouldBe releasedAt
+            it.expiresAt shouldBe releasedAt.plus(replay)
+            it.captureSessionId shouldBe s.id
+            it.captureExpiresAt shouldBe releasedAt.plus(retention)
+        }
+    }
+
+    @Test
+    fun `a value INSERT blocked after its reservation lock cannot recreate detail after expiry and purge`() {
+        blockedDetailInsert(sealing = false)
+    }
+
+    @Test
+    fun `a seal INSERT blocked after its reservation lock cannot recreate detail after expiry and purge`() {
+        blockedDetailInsert(sealing = true)
+    }
+
+    @Test
+    fun `a value and a seal INSERT blocked and released before the expiry are kept - the successful controls`() {
+        blockedDetailInsert(sealing = false, expire = false)
+        seed()
+        blockedDetailInsert(sealing = true, expire = false)
+    }
+
+    @Test
+    fun `a late-finishing run's seal blocked at the INSERT before the detail deadline is kept, then denied at it before cleanup`() {
+        val s = session()
+        sessions.start(s)
+        val (c, decision) = admit()
+        val expiresAt = decision.expiresAt.shouldNotBeNull()
+        // The window ends while the run is still going; the run's details stay governed by its admission's deadline.
+        sessions.stop(workspaceId, endpointId, s.id, userId, at(now.plusSeconds(5)))
+        storeClock.set(expiresAt.minusSeconds(10))
+        val accepted =
+            withHeldDetailTables { held ->
+                val sealed =
+                    CompletableFuture.supplyAsync { store.seal(seal(c.executionId, s.id, expiresAt.minusSeconds(11), expiresAt)) }
+                awaitLockWait()
+                sealed.isDone shouldBe false
+                storeClock.set(expiresAt.minusSeconds(1))
+                held.jdbcTemplate.execute("COMMIT")
+                sealed.get(30, TimeUnit.SECONDS)
+            }
+        accepted shouldBe true
+        store.run(c.executionId, workspaceId, expiresAt.minus(1, ChronoUnit.MICROS)).shouldNotBeNull().sessionId shouldBe s.id
+        // At the deadline the read is denied though the purge has not run yet; the purge then deletes it.
+        store.run(c.executionId, workspaceId, expiresAt).shouldBeNull()
+        count("execution_capture_runs") shouldBe 1
+        store.purgeExpired(expiresAt, 10) shouldBe 1
+        count("execution_capture_runs") shouldBe 0
+    }
+
+    /**
+     * Writes an early value, then holds both detail tables in SHARE mode so the next value ([sealing] false) or seal
+     * waits at its INSERT — after its reservation lock and first deadline check passed. With [expire] the clock reaches
+     * the deadline and the holder purges the early value before releasing: the blocked write must report false and no
+     * private row may remain. Without it, the release happens before the deadline and the write is kept.
+     */
+    private fun blockedDetailInsert(
+        sealing: Boolean,
+        expire: Boolean = true,
+    ) {
+        sessions.start(session())
+        val (c, decision) = admit()
+        val expiresAt = decision.expiresAt.shouldNotBeNull()
+        storeClock.set(expiresAt.minusSeconds(1))
+        store.write(value(c.executionId, workspaceId, node = "early", recordedAt = now)) shouldBe true
+        val accepted =
+            withHeldDetailTables { held ->
+                val pending =
+                    CompletableFuture.supplyAsync {
+                        if (sealing) {
+                            store.seal(seal(c.executionId, decision.sessionId.shouldNotBeNull(), now, expiresAt))
+                        } else {
+                            store.write(value(c.executionId, workspaceId, node = "late", recordedAt = now))
+                        }
+                    }
+                awaitLockWait()
+                pending.isDone shouldBe false
+                if (expire) {
+                    storeClock.set(expiresAt)
+                    ExecutionCaptureStore.purgeOnly(held).purgeExpired(expiresAt, 10) shouldBe 1
+                } else {
+                    ExecutionCaptureStore.purgeOnly(held).purgeExpired(expiresAt.minusSeconds(1), 10) shouldBe 0
+                }
+                held.jdbcTemplate.execute("COMMIT")
+                pending.get(30, TimeUnit.SECONDS)
+            }
+        accepted shouldBe !expire
+        val remaining = count("execution_capture_values") + count("execution_capture_runs")
+        remaining shouldBe if (expire) 0 else 2
+        if (expire) {
+            store.values(c.executionId, workspaceId, expiresAt.minus(1, ChronoUnit.MICROS)).shouldBeEmpty()
+            store.run(c.executionId, workspaceId, expiresAt.minus(1, ChronoUnit.MICROS)).shouldBeNull()
+        }
+    }
+
+    /**
+     * Admits [c] while another transaction holds the reservation table in SHARE mode: the admission's INSERT waits
+     * (after nothing else held it); meanwhile [clock] moves to [advanceTo]; the hold is then released.
+     */
+    private fun heldInsertAdmission(
+        c: PublishedMutationReservation,
+        clock: MutableClock,
+        advanceTo: Instant,
+    ): PublishedMutationReservation =
+        withHeldReservationTable { held ->
+            val admission =
+                CompletableFuture.supplyAsync { reservations.reserveDeciding(c, null, AdmissionStamp(clock, replay, retention)) }
+            awaitLockWait()
+            admission.isDone shouldBe false
+            clock.set(advanceTo)
+            held.jdbcTemplate.execute("COMMIT")
+            admission.get(30, TimeUnit.SECONDS)
+        }.shouldNotBeNull()
+
+    private fun <T> withHeldReservationTable(block: (NamedParameterJdbcTemplate) -> T): T =
+        withHeldLock("LOCK TABLE published_mutation_reservations IN SHARE MODE", block)
+
+    private fun <T> withHeldDetailTables(block: (NamedParameterJdbcTemplate) -> T): T =
+        withHeldLock("LOCK TABLE execution_capture_values, execution_capture_runs IN SHARE MODE", block)
+
+    private fun <T> withHeldLock(
+        lock: String,
+        block: (NamedParameterJdbcTemplate) -> T,
+    ): T {
+        var result: Result<T>? = null
+        withHeldConnection { held ->
+            held.jdbcTemplate.execute(lock)
+            result = runCatching { block(held) }
+        }
+        return result.shouldNotBeNull().getOrThrow()
     }
 
     private fun value(
