@@ -195,6 +195,23 @@
       });
       return row;
     });
+    // A stack at zero whose sum at one position, up or down, is beyond float64 is not drawn there (#1011): every
+    // series has a gap at that position, as a value that is not finite has; a series with no row there too, or its
+    // line and its fill would run across the gap.
+    if (stack === "zero") {
+      for (var oj = 0; oj < xs.length; oj++) {
+        var up = 0, down = 0;
+        for (var os = 0; os < cells.length; os++) {
+          var oc = cells[os][oj];
+          if (oc === null || oc === undefined) continue;
+          if (oc.num < 0) down += oc.num;
+          else up += oc.num;
+        }
+        if (isFinite(up) && isFinite(down)) continue;
+        for (var ok = 0; ok < cells.length; ok++) cells[ok][oj] = null;
+        undrawn = true;
+      }
+    }
     if (undrawn) warn("chart.rule.non-finite");
     if (nonPositive) warn("chart.rule.log-nonpositive");
     if (normalize) {
