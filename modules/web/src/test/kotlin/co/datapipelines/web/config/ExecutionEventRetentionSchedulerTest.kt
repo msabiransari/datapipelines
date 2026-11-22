@@ -8,6 +8,7 @@ import co.datapipelines.auth.KeyRetentionPurge
 import co.datapipelines.executor.ExecutionEventRetention
 import co.datapipelines.persistence.ScheduledJob
 import co.datapipelines.web.dashboards.runtime.DashboardRefreshRetention
+import co.datapipelines.web.endpoints.ExecutionCaptureRetention
 import co.datapipelines.web.parameters.ParameterEvaluationRetention
 import co.datapipelines.web.parameters.ParameterEvaluationSweeper
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -43,10 +44,12 @@ class ExecutionEventRetentionSchedulerTest {
     private val dashboards = mockk<DashboardRefreshRetention>(relaxed = true)
     private val evaluationSweeper = mockk<ParameterEvaluationSweeper>(relaxed = true)
     private val evaluations = mockk<ParameterEvaluationRetention>(relaxed = true)
-    private val scheduler = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations)
+    private val capture = mockk<ExecutionCaptureRetention>(relaxed = true)
+    private val scheduler =
+        ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations, captureRetention = capture)
 
     @Test
-    fun `a tick runs the six steps in order - events, dashboard refreshes, the evaluation sweep and retention, keys, the audit log`() {
+    fun `a tick runs the seven steps in order - events, dashboard refreshes, the evaluation sweep and retention, capture, keys, audit`() {
         val lines = captured { scheduler.retain() }
 
         verifyOrder {
@@ -54,6 +57,7 @@ class ExecutionEventRetentionSchedulerTest {
             dashboards.retainOnce()
             evaluationSweeper.sweepOnce()
             evaluations.retainOnce()
+            capture.retainOnce()
             keys.purgeOnce()
             audit.purgeOnce()
         }
@@ -95,6 +99,29 @@ class ExecutionEventRetentionSchedulerTest {
         lines.single { it.level == Level.ERROR }.formattedMessage shouldContain "event=retention.step_failed step=dashboard_refreshes"
     }
 
+    /** #1043: the capture purge is one more isolated step — its failure names it and the purges after it still run. */
+    @Test
+    fun `a failing capture purge does not stop the purges after it`() {
+        every { capture.retainOnce() } throws IllegalStateException("unexpected")
+
+        val lines = captured { scheduler.retain() }
+
+        verify(exactly = 1) { keys.purgeOnce() }
+        verify(exactly = 1) { audit.purgeOnce() }
+        lines.single { it.level == Level.ERROR }.formattedMessage shouldContain "event=retention.step_failed step=capture_detail"
+    }
+
+    /** A direct construction without the capture step (the other suites' shape) still runs the six others. */
+    @Test
+    fun `a scheduler built without the capture step runs the others`() {
+        val withoutCapture = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations)
+
+        withoutCapture.retain()
+
+        verify(exactly = 1) { audit.purgeOnce() }
+        verify(exactly = 0) { capture.retainOnce() }
+    }
+
     @Test
     fun `a failing keys purge does not stop the audit retention`() {
         every { keys.purgeOnce() } throws DataAccessResourceFailureException("metadata database unreachable")
@@ -134,13 +161,22 @@ class ExecutionEventRetentionSchedulerTest {
         every { dashboards.retainOnce() } throws IllegalStateException("b")
         every { evaluationSweeper.sweepOnce() } throws IllegalStateException("c")
         every { evaluations.retainOnce() } throws IllegalStateException("d")
+        every { capture.retainOnce() } throws IllegalStateException("g")
         every { keys.purgeOnce() } throws IllegalStateException("e")
         every { audit.purgeOnce() } throws IllegalStateException("f")
 
         val lines = captured { scheduler.retain() }
 
         lines.filter { it.level == Level.ERROR }.map { it.formattedMessage.substringAfter("step=").substringBefore(' ') } shouldBe
-            listOf("execution_events", "dashboard_refreshes", "parameter_evaluation_sweep", "parameter_evaluations", "keys", "audit_log")
+            listOf(
+                "execution_events",
+                "dashboard_refreshes",
+                "parameter_evaluation_sweep",
+                "parameter_evaluations",
+                "capture_detail",
+                "keys",
+                "audit_log",
+            )
     }
 
     /**
@@ -150,7 +186,7 @@ class ExecutionEventRetentionSchedulerTest {
     @Test
     fun `a failing keys purge is counted once under job=keys_purge`() {
         val registry = SimpleMeterRegistry()
-        val counted = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations, registry)
+        val counted = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations, registry, capture)
         every { keys.purgeOnce() } throws DataAccessResourceFailureException("canceling statement due to statement timeout")
 
         counted.retain()
@@ -166,7 +202,7 @@ class ExecutionEventRetentionSchedulerTest {
     @Test
     fun `every step's escaped failure is counted once under its own job - never a quiet tick`() {
         val registry = SimpleMeterRegistry()
-        val counted = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations, registry)
+        val counted = ExecutionEventRetentionScheduler(events, keys, audit, dashboards, evaluationSweeper, evaluations, registry, capture)
         // Read before anything below registers a counter by reading it: the closed tag set, as built.
         registry
             .find(ScheduledJob.FAILED_TICK_METER)
@@ -182,6 +218,7 @@ class ExecutionEventRetentionSchedulerTest {
         every { dashboards.retainOnce() } throws IllegalStateException("b")
         every { evaluationSweeper.sweepOnce() } throws IllegalStateException("c")
         every { evaluations.retainOnce() } throws IllegalStateException("d")
+        every { capture.retainOnce() } throws IllegalStateException("g")
         every { audit.purgeOnce() } throws IllegalStateException("f")
         counted.retain()
 
@@ -207,13 +244,14 @@ class ExecutionEventRetentionSchedulerTest {
     }
 
     private companion object {
-        /** The tick's `job` tags, literals (#326's three, #636's three) — never read back from the enum under test. */
+        /** The tick's `job` tags, literals (#326's three, #636's three, #1043's one) — never read back from the enum under test. */
         val COUNTED =
             listOf(
                 "event_retention",
                 "dashboard_refresh_retention",
                 "parameter_evaluation_sweep",
                 "parameter_evaluation_retention",
+                "capture_retention",
                 "keys_purge",
                 "audit_retention",
             )

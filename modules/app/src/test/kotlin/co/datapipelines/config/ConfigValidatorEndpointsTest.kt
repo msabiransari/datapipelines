@@ -2,6 +2,7 @@ package co.datapipelines.config
 
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
@@ -62,5 +63,39 @@ class ConfigValidatorEndpointsTest {
             )
 
         report.violations.shouldBeEmpty()
+    }
+
+    @Test
+    fun `the capture durations - defaults and positive values pass, an absent key takes the binder default`() {
+        ConfigValidator.validate(validSnapshot()).violations.shouldBeEmpty()
+        ConfigValidator
+            .validate(validSnapshot().copy(endpointsCaptureWindowSeconds = "900", endpointsCaptureDetailRetentionHours = "24"))
+            .violations
+            .shouldBeEmpty()
+        ConfigValidator
+            .validate(validSnapshot().copy(endpointsCaptureWindowSeconds = " 60 ", endpointsCaptureDetailRetentionHours = "1"))
+            .violations
+            .shouldBeEmpty()
+    }
+
+    @Test
+    fun `zero, negative, non-numeric, overflowing and unrepresentable capture durations each refuse startup naming the key`() {
+        val window = "datapipelines.endpoints.capture-window-seconds"
+        val retention = "datapipelines.endpoints.capture-detail-retention-hours"
+        listOf("0", "-5", "abc", "99999999999", "").forEach { bad ->
+            ConfigValidator.validate(validSnapshot().copy(endpointsCaptureWindowSeconds = bad)).violations.single() shouldContain window
+            ConfigValidator.validate(validSnapshot().copy(endpointsCaptureDetailRetentionHours = bad)).violations.single() shouldContain
+                retention
+        }
+        // Int.MAX_VALUE hours from now is past 9999-12-31: no admission could store that expiry.
+        ConfigValidator
+            .validate(validSnapshot().copy(endpointsCaptureDetailRetentionHours = Int.MAX_VALUE.toString()))
+            .violations
+            .single() shouldContain "not representable"
+        // Both bad at once: two violations, one per key.
+        ConfigValidator
+            .validate(validSnapshot().copy(endpointsCaptureWindowSeconds = "0", endpointsCaptureDetailRetentionHours = "0"))
+            .violations
+            .size shouldBe 2
     }
 }

@@ -513,6 +513,13 @@ object ApiErrorCatalog {
             // #1039 §13.14 — a dependency a published mutation needs before admission was down: a withhold, not the
             // caller's fault (503). The Idempotency-Key entry takes the request family's 400.
             PipelineErrorCodes.Endpoint.DEPENDENCY_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            // #1043 §13.27 — runtime capture: one active window per route and method (409), a window or a captured
+            // detail absent in the selected workspace (404), a captured detail past its expiry (410, gone for good), and a
+            // refused start (400: a GET route or a malformed correlation filter).
+            PipelineErrorCodes.ExecutionCapture.ALREADY_ACTIVE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.ExecutionCapture.NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.ExecutionCapture.EXPIRED to HttpStatus.GONE,
+            PipelineErrorCodes.ExecutionCapture.INVALID to HttpStatus.BAD_REQUEST,
             // #786 §13.14 — an unknown API version is a 404 under the version family's 409; an exact pin the caller's
             // posture does not admit, and an authoring-disabled deployment's API write, are state conflicts (409) under
             // the family's 400. `endpoint.pipeline_version.not_found` keeps the 400: the request names a version that
@@ -783,6 +790,12 @@ object ApiErrorCatalog {
 
     private val AUTHORED_USER_MESSAGES: Map<String, String> =
         mapOf(
+            PipelineErrorCodes.ExecutionCapture.ALREADY_ACTIVE to
+                "A capture is already active for this API method. Stop it before opening another.",
+            PipelineErrorCodes.ExecutionCapture.NOT_FOUND to "No captured details exist for that capture or execution.",
+            PipelineErrorCodes.ExecutionCapture.EXPIRED to "The captured details of this execution have expired and were removed.",
+            PipelineErrorCodes.ExecutionCapture.INVALID to
+                "Capture applies to POST, PUT and DELETE APIs, and a correlation filter must be one UUID.",
             PipelineErrorCodes.Lake.CAPACITY_BUSY to "Delivery capacity is busy. Retry when an ingestion slot and scratch are available.",
             PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to "The execution has no checked authority to append to the lake.",
             PipelineErrorCodes.Lake.APPEND_OUTCOME_UNKNOWN to

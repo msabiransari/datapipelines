@@ -121,9 +121,10 @@ class ScopeMatrixSpecDriftTest {
          * (#10 L1b: `visualization.*` and `dashboard.*` — read, create, update, version.manage, delete, release,
          * switch_version; the two imports landed with L1c, `dashboard.execute` with L2 and `dashboard.key.bind`
          * with L5), re-derived. 103 since #786 added `endpoint.release` and `endpoint.version.manage` (an API's release
-         * and its version lifecycle). 104 since #957 added `lake.maintain` (system only, no route).
+         * and its version lifecycle). 104 since #957 added `lake.maintain` (system only, no route). 106 since #1043 added
+         * `execution.capture.manage` and `execution.capture.read` (session-only, workspace admin).
          */
-        const val PERMISSION_COUNT = 104
+        const val PERMISSION_COUNT = 106
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

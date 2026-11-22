@@ -84,6 +84,12 @@ data class NodeResult(
     /** SCRIPT nodes only (§4.12): how many invariants were evaluated after the last batch (§5.4). */
     val invariantsChecked: Int? = null,
 ) {
+    /**
+     * #1043: this result with the node-computed values removed (`context_value`, `context_values`) — what a run whose
+     * node values are private (`ExecuteRequest.privateNodeValues`) records and emits. The declared [contextKey] stays.
+     */
+    fun withoutValues(): NodeResult = if (contextValue == null && contextValues == null) this else copy(contextValue = null, contextValues = null)
+
     companion object {
         /** A successful node's result; the duration is computed from [startedAt] to now. */
         fun of(

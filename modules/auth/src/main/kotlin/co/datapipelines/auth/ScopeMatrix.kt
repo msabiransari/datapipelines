@@ -122,10 +122,11 @@ object ScopeMatrix {
         principal.keyRole?.let { role ->
             val memberRole = role.asMemberRole()
             val held =
-                if (memberRole == null) {
-                    permission in RolePermissions.of(role)
-                } else {
-                    PermissionResolution.resolver.holds(context?.id, memberRole, false, permission)
+                when {
+                    // #1043: a session-only permission is no key's, whatever member role the key carries.
+                    permission in RolePermissions.SESSION_ONLY -> false
+                    memberRole == null -> permission in RolePermissions.of(role)
+                    else -> PermissionResolution.resolver.holds(context?.id, memberRole, false, permission)
                 }
             if (held) return Decision.Allowed
             return roleRefusal(AuthErrorCodes.ROLE_REQUIRED, operationName, permission, role.wire, context?.name)
@@ -173,6 +174,10 @@ object ScopeMatrix {
             )
         }
 
+        // #1043: a session-only permission is never a key's — a context-judged key principal (no key role) included.
+        if (permission in RolePermissions.SESSION_ONLY && principal.authMethod != AuthMethod.OIDC) {
+            return roleRefusal(AuthErrorCodes.ROLE_REQUIRED, operationName, permission, context.heldRole, context.name)
+        }
         if (context.permits(permission)) return Decision.Allowed
 
         // D-R12's distinct refusal: the KEY is fine, the role it was judged against does not

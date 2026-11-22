@@ -247,6 +247,11 @@ data class AuthenticatedPrincipal(
                 permission in RolePermissions.of(keyRole)
             }
 
+            // #1043: a session-only permission is held by an interactive session only, never a key or the system.
+            permission in RolePermissions.SESSION_ONLY && authMethod != AuthMethod.OIDC -> {
+                false
+            }
+
             // #957 D8: the workspace-less system principal (SystemActorPrincipals.forInstance) holds the system-only
             // permissions the resolver's system arm grants, and nothing else: no instance permission, no member one.
             authMethod == AuthMethod.SYSTEM && workspace == null -> {

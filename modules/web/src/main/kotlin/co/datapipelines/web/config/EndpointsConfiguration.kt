@@ -44,6 +44,7 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ResolvedNode
 import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import co.datapipelines.web.endpoints.CaptureRecorders
 import co.datapipelines.web.endpoints.MutationRequestRules
 import co.datapipelines.web.endpoints.PublishedEndpointServeService
 import co.datapipelines.web.endpoints.PublishedExecutionPagingService
@@ -368,6 +369,8 @@ class EndpointsConfiguration {
         audit: AuditEventSink,
         executionScope: WebSurfaceConfiguration.ExecutionCoroutineScope,
         meters: MeterRegistry,
+        // #1043 — the recorder of a captured admission (ExecutionCaptureConfiguration).
+        captureRecorders: CaptureRecorders,
     ): PublishedMutationService =
         PublishedMutationService(
             reservations = reservations,
@@ -385,6 +388,7 @@ class EndpointsConfiguration {
                     audit = audit,
                     scope = executionScope,
                     meters = meters,
+                    captures = captureRecorders,
                 ),
             readOnlyRule = readOnlyRule,
             endpointsProperties = endpointsProperties,

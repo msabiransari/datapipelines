@@ -589,7 +589,12 @@ internal class ScriptRun(
             )
         invariants.checkStrict(write.rowsRejected, rejectsTable)
         // §5.5: the Context key is written only after invariants and strict pass.
-        if (!tableMode) commitValue(write.gatedValue)
+        if (!tableMode) {
+            commitValue(write.gatedValue)
+            // #1043: an administrator's capture keeps this declared output in private diagnostic storage — only a value
+            // that passed the gate, invariants and strict; never an input, a table output or a rejection. Never throws.
+            ctx.valueCapture?.record(node.id, requireNotNull(node.contextKey), write.gatedValue)
+        }
         return NodeResult.of(
             nodeId = node.id,
             rowsOut = write.rowsOut,

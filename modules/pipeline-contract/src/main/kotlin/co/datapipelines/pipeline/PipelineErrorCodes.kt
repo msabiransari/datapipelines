@@ -605,6 +605,31 @@ object PipelineErrorCodes {
     }
 
     /** §13.4 — node execution. */
+    /**
+     * §13.27 (#1043, published-mutation-apis §6, §7 "Runtime capture") — a workspace administrator's temporary capture
+     * of a published mutation's declared transformer outputs. Every code here answers an interactive session only; no
+     * value, filter text or captured output is ever echoed.
+     */
+    object ExecutionCapture {
+        /** 409: a capture window is already active for this route and method; `details.capture_id` names it. */
+        const val ALREADY_ACTIVE = "execution.capture.already_active"
+
+        /**
+         * 404: no capture window with that id on that route, or no captured detail for that execution, in the
+         * selected workspace — an execution that was never captured answers exactly as an absent one.
+         */
+        const val NOT_FOUND = "execution.capture.not_found"
+
+        /** 410: the execution was captured, but its private details passed their expiry (`details.expired_at`). */
+        const val EXPIRED = "execution.capture.expired"
+
+        /**
+         * 400: the capture request is refused before anything is written — a GET route (`details.reason` =
+         * `method_not_capturable`) or a correlation filter that is not one UUID (`correlation_id_invalid`).
+         */
+        const val INVALID = "execution.capture.invalid"
+    }
+
     object Node {
         const val TEMPLATE_NOT_FOUND = "pipeline.node.template_not_found"
         const val TEMPLATE_RENDER_FAILED = "pipeline.node.template_render_failed"

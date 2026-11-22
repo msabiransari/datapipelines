@@ -221,6 +221,40 @@ class RoleMatrixTest {
         }
     }
 
+    /**
+     * #1043 — runtime capture is an interactive administrator's: a workspace admin's and a super admin's session hold both
+     * capture permissions; no key does — every key role, an administrator-role `mcp` key and a context-judged key
+     * principal included — and the principal's own `holds` agrees with the matrix.
+     */
+    @Test
+    fun `the capture permissions are an admin session's only - every key is refused them`() {
+        val capture = RolePermissions.SESSION_ONLY
+        capture shouldBe setOf(Permission.EXECUTION_CAPTURE_MANAGE, Permission.EXECUTION_CAPTURE_READ)
+        capture.forEach { permission ->
+            withClue(permission.wire) {
+                allowed(session(WorkspaceRole.WORKSPACE_ADMIN), permission) shouldBe ScopeMatrix.Decision.Allowed
+                session(WorkspaceRole.WORKSPACE_ADMIN).holds(permission) shouldBe true
+                allowed(superAdminSession(), permission) shouldBe ScopeMatrix.Decision.Allowed
+                listOf(WorkspaceRole.VIEWER, WorkspaceRole.AUTHOR, WorkspaceRole.PROMOTER).forEach { role ->
+                    allowed(session(role), permission).shouldBeInstanceOf<ScopeMatrix.Decision.Refused>()
+                }
+                KeyRole.entries.forEach { role ->
+                    withClue(role.wire) {
+                        val principal = keyRole(role).copy(workspace = context(WorkspaceRole.WORKSPACE_ADMIN))
+                        ScopeMatrix
+                            .allowed(principal, permission, context(WorkspaceRole.WORKSPACE_ADMIN))
+                            .shouldBeInstanceOf<ScopeMatrix.Decision.Refused>()
+                        principal.holds(permission) shouldBe false
+                    }
+                }
+                // A key principal judged by its context (no key role) on an admin's workspace: still refused.
+                val legacyKey = key(WorkspaceRole.WORKSPACE_ADMIN)
+                refusalFor(legacyKey, permission).code shouldBe AuthErrorCodes.ROLE_REQUIRED
+                legacyKey.holds(permission) shouldBe false
+            }
+        }
+    }
+
     @Test
     fun `a role refusal names the catalog permission and the ROLE it was judged as (A-6)`() {
         val refusal = refusalFor(session(WorkspaceRole.VIEWER), Permission.PIPELINE_UPDATE)

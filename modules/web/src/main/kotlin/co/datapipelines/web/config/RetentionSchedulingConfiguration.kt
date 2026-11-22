@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.endpoints.ExecutionCaptureStore
 import co.datapipelines.auth.AuditLogRetention
 import co.datapipelines.auth.AuditProperties
 import co.datapipelines.auth.KeyRetentionPurge
@@ -11,6 +12,7 @@ import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.persistence.FailureShape
 import co.datapipelines.persistence.ScheduledJob
 import co.datapipelines.visualization.DashboardRefreshRepository
+import co.datapipelines.web.endpoints.ExecutionCaptureRetention
 import co.datapipelines.web.dashboards.runtime.DashboardRefreshRetention
 import co.datapipelines.web.parameters.ParameterEvaluationRetention
 import co.datapipelines.web.parameters.ParameterEvaluationSweeper
@@ -126,6 +128,16 @@ class RetentionSchedulingConfiguration {
             metrics = meterRegistry,
         )
 
+    /**
+     * #1043: expired runtime capture detail, deleted in bounded batches (metadata-db §8.6). Its store is built here over
+     * the retention tick's bound, so the capture writes on the shared store bean stay unbounded by it.
+     */
+    @Bean
+    fun executionCaptureRetention(
+        jdbc: NamedParameterJdbcTemplate,
+        meterRegistry: MeterRegistry,
+    ): ExecutionCaptureRetention = ExecutionCaptureRetention(ExecutionCaptureStore(retentionStatements(jdbc)), meterRegistry)
+
     @Bean
     fun executionEventRetentionScheduler(
         retention: ExecutionEventRetention,
@@ -135,6 +147,7 @@ class RetentionSchedulingConfiguration {
         evaluationSweeper: ParameterEvaluationSweeper,
         evaluationRetention: ParameterEvaluationRetention,
         meterRegistry: MeterRegistry,
+        captureRetention: ExecutionCaptureRetention,
     ): ExecutionEventRetentionScheduler =
         ExecutionEventRetentionScheduler(
             retention,
@@ -144,6 +157,7 @@ class RetentionSchedulingConfiguration {
             evaluationSweeper,
             evaluationRetention,
             meterRegistry,
+            captureRetention,
         )
 
     /**
@@ -169,7 +183,8 @@ class RetentionSchedulingConfiguration {
  *    past the evaluate deadline become `INCOMPLETE` (metadata-db §8.5) — before the retention, so they age out with
  *    the rest;
  * 4. [ParameterEvaluationRetention] (#376) — finished evaluation records past the event retention, one bounded batch
- *    (metadata-db §8.1);
+ *    (metadata-db §8.1); then (#1043) [ExecutionCaptureRetention] — runtime capture detail past its own expiry, in
+ *    bounded batches (metadata-db §8.6), its failures counted under `job=capture_retention`;
  * 5. [KeyRetentionPurge] (keys v2 A17/B5) — revoked keys and their identities once nothing
  *    references them;
  * 6. [AuditLogRetention] (#310) — `audit_log` rows older than `datapipelines.audit.retention-days`.
@@ -203,6 +218,8 @@ class ExecutionEventRetentionScheduler(
     private val evaluationRetention: ParameterEvaluationRetention,
     /** The failed-tick counter's registry; null (direct constructions in tests) counts nothing. */
     metrics: MeterRegistry? = null,
+    /** #1043: expired capture detail's purge; null (direct constructions in tests) skips the step. */
+    private val captureRetention: ExecutionCaptureRetention? = null,
 ) {
     private val failedTicks: Map<ScheduledJob, Counter> =
         metrics?.let { registry ->
@@ -223,6 +240,8 @@ class ExecutionEventRetentionScheduler(
         // #376: the stale sweep first, so a record it closes ages out with the rest; then the retention batch.
         step("parameter_evaluation_sweep", ScheduledJob.PARAMETER_EVALUATION_SWEEP) { evaluationSweeper.sweepOnce() }
         step("parameter_evaluations", ScheduledJob.PARAMETER_EVALUATION_RETENTION) { evaluationRetention.retainOnce() }
+        // #1043: expired runtime capture detail (reads already refuse it; this reclaims the rows).
+        captureRetention?.let { step("capture_detail", ScheduledJob.CAPTURE_RETENTION) { it.retainOnce() } }
         step("keys", ScheduledJob.KEYS_PURGE) { keyPurge.purgeOnce() }
         step("audit_log", ScheduledJob.AUDIT_RETENTION) { auditRetention.purgeOnce() }
     }
@@ -258,6 +277,7 @@ class ExecutionEventRetentionScheduler(
                 ScheduledJob.DASHBOARD_REFRESH_RETENTION,
                 ScheduledJob.PARAMETER_EVALUATION_SWEEP,
                 ScheduledJob.PARAMETER_EVALUATION_RETENTION,
+                ScheduledJob.CAPTURE_RETENTION,
                 ScheduledJob.KEYS_PURGE,
                 ScheduledJob.AUDIT_RETENTION,
             )

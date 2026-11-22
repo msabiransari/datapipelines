@@ -6,6 +6,7 @@ import co.datapipelines.application.endpoints.PublishedMutationReservation
 import co.datapipelines.application.endpoints.PublishedMutationReservationRepository
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.executor.BoundedValueCapture
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
@@ -71,6 +72,8 @@ class PublishedMutationLauncher(
     private val audit: AuditEventSink,
     private val scope: CoroutineScope,
     private val meters: MeterRegistry? = null,
+    /** #1043: the recorder of a captured admission; null where capture is not wired (no run is then recorded). */
+    private val captures: CaptureRecorders? = null,
 ) {
     private val log = LoggerFactory.getLogger(PublishedMutationLauncher::class.java)
 
@@ -127,7 +130,10 @@ class PublishedMutationLauncher(
             reservation.apiVersion,
             reservation.executionId,
         )
-        val deferred = scope.async { attempt(request, reservation) }
+        // #1043: the decision the reservation stored at admission, never a fresh lookup — a retry or takeover reuses it.
+        val capture = captures?.of(reservation)
+        val captured = if (capture == null) request else request.copy(valueCapture = capture)
+        val deferred = scope.async { attempt(captured, reservation, capture) }
         val timeout = endpointsProperties.clampTimeout(timeoutSeconds)
         // Cancels the AWAIT, never the run: the Deferred belongs to `scope`. Null is the 202 branch.
         val attempt = runBlocking { withTimeoutOrNull(timeout.seconds) { deferred.await() } }
@@ -148,6 +154,7 @@ class PublishedMutationLauncher(
     private suspend fun attempt(
         request: ExecuteRequest,
         reservation: PublishedMutationReservation,
+        capture: BoundedValueCapture?,
     ): Attempt =
         try {
             Attempt.Finished(runner.run(request, reservation.workspaceId, ExecutionTrigger.ENDPOINT, failClosed = true))
@@ -178,6 +185,10 @@ class PublishedMutationLauncher(
                     }
                 }
             Attempt.Thrown(e, release)
+        } finally {
+            // However the run ended — and after the caller's wait timed out too — the closing summary is written once,
+            // off the business path; a run released before it started has no reservation, so the store refuses it.
+            capture?.let { withContext(NonCancellable + Dispatchers.IO) { it.seal() } }
         }
 
     private fun answer(
@@ -336,6 +347,9 @@ class PublishedMutationLauncher(
                 readOnly = admitted.readOnly,
                 requestBody = admitted.body,
                 boundedDiagnosticsRequired = true,
+                // #1043: a published write's computed node values never reach ordinary history, polling or events;
+                // only an administrator's capture keeps them, in its own private store.
+                privateNodeValues = true,
                 // The durable reservation is the replay mechanism here; the framework's Redis store is never consulted.
                 idempotencyKey = null,
             )

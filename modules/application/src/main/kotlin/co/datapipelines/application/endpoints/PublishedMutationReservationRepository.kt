@@ -30,9 +30,17 @@ data class PublishedMutationReservation(
     val createdAt: Instant,
     val expiresAt: Instant,
     val retiredAt: Instant? = null,
+    /**
+     * #1043 — the capture window that admitted this execution for runtime capture, decided ONCE at admission by
+     * [PublishedMutationReservationRepository.reserveDeciding] and reused by every retry; null = not captured.
+     */
+    val captureSessionId: UUID? = null,
+    /** #1043 — when the private captured details expire (admission + the detail retention); set iff [captureSessionId]. */
+    val captureExpiresAt: Instant? = null,
 ) {
     init {
         require(method.isMutation) { "a reservation is a mutation's: $method" }
+        require((captureSessionId == null) == (captureExpiresAt == null)) { "a capture decision carries its expiry" }
     }
 
     /** Whether the replay window has elapsed at [now]; an expired live row is retired by the next request in its scope. */
@@ -72,25 +80,53 @@ class PublishedMutationReservationRepository(
                 :createdAt, :expiresAt)
             ON CONFLICT (scope_digest) DO NOTHING
             """.trimIndent(),
-            mapOf(
-                "executionId" to candidate.executionId,
-                "workspaceId" to candidate.workspaceId,
-                "apiKeyId" to candidate.apiKeyId,
-                "endpointId" to candidate.endpointId,
-                "apiVersion" to candidate.apiVersion,
-                "pipelineId" to candidate.pipelineId,
-                "pipelineVersion" to candidate.pipelineVersion,
-                "hasCaller" to candidate.hasCaller,
-                "method" to candidate.method.name,
-                "businessPath" to candidate.businessPath,
-                "scopeDigest" to candidate.scopeDigest,
-                "requestFingerprint" to candidate.requestFingerprint,
-                "bodyBytes" to candidate.bodyBytes,
-                "ownerToken" to candidate.ownerToken,
-                "createdAt" to Timestamp.from(candidate.createdAt),
-                "expiresAt" to Timestamp.from(candidate.expiresAt),
-            ),
+            params(candidate),
         ) == 1
+    }
+
+    /**
+     * #1043 — [reserve] that also DECIDES runtime capture, in the same statement: the open capture window of the
+     * candidate's route entity and method whose deadline is after [PublishedMutationReservation.createdAt] and whose
+     * correlation filter is absent or equals [correlationId] is read under `FOR SHARE`, and its id is written with the
+     * reservation (with `capture_expires_at` = [captureExpiresAt]). A concurrent stop updates that row, so the database
+     * orders it strictly before this statement (no capture) or after it (captured). Returns the decision when this call's
+     * row was written, null when another request already holds the scope (its row carries ITS decision — read it with
+     * [findLive]). The candidate's own capture fields are ignored.
+     */
+    fun reserveDeciding(
+        candidate: PublishedMutationReservation,
+        correlationId: UUID?,
+        captureExpiresAt: Instant,
+    ): CaptureDecision? {
+        require(candidate.retiredAt == null && candidate.scopeDigest != null && candidate.requestFingerprint != null) {
+            "only a live reservation is inserted"
+        }
+        return jdbc
+            .query(
+                """
+                WITH capture AS (
+                    SELECT id FROM execution_capture_sessions
+                     WHERE workspace_id = :workspaceId AND endpoint_id = :endpointId AND method = :method
+                       AND stopped_at IS NULL AND :createdAt < deadline_at
+                       AND (correlation_id IS NULL OR correlation_id = CAST(:correlationId AS uuid))
+                       FOR SHARE)
+                INSERT INTO published_mutation_reservations (
+                    execution_id, workspace_id, api_key_id, endpoint_id, api_version, pipeline_id, pipeline_version,
+                    has_caller, method, business_path, scope_digest, request_fingerprint, body_bytes, owner_token,
+                    created_at, expires_at, capture_session_id, capture_expires_at)
+                SELECT
+                    :executionId, :workspaceId, :apiKeyId, :endpointId, :apiVersion, :pipelineId, :pipelineVersion,
+                    :hasCaller, :method, :businessPath, :scopeDigest, :requestFingerprint, :bodyBytes, :ownerToken,
+                    :createdAt, :expiresAt, c.id, CASE WHEN c.id IS NULL THEN NULL ELSE CAST(:captureExpiresAt AS timestamptz) END
+                  FROM (SELECT 1) AS one LEFT JOIN capture c ON TRUE
+                ON CONFLICT (scope_digest) DO NOTHING
+                RETURNING capture_session_id, capture_expires_at
+                """.trimIndent(),
+                params(candidate) +
+                    mapOf("correlationId" to correlationId?.toString(), "captureExpiresAt" to Timestamp.from(captureExpiresAt)),
+            ) { rs, _ ->
+                CaptureDecision(rs.getObject("capture_session_id", UUID::class.java), rs.getTimestamp("capture_expires_at")?.toInstant())
+            }.firstOrNull()
     }
 
     /** The live reservation holding [scopeDigest], or null. */
@@ -169,11 +205,31 @@ class PublishedMutationReservationRepository(
             mapOf("executionId" to executionId, "ownerToken" to ownerToken),
         ) == 1
 
+    private fun params(candidate: PublishedMutationReservation): Map<String, Any?> =
+        mapOf(
+            "executionId" to candidate.executionId,
+            "workspaceId" to candidate.workspaceId,
+            "apiKeyId" to candidate.apiKeyId,
+            "endpointId" to candidate.endpointId,
+            "apiVersion" to candidate.apiVersion,
+            "pipelineId" to candidate.pipelineId,
+            "pipelineVersion" to candidate.pipelineVersion,
+            "hasCaller" to candidate.hasCaller,
+            "method" to candidate.method.name,
+            "businessPath" to candidate.businessPath,
+            "scopeDigest" to candidate.scopeDigest,
+            "requestFingerprint" to candidate.requestFingerprint,
+            "bodyBytes" to candidate.bodyBytes,
+            "ownerToken" to candidate.ownerToken,
+            "createdAt" to Timestamp.from(candidate.createdAt),
+            "expiresAt" to Timestamp.from(candidate.expiresAt),
+        )
+
     private companion object {
         const val SELECT =
             "SELECT execution_id, workspace_id, api_key_id, endpoint_id, api_version, pipeline_id, pipeline_version, " +
                 "has_caller, method, business_path, scope_digest, request_fingerprint, body_bytes, owner_token, created_at, " +
-                "expires_at, retired_at FROM published_mutation_reservations"
+                "expires_at, retired_at, capture_session_id, capture_expires_at FROM published_mutation_reservations"
 
         val MAPPER =
             RowMapper { rs: ResultSet, _: Int ->
@@ -195,7 +251,17 @@ class PublishedMutationReservationRepository(
                     createdAt = rs.getTimestamp("created_at").toInstant(),
                     expiresAt = rs.getTimestamp("expires_at").toInstant(),
                     retiredAt = rs.getTimestamp("retired_at")?.toInstant(),
+                    captureSessionId = rs.getObject("capture_session_id", UUID::class.java),
+                    captureExpiresAt = rs.getTimestamp("capture_expires_at")?.toInstant(),
                 )
             }
     }
+}
+
+/** #1043 — the capture decision a reserving statement stored: [sessionId] null = not captured. */
+data class CaptureDecision(
+    val sessionId: UUID?,
+    val expiresAt: Instant?,
+) {
+    val captured: Boolean get() = sessionId != null
 }

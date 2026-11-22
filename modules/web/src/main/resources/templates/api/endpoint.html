@@ -176,6 +176,18 @@
             version is current.</p>
         </div>
       </div>
+
+      <!-- #1043 (ui-screens §4.18c): runtime capture of this POST, PUT or DELETE — workspace administrators only. The
+           card loads its own state (and re-renders itself after start and stop). -->
+      <div class="ds-card" th:if="${canManageCapture}" data-api-capture>
+        <div class="app-card-h">
+          <h2 class="ds-title">Runtime capture</h2>
+        </div>
+        <div class="app-card-b" id="api-capture"
+             th:attr="hx-get=@{'/partials/endpoints/{id}/capture'(id=${page.id})}" hx-trigger="load" hx-swap="outerHTML">
+          <p class="u-text-sm u-secondary">Loading capture state…</p>
+        </div>
+      </div>
     </div>
   </div>
 

@@ -100,6 +100,14 @@ enum class Permission(
     EXECUTION_CANCEL("execution.cancel"),
     EXECUTION_CANCEL_ALL("execution.cancel_all"),
 
+    // #1043 (published-mutation-apis §6, §7 "Runtime capture") — the workspace administrator's temporary capture of a
+    // published mutation's declared transformer outputs: open, list and stop a capture window on a route, and inspect
+    // the private captured details by execution id. Interactive sessions only (RolePermissions.SESSION_ONLY): no key
+    // kind or key role holds either, an administrator-role `mcp` key included. Neither grants execution, datasource or
+    // ordinary history access.
+    EXECUTION_CAPTURE_MANAGE("execution.capture.manage"),
+    EXECUTION_CAPTURE_READ("execution.capture.read"),
+
     // Schedules (#9, scheduler design revision §4, R8, L2). Pause, resume and unblock share one
     // permission (operational controls); Run now is its own (L2, the granularity rule).
     SCHEDULE_READ("schedule.read"),

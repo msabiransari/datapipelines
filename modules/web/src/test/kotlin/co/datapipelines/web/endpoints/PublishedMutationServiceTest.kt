@@ -5,6 +5,7 @@ import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.PublishedMutationDigests
 import co.datapipelines.application.endpoints.PublishedMutationReservation
+import co.datapipelines.application.endpoints.CaptureDecision
 import co.datapipelines.application.endpoints.PublishedMutationReservationRepository
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.ApiKeyKind
@@ -140,7 +141,7 @@ class PublishedMutationServiceTest {
     fun `a fresh request reserves its scope and starts the current pin under the reservation's id`() {
         val reserved = slot<PublishedMutationReservation>()
         every { reservations.findLive(any()) } returns null
-        every { reservations.reserve(capture(reserved)) } returns true
+        every { reservations.reserveDeciding(capture(reserved), any(), any()) } returns UNCAPTURED
         every { launcher.start(any(), any(), any(), any(), any(), any()) } answers {
             Outcome.Accepted(thirdArg<PublishedMutationReservation>().executionId, emptyMap())
         }
@@ -167,7 +168,7 @@ class PublishedMutationServiceTest {
         val refused = outcome.shouldBeInstanceOf<Outcome.Refused>()
         refused.status shouldBe 503
         refused.code shouldBe PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED
-        verify(exactly = 0) { reservations.reserve(any()) }
+        verify(exactly = 0) { reservations.reserveDeciding(any(), any(), any()) }
         verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
         counted("disabled") shouldBe 1.0
     }
@@ -192,7 +193,7 @@ class PublishedMutationServiceTest {
         val stale = reservationFor(call(), createdAt = now.minus(Duration.ofDays(2)), expiresAt = now.minusSeconds(1))
         every { reservations.findLive(stale.scope) } returns stale
         every { reservations.retire(stale.executionId, stale.scope, now) } returns true
-        every { reservations.reserve(any()) } returns true
+        every { reservations.reserveDeciding(any(), any(), any()) } returns UNCAPTURED
         every { launcher.start(any(), any(), any(), any(), any(), any()) } answers {
             Outcome.Accepted(thirdArg<PublishedMutationReservation>().executionId, emptyMap())
         }
@@ -214,7 +215,7 @@ class PublishedMutationServiceTest {
 
         refused.status shouldBe 503
         refused.code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED
-        verify(exactly = 0) { reservations.reserve(any()) }
+        verify(exactly = 0) { reservations.reserveDeciding(any(), any(), any()) }
     }
 
     @Test
@@ -226,7 +227,7 @@ class PublishedMutationServiceTest {
 
         refused.status shouldBe 503
         refused.code shouldBe PipelineErrorCodes.Endpoint.DEPENDENCY_UNAVAILABLE
-        verify(exactly = 0) { reservations.reserve(any()) }
+        verify(exactly = 0) { reservations.reserveDeciding(any(), any(), any()) }
     }
 
     // ------------------------------------------------------------------------- the store
@@ -246,7 +247,7 @@ class PublishedMutationServiceTest {
     @Test
     fun `a reservation that cannot be written is 503 reservation_unavailable and nothing runs`() {
         every { reservations.findLive(any()) } returns null
-        every { reservations.reserve(any()) } throws DataAccessResourceFailureException("down")
+        every { reservations.reserveDeciding(any(), any(), any()) } throws DataAccessResourceFailureException("down")
 
         val refused = service().serve(call(), pins).shouldBeInstanceOf<Outcome.Refused>()
 
@@ -258,7 +259,7 @@ class PublishedMutationServiceTest {
     fun `a lost reservation race replays the winner instead of running twice`() {
         val winner = reservationFor(call(), createdAt = now)
         every { reservations.findLive(winner.scope) } returnsMany listOf(null, winner)
-        every { reservations.reserve(any()) } returns false
+        every { reservations.reserveDeciding(any(), any(), any()) } returns null
         every { executions.findById(workspaceId, winner.executionId) } returns null
 
         val outcome = service().serve(call(), pins)
@@ -417,7 +418,7 @@ class PublishedMutationServiceTest {
         parameterSchema = QUANTITY_INTEGER
         val reserved = slot<PublishedMutationReservation>()
         every { reservations.findLive(any()) } returns null
-        every { reservations.reserve(capture(reserved)) } returns true
+        every { reservations.reserveDeciding(capture(reserved), any(), any()) } returns UNCAPTURED
         every { launcher.start(any(), any(), any(), any(), any(), any()) } answers {
             Outcome.Accepted(thirdArg<PublishedMutationReservation>().executionId, emptyMap())
         }
@@ -495,7 +496,7 @@ class PublishedMutationServiceTest {
 
         refused.status shouldBe 406
         refused.code shouldBe PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE
-        verify(exactly = 0) { reservations.reserve(any()) }
+        verify(exactly = 0) { reservations.reserveDeciding(any(), any(), any()) }
         verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
     }
 
@@ -791,6 +792,9 @@ class PublishedMutationServiceTest {
     }
 
     private companion object {
+        /** A won reservation no capture session admitted (#1043): the default answer of every case here. */
+        val UNCAPTURED = CaptureDecision(sessionId = null, expiresAt = null)
+
         const val KEY_ID = "dpk_MUTATION01"
         const val ORIGINAL_TIMEOUT = 7
         const val QUANTITY_INTEGER = """{"quantity":{"type":"INTEGER","required":false}}"""
