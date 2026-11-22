@@ -1,0 +1,56 @@
+{
+ "note": "a square, a line and a dot",
+ "document": {
+  "display_name": "Test type test_keys",
+  "config": {
+   "mark": {
+    "type": "test_keys"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Square, line, dot"
+   },
+   "test": {
+    "keys": [
+     {
+      "id": "bar",
+      "title": "Bars",
+      "key": "legendKeyBar",
+      "colour": "--chart-series-1"
+     },
+     {
+      "id": "line",
+      "title": "Lines",
+      "key": "legendKeyLine",
+      "colour": "--chart-series-2"
+     },
+     {
+      "id": "dot",
+      "title": "Points",
+      "key": "legendKeyPoint",
+      "colour": "--chart-muted"
+     }
+    ],
+    "keysAlone": false
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Amount",
+   "Amount",
+   "Amount"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 3
+ }
+}

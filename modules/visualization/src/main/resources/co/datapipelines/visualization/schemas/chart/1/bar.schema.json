@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://datapipelines.co/schemas/chart/1/bar.schema.json",
-  "$comment": "Product copy of the 854 lane schema (lane #860, design record 2026-11-06-neutral-chart-grammar §4.3); lane 989 (design record 2026-11-14-js-rendered-charts §4.4, D2) moved band, value and series to the skeleton's $defs and admits G1, G4, G6, G7 and G8. Served at /schemas/chart/1/bar.schema.json.",
+  "$comment": "Product copy of the 854 lane schema (lane #860, design record 2026-11-06-neutral-chart-grammar §4.3); lane 989 (design record 2026-11-14-js-rendered-charts §4.4, D2) moved band, value and series to the skeleton's $defs and admits G1, G4, G6, G7 and G8. Lane 1050 (design record §9 G2) admits color: shade beside series. Served at /schemas/chart/1/bar.schema.json.",
   "title": "datapipelines chart document, version 1, family bar",
   "description": "A skeleton document whose config is a bar config (spec/bar.md). Orientation is not a field: it is derived from which channel is quantitative (y = vertical bars, x = horizontal bars); exactly one of the two encodings matches.",
   "type": "object",
@@ -73,7 +73,7 @@
           "$ref": "#/$defs/value"
         },
         "color": {
-          "$ref": "#/$defs/series"
+          "$ref": "#/$defs/color"
         },
         "tooltip": {
           "$ref": "skeleton.schema.json#/$defs/tooltip"
@@ -83,7 +83,20 @@
         "type": "object",
         "required": [
           "color"
-        ]
+        ],
+        "properties": {
+          "color": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "nominal",
+                  "ordinal"
+                ]
+              }
+            }
+          }
+        }
       },
       "then": {
         "type": "object",
@@ -140,7 +153,7 @@
           "$ref": "#/$defs/value"
         },
         "color": {
-          "$ref": "#/$defs/series"
+          "$ref": "#/$defs/color"
         },
         "tooltip": {
           "$ref": "skeleton.schema.json#/$defs/tooltip"
@@ -150,7 +163,20 @@
         "type": "object",
         "required": [
           "color"
-        ]
+        ],
+        "properties": {
+          "color": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "nominal",
+                  "ordinal"
+                ]
+              }
+            }
+          }
+        }
       },
       "then": {
         "type": "object",
@@ -271,6 +297,35 @@
           "$ref": "skeleton.schema.json#/$defs/legend"
         }
       }
+    },
+    "color": {
+      "description": "Series by a column's values (nominal, ordinal: then the value's stack is required), or colour by value (quantitative: the shade; the value's stack is refused, as without a colour). The object's own type selects which, so a refusal names the one it meant.",
+      "if": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "quantitative"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/$defs/shade"
+      },
+      "else": {
+        "$ref": "#/$defs/series"
+      }
+    },
+    "shade": {
+      "description": "The skeleton's shade: on a bar the scale is sequential or diverging (two-sided around mid, zero where none is given), as the skeleton says.",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/shade"
+        }
+      ]
     }
   }
 }

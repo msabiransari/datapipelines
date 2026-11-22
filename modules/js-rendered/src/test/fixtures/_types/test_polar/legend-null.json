@@ -1,0 +1,52 @@
+{
+ "note": "legend: null: no legend at any level",
+ "document": {
+  "display_name": "Test type test_polar",
+  "config": {
+   "mark": {
+    "type": "test_polar"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": null
+    },
+    "from": {
+     "field": "from"
+    },
+    "to": {
+     "field": "to"
+    }
+   },
+   "title": {
+    "text": "No legend"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East"
+  ],
+  "from": [
+   0,
+   100,
+   200
+  ],
+  "to": [
+   100,
+   200,
+   300
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "from": "INTEGER",
+  "to": "INTEGER"
+ },
+ "expect": {
+  "marks": 3
+ }
+}

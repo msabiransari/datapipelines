@@ -1,0 +1,72 @@
+{
+ "note": "values in the thousands: at a large frame at least two ring numbers fit",
+ "document": {
+  "display_name": "Test type test_web",
+  "config": {
+   "mark": {
+    "type": "test_web"
+   },
+   "encoding": {
+    "category": {
+     "field": "k"
+    },
+    "value": {
+     "field": "v"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Orders by channel"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "Speed",
+   "Range",
+   "Comfort",
+   "Price",
+   "Safety",
+   "Speed",
+   "Range",
+   "Comfort",
+   "Price",
+   "Safety"
+  ],
+  "v": [
+   4800,
+   3100,
+   2650,
+   4200,
+   1900,
+   3900,
+   3550,
+   1200,
+   3600,
+   2300
+  ],
+  "s": [
+   "This year",
+   "This year",
+   "This year",
+   "This year",
+   "This year",
+   "Last year",
+   "Last year",
+   "Last year",
+   "Last year",
+   "Last year"
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 12
+ }
+}

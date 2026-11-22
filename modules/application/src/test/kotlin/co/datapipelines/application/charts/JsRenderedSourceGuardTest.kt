@@ -18,6 +18,9 @@ import org.junit.jupiter.api.Test
  * name character cannot match inside a longer name: `Date` is not `update`, `eval` is not `evaluate`; an opening
  * parenthesis allows space before it). Its control is kept too: every pattern fires in code and none inside comments.
  *
+ * The types for tests only (brief 1049 D5, `modules/js-rendered/src/test/js/types/`) are scanned with the same 23
+ * patterns: their bytes must agree across the runtimes as the engine's do. They are no engine file and reach no jar.
+ *
  * The product runs what this guard scans (brief 986 D10): the chart entry's program, [JsRenderedChartEngine.PROGRAM], is
  * these files in load order, read from the source tree, then the entry's own function — which holds no banned pattern
  * and no markup either — and its Source is counted (not internal: the record's §5.3, G2).
@@ -34,11 +37,29 @@ class JsRenderedSourceGuardTest {
             .toSortedMap()
     }
 
+    /** Every `.js` file of the test types (brief 1049 D5), by file name. */
+    private val testTypes: Map<String, String> by lazy {
+        ChartGuardFiles
+            .repoFile("${ChartGuardFiles.MODULE}/src/test/js/types")
+            .listFiles { f -> f.isFile && f.name.endsWith(".js") }
+            .orEmpty()
+            .associate { it.name to it.readText() }
+            .toSortedMap()
+    }
+
     @Test
     fun `the scanned files are exactly the engine's load order (non-vacuity)`() {
         files.keys shouldBe JsRenderedEngineFiles.names.toSet()
         files.size shouldBeGreaterThanOrEqual FILE_FLOOR
         (STRING_WRITER in files) shouldBe true
+        println("JsRenderedSourceGuardTest: ${files.size} engine files, ${testTypes.size} test type files")
+    }
+
+    @Test
+    fun `no test type file holds a banned pattern or a markup string in its code`() {
+        testTypes.size shouldBeGreaterThanOrEqual TEST_TYPE_FLOOR
+        testTypes.flatMap { (name, text) -> scan(text).map { "types/$name:${it.line} ${it.pattern} (${it.match})" } } shouldBe emptyList()
+        testTypes.flatMap { (name, text) -> markupStrings(text).map { "types/$name: $it" } } shouldBe emptyList()
     }
 
     @Test
@@ -109,8 +130,18 @@ class JsRenderedSourceGuardTest {
         /** The string writer: the one engine file that holds markup strings (brief 985 Security, "Rendering"). */
         const val STRING_WRITER = "31-write-string.js"
 
-        /** The engine's file count when this guard was written (16 shared files and bar's template). */
-        const val FILE_FLOOR = 17
+        /**
+         * The engine's file count: 23 at brief 1049's base, its two files (17-trig.js, 18-frames.js), brief 1050's one
+         * (19-colour.js), brief 1052's 21-lookup.js, brief 1051's 18a-bare.js and brief 1055's 18b-radial.js.
+         */
+        const val FILE_FLOOR = 29
+
+        /**
+         * Brief 1049's three test types (test_plain, test_polar, test_quiet), brief 1052's test_marks, brief 1051's five
+         * (test_points, test_grid, test_two_axes, test_bins, test_bare), brief 1055's test_web, brief 1053's test_tones
+         * and brief 1054's two (test_switch, test_keys).
+         */
+        const val TEST_TYPE_FLOOR = 13
 
         const val BANNED_COUNT = 23
 

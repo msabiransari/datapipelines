@@ -1,0 +1,78 @@
+{
+ "source": [
+  "lane 1050 make_shade_fixtures.py (brief 1050 D7)"
+ ],
+ "note": "colour by value: band B's shade is null (sum of no values) beside a drawn bar; B is drawn in --chart-grid and still counts as a mark (I3: 2)",
+ "document": {
+  "display_name": "A null shade beside a drawn bar",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "margin",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "margin",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "A null shade beside a drawn bar"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "A",
+   "B"
+  ],
+  "amount": [
+   10,
+   20
+  ],
+  "margin": [
+   1,
+   null
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "margin": "DOUBLE"
+ }
+}

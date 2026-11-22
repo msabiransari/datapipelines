@@ -55,7 +55,13 @@
     legendKeyGap: f(0.42, "render", "em: between a legend key and its name"),
     legendEntryGap: f(1, "render", "em: between two legend entries"),
     legendGap: f(0.67, "render", "em: between the legend and the plot"),
+    legendStepRatio: f(1.6, "render", "§3.3 and the first look study (16 × 10 px): a step of a colour scale's legend is legendKey high and this many times as wide in a row, the other way round in a column"),
     valueLabelGap: f(0.25, "render", "em of --chart-text-small: between a bar's end and its value label"),
+    // the radial axis (brief 1055 D8; record §9 G3, look contract §2.1 radar "grid: straight", §4.7 radar)
+    radialRings: f("polygon", "render", "look contract §2.1 radar (L9, grid: straight): a radial axis's rings are polygons through the spokes (\"circle\": one circle per ring, reached by the table's test only)"),
+    radialTickSpan: f(2, "render", "× the radius: the axis length the radial axis's tick rule is given (its scale is read across the whole circle)"),
+    radialNameShare: f(0.25, "render", "the widest a radial axis's name may be, as a share of the plot's width"),
+    radialRadiusFloor: f(0.5, "render", "a radial axis writes its names only while the radius left after their room is at least this share of the polar frame's"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
     curveDefault: f("smooth", "render", "§2 line and the record's §4.5: a line's curve is a monotone cubic unless the author wrote another"),
@@ -66,6 +72,7 @@
     areaFade: f(true, "render", "§2 area: the fill fades from --chart-area-top at the plot's top to --chart-area-bottom at the baseline (false: one flat opacity, the top's)"),
     legendKeyLine: f("line", "render", "§4.2: a line's legend key is a short line"),
     legendKeyArea: f("square", "render", "§4.2: an area's legend key is a square"),
+    legendKeyPoint: f("dot", "render", "§4.2: a point's legend key is a dot"),
     directMin: f(2, "render", "§4.2 line 4 (L5): the names are on the lines from this many series in the data"),
     directMax: f(4, "render", "§4.2 line 4 (L5): the names are on the lines up to this many series in the data"),
     directGap: f(0.5, "render", "em: between the plot's right edge and a name or a last value written after the lines"),
@@ -85,6 +92,9 @@
     tipValueWeight: f(600, "interaction", "contract §4.4: a card row's value is bold, and the hovered series' name in a bar's group"),
     crosshairDot: f(0.5, "interaction", "contract §3.4: a crosshair dot's radius is --chart-point plus this many px"),
     focusGap: f(0.25, "interaction", "em: the keyboard's focus ring stands this far outside its target's box"),
+    markReach: f(24, "interaction", "contract §3.8 (C5), §4.4: a point that asks for it is found within this many px of the pointer"),
+    markMove: f(5, "interaction", "contract §3.8 (C5), §4.4: a hovered slice moves this many px outward"),
+    markRing: f(0.25, "interaction", "em: the hover ring stands this far outside its mark"),
   };
 
   var CAPS = {

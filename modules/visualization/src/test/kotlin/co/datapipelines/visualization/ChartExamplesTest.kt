@@ -12,13 +12,13 @@ import org.junit.jupiter.params.provider.MethodSource
 import java.io.File
 
 /**
- * The 61 chart examples (`chart-examples/`: the 854 set re-cut under design record R11, and lane 989's line, area and
- * shared-shape additions G1, G4, G6, G7, G8) through the PRODUCTION save path — the reader, then
- * [VisualizationValidator] with its three layers — each against `expectations.json`: `valid` passes; `schema` fails
- * ONLY at the schema with an error of the named keyword at the named pointer; `save` refuses with EXACTLY the named
- * `chart.*` code, at the named JSON Pointer when the expectation names one; `product` is refused by the named product
- * rule. The same files and
- * expectations drive the JS reference (`validation-parity.mjs`, the lane's evidence), so the two agree file for file.
+ * The 72 chart examples (`chart-examples/`: the 854 set re-cut under design record R11, lane 989's line, area and
+ * shared-shape additions G1, G4, G6, G7, G8, and lane 1050's bar coloured by value) through the PRODUCTION save path —
+ * the reader, then [VisualizationValidator] with its three layers — each against `expectations.json`: `valid` passes;
+ * `schema` fails ONLY at the schema with an error of the named keyword at the named pointer; `save` refuses with
+ * EXACTLY the named `chart.*` code, at the named JSON Pointer when the expectation names one; `product` is refused by
+ * the named product rule. The same files and expectations drive the JS reference (`validation-parity.mjs`, the lane's
+ * evidence), so the two agree file for file.
  */
 class ChartExamplesTest {
     @Test
@@ -83,7 +83,7 @@ class ChartExamplesTest {
         private val ROOT: File by lazy {
             File(checkNotNull(ChartExamplesTest::class.java.getResource("/chart-examples/expectations.json")).toURI()).parentFile
         }
-        private const val EXAMPLE_COUNT = 61
+        private const val EXAMPLE_COUNT = 72
 
         private val EXPECTATIONS: Map<String, JsonNode> by lazy {
             ArtifactJson.mapper

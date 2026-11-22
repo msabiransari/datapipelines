@@ -112,6 +112,35 @@ output of its pinned script template), and every `field` names one of its column
 - **Count bars with `mark_count`:** the distinct band × series cells with a value. The example with 2 regions ×
   2 products in its fixture has `mark_count` 4.
 
+**Colour by value.** When the bars' length shows one measure and you want a second measure read from their colour,
+write `color` as a **shade** — a quantitative `color` with an `aggregate` and `scale: "sequential"`:
+
+```json
+"encoding": {
+  "x": { "field": "region", "type": "nominal", "sort": "-y" },
+  "y": { "field": "amount", "type": "quantitative", "aggregate": "sum" },
+  "color": { "field": "margin", "type": "quantitative", "aggregate": "mean", "scale": "sequential" }
+}
+```
+
+- Each bar takes one of seven steps from the smallest to the largest shade of the bars drawn; the legend is that
+  scale (the two end values and the seven steps), at the top unless `color.legend` places it (`null` for none).
+- The shade's field is a numeric column, with every aggregate (`count` counts its non-null values). The bar then has
+  one series: leave `stack` and `fields` out.
+- A shade has no `title` or `sort`. `mark_count` counts the bars, one per band, as without a colour.
+
+**Sequential or diverging?** `scale: "sequential"` runs from the smallest shade to the largest. Use
+`scale: "diverging"` when the shade lies on two sides of a middle that means something — a change (up or down), a
+difference from a target — and give that middle as `mid` (zero when left out). Both sides use the same distance, so
+equal gaps above and below the middle get equally strong colours; the legend reads the middle minus and plus the
+farthest gap:
+
+```json
+"color": { "field": "vs_target", "type": "quantitative", "aggregate": "sum", "scale": "diverging", "mid": 100 }
+```
+
+- `mid` is admitted with `diverging` only, and must be a finite number.
+
 **Line or area?** A `line` shows how values move along an ordered axis (time, a number, an ordered category) and
 compares a few series; an `area` shows the same where the amount itself matters — filled down to zero, or stacked
 to show how the parts add up to a total (`"normalize"`: shares of it). Prefer a bar for unordered categories.
@@ -158,12 +187,13 @@ failure's `path` names the field. Its `details.reason` says what to fix:
 | `schema` | the document breaks the schema at `details.pointer` (`details.keyword` says how) — often a missing `sort`, `aggregate` or `stack`, or an unknown key |
 | `chart.inputs.cardinality` / `chart.transform.output_unknown` | several inputs and no script template, so the chart cannot know its columns: keep one input, or pin a script template that combines them |
 | `chart.field.unknown` / `chart.field.binary` / `chart.field.null_type` | name a column that exists and is neither BINARY nor NULL-typed |
-| `chart.measure.not_numeric` | put a numeric column on the value, or on a `quantitative` `x` |
+| `chart.measure.not_numeric` | put a numeric column on the value, on a `quantitative` `x`, or on a shade (`color` quantitative) |
 | `chart.category.type_mismatch` | a `temporal` band or `x` needs a DATE or TIMESTAMP column — or make it `nominal` |
 | `chart.category.nullable` / `chart.color.nullable` | use a non-nullable band or series column |
 | `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | drop `scale.domain` on a normalized stack; else make it increasing, and include zero on a bar, an area or beside `zero: true` |
 | `chart.scale.log_unsupported` | use a linear scale — a log scale is refused on an area, on a stacked or normalized value and beside `scale.zero` |
 | `chart.scale.domain_log` | a log `domain` must be greater than 0 and increasing |
+| `chart.shade.mid_invalid` / `chart.size.range_invalid` | a shade's `mid` must be a finite number; a size's `range` must increase (both for types that come later) |
 | `chart.format.normalize_percent` / `chart.format.currency_unknown` | format a normalized value `percent`; use a known currency code |
 | `chart.bindings.mismatch` | delete `bindings` — the save derives them |
 

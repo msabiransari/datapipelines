@@ -15,6 +15,8 @@ package co.datapipelines.visualization
 enum class ChartType(
     val wire: String,
     val channels: List<ChartChannel>,
+    /** The scale policy of the type's marks (record §9 G2): a shape outside any layer object takes this row. */
+    val policy: ChartMarkPolicy,
 ) {
     BAR(
         "bar",
@@ -34,13 +36,14 @@ enum class ChartType(
             ),
             ChartChannel("tooltip", required = false, node = ChartChannelNodes.tooltip),
         ),
+        ChartMarkPolicy.BAR,
     ),
 
     /** A line per series over a band or a continuous axis (§4.5 row `line`; lane F5, #989). */
-    LINE("line", ChartChannelNodes.lineFamily),
+    LINE("line", ChartChannelNodes.lineFamily, ChartMarkPolicy.LINE),
 
     /** As [LINE], filled down to zero or to the series below it (§4.5 row `area`; lane F5, #989). */
-    AREA("area", ChartChannelNodes.lineFamily),
+    AREA("area", ChartChannelNodes.lineFamily, ChartMarkPolicy.AREA),
     ;
 
     /** The schema file under [ChartSchemas.RESOURCE_DIR]. */
@@ -125,15 +128,25 @@ sealed interface ChannelNode {
         override fun wire(): Map<String, Any> = mapOf("node" to "list", "min" to min, "max" to max, "of" to of.wire())
     }
 
-    /** A closed object whose named members are nodes. */
+    /**
+     * A closed object whose named members are nodes. [layer], when set, declares the object a layer (record §9 G2, "The
+     * layer policy"): it names the member that holds the layer's mark, and every shape found inside the object takes
+     * that mark's [ChartMarkPolicy]. [wire] carries `layer` only when it is set, so a descriptor without layers keeps its
+     * registered form byte for byte.
+     */
     data class ObjectOf(
         val members: Map<String, ChannelNode>,
+        val layer: String? = null,
     ) : ChannelNode {
         init {
             require(members.isNotEmpty()) { "an object node names at least one member" }
+            require(layer == null || layer !in members) { "the layer's mark member $layer is not a node member" }
         }
 
-        override fun wire(): Map<String, Any> = mapOf("node" to "object", "members" to members.mapValues { it.value.wire() })
+        override fun wire(): Map<String, Any> {
+            val base = mapOf("node" to "object", "members" to members.mapValues { it.value.wire() })
+            return if (layer == null) base else base + ("layer" to layer)
+        }
     }
 }
 

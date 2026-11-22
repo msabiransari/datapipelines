@@ -330,6 +330,64 @@
    "code": "chart.category.type_mismatch",
    "pointer": "/config/encoding/x/type",
    "note": "a temporal position on a STRING column"
+  },
+  "valid/bar-shade.json": {
+   "valid": true
+  },
+  "valid/bar-shade-horizontal-count.json": {
+   "valid": true
+  },
+  "invalid/bar-shade-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/bar-shade-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding"
+  },
+  "valid/bar-shade-diverging.json": {
+   "valid": true,
+   "note": "lane 1053 D9: turned round; refused at the schema (const at /config/encoding/color/scale) under lane 1050, drawn since the two-sided scale"
+  },
+  "valid/bar-shade-diverging-mid.json": {
+   "valid": true,
+   "note": "lane 1053 D9: a diverging shade with mid 100"
+  },
+  "invalid/bar-shade-sequential-mid.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/color",
+   "note": "lane 1053 D9: mid is admitted with diverging only (the skeleton)"
+  },
+  "invalid/bar-shade-mid-infinite.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.shade.mid_invalid",
+   "pointer": "/config/encoding/color/mid",
+   "note": "lane 1053 D9: a mid past a double's range"
+  },
+  "invalid/bar-shade-no-field.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/color"
+  },
+  "invalid/bar-shade-text-sum.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/color/field"
+  },
+  "invalid/bar-shade-text-count.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/color/field"
   }
  }
 }

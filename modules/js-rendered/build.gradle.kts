@@ -153,6 +153,12 @@ val jsRenderedFixtureResources =
             include("geometry.js")
             into("co/datapipelines/jsrendered/test")
         }
+        // The types for tests only (brief 1049 D5), evaluated by JsRenderedTestTypesTest after the product's program.
+        // Their pictures, types-index.txt, trig.json and sweep.json come with jsRenderedEmit above (emitted/_types/…).
+        from(File(jsTests, "types")) {
+            include("*.js")
+            into("co/datapipelines/jsrendered/test/types")
+        }
     }
 val jsRenderedTestData =
     configurations.create("jsRenderedTestData") {

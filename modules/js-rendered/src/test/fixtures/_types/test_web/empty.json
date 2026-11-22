@@ -1,0 +1,39 @@
+{
+ "note": "no row: the no-data state, the frame is never asked",
+ "document": {
+  "display_name": "Test type test_web",
+  "config": {
+   "mark": {
+    "type": "test_web"
+   },
+   "encoding": {
+    "category": {
+     "field": "k"
+    },
+    "value": {
+     "field": "v"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Empty"
+   }
+  }
+ },
+ "columns": {
+  "k": [],
+  "v": [],
+  "s": []
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

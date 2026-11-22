@@ -1,0 +1,56 @@
+{
+ "note": "no rows: the state no-data, the index without marks",
+ "document": {
+  "display_name": "Test type test_marks",
+  "config": {
+   "mark": {
+    "type": "test_marks"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "id": {
+     "field": "id"
+    }
+   },
+   "title": {
+    "text": "Nothing to find"
+   }
+  }
+ },
+ "columns": {
+  "s": [],
+  "id": [],
+  "kind": [],
+  "a": [],
+  "b": [],
+  "c": [],
+  "d": [],
+  "e": [],
+  "f": [],
+  "row": [],
+  "key": [],
+  "near": [],
+  "emph": []
+ },
+ "types": {
+  "s": "STRING",
+  "id": "STRING",
+  "kind": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE",
+  "d": "DOUBLE",
+  "e": "DOUBLE",
+  "f": "DOUBLE",
+  "row": "INTEGER",
+  "key": "BOOLEAN",
+  "near": "BOOLEAN",
+  "emph": "STRING"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

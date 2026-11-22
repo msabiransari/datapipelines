@@ -1,0 +1,52 @@
+{
+ "note": "a title with a subtitle over three series",
+ "document": {
+  "display_name": "Test type test_polar",
+  "config": {
+   "mark": {
+    "type": "test_polar"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "from": {
+     "field": "from"
+    },
+    "to": {
+     "field": "to"
+    }
+   },
+   "title": {
+    "text": "Shares by region",
+    "subtitle": "Each ring is one row; the subtitle is long enough to wrap onto a second line at narrow frames"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East"
+  ],
+  "from": [
+   0,
+   120,
+   240
+  ],
+  "to": [
+   120,
+   240,
+   360
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "from": "INTEGER",
+  "to": "INTEGER"
+ },
+ "expect": {
+  "marks": 3
+ }
+}

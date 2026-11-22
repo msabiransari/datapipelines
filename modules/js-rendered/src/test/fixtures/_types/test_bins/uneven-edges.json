@@ -1,0 +1,45 @@
+{
+ "note": "uneven edges 0, 1, 2, 5, 10, 20, 50, 100: every label under its edge",
+ "document": {
+  "display_name": "Test type test_bins",
+  "config": {
+   "mark": {
+    "type": "test_bins"
+   },
+   "encoding": {
+    "x": {
+     "field": "v",
+     "edges": [
+      0,
+      1,
+      2,
+      5,
+      10,
+      20,
+      50,
+      100
+     ]
+    }
+   }
+  }
+ },
+ "columns": {
+  "v": [
+   0.5,
+   1.5,
+   3,
+   4,
+   7,
+   15,
+   30,
+   45,
+   80
+  ]
+ },
+ "types": {
+  "v": "DOUBLE"
+ },
+ "expect": {
+  "marks": 7
+ }
+}

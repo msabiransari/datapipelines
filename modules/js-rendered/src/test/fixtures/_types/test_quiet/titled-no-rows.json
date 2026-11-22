@@ -1,0 +1,33 @@
+{
+ "note": "the same document with no rows: the no-data state, without the title",
+ "document": {
+  "display_name": "Test type test_quiet",
+  "config": {
+   "mark": {
+    "type": "test_quiet"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "A title the frame takes away",
+    "subtitle": "and a subtitle it takes away too"
+   }
+  }
+ },
+ "columns": {
+  "s": []
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "hidden": [
+  "string:South"
+ ],
+ "expect": {
+  "marks": 0
+ }
+}

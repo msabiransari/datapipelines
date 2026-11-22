@@ -1,0 +1,36 @@
+{
+ "note": "brief 1053 D10: six rectangles, each filled with one of the six colours with a meaning (look contract §3.6), no legend",
+ "document": {
+  "display_name": "Test type test_tones",
+  "config": {
+   "mark": {
+    "type": "test_tones"
+   },
+   "encoding": {
+    "tone": {
+     "field": "tone",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Six tones"
+   }
+  }
+ },
+ "columns": {
+  "tone": [
+   "positive",
+   "negative",
+   "total",
+   "good",
+   "warn",
+   "bad"
+  ]
+ },
+ "types": {
+  "tone": "STRING"
+ },
+ "expect": {
+  "marks": 6
+ }
+}

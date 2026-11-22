@@ -1,0 +1,138 @@
+{
+ "note": "two series, the legend at the top, 8 rows",
+ "document": {
+  "display_name": "Test type test_grid",
+  "config": {
+   "mark": {
+    "type": "test_grid"
+   },
+   "encoding": {
+    "x": {
+     "field": "c"
+    },
+    "y": {
+     "field": "r"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": {
+      "orient": "top"
+     }
+    }
+   }
+  }
+ },
+ "columns": {
+  "c": [
+   "A",
+   "B",
+   "C",
+   "D",
+   "A",
+   "B",
+   "C",
+   "D",
+   "A",
+   "B",
+   "C",
+   "D",
+   "A",
+   "B",
+   "C",
+   "D",
+   "A",
+   "B",
+   "C",
+   "D",
+   "A",
+   "B",
+   "C",
+   "D",
+   "A",
+   "B",
+   "C",
+   "D",
+   "A",
+   "B",
+   "C",
+   "D"
+  ],
+  "r": [
+   "Row 0",
+   "Row 0",
+   "Row 0",
+   "Row 0",
+   "Row 1",
+   "Row 1",
+   "Row 1",
+   "Row 1",
+   "Row 2",
+   "Row 2",
+   "Row 2",
+   "Row 2",
+   "Row 3",
+   "Row 3",
+   "Row 3",
+   "Row 3",
+   "Row 4",
+   "Row 4",
+   "Row 4",
+   "Row 4",
+   "Row 5",
+   "Row 5",
+   "Row 5",
+   "Row 5",
+   "Row 6",
+   "Row 6",
+   "Row 6",
+   "Row 6",
+   "Row 7",
+   "Row 7",
+   "Row 7",
+   "Row 7"
+  ],
+  "s": [
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "First",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second",
+   "Second"
+  ]
+ },
+ "types": {
+  "c": "STRING",
+  "r": "STRING",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 32
+ }
+}

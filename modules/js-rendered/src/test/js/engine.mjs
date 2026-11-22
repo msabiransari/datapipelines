@@ -9,6 +9,10 @@ import vm from "node:vm";
 export const MODULE = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 export const ENGINE = join(MODULE, "src/main/resources/co/datapipelines/jsrendered/engine");
 export const FIXTURES = join(MODULE, "src/test/fixtures");
+/** The types for tests only (brief 1049 D5): one classic script per type, `<name>.js`, in the template's own form. */
+export const TEST_TYPES = join(MODULE, "src/test/js/types");
+/** Their fixtures, `_types/<name>/*.json`: the underscore keeps them out of chartFixtures() and every product guard. */
+export const TYPE_FIXTURES = join(FIXTURES, "_types");
 
 /** The file names of LOAD-ORDER.txt, in order. */
 export function loadOrder() {
@@ -38,6 +42,45 @@ export function engine(edit) {
   const ctx = vm.createContext({});
   vm.runInContext(concatenation(srcs) + "\nthis.JsRendered = JsRendered;", ctx, { filename: "js-rendered-engine.js" });
   return ctx.JsRendered;
+}
+
+/** The names of the test types (their files under src/test/js/types/, without `.js`), sorted. */
+export function testTypes() {
+  return readdirSync(TEST_TYPES).filter((f) => f.endsWith(".js")).map((f) => f.slice(0, -3)).sort();
+}
+
+/** The key of a test type's source in the map engineWith hands to `edit`. */
+export function testTypeKey(name) {
+  return "test/types/" + name + ".js";
+}
+
+/**
+ * A fresh engine with test types registered (brief 1049 D5): the concatenation of LOAD-ORDER.txt, then the named test
+ * types' files in the order given, in ONE context. edit(srcs) may change any of them first; a test type's source is
+ * under testTypeKey(name). A later lane adds a file and a fixture directory and edits neither function.
+ */
+export function engineWith(names, edit) {
+  const srcs = sources();
+  for (const n of names) srcs[testTypeKey(n)] = readFileSync(join(TEST_TYPES, n + ".js"), "utf8");
+  if (edit) edit(srcs);
+  const text = concatenation(srcs) + names.map((n) => srcs[testTypeKey(n)] + "\n").join("");
+  const ctx = vm.createContext({});
+  vm.runInContext(text + "\nthis.JsRendered = JsRendered;", ctx, { filename: "js-rendered-engine-with-test-types.js" });
+  return ctx.JsRendered;
+}
+
+/** The fixtures of one test type: [{wire: name, name, path, fixture}], sorted by name; `expect.marks` is hand-written. */
+export function typeFixtures(name) {
+  const dir = join(TYPE_FIXTURES, name);
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".json"))
+    .sort()
+    .map((f) => ({ wire: name, name: f.slice(0, -5), path: join(dir, f), fixture: JSON.parse(readFileSync(join(dir, f), "utf8")) }));
+}
+
+/** The render input of a test type's fixture: inputOf, with the fixture's own `theme` when it has one. */
+export function typeInputOf(fx, w, h, extra = {}) {
+  return inputOf(fx, w, h, Object.assign(fx.theme === undefined ? {} : { theme: fx.theme }, extra));
 }
 
 /** Every chart fixture: [{wire, name, path, fixture}], sorted by wire then name; `_layout` is not a chart fixture. */

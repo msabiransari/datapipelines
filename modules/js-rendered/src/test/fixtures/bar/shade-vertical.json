@@ -1,0 +1,93 @@
+{
+ "source": [
+  "lane 1050 make_shade_fixtures.py (brief 1050 D7)"
+ ],
+ "note": "colour by value: bar length = sum of amount, colour = mean margin, the scale's legend at the top",
+ "document": {
+  "display_name": "Amount by region, coloured by margin",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "margin",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "margin",
+     "aggregate": "mean",
+     "type": "quantitative",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "Amount by region, coloured by margin"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "North",
+   "South",
+   "East",
+   "West",
+   "Central",
+   "North",
+   "South"
+  ],
+  "amount": [
+   120.5,
+   80,
+   45.25,
+   200,
+   60,
+   30,
+   20
+  ],
+  "margin": [
+   0.12,
+   0.31,
+   -0.05,
+   0.22,
+   0.4,
+   0.18,
+   0.09
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "margin": "DOUBLE"
+ }
+}

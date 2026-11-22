@@ -1,0 +1,44 @@
+{
+ "note": "ONE entry under keysAlone false (the treemap's case): no legend at any level",
+ "document": {
+  "display_name": "Test type test_keys",
+  "config": {
+   "mark": {
+    "type": "test_keys"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "One key not alone"
+   },
+   "test": {
+    "keys": [
+     {
+      "id": "tone",
+      "title": "Within range",
+      "key": "legendKeyBar",
+      "colour": "--chart-series-3"
+     }
+    ],
+    "keysAlone": false
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Amount",
+   "Amount",
+   "Amount"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 3
+ }
+}

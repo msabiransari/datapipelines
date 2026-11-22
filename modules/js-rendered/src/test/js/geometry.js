@@ -76,12 +76,39 @@ function JsRenderedInvariants(E) {
     return true;
   }
 
-  /** The bounding box [x0, y0, x1, y1] of a mark primitive. */
+  /**
+   * The axis points of the circle an arc segment lies on that the arc passes through: `A r` from (x0, y0) to (x1, y1)
+   * is the path primitive's "circular arc of radius r, the shorter way, clockwise" (the writers' sweep flag 1, large-arc
+   * 0). Its centre is on the right of the chord from start to end (y grows down the screen), h = √(r² − (chord/2)²)
+   * from the chord's middle; a radius shorter than half the chord grows to it, as a writer draws it (a half circle).
+   * The arc is the part of the circle LEFT of the chord (the shorter part; a half circle's clockwise half), so of the
+   * circle's four axis points those on that side, by the sign of one cross product, lie on it. No trigonometry.
+   */
+  function arcExtremes(x0, y0, r, x1, y1) {
+    const dx = x1 - x0, dy = y1 - y0, chord = Math.sqrt(dx * dx + dy * dy);
+    if (chord === 0) return [];
+    const half = chord / 2, rr = r < half ? half : r, h = Math.sqrt(rr * rr - half * half);
+    // The unit normal on the right of the travel (dx, dy) on a y-down screen is (-dy, dx) / chord.
+    const cx = x0 + dx / 2 - (dy / chord) * h, cy = y0 + dy / 2 + (dx / chord) * h;
+    const out = [];
+    for (const [px, py] of [[cx + rr, cy], [cx, cy + rr], [cx - rr, cy], [cx, cy - rr]]) {
+      // Left of the travel: (p − start) × (end − start) > 0 on a y-down screen.
+      if ((px - x0) * dy - (py - y0) * dx > 1e-9) out.push([px, py]);
+    }
+    return out;
+  }
+
+  /**
+   * The bounding box [x0, y0, x1, y1] of a mark primitive. A path's box holds its end points, a cubic's two control
+   * points (the segment lies inside their hull) and an arc's own extremes (arcExtremes), so an arc that bulges out of
+   * the frame is outside it here too.
+   */
   function markBox(p) {
     if (p.k === "rect") return [p.x, p.y, p.x + p.w, p.y + p.h];
     if (p.k === "circle") return [p.cx - p.r, p.cy - p.r, p.cx + p.r, p.cy + p.r];
     if (p.k === "line") return [Math.min(p.x1, p.x2), Math.min(p.y1, p.y2), Math.max(p.x1, p.x2), Math.max(p.y1, p.y2)];
     const xs = [], ys = [];
+    let atX = null, atY = null;
     for (let i = 0; i < p.d.length; i++) {
       const c = p.d[i], n = c === "M" || c === "L" ? 2 : c === "A" ? 3 : c === "C" ? 6 : 0;
       if (n === 0) continue;
@@ -90,8 +117,14 @@ function JsRenderedInvariants(E) {
         xs.push(p.d[i + q]);
         ys.push(p.d[i + q + 1]);
       }
-      xs.push(p.d[i + n - 1]);
-      ys.push(p.d[i + n]);
+      if (c === "A" && atX !== null) for (const [ex, ey] of arcExtremes(atX, atY, p.d[i + 1], p.d[i + 2], p.d[i + 3])) {
+        xs.push(ex);
+        ys.push(ey);
+      }
+      atX = p.d[i + n - 1];
+      atY = p.d[i + n];
+      xs.push(atX);
+      ys.push(atY);
       i += n;
     }
     return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
@@ -179,5 +212,5 @@ function JsRenderedInvariants(E) {
     return { violations: out, texts: ts.length, marks };
   }
 
-  return { TOL: TOL, width: width, drawn: drawn, textBox: textBox, meet: meet, markBox: markBox, texts: texts, violations: violations };
+  return { TOL: TOL, width: width, drawn: drawn, textBox: textBox, meet: meet, markBox: markBox, arcExtremes: arcExtremes, texts: texts, violations: violations };
 }

@@ -1,0 +1,77 @@
+{
+ "display_name": "Amount by region, coloured by count",
+ "description": "Total amount per region, each bar coloured by how many amounts it has.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "bar"
+  },
+  "encoding": {
+   "x": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "title": "Amount",
+    "format": "compact"
+   },
+   "y": {
+    "field": "region",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Region"
+   },
+   "color": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "count",
+    "scale": "sequential",
+    "legend": {
+     "orient": "right"
+    }
+   }
+  },
+  "title": {
+   "text": "Amount by region, coloured by count"
+  }
+ }
+}

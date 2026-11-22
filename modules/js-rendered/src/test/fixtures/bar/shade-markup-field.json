@@ -1,0 +1,83 @@
+{
+ "source": [
+  "lane 1050 make_shade_fixtures.py (brief 1050 D7)"
+ ],
+ "note": "a shade field named with markup: the legend's group name and the tooltip line show it as text",
+ "document": {
+  "display_name": "Markup in a shade field",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "<b>margin</b>",
+      "type": "DOUBLE"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "<b>margin</b>",
+     "aggregate": "mean",
+     "type": "quantitative",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "Markup in a shade field"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "North",
+   "South",
+   "East",
+   "West"
+  ],
+  "amount": [
+   120.5,
+   80,
+   45.25,
+   200
+  ],
+  "<b>margin</b>": [
+   0.12,
+   0.31,
+   -0.05,
+   0.22
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "<b>margin</b>": "DOUBLE"
+ }
+}

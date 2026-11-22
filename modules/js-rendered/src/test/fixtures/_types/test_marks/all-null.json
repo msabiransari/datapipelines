@@ -1,0 +1,95 @@
+{
+ "note": "rows whose values are all null: the state no-data, the index without marks",
+ "document": {
+  "display_name": "Test type test_marks",
+  "config": {
+   "mark": {
+    "type": "test_marks"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "id": {
+     "field": "id"
+    }
+   },
+   "title": {
+    "text": "All null"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   null,
+   null
+  ],
+  "id": [
+   null,
+   null
+  ],
+  "kind": [
+   null,
+   null
+  ],
+  "a": [
+   null,
+   null
+  ],
+  "b": [
+   null,
+   null
+  ],
+  "c": [
+   null,
+   null
+  ],
+  "d": [
+   null,
+   null
+  ],
+  "e": [
+   null,
+   null
+  ],
+  "f": [
+   null,
+   null
+  ],
+  "row": [
+   null,
+   null
+  ],
+  "key": [
+   null,
+   null
+  ],
+  "near": [
+   null,
+   null
+  ],
+  "emph": [
+   null,
+   null
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "id": "STRING",
+  "kind": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE",
+  "d": "DOUBLE",
+  "e": "DOUBLE",
+  "f": "DOUBLE",
+  "row": "INTEGER",
+  "key": "BOOLEAN",
+  "near": "BOOLEAN",
+  "emph": "STRING"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

@@ -1,0 +1,94 @@
+{
+ "source": [
+  "lane 1050 make_shade_fixtures.py (brief 1050 D7)"
+ ],
+ "note": "colour by value with value labels: the labels where the bar writes them today, beyond the bar's end",
+ "document": {
+  "display_name": "Labels on shaded bars",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "margin",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar",
+    "labels": "values"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "margin",
+     "aggregate": "mean",
+     "type": "quantitative",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "Labels on shaded bars"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "North",
+   "South",
+   "East",
+   "West",
+   "Central",
+   "North",
+   "South"
+  ],
+  "amount": [
+   120.5,
+   80,
+   45.25,
+   200,
+   60,
+   30,
+   20
+  ],
+  "margin": [
+   0.12,
+   0.31,
+   -0.05,
+   0.22,
+   0.4,
+   0.18,
+   0.09
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "margin": "DOUBLE"
+ }
+}

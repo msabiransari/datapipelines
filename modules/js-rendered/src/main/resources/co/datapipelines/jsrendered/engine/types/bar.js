@@ -9,6 +9,10 @@
 // (series from columns, in the list's order), G4 a log value axis (a bar grows from its lower bound; a value <= 0 is
 // not drawn), G6 `unit` (after the number in tooltips and value labels, and in the value axis's title) and G7
 // `encoding.tooltip` (its lines carried on each mark; the value of an aggregated bar's detail is its first row's).
+// Lane 1050 (brief D7) adds colour by value: `color` is a series or a shade (selected by its `type`). With a shade the
+// bar has one series, each bar's shade value is the shade's aggregate over the bar's rows (nulls left out first, so
+// `count` counts values), its fill is that value's step on the colour scale (R.colour) and its card adds the shade's
+// line; the model hands the scale as `shade`, so render's legendOf draws the scale's legend instead of a series list.
 (function (R) {
   "use strict";
   var P = R.prim, D = R.data, T = R.text, S = R.scales, L = R.lines, look = R.tables.look, r2 = S.r2;
@@ -28,11 +32,13 @@
 
   function model(doc, columns, types) {
     var e = doc.config.encoding, vertical = e.y.type === "quantitative";
-    var band = vertical ? e.x : e.y, value = vertical ? e.y : e.x, color = e.color || null;
-    if (color !== null && color.type === "quantitative") throw new Error("bar: colour by value (shade) is not drawn by this engine version");
+    var band = vertical ? e.x : e.y, value = vertical ? e.y : e.x, given = e.color || null;
+    // `color` names a series (nominal, ordinal) or a shade (quantitative); from here `color` is the series form only.
+    var shade = given !== null && given.type === "quantitative" ? given : null, color = shade === null ? given : null;
     types = types && typeof types === "object" ? types : {};
     var warnings = [];
     var B = D.column(columns, band.field), V = value.field ? D.column(columns, value.field) : null, C = color ? D.column(columns, color.field) : null;
+    var SH = shade ? D.column(columns, shade.field) : null, shadeVals = new Map();
     // G1: with fields, each entry is a series (key "field:<index>"), read from its own column.
     var fields = Array.isArray(value.fields) ? value.fields : null;
     var FV = fields ? fields.map(function (f) {
@@ -66,6 +72,11 @@
         continue;
       }
       var bk = D.keyOf(b), sk = C ? D.keyOf(s) : "";
+      // A shade's values by band, its nulls left out here (the helper's `count` counts what it is handed).
+      if (SH) {
+        if (!shadeVals.has(bk)) shadeVals.set(bk, []);
+        if (!D.isNull(SH[i])) shadeVals.get(bk).push(SH[i]);
+      }
       if (!cats.has(bk)) cats.set(bk, { key: bk, raw: b, first: cats.size, full: temporal ? T.temporalFull(b, band.format) : String(b) });
       if (fields) {
         for (var fi = 0; fi < fields.length; fi++) {
@@ -151,6 +162,11 @@
     if (nonPositive) warnings.push({ code: "chart.rule.log-nonpositive" });
     var markCount = 0;
     for (var si = 0; si < cells.length; si++) for (var ci = 0; ci < cells[si].length; ci++) if (cells[si][ci].num !== null) markCount++;
+    // The shade of each category's bar, {num, exact} or null where no bar is drawn, and the scale over the drawn ones.
+    var shades = shade ? categories.map(function (c, ci2) {
+      return cells[0][ci2].num === null ? null : D.aggregate(shadeVals.get(c.key) || [], shade.aggregate, shade.field);
+    }) : null;
+    var scale = shade ? R.colour.of(shade, shades) : null;
     for (var q = 0; q < series.length; q++) {
       series[q].id = color ? series[q].key : fields ? "field:" + series[q].field : "measure";
       series[q].title = series[q].full;
@@ -180,8 +196,14 @@
     var a0 = value.aggregate.charAt(0).toUpperCase() + value.aggregate.slice(1);
     var vt = titleOf(value, value.field ? a0 + " of " + value.field : fields ? a0 : "Count");
     if (vt !== null && !fields && typeof value.unit === "string" && value.unit !== "") vt = vt + " (" + value.unit + ")";
+    // The shade's card line (D7): its field and its value by the one number rule, from the exact text where there is
+    // one; a value that is null or not finite reads as a null detail does (the field, then nothing).
+    var shadeLine = function (ci) {
+      var a = shades[ci], text = a === null ? "" : a.exact !== null ? T.value(a.exact) : a.num !== null && isFinite(a.num) ? T.value(a.num) : "";
+      return shade.field + ": " + text;
+    };
     var details = function (si, ci) {
-      var out = [];
+      var out = shade ? [shadeLine(ci)] : [];
       if (!tips.length) return out;
       var byS = firstRow.get(categories[ci].key), row = byS ? byS.get(series[si].key) : undefined;
       for (var d = 0; d < tips.length; d++) out.push(L.detailLine(tips[d], row === undefined ? null : tipCols[d][row], types));
@@ -219,6 +241,10 @@
       markCount: markCount,
       warnings: warnings,
       legend: color ? color.legend : null,
+      shade: shade ? { scale: scale, legend: shade.legend, title: shade.field } : null,
+      shadeOf: shade ? function (ci) {
+        return shades[ci] === null ? null : shades[ci].num;
+      } : null,
       labelsOn: labelsOn,
       format: format,
       details: details,
@@ -348,7 +374,8 @@
         var isOuter = !stacked || look("roundOuterOnly") !== true || (v >= 0 ? outer[ci].pos === si : outer[ci].neg === si);
         var r = isOuter ? Math.min(radius, barW * maxShare, len) : 0;
         var tip = [m.categories[ci].full, (m.series.length > 1 || ser.id !== "measure" ? ser.title + ": " : "") + cellv.text].concat(m.details(si, ci));
-        var baseF = { fill: ser.colour, color: theme.css(ser.colour), series: ser.id, datum: ci, tip: tip };
+        var fill = m.shade ? R.colour.token(m.shade.scale, m.shadeOf(ci)) : ser.colour;
+        var baseF = { fill: fill, color: theme.css(fill), series: ser.id, datum: ci, tip: tip };
         var mk, box;
         if (vertical) {
           var up = p1 <= p0, y = up ? p1 : p0 + shift;

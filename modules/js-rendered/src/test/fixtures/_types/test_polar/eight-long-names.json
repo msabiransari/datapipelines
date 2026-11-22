@@ -1,0 +1,66 @@
+{
+ "note": "eight series with long names: the legend wraps at full, one row with +n at compact",
+ "document": {
+  "display_name": "Test type test_polar",
+  "config": {
+   "mark": {
+    "type": "test_polar"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "from": {
+     "field": "from"
+    },
+    "to": {
+     "field": "to"
+    }
+   },
+   "title": {
+    "text": "Eight series"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Northern distribution region alpha",
+   "Southern distribution region beta",
+   "Eastern coastal warehouse gamma",
+   "Western mountain depot delta",
+   "Central logistics hub epsilon",
+   "Overseas partner network zeta",
+   "Online marketplace channel eta",
+   "Wholesale direct accounts theta"
+  ],
+  "from": [
+   0,
+   20,
+   40,
+   60,
+   80,
+   100,
+   120,
+   140
+  ],
+  "to": [
+   45,
+   90,
+   135,
+   180,
+   225,
+   270,
+   315,
+   360
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "from": "INTEGER",
+  "to": "INTEGER"
+ },
+ "expect": {
+  "marks": 8
+ }
+}

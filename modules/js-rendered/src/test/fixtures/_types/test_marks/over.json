@@ -1,0 +1,96 @@
+{
+ "note": "a box that lies wholly over a larger box, listed after it",
+ "document": {
+  "display_name": "Test type test_marks",
+  "config": {
+   "mark": {
+    "type": "test_marks"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": null
+    },
+    "id": {
+     "field": "id"
+    }
+   },
+   "title": {
+    "text": "Over"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Boxes",
+   "Boxes"
+  ],
+  "id": [
+   "large",
+   "small"
+  ],
+  "kind": [
+   "box",
+   "box"
+  ],
+  "a": [
+   0.1,
+   0.4
+  ],
+  "b": [
+   0.1,
+   0.4
+  ],
+  "c": [
+   0.8,
+   0.2
+  ],
+  "d": [
+   0.8,
+   0.2
+  ],
+  "e": [
+   null,
+   null
+  ],
+  "f": [
+   null,
+   null
+  ],
+  "row": [
+   null,
+   null
+  ],
+  "key": [
+   null,
+   null
+  ],
+  "near": [
+   null,
+   null
+  ],
+  "emph": [
+   "ring",
+   "ring"
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "id": "STRING",
+  "kind": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE",
+  "d": "DOUBLE",
+  "e": "DOUBLE",
+  "f": "DOUBLE",
+  "row": "INTEGER",
+  "key": "BOOLEAN",
+  "near": "BOOLEAN",
+  "emph": "STRING"
+ },
+ "expect": {
+  "marks": 2
+ }
+}

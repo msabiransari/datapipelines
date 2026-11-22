@@ -1,0 +1,50 @@
+{
+ "note": "titles with markup characters and quotes: text in both writers",
+ "document": {
+  "display_name": "Test type test_keys",
+  "config": {
+   "mark": {
+    "type": "test_keys"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "Markup titles"
+   },
+   "test": {
+    "keys": [
+     {
+      "id": "lt",
+      "title": "A <b>bold</b> & co",
+      "key": "legendKeyBar",
+      "colour": "--chart-series-1"
+     },
+     {
+      "id": "q",
+      "title": "Quote \" and ' apostrophe",
+      "key": "legendKeyPoint",
+      "colour": "--chart-series-2"
+     }
+    ],
+    "keysAlone": false
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Amount",
+   "Amount",
+   "Amount"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 3
+ }
+}

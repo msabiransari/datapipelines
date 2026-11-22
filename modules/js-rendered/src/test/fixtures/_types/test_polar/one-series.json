@@ -1,0 +1,48 @@
+{
+ "note": "one series: no legend",
+ "document": {
+  "display_name": "Test type test_polar",
+  "config": {
+   "mark": {
+    "type": "test_polar"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "from": {
+     "field": "from"
+    },
+    "to": {
+     "field": "to"
+    }
+   },
+   "title": {
+    "text": "One series"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "a",
+   "a"
+  ],
+  "from": [
+   0,
+   90
+  ],
+  "to": [
+   60,
+   200
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "from": "INTEGER",
+  "to": "INTEGER"
+ },
+ "expect": {
+  "marks": 2
+ }
+}

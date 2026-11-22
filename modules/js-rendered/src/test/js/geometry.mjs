@@ -14,17 +14,22 @@ const G = ctx.G;
 
 /** Overlap below this many px is not a meeting (rounding to two decimals moves an edge by at most 0.005). */
 export const TOL = G.TOL;
-export const { width, drawn, textBox, meet, markBox, texts } = G;
+export const { width, drawn, textBox, meet, markBox, arcExtremes, texts } = G;
 
 /** The violations of I1, I2, I4 and I5 in one picture of frame W × H, with the counts checked: {violations, texts, marks}. */
 export function violations(prims, W, H) {
   return G.violations(prims, W, H);
 }
 
-/** I3's expected count for a bar fixture, computed from the delivered columns by this test, never by the engine. */
+/**
+ * I3's expected count for a bar fixture, computed from the delivered columns by this test, never by the engine. A
+ * `color` of type quantitative is a shade (brief 1050 D7), known from the document alone: it makes no series, so the
+ * cells are the bands and a row whose shade is null is still a row of its band.
+ */
 export function expectedBarMarks(fx, hiddenIds) {
   const e = fx.document.config.encoding, vertical = e.y.type === "quantitative";
-  const band = vertical ? e.x : e.y, value = vertical ? e.y : e.x, color = e.color || null;
+  const band = vertical ? e.x : e.y, value = vertical ? e.y : e.x, given = e.color || null;
+  const color = given !== null && given.type !== "quantitative" ? given : null;
   const col = (f) => (f && Object.prototype.hasOwnProperty.call(fx.columns, f) ? fx.columns[f] : []);
   const B = col(band.field), V = value.field ? col(value.field) : null, C = color ? col(color.field) : null;
   const cells = new Map();

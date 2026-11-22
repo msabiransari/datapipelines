@@ -1,0 +1,542 @@
+{
+ "note": "per category a box whose card is six rows without a colour, Middle kept; outside points with key false and near false, This point kept",
+ "document": {
+  "display_name": "Test type test_marks",
+  "config": {
+   "mark": {
+    "type": "test_marks"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "id": {
+     "field": "id"
+    }
+   },
+   "title": {
+    "text": "Spread by region"
+   },
+   "cards": {
+    "box-north": {
+     "heading": "North",
+     "rows": [
+      {
+       "name": "Highest inside",
+       "value": "91",
+       "colour": null
+      },
+      {
+       "name": "Upper quarter",
+       "value": "74",
+       "colour": null
+      },
+      {
+       "name": "Middle",
+       "value": "60",
+       "colour": null
+      },
+      {
+       "name": "Lower quarter",
+       "value": "48",
+       "colour": null
+      },
+      {
+       "name": "Lowest inside",
+       "value": "30",
+       "colour": null
+      },
+      {
+       "name": "Outside points",
+       "value": "2",
+       "colour": null
+      }
+     ],
+     "keep": 2
+    },
+    "out-north-high": {
+     "heading": "North",
+     "rows": [
+      {
+       "name": "This point",
+       "value": "98",
+       "colour": null
+      },
+      {
+       "name": "Highest inside",
+       "value": "91",
+       "colour": null
+      },
+      {
+       "name": "Upper quarter",
+       "value": "74",
+       "colour": null
+      },
+      {
+       "name": "Middle",
+       "value": "60",
+       "colour": null
+      },
+      {
+       "name": "Lower quarter",
+       "value": "48",
+       "colour": null
+      },
+      {
+       "name": "Lowest inside",
+       "value": "30",
+       "colour": null
+      },
+      {
+       "name": "Outside points",
+       "value": "2",
+       "colour": null
+      }
+     ],
+     "keep": 0
+    },
+    "out-north-low": {
+     "heading": "North",
+     "rows": [
+      {
+       "name": "This point",
+       "value": "12",
+       "colour": null
+      },
+      {
+       "name": "Highest inside",
+       "value": "91",
+       "colour": null
+      },
+      {
+       "name": "Upper quarter",
+       "value": "74",
+       "colour": null
+      },
+      {
+       "name": "Middle",
+       "value": "60",
+       "colour": null
+      },
+      {
+       "name": "Lower quarter",
+       "value": "48",
+       "colour": null
+      },
+      {
+       "name": "Lowest inside",
+       "value": "30",
+       "colour": null
+      },
+      {
+       "name": "Outside points",
+       "value": "2",
+       "colour": null
+      }
+     ],
+     "keep": 0
+    },
+    "box-south": {
+     "heading": "South",
+     "rows": [
+      {
+       "name": "Highest inside",
+       "value": "91",
+       "colour": null
+      },
+      {
+       "name": "Upper quarter",
+       "value": "74",
+       "colour": null
+      },
+      {
+       "name": "Middle",
+       "value": "60",
+       "colour": null
+      },
+      {
+       "name": "Lower quarter",
+       "value": "48",
+       "colour": null
+      },
+      {
+       "name": "Lowest inside",
+       "value": "30",
+       "colour": null
+      },
+      {
+       "name": "Outside points",
+       "value": "2",
+       "colour": null
+      }
+     ],
+     "keep": 2
+    },
+    "out-south-high": {
+     "heading": "South",
+     "rows": [
+      {
+       "name": "This point",
+       "value": "98",
+       "colour": null
+      },
+      {
+       "name": "Highest inside",
+       "value": "91",
+       "colour": null
+      },
+      {
+       "name": "Upper quarter",
+       "value": "74",
+       "colour": null
+      },
+      {
+       "name": "Middle",
+       "value": "60",
+       "colour": null
+      },
+      {
+       "name": "Lower quarter",
+       "value": "48",
+       "colour": null
+      },
+      {
+       "name": "Lowest inside",
+       "value": "30",
+       "colour": null
+      },
+      {
+       "name": "Outside points",
+       "value": "2",
+       "colour": null
+      }
+     ],
+     "keep": 0
+    },
+    "out-south-low": {
+     "heading": "South",
+     "rows": [
+      {
+       "name": "This point",
+       "value": "12",
+       "colour": null
+      },
+      {
+       "name": "Highest inside",
+       "value": "91",
+       "colour": null
+      },
+      {
+       "name": "Upper quarter",
+       "value": "74",
+       "colour": null
+      },
+      {
+       "name": "Middle",
+       "value": "60",
+       "colour": null
+      },
+      {
+       "name": "Lower quarter",
+       "value": "48",
+       "colour": null
+      },
+      {
+       "name": "Lowest inside",
+       "value": "30",
+       "colour": null
+      },
+      {
+       "name": "Outside points",
+       "value": "2",
+       "colour": null
+      }
+     ],
+     "keep": 0
+    },
+    "box-east": {
+     "heading": "East",
+     "rows": [
+      {
+       "name": "Highest inside",
+       "value": "91",
+       "colour": null
+      },
+      {
+       "name": "Upper quarter",
+       "value": "74",
+       "colour": null
+      },
+      {
+       "name": "Middle",
+       "value": "60",
+       "colour": null
+      },
+      {
+       "name": "Lower quarter",
+       "value": "48",
+       "colour": null
+      },
+      {
+       "name": "Lowest inside",
+       "value": "30",
+       "colour": null
+      },
+      {
+       "name": "Outside points",
+       "value": "2",
+       "colour": null
+      }
+     ],
+     "keep": 2
+    },
+    "out-east-high": {
+     "heading": "East",
+     "rows": [
+      {
+       "name": "This point",
+       "value": "98",
+       "colour": null
+      },
+      {
+       "name": "Highest inside",
+       "value": "91",
+       "colour": null
+      },
+      {
+       "name": "Upper quarter",
+       "value": "74",
+       "colour": null
+      },
+      {
+       "name": "Middle",
+       "value": "60",
+       "colour": null
+      },
+      {
+       "name": "Lower quarter",
+       "value": "48",
+       "colour": null
+      },
+      {
+       "name": "Lowest inside",
+       "value": "30",
+       "colour": null
+      },
+      {
+       "name": "Outside points",
+       "value": "2",
+       "colour": null
+      }
+     ],
+     "keep": 0
+    },
+    "out-east-low": {
+     "heading": "East",
+     "rows": [
+      {
+       "name": "This point",
+       "value": "12",
+       "colour": null
+      },
+      {
+       "name": "Highest inside",
+       "value": "91",
+       "colour": null
+      },
+      {
+       "name": "Upper quarter",
+       "value": "74",
+       "colour": null
+      },
+      {
+       "name": "Middle",
+       "value": "60",
+       "colour": null
+      },
+      {
+       "name": "Lower quarter",
+       "value": "48",
+       "colour": null
+      },
+      {
+       "name": "Lowest inside",
+       "value": "30",
+       "colour": null
+      },
+      {
+       "name": "Outside points",
+       "value": "2",
+       "colour": null
+      }
+     ],
+     "keep": 0
+    }
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "Spread",
+   "Spread",
+   "Spread",
+   "Spread",
+   "Spread",
+   "Spread",
+   "Spread",
+   "Spread",
+   "Spread"
+  ],
+  "id": [
+   "box-north",
+   "out-north-high",
+   "out-north-low",
+   "box-south",
+   "out-south-high",
+   "out-south-low",
+   "box-east",
+   "out-east-high",
+   "out-east-low"
+  ],
+  "kind": [
+   "box",
+   "point",
+   "point",
+   "box",
+   "point",
+   "point",
+   "box",
+   "point",
+   "point"
+  ],
+  "a": [
+   0.1,
+   0.2,
+   0.2,
+   0.4,
+   0.5,
+   0.5,
+   0.7,
+   0.7999999999999999,
+   0.7999999999999999
+  ],
+  "b": [
+   0.3,
+   0.15,
+   0.85,
+   0.3,
+   0.15,
+   0.85,
+   0.3,
+   0.15,
+   0.85
+  ],
+  "c": [
+   0.2,
+   4,
+   4,
+   0.2,
+   4,
+   4,
+   0.2,
+   4,
+   4
+  ],
+  "d": [
+   0.4,
+   null,
+   null,
+   0.4,
+   null,
+   null,
+   0.4,
+   null,
+   null
+  ],
+  "e": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "f": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "row": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "key": [
+   null,
+   false,
+   false,
+   null,
+   false,
+   false,
+   null,
+   false,
+   false
+  ],
+  "near": [
+   null,
+   false,
+   false,
+   null,
+   false,
+   false,
+   null,
+   false,
+   false
+  ],
+  "emph": [
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring"
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "id": "STRING",
+  "kind": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE",
+  "d": "DOUBLE",
+  "e": "DOUBLE",
+  "f": "DOUBLE",
+  "row": "INTEGER",
+  "key": "BOOLEAN",
+  "near": "BOOLEAN",
+  "emph": "STRING"
+ },
+ "expect": {
+  "marks": 9
+ }
+}

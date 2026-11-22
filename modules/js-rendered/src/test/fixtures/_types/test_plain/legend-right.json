@@ -1,0 +1,39 @@
+{
+ "note": "the legend written at right",
+ "document": {
+  "display_name": "Test type test_plain",
+  "config": {
+   "mark": {
+    "type": "test_plain"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": {
+      "orient": "right"
+     }
+    }
+   },
+   "title": {
+    "text": "Legend right"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East",
+   "West",
+   "North",
+   "South"
+  ]
+ },
+ "types": {
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 6
+ }
+}

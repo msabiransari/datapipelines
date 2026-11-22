@@ -1,0 +1,127 @@
+{
+ "variant": "shade-diverging",
+ "note": "brief 1053 D11: fixture (1) of D9 — a two-sided shade without a mid, the values -30 to 30 in steps of 10, one bar per step: the steps 1 to 7 in category order, the legend −30 and 30",
+ "spec": {
+  "display_name": "Shade, two-sided",
+  "description": "Amount per group, coloured by its change around zero.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "group",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "change",
+      "type": "INTEGER"
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "group",
+     "type": "nominal",
+     "sort": "ascending",
+     "title": "Group"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "change",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "scale": "diverging"
+    }
+   },
+   "title": {
+    "text": "Amount by group, coloured by change"
+   }
+  }
+ },
+ "bindings": {
+  "group": [
+   "A",
+   "B",
+   "C",
+   "D",
+   "E",
+   "F",
+   "G"
+  ],
+  "amount": [
+   10,
+   20,
+   30,
+   40,
+   50,
+   60,
+   70
+  ],
+  "change": [
+   -30,
+   -20,
+   -10,
+   0,
+   10,
+   20,
+   30
+  ]
+ },
+ "expect": {
+  "vertical": true,
+  "stack": null,
+  "categories": [
+   "A",
+   "B",
+   "C",
+   "D",
+   "E",
+   "F",
+   "G"
+  ],
+  "categories_full": [
+   "A",
+   "B",
+   "C",
+   "D",
+   "E",
+   "F",
+   "G"
+  ],
+  "bars": 7,
+  "data_warnings": 0,
+  "fills": [
+   "--chart-div-1",
+   "--chart-div-2",
+   "--chart-div-3",
+   "--chart-div-4",
+   "--chart-div-5",
+   "--chart-div-6",
+   "--chart-div-7"
+  ],
+  "legend_texts": [
+   "−30",
+   "30"
+  ],
+  "hover": [],
+  "label_texts": []
+ }
+}

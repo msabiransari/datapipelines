@@ -1,0 +1,626 @@
+{
+ "note": "three series of five points; the card one row per series with its colour, the point's own row bold and kept",
+ "document": {
+  "display_name": "Test type test_marks",
+  "config": {
+   "mark": {
+    "type": "test_marks"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    },
+    "id": {
+     "field": "id"
+    }
+   },
+   "title": {
+    "text": "Spokes"
+   },
+   "cards": {
+    "one-0": {
+     "heading": "Spoke 1",
+     "rows": [
+      {
+       "name": "One",
+       "value": "9",
+       "colour": "--chart-series-1",
+       "bold": true
+      },
+      {
+       "name": "Two",
+       "value": "6",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "3",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 0
+    },
+    "one-1": {
+     "heading": "Spoke 2",
+     "rows": [
+      {
+       "name": "One",
+       "value": "7",
+       "colour": "--chart-series-1",
+       "bold": true
+      },
+      {
+       "name": "Two",
+       "value": "5",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "2",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 0
+    },
+    "one-2": {
+     "heading": "Spoke 3",
+     "rows": [
+      {
+       "name": "One",
+       "value": "8",
+       "colour": "--chart-series-1",
+       "bold": true
+      },
+      {
+       "name": "Two",
+       "value": "6",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "3",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 0
+    },
+    "one-3": {
+     "heading": "Spoke 4",
+     "rows": [
+      {
+       "name": "One",
+       "value": "6",
+       "colour": "--chart-series-1",
+       "bold": true
+      },
+      {
+       "name": "Two",
+       "value": "4",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "2",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 0
+    },
+    "one-4": {
+     "heading": "Spoke 5",
+     "rows": [
+      {
+       "name": "One",
+       "value": "9",
+       "colour": "--chart-series-1",
+       "bold": true
+      },
+      {
+       "name": "Two",
+       "value": "5",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "3",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 0
+    },
+    "two-0": {
+     "heading": "Spoke 1",
+     "rows": [
+      {
+       "name": "One",
+       "value": "9",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "6",
+       "colour": "--chart-series-2",
+       "bold": true
+      },
+      {
+       "name": "Three",
+       "value": "3",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 1
+    },
+    "two-1": {
+     "heading": "Spoke 2",
+     "rows": [
+      {
+       "name": "One",
+       "value": "7",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "5",
+       "colour": "--chart-series-2",
+       "bold": true
+      },
+      {
+       "name": "Three",
+       "value": "2",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 1
+    },
+    "two-2": {
+     "heading": "Spoke 3",
+     "rows": [
+      {
+       "name": "One",
+       "value": "8",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "6",
+       "colour": "--chart-series-2",
+       "bold": true
+      },
+      {
+       "name": "Three",
+       "value": "3",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 1
+    },
+    "two-3": {
+     "heading": "Spoke 4",
+     "rows": [
+      {
+       "name": "One",
+       "value": "6",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "4",
+       "colour": "--chart-series-2",
+       "bold": true
+      },
+      {
+       "name": "Three",
+       "value": "2",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 1
+    },
+    "two-4": {
+     "heading": "Spoke 5",
+     "rows": [
+      {
+       "name": "One",
+       "value": "9",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "5",
+       "colour": "--chart-series-2",
+       "bold": true
+      },
+      {
+       "name": "Three",
+       "value": "3",
+       "colour": "--chart-series-3",
+       "bold": false
+      }
+     ],
+     "keep": 1
+    },
+    "three-0": {
+     "heading": "Spoke 1",
+     "rows": [
+      {
+       "name": "One",
+       "value": "9",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "6",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "3",
+       "colour": "--chart-series-3",
+       "bold": true
+      }
+     ],
+     "keep": 2
+    },
+    "three-1": {
+     "heading": "Spoke 2",
+     "rows": [
+      {
+       "name": "One",
+       "value": "7",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "5",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "2",
+       "colour": "--chart-series-3",
+       "bold": true
+      }
+     ],
+     "keep": 2
+    },
+    "three-2": {
+     "heading": "Spoke 3",
+     "rows": [
+      {
+       "name": "One",
+       "value": "8",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "6",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "3",
+       "colour": "--chart-series-3",
+       "bold": true
+      }
+     ],
+     "keep": 2
+    },
+    "three-3": {
+     "heading": "Spoke 4",
+     "rows": [
+      {
+       "name": "One",
+       "value": "6",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "4",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "2",
+       "colour": "--chart-series-3",
+       "bold": true
+      }
+     ],
+     "keep": 2
+    },
+    "three-4": {
+     "heading": "Spoke 5",
+     "rows": [
+      {
+       "name": "One",
+       "value": "9",
+       "colour": "--chart-series-1",
+       "bold": false
+      },
+      {
+       "name": "Two",
+       "value": "5",
+       "colour": "--chart-series-2",
+       "bold": false
+      },
+      {
+       "name": "Three",
+       "value": "3",
+       "colour": "--chart-series-3",
+       "bold": true
+      }
+     ],
+     "keep": 2
+    }
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "One",
+   "One",
+   "One",
+   "One",
+   "One",
+   "Two",
+   "Two",
+   "Two",
+   "Two",
+   "Two",
+   "Three",
+   "Three",
+   "Three",
+   "Three",
+   "Three"
+  ],
+  "id": [
+   "one-0",
+   "one-1",
+   "one-2",
+   "one-3",
+   "one-4",
+   "two-0",
+   "two-1",
+   "two-2",
+   "two-3",
+   "two-4",
+   "three-0",
+   "three-1",
+   "three-2",
+   "three-3",
+   "three-4"
+  ],
+  "kind": [
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point",
+   "point"
+  ],
+  "a": [
+   0.5,
+   0.8614,
+   0.7234,
+   0.2766,
+   0.1386,
+   0.5,
+   0.7473,
+   0.6528,
+   0.3472,
+   0.2527,
+   0.5,
+   0.6331,
+   0.5823,
+   0.4177,
+   0.3669
+  ],
+  "b": [
+   0.12,
+   0.3826,
+   0.8074,
+   0.8074,
+   0.3826,
+   0.24,
+   0.4197,
+   0.7103,
+   0.7103,
+   0.4197,
+   0.36,
+   0.4567,
+   0.6133,
+   0.6133,
+   0.4567
+  ],
+  "c": [
+   4,
+   4,
+   4,
+   4,
+   4,
+   4,
+   4,
+   4,
+   4,
+   4,
+   4,
+   4,
+   4,
+   4,
+   4
+  ],
+  "d": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "e": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "f": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "row": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   1,
+   1,
+   1,
+   1,
+   1,
+   2,
+   2,
+   2,
+   2,
+   2
+  ],
+  "key": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "near": [
+   true,
+   true,
+   true,
+   true,
+   true,
+   true,
+   true,
+   true,
+   true,
+   true,
+   true,
+   true,
+   true,
+   true,
+   true
+  ],
+  "emph": [
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring",
+   "ring"
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "id": "STRING",
+  "kind": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE",
+  "d": "DOUBLE",
+  "e": "DOUBLE",
+  "f": "DOUBLE",
+  "row": "INTEGER",
+  "key": "BOOLEAN",
+  "near": "BOOLEAN",
+  "emph": "STRING"
+ },
+ "expect": {
+  "marks": 15
+ }
+}

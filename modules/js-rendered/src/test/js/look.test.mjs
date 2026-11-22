@@ -3,7 +3,7 @@
 // may call it; the engine may not), so the engine's sRGB table is checked against an independent oracle.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { engine, chartFixtures, inputOf, canonical } from "./engine.mjs";
+import { engine, engineWith, chartFixtures, inputOf, canonical, typeFixtures, typeInputOf } from "./engine.mjs";
 import { violations, WIDTHS, HEIGHTS } from "./geometry.mjs";
 
 const R = engine();
@@ -20,14 +20,20 @@ const LA5 = ["gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stac
   "textAscent", "textDescent", "edge", "lineHeight", "titleGap", "tickGap", "labelGap", "cornerClear", "axisTitleGap", "legendKey", "legendKeyGap", "legendEntryGap", "legendGap", "valueLabelGap",
   "emptyText", "morePrefix",
   // The line family's (brief 989 D6, D7, D10a): its defaults, its legend keys, the direct legend's bounds and gap.
-  "curveDefault", "pointsDefault", "lineLabelsDefault", "lastLabelFormat", "lineRound", "areaFade", "legendKeyLine", "legendKeyArea", "directMin", "directMax", "directGap"];
+  "curveDefault", "pointsDefault", "lineLabelsDefault", "lastLabelFormat", "lineRound", "areaFade", "legendKeyLine", "legendKeyArea", "directMin", "directMax", "directGap",
+  // The radial axis's (brief 1055 D8): its rings' form, its tick rule's span, its names' column and the rule of no room.
+  "radialRings", "radialTickSpan", "radialNameShare", "radialRadiusFloor",
+  // Colour by value's (brief 1050 D5): the width of a step of a colour scale's legend, in keys.
+  "legendStepRatio",
+  // The legend's forms (brief 1054 D8): a point's key, a dot.
+  "legendKeyPoint"];
 
 /**
  * The interaction layer's fields (brief 990 D4a): consumer `interaction`, read on the page by the layer and never by
  * render. Their A14 half is the browser's (a placed pointer sees each field's own result change); here they are only
  * required to exist, to name their consumer, and to leave every picture render draws unchanged.
  */
-const INTERACTION = ["tipDistance", "tipLine", "tipPad", "tipKey", "tipGap", "tipMax", "tipTotalJoin", "tipValueWeight", "crosshairDot", "focusGap"];
+const INTERACTION = ["tipDistance", "tipLine", "tipPad", "tipKey", "tipGap", "tipMax", "tipTotalJoin", "tipValueWeight", "crosshairDot", "focusGap", "markReach", "markMove", "markRing"];
 
 test("LA5: the look table is closed and holds exactly the fixed values bar, the line family, the shared layout and the interaction layer use", () => {
   assert.deepEqual(Object.keys(R.tables.LOOK).sort(), [...LA5, ...INTERACTION].sort());
@@ -43,7 +49,11 @@ test("LA5: the look table is closed and holds exactly the fixed values bar, the 
 const OTHER = { legendSideMaxEm: 2, legendKeyBar: "line", labelsDefault: "none", stackTotalFormat: "integer", emptyText: "Nothing to show", morePrefix: "and ", rotateAngle: 60,
   curveDefault: "step", pointsDefault: "markers", lineLabelsDefault: "last", lastLabelFormat: "integer", legendKeyLine: "square", legendKeyArea: "line",
   // A quarter down, not up: no fixture has five series, so 5 shows nothing; at 3 the four-line fixture loses its names on the lines.
-  directMax: 3 };
+  directMax: 3,
+  // The ring's other form (brief 1055 D8; the contract's LA15 plant for the radar's rings).
+  radialRings: "circle",
+  // A point's key as a square (brief 1054 D8).
+  legendKeyPoint: "square" };
 function other(name, v) {
   if (Object.prototype.hasOwnProperty.call(OTHER, name)) return OTHER[name];
   if (typeof v === "boolean") return !v;
@@ -52,6 +62,15 @@ function other(name, v) {
   throw new Error("A14 has no other value for " + name);
 }
 const A14_FRAMES = [[960, 540], [480, 360], [372, 250], [300, 180], [240, 160], [200, 140], [150, 60], [90, 26], [80, 24], [1600, 480]];
+/**
+ * The fields only a frame no product type uses reads (brief 1055 D8): each is proven on the fixtures of the test type
+ * named here (the engine loaded with it by engineWith, the field changed in that copy's table, the same frames) and is
+ * dead when none of those pictures changes. The test type's fixtures never join chartFixtures(); and with each of these
+ * fields changed, every chart fixture's picture equals its base (no product picture reads it).
+ */
+const A14_ON_TYPE = { radialRings: "test_web", radialTickSpan: "test_web", radialNameShare: "test_web", radialRadiusFloor: "test_web",
+  // Brief 1054 D8: no product fixture reads a point's key before scatter.
+  legendKeyPoint: "test_switch" };
 
 test("A14 (render half): changing any one look field changes the primitives of at least one chart fixture", () => {
   const base = new Map();
@@ -60,7 +79,27 @@ test("A14 (render half): changing any one look field changes the primitives of a
   const key = (f, w, h) => f.wire + "/" + f.name + "@" + w + "x" + h;
   for (const f of FIXTURES) for (const [w, h] of A14_FRAMES) base.set(key(f, w, h), canonical(R.render(inputOf(f.fixture, w, h))));
   const dead = [];
+  const typeBase = new Map();
+  let onType = 0, productKept = 0;
   for (const name of Object.keys(R.tables.LOOK).filter((n) => R.tables.LOOK[n].consumer === "render")) {
+    if (Object.prototype.hasOwnProperty.call(A14_ON_TYPE, name)) {
+      const type = A14_ON_TYPE[name], fxs = typeFixtures(type), T0 = engineWith([type]), T = engineWith([type]);
+      for (const f of fxs) for (const [w, h] of A14_FRAMES) if (!typeBase.has(key(f, w, h))) typeBase.set(key(f, w, h), canonical(T0.render(typeInputOf(f.fixture, w, h))));
+      T.tables.LOOK[name].value = other(name, T.tables.LOOK[name].value);
+      const first = fxs.flatMap((f) => A14_FRAMES.map(([w, h]) => [f, w, h])).find(([f, w, h]) => canonical(T.render(typeInputOf(f.fixture, w, h))) !== typeBase.get(key(f, w, h)));
+      if (first === undefined) dead.push(name);
+      else console.log(`A14 ${name}: first changed on ${type}/${first[0].name} at ${first[1]} x ${first[2]}`);
+      const E = engine();
+      E.tables.LOOK[name].value = other(name, E.tables.LOOK[name].value);
+      for (const f of FIXTURES) {
+        for (const [w, h] of A14_FRAMES) {
+          assert.equal(canonical(E.render(inputOf(f.fixture, w, h))), base.get(key(f, w, h)), name + " reached a product picture: " + key(f, w, h));
+          productKept++;
+        }
+      }
+      onType++;
+      continue;
+    }
     const E = engine();
     E.tables.LOOK[name].value = other(name, E.tables.LOOK[name].value);
     let changed = false;
@@ -75,8 +114,11 @@ test("A14 (render half): changing any one look field changes the primitives of a
     }
     if (!changed) dead.push(name);
   }
-  assert.deepEqual(dead, [], "look fields whose change no chart fixture shows");
+  assert.deepEqual(dead, [], "look fields whose change no chart fixture (or, for A14_ON_TYPE, no fixture of its test type) shows");
   assert.ok(Object.keys(R.tables.LOOK).length >= 37, "fields checked");
+  assert.equal(onType, Object.keys(A14_ON_TYPE).length, "every field of A14_ON_TYPE is in the table and proven on its type");
+  assert.equal(productKept, onType * FIXTURES.length * A14_FRAMES.length);
+  console.log(`A14 on a test type: ${onType} fields; ${productKept} chart pictures compared with each changed, 0 differ`);
 });
 
 test("A14 (the interaction fields): render never reads one; a change of each leaves every picture as it was (their check is the browser's)", () => {
@@ -110,11 +152,31 @@ test("LA13 (the table's half): with the default tokens 2p + h is no more than 24
 test("LA1 (the engine's half): a light and a dark default for every token it receives, none for the stylesheet's two", () => {
   const light = plain(R.theme.defaults("light")), dark = plain(R.theme.defaults("dark"));
   assert.deepEqual(Object.keys(light), Object.keys(dark));
-  // 43: the contract's valued tokens (§3.1 to §3.6) less the stylesheet's two; the tokens a later type values (its
-  // O-6 to O-8: --chart-positive, -negative, -total, -good, -warn, -bad, the diverging ramp, series 9 to 12) are not
-  // invented here (brief D6).
-  assert.equal(Object.keys(light).length, 43);
-  for (const t of ["--chart-positive", "--chart-good", "--chart-div-1", "--chart-series-9"]) assert.ok(!(t in light), t + " is a later lane's");
+  // 56: the contract's valued tokens (§3.1 to §3.6) less the stylesheet's two. §3.6's thirteen (the colours with a
+  // meaning and the two-sided ramp, the owner's pick L9) are defaults since brief 1053 D4, compared below with the
+  // contract's table written here as numbers; series 9 to 12 are still a later lane's and are not invented here.
+  assert.equal(Object.keys(light).length, 56);
+  for (const t of ["--chart-series-9"]) assert.ok(!(t in light), t + " is a later lane's");
+  const MEANING = {
+    "--chart-positive": [[25, 113, 194], [77, 171, 247]],
+    "--chart-negative": [[217, 72, 15], [255, 146, 43]],
+    "--chart-total": [[52, 58, 64], [222, 226, 230]],
+    "--chart-good": [[0, 117, 90], [66, 174, 142]],
+    "--chart-warn": [[206, 124, 4], [250, 183, 42]],
+    "--chart-bad": [[205, 23, 30], [212, 35, 37]],
+    "--chart-div-1": [[40, 62, 149], [131, 155, 251]],
+    "--chart-div-2": [[98, 121, 182], [99, 117, 181]],
+    "--chart-div-3": [[165, 179, 213], [70, 81, 116]],
+    "--chart-div-4": [[236, 238, 242], [42, 47, 56]],
+    "--chart-div-5": [[215, 166, 153], [103, 76, 59]],
+    "--chart-div-6": [[185, 93, 66], [168, 103, 52]],
+    "--chart-div-7": [[127, 36, 0], [238, 130, 11]],
+  };
+  assert.equal(Object.keys(MEANING).length, 13);
+  for (const [t, [l, d]] of Object.entries(MEANING)) {
+    assert.deepEqual(light[t], l, t + " light");
+    assert.deepEqual(dark[t], d, t + " dark");
+  }
   for (const t of ["--chart-pad", "--chart-tip-shadow"]) {
     assert.ok(!(t in light), t + " is the stylesheet's alone");
     assert.throws(() => R.theme.resolve({ base: "light", tokens: { [t]: 1 } }), new RegExp("unknown token " + t));

@@ -152,8 +152,11 @@ class JsRenderedIdentityTest {
             }).sort(function (a, b) { return b.y - a.y; }).map(function (p) { return p.shown === null || p.shown === undefined ? p.text : p.shown; }).join("|");
             """.trimIndent()
 
-        /** The chart fixtures the emitter must have drawn, at least (lane 985 delivers 43). */
-        const val FIXTURE_FLOOR = 43
+        /**
+         * The chart fixtures the emitter must have drawn, at least: the bar count (lane 985's 43, brief 1050's twelve shaded
+         * bars, brief 1053's fifteen two-sided bars and one sequential bar of seven steps).
+         */
+        const val FIXTURE_FLOOR = 71
 
         /** emit.mjs's frames: one per level, one below the smallest, and the full and compact boundaries (#985 R1). */
         const val FRAME_FLOOR = 7

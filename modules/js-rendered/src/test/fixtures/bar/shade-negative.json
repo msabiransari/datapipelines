@@ -1,0 +1,87 @@
+{
+ "source": [
+  "lane 1050 make_shade_fixtures.py (brief 1050 D7)"
+ ],
+ "note": "colour by value over negative shade values only: lo and hi both below zero, steps run lowest to highest",
+ "document": {
+  "display_name": "Losses by region",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "region",
+      "type": "STRING"
+     },
+     {
+      "name": "amount",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "margin",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "region",
+     "type": "nominal",
+     "title": "Region"
+    },
+    "y": {
+     "field": "amount",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Amount"
+    },
+    "color": {
+     "field": "margin",
+     "aggregate": "sum",
+     "type": "quantitative",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "Losses by region"
+   }
+  }
+ },
+ "columns": {
+  "region": [
+   "North",
+   "South",
+   "East",
+   "West",
+   "Central"
+  ],
+  "amount": [
+   120.5,
+   80,
+   45.25,
+   200,
+   60
+  ],
+  "margin": [
+   -0.4,
+   -0.1,
+   -2.5,
+   -0.75,
+   -1
+  ]
+ },
+ "types": {
+  "region": "STRING",
+  "amount": "DOUBLE",
+  "margin": "DOUBLE"
+ }
+}

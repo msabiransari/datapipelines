@@ -1,0 +1,57 @@
+{
+ "note": "the legend written at top",
+ "document": {
+  "display_name": "Test type test_polar",
+  "config": {
+   "mark": {
+    "type": "test_polar"
+   },
+   "encoding": {
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "legend": {
+      "orient": "top"
+     }
+    },
+    "from": {
+     "field": "from"
+    },
+    "to": {
+     "field": "to"
+    }
+   },
+   "title": {
+    "text": "Legend top"
+   }
+  }
+ },
+ "columns": {
+  "s": [
+   "North",
+   "South",
+   "East",
+   "West"
+  ],
+  "from": [
+   0,
+   90,
+   180,
+   270
+  ],
+  "to": [
+   90,
+   180,
+   270,
+   360
+  ]
+ },
+ "types": {
+  "s": "STRING",
+  "from": "INTEGER",
+  "to": "INTEGER"
+ },
+ "expect": {
+  "marks": 4
+ }
+}

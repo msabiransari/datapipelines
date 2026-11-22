@@ -1,0 +1,60 @@
+{
+ "note": "case (a): a left axis with an author's domain 3..97, its ticks not on the plot's edges",
+ "document": {
+  "display_name": "Test type test_two_axes",
+  "config": {
+   "mark": {
+    "type": "test_two_axes"
+   },
+   "encoding": {
+    "x": {
+     "field": "x"
+    },
+    "y": {
+     "field": "y",
+     "domain": [
+      3,
+      97
+     ]
+    },
+    "y2": {
+     "field": "y2"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "y": [
+   12,
+   30,
+   45,
+   22,
+   38,
+   51
+  ],
+  "y2": [
+   140,
+   220,
+   180,
+   260,
+   310,
+   205
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "y": "DOUBLE",
+  "y2": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}

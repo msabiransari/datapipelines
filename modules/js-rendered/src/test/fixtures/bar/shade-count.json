@@ -1,0 +1,90 @@
+{
+ "source": [
+  "lane 1050 make_shade_fixtures.py (brief 1050 D7)"
+ ],
+ "note": "count of a numeric column as the shade, no null value: the count is the number of rows of each bar",
+ "document": {
+  "display_name": "Orders per team",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "sales": {
+    "columns": [
+     {
+      "name": "team",
+      "type": "STRING"
+     },
+     {
+      "name": "hours",
+      "type": "DOUBLE"
+     },
+     {
+      "name": "units",
+      "type": "INTEGER",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "team",
+     "type": "nominal",
+     "title": "Team"
+    },
+    "y": {
+     "field": "hours",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Hours"
+    },
+    "color": {
+     "field": "units",
+     "aggregate": "count",
+     "type": "quantitative",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "Orders per team"
+   }
+  }
+ },
+ "columns": {
+  "team": [
+   "A",
+   "A",
+   "A",
+   "B",
+   "C",
+   "C"
+  ],
+  "hours": [
+   3,
+   4,
+   5,
+   2,
+   6,
+   1
+  ],
+  "units": [
+   1,
+   1,
+   2,
+   3,
+   5,
+   8
+  ]
+ },
+ "types": {
+  "team": "STRING",
+  "hours": "DOUBLE",
+  "units": "INTEGER"
+ }
+}
