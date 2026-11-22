@@ -2424,7 +2424,10 @@ includes a release the store did not confirm and an execution record it could no
 answers (a recorded run its row, a confirmed lost release `202`), never an assumed one. A metadata read that
 fails while the pin resolves — the current pin of a fresh request, or the original pin of a retry or takeover —
 is `503 endpoint.dependency_unavailable`, distinct from a pin confirmed absent or unservable (its own refusal,
-`endpoint.pipeline_not_released`); neither runs SQL, and the reservation stays. If the admitting replica stops
+`endpoint.pipeline_not_released`); this request starts no SQL. A failed lookup before takeover leaves an existing
+reservation intact. During takeover, a confirmed conditional release frees a request that never started;
+an unconfirmed release retains its reservation and answers `503 idempotency.reservation_unavailable`.
+These refusals do not establish the outcome of any execution already admitted. If the admitting replica stops
 after reserving and before the execution row exists, an identical retry after
 [`mutation-start-window-seconds`](configuration.md#322-published-endpoints) (default `60`) takes the start claim
 over and starts the ORIGINAL pin under the ORIGINAL execution id; the execution row's primary key fences the

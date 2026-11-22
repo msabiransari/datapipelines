@@ -108,7 +108,8 @@ version types it: `quantity=01` and `quantity=1` on an `INTEGER` are the same re
 retry still needs an `Accept` that admits JSON (else `406`). A deliberate second write takes a NEW key.
 A run that ended `FAILED`, `ABORTED` or `OUTCOME_UNKNOWN` answers `409` with its code and a
 `status_url`: an unknown outcome means the target may hold the write — reconcile, never resend.
-`503 idempotency.reservation_unavailable` ran nothing; retry with the same key. The answer's
+`503 idempotency.reservation_unavailable` leaves the execution's outcome unconfirmed; retry with
+the same key to recover it. The answer's
 `status_url` and `result_url` poll the run under the same business path, with the key that
 started it and the grant it was started under — a write-only key needs no `GET` grant for it.
 Write a `PUT` or `DELETE` pipeline so repeating the request has the same intended effect: the

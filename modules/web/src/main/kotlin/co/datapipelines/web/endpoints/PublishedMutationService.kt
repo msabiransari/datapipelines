@@ -311,7 +311,7 @@ class PublishedMutationService(
             Outcome.Refused(
                 HTTP_SERVICE_UNAVAILABLE,
                 PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE,
-                "The request's reservation could not be read or recorded, so nothing was run. Retry with the same key.",
+                "The request's reservation state could not be confirmed. Retry with the same key to recover its outcome.",
             ),
             OUTCOME_RESERVATION_UNAVAILABLE,
         )
@@ -322,7 +322,7 @@ class PublishedMutationService(
         Outcome.Refused(
             HTTP_SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Endpoint.DEPENDENCY_UNAVAILABLE,
-            "A service this route depends on is unavailable, so nothing was run. Retry with the same key.",
+            "A service this route depends on is unavailable. Retry with the same key to recover its outcome.",
         )
 
     private fun counted(
