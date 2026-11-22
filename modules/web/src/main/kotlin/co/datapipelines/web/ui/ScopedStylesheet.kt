@@ -18,11 +18,14 @@ import java.math.RoundingMode
  * - each selector, split at top-level commas: exactly `:root`, `html` or `body` becomes `&`; one that BEGINS with one
  *   of the three becomes `&:is(&)` and the rest (the rule keeps its weight), unless the first combinator after the
  *   root's own part is a sibling one (`+`, `~`, `||`): that would select an element of the host's beside the container,
- *   so it is refused; one of the three anywhere else is refused; every other selector becomes `& ` and itself;
+ *   so it is refused; one of the three anywhere else is refused, at any depth of parentheses (the selector is read
+ *   token by token, [SELECTOR_FUNCTIONS] say which function's argument is a selector); every other selector becomes
+ *   `& ` and itself;
  * - a rule whose selectors are only `html` and `body`: each declaration is carried onto the container ([CARRIED]),
  *   dropped ([DROPPED]), or refused naming the rule;
  * - every length in `rem` inside a declaration or a `@keyframes` becomes `px` (× 16, at most four decimals): `rem` is
- *   the HOST's root font size. A group rule's condition keeps its `rem` (there it is the browser's default size).
+ *   the HOST's root font size. A group rule's condition keeps its `rem` (there it is the browser's default size), and so
+ *   does the text of a string or of a `url(…)` token, which is not a length: it leaves byte for byte as it entered.
  *
  * A refusal ([Refusal]) is a refusal of the build's own input: the real sheets are scoped by a test, so a sheet this
  * cannot scope is a red test naming the rule, never a wrong stylesheet in front of a host.
@@ -228,7 +231,7 @@ object ScopedStylesheet {
             val root = ROOT_START.find(source)
             if (root != null) {
                 val rest = source.substring(root.range.last + 1)
-                if (ROOTISH.containsMatchIn(rest)) throw Refusal("a root selector the scoping does not know: $source")
+                if (namesRoot(rest)) throw Refusal("a root selector the scoping does not know: $source")
                 val combinator = firstCombinator(rest)
                 if (combinator in SIBLING_COMBINATORS) {
                     throw Refusal("a root selector that selects a sibling of the container (combinator $combinator): $source")
@@ -236,16 +239,18 @@ object ScopedStylesheet {
                 rootBeginning.merge(combinator ?: "none", 1, Int::plus)
                 return "&:is(&)$rest"
             }
-            if (ROOTISH.containsMatchIn(source)) throw Refusal("a root selector the scoping does not know: $source")
+            if (namesRoot(source)) throw Refusal("a root selector the scoping does not know: $source")
             return "& $source"
         }
 
-        /** [css] with every `rem` length outside a condition as `px` (D3). */
+        /** [css] with every `rem` length as `px` (D3); a string and a `url(…)` token are text, kept as they are. */
         private fun px(css: String): String =
-            REM.replace(css) { match ->
-                remLengths += 1
-                val value = BigDecimal(match.groupValues[2]).multiply(ROOT_PX).setScale(PX_DECIMALS, RoundingMode.HALF_UP)
-                match.groupValues[1] + value.stripTrailingZeros().toPlainString() + "px"
+            CssText.mapOutsideText(css) { code ->
+                REM.replace(code) { match ->
+                    remLengths += 1
+                    val value = BigDecimal(match.groupValues[2]).multiply(ROOT_PX).setScale(PX_DECIMALS, RoundingMode.HALF_UP)
+                    match.groupValues[1] + value.stripTrailingZeros().toPlainString() + "px"
+                }
             }
     }
 
@@ -269,6 +274,97 @@ object ScopedStylesheet {
         }
     }
 
+    /**
+     * The pseudo-classes and pseudo-elements whose argument is a selector list, each with why (D2, round 2): inside
+     * these a root form is a selector token and is refused. A function not listed (`:lang(html)`, `:nth-of-type(2n)`,
+     * `::part(x)`, `:dir(ltr)`) takes no selector, and its argument is left alone.
+     */
+    val SELECTOR_FUNCTIONS: Map<String, String> =
+        mapOf(
+            "is" to "matches any selector of its list",
+            "where" to "matches any selector of its list, with no weight",
+            "not" to "matches what none of its list selects",
+            "has" to "a relative selector list: what the element contains or precedes",
+            "matches" to "the earlier name of :is",
+            "-webkit-any" to "the prefixed earlier form of :is",
+            "-moz-any" to "the prefixed earlier form of :is",
+            "nth-child" to "after its `of` keyword the argument is a selector list",
+            "nth-last-child" to "after its `of` keyword the argument is a selector list",
+            "host" to "a compound selector the shadow host must match",
+            "host-context" to "a compound selector the host or one of its ancestors must match",
+            "slotted" to "a compound selector the slotted element must match",
+            "cue" to "a selector inside a media track's cue",
+            "current" to "a selector of the element being presented in time",
+            "past" to "a selector of an element presented before the current one",
+            "future" to "a selector of an element presented after the current one",
+        )
+
+    /**
+     * Whether [selector] holds `:root`, `html` or `body` as a selector token (D2), at any depth of the parentheses of a
+     * [SELECTOR_FUNCTIONS] function. Read token by token: an attribute selector and a string are skipped whole, a class
+     * or an id is a name and never a root, and an escaped name is read unescaped.
+     */
+    internal fun namesRoot(selector: String): Boolean {
+        var i = 0
+        while (i < selector.length) {
+            val (found, next) = token(selector, i)
+            if (found) return true
+            i = next
+        }
+        return false
+    }
+
+    /** The selector token at [at]: whether it is or holds a root form, and the index after it. */
+    private fun token(
+        selector: String,
+        at: Int,
+    ): Pair<Boolean, Int> {
+        val c = selector[at]
+        return when {
+            c == '[' || c == '(' -> {
+                false to CssText.closing(selector, at)
+            }
+
+            c == '"' || c == '\'' -> {
+                false to CssText.stringEnd(selector, at) + 1
+            }
+
+            c == '.' || c == '#' -> {
+                false to CssText.name(selector, at + 1).second
+            }
+
+            c == ':' -> {
+                pseudo(selector, at)
+            }
+
+            CssText.startsName(selector, at) -> {
+                val (name, end) = CssText.name(selector, at)
+                val namespacePrefix = selector.startsWith("|", end) && !selector.startsWith("||", end)
+                (!namespacePrefix && name.lowercase() in PAGE_ELEMENTS) to end
+            }
+
+            else -> {
+                false to at + 1
+            }
+        }
+    }
+
+    /** The pseudo-class or pseudo-element at [colon]: whether it is or holds a root form, and the index after it. */
+    private fun pseudo(
+        selector: String,
+        colon: Int,
+    ): Pair<Boolean, Int> {
+        val single = !selector.startsWith("::", colon)
+        val (raw, end) = CssText.name(selector, if (single) colon + 1 else colon + 2)
+        val name = raw.lowercase()
+        if (!selector.startsWith("(", end)) return (single && name == "root") to end
+        val close = CssText.closing(selector, end)
+        if (name !in SELECTOR_FUNCTIONS) return false to close
+        val argument = selector.substring(end + 1, (close - 1).coerceAtLeast(end + 1))
+        val list = if (name.startsWith("nth-")) NTH_OF.find(argument)?.let { argument.substring(it.range.last + 1) }.orEmpty() else argument
+        return namesRoot(list) to close
+    }
+
     private const val PRELUDE_SHOWN = 80
     private const val PX_DECIMALS = 4
     private val ROOT_PX = BigDecimal(16)
@@ -277,7 +373,9 @@ object ScopedStylesheet {
     private val SIBLING_COMBINATORS = setOf("+", "~", "||")
     private val AT_NAME = Regex("""^@([-\w]+)""")
     private val ROOT_START = Regex("""^(?::root|(?i:html|body))(?![\w-])""")
-    private val ROOTISH = Regex("""(?i):root(?![\w-])|(?<![\w.#\-:\[="'(])(?:html|body)(?![\w-])""")
+
+    /** The `of` that ends the An+B part of `:nth-child(…)` and begins its selector list. */
+    private val NTH_OF = Regex("""(?i)(?:^|\s)of\s""")
 
     /** A length in `rem`: not part of a name (`x-1rem`), its sign kept. */
     private val REM = Regex("""(?<![\w.#-])(-?)(\d*\.?\d+)rem(?![\w-])""")
@@ -413,7 +511,7 @@ internal object CssText {
     }
 
     /** The index of the quote that closes the string opened at [open] (escapes skipped). */
-    private fun stringEnd(
+    fun stringEnd(
         css: String,
         open: Int,
     ): Int {
@@ -482,6 +580,87 @@ internal object CssText {
         return out
     }
 
+    /**
+     * [text] with [transform] applied to each run of it outside strings and `url(…)` tokens; a string and a `url(…)`
+     * token (its address quoted or not; an unquoted one ends at its `)`) are copied byte for byte.
+     */
+    fun mapOutsideText(
+        text: String,
+        transform: (String) -> String,
+    ): String {
+        val out = StringBuilder(text.length)
+        var start = 0
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            val end =
+                when {
+                    c == '"' || c == '\'' -> stringEnd(text, i) + 1
+                    URL.matchesAt(text, i) && (i == 0 || !isNameChar(text[i - 1])) -> urlEnd(text, i + URL_OPEN)
+                    else -> -1
+                }
+            if (end < 0) {
+                i += 1
+            } else {
+                val stop = end.coerceAtMost(text.length)
+                out.append(transform(text.substring(start, i))).append(text, i, stop)
+                start = stop
+                i = stop
+            }
+        }
+        return out.append(transform(text.substring(start))).toString()
+    }
+
+    /** The index just after the `)` that closes a `url(` whose content starts at [from] (a string or an escape skipped). */
+    private fun urlEnd(
+        text: String,
+        from: Int,
+    ): Int {
+        var i = from
+        while (i < text.length && text[i] != ')') {
+            i =
+                when (text[i]) {
+                    '"', '\'' -> stringEnd(text, i) + 1
+                    '\\' -> i + 2
+                    else -> i + 1
+                }
+        }
+        return i + 1
+    }
+
+    /** Whether a CSS name (an identifier) starts at [at]: a letter, `_`, `-`, a non-ASCII character or an escape. */
+    fun startsName(
+        text: String,
+        at: Int,
+    ): Boolean = (isNameChar(text[at]) && !text[at].isDigit()) || text[at] == '\\'
+
+    /** The CSS name starting at [from], its escapes resolved, and the index just after it. */
+    fun name(
+        text: String,
+        from: Int,
+    ): Pair<String, Int> {
+        val out = StringBuilder()
+        var i = from
+        while (i < text.length && (isNameChar(text[i]) || text[i] == '\\')) {
+            if (text[i] != '\\') {
+                out.append(text[i])
+                i += 1
+                continue
+            }
+            val hex = HEX_ESCAPE.matchAt(text, i + 1)
+            if (hex != null) {
+                out.appendCodePoint(hex.groupValues[1].toInt(HEX))
+                i = hex.range.last + 1
+            } else {
+                if (i + 1 < text.length) out.append(text[i + 1])
+                i += 2
+            }
+        }
+        return out.toString() to i.coerceAtMost(text.length)
+    }
+
+    private fun isNameChar(c: Char): Boolean = c.isLetterOrDigit() || c == '-' || c == '_' || c.code >= NON_ASCII
+
     /** [text] with the content of every string removed (the quotes kept), for structural checks. */
     fun outsideStrings(text: String): String {
         val out = StringBuilder()
@@ -500,4 +679,9 @@ internal object CssText {
     }
 
     private const val PRELUDE_SHOWN = 80
+    private const val NON_ASCII = 0x80
+    private const val HEX = 16
+    private const val URL_OPEN = 4
+    private val URL = Regex("""(?i)url\(""")
+    private val HEX_ESCAPE = Regex("""([0-9a-fA-F]{1,6})[ \t\n]?""")
 }

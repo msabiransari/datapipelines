@@ -116,6 +116,54 @@ class ScopedStylesheetTest {
         refusal.message.orEmpty() shouldContain message
     }
 
+    @Test
+    fun `R1 the lander's case keeps the string and the address and converts the width`() {
+        val result =
+            ScopedStylesheet.scope(".card { content: \"1rem\"; background-image: url(\"/images/1rem.svg\"); width: 1rem }", SCOPE)
+        result.text shouldBe block("& .card { content: \"1rem\"; background-image: url(\"/images/1rem.svg\"); width: 16px }")
+        result.counts.remLengths shouldBe 1
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("remTexts")
+    fun `R1 rem inside a string or a url token is kept, a length beside it converts, in a declaration`(
+        label: String,
+        declaration: String,
+        expected: String,
+    ) {
+        val output = scoped(".a { $declaration }")
+        println("1065|R1|declaration|$label|$output")
+        output shouldBe block("& .a { $expected }")
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("remTexts")
+    fun `R1 rem inside a string or a url token is kept, a length beside it converts, in a keyframes body`(
+        label: String,
+        declaration: String,
+        expected: String,
+    ) {
+        val output = scoped("@keyframes k { to { $declaration } }")
+        println("1065|R1|keyframes|$label|$output")
+        output shouldBe "@keyframes k { to { $expected } }\n" + block("")
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("rootTokens")
+    fun `R2 a root form inside a selector function is refused, naming the selector`(selector: String) {
+        val refusal = shouldThrow<ScopedStylesheet.Refusal> { ScopedStylesheet.scope("$selector { color: red }", SCOPE) }
+        println("1065|R2|refusal|$selector|${refusal.message}")
+        refusal.message.orEmpty() shouldContain "a root selector the scoping does not know: $selector"
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("rootLookalikes")
+    fun `R2 a selector that only reads like a root form is admitted under the scope`(selector: String) {
+        val output = scoped("$selector { color: red }")
+        println("1065|R2|admitted|$selector|$output")
+        output shouldBe block("& $selector { color: red }")
+    }
+
     private fun scoped(source: String): String = ScopedStylesheet.scope(source, SCOPE).text
 
     /** The scope block around [inner], as the scoping writes it when nothing is hoisted. */
@@ -126,6 +174,80 @@ class ScopedStylesheetTest {
 
         @JvmStatic
         fun refusals(): List<Arguments> = REFUSALS
+
+        /** R1 (D3): a declaration as written, and as it must leave the scoping; the same row runs in a rule and a keyframe. */
+        @JvmStatic
+        fun remTexts(): List<Arguments> =
+            listOf(
+                Arguments.of("a double-quoted string", "content: \"1rem\"", "content: \"1rem\""),
+                Arguments.of("a single-quoted string", "content: '1rem'", "content: '1rem'"),
+                Arguments.of("an escaped quote before the rem", "content: \"a\\\"1rem\"", "content: \"a\\\"1rem\""),
+                Arguments.of("url with a double-quoted address", "background: url(\"/i/1rem.svg\")", "background: url(\"/i/1rem.svg\")"),
+                Arguments.of("url with a single-quoted address", "background: url('/i/1rem.svg')", "background: url('/i/1rem.svg')"),
+                Arguments.of("url with an unquoted address", "background: url(/img/1rem.svg)", "background: url(/img/1rem.svg)"),
+                Arguments.of("url written in upper case", "background: URL(/img/1rem.svg)", "background: URL(/img/1rem.svg)"),
+                Arguments.of("a string holding a parenthesis, then a length", "--label: \"(1rem\" 2rem", "--label: \"(1rem\" 32px"),
+                Arguments.of(
+                    "a url token and a length in one declaration",
+                    "background: url(a-1rem.png) 0 1rem",
+                    "background: url(a-1rem.png) 0 16px",
+                ),
+                Arguments.of(
+                    "a length inside calc, after a string",
+                    "--x: \"1rem\"; width: calc(100% - 2rem)",
+                    "--x: \"1rem\"; width: calc(100% - 32px)",
+                ),
+                Arguments.of(
+                    "a length in var after a url",
+                    "background: url(x.png); margin: var(--a, 1rem)",
+                    "background: url(x.png); margin: var(--a, 16px)",
+                ),
+                Arguments.of("a name that ends in url", "--myurl: 1rem", "--myurl: 16px"),
+            )
+
+        /** R2 (D2): a root form as a selector token anywhere but the supported beginning; each is refused. */
+        @JvmStatic
+        fun rootTokens(): List<String> =
+            listOf(
+                ".card:is(body)",
+                ".card:not(html)",
+                ".card:is(html)",
+                ".card:not(body)",
+                ".card:where(html)",
+                ".card:where(body)",
+                ".card:has(html)",
+                ".card:has(body)",
+                ".card:is(.a, body)",
+                ".card:not(:is(html))",
+                ".card:is(body.dark)",
+                ".card:is(BODY)",
+                ".card:has(> body)",
+                ".card:nth-child(2n of .a, body)",
+                ":root:not(body) .x",
+                "html:is(.a) :where(body) .x",
+                ".card:is(:root)",
+                ".a body",
+                ".a > html",
+            )
+
+        /** R2: forms that only read like a root form; each is admitted under the scope, its text unchanged. */
+        @JvmStatic
+        fun rootLookalikes(): List<String> =
+            listOf(
+                ".body",
+                "#html",
+                "[data-x=\"body\"]",
+                "[data-x=body]",
+                "[title=\"a (body) b\"]",
+                ".html-view",
+                "tbody",
+                ".my-body",
+                ".a:lang(html)",
+                ".a:is(.body, #html, tbody)",
+                ".a:not([data-x=\"body\"])",
+                ".a:has(> .my-body)",
+                ".a:nth-child(2n of .body)",
+            )
 
         /** Each refusal of D2 with its input and the words its message must hold (A.1). */
         private val REFUSALS: List<Arguments> =
