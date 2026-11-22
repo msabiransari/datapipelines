@@ -21,18 +21,22 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.ApplicationContext
 import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.test.util.ReflectionTestUtils
 import java.sql.DriverManager
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
 /**
@@ -51,7 +55,12 @@ import java.util.concurrent.TimeUnit
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["datapipelines.endpoints.mutations-enabled=true"],
+    // A script pool of one permit and one queue slot, so the pool-exhaustion case can fill it deterministically.
+    properties = [
+        "datapipelines.endpoints.mutations-enabled=true",
+        "datapipelines.script.pool-size=1",
+        "datapipelines.script.pool-queue=1",
+    ],
 )
 @Suppress("LargeClass") // one route family over one seed; the cases share it rather than re-seeding
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -59,6 +68,9 @@ import java.util.concurrent.TimeUnit
 class PublishedMutationServeIntegrationTest {
     @LocalServerPort
     private var port: Int = 0
+
+    @Autowired
+    private lateinit var context: ApplicationContext
 
     private val mapper = ObjectMapper()
 
@@ -423,7 +435,8 @@ class PublishedMutationServeIntegrationTest {
     @Test
     fun `a reservation whose owner never recorded the run is taken over once, on the original version`() {
         // The admitting replica "dies" between reserving and recording: its execution insert is refused and so is its
-        // release, leaving a reservation with no execution row — what a crashed second instance leaves behind.
+        // release, leaving a reservation with no execution row — what a crashed second instance leaves behind. The
+        // store confirmed no execution state, so the answer is the reservation refusal (§4), never an assumed 202.
         val stranded =
             trigger(
                 "mut1039_refuse_execution",
@@ -435,10 +448,15 @@ class PublishedMutationServeIntegrationTest {
                     mutate(writer, "POST", TAKEOVER, "takeover-1", order("TO-1"))
                 }
             }
-        withClue(stranded.asString()) { stranded.statusCode() shouldBe 202 }
-        val id = stranded.jsonPath().getString("execution_id")
+        withClue(stranded.asString()) {
+            stranded.statusCode() shouldBe 503
+            stranded.jsonPath().getString("error.code") shouldBe "idempotency.reservation_unavailable"
+            stranded.header("DP-Execution-Id") shouldBe null
+        }
+        // The reservation is KEPT (not released, not retired): the same key answers from it once the store is back.
+        val id = text("SELECT execution_id FROM published_mutation_reservations WHERE business_path = '$TAKEOVER'")
+        count("SELECT count(*) FROM published_mutation_reservations WHERE business_path = '$TAKEOVER'") shouldBe 1
         count("SELECT count(*) FROM pipeline_executions WHERE execution_id = '$id'") shouldBe 0
-        count("SELECT count(*) FROM published_mutation_reservations WHERE execution_id = '$id'") shouldBe 1
 
         // Inside the start window the owner may still be starting it: 202, the same id, nothing run.
         val early = mutate(writer, "POST", TAKEOVER, "takeover-1", order("TO-1"))
@@ -459,6 +477,151 @@ class PublishedMutationServeIntegrationTest {
         val again = mutate(writer, "POST", TAKEOVER, "takeover-1", order("TO-1"))
         again.jsonPath().getString("execution_id") shouldBe id
         skus("TO-1") shouldBe 1
+        count("SELECT count(*) FROM pipeline_executions WHERE execution_id = '$id'") shouldBe 1
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // A retry is judged by its ORIGINAL pin: typed parameters, result negotiation
+    // -----------------------------------------------------------------------------------------
+
+    @Test
+    fun `equal typed query values replay one execution, a different value is 409, and a newer pin never changes that`() {
+        val first = mutate(writer, "POST", "$QTY?quantity=01", "typed-1", null)
+        withClue(first.asString()) { first.statusCode() shouldBe 200 }
+        val id = first.jsonPath().getString("execution_id")
+        // The INTEGER 1 was bound (the template stores its text): "01" was never the value.
+        quantities("1") shouldBe 1
+
+        val respelled = mutate(writer, "POST", "$QTY?quantity=1", "typed-1", null)
+        withClue(respelled.asString()) { respelled.statusCode() shouldBe 200 }
+        respelled.jsonPath().getString("execution_id") shouldBe id
+        quantities(null) shouldBe 1
+        executionsOf(QTY_PIPELINE, id) shouldBe 1
+
+        val different = mutate(writer, "POST", "$QTY?quantity=2", "typed-1", null)
+        withClue(different.asString()) {
+            different.statusCode() shouldBe 409
+            different.jsonPath().getString("error.code") shouldBe "idempotency.key_reused_for_different_request"
+            different.asString() shouldNotContain id
+        }
+        quantities(null) shouldBe 1
+
+        // v2 declares quantity a STRING: under ITS rules "1" is not "01". The retry is still judged by v1's.
+        saveAndRelease(routes.getValue(QTY), QTY_TEXT_PIPELINE)
+        val afterRelease = mutate(writer, "POST", "$QTY?quantity=1", "typed-1", null)
+        withClue(afterRelease.asString()) { afterRelease.statusCode() shouldBe 200 }
+        afterRelease.jsonPath().getString("execution_id") shouldBe id
+        quantities(null) shouldBe 1
+
+        // Control: v2 IS current and STRING-typed — a fresh key runs it and keeps the text as sent.
+        val fresh = mutate(writer, "POST", "$QTY?quantity=01", "typed-2", null)
+        withClue(fresh.asString()) { fresh.statusCode() shouldBe 200 }
+        fresh.jsonPath().getString("execution_id") shouldNotBe id
+        quantities("v2:01") shouldBe 1
+        quantities(null) shouldBe 2
+    }
+
+    @Test
+    fun `an unsupported Accept is 406 on the first call, while running and after success - the reservation stays, nothing reruns`() {
+        val reservations = count("SELECT count(*) FROM published_mutation_reservations")
+        val executions = count("SELECT count(*) FROM pipeline_executions")
+        val refused = mutate(writer, "POST", ORDERS, "accept-1", order("NA-1"), accept = "text/plain")
+        withClue(refused.asString()) {
+            refused.statusCode() shouldBe 406
+            refused.jsonPath().getString("error.code") shouldBe "endpoint.not_acceptable"
+        }
+        count("SELECT count(*) FROM published_mutation_reservations") shouldBe reservations
+        count("SELECT count(*) FROM pipeline_executions") shouldBe executions
+        skus("NA-1") shouldBe 0
+
+        // Refused before admission: the key was not consumed, so the acceptable request runs under it.
+        val done = mutate(writer, "POST", ORDERS, "accept-1", order("NA-1"))
+        withClue(done.asString()) { done.statusCode() shouldBe 200 }
+        val id = done.jsonPath().getString("execution_id")
+        val afterSuccess = mutate(writer, "POST", ORDERS, "accept-1", order("NA-1"), accept = "text/plain")
+        withClue(afterSuccess.asString()) {
+            afterSuccess.statusCode() shouldBe 406
+            afterSuccess.jsonPath().getString("error.code") shouldBe "endpoint.not_acceptable"
+            afterSuccess.asString() shouldNotContain id
+        }
+        count("SELECT count(*) FROM published_mutation_reservations WHERE execution_id = '$id'") shouldBe 1
+        val replayed = mutate(writer, "POST", ORDERS, "accept-1", order("NA-1"))
+        withClue(replayed.asString()) { replayed.statusCode() shouldBe 200 }
+        replayed.jsonPath().getString("execution_id") shouldBe id
+        skus("NA-1") shouldBe 1
+        executionsOf(ORDERS_PIPELINE, id) shouldBe 1
+
+        // Running: the slow route answers 202 after its one-second timeout and keeps running for three.
+        val running = mutate(writer, "POST", SLOW, "accept-2", null)
+        withClue(running.asString()) { running.statusCode() shouldBe 202 }
+        val slowId = running.jsonPath().getString("execution_id")
+        val whileRunning = mutate(writer, "POST", SLOW, "accept-2", null, accept = "text/plain")
+        withClue(whileRunning.asString()) {
+            whileRunning.statusCode() shouldBe 406
+            whileRunning.jsonPath().getString("error.code") shouldBe "endpoint.not_acceptable"
+        }
+        text("SELECT status FROM pipeline_executions WHERE execution_id = '$slowId'") shouldBe "RUNNING"
+        awaitStatus(slowId, "SUCCESS")
+        mutate(writer, "POST", SLOW, "accept-2", null, accept = "text/plain").statusCode() shouldBe 406
+        val slowReplay = mutate(writer, "POST", SLOW, "accept-2", null)
+        withClue(slowReplay.asString()) { slowReplay.statusCode() shouldBe 200 }
+        slowReplay.jsonPath().getString("execution_id") shouldBe slowId
+        executionsOf(SLOW_PIPELINE, slowId) shouldBe 1
+        count("SELECT count(*) FROM published_mutation_reservations WHERE execution_id = '$slowId'") shouldBe 1
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Ported from the round-1 source review's defensive HTTP cases: pool exhaustion, restart, mutation budget
+    // -----------------------------------------------------------------------------------------
+
+    @Test
+    fun `a full script pool is 409 pool_exhausted with its execution on the first answer and the retry, writing nothing`() {
+        // Hold the configured pool's single admission permit: a deterministic full pool, no timing involved.
+        val pool = context.getBean("scriptEvaluationPool")
+        val permits = ReflectionTestUtils.getField(pool, "admission") as Semaphore
+        check(permits.tryAcquire()) { "the suite's one script-pool permit was already held" }
+        try {
+            val first = mutate(writer, "POST", ORDERS, "pool-1", order("POOL-1"))
+            withClue(first.asString()) { first.statusCode() shouldBe 409 }
+            first.jsonPath().getString("error.code") shouldBe "pipeline.script.pool_exhausted"
+            first.jsonPath().getString("error.details.status") shouldBe "FAILED"
+            val id = first.jsonPath().getString("error.details.execution_id")
+            val retry = mutate(writer, "POST", ORDERS, "pool-1", order("POOL-1"))
+            withClue(retry.asString()) { retry.statusCode() shouldBe 409 }
+            retry.jsonPath().getString("error.code") shouldBe "pipeline.script.pool_exhausted"
+            retry.jsonPath().getString("error.details.execution_id") shouldBe id
+            skus("POOL-1") shouldBe 0
+            executionsOf(ORDERS_PIPELINE, id) shouldBe 1
+        } finally {
+            permits.release()
+        }
+    }
+
+    @Test
+    fun `a restarted replica replays the original once, and a spent mutation budget refuses before any reservation`() {
+        val first = mutate(writer, "POST", ORDERS, "restart-1", order("RESTART-1"), replicaPort = portB)
+        withClue(first.asString()) { first.statusCode() shouldBe 200 }
+        val id = first.jsonPath().getString("execution_id")
+        // A fresh application context and server on replica B: empty instance caches, the same durable stores.
+        replicaB?.close()
+        bootReplicaB(budget = "1")
+        try {
+            val retry = mutate(writer, "POST", ORDERS, "restart-1", order("RESTART-1"), replicaPort = portB)
+            withClue(retry.asString()) { retry.statusCode() shouldBe 200 }
+            retry.jsonPath().getString("execution_id") shouldBe id
+            val reservations = count("SELECT count(*) FROM published_mutation_reservations")
+            val executions = count("SELECT count(*) FROM pipeline_executions")
+            val limited = mutate(writer, "POST", ORDERS, "restart-2", order("RESTART-2"), replicaPort = portB)
+            withClue(limited.asString()) { limited.statusCode() shouldBe 429 }
+            limited.jsonPath().getString("error.code") shouldBe "rate_limit.exceeded"
+            count("SELECT count(*) FROM published_mutation_reservations") shouldBe reservations
+            count("SELECT count(*) FROM pipeline_executions") shouldBe executions
+            skus("RESTART-2") shouldBe 0
+            skus("RESTART-1") shouldBe 1
+        } finally {
+            replicaB?.close()
+            bootReplicaB()
+        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -713,9 +876,11 @@ class PublishedMutationServeIntegrationTest {
         idempotencyKey: String?,
         body: String?,
         replicaPort: Int = port,
+        accept: String? = null,
     ): Response {
         val spec = base(key, idempotencyKey, replicaPort)
         body?.let { spec.contentType(ContentType.JSON).body(it) }
+        accept?.let { spec.accept(it) }
         return spec.`when`().request(method, "/api$path").thenReturn()
     }
 
@@ -753,6 +918,10 @@ class PublishedMutationServeIntegrationTest {
 
     /** Hit rows written by the pipeline that tags [path]; cases compare it before and after one call. */
     private fun hits(path: String): Int = targetCount("SELECT count(*) FROM mut_hits WHERE path = '$path'")
+
+    /** Rows the typed-parameter route wrote, with [value] (null: all of them). */
+    private fun quantities(value: String?): Int =
+        targetCount("SELECT count(*) FROM mut_qty" + (value?.let { " WHERE quantity = '$it'" } ?: ""))
 
     private fun executionsOf(
         pipeline: String,
@@ -861,7 +1030,7 @@ class PublishedMutationServeIntegrationTest {
      * instances of one deployment. Command-line args, because builder properties are defaults that application.yml's
      * environment placeholders would override.
      */
-    private fun bootReplicaB() {
+    private fun bootReplicaB(budget: String = KEY_BUDGET) {
         replicaB =
             SpringApplicationBuilder(DatapipelinesApplication::class.java).run(
                 "--server.port=0",
@@ -878,7 +1047,7 @@ class PublishedMutationServeIntegrationTest {
                 "--datapipelines.endpoints.mutations-enabled=true",
                 "--datapipelines.endpoints.body-max-bytes=$BODY_MAX_BYTES",
                 "--datapipelines.result.ttl-min-seconds=1",
-                "--datapipelines.endpoints.key-request-budget.max-requests=$KEY_BUDGET",
+                "--datapipelines.endpoints.key-request-budget.max-requests=$budget",
             )
         portB = Integer.parseInt(checkNotNull(replicaB?.environment?.getProperty("local.server.port")))
     }
@@ -913,7 +1082,8 @@ class PublishedMutationServeIntegrationTest {
                 )
                 s.execute("CREATE TABLE IF NOT EXISTS mut_hits (path text NOT NULL, at timestamptz NOT NULL DEFAULT now())")
                 s.execute("CREATE TABLE IF NOT EXISTS mut_state (name text PRIMARY KEY, state text NOT NULL)")
-                s.execute("TRUNCATE mut_lines, mut_hits, mut_state")
+                s.execute("CREATE TABLE IF NOT EXISTS mut_qty (quantity text NOT NULL)")
+                s.execute("TRUNCATE mut_lines, mut_hits, mut_state, mut_qty")
                 s.execute("INSERT INTO mut_state (name, state) VALUES ('put-target', 'initial'), ('delete-target', 'present')")
             }
         }
@@ -945,6 +1115,9 @@ class PublishedMutationServeIntegrationTest {
         // The idempotent PUT and DELETE of one stable resource: the same final state however often they run.
         sqlTemplate(STABLE_PUT_TEMPLATE, "UPDATE mut_state SET state = 'set' WHERE name = 'put-target'")
         sqlTemplate(STABLE_DELETE_TEMPLATE, "DELETE FROM mut_state WHERE name = 'delete-target'")
+        // The typed-parameter route: v1 binds quantity as an INTEGER, v2 as a STRING and tags its rows.
+        sqlTemplate(QTY_TEMPLATE, "INSERT INTO mut_qty (quantity) VALUES (CAST(:quantity AS text))")
+        sqlTemplate(QTY_TEXT_TEMPLATE, "INSERT INTO mut_qty (quantity) VALUES ('v2:' || CAST(:quantity AS text))")
         // One hit row per run, tagged with the route that ran it (a parameterless DML: the path is the template's own).
         for (path in listOf(HITS, VERSIONED, TAKEOVER)) {
             sqlTemplate(hitTemplate(path), "INSERT INTO mut_hits (path) VALUES ('$path')")
@@ -965,6 +1138,15 @@ class PublishedMutationServeIntegrationTest {
         // The v2 pins of the version-switch and takeover cases: each tags its OWN route, so "v2 never ran" is countable.
         pipelines[HIT_VERSIONED_PIPELINE] = pipeline(HIT_VERSIONED_PIPELINE, listOf(hit(VERSIONED)), null)
         pipelines[HIT_TAKEOVER_PIPELINE] = pipeline(HIT_TAKEOVER_PIPELINE, listOf(hit(TAKEOVER)), null)
+        pipelines[QTY_PIPELINE] =
+            pipeline(QTY_PIPELINE, listOf(writing(QTY_TEMPLATE)), null, quantity("INTEGER"))
+        pipelines[QTY_TEXT_PIPELINE] =
+            pipeline(
+                QTY_TEXT_PIPELINE,
+                listOf(writing(QTY_TEXT_TEMPLATE)),
+                null,
+                quantity("STRING"),
+            )
         pipelines[FAIL_PIPELINE] =
             pipeline(
                 FAIL_PIPELINE,
@@ -999,6 +1181,7 @@ class PublishedMutationServeIntegrationTest {
         routes[SLOW] = publish(SLOW, "POST", SLOW_PIPELINE, 1)
         routes[SLEEPY] = publish(SLEEPY, "POST", SLEEPY_PIPELINE, 1)
         routes[FAIL] = publish(FAIL, "POST", FAIL_PIPELINE, TIMEOUT_S)
+        routes[QTY] = publish(QTY, "POST", QTY_PIPELINE, TIMEOUT_S)
     }
 
     private fun mintKeys() {
@@ -1017,6 +1200,7 @@ class PublishedMutationServeIntegrationTest {
             SLOW to "POST",
             SLEEPY to "POST",
             FAIL to "POST",
+            QTY to "POST",
         ).forEach { (path, method) -> grant(writer, path, method) }
         reader = mint("mut-reader", bindings = """["/"]""", workspace = null)
         grant(reader, ORDERS, "POST")
@@ -1221,6 +1405,23 @@ class PublishedMutationServeIntegrationTest {
             "depends_on" to emptyList<String>(),
         )
 
+    /** The typed route's one optional query parameter, declared as [type]. */
+    private fun quantity(type: String): Map<String, Any?> =
+        mapOf("quantity" to mapOf("type" to type, "required" to false, "description" to "How many to write."))
+
+    /** One parameterised write whose statistics are the zero-caller answer. */
+    private fun writing(template: String): Map<String, Any?> =
+        mapOf(
+            "id" to "write",
+            "description" to "One typed write",
+            "type" to "DML",
+            "source" to DATASOURCE,
+            "template" to mapOf("id" to template, "version" to 1),
+            "operation" to "update",
+            "output" to mapOf("target" to "discard"),
+            "depends_on" to emptyList<String>(),
+        )
+
     private fun hitTemplate(path: String): String = "test/mut1039_hit${path.substringAfterLast('/')}.sql"
 
     /** Creates [name] and releases its v1 — an API pins an exact released version. */
@@ -1228,6 +1429,7 @@ class PublishedMutationServeIntegrationTest {
         name: String,
         nodes: List<Map<String, Any?>>,
         requestBody: Map<String, Any?>?,
+        parameters: Map<String, Any?> = emptyMap(),
     ): String {
         val document =
             mapOf(
@@ -1235,7 +1437,7 @@ class PublishedMutationServeIntegrationTest {
                 "name" to name,
                 "display_name" to "Mutation 1039 $name",
                 "description" to "#1039 published mutation fixture",
-                "parameters" to emptyMap<String, Any>(),
+                "parameters" to parameters,
                 "nodes" to nodes,
             ) + (requestBody?.let { mapOf("request_body" to it) } ?: emptyMap())
         val created =
@@ -1384,6 +1586,7 @@ class PublishedMutationServeIntegrationTest {
         private const val SLOW = "/mut/v1/slow"
         private const val SLEEPY = "/mut/v1/sleepy"
         private const val FAIL = "/mut/v1/fail"
+        private const val QTY = "/mut/v1/qty"
 
         private const val ORDERS_PIPELINE = "test/mut1039_orders"
         private const val TAKEOVER_PIPELINE = "test/mut1039_takeover"
@@ -1396,6 +1599,8 @@ class PublishedMutationServeIntegrationTest {
         private const val HIT_VERSIONED_PIPELINE = "test/mut1039_hit_versioned"
         private const val HIT_TAKEOVER_PIPELINE = "test/mut1039_hit_takeover"
         private const val FAIL_PIPELINE = "test/mut1039_fail"
+        private const val QTY_PIPELINE = "test/mut1039_qty"
+        private const val QTY_TEXT_PIPELINE = "test/mut1039_qty_text"
 
         private const val LINES_TEMPLATE = "test/mut1039_lines.jsonata"
         private const val FAIL_TEMPLATE = "test/mut1039_fail.jsonata"
@@ -1405,6 +1610,8 @@ class PublishedMutationServeIntegrationTest {
         private const val STABLE_DELETE_TEMPLATE = "test/mut1039_stable_delete.sql"
         private const val SLOW_TEMPLATE = "test/mut1039_slow.sql"
         private const val SLEEPY_TEMPLATE = "test/mut1039_sleepy.sql"
+        private const val QTY_TEMPLATE = "test/mut1039_qty.sql"
+        private const val QTY_TEXT_TEMPLATE = "test/mut1039_qty_text.sql"
 
         private const val TIMEOUT_S = 60
         private const val SLOW_SECONDS = 3
