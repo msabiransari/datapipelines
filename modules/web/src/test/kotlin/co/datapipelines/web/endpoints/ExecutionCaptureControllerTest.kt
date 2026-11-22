@@ -12,7 +12,9 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.web.api.ApiErrors
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -119,11 +121,29 @@ class ExecutionCaptureControllerTest {
             """["correlation_id"]""",
             """{"correlation_id": 42}""",
             "\"text\"",
-            "{not json",
+            "[".repeat(RequestLimits.MAX_NESTING_DEPTH) + "]".repeat(RequestLimits.MAX_NESTING_DEPTH),
         ).forEach { body ->
             val refused = shouldThrow<DatapipelinesException> { controller.start(endpointId, body) }
             refused.code shouldBe PipelineErrorCodes.ExecutionCapture.INVALID
             refused.details["reason"] shouldBe ExecutionCaptureService.REASON_CORRELATION
+        }
+        verify(exactly = 0) { service.start(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `unreadable start bytes are malformed_json - the depth bound named, a parse failure quoting nothing of the body`() {
+        signIn(session)
+        val endpointId = UUID.randomUUID()
+        val deep = "[".repeat(RequestLimits.MAX_NESTING_DEPTH + 1) + "]".repeat(RequestLimits.MAX_NESTING_DEPTH + 1)
+        val overBound = shouldThrow<DatapipelinesException> { controller.start(endpointId, deep) }
+        overBound.code shouldBe PipelineErrorCodes.ExecutionCapture.INVALID
+        overBound.details["reason"] shouldBe ApiErrors.MALFORMED_JSON
+        overBound.message shouldContain "nesting depth"
+        listOf("{not json", """{"correlation_id": secret-filter-text}""").forEach { body ->
+            val broken = shouldThrow<DatapipelinesException> { controller.start(endpointId, body) }
+            broken.code shouldBe PipelineErrorCodes.ExecutionCapture.INVALID
+            broken.details["reason"] shouldBe ApiErrors.MALFORMED_JSON
+            broken.message shouldBe ExecutionCaptureController.MALFORMED_MESSAGE
         }
         verify(exactly = 0) { service.start(any(), any(), any(), any()) }
     }

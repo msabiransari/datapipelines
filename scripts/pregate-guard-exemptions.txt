@@ -111,6 +111,7 @@ waived-for-cost co.datapipelines.application.endpoints.EndpointPromotionImportIn
 waived-for-cost co.datapipelines.application.endpoints.EndpointVersionBodyHashIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointVersionConversionIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointVersionLifecycleIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.ExecutionCaptureIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.PublishedMutationReservationIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.RetirePreRep5RowsMigrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.lake.LakeReferenceIndexRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer

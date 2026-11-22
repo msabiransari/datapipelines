@@ -1947,7 +1947,7 @@ A workspace administrator's temporary capture of a published mutation's declared
 | `execution.capture.already_active` | 409 | A capture window is already active for this route entity and method in the workspace. `details.capture_id` names it; stop it before opening another. A window past its deadline does not count — the next start closes it as expired |
 | `execution.capture.not_found` | 404 | No capture window with that id on that route, or no captured detail for that execution, in the selected workspace. An execution that was never captured, another workspace's execution and an unknown id answer the same |
 | `execution.capture.expired` | 410 | The execution was captured, but its private details passed `expires_at` (admission + `datapipelines.endpoints.capture-detail-retention-hours`). Refused on every read from that instant, whether or not the retention tick has deleted the rows yet; `details.expired_at` carries the instant |
-| `execution.capture.invalid` | 400 | The start is refused before anything is written: the route is a `GET` (`details.reason` = `method_not_capturable`), or the correlation filter is not one UUID (`correlation_id_invalid`) |
+| `execution.capture.invalid` | 400 | The start is refused before anything is written: the route is a `GET` (`details.reason` = `method_not_capturable`), the correlation filter is not one UUID (`correlation_id_invalid`), or the body cannot be read: not JSON, or past the [§13.21](#1321-request-limits) bounds (`malformed_json`) |
 
 ---
 ## 14. Pipeline Lifecycle Operations

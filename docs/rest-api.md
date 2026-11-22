@@ -3418,7 +3418,8 @@ A workspace administrator's temporary, private capture of what a published `POST
 | Refusal | Answer |
 |---|---|
 | a `GET` route | `400 execution.capture.invalid`, `details.reason = method_not_capturable` |
-| a filter that is not one UUID, a non-string filter, any other body field, a body that is not JSON | `400 execution.capture.invalid`, `details.reason = correlation_id_invalid` (the value is never echoed) |
+| a filter that is not one UUID, a non-string filter, any other body field, a body that is JSON but not one object | `400 execution.capture.invalid`, `details.reason = correlation_id_invalid` (the value is never echoed) |
+| a body that is not JSON, or nested past the request bound ([Pipeline Contract §13.21](pipeline-contract.md#1321-request-limits)) | `400 execution.capture.invalid`, `details.reason = malformed_json`, the house shape of every string-body route; the message names a bound breach and is otherwise constant, quoting none of the body |
 | unknown route, or another workspace's | `404 endpoint.not_found` |
 | a window is already open for this route and method | `409 execution.capture.already_active`, `details.capture_id` and `details.deadline_at` name it; a window past its deadline does not count — this start closes it as `expired` |
 

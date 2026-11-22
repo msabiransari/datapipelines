@@ -84,6 +84,8 @@ class RequestNestingDepthE2eTest {
             // #786: the API release plan body is read the same way, BEFORE any lookup; the API family answers an
             // unusable body with the execute code.
             StringRoute("POST", "/api/v1/endpoints/${UUID.randomUUID()}/release", EXECUTE_MALFORMED),
+            // #1043: the optional capture filter body is read through the request mapper BEFORE any lookup.
+            StringRoute("POST", "/api/v1/endpoints/${UUID.randomUUID()}/captures", CAPTURE_MALFORMED),
             StringRoute("POST", "/api/v1/pipelines/${UUID.randomUUID()}/execute", EXECUTE_MALFORMED),
             StringRoute("POST", "/api/v1/schedules", SCHEDULE_MALFORMED),
             StringRoute("PUT", "/api/v1/schedules/${UUID.randomUUID()}", SCHEDULE_MALFORMED),
@@ -212,12 +214,14 @@ class RequestNestingDepthE2eTest {
                 "ParameterEvaluationStreamController.kt" to 1,
                 // #786: the API release plan.
                 "EndpointVersionsController.kt" to 1,
+                // #1043: the capture window's optional filter.
+                "ExecutionCaptureController.kt" to 1,
             )
         withClue("files declaring an @RequestBody String parameter, and how many each declares") {
             found.entries.map { it.key to it.value } shouldContainExactlyInAnyOrder
                 (swept + ALLOWLISTED).entries.map { it.key to it.value }
         }
-        // 35 routes sweep themselves, no allowlist (#323, #10 L1c, #353, #375, #517, #786, #873)
+        // 39 routes sweep themselves, no allowlist (#323, #10 L1c, #353, #375, #517, #786, #873, #1043)
         stringRoutes.size shouldBe swept.values.sum()
     }
 
@@ -331,6 +335,7 @@ class RequestNestingDepthE2eTest {
         const val VISUALIZATION_MALFORMED = "visualization.validation.body_invalid"
         const val DASHBOARD_MALFORMED = "dashboard.validation.body_invalid"
         const val PARAMETER_MALFORMED = "parameter.validation.body_invalid"
+        const val CAPTURE_MALFORMED = "execution.capture.invalid"
 
         /** `{` request, `params`, `arguments`: the nesting a tools/call spends before its arguments' values. */
         const val MCP_ENVELOPE_DEPTH = 3

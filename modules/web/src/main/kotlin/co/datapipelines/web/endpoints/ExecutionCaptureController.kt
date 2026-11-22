@@ -6,10 +6,15 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.web.api.ApiErrors
+import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
+import co.datapipelines.web.api.RequestBodies
 import co.datapipelines.web.api.currentPrincipal
-import com.fasterxml.jackson.core.JacksonException
+import com.fasterxml.jackson.core.JsonProcessingException
+import com.fasterxml.jackson.core.exc.StreamConstraintsException
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.http.CacheControl
@@ -156,7 +161,8 @@ class ExecutionCaptureController(
                     },
             )
 
-        private val JSON = ObjectMapper()
+        /** The request mapper (#291): the stated read bounds, not Jackson's defaults (pipeline-contract §13.21). */
+        private val REQUEST_MAPPER = RequestLimits.requestMapper(ObjectMapper())
 
         /**
          * The optional filter of a start body: no body, a blank one, JSON `null`, `{}` and `{"correlation_id": null}`
@@ -169,29 +175,41 @@ class ExecutionCaptureController(
                 body.isObject &&
                     body.fieldNames().asSequence().all { it == FIELD_CORRELATION } &&
                     (field == null || field.isNull || field.isTextual)
-            if (!wellFormed) throw invalidBody(null)
+            if (!wellFormed) throw invalidBody()
             return field?.takeIf { it.isTextual }?.asText()
         }
 
-        /** The body's JSON tree, or null when there is none (absent, blank or JSON `null`); broken JSON is refused. */
+        /** The body's JSON tree, or null when there is none (absent, blank or JSON `null`); unreadable bytes are refused. */
         private fun parsed(text: String?): JsonNode? {
             if (text.isNullOrBlank()) return null
-            val tree =
-                try {
-                    JSON.readTree(text)
-                } catch (e: JacksonException) {
-                    throw invalidBody(e)
-                }
-            return tree.takeUnless { it.isNull || it.isMissingNode }
+            return RequestBodies.readTree(REQUEST_MAPPER, text, ::malformedBody).takeUnless { it.isNull || it.isMissingNode }
         }
 
-        private fun invalidBody(cause: Throwable?) =
+        private fun invalidBody() =
             DatapipelinesException(
                 code = PipelineErrorCodes.ExecutionCapture.INVALID,
                 message = "The capture request accepts only an optional correlation_id UUID.",
                 details = mapOf("reason" to ExecutionCaptureService.REASON_CORRELATION),
-                cause = cause,
             )
+
+        /**
+         * Bytes that cannot be read — not JSON, or past the request bounds (#291) — in the house shape every string-body
+         * route answers (`details.reason = "malformed_json"`). A bound breach is named in the constraint's own words, which
+         * carry none of the caller's bytes; any other parse failure keeps one constant message, because the parser's
+         * would quote a fragment of the body, and so of the filter (rest-api §26.2: the value is never echoed).
+         */
+        private fun malformedBody(cause: JsonProcessingException): ApiException {
+            val bound =
+                generateSequence<Throwable>(cause) { it.cause }
+                    .filterIsInstance<StreamConstraintsException>()
+                    .firstOrNull()
+            return ApiException(
+                PipelineErrorCodes.ExecutionCapture.INVALID,
+                bound?.let { "Request body is past the request bounds: ${it.originalMessage}" } ?: MALFORMED_MESSAGE,
+                mapOf(ApiErrors.REASON to ApiErrors.MALFORMED_JSON),
+                cause,
+            )
+        }
 
         private fun <T> noStore(
             status: HttpStatus,
@@ -199,5 +217,6 @@ class ExecutionCaptureController(
         ): ResponseEntity<ApiResponse<T>> = ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(ApiResponse.of(body))
 
         private const val FIELD_CORRELATION = "correlation_id"
+        internal const val MALFORMED_MESSAGE = "Request body is not valid JSON."
     }
 }
