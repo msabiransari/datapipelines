@@ -47,9 +47,9 @@ function plant(file, from, to) {
 const R = eng();
 const CLEAN = engineWith([TYPE]);
 /**
- * #1059 (D9): an axis writes 5e99 where it wrote 134 digits, so no fixture reaches condition (a) any more. The rule
- * stays the frame's and is read on a copy whose e-form start points are planted out of reach, built for the engine
- * under test (LONG) and for this test's own oracle (LONG_ORACLE), where extent-1e100 writes its 134 characters again.
+ * #1059 (D9): an axis writes 5e99 where the compact fixture wrote 118 characters, so no fixture reaches condition (a).
+ * The rule stays the frame's and is read on a copy whose e-form start points are planted out of reach, built for the engine
+ * under test (LONG) and for this test's own oracle (LONG_ORACLE), where extent-1e100 writes its 118 characters again.
  */
 const LONG_TEXTS = plant("01-text.js", "var SCI_FROM = 15, SCI_BELOW = -5;", "var SCI_FROM = 400, SCI_BELOW = -400;");
 const LONG = eng(LONG_TEXTS);
@@ -468,7 +468,7 @@ test("G4: the plate left out, the plate after its number, condition (a) removed,
   const after = eng(plant(FILE, PLATE + NUMBER, NUMBER + PLATE));
   red(failures(after, "thousands-two-series", [[960, 540]]), /has no plate directly before it/, "plate after its number");
   const NO_A = plant(FILE, "      if (plate.x0 < plot.x || plate.y0 < plot.y || plate.x1 > plot.x + plot.w || plate.y1 > plot.y + plot.h) continue;\n", "");
-  // Read on the copy with the e form's start points out of reach (#1059, D9), where extent-1e100 writes 134 digits.
+  // Read on the copy with the e form's start points out of reach (#1059, D9), where extent-1e100 writes 118 characters.
   // At 360 x 240 a name and the centre also refuse the number (conditions b and d), so the plant is read at 360 x 480,
   // where condition (a) alone keeps the 645 px text out.
   const noA = eng((s) => {
