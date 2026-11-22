@@ -265,6 +265,11 @@ class ScriptVocabularyGuardTest {
                     "the CSS transform property (#663)",
                 ),
                 Triple(
+                    Regex("^tests/browser-tests/src/test/kotlin/co/datapipelines/browser/ScopedStylesheetBrowserTest\\.kt$"),
+                    Regex("^(?:(?!transform).|(?<![\\w-])transform-origin(?![\\w-]))*$", setOf(IGNORE_CASE)),
+                    "the CSS transform-origin property's name, in #1065 B1's closed list of the page's height-bound properties",
+                ),
+                Triple(
                     Regex("^docs/dashboards\\.md$"),
                     Regex("transform", setOf(IGNORE_CASE)),
                     "the visualization block: a visualization pins a TEMPLATE through the `transform` key",

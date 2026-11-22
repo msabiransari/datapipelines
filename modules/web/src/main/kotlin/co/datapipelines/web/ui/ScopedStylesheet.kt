@@ -87,7 +87,7 @@ object ScopedStylesheet {
         val counts: Counts,
     )
 
-    /** A source this transform refuses to scope; the message names the rule or the at-rule. */
+    /** A source the scoping refuses; the message names the rule or the at-rule. */
     class Refusal(
         message: String,
     ) : IllegalArgumentException(message)
@@ -155,7 +155,7 @@ object ScopedStylesheet {
             when {
                 name !in HOISTED && name !in GROUPS -> {
                     throw Refusal(
-                        "an at-rule this transform does not know: ${prelude.take(PRELUDE_SHOWN)}",
+                        "an at-rule the scoping does not know: ${prelude.take(PRELUDE_SHOWN)}",
                     )
                 }
 
@@ -185,7 +185,7 @@ object ScopedStylesheet {
             if ('{' in CssText.outsideStrings(body)) throw Refusal("a source rule already nests (a rule inside its block): $prelude")
             val list = CssText.splitTopLevel(prelude, ',').map(String::trim).filter(String::isNotEmpty)
             val declarations = if (list.any { it.lowercase() in PAGE_ELEMENTS }) pageDeclarations(prelude, list, body) else body
-            return list.joinToString(", ", transform = ::selector) + " {" + px(declarations) + "}"
+            return list.joinToString(", ") { selector(it) } + " {" + px(declarations) + "}"
         }
 
         /** A rule on `html`/`body`: [CARRIED] declarations kept, [DROPPED] ones left out, any other refused. */
@@ -228,7 +228,7 @@ object ScopedStylesheet {
             val root = ROOT_START.find(source)
             if (root != null) {
                 val rest = source.substring(root.range.last + 1)
-                if (ROOTISH.containsMatchIn(rest)) throw Refusal("a root selector this transform does not know: $source")
+                if (ROOTISH.containsMatchIn(rest)) throw Refusal("a root selector the scoping does not know: $source")
                 val combinator = firstCombinator(rest)
                 if (combinator in SIBLING_COMBINATORS) {
                     throw Refusal("a root selector that selects a sibling of the container (combinator $combinator): $source")
@@ -236,7 +236,7 @@ object ScopedStylesheet {
                 rootBeginning.merge(combinator ?: "none", 1, Int::plus)
                 return "&:is(&)$rest"
             }
-            if (ROOTISH.containsMatchIn(source)) throw Refusal("a root selector this transform does not know: $source")
+            if (ROOTISH.containsMatchIn(source)) throw Refusal("a root selector the scoping does not know: $source")
             return "& $source"
         }
 

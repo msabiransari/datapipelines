@@ -9,7 +9,7 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 
 /**
- * The scoping transform rule by rule (#1065 A.1, D2, D3): literal input, literal expected output, one case per rule,
+ * The scoping rule by rule (#1065 A.1, D2, D3): literal input, literal expected output, one case per rule,
  * and every refusal with the words its message must carry. The real sheets are [ScopedStylesheetSheetsTest]'s.
  */
 class ScopedStylesheetTest {
@@ -55,10 +55,10 @@ class ScopedStylesheetTest {
     fun `font-face and keyframes are hoisted before the block, a keyframe's rem converted`() {
         val source =
             "@font-face { font-family: \"F\"; src: url(a.woff2) } .a { color: red } " +
-                "@keyframes k { from { opacity: 0 } to { transform: translateY(0.5rem) } }"
+                "@keyframes k { from { opacity: 0 } to { translate: 0 0.5rem } }"
         scoped(source) shouldBe
             "@font-face { font-family: \"F\"; src: url(a.woff2) }\n" +
-            "@keyframes k { from { opacity: 0 } to { transform: translateY(8px) } }\n" +
+            "@keyframes k { from { opacity: 0 } to { translate: 0 8px } }\n" +
             block("& .a { color: red }")
     }
 
@@ -106,7 +106,7 @@ class ScopedStylesheetTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("refusals")
-    fun `a source the transform cannot scope is refused, naming it`(
+    fun `a source that cannot be scoped is refused, naming it`(
         label: String,
         source: String,
         message: String,
@@ -118,7 +118,7 @@ class ScopedStylesheetTest {
 
     private fun scoped(source: String): String = ScopedStylesheet.scope(source, SCOPE).text
 
-    /** The scope block around [inner], as the transform writes it when nothing is hoisted. */
+    /** The scope block around [inner], as the scoping writes it when nothing is hoisted. */
     private fun block(inner: String): String = "$SCOPE {\n$inner\n}\n"
 
     companion object {
@@ -134,7 +134,7 @@ class ScopedStylesheetTest {
                 Arguments.of(
                     "an unknown at-rule",
                     "@starting-style { .a { b: c } }",
-                    "an at-rule this transform does not know: @starting-style",
+                    "an at-rule the scoping does not know: @starting-style",
                 ),
                 Arguments.of(
                     "@property",
@@ -145,7 +145,7 @@ class ScopedStylesheetTest {
                 Arguments.of("@font-feature-values", "@font-feature-values F { @styleset { a: 1 } }", "@font-feature-values is refused"),
                 Arguments.of("@-webkit-keyframes", "@-webkit-keyframes k { from { b: c } }", "@-webkit-keyframes is refused"),
                 Arguments.of("an at-rule without a block", "@layer a, b;", "an at-rule without a block: @layer a, b"),
-                Arguments.of("a root form not at the start", ".a :root { b: c }", "a root selector this transform does not know: .a :root"),
+                Arguments.of("a root form not at the start", ".a :root { b: c }", "a root selector the scoping does not know: .a :root"),
                 Arguments.of(
                     ":root + sibling",
                     ":root + .outside { color: red }",

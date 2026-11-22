@@ -10,11 +10,11 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
 /**
- * The transform over the REAL sheets (#1065 A.2, D2, D3, D8): the six sheets of the client library's stylesheet, read
+ * The scoping over the REAL sheets (#1065 A.2, D2, D3, D8): the six sheets of the client library's stylesheet, read
  * from the repository and joined as the library joins them, and each theme sheet under its own scope. Each count is
  * printed beside the brief's (measured at `b479c5d81`) with a floor of 1, so an empty read is red and none is pinned.
  *
- * The output is then read back by THIS test's own small reader ([OutputReader]), never by the transform's: every
+ * The output is then read back by THIS test's own small reader ([OutputReader]), never by the scoping's: every
  * top-level statement is `@font-face`, `@keyframes` or the one scope block; no declaration holds a `rem` length; no
  * selector inside the block lacks `&`; no selector that begins `&:is(&)` goes on with a sibling combinator. And the
  * names the hoisted rules define for the host's whole page equal the names the skill's sentence 6 gives, read from the

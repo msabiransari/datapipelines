@@ -489,7 +489,7 @@ class StaticCacheHeadersE2eTest {
         }
     }
 
-    /** The scoping transform the application serves through (`ScopedStylesheet`, read by reflection), as UTF-8 bytes. */
+    /** The scoping the application serves through (`ScopedStylesheet`, read by reflection), as UTF-8 bytes. */
     private fun scoped(
         source: String,
         scope: String,
