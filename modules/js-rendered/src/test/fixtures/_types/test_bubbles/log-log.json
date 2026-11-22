@@ -1,0 +1,79 @@
+{
+ "note": "a log x against a log value axis, radii 3 to 32",
+ "document": {
+  "display_name": "Test type test_bubbles",
+  "config": {
+   "mark": {
+    "type": "test_bubbles"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "log"
+    },
+    "y": {
+     "field": "y",
+     "log": true
+    },
+    "size": {
+     "field": "r"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0.02,
+   0.2,
+   2.0,
+   20.0,
+   200.0,
+   0.05,
+   0.5,
+   5.0
+  ],
+  "y": [
+   3.0,
+   9.0,
+   30.0,
+   90.0,
+   300.0,
+   1.0,
+   12.0,
+   200.0
+  ],
+  "r": [
+   32.0,
+   3.0,
+   10.0,
+   5.0,
+   24.0,
+   7.0,
+   14.0,
+   28.0
+  ],
+  "s": [
+   "A",
+   "A",
+   "A",
+   "A",
+   "A",
+   "B",
+   "B",
+   "B"
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE",
+  "r": "DOUBLE",
+  "s": "STRING"
+ },
+ "expect": {
+  "marks": 8
+ }
+}

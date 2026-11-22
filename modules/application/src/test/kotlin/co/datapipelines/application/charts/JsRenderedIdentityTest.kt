@@ -105,7 +105,9 @@ class JsRenderedIdentityTest {
             sandbox.evaluate(
                 """
                 var cases = [[[0, 0.0001, 0.0002], null], [[0, 0.00001, 0.00002, 0.00003], null],
-                  [[0, 0.0000025, 0.000005, 0.0000075, 0.00001], null], [[0, 0.0001, 0.0002], "percent"]];
+                  [[0, 0.0000025, 0.000005, 0.0000075, 0.00001], null], [[0, 0.0001, 0.0002], "percent"],
+                  [[0, 2.5e17, 5e17, 7.5e17, 1e18], null], [[1e-9], null],
+                  [[-1.7976931348623157e308, 1.7976931348623157e308], null], [[0, 2.5e-9, 5e-9], "percent"], [[0.0000105], null]];
                 return cases.map(function (c) { return JsRendered.text.ticks(c[0], c[1]).join("|"); }).join("\n");
                 """.trimIndent(),
                 null,
@@ -114,9 +116,19 @@ class JsRenderedIdentityTest {
             listOf(
                 "0|0.0001|0.0002",
                 "0|0.00001|0.00002|0.00003",
-                "0|0.0000025|0.000005|0.0000075|0.00001",
+                // From 10^15 up and below 10^-5 an axis writes the e form, the power's minus U+2212 (#1059, owner 2026-11-21).
+                "0|2.5e\u22126|5e\u22126|7.5e\u22126|1e\u22125",
                 "0%|0.01%|0.02%",
+                "0|2.5e17|5e17|7.5e17|1e18",
+                "1e\u22129",
+                "\u22121.797693e308|1.797693e308",
+                "0%|2.5e\u22127%|5e\u22127%",
+                "0.0000105",
             )
+        // This test's reader reads every one of those labels, the e form's exponent as written.
+        direct.lines().flatMap { it.split("|") }.forEach { readLabel(it) }
+        readLabel("1e\u22129") shouldBe BigDecimal("1E-9")
+        readLabel("5e\u22127%") shouldBe BigDecimal("5E-9")
         for ((fixture, most) in SMALL_VALUE_FIXTURES) {
             for (frame in listOf("960x540", "300x180")) {
                 val input = ChartGuardFiles.resource("${ChartGuardFiles.EMITTED}/$fixture/$frame.input.json")

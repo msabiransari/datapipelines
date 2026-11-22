@@ -293,6 +293,8 @@
       if (lo === 0) return [0, 1];
       return lo > 0 ? [0, lo] : [lo, 0];
     }
+    // Two ends the ticks cannot tell apart are one value, as on the single axis (owner 2026-11-21, #1063).
+    if (S.oneValue(lo, hi)) return lo > 0 ? [0, hi] : hi < 0 ? [lo, 0] : [lo, hi];
     return [lo, hi];
   }
 
@@ -353,6 +355,8 @@
     var k0 = S.decade(min), k = n - 1, m = 1;
     while (k0 + k * m <= 308 && S.pow10(k0 + k * m) < max) m++;
     if (k0 + k * m > 308) return null;
+    // Below the table too: the smallest double lies under 10^-323, and no power of ten holds it (#1060).
+    if (S.pow10(k0) > min) return null;
     var ticks = [], texts = [];
     for (var j = 0; j < n; j++) {
       ticks.push(S.pow10(k0 + j * m));

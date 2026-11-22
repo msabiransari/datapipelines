@@ -50,6 +50,11 @@
       if (right) throw new Error("cartesian: second cannot stand beside right");
       if (typeof L.second.extent !== "function") throw new Error("cartesian: second.extent is a function");
     }
+    if (has(L.pad)) {
+      if (typeof L.pad !== "function") throw new Error("cartesian: pad is a function of the helper");
+      if (!has(L.x) || L.vertical !== true) throw new Error("cartesian: pad is for a layout part with x and vertical: true");
+      if (has(L.second)) throw new Error("cartesian: pad cannot stand beside second");
+    }
     if (has(L.x) && has(L.x.edges)) {
       var ed = L.x.edges, ok = Array.isArray(ed) && ed.length >= 2;
       for (var i = 0; ok && i < ed.length; i++) ok = typeof ed[i] === "number" && ed[i] > -Infinity && ed[i] < Infinity && (i === 0 || ed[i] > ed[i - 1]);
@@ -116,13 +121,13 @@
   }
 
   /** The x labels of a layout part at a plot: the bands' centres, or a position axis's ticks at their places. */
-  function xLabels(lvl, L, plot) {
+  function xLabels(lvl, L, plot, px) {
     if (!L.x) {
       var labels = bandLabels(L), step = plot.w / Math.max(1, L.bands.length);
       for (var j = 0; j < labels.length; j++) labels[j].x = plot.x + step * (j + 0.5);
       return { labels: labels, axis: null, step: step };
     }
-    var ax = positionAxis(lvl, L.x, plot.w), sc = A.scaleOf(ax, plot.x, plot.x + plot.w), out = [];
+    var ax = positionAxis(lvl, L.x, plot.w), sc = A.scaleOf(ax, plot.x + (px || 0), plot.x + plot.w - (px || 0)), out = [];
     for (var i = 0; i < ax.ticks.length; i++) out.push({ text: ax.ticks[i].text, under: ax.ticks[i].under, x: sc(ax.ticks[i].at) });
     return { labels: out, axis: { lo: ax.lo, hi: ax.hi, log: ax.log, scale: sc }, step: plot.w / Math.max(1, L.bands.length) };
   }
@@ -134,6 +139,20 @@
   function reachOf(L, h) {
     var r = typeof L.reach === "function" ? L.reach(h) : 0;
     return typeof r === "number" && r > 0 ? r : 0;
+  }
+
+  /** The room a layout part asks for inside the plot's edges (pad(h), px), or null when it has no `pad`; a bad value throws. */
+  function padOf(L, h) {
+    if (!has(L.pad)) return null;
+    var p = L.pad(h);
+    if (typeof p !== "number" || !(p >= 0 && p < Infinity)) throw new Error("cartesian: pad is a finite number of px, 0 or more");
+    return p;
+  }
+
+  /** What is kept of it at a plot: {x, y}, never more than a quarter of a side; null when the part has no `pad`. */
+  function keptOf(L, h, plot) {
+    var p = padOf(L, h);
+    return p === null ? null : { x: Math.min(p, plot.w / 4), y: Math.min(p, plot.h / 4) };
   }
 
   /**
@@ -182,15 +201,16 @@
     // The plot keeps the value axis's need (#985 R1): a rotated label is cut shorter, or the corner cuts the first
     // label, before the plot is made lower than two tick labels.
     var avail = b.bottom - bandTitleH - plotTop, need = valueNeed(h), cs = A.angle(), maxLen = null;
-    var ax, plot, scale, row, step;
+    var ax, plot, scale, row, step, kept;
     for (var pass = 0; pass < 2; pass++) {
       var plotBottom = b.bottom - bandTitleH - reserve - extra;
       var plotH = Math.max(1, plotBottom - plotTop);
       ax = valueAxisOf(lvl, L, ext, plotH, L.endLabels === null ? 0 : h.boxH(h.small) + look("valueLabelGap") * h.small);
       var plotX = b.left + titleCol + widestOf(h, ax.texts, s) + tg;
       plot = { x: r2(plotX), y: r2(plotTop), w: r2(Math.max(1, b.right - right - plotX)), h: r2(plotH) };
-      scale = A.scaleOf(ax, plot.y + plot.h, plot.y);
-      xs = xLabels(lvl, L, plot);
+      kept = keptOf(L, h, plot);
+      scale = kept === null ? A.scaleOf(ax, plot.y + plot.h, plot.y) : A.scaleOf(ax, plot.y + plot.h - kept.y, plot.y + kept.y);
+      xs = xLabels(lvl, L, plot, kept === null ? 0 : kept.x);
       labels = xs.labels;
       step = xs.step;
       var ly = scale(ax.ticks[0]), lw = h.width(ax.texts[0], s);
@@ -231,7 +251,7 @@
       var bt = h.fit(L.bandTitle, s, 400, plot.w);
       if (bt !== "") g.titles.push(h.label({ role: "axis", x: plot.x + plot.w / 2, y: plot.y + plot.h + row.height + h.em("axisTitleGap") + h.ascent(s), text: L.bandTitle, shown: bt, anchor: "middle", size: s, ink: "--chart-muted" }));
     }
-    return { plot: plot, value: value, band: { start: plot.x, step: step, n: n }, x: xs.axis, corner: row.corner, rotated: row.rotated, labelTop: plot.y + plot.h + tg, boxTop: b.top, rowTexts: row.texts };
+    return { plot: plot, value: value, band: { start: plot.x, step: step, n: n }, x: xs.axis, pad: kept, corner: row.corner, rotated: row.rotated, labelTop: plot.y + plot.h + tg, boxTop: b.top, rowTexts: row.texts };
   }
 
   /** The names of a list of categories [{text, under}] as a column writes them: the text, then its second line after a space. */
@@ -454,10 +474,11 @@
       out.rows = { start: plot.y, step: plot.h / Math.max(1, L.rows.length), n: L.rows.length };
       return out;
     }
-    var ax = valueAxisOf("minimal", L, L.extent(visible), len, 0);
-    var scale = L.vertical ? A.scaleOf(ax, plot.y + plot.h, plot.y) : A.scaleOf(ax, plot.x, plot.x + plot.w);
+    var ax = valueAxisOf("minimal", L, L.extent(visible), len, 0), kept = keptOf(L, h, plot);
+    var scale = kept !== null ? A.scaleOf(ax, plot.y + plot.h - kept.y, plot.y + kept.y) : L.vertical ? A.scaleOf(ax, plot.y + plot.h, plot.y) : A.scaleOf(ax, plot.x, plot.x + plot.w);
+    if (kept !== null) out.pad = kept;
     out.value = { lo: ax.lo, hi: ax.hi, ticks: ax.ticks, scale: scale, log: ax.log === true };
-    out.x = L.x ? xLabels("minimal", L, plot).axis : null;
+    out.x = L.x ? xLabels("minimal", L, plot, kept === null ? 0 : kept.x).axis : null;
     if (has(L.second)) out.value2 = secondOf("minimal", L, visible, out.value, plot);
     return out;
   }
@@ -515,6 +536,7 @@
   function handOf(geo) {
     var hand = { plot: geo.plot, value: geo.value, band: geo.band, x: geo.x };
     if (has(geo.rows)) hand.rows = geo.rows;
+    if (has(geo.pad)) hand.pad = geo.pad;
     if (has(geo.value2)) hand.value2 = { lo: geo.value2.lo, hi: geo.value2.hi, ticks: geo.value2.ticks, scale: geo.value2.scale, log: geo.value2.log };
     return hand;
   }

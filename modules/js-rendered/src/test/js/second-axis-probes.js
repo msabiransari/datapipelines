@@ -3,8 +3,9 @@
 // fixes (landings/1051-r3.md), and of round 5's, R6 (landings/1051-r4.md: left ticks the left scale keeps a hair past
 // its domain), as ONE script both runtimes evaluate: Node in second-bounds.test.mjs and the server's
 // sandbox in JsRenderedTestTypesTest. Each compares the JSON text it gets with second-axis-probes.json, Node's output,
-// byte for byte, so the two runtimes agree on these paths to the bit. A picture cannot carry R2 to R4: their inputs
-// (ends near ±1e308, subnormal ends) write tick texts hundreds of characters wide, which leave any frame (#1059); a
+// byte for byte, so the two runtimes agree on these paths to the bit. R2 to R4 stay probes, not pictures: their inputs
+// (ends near ±1e308, subnormal ends) wrote tick texts hundreds of characters wide when they were added; since #1059 an
+// axis writes them in the e form (−1.79e308), and whole charts at those ends are read in tick-texts.test.mjs (A.7); a
 // fixture of test_two_axes carries R1 (signed-two-ticks). A classic script: one function of the engine's namespace, no
 // module syntax, nothing of R-BAN.
 function secondAxisProbes(R) {

@@ -1,0 +1,36 @@
+{
+ "note": "no rows: the no-data state",
+ "document": {
+  "display_name": "Test type test_bubbles",
+  "config": {
+   "mark": {
+    "type": "test_bubbles"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "linear"
+    },
+    "y": {
+     "field": "y"
+    },
+    "size": {
+     "field": "r"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [],
+  "y": [],
+  "r": []
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE",
+  "r": "DOUBLE"
+ },
+ "expect": {
+  "marks": 0
+ }
+}

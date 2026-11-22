@@ -1,0 +1,42 @@
+{
+ "note": "one point, radius 32: both extents are one value",
+ "document": {
+  "display_name": "Test type test_bubbles",
+  "config": {
+   "mark": {
+    "type": "test_bubbles"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "linear"
+    },
+    "y": {
+     "field": "y"
+    },
+    "size": {
+     "field": "r"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   42.5
+  ],
+  "y": [
+   17.25
+  ],
+  "r": [
+   32.0
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE",
+  "r": "DOUBLE"
+ },
+ "expect": {
+  "marks": 1
+ }
+}
