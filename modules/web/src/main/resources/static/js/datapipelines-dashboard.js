@@ -2582,6 +2582,18 @@
         "adapters({parametersContainer}) needs the element that hosts the parameters pane",
       );
     }
+    // #1065 D4 — the client library's stylesheet applies only inside the elements handed here: its rules are scoped
+    // under the class `dp-scope`, which both elements carry from now on. Dispose removes it from an element only when
+    // it was added here, so a host that wrote the class itself keeps it.
+    var scopedElements = [];
+    var markScope = function (element) {
+      var classes = typeof element.className === "string" ? element.className : "";
+      if ((" " + classes + " ").replace(/\s+/g, " ").indexOf(" dp-scope ") !== -1) return;
+      element.className = classes.trim() ? classes.trim() + " dp-scope" : "dp-scope";
+      scopedElements.push(element);
+    };
+    markScope(container);
+    if (parametersContainer) markScope(parametersContainer);
     var implemented = {};
     var listeners = { edit: null, commit: null, action: null };
     var notifications = [];
@@ -3338,6 +3350,19 @@
         if (this.root && this.root.parentNode && this.root.parentNode.removeChild) {
           this.root.parentNode.removeChild(this.root);
         }
+        // #1065 D4 — the class leaves the elements it was added to, and only those.
+        for (var s = 0; s < scopedElements.length; s++) {
+          var scoped = scopedElements[s];
+          if (typeof scoped.className === "string") {
+            scoped.className = scoped.className
+              .split(/\s+/)
+              .filter(function (word) {
+                return word && word !== "dp-scope";
+              })
+              .join(" ");
+          }
+        }
+        scopedElements = [];
       },
     };
   }
