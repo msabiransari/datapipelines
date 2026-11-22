@@ -3,12 +3,14 @@
   The embedded-dashboard example: a static host page outside this app.
 
   A host changes exactly FOUR values:
-    1. the Datapipelines origin — every /vendor, /css and /js asset below is written
+    1. the Datapipelines origin — the stylesheet and the script below are written
        against the placeholder https://dp.example.co; replace it with your
        deployment's origin (the README says it once)
     2. data-dp-proxy-base   — YOUR relay's base (here the placeholder https://app.example.co/dp)
     3. data-dp-dashboard-id — the dashboard's UUID (here the all-zero placeholder)
-    4. the theme sheet      — themes/light.css if you serve another theme
+    4. the theme            — datapipelines.css carries the light theme; for another,
+       link /vendor/design-system/themes/<name>.css AFTER it and set
+       data-theme="<name>" on <html>
 
   The dashboard key never appears in this file: the relay attaches it server-side
   (examples/dashboard-proxy/). Run the relay behind your own authentication.
@@ -19,16 +21,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Embedded dashboard</title>
 
-    <!-- The design system's sheets, in this order: the tokens, the theme, the base
-         layers, then the application and dashboard styles that read them. Every
-         Datapipelines asset carries the placeholder origin: on a separate host
-         origin a root-relative URL would resolve to the host and never load. -->
-    <link rel="stylesheet" href="https://dp.example.co/vendor/design-system/tokens.css" />
-    <link rel="stylesheet" href="https://dp.example.co/vendor/design-system/themes/light.css" />
-    <link rel="stylesheet" href="https://dp.example.co/vendor/design-system/base.css" />
-    <link rel="stylesheet" href="https://dp.example.co/vendor/design-system/primitives.css" />
-    <link rel="stylesheet" href="https://dp.example.co/css/app.css" />
-    <link rel="stylesheet" href="https://dp.example.co/css/dashboards.css" />
+    <!-- The client library's ONE stylesheet: the design tokens, the light theme, the
+         base layers and the dashboard styles, with the fonts it names served from the
+         same origin. Every Datapipelines asset carries the placeholder origin: on a
+         separate host origin a root-relative URL would resolve to the host and never load. -->
+    <link rel="stylesheet" href="https://dp.example.co/css/datapipelines.css" />
   </head>
 
   <body>
@@ -43,46 +40,11 @@
     ></div>
     <div id="parameters"></div>
 
-    <!-- The chart engine's files, in the engine's load order (the order the server
-         loads them in): the datapipelines client library draws every chart itself. -->
-    <script src="https://dp.example.co/js/js-rendered/00-namespace.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/01-text.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/02-widths-noto-sans.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/03-measure.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/04-srgb.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/05-theme.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/06-tables.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/07-scales.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/08-prim.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/09-data.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/10-chrome.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/11-axes.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/12-cartesian.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/13-time.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/14-curve.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/15-thin.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/16-lines.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/17-trig.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/18-frames.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/18a-bare.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/18b-radial.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/19-colour.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/20-render.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/21-lookup.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/30-write-dom.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/31-write-string.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/types/bar.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/types/line.js"></script>
-    <script src="https://dp.example.co/js/js-rendered/types/area.js"></script>
-
-    <!-- The runtime, then the chart interaction layer and the chart kind's
-         adapter, then the table and KPI renderers, then the boot glue. The
-         adapters register themselves at script load, before init. -->
-    <script src="https://dp.example.co/js/datapipelines-dashboard.js"></script>
-    <script src="https://dp.example.co/js/datapipelines-chart-interactions.js"></script>
-    <script src="https://dp.example.co/js/datapipelines-dashboard-chart.js"></script>
-    <script src="https://dp.example.co/js/datapipelines-dashboard-table.js"></script>
-    <script src="https://dp.example.co/js/datapipelines-dashboard-kpi.js"></script>
+    <!-- The client library's ONE script: the chart engine, the runtime, the charts'
+         interaction layer and the chart, table and KPI adapters, which register their
+         kinds at load. A new chart type arrives inside it: this page does not change.
+         Then the host's own boot glue. -->
+    <script src="https://dp.example.co/js/datapipelines.js"></script>
     <script src="embed.js"></script>
   </body>
 </html>
