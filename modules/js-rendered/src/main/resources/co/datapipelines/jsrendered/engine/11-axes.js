@@ -67,6 +67,13 @@
    * rotateMaxEm, whole: true on a position axis (brief 989 D5), where a tick label is drawn whole or not at all: a cut
    * tick would name a value it does not show}. Returns {texts, drawn: [label index], height, rotated, corner: "clear" | "moved" | "cut", need: the px the
    * corner asked to move down}.
+   * The step rule keeps every k-th label, k the least number for which k × the least distance between two labels is at
+   * least the room a label asks plus the label gap: on a row of whole labels the widest label's whole width, so a kept
+   * label never lacks room beside its neighbours (lane 1087); on a row whose labels may be cut min(the widest label,
+   * labelMinEm). When the rule ends at k = n on a row of whole labels the first label is kept alone and has no neighbour:
+   * its room is the frame's edges alone. A kept label is then left out only where the frame's edge leaves it less than
+   * its width, or by the corner rule; the rule counts from the first label and has no second choice, so a row whose
+   * kept labels all stand at the frame's edges is empty even when a label it did not keep would fit (issue #1092).
    */
   function labelRow(h, o) {
     var s = h.text, a = h.ascent(s), d = h.descent(s), gap = h.em("labelGap"), tg = h.em("tickGap");
@@ -88,9 +95,10 @@
       if (labels[i].under !== null && labels[i].under !== undefined) anyUnder = true;
     }
     if (!(step > 0)) step = 1;
-    var k = 1, want = Math.min(widest, look("labelMinEm") * s) + gap;
+    var k = 1, want = (o.whole === true ? widest : Math.min(widest, look("labelMinEm") * s)) + gap;
     while (k * step < want && k < n) k++;
     var shownCount = Math.ceil(n / k);
+    var alone = o.whole === true && k >= n;
     var rotated = o.rotate === "force" || (o.rotate === "allow" && 1 - shownCount / n > look("rotateHiddenShare"));
     var top = o.plot.y + o.plot.h + tg;
     if (rotated) {
@@ -123,7 +131,7 @@
     var prevUnder = null;
     for (var j = 0; j < n; j += k) {
       var x = labels[j].x;
-      var roomJ = Math.min(k * step - gap, 2 * (x - x0), 2 * (x1 - x));
+      var roomJ = Math.min(alone ? Infinity : k * step - gap, 2 * (x - x0), 2 * (x1 - x));
       var sh = roomJ > 0 ? h.fit(labels[j].text, s, 400, roomJ) : "";
       if (sh === "" || (o.whole === true && sh !== labels[j].text)) continue;
       var under = labels[j].under !== null && labels[j].under !== undefined && (placed.length === 0 || labels[j].under !== prevUnder) ? labels[j].under : null;
