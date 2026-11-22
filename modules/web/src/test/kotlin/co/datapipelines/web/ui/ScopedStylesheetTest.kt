@@ -228,6 +228,12 @@ class ScopedStylesheetTest {
                 ".card:is(:root)",
                 ".a body",
                 ".a > html",
+                ".card:is(b\\6f dy)",
+                ".card:is(\\62 ody)",
+                ".card:is(h\\tml)",
+                ".card:is(*|body)",
+                ".card::slotted(body)",
+                ".card:-webkit-any(html)",
             )
 
         /** R2: forms that only read like a root form; each is admitted under the scope, its text unchanged. */
@@ -247,6 +253,11 @@ class ScopedStylesheetTest {
                 ".a:not([data-x=\"body\"])",
                 ".a:has(> .my-body)",
                 ".a:nth-child(2n of .body)",
+                ".a:nth-child(odd)",
+                ".b\\6f dy",
+                ".a body|x",
+                ".a::part(body)",
+                ".a:dir(ltr) :state(html)",
             )
 
         /** Each refusal of D2 with its input and the words its message must hold (A.1). */
