@@ -228,9 +228,9 @@ object ScopedStylesheet {
                 rootExact += 1
                 return "&"
             }
-            val root = ROOT_START.find(source)
+            val root = rootStart(source)
             if (root != null) {
-                val rest = source.substring(root.range.last + 1)
+                val rest = source.substring(root)
                 if (namesRoot(rest)) throw Refusal("a root selector the scoping does not know: $source")
                 val combinator = firstCombinator(rest)
                 if (combinator in SIBLING_COMBINATORS) {
@@ -349,6 +349,28 @@ object ScopedStylesheet {
         }
     }
 
+    /**
+     * The index just after the root form [source] begins with, as a whole token (`:root`, or `html`/`body` in any case,
+     * escapes read), or null: `html-view`, `body|a` (a namespace prefix) and `:root-x` begin with none.
+     */
+    private fun rootStart(source: String): Int? {
+        val end =
+            when {
+                source.startsWith(":") -> {
+                    CssText.name(source, 1).takeIf { (name, _) -> name == "root" }?.second
+                }
+
+                source.isNotEmpty() && CssText.startsName(source, 0) -> {
+                    CssText.name(source, 0).takeIf { (name, _) -> name.lowercase() in PAGE_ELEMENTS }?.second
+                }
+
+                else -> {
+                    null
+                }
+            }
+        return end?.takeUnless { source.startsWith("|", it) && !source.startsWith("||", it) }
+    }
+
     /** The pseudo-class or pseudo-element at [colon]: whether it is or holds a root form, and the index after it. */
     private fun pseudo(
         selector: String,
@@ -372,7 +394,6 @@ object ScopedStylesheet {
     private val ROOT_FORMS = setOf(":root", "html", "body")
     private val SIBLING_COMBINATORS = setOf("+", "~", "||")
     private val AT_NAME = Regex("""^@([-\w]+)""")
-    private val ROOT_START = Regex("""^(?::root|(?i:html|body))(?![\w-])""")
 
     /** The `of` that ends the An+B part of `:nth-child(…)` and begins its selector list. */
     private val NTH_OF = Regex("""(?i)(?:^|\s)of\s""")

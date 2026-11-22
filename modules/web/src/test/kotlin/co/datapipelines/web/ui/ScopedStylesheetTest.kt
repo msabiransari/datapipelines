@@ -156,6 +156,16 @@ class ScopedStylesheetTest {
         refusal.message.orEmpty() shouldContain "a root selector the scoping does not know: $selector"
     }
 
+    @Test
+    fun `R2 the beginning is read as a token too, an escaped root form included`() {
+        scoped("body|a { c: d }") shouldBe block("& body|a { c: d }")
+        scoped("html\\.x .y { c: d }") shouldBe block("& html\\.x .y { c: d }")
+        scoped("bodyé { c: d }") shouldBe block("& bodyé { c: d }")
+        scoped(":root-x .y { c: d }") shouldBe block("& :root-x .y { c: d }")
+        scoped("\\62 ody .y { c: d }") shouldBe block("&:is(&) .y { c: d }")
+        scoped("BODY.dark .y { c: d }") shouldBe block("&:is(&).dark .y { c: d }")
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("rootLookalikes")
     fun `R2 a selector that only reads like a root form is admitted under the scope`(selector: String) {
