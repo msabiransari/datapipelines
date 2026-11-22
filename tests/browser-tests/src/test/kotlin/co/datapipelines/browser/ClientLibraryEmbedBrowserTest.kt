@@ -5,6 +5,8 @@ import com.microsoft.playwright.Page
 import com.microsoft.playwright.PlaywrightException
 import com.microsoft.playwright.Response
 import com.microsoft.playwright.Route
+import com.sun.net.httpserver.HttpExchange
+import com.sun.net.httpserver.HttpServer
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -14,6 +16,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.Test
 import java.io.File
+import java.net.InetSocketAddress
 import java.net.URI
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -21,12 +24,18 @@ import java.util.concurrent.CopyOnWriteArrayList
  * **The embedding example draws on a page of ANOTHER origin with the client library** (#1064 A.5, D9; design record
  * §8 A12, the browser half).
  *
- * The page is the example's COMMITTED `index.html` and `embed.js`, byte for byte, answered at the example's own
- * placeholder origins by request routing: the host page at `https://app.example.co/embed/`, the library's two files
- * and its fonts at `https://dp.example.co` (each request fetched from the running application at the same path and
- * answered with the application's own response, headers included), and the relay at `https://app.example.co/dp`
- * (the test's: the four runtime routes of `examples/dashboard-proxy/`, the dashboard key added, the placeholder
- * dashboard id replaced by the seeded board's). The page's origin is asserted to differ from the library's.
+ * Two origins. The LIBRARY's is the running application itself, `http://localhost:<port>`, asked directly — no request
+ * to it is intercepted, so the browser's own cross-origin rule judges the font answers (measured: a font answered by
+ * Playwright's request fulfilment loads WITHOUT `Access-Control-Allow-Origin`, so a routed library origin cannot see
+ * D4's header). The PAGE's is a second local server, [PageHost] on `http://127.0.0.1:<its own port>`, which serves the
+ * example's committed `index.html` with its two documented values replaced (the Datapipelines origin,
+ * `https://dp.example.co`, by the application's; the relay base, `https://app.example.co/dp`, by this server's `/dp`; the
+ * page is asserted to differ from the committed file in nothing else) and its committed `embed.js` byte for byte — a
+ * real server and not request routing, because the browser treats a routed document as public and refuses its requests
+ * to a loopback address (measured: "Permission was denied for this request to access the `loopback` address space").
+ * The relay under the page's `/dp` is request routing: the four runtime routes of `examples/dashboard-proxy/`, its three
+ * forwarded headers, the dashboard key added, the placeholder dashboard id replaced by the seeded board's. The page's
+ * origin is asserted to differ from the library's.
  *
  * The page's content policy is the test's, sent as the document's response header and read back from it before a
  * violation is counted: `script-src` the page's origin and the library's, `style-src` and `font-src` the library's,
@@ -41,28 +50,51 @@ import java.util.concurrent.CopyOnWriteArrayList
  * measured width, which stay true on a machine that has the font installed (the brief's measurement).
  */
 class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
+    private val libraryOrigin: String get() = baseUrl
+    private val libraryScript: String get() = "$libraryOrigin/js/datapipelines.js"
+    private val libraryStylesheet: String get() = "$libraryOrigin/css/datapipelines.css"
+
+    /** D9's policy: four directives, the origins only; no 'unsafe-inline', no 'unsafe-eval', no star, no scheme. */
+    private fun policy(
+        pageOrigin: String,
+        styleSource: String = libraryOrigin,
+    ): String =
+        "script-src $pageOrigin $libraryOrigin; style-src $styleSource; font-src $libraryOrigin; connect-src $pageOrigin"
+
     @Test
     fun `the example draws every tile on another origin under its enforced policy, with the library's fonts`() {
         val root = ready("cl1064")
         val board = seedEmbedBoard(root)
         val key = mintDashboardKey("$root/boards")
-        val visit = Visit(policy = POLICY, board = board, key = key)
+        val host = PageHost()
+        val visit = Visit(host = host, policy = policy(host.origin), board = board, key = key)
         val context = newBrowserContext()
         try {
             val page = visit.open(context)
             val documentPolicy = visit.documentPolicy
-            println("1064|A5|origins|page=${URI(page.url()).origin()} library=${URI(LIBRARY_SCRIPT).origin()}")
+            println("1064|A5|origins|page=${URI(page.url()).origin()} library=${URI(libraryScript).origin()}")
             println("1064|A5|policy-as-sent|$documentPolicy")
-            withClue("the page's origin is not the library's") { URI(page.url()).origin() shouldNotBe URI(LIBRARY_SCRIPT).origin() }
+            withClue("the page's origin is not the library's") { URI(page.url()).origin() shouldNotBe URI(libraryScript).origin() }
             withClue("the document's own response carries the test's policy (G9: read back before any violation is counted)") {
-                documentPolicy shouldBe POLICY
+                documentPolicy shouldBe policy(host.origin)
             }
-            assertTilesDrawn(page)
+            try {
+                assertTilesDrawn(page)
+            } catch (undrawn: AssertionError) {
+                throw AssertionError(
+                    "${undrawn.message}; the board shows: ${boardText(page)}; asked of the library's origin: ${visit.libraryRequests}; " +
+                        "console errors: ${visit.consoleErrors}",
+                    undrawn,
+                )
+            } finally {
+                println("1064|A5|relay|${visit.relayed}")
+                println("1064|A5|console-errors|${visit.consoleErrors}")
+                println("1064|A5|board-text|${boardText(page)}")
+            }
             val faces = loadFaces(page)
             println("1064|A5|faces|count=${faces.size} ${faces.joinToString(" ") { "${it["family"]}/${it["weight"]}=${it["status"]}" }}")
-            println("1064|A5|font-requests|${visit.fontAnswers.joinToString(" ")} failed=${visit.failed}")
+            println("1064|A5|font-requests|${visit.fontAnswers.joinToString(" ")} failed=${visit.fontsFailed}")
             println("1064|A5|library-requests|${visit.libraryRequests}")
-            println("1064|A5|console-errors|${visit.consoleErrors}")
             val violations = drainCspViolations()
             println("1064|A5|csp-violations|count=${violations.size} $violations")
             assertSoftly {
@@ -72,53 +104,99 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                 }
                 withClue("font requests to the library's origin (floor $FACE_FLOOR), each answered 200, none failed") {
                     visit.fontAnswers.size shouldBeGreaterThanOrEqual FACE_FLOOR
-                    visit.fontAnswers.filterNot { it.endsWith("=200") }.shouldBeEmpty()
-                    visit.failed.shouldBeEmpty()
+                    visit.fontAnswers.filterNot { it.contains("=200 ") }.shouldBeEmpty()
+                    visit.fontsFailed.shouldBeEmpty()
                 }
                 withClue("content-policy violations") { violations.shouldBeEmpty() }
                 withClue("console errors") { visit.consoleErrors.shouldBeEmpty() }
                 withClue("from the library's origin, besides the fonts: exactly one script and one stylesheet, each once, each 200") {
-                    visit.libraryRequests shouldContainExactlyInAnyOrder listOf("$LIBRARY_SCRIPT=200", "$LIBRARY_STYLESHEET=200")
+                    visit.libraryRequests shouldContainExactlyInAnyOrder listOf("$libraryScript=200", "$libraryStylesheet=200")
                 }
             }
         } finally {
-            context.close()
+            visit.close(context)
+            host.close()
         }
     }
 
     @Test
     fun `the negative control - a policy whose style-src names the page only leaves a refusal naming the stylesheet`() {
-        val visit = Visit(policy = CONTROL_POLICY, board = null, key = null)
+        val host = PageHost()
+        val visit = Visit(host = host, policy = policy(host.origin, styleSource = host.origin), board = null, key = null)
         val context = newBrowserContext()
         val refusals: List<String>
         try {
             val page = visit.open(context)
             println("1064|G9|control-policy-as-sent|${visit.documentPolicy}")
-            withClue("the control's document carries the control's policy") { visit.documentPolicy shouldBe CONTROL_POLICY }
+            withClue("the control's document carries the control's policy") {
+                visit.documentPolicy shouldBe policy(host.origin, styleSource = host.origin)
+            }
             try {
                 page.waitForCondition {
                     drainedSoFar.addAll(drainCspViolations())
-                    drainedSoFar.any { LIBRARY_STYLESHEET in it }
+                    drainedSoFar.any { libraryStylesheet in it }
                 }
             } catch (timeout: PlaywrightException) {
                 println("1064|G9|control|no refusal naming the stylesheet within the wait: ${timeout.message?.lineSequence()?.first()}")
             }
         } finally {
-            context.close()
+            visit.close(context)
+            host.close()
             drainedSoFar.addAll(drainCspViolations())
             refusals = drainedSoFar.toList().also { drainedSoFar.clear() }
         }
         println("1064|G9|control-refusals|count=${refusals.size} $refusals")
         withClue("the collector holds a refusal naming the stylesheet's URL (a control that sees nothing is red)") {
-            refusals.filter { LIBRARY_STYLESHEET in it }.size shouldBeGreaterThanOrEqual 1
+            refusals.filter { libraryStylesheet in it }.size shouldBeGreaterThanOrEqual 1
         }
     }
 
     /** The control's drains, kept until the context is closed (the suite's after-test check reads the collector). */
     private val drainedSoFar = CopyOnWriteArrayList<String>()
 
-    /** One visit of the example in its own context: the routes, and what the page asked of the library's origin. */
+    /**
+     * The page's origin: a server on the loopback that answers the example's two files and nothing else (404), the page
+     * with [policy] as its `Content-Security-Policy` header. Stopped by [close].
+     */
+    private inner class PageHost : AutoCloseable {
+        private val server: HttpServer = HttpServer.create(InetSocketAddress(LOOPBACK, 0), 0)
+        val origin: String = "http://$LOOPBACK:${server.address.port}"
+        val pageUrl: String = "$origin$PAGE_PATH"
+
+        @Volatile
+        var policy: String? = null
+
+        init {
+            server.createContext("/") { exchange ->
+                try {
+                    answer(exchange)
+                } finally {
+                    exchange.close()
+                }
+            }
+            server.start()
+        }
+
+        private fun answer(exchange: HttpExchange) {
+            val (body, contentType) =
+                when (exchange.requestURI.rawPath) {
+                    PAGE_PATH -> examplePage(origin) to "text/html; charset=utf-8"
+                    SCRIPT_PATH -> exampleFile("embed.js") to "text/javascript; charset=utf-8"
+                    else -> null to "text/plain; charset=utf-8"
+                }
+            exchange.responseHeaders.set("Content-Type", contentType)
+            if (exchange.requestURI.rawPath == PAGE_PATH) policy?.let { exchange.responseHeaders.set("Content-Security-Policy", it) }
+            val bytes = body ?: "not part of the example".toByteArray()
+            exchange.sendResponseHeaders(if (body == null) NOT_FOUND else OK, bytes.size.toLong())
+            exchange.responseBody.write(bytes)
+        }
+
+        override fun close() = server.stop(0)
+    }
+
+    /** One visit of the example in its own context: the relay's route, and what the page asked of the library's origin. */
     private inner class Visit(
+        val host: PageHost,
         val policy: String,
         val board: String?,
         val key: String?,
@@ -126,60 +204,56 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         var documentPolicy: String? = null
         val fontAnswers = CopyOnWriteArrayList<String>()
         val libraryRequests = CopyOnWriteArrayList<String>()
-        val failed = CopyOnWriteArrayList<String>()
+        val fontsFailed = CopyOnWriteArrayList<String>()
         val consoleErrors = CopyOnWriteArrayList<String>()
+        val relayed = CopyOnWriteArrayList<String>()
+
+        @Volatile
+        private var closing = false
+
+        /**
+         * Closes [context]. A relayed request still open then (the refresh stream) fails inside Playwright; that failure
+         * is expected while closing and only then, so it cannot replace the test's own verdict.
+         */
+        fun close(context: BrowserContext) {
+            closing = true
+            context.close()
+        }
 
         fun open(context: BrowserContext): Page {
-            context.route("$LIBRARY_ORIGIN/**") { route -> fromApplication(route) }
-            context.route("$PAGE_ORIGIN/**") { route -> hostOrRelay(route) }
-            context.onRequestFailed { request -> failed += "${request.url()} ${request.failure()}" }
+            host.policy = policy
+            context.route("${host.origin}$RELAY_PATH/**") { route ->
+                val url = URI(route.request().url())
+                relay(route, url.rawPath.removePrefix(RELAY_PATH), url.rawQuery)
+            }
+            context.onRequestFailed { request ->
+                if (!fromLibrary(request.url())) return@onRequestFailed
+                if (URI(request.url()).path.startsWith(FONT_PREFIX)) {
+                    fontsFailed += "${request.url()} ${request.failure()}"
+                } else {
+                    libraryRequests += "${request.url().substringBefore('?')}=failed(${request.failure()})"
+                }
+            }
             context.onResponse { response ->
                 val url = response.url()
-                if (!url.startsWith(LIBRARY_ORIGIN)) return@onResponse
-                val answer = "${url.substringBefore('?')}=${response.status()}"
-                if (URI(url).path.startsWith(FONT_PREFIX)) fontAnswers += answer else libraryRequests += answer
+                if (!fromLibrary(url)) return@onResponse
+                if (URI(url).path.startsWith(FONT_PREFIX)) {
+                    val allowOrigin = response.headers()["access-control-allow-origin"]
+                    fontAnswers += "${url.substringBefore('?')}=${response.status()} acao=$allowOrigin"
+                } else {
+                    libraryRequests += "${url.substringBefore('?')}=${response.status()}"
+                }
             }
             val page = context.newPage()
             page.onConsoleMessage { message -> if (message.type() == "error") consoleErrors += message.text() }
+            page.onPageError { error -> consoleErrors += "page error: $error" }
             var response: Response? = null
-            named(page, "the example's page at $PAGE_URL") { response = page.navigate(PAGE_URL) }
+            named(page, "the example's page at ${host.pageUrl}") { response = page.navigate(host.pageUrl) }
             documentPolicy = response?.headers()?.get("content-security-policy")
             return page
         }
 
-        /** The library's origin is the application: the same path, the application's own answer and headers. */
-        private fun fromApplication(route: Route) {
-            val path = URI(route.request().url()).rawPath
-            val answer = route.fetch(Route.FetchOptions().setUrl(baseUrl + path))
-            route.fulfill(Route.FulfillOptions().setResponse(answer))
-        }
-
-        private fun hostOrRelay(route: Route) {
-            val url = URI(route.request().url())
-            when {
-                url.rawPath == "/embed/index.html" -> fulfillFile(route, "index.html", "text/html; charset=utf-8", policy)
-                url.rawPath == "/embed/embed.js" -> fulfillFile(route, "embed.js", "text/javascript; charset=utf-8", null)
-                url.rawPath.startsWith(RELAY_PATH) -> relay(route, url.rawPath.removePrefix(RELAY_PATH), url.rawQuery)
-                else -> route.fulfill(Route.FulfillOptions().setStatus(404).setBody("not part of the example"))
-            }
-        }
-
-        private fun fulfillFile(
-            route: Route,
-            name: String,
-            contentType: String,
-            csp: String?,
-        ) {
-            val headers = if (csp == null) emptyMap() else mapOf("Content-Security-Policy" to csp)
-            route.fulfill(
-                Route
-                    .FulfillOptions()
-                    .setStatus(200)
-                    .setContentType(contentType)
-                    .setHeaders(headers)
-                    .setBodyBytes(File(repoRoot(), "$EXAMPLE_DIR/$name").readBytes()),
-            )
-        }
+        private fun fromLibrary(url: String): Boolean = URI(url).origin() == libraryOrigin
 
         /** The reference relay's rule: the four runtime routes only, three request headers through, the key added. */
         private fun relay(
@@ -189,15 +263,47 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         ) {
             val method = route.request().method()
             if (board == null || key == null || RUNTIME_ROUTES.none { (m, pattern) -> m == method && pattern.matches(path) }) {
+                relayed += "$method $path=404(not relayed)"
                 route.fulfill(Route.FulfillOptions().setStatus(404).setContentType("application/json").setBody(NOT_RELAYED))
                 return
             }
             val forwarded = route.request().headers().filterKeys { it.lowercase() in FORWARDED_HEADERS } + ("DP-API-Key" to key)
             val upstream = baseUrl + path.replace(PLACEHOLDER_ID, board) + (query?.let { "?$it" } ?: "")
-            val answer = route.fetch(Route.FetchOptions().setUrl(upstream).setHeaders(forwarded))
-            route.fulfill(Route.FulfillOptions().setResponse(answer))
+            try {
+                val answer = route.fetch(Route.FetchOptions().setUrl(upstream).setHeaders(forwarded))
+                relayed += "$method $path=${answer.status()}"
+                route.fulfill(Route.FulfillOptions().setResponse(answer))
+            } catch (closed: PlaywrightException) {
+                if (!closing) throw closed
+                relayed += "$method $path=(context closing)"
+            }
         }
     }
+
+    /**
+     * The committed `index.html` with its two documented values replaced (the README's values 1 and 2), each occurrence
+     * counted; replacing them back gives the committed bytes, so nothing else of the page differs.
+     */
+    private fun examplePage(pageOrigin: String): ByteArray {
+        val committed = String(exampleFile("index.html"), Charsets.UTF_8)
+        val replacements =
+            listOf(
+                "href=\"$PLACEHOLDER_LIBRARY/" to "href=\"$libraryOrigin/",
+                "src=\"$PLACEHOLDER_LIBRARY/" to "src=\"$libraryOrigin/",
+                "data-dp-proxy-base=\"$PLACEHOLDER_RELAY\"" to "data-dp-proxy-base=\"$pageOrigin$RELAY_PATH\"",
+            )
+        for ((from, _) in replacements) check(committed.split(from).size == 2) { "index.html holds `$from` exactly once" }
+        val served = replacements.fold(committed) { text, (from, to) -> text.replace(from, to) }
+        check(replacements.fold(served) { text, (from, to) -> text.replace(to, from) } == committed) {
+            "the served page differs from the committed one beyond the two documented values"
+        }
+        return served.toByteArray(Charsets.UTF_8)
+    }
+
+    /** The board container's text, one line, cut (a bootstrap refusal shows its code there). */
+    private fun boardText(page: Page): String = page.locator("#dashboard").innerText().replace('\n', ' ').take(DIAGNOSTIC_CHARS)
+
+    private fun exampleFile(name: String): ByteArray = File(repoRoot(), "$EXAMPLE_DIR/$name").readBytes()
 
     /** Every tile drawn: each wire's chart picture with marks, the table's five rows, the KPI's value. */
     private fun assertTilesDrawn(page: Page) {
@@ -330,17 +436,20 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
     private fun URI.origin(): String = "$scheme://$authority"
 
     private companion object {
-        const val PAGE_ORIGIN = "https://app.example.co"
-        const val LIBRARY_ORIGIN = "https://dp.example.co"
-        const val PAGE_URL = "$PAGE_ORIGIN/embed/index.html"
+        const val PLACEHOLDER_LIBRARY = "https://dp.example.co"
+        const val PLACEHOLDER_RELAY = "https://app.example.co/dp"
         const val RELAY_PATH = "/dp"
-        const val LIBRARY_SCRIPT = "$LIBRARY_ORIGIN/js/datapipelines.js"
-        const val LIBRARY_STYLESHEET = "$LIBRARY_ORIGIN/css/datapipelines.css"
+        const val LOOPBACK = "127.0.0.1"
+        const val PAGE_PATH = "/embed/index.html"
+        const val SCRIPT_PATH = "/embed/embed.js"
+        const val OK = 200
+        const val NOT_FOUND = 404
         const val FONT_PREFIX = "/vendor/fonts/"
         const val PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000"
         const val EXAMPLE_DIR = "examples/dashboard-embed"
         const val REFERENCE_JS = "modules/js-rendered/src/reference/reference.js"
         const val FACE_FLOOR = 4
+        const val DIAGNOSTIC_CHARS = 600
         const val WIRE_FLOOR = 1
         const val TABLE_ROWS = 5
         const val KPI_VALUE = "42"
@@ -348,14 +457,6 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         const val CHART_H = 4
         const val NOT_RELAYED = """{"error":{"code":"proxy.not_found","message":"not relayed","details":{}}}"""
         val WIRES_LINE = Regex("""var WIRES = \[([^\]]*)\]""")
-
-        /** D9's policy: four directives, the origins only; no 'unsafe-inline', no 'unsafe-eval', no star, no scheme. */
-        const val POLICY =
-            "script-src $PAGE_ORIGIN $LIBRARY_ORIGIN; style-src $LIBRARY_ORIGIN; font-src $LIBRARY_ORIGIN; connect-src $PAGE_ORIGIN"
-
-        /** The negative control: the stylesheet's origin left out of `style-src`. */
-        const val CONTROL_POLICY =
-            "script-src $PAGE_ORIGIN $LIBRARY_ORIGIN; style-src $PAGE_ORIGIN; font-src $LIBRARY_ORIGIN; connect-src $PAGE_ORIGIN"
 
         /** `examples/dashboard-proxy/proxy.mjs`'s relayed routes and forwarded headers. */
         val RUNTIME_ROUTES =

@@ -386,7 +386,7 @@ class StaticCacheHeadersE2eTest {
                 val answer = get(path, FOREIGN_ORIGIN)
                 val sibling = get(kindOf)
                 val parts = sources.getValue(path)
-                val joined = parts.flatMap { (get(it).also { r -> check(r.statusCode() == 200) { it } }.body() + NEWLINE).toList() }
+                val bodies = parts.map { it to get(it).also { r -> check(r.statusCode() == 200) { it } }.body() + NEWLINE }
                 val shown = (CACHE_HEADERS + LIBRARY_HEADERS).joinToString(" ") { "$it=${answer.header(it)}" }
                 println("1064|A2|$path|status=${answer.statusCode()} bytes=${answer.body().size} sources=${parts.size} $shown")
                 withClue("$path through the application, no session") {
@@ -397,7 +397,7 @@ class StaticCacheHeadersE2eTest {
                     answer.header("ETag") shouldBe "\"${sha256(answer.body())}\""
                     answer.header("Last-Modified") shouldBe ""
                     answer.header(ACAO) shouldBe ""
-                    answer.body().toList() shouldBe joined
+                    firstDifference(bodies, answer.body()) shouldBe null
                 }
                 val queried = get("$path?v=2&name=../app.css")
                 withClue("$path with a query string: the same bytes") {
@@ -515,6 +515,20 @@ class StaticCacheHeadersE2eTest {
     }
 
     private fun HttpResponse<*>.header(name: String): String = headers().allValues(name).joinToString(", ")
+
+    /** Null when [actual] is every part's bytes in order and nothing else; otherwise the first part whose bytes differ. */
+    private fun firstDifference(
+        parts: List<Pair<String, ByteArray>>,
+        actual: ByteArray,
+    ): String? {
+        var offset = 0
+        for ((path, bytes) in parts) {
+            val end = offset + bytes.size
+            if (end > actual.size || !actual.copyOfRange(offset, end).contentEquals(bytes)) return "the first differing source is $path"
+            offset = end
+        }
+        return if (offset == actual.size) null else "${actual.size - offset} bytes after the last source"
+    }
 
     private fun HttpResponse<*>.originHeaders(): String = "status=${statusCode()} $ACAO=${header(ACAO)} $ACAC=${header(ACAC)}"
 

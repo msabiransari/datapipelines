@@ -62,7 +62,7 @@ class ClientLibraryTest {
         println("1064|A1|built-once|reads=$reads")
         withClue("every source read exactly once across two reads of each text") {
             reads.keys shouldBe (listOf("a.js", "types/b.js") + ClientLibrary.RUNTIME_FILES + ClientLibrary.STYLESHEETS).toSet()
-            reads.filterValues { it != 1 }.shouldBeEmpty()
+            reads.filterValues { it != 1 } shouldBe emptyMap()
         }
     }
 

@@ -10,7 +10,7 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
 import org.springframework.web.context.support.StaticWebApplicationContext
-import org.springframework.web.servlet.HttpRequestHandler
+import org.springframework.web.HttpRequestHandler
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry
 import org.springframework.web.servlet.handler.SimpleUrlHandlerMapping
 import java.security.MessageDigest
@@ -49,7 +49,8 @@ class ClientLibraryHandlerTest {
             )) {
                 val response = get(path).shouldNotBeNull()
                 val etag = "\"" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)) + "\""
-                println("1064|handler|$path|status=${response.status} bytes=${response.contentAsByteArray.size} etag=${response.getHeader("ETag")}")
+                val size = response.contentAsByteArray.size
+                println("1064|handler|$path|status=${response.status} bytes=$size etag=${response.getHeader("ETag")}")
                 withClue(path) {
                     response.status shouldBe 200
                     response.contentAsByteArray.contentEquals(bytes) shouldBe true
@@ -91,6 +92,8 @@ class ClientLibraryHandlerTest {
         headers.forEach { (name, value) -> request.addHeader(name, value) }
         val chain = mapping.getHandler(request) ?: return null
         val response = MockHttpServletResponse()
+        // The mapping's own interceptors expose the path within the mapping, as the dispatcher runs them.
+        chain.interceptorList.forEach { it.preHandle(request, response, chain.handler) }
         (chain.handler as HttpRequestHandler).handleRequest(request, response)
         return response
     }
