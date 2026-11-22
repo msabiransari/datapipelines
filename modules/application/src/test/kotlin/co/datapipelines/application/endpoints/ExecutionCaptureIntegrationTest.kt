@@ -146,7 +146,10 @@ class ExecutionCaptureIntegrationTest {
     fun `one open window per route and method - a second start is refused naming the first, an expired one is closed`() {
         val first = session()
         sessions.start(first).shouldBeInstanceOf<CaptureStart.Opened>()
-        sessions.start(session()).shouldBeInstanceOf<CaptureStart.AlreadyActive>().active.id shouldBe first.id
+        sessions
+            .start(session())
+            .shouldBeInstanceOf<CaptureStart.AlreadyActive>()
+            .active.id shouldBe first.id
         // Another method or another workspace is another key.
         sessions.start(session(method = EndpointMethod.PUT)).shouldBeInstanceOf<CaptureStart.Opened>()
         sessions.start(session(ws = otherWorkspaceId)).shouldBeInstanceOf<CaptureStart.Opened>()
@@ -177,17 +180,30 @@ class ExecutionCaptureIntegrationTest {
         sessions.stop(otherWorkspaceId, endpointId, second.id, userId, now) shouldBe CaptureStop.NotFound
         sessions.stop(workspaceId, UUID.randomUUID(), second.id, userId, now) shouldBe CaptureStop.NotFound
         // A stop at or after the deadline records the expiry at the deadline.
-        sessions.stop(workspaceId, endpointId, second.id, userId, second.deadlineAt.plusSeconds(60)).shouldBeInstanceOf<CaptureStop.Stopped>().session.let {
-            it.endReason shouldBe CaptureSession.EndReason.EXPIRED
-            it.stoppedAt shouldBe second.deadlineAt
-        }
+        sessions
+            .stop(
+                workspaceId,
+                endpointId,
+                second.id,
+                userId,
+                second.deadlineAt.plusSeconds(60),
+            ).shouldBeInstanceOf<CaptureStop.Stopped>()
+            .session
+            .let {
+                it.endReason shouldBe CaptureSession.EndReason.EXPIRED
+                it.stoppedAt shouldBe second.deadlineAt
+            }
     }
 
     @Test
     fun `default off - no window, no capture decision`() {
         val (c, decision) = admit()
         decision.captured shouldBe false
-        reservations.findLive(c.scopeDigest!!).shouldNotBeNull().captureSessionId.shouldBeNull()
+        reservations
+            .findLive(c.scopeDigest!!)
+            .shouldNotBeNull()
+            .captureSessionId
+            .shouldBeNull()
     }
 
     @Test
@@ -293,9 +309,22 @@ class ExecutionCaptureIntegrationTest {
         sessions.start(session())
         val (c, decision) = admit()
         val expiresAt = decision.expiresAt!!
-        listOf("a", "b", "c").forEach { node -> store.write(value(c.executionId, workspaceId, node = node, recordedAt = now.plusSeconds(2))) shouldBe true }
+        listOf("a", "b", "c").forEach { node ->
+            store.write(value(c.executionId, workspaceId, node = node, recordedAt = now.plusSeconds(2))) shouldBe
+                true
+        }
         store.write(
-            CapturedValue(c.executionId, workspaceId, "d", "out", null, 9_999, CapturedValue.OmittedReason.BYTE_BUDGET_EXHAUSTED, now.plusSeconds(2), expiresAt),
+            CapturedValue(
+                c.executionId,
+                workspaceId,
+                "d",
+                "out",
+                null,
+                9_999,
+                CapturedValue.OmittedReason.BYTE_BUDGET_EXHAUSTED,
+                now.plusSeconds(2),
+                expiresAt,
+            ),
         ) shouldBe true
         store.seal(CaptureSeal(c.executionId, workspaceId, decision.sessionId!!, 3, 1, 0, 30, now.plusSeconds(3), expiresAt)) shouldBe true
 

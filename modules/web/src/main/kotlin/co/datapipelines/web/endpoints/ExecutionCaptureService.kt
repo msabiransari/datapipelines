@@ -112,6 +112,7 @@ class ExecutionCaptureService(
      * request correlation UUID. Refuses a GET route (`execution.capture.invalid`), a malformed filter, an unknown route
      * and a second active window (`execution.capture.already_active`, naming it).
      */
+    @Suppress("ThrowsCount") // each refusal is a distinct catalogued code a caller must tell apart
     fun start(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,

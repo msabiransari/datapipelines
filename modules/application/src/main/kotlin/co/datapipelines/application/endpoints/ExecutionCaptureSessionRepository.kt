@@ -180,7 +180,8 @@ class ExecutionCaptureSessionRepository(
     ): CaptureSession? =
         jdbc
             .query(
-                "SELECT $COLUMNS FROM execution_capture_sessions WHERE id = :id AND workspace_id = :workspaceId AND endpoint_id = :endpointId",
+                "SELECT $COLUMNS FROM execution_capture_sessions " +
+                    "WHERE id = :id AND workspace_id = :workspaceId AND endpoint_id = :endpointId",
                 mapOf("id" to sessionId, "workspaceId" to workspaceId, "endpointId" to endpointId),
                 MAPPER,
             ).firstOrNull()

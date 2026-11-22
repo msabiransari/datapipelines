@@ -31,6 +31,23 @@ class PublishedMutationCaptureFixtures(
 
     /** Seeds the target, the two templates and the pipeline, publishes `POST` [path] and releases it; the entity id. */
     fun seedRoute(path: String): String {
+        seedTarget()
+        val pipeline = seedPipeline()
+        val (published, publishedBody) =
+            send(
+                "POST",
+                "/api/v1/endpoints",
+                """{"path":"$path","method":"POST","pipeline":"$pipeline","pipeline_version":1,"timeout_seconds":60}""",
+            )
+        withClue("publish POST $path: $publishedBody") { published shouldBe 201 }
+        val endpointId = idOf(publishedBody)
+        send("POST", "/api/v1/endpoints/$endpointId/release", ifMatch = hashOf(send("GET", "/api/v1/endpoints/$endpointId/versions/1")))
+            .first shouldBe 200
+        return endpointId
+    }
+
+    /** The scratch target database with its one table, registered as this class's datasource. */
+    private fun seedTarget() {
         DriverManager.getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password).use { c ->
             c.createStatement().use { it.execute("""CREATE DATABASE "$database"""") }
         }
@@ -49,7 +66,10 @@ class PublishedMutationCaptureFixtures(
                 "description" to "#1043 browser write target",
             ) + SharedBrowserE2e.SOURCE_DATASOURCE_POOL_FIELDS
         withClue("datasource registration") { send("POST", "/partials/datasources", form = form).first shouldBe 200 }
+    }
 
+    /** The two released templates and the released v1 of the pipeline over them; the pipeline's name. */
+    private fun seedPipeline(): String {
         val pick = "test/cap1043_${suffix}_pick.jsonata"
         val write = "test/cap1043_${suffix}_write.sql"
         releaseTemplate(
@@ -82,18 +102,7 @@ class PublishedMutationCaptureFixtures(
         val pipelineId = idOf(createdBody)
         send("POST", "/api/v1/pipelines/$pipelineId/release", ifMatch = hashOf(send("GET", "/api/v1/pipelines/$pipelineId")))
             .first shouldBe 200
-
-        val (published, publishedBody) =
-            send(
-                "POST",
-                "/api/v1/endpoints",
-                """{"path":"$path","method":"POST","pipeline":"$pipeline","pipeline_version":1,"timeout_seconds":60}""",
-            )
-        withClue("publish POST $path: $publishedBody") { published shouldBe 201 }
-        val endpointId = idOf(publishedBody)
-        send("POST", "/api/v1/endpoints/$endpointId/release", ifMatch = hashOf(send("GET", "/api/v1/endpoints/$endpointId/versions/1")))
-            .first shouldBe 200
-        return endpointId
+        return pipeline
     }
 
     /** Mints an endpoint key granted exactly `POST` [path]; its credential (the REST routes the Keys page uses). */

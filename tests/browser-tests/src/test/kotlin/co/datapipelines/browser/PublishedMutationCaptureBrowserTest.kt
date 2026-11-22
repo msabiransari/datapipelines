@@ -26,6 +26,7 @@ import java.nio.file.Paths
  */
 class PublishedMutationCaptureBrowserTest : BrowserSuite() {
     @Test
+    @Suppress("LongMethod") // one flow: the window opened, the call reproduced, the stop and the inspection are one story
     fun `an administrator opens a capture, reproduces a call, stops it and inspects the captured run`() {
         startTrace()
         val suffix = generatedPassword("s").take(8).lowercase().filter { it.isLetterOrDigit() }
@@ -50,9 +51,10 @@ class PublishedMutationCaptureBrowserTest : BrowserSuite() {
             page.locator("[data-api-capture-start]").innerText() shouldBe "Capture for 15 minutes"
         }
         shot("card-disabled")
-        page.waitForResponse({ it.url().endsWith("/partials/endpoints/$endpointId/capture") && it.request().method() == "POST" }) {
-            page.locator("[data-api-capture-start]").click()
-        }.status() shouldBe 200
+        page
+            .waitForResponse({ it.url().endsWith("/partials/endpoints/$endpointId/capture") && it.request().method() == "POST" }) {
+                page.locator("[data-api-capture-start]").click()
+            }.status() shouldBe 200
         page.locator("[data-api-capture-card][data-capture-state='active']").waitFor()
         withClue("the active card: remaining time, no filter") {
             page.locator("[data-api-capture-remaining]").innerText() shouldContain "min remaining"
@@ -69,14 +71,17 @@ class PublishedMutationCaptureBrowserTest : BrowserSuite() {
         val executionId = answered.headers().firstValue("DP-Execution-Id").orElseThrow()
         fx.count("SELECT count(*) FROM cap_rows WHERE picked = '$selected'") shouldBe 1
         withClue("the decision was stored with the admitting reservation") {
-            fx.metadata("SELECT (capture_session_id IS NOT NULL)::text FROM published_mutation_reservations WHERE execution_id = '$executionId'") shouldBe
+            fx.metadata(
+                "SELECT (capture_session_id IS NOT NULL)::text FROM published_mutation_reservations WHERE execution_id = '$executionId'",
+            ) shouldBe
                 "true"
         }
 
         // 3 — stop.
-        page.waitForResponse({ it.url().endsWith("/stop") && it.request().method() == "POST" }) {
-            page.locator("[data-api-capture-stop]").click()
-        }.status() shouldBe 200
+        page
+            .waitForResponse({ it.url().endsWith("/stop") && it.request().method() == "POST" }) {
+                page.locator("[data-api-capture-stop]").click()
+            }.status() shouldBe 200
         page.locator("[data-api-capture-card][data-capture-state='disabled']").waitFor()
         val run = page.locator("[data-api-capture-history] [data-api-capture-run]")
         withClue("the ended window links exactly the run it captured") {
@@ -88,7 +93,9 @@ class PublishedMutationCaptureBrowserTest : BrowserSuite() {
         withClue(after.body()) { after.statusCode() shouldBe 200 }
         val afterId = after.headers().firstValue("DP-Execution-Id").orElseThrow()
         withClue("a call after the stop is served uncaptured") {
-            fx.metadata("SELECT coalesce(capture_session_id::text, 'none') FROM published_mutation_reservations WHERE execution_id = '$afterId'") shouldBe
+            fx.metadata(
+                "SELECT coalesce(capture_session_id::text, 'none') FROM published_mutation_reservations WHERE execution_id = '$afterId'",
+            ) shouldBe
                 "none"
         }
 

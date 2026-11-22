@@ -96,13 +96,13 @@ class ScriptValueCaptureRunTest {
         val seals = CopyOnWriteArrayList<CaptureSeal>()
 
         override fun write(value: CapturedValue): Boolean {
-            if (fails) throw IllegalStateException("diagnostic store down")
+            if (fails) error("diagnostic store down")
             values += value
             return true
         }
 
         override fun seal(seal: CaptureSeal): Boolean {
-            if (fails) throw IllegalStateException("diagnostic store down")
+            if (fails) error("diagnostic store down")
             seals += seal
             return true
         }
@@ -143,11 +143,16 @@ class ScriptValueCaptureRunTest {
         store.values.forEach { v ->
             v.omittedReason shouldBe null
             v.valueJson shouldBe """{"lines":2,"student":"$SELECTED_MARKER"}"""
-            v.valueBytes shouldBe v.valueJson!!.toByteArray().size.toLong()
+            v.valueBytes shouldBe
+                v.valueJson!!
+                    .toByteArray()
+                    .size
+                    .toLong()
             v.valueJson shouldNotContain RAW_MARKER
             v.expiresAt shouldBe now.plus(Duration.ofHours(24))
         }
-        meters.counter(BoundedValueCapture.METER, BoundedValueCapture.OUTCOME_TAG, BoundedValueCapture.OUTCOME_CAPTURED).count() shouldBe 2.0
+        meters.counter(BoundedValueCapture.METER, BoundedValueCapture.OUTCOME_TAG, BoundedValueCapture.OUTCOME_CAPTURED).count() shouldBe
+            2.0
         recorder.seal()
         store.seals.single().let {
             it.valuesCaptured shouldBe 2
@@ -179,11 +184,14 @@ class ScriptValueCaptureRunTest {
         harness().use { h ->
             val result = run(h, recorder)
             result.status shouldBe ExecutionStatus.SUCCESS
-            h.emitter.events.filterIsInstance<NodeCompleted>().map { it.nodeId } shouldBe listOf("shape_a", "shape_b")
+            h.emitter.events
+                .filterIsInstance<NodeCompleted>()
+                .map { it.nodeId } shouldBe listOf("shape_a", "shape_b")
         }
         meters.counter(BoundedValueCapture.METER, BoundedValueCapture.OUTCOME_TAG, BoundedValueCapture.OUTCOME_FAILED).count() shouldBe 2.0
         recorder.seal()
-        meters.counter(BoundedValueCapture.METER, BoundedValueCapture.OUTCOME_TAG, BoundedValueCapture.OUTCOME_SEAL_FAILED).count() shouldBe 1.0
+        meters.counter(BoundedValueCapture.METER, BoundedValueCapture.OUTCOME_TAG, BoundedValueCapture.OUTCOME_SEAL_FAILED).count() shouldBe
+            1.0
     }
 
     @Test
@@ -207,7 +215,10 @@ class ScriptValueCaptureRunTest {
                     it.stats.contextValue shouldBe null
                     it.stats.contextValues shouldBe null
                 }
-                val terminal = h.emitter.events.filterIsInstance<PipelineCompleted>().single()
+                val terminal =
+                    h.emitter.events
+                        .filterIsInstance<PipelineCompleted>()
+                        .single()
                 terminal.nodeStats.forEach { it.contextValue shouldBe null }
                 terminal.contextSnapshot.keys.contains("summary_a") shouldBe false
                 terminal.contextSnapshot.keys.contains("summary_b") shouldBe false

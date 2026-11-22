@@ -604,7 +604,6 @@ object PipelineErrorCodes {
         const val TEMPLATE_UNRENDERED = "pipeline.execution.template_unrendered"
     }
 
-    /** §13.4 — node execution. */
     /**
      * §13.27 (#1043, published-mutation-apis §6, §7 "Runtime capture") — a workspace administrator's temporary capture
      * of a published mutation's declared transformer outputs. Every code here answers an interactive session only; no
@@ -630,6 +629,7 @@ object PipelineErrorCodes {
         const val INVALID = "execution.capture.invalid"
     }
 
+    /** §13.4 — node execution. */
     object Node {
         const val TEMPLATE_NOT_FOUND = "pipeline.node.template_not_found"
         const val TEMPLATE_RENDER_FAILED = "pipeline.node.template_render_failed"

@@ -183,7 +183,9 @@ class BoundedValueCapture(
         val now = clock.instant()
         if (!now.isBefore(expiresAt)) return
         try {
-            store.seal(CaptureSeal(executionId, workspaceId, sessionId, captured.get(), omitted.get(), failures.get(), used.get(), now, expiresAt))
+            store.seal(
+                CaptureSeal(executionId, workspaceId, sessionId, captured.get(), omitted.get(), failures.get(), used.get(), now, expiresAt),
+            )
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {

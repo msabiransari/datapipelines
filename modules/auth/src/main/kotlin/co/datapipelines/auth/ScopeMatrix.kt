@@ -106,6 +106,30 @@ object ScopeMatrix {
         return allowed(principal, tool, declared, context)
     }
 
+    /** A key acting as its own identity: its key role is the whole answer (see [allowed]). */
+    private fun keyRoleDecision(
+        role: KeyRole,
+        operationName: String,
+        permission: Permission,
+        context: WorkspaceContext?,
+    ): Decision {
+        val memberRole = role.asMemberRole()
+        val held =
+            when {
+                // #1043: a session-only permission is no key's, whatever member role the key carries.
+                permission in RolePermissions.SESSION_ONLY -> false
+
+                memberRole == null -> permission in RolePermissions.of(role)
+
+                else -> PermissionResolution.resolver.holds(context?.id, memberRole, false, permission)
+            }
+        return if (held) {
+            Decision.Allowed
+        } else {
+            roleRefusal(AuthErrorCodes.ROLE_REQUIRED, operationName, permission, role.wire, context?.name)
+        }
+    }
+
     @Suppress("ReturnCount") // one guarded refusal per rule; a merged expression would hide which rule fired
     private fun allowed(
         principal: AuthenticatedPrincipal,
@@ -119,18 +143,7 @@ object ScopeMatrix {
         // production resolver reads the same member column. The two transport roles keep the
         // direct read: the record's B4 wire-truth sentence stays true for them, and
         // [PermissionResolver]'s KDoc says why one decision must not split across two paths.
-        principal.keyRole?.let { role ->
-            val memberRole = role.asMemberRole()
-            val held =
-                when {
-                    // #1043: a session-only permission is no key's, whatever member role the key carries.
-                    permission in RolePermissions.SESSION_ONLY -> false
-                    memberRole == null -> permission in RolePermissions.of(role)
-                    else -> PermissionResolution.resolver.holds(context?.id, memberRole, false, permission)
-                }
-            if (held) return Decision.Allowed
-            return roleRefusal(AuthErrorCodes.ROLE_REQUIRED, operationName, permission, role.wire, context?.name)
-        }
+        principal.keyRole?.let { role -> return keyRoleDecision(role, operationName, permission, context) }
         // A promotion principal ALWAYS carries the promotion_receiver role (the filter stamps it on
         // both credential shapes). One without it is a wiring defect, and it fails closed.
         if (principal.authMethod == AuthMethod.PROMOTION) {

@@ -158,29 +158,39 @@ class ExecutionCaptureController(
 
         private val JSON = ObjectMapper()
 
+        /**
+         * The optional filter of a start body: no body, a blank one, JSON `null`, `{}` and `{"correlation_id": null}`
+         * mean none; anything but an object whose only field is a string-or-null `correlation_id` is refused.
+         */
         private fun correlationOf(text: String?): String? {
+            val body = parsed(text) ?: return null
+            val field = body.get(FIELD_CORRELATION)
+            val wellFormed =
+                body.isObject &&
+                    body.fieldNames().asSequence().all { it == FIELD_CORRELATION } &&
+                    (field == null || field.isNull || field.isTextual)
+            if (!wellFormed) throw invalidBody(null)
+            return field?.takeIf { it.isTextual }?.asText()
+        }
+
+        /** The body's JSON tree, or null when there is none (absent, blank or JSON `null`); broken JSON is refused. */
+        private fun parsed(text: String?): JsonNode? {
             if (text.isNullOrBlank()) return null
-            val body: JsonNode =
+            val tree =
                 try {
                     JSON.readTree(text)
                 } catch (e: JacksonException) {
-                    throw invalidBody()
+                    throw invalidBody(e)
                 }
-            if (body.isNull || body.isMissingNode) return null
-            if (!body.isObject || body.fieldNames().asSequence().any { it != FIELD_CORRELATION }) {
-                throw invalidBody()
-            }
-            val field = body.get(FIELD_CORRELATION) ?: return null
-            if (field.isNull) return null
-            if (!field.isTextual) throw invalidBody()
-            return field.asText()
+            return tree.takeUnless { it.isNull || it.isMissingNode }
         }
 
-        private fun invalidBody() =
+        private fun invalidBody(cause: Throwable?) =
             DatapipelinesException(
                 code = PipelineErrorCodes.ExecutionCapture.INVALID,
                 message = "The capture request accepts only an optional correlation_id UUID.",
                 details = mapOf("reason" to ExecutionCaptureService.REASON_CORRELATION),
+                cause = cause,
             )
 
         private fun <T> noStore(

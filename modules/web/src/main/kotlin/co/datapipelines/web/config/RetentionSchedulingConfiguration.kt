@@ -139,6 +139,7 @@ class RetentionSchedulingConfiguration {
     ): ExecutionCaptureRetention = ExecutionCaptureRetention(ExecutionCaptureStore(retentionStatements(jdbc)), meterRegistry)
 
     @Bean
+    @Suppress("LongParameterList") // one retention step per collaborator; the tick runs them all in order
     fun executionEventRetentionScheduler(
         retention: ExecutionEventRetention,
         keyPurge: KeyRetentionPurge,

@@ -218,12 +218,14 @@ class PublishedMutationCaptureIntegrationTest {
             awaitSealed(id)
 
             rows(
-                "SELECT node_id, state, coalesce(omitted_reason, ''), coalesce(value_text, '') FROM execution_capture_values WHERE execution_id = '$id'",
+                "SELECT node_id, state, coalesce(omitted_reason, ''), coalesce(value_text, '') " +
+                    "FROM execution_capture_values WHERE execution_id = '$id'",
             ) shouldContainExactlyInAnyOrder
                 listOf(listOf("pick", "CAPTURED", "", "\"$long1\""), listOf("tag", "OMITTED", "byte_budget_exhausted", ""))
             captureText(id) shouldNotContain long2
             text(
-                "SELECT values_captured || '/' || values_omitted || '/' || bytes_used FROM execution_capture_runs WHERE execution_id = '$id'",
+                "SELECT values_captured || '/' || values_omitted || '/' || bytes_used " +
+                    "FROM execution_capture_runs WHERE execution_id = '$id'",
             ) shouldBe "1/1/${long1.length + 2}"
             // The business work is unaffected by the budget: the omitted value was still written.
             targetCount("SELECT count(*) FROM cap_rows WHERE picked = '$long1' AND tagged = '$long2'") shouldBe 1
@@ -557,7 +559,8 @@ class PublishedMutationCaptureIntegrationTest {
             stopRaw(REVOKED, capture).statusCode() shouldBe 403
         } finally {
             sql(
-                "UPDATE workspace_members SET role = 'workspace_admin' WHERE workspace_id = '$DEFAULT_WORKSPACE' AND user_id = '$ADMIN_USER'",
+                "UPDATE workspace_members SET role = 'workspace_admin' " +
+                    "WHERE workspace_id = '$DEFAULT_WORKSPACE' AND user_id = '$ADMIN_USER'",
             )
         }
         awaitDetailStatus(id, 200)
@@ -880,7 +883,8 @@ class PublishedMutationCaptureIntegrationTest {
         block: () -> T,
     ): T {
         sql(
-            "CREATE OR REPLACE FUNCTION $name() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN RAISE EXCEPTION 'injected fault $name'; END \$\$",
+            "CREATE OR REPLACE FUNCTION $name() RETURNS trigger LANGUAGE plpgsql AS " +
+                "\$\$ BEGIN RAISE EXCEPTION 'injected fault $name'; END \$\$",
         )
         sql("CREATE TRIGGER $name $timing ON $table FOR EACH ROW WHEN ($condition) EXECUTE FUNCTION $name()")
         try {
@@ -1075,7 +1079,8 @@ class PublishedMutationCaptureIntegrationTest {
             session()
                 .contentType(ContentType.JSON)
                 .body(
-                    """{"path": "$path", "method": "$method", "pipeline": "$pipeline", "pipeline_version": 1, "timeout_seconds": $TIMEOUT_S}""",
+                    """{"path": "$path", "method": "$method", "pipeline": "$pipeline", """ +
+                        """"pipeline_version": 1, "timeout_seconds": $TIMEOUT_S}""",
                 ).post("/api/v1/endpoints")
                 .thenReturn()
         withClue("publish $method $path: ${created.asString()}") { created.statusCode() shouldBe 201 }

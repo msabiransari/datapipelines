@@ -1189,7 +1189,8 @@ class FlywayMigrationIntegrationTest {
             "SELECT conrelid::regclass::text || '|' || pg_get_constraintdef(oid) FROM pg_constraint " +
                 "WHERE contype = 'f' AND conrelid IN ('execution_capture_sessions'::regclass, " +
                 "'execution_capture_values'::regclass, 'execution_capture_runs'::regclass, " +
-                "'published_mutation_reservations'::regclass) ORDER BY conrelid::regclass::text || '|' || pg_get_constraintdef(oid) COLLATE \"C\"",
+                "'published_mutation_reservations'::regclass) " +
+                "ORDER BY conrelid::regclass::text || '|' || pg_get_constraintdef(oid) COLLATE \"C\"",
         ) { it.getString(1) } shouldContainExactly
             listOf(
                 "execution_capture_runs|FOREIGN KEY (execution_id) REFERENCES published_mutation_reservations(execution_id) " +
