@@ -1,0 +1,51 @@
+{
+ "note": "a point in each corner of the data's extent, every radius 32",
+ "document": {
+  "display_name": "Test type test_bubbles",
+  "config": {
+   "mark": {
+    "type": "test_bubbles"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "kind": "linear"
+    },
+    "y": {
+     "field": "y"
+    },
+    "size": {
+     "field": "r"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0.0,
+   100.0,
+   0.0,
+   100.0
+  ],
+  "y": [
+   0.0,
+   0.0,
+   50.0,
+   50.0
+  ],
+  "r": [
+   32.0,
+   32.0,
+   32.0,
+   32.0
+  ]
+ },
+ "types": {
+  "x": "DOUBLE",
+  "y": "DOUBLE",
+  "r": "DOUBLE"
+ },
+ "expect": {
+  "marks": 4
+ }
+}
