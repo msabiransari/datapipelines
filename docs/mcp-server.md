@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.85 (frozen contract — additive-only changes after this point)
+**Status:** v1.90 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-11-20
+**Last updated:** 2026-11-22
 
 ---
 
@@ -1038,7 +1038,7 @@ Create an API at `/api/<category>/<version>/<path…>` for one HTTP method — `
 }
 ```
 
-Returns the endpoint's wire shape: `method`, `path`, `pipeline` (by NAME), `timeout_seconds`, `description`, `enabled`, `path_variables` and the servable `url`. A legacy path (listed flagged by §6.2.24) resolves as **not-found** here — the single read answers the valid shape only.
+Returns the endpoint's wire shape: `method`, `path`, `pipeline` (by NAME), `pipeline_version` (the current version's EXACT pin, #1040), `timeout_seconds`, `description`, `request_body` (#1040: the pinned version's body contract — `{"mode": "none" | "optional" | "required", "readers": [{"node_id", "template": "id@version"}]}`, the SCRIPT transformers that read the body; `null` with no current version or a pin that no longer resolves — the same spelling as [REST §19.5a](rest-api.md#195a-authoring-a-mutation-route-1040)), `enabled`, `path_variables` and the servable `url`. A legacy path (listed flagged by §6.2.24) resolves as **not-found** here — the single read answers the valid shape only.
 
 #### 6.2.24 `endpoints_list`
 
@@ -3164,6 +3164,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.90 | 1040 (#1040) | **§6.2.23–§6.2.25 (additive):** `endpoints_create`, `endpoints_list` and `endpoints_get` answer `pipeline_version` (the current version's exact pin) and `request_body` (`mode` + the reading SCRIPT transformers, `null` with no current version or an unresolvable pin) — what an author must see before acting on a route; the REST management read carries the same spelling (rest-api §19.5a). The status line, stale at v1.85 since v1.86, is brought to this entry. No tool, input or permission change. |
 | 2026-11-21 | v1.89 | 1038 r4 (#1038) | **§6.2.3 / template writes:** a body fixture saved with `templates_create`/`_update` keeps member order, repeated members and exact numbers through stored tests, `templates_get`, re-save and release (#1080). |
 | 2026-11-21 | v1.88 | 1038 r3 (#1038) | **§6.2.3:** `request_body`'s byte budget counts canonical bytes, as framework execute does. **§6.2.3 / §6.2.43 / template writes:** body fixtures in `templates_evaluate` `input` and `templates_create`/`_update` `tests` are bound from the exact argument text (a repeated member refused, exact fractions); body-case diagnostics are bounded. |
 | 2026-11-21 | v1.87 | 1038 r2 (#1038) | **§6.2.3:** the transport deviation is removed — `pipelines_execute` refuses a member repeated inside `request_body` before any tool runs and keeps every number exact (#1056 completed); a failed body execution reports its code and node metadata only. |

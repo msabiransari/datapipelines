@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.133 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
+**Status:** v2.134 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-20
+**Last updated:** 2026-11-22
 
 ---
 
@@ -2142,10 +2142,25 @@ What this deployment already holds in `{name}` — the sender's whole delta inpu
     "datasources": ["sales_db", "warehouse"],
     "parameter_sets": [ { "name": "acme/sales/region_filters", "current_version": 4, "body_hash": "sha256-..." } ],
     "visualizations": [ { "name": "acme/charts/monthly_revenue", "current_version": 1, "body_hash": "sha256-..." } ],
-    "dashboards": [ { "name": "acme/dash/revenue_overview", "current_version": 2, "body_hash": "sha256-..." } ]
+    "dashboards": [ { "name": "acme/dash/revenue_overview", "current_version": 2, "body_hash": "sha256-..." } ],
+    "endpoint_capabilities": {
+      "methods": ["POST", "PUT", "DELETE"],
+      "exact_pin": true,
+      "request_body_modes": ["none", "optional", "required"],
+      "method_grants": true
+    }
   }
 }
 ```
+
+**`endpoint_capabilities` (#1040, published-mutation-apis §7)** is what this receiver can import of a
+method-bearing API route: the methods it stores as their own identity, whether it imports a route on the
+sender's EXACT pipeline version (`exact_pin`), the request-body modes it understands, and whether it binds an
+exact method grant (`method_grants`). It describes the binary — what this deployment can store faithfully — never
+the `mutations-enabled` serving switch, so a receiver may import a mutation route it does not yet serve. A
+receiver that predates #1040 answers no such object, and the sender then refuses before building a batch
+(`409 endpoint.promotion.method_unsupported`, §18.2) rather than send a route the target would import as a `GET`
+or refuse.
 
 `parameter_sets` (#194 lane D, the record's §8.3), `visualizations` and `dashboards` (#10 L1c) are the same `(name, current_version, body_hash)` triple for the workspace's sets and released artifacts; a sender that predates an engine reads an inventory whose extra lists it ignores.
 
@@ -2191,6 +2206,33 @@ A **template-backed set is received** (#302): each entry's full parameter-set va
 
 Each entry is the ordinary portable body plus the [§9.2](versioning.md#92-import-with-preserved-versions) lifecycle fields (`version`, `body_hash`, `released_at`), so the receiver's preserved-version import path applies unchanged: version numbers are honored, never renumbered; `body_hash` is recomputed and must match; a local DRAFT is never clobbered; a same-hash re-import is a no-op.
 
+**The `endpoints` arm's method entries (#1040).** A `GET` route travels as it always has — `path`, `pipeline`,
+`timeout_seconds`, `description` and its node `bindings`, pinned on the target to that pipeline's CURRENT
+version (the exact-pin transfer of a `GET` route is #879). A `POST`, `PUT` or `DELETE` route travels EXACTLY
+pinned and adds `method`, `pipeline_version`, `pipeline_body_hash` (the pinned pipeline version's content
+hash), `request_body` (its body mode: `none`, `optional` or `required`) and `grants` — the names of the source
+workspace's keys holding an exact grant of that method on that route; its `bindings` is always empty, because a
+mutation route is never granted by a node.
+
+```json
+{ "path": "/lending/v1/applications", "method": "POST", "pipeline": "acme/lending/apply",
+  "pipeline_version": 3, "pipeline_body_hash": "sha256-...", "request_body": "required",
+  "timeout_seconds": 30, "description": "", "bindings": [], "grants": ["lending-writer"] }
+```
+
+The receiver imports such an entry on THAT pipeline version, which the same batch or this deployment must hold
+RELEASED with the same content — never this deployment's current, never a reinterpretation: a version present
+here with different content refuses `409 pipeline.import.version_conflict`, an absent one
+`400 endpoint.pipeline_version.not_found`, a non-RELEASED one `409 endpoint.pipeline_version.not_eligible`. Version
+numbers of the API are the receiver's own (the pin is the portable identity): an absent route is created with
+v1 RELEASED and current; a route already current on the same pin is left alone; a route on another pin gains a
+new RELEASED version that becomes current. Each grant is bound as an exact grant of that method on the
+receiver's own route entity, by key NAME — a target missing a named key refuses `409
+endpoint.promotion.key_missing` before anything lands. An entry with no pin, no hash, an unknown body mode, a
+non-empty `bindings` or a method outside `POST`/`PUT`/`DELETE` refuses the batch `409
+endpoint.promotion.method_unsupported` (`details.unsupported_routes` naming each `path`) before anything is
+imported. Every refusal rolls the whole batch back.
+
 `source_env` is the sender's `deployment.name` and `key_fingerprint` a truncated SHA-256 of the key it presented — **never the key**. Both are recorded by the receiver against the import (`auth.promotion.accepted`), so a promoted row's provenance survives in the audit trail. Every promoted row is stamped with the receiver's own system service account ([Auth §4.5](auth.md#45-the-system-service-account-r7)) — the payload carries no user id that would mean anything locally.
 
 ```json
@@ -2213,8 +2255,11 @@ Each entry is the ordinary portable body plus the [§9.2](versioning.md#92-impor
 | `parameter.import.missing_template` | 400 | A pushed set pins a template version neither in the batch nor stored here — refused before anything lands |
 | `parameter.validation.*` | 400 | A pushed set failed its validation on this deployment (the selector probe included — it runs BEFORE the batch's transaction, on this deployment's own datasources); `details.failures[]` lists every one |
 | `parameter.version.conflict` | 409 | A pushed set's landing refused: the id held by another workspace (`details.reason = id_taken`), a hash mismatch, or a taken version number — the batch rolls back whole, templates included |
+| `endpoint.promotion.method_unsupported` | 409 | A method entry this receiver cannot import exactly — no pin, no hash, an unknown body mode, node `bindings`, or a method outside `POST`/`PUT`/`DELETE` (#1040); `details.unsupported_routes` names each entry's `path` |
+| `endpoint.promotion.key_missing` | 409 | A `GET` entry's binding or a method entry's grant names a key this workspace does not have |
+| `endpoint.pipeline_version.not_found` / `.not_eligible` | 400 / 409 | A method entry pins a pipeline version this deployment does not hold, or holds but not RELEASED (#1040) |
 
-The whole batch rolls back on any of the above. The sender's own refusals — `pipeline.promotion.not_released`, `.not_newer`, `.missing_datasources`, `.target_is_authoring` — happen before the request is made and never reach this endpoint.
+The whole batch rolls back on any of the above. The sender's own refusals — `pipeline.promotion.not_released`, `.not_newer`, `.missing_datasources`, `.target_is_authoring`, and `endpoint.promotion.method_unsupported` for a method route the target's inventory does not advertise (#1040, §18.1) — happen before the request is made and never reach this endpoint.
 
 ---
 
@@ -2580,12 +2625,74 @@ name** — the bindings are read with the workspace predicate in the query (2026
 neighbouring workspace's key bound at an equal node (legal: only the exact `path_pattern` is
 unique deployment-wide, path trees may overlap) never rides into the batch; a target missing
 that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed.
-**Only GET routes and GET grants travel (#1037).** A published non-GET route over a promoted
-pipeline refuses the whole batch on the sender with `409 endpoint.promotion.method_unsupported`
-before anything is pushed, and a mutation grant is never carried in an entry's bindings; a receiver
-refuses, with the same code and before anything is imported, a batch whose entry names a `method`
-other than `GET` ([Pipeline Contract §13.14](pipeline-contract.md#1314-published-endpoints)).
+**Method routes travel exactly pinned (#1040; #1037 refused them).** A published `POST`, `PUT` or
+`DELETE` route over a promoted pipeline travels with its exact pipeline version, that version's content hash,
+its body mode and its grants by key name (§18.2); the receiver imports it on that exact version, as its own
+route, and binds each grant to its own route entity. The sender reads the target's
+`endpoint_capabilities` (§18.1) FRESH before building the batch: a target that does not advertise the route's
+method, exact pins, its body mode or method grants refuses the whole batch on the sender with `409
+endpoint.promotion.method_unsupported` (`details.unsupported_routes` naming each route's `method` and `path`,
+`details.target_advertises` whether the target answered capabilities at all) before anything is pushed; a
+receiver refuses an entry it cannot import exactly with the same code
+([Pipeline Contract §13.14](pipeline-contract.md#1314-published-endpoints)).
 The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool-definitions)).
+
+### 19.5a Authoring a mutation route (#1040)
+
+**What an author sees before a save.** Creation is `POST /api/v1/endpoints` (or `endpoints_create`) with an
+optional `method` — absent is `GET`, the pre-method default, and anything but `GET`/`POST`/`PUT`/`DELETE` is
+`400 endpoint.method_invalid` — and an exact `pipeline_version`. Every management read (§19.5 `GET`, and the
+MCP `endpoints_list` / `endpoints_get` / `endpoints_create` answers) carries the route's `method`, its current
+version's exact `pipeline_version` and its **`request_body`**: the pinned version's body mode and the SCRIPT
+transformers that read the body, derived from the exact pin (never stored, so it cannot disagree with what the
+serve path admits):
+
+```json
+"request_body": { "mode": "required", "readers": [ { "node_id": "shape", "template": "acme/lending/shape.jsonata@2" } ] }
+```
+
+`mode` is `none` for a pipeline that declares no body (a `GET`, or a bodyless `DELETE`), `optional` or
+`required`; `request_body` is `null` while the route has no current version or its pin no longer resolves. The
+API's version page ([UI Screens §4.18b](ui-screens.md)) shows the same — method, exact pin, body mode, the
+reading transformers and the keys granted that method on the route — and its draft dialog shows the route's
+method as fixed (a route's method is its identity; a different method is a different route, created beside it)
+and each pickable pipeline version's body contract, so a draft that moves the pin shows what callers must send
+before it is saved. Release, discard, restore and switch address one route's versions: a `GET` and a `POST` at
+one path keep independent version histories.
+
+**Grants on the Keys page.** The `/api-keys` association form offers, beside the `GET` tree's nodes, one
+checkbox per published mutation ROUTE (`POST /lending/v1/applications`): ticking it is `api_key.bind` with that
+method on exactly that route; un-ticking it unbinds exactly that method. A save changes only the routes the
+form showed (a route published after the page was drawn is never unbound by a save that did not offer it), a
+`GET` node never grants a mutation route, and a hand-crafted grant value naming `GET`, an unknown method or no
+path is `400 endpoint.method_invalid` with nothing written. A write-only key holds grants and no node.
+
+**Rollout, in order.** (1) Upgrade every deployment that will hold the route — a receiver must advertise
+`endpoint_capabilities` before a sender will promote a method route to it (§18.1); (2) set
+`datapipelines.endpoints.mutations-enabled=true` where it is to be SERVED (a route may be imported, authored
+and granted while the gate is off — fresh calls answer `503 endpoint.mutations_disabled`); (3) publish and
+release the route on its exact pin; (4) mint a key and grant it the route's method; (5) call with an
+`Idempotency-Key` (§19.3a). **Recovery:** turning the gate off drains — fresh mutations refuse while retries
+and polling of admitted runs keep answering (§19.3a); un-ticking a grant refuses that method at once (`405`
+naming the methods the key still holds, `404` when it holds none); switching the route to an earlier version
+changes what fresh requests run, never how an admitted retry is judged. Status and polling are §19.3a's.
+
+**Limits** are §19.3's: the body is bounded by `body-max-bytes`, `body-max-depth` and the token bound
+(`413 endpoint.request.too_large`), counted while reading — a chunked body stops at the cap; a reservation lives
+`datapipelines.idempotency.ttl-seconds`. **Repeat semantics** are §19.3a's: one `Idempotency-Key` is one
+execution however often it is retried; a deliberate second write takes a new key, and a repeated `PUT` or
+`DELETE` under new keys runs again — idempotent at the resource only when the pipeline's own SQL is.
+
+**`DELETE` with a body ([RFC 9110 §9.3.5](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.5)).** RFC 9110
+gives content in a `DELETE` no generally defined semantics and warns that some implementations reject it. This
+product defines it per route: a `DELETE` route whose pinned pipeline declares `request_body` reads the body
+exactly as a `POST` does, and a `DELETE` route whose pin declares none refuses any body (`reason:
+not_accepted`). **Supported:** an HTTP/1.1 client calling the application's own listener directly — the
+in-repo proof sends both a `Content-Length` and a chunked body, with `java.net.http`. **Not promised:** a
+reverse proxy, load balancer, CDN or client library between the caller and the listener may drop, refuse or
+not forward a `DELETE` body; no proxy is bundled or certified, so an operator who places one in front verifies
+that it forwards `DELETE` content unchanged — or publishes the operation as a `POST` instead. A bodyless
+`DELETE` has no such dependency.
 
 ### 19.6 Status codes, complete
 
@@ -3281,6 +3388,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v2.134 | 1040 (#1040) | **Additive.** §18.1's inventory gains `endpoint_capabilities` (methods, `exact_pin`, `request_body_modes`, `method_grants`); a receiver that predates it answers none and the sender refuses a method route before building the batch. §18.2's `endpoints` arm documents the method entry (`method`, `pipeline_version`, `pipeline_body_hash`, `request_body`, `grants`; `bindings` empty) imported on the EXACT pipeline version — absent route → v1 RELEASED, same pin → unchanged, another pin → a new RELEASED current version — and its refusals (`pipeline.import.version_conflict`, `endpoint.pipeline_version.not_found` / `.not_eligible`, `endpoint.promotion.key_missing`, `endpoint.promotion.method_unsupported`). §19.5's promotion paragraph replaces #1037's "only GET routes travel". New §19.5a: the authoring surface (`request_body` on every management read, REST and MCP; the version page and draft dialog; the Keys page's exact method grants), rollout, recovery, limits, repeat semantics and `DELETE` content under RFC 9110 §9.3.5 (supported: the application's own listener; no proxy promised). No route, permission or status added. |
 | 2026-11-21 | v2.133 | 1039 (#1039) | **§19 (additive — the mutation surface answered only `503` before):** published `POST`, `PUT` and `DELETE` are served (new §19.3a): a required `Idempotency-Key` (`400 endpoint.request.idempotency_key_invalid` entry), a durable reservation before any business SQL, replay from the original execution and pin, `409 idempotency.key_reused_for_different_request`, `503 idempotency.reservation_unavailable` (also a release or execution record the store did not confirm) / `endpoint.dependency_unavailable` (also the original pin's lookup on a retry or takeover), the fingerprint over the typed values the ORIGINAL pin binds (defaults applied), a retry's `406` result negotiation, the start-window takeover, the terminal-state table (`200`/`202`/`409`/`410`/`503`), polling from the initiating grant only (`204` for a zero-caller result; a retry under a revoked grant `404`, or `405` with a bounded `Allow` while another method stays visible) and `mutations-enabled` withholding fresh requests only. A form or multipart body is `415` unless it declares zero length. §19.6 gains the `204`, `409` and `410` rows; §19.7 no longer lists `POST`. The Status line, left at v2.128 by later rows, now reads the latest version. |
 | 2026-11-21 | v2.132 | 1038 r4 (#1038) | **§6.1.4 (additive):** a saved body fixture keeps member order, repeated members and exact numbers through stored tests, template read-back, re-save, export and release (#1080). |
 | 2026-11-21 | v2.131 | 1038 r3 (#1038) | **§6.1.4 (additive):** the fixture budget counts canonical bytes on both full-run surfaces; an authored body fixture on evaluate and template save is read from the request's own text (a repeated member refused, exact fractions); an authored body case's evaluation and suite verdict use the bounded diagnostics. |
