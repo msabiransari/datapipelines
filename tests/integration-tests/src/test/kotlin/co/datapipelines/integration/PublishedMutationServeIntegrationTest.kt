@@ -190,6 +190,48 @@ class PublishedMutationServeIntegrationTest {
     }
 
     @Test
+    fun `a repeated PUT and DELETE under distinct keys are separate audited executions with one stable final state`() {
+        val calls = listOf("PUT" to "stable-put-1", "PUT" to "stable-put-2", "DELETE" to "stable-del-1", "DELETE" to "stable-del-2")
+        val answers = calls.map { (method, key) -> mutate(writer, method, STABLE, key, null) }
+        answers.forEach { withClue(it.asString()) { it.statusCode() shouldBe 200 } }
+        val ids = answers.map { it.jsonPath().getString("execution_id") }
+        ids.toSet() shouldHaveSize calls.size
+
+        // The author's idempotent statements: PUT sets the same state twice, the second DELETE finds nothing left.
+        answers.map {
+            it
+                .jsonPath()
+                .getList<List<Any?>>("rows")
+                .single()
+                .single()
+                .toString()
+        } shouldBe
+            listOf("1", "1", "1", "0")
+        targetCount("SELECT count(*) FROM mut_state WHERE name = 'put-target' AND state = 'set'") shouldBe 1
+        targetCount("SELECT count(*) FROM mut_state WHERE name = 'delete-target'") shouldBe 0
+
+        // Each call has its own audit trail naming the caller, method and route — and never the request key.
+        calls.zip(ids).forEach { (call, id) ->
+            val (method, key) = call
+            val audit =
+                rows(
+                    "SELECT key_id, details_json->>'method', details_json->>'endpoint_id', details_json->>'outcome', " +
+                        "details_json::text FROM audit_log WHERE event = 'endpoint.served' " +
+                        "AND details_json->>'execution_id' = '$id' ORDER BY id",
+                )
+            withClue("$method $id $audit") {
+                audit.map { it[3] } shouldContain "completed"
+                audit.forEach { row ->
+                    row[0] shouldBe writer.id
+                    row[1] shouldBe method
+                    row[2] shouldBe routes.getValue("$STABLE $method")
+                    row[4].orEmpty() shouldNotContain key
+                }
+            }
+        }
+    }
+
+    @Test
     fun `the envelope answers 405, 413 and 415 before anything is reserved`() {
         val reservations = count("SELECT count(*) FROM published_mutation_reservations")
         val notGranted =
@@ -569,6 +611,20 @@ class PublishedMutationServeIntegrationTest {
         poll(writer, "/api$ORDERS/executions/$id").statusCode() shouldBe 200
         poll(writer, "/api$ORDERS/executions/$id/result").statusCode() shouldBe 200
 
+        // The retry hands out the same business URLs, and they answer under the same rules.
+        val retry = mutate(writer, "POST", ORDERS, "polling-1", order("PL-1"))
+        withClue(retry.asString()) { retry.statusCode() shouldBe 200 }
+        retry.jsonPath().getString("execution_id") shouldBe id
+        val retryUrls = listOf(retry.jsonPath().getString("status_url"), retry.jsonPath().getString("result_url"))
+        retryUrls shouldBe listOf("/api$ORDERS/executions/$id", "/api$ORDERS/executions/$id/result")
+        retryUrls.forEach { url ->
+            withClue(url) {
+                poll(writer, url).statusCode() shouldBe 200
+                poll(reader, url).statusCode() shouldBe 404
+                poll(foreign, url).statusCode() shouldBe 404
+            }
+        }
+
         // Another key of the same workspace, holding a GET walk and the same POST grant: not found.
         poll(reader, "/api$ORDERS/executions/$id").statusCode() shouldBe 404
         poll(reader, "/api$ORDERS/executions/$id/result").statusCode() shouldBe 404
@@ -579,16 +635,41 @@ class PublishedMutationServeIntegrationTest {
         poll(foreign, "/api$ORDERS/executions/$id").statusCode() shouldBe 404
 
         // Revoking the initiating grant closes the polling path too.
-        given()
-            .port(port)
-            .asSession(ADMIN_SESSION)
-            .`when`()
-            .delete("/api/v1/endpoints/bindings?pathPrefix=$ORDERS&apiKeyId=${writer.id}&method=POST")
-            .then()
-            .statusCode(204)
+        revoke(writer, ORDERS, "POST")
         poll(writer, "/api$ORDERS/executions/$id").statusCode() shouldBe 404
         grant(writer, ORDERS, "POST")
         poll(writer, "/api$ORDERS/executions/$id").statusCode() shouldBe 200
+    }
+
+    @Test
+    fun `a revoked grant refuses the retry without revealing the original, and a restored grant replays it`() {
+        val first = mutate(writer, "PUT", HITS, "revoked-1", null)
+        withClue(first.asString()) { first.statusCode() shouldBe 200 }
+        val id = first.jsonPath().getString("execution_id")
+        val after = hits(HITS)
+
+        revoke(writer, HITS, "PUT")
+        try {
+            // The key still holds DELETE on the path: 405 naming only that, and nothing about the admitted run.
+            val refused = mutate(writer, "PUT", HITS, "revoked-1", null)
+            withClue(refused.asString()) {
+                refused.statusCode() shouldBe 405
+                refused.jsonPath().getString("error.code") shouldBe "endpoint.method_not_allowed"
+                refused.header("Allow").split(",").map { it.trim() } shouldBe listOf("DELETE")
+                refused.header("DP-Execution-Id") shouldBe null
+                refused.asString() shouldNotContain id
+            }
+            poll(writer, "/api$HITS/executions/$id").statusCode() shouldBe 404
+            hits(HITS) shouldBe after
+        } finally {
+            grant(writer, HITS, "PUT")
+        }
+
+        // The reservation outlived the revocation: the restored grant replays the original, nothing reruns.
+        val replay = mutate(writer, "PUT", HITS, "revoked-1", null)
+        withClue(replay.asString()) { replay.statusCode() shouldBe 200 }
+        replay.jsonPath().getString("execution_id") shouldBe id
+        hits(HITS) shouldBe after
     }
 
     @Test
@@ -831,7 +912,9 @@ class PublishedMutationServeIntegrationTest {
                         "sku text NOT NULL, qty int NOT NULL, ext_id text, ext_number text)",
                 )
                 s.execute("CREATE TABLE IF NOT EXISTS mut_hits (path text NOT NULL, at timestamptz NOT NULL DEFAULT now())")
-                s.execute("TRUNCATE mut_lines, mut_hits")
+                s.execute("CREATE TABLE IF NOT EXISTS mut_state (name text PRIMARY KEY, state text NOT NULL)")
+                s.execute("TRUNCATE mut_lines, mut_hits, mut_state")
+                s.execute("INSERT INTO mut_state (name, state) VALUES ('put-target', 'initial'), ('delete-target', 'present')")
             }
         }
     }
@@ -859,6 +942,9 @@ class PublishedMutationServeIntegrationTest {
         sqlTemplate(READ_TEMPLATE, "SELECT count(*) AS n FROM mut_lines")
         sqlTemplate(SLOW_TEMPLATE, "SELECT 1 AS n FROM pg_sleep($SLOW_SECONDS)")
         sqlTemplate(SLEEPY_TEMPLATE, "SELECT 1 AS n FROM pg_sleep($SLEEPY_SECONDS)")
+        // The idempotent PUT and DELETE of one stable resource: the same final state however often they run.
+        sqlTemplate(STABLE_PUT_TEMPLATE, "UPDATE mut_state SET state = 'set' WHERE name = 'put-target'")
+        sqlTemplate(STABLE_DELETE_TEMPLATE, "DELETE FROM mut_state WHERE name = 'delete-target'")
         // One hit row per run, tagged with the route that ran it (a parameterless DML: the path is the template's own).
         for (path in listOf(HITS, VERSIONED, TAKEOVER)) {
             sqlTemplate(hitTemplate(path), "INSERT INTO mut_hits (path) VALUES ('$path')")
@@ -873,6 +959,9 @@ class PublishedMutationServeIntegrationTest {
         pipelines[SLOW_PIPELINE] = pipeline(SLOW_PIPELINE, listOf(dql("slow", SLOW_TEMPLATE)), null)
         pipelines[SLEEPY_PIPELINE] = pipeline(SLEEPY_PIPELINE, listOf(dql("sleepy", SLEEPY_TEMPLATE)), null)
         pipelines[HIT_PIPELINE] = pipeline(HIT_PIPELINE, listOf(hit(HITS)), null)
+        pipelines[STABLE_PUT_PIPELINE] = pipeline(STABLE_PUT_PIPELINE, listOf(affecting(STABLE_PUT_TEMPLATE, "update")), null)
+        pipelines[STABLE_DELETE_PIPELINE] =
+            pipeline(STABLE_DELETE_PIPELINE, listOf(affecting(STABLE_DELETE_TEMPLATE, "delete")), null)
         // The v2 pins of the version-switch and takeover cases: each tags its OWN route, so "v2 never ran" is countable.
         pipelines[HIT_VERSIONED_PIPELINE] = pipeline(HIT_VERSIONED_PIPELINE, listOf(hit(VERSIONED)), null)
         pipelines[HIT_TAKEOVER_PIPELINE] = pipeline(HIT_TAKEOVER_PIPELINE, listOf(hit(TAKEOVER)), null)
@@ -901,6 +990,8 @@ class PublishedMutationServeIntegrationTest {
         routes["$ORDERS DELETE"] = publish(ORDERS, "DELETE", ORDERS_PIPELINE, TIMEOUT_S)
         routes[HITS] = publish(HITS, "PUT", HIT_PIPELINE, TIMEOUT_S)
         routes["$HITS DELETE"] = publish(HITS, "DELETE", HIT_PIPELINE, TIMEOUT_S)
+        routes["$STABLE PUT"] = publish(STABLE, "PUT", STABLE_PUT_PIPELINE, TIMEOUT_S)
+        routes["$STABLE DELETE"] = publish(STABLE, "DELETE", STABLE_DELETE_PIPELINE, TIMEOUT_S)
         routes[VERSIONED] = publish(VERSIONED, "POST", ORDERS_PIPELINE, TIMEOUT_S)
         routes[TAKEOVER] = publish(TAKEOVER, "POST", TAKEOVER_PIPELINE, TIMEOUT_S)
         routes[FAULT] = publish(FAULT, "POST", ORDERS_PIPELINE, TIMEOUT_S)
@@ -917,6 +1008,8 @@ class PublishedMutationServeIntegrationTest {
             ORDERS to "DELETE",
             HITS to "PUT",
             HITS to "DELETE",
+            STABLE to "PUT",
+            STABLE to "DELETE",
             VERSIONED to "POST",
             TAKEOVER to "POST",
             FAULT to "POST",
@@ -963,6 +1056,20 @@ class PublishedMutationServeIntegrationTest {
             .post("/api/v1/endpoints/bindings")
             .then()
             .statusCode(201)
+    }
+
+    private fun revoke(
+        key: Key,
+        path: String,
+        method: String,
+    ) {
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .delete("/api/v1/endpoints/bindings?pathPrefix=$path&apiKeyId=${key.id}&method=$method")
+            .then()
+            .statusCode(204)
     }
 
     /** Publishes [path]/[method] pinning v1 of [pipeline] and releases that version. */
@@ -1095,6 +1202,22 @@ class PublishedMutationServeIntegrationTest {
             "template" to mapOf("id" to hitTemplate(path), "version" to 1),
             "operation" to "update",
             "output" to mapOf("target" to "discard"),
+            "depends_on" to emptyList<String>(),
+        )
+
+    /** One `update` or `delete` statement whose `affected_rows` row goes to the caller. */
+    private fun affecting(
+        template: String,
+        operation: String,
+    ): Map<String, Any?> =
+        mapOf(
+            "id" to "write",
+            "description" to "One idempotent statement",
+            "type" to "DML",
+            "source" to DATASOURCE,
+            "template" to mapOf("id" to template, "version" to 1),
+            "operation" to operation,
+            "output" to mapOf("target" to "caller"),
             "depends_on" to emptyList<String>(),
         )
 
@@ -1253,6 +1376,7 @@ class PublishedMutationServeIntegrationTest {
 
         private const val ORDERS = "/mut/v1/orders"
         private const val HITS = "/mut/v1/hits"
+        private const val STABLE = "/mut/v1/stable"
         private const val VERSIONED = "/mut/v1/versioned"
         private const val TAKEOVER = "/mut/v1/takeover"
         private const val FAULT = "/mut/v1/fault"
@@ -1267,6 +1391,8 @@ class PublishedMutationServeIntegrationTest {
         private const val SLOW_PIPELINE = "test/mut1039_slow"
         private const val SLEEPY_PIPELINE = "test/mut1039_sleepy"
         private const val HIT_PIPELINE = "test/mut1039_hit"
+        private const val STABLE_PUT_PIPELINE = "test/mut1039_stable_put"
+        private const val STABLE_DELETE_PIPELINE = "test/mut1039_stable_delete"
         private const val HIT_VERSIONED_PIPELINE = "test/mut1039_hit_versioned"
         private const val HIT_TAKEOVER_PIPELINE = "test/mut1039_hit_takeover"
         private const val FAIL_PIPELINE = "test/mut1039_fail"
@@ -1275,6 +1401,8 @@ class PublishedMutationServeIntegrationTest {
         private const val FAIL_TEMPLATE = "test/mut1039_fail.jsonata"
         private const val INSERT_TEMPLATE = "test/mut1039_insert_line.sql"
         private const val READ_TEMPLATE = "test/mut1039_read.sql"
+        private const val STABLE_PUT_TEMPLATE = "test/mut1039_stable_put.sql"
+        private const val STABLE_DELETE_TEMPLATE = "test/mut1039_stable_delete.sql"
         private const val SLOW_TEMPLATE = "test/mut1039_slow.sql"
         private const val SLEEPY_TEMPLATE = "test/mut1039_sleepy.sql"
 
