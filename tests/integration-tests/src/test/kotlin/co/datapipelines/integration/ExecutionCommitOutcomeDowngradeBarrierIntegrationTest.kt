@@ -41,6 +41,13 @@ class ExecutionCommitOutcomeDowngradeBarrierIntegrationTest {
 
     private val allShipped = repoFile("modules/app/src/main/resources/db/migration")
     private val allBarriers = repoFile("modules/app/src/main/resources/db/downgrade-barrier")
+
+    // Pin the V66-to-V65 boundary; the newer-schema refusal below separately exercises all current migrations.
+    private val shipped: File = scratch("dp-v66-current-") { copyVersioned(it) { version -> version <= COMMIT_OUTCOME_VERSION } }
+    private val shippedBarriers: File =
+        scratch("dp-v66-barriers-") { target ->
+            listOf(V65_BARRIER, V66_BARRIER).forEach { File(allBarriers, it).copyTo(File(target, it)) }
+        }
     private val previousBinary: File = scratch("dp-v66-previous-") { copyVersioned(it) { version -> version <= LAST_PREVIOUS_VERSION } }
     private val previousBarrier: File = scratch("dp-v66-previous-barrier-") { File(allBarriers, V65_BARRIER).copyTo(File(it, V65_BARRIER)) }
     private val db = SharedE2e.scratchDatabase("v66_barrier")
@@ -48,7 +55,7 @@ class ExecutionCommitOutcomeDowngradeBarrierIntegrationTest {
     @Test
     @Order(1)
     fun `the shipped scripts record V66 and the commit outcome barrier as a repeatable`() {
-        migrate(db, allShipped, allBarriers)
+        migrate(db, shipped, shippedBarriers)
 
         history() shouldContainExactly listOf("66|execution commit outcomes", "R|execution commit outcome downgrade barrier")
     }
@@ -103,7 +110,7 @@ class ExecutionCommitOutcomeDowngradeBarrierIntegrationTest {
     @Test
     @Order(6)
     fun `the current scripts migrate the rolled-back database forward again`() {
-        migrate(db, allShipped, allBarriers)
+        migrate(db, shipped, shippedBarriers)
 
         history() shouldContainExactly listOf("66|execution commit outcomes", "R|execution commit outcome downgrade barrier")
         columnsOf("pipeline_executions").containsAll(V66_COLUMNS) shouldBe true
@@ -111,7 +118,27 @@ class ExecutionCommitOutcomeDowngradeBarrierIntegrationTest {
             "SELECT settlement_pending::TEXT || result_unavailable::TEXT FROM pipeline_executions WHERE execution_id = '$confirmed'",
         ) shouldContainExactly
             listOf("falsefalse")
-        validate(db, allShipped, allBarriers) shouldBe null
+        validate(db, shipped, shippedBarriers) shouldBe null
+    }
+
+    @Test
+    @Order(7)
+    fun `the V66 rollback refuses later migrations without changing history or columns`() {
+        val newer = SharedE2e.scratchDatabase("v66_newer")
+        migrate(newer, allShipped, allBarriers)
+        val historySql = "SELECT COALESCE(version, 'R') || '|' || script FROM flyway_schema_history ORDER BY installed_rank"
+        val originalHistory = query(historySql, newer)
+        query(
+            "SELECT (MAX(version::INTEGER) > $COMMIT_OUTCOME_VERSION)::TEXT FROM flyway_schema_history WHERE version IS NOT NULL",
+            newer,
+        ) shouldContainExactly listOf("true")
+
+        val refusal = shouldThrow<SQLException> { execute(documentedRollback(), newer) }
+
+        requireNotNull(refusal.message) shouldContain "V66 rollback refused: later migrations"
+        query(historySql, newer) shouldContainExactly originalHistory
+        columnsOf("pipeline_executions", newer).containsAll(V66_COLUMNS) shouldBe true
+        validate(newer, allShipped, allBarriers) shouldBe null
     }
 
     // ---------------------------------------------------------------- fixtures
@@ -192,14 +219,20 @@ class ExecutionCommitOutcomeDowngradeBarrierIntegrationTest {
 
     // ---------------------------------------------------------------- JDBC
 
-    private fun execute(sql: String) {
-        DriverManager.getConnection(db.jdbcUrl, db.username, db.password).use { connection ->
+    private fun execute(
+        sql: String,
+        target: SharedE2e.SharedPostgresRef = db,
+    ) {
+        DriverManager.getConnection(target.jdbcUrl, target.username, target.password).use { connection ->
             connection.createStatement().use { it.execute(sql) }
         }
     }
 
-    private fun query(sql: String): List<String> =
-        DriverManager.getConnection(db.jdbcUrl, db.username, db.password).use { connection ->
+    private fun query(
+        sql: String,
+        target: SharedE2e.SharedPostgresRef = db,
+    ): List<String> =
+        DriverManager.getConnection(target.jdbcUrl, target.username, target.password).use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeQuery(sql).use { rows ->
                     generateSequence { if (rows.next()) rows.getString(1) else null }.toList()
@@ -214,8 +247,11 @@ class ExecutionCommitOutcomeDowngradeBarrierIntegrationTest {
                 "WHERE version = '66' OR description = 'execution commit outcome downgrade barrier' ORDER BY installed_rank",
         )
 
-    private fun columnsOf(table: String): List<String> =
-        query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '$table'")
+    private fun columnsOf(
+        table: String,
+        target: SharedE2e.SharedPostgresRef = db,
+    ): List<String> =
+        query("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '$table'", target)
 
     // ---------------------------------------------------------------- the shipped scripts
 
@@ -244,7 +280,9 @@ class ExecutionCommitOutcomeDowngradeBarrierIntegrationTest {
 
     private companion object {
         const val LAST_PREVIOUS_VERSION = 65
+        const val COMMIT_OUTCOME_VERSION = 66
         const val V65_BARRIER = "R__published_endpoint_method_downgrade_barrier.sql"
+        const val V66_BARRIER = "R__execution_commit_outcome_downgrade_barrier.sql"
         const val ROLLBACK_START = "<!-- v66-rollback:start -->"
         const val ROLLBACK_END = "<!-- v66-rollback:end -->"
         val V66_COLUMNS = listOf("commit_attempted_at", "commit_confirmed_at", "settlement_pending", "result_unavailable")

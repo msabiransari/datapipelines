@@ -2946,6 +2946,11 @@ A rollback that skips step 3 is refused by the previous binary at startup; do no
 
 **Rollback is deliberate, and it REFUSES to rewrite an unknown outcome.** Order matters:
 
+This procedure covers the V66-to-V65 boundary. If later migrations are applied, roll them back first, newest first
+([V68](#77-rolling-back-v68-runtime-capture-1043), then [V67](#76-rolling-back-v67-published-mutation-reservations-1039)
+for the current schema). The block refuses while later migration history remains; removing V66 alone would leave a gap
+that Flyway refuses on re-upgrade.
+
 1. Take a backup (`pg_dump`). The block drops the four V66 columns, so `result_unavailable` and the commit stamps of settled executions are not recoverable from the schema afterwards.
 2. Drain: stop admitting runs, let admitted executions settle or abort them explicitly ([Deployment §8.3.1](deployment.md)), then stop **every** instance running a V66-aware binary — one left running writes V66 rows after the cleanup.
 3. Run this block on the metadata database, as one transaction. It is the single source: the integration test extracts and executes THIS text. The block **raises and changes nothing** while any `OUTCOME_UNKNOWN` row, any `RUNNING` row with a commit attempt, or any pending child exists: an unknown outcome stays readable in the V66 schema, and no older reader is allowed to invent a label for it. Resolve those executions first — the operator checks the target database per the execution id, exports the row, and removes or rewrites it under their own change control (the product never rewrites an unknown outcome) — or stays on the V66 binary.
@@ -2955,6 +2960,9 @@ A rollback that skips step 3 is refused by the previous binary at startup; do no
 BEGIN;
 DO $$
 BEGIN
+    IF EXISTS (SELECT 1 FROM flyway_schema_history WHERE version IS NOT NULL AND version::INTEGER > 66) THEN
+        RAISE EXCEPTION 'V66 rollback refused: later migrations are still applied; roll them back in reverse order first';
+    END IF;
     IF EXISTS (SELECT 1 FROM pipeline_executions
                 WHERE status = 'OUTCOME_UNKNOWN'
                    OR settlement_pending
