@@ -5,7 +5,6 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldStartWith
 import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletResponse
@@ -66,8 +65,11 @@ class LlmsTextTest {
 
     @Test
     fun `both files open with the llmstxt shape and the homepage's own summary`() {
+        // Only the opening is compared, so no assertion message can be built from the whole
+        // text: llms-full runs to megabytes, and the pregate's one test JVM is short of heap (#1058).
+        val opening = "# ${LlmsText.SITE_NAME}\n\n> $SITE_SUMMARY\n\n"
         listOf(index, full).forEach { text ->
-            text shouldStartWith "# ${LlmsText.SITE_NAME}\n\n> $SITE_SUMMARY\n\n"
+            text.take(opening.length) shouldBe opening
         }
         // Every link line is `- [title](absolute url): description` — the description is
         // what an agent reads before it fetches.
