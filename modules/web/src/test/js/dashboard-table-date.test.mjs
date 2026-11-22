@@ -59,12 +59,10 @@ for (const value of DATE_ONLY) {
     const expected = expectedDay(value);
     const before = dayBefore(value);
     assert.notEqual(expected, before, "the two candidate texts must differ for the case to mean anything");
-    const seen = {};
-    for (const zone of ZONES) {
-      seen[zone] = inZone(zone, () => format(value, "date"));
-      assert.equal(seen[zone], expected, `${zone}: ${value} under date`);
-      assert.notEqual(seen[zone], before, `${zone}: ${value} reads the day before`);
-    }
+    // Whole maps, zone by text, so a red names every zone that lost the day, not only the first.
+    const seen = Object.fromEntries(ZONES.map((zone) => [zone, inZone(zone, () => format(value, "date"))]));
+    const want = Object.fromEntries(ZONES.map((zone) => [zone, expected]));
+    assert.deepEqual(seen, want, `${value} under date, by zone (the day before reads ${before})`);
     assert.equal(new Set(Object.values(seen)).size, 1, `one text in every zone: ${JSON.stringify(seen)}`);
   });
 }
@@ -88,14 +86,13 @@ const INSTANTS = [
 
 for (const value of INSTANTS) {
   test(`an instant ${value} under date keeps the base's bytes: the local day, the 31st of August west of UTC`, () => {
-    for (const zone of ZONES) {
-      inZone(zone, () => {
-        const got = format(value, "date");
-        assert.equal(got, baseDate(value), `${zone}: ${value} keeps the base's text`);
-        const day = WEST.has(zone) ? Date.UTC(2026, 7, 31) : Date.UTC(2026, 8, 1);
-        assert.equal(got, utcDayText(day), `${zone}: ${value} is the viewer's local day`);
-      });
-    }
+    const got = Object.fromEntries(ZONES.map((zone) => [zone, inZone(zone, () => format(value, "date"))]));
+    const base = Object.fromEntries(ZONES.map((zone) => [zone, inZone(zone, () => baseDate(value))]));
+    const localDay = Object.fromEntries(
+      ZONES.map((zone) => [zone, utcDayText(WEST.has(zone) ? Date.UTC(2026, 7, 31) : Date.UTC(2026, 8, 1))]),
+    );
+    assert.deepEqual(got, base, `${value} under date keeps the base's text, by zone`);
+    assert.deepEqual(got, localDay, `${value} under date is the viewer's local day, by zone`);
   });
 }
 
