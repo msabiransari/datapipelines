@@ -54,7 +54,128 @@
     return { lo: a, hi: b, step: span, ticks: [a, b] };
   }
 
-  /** The smallest nice range that contains [min, max] in at most `intervals` steps: {lo, hi, step, ticks}. */
+  /** A nice step as decimal parts {m, e}: m × 10^e, m one of 1, 2, 25, 5 (25 × 10^(k-1) is 2.5 × 10^k). */
+  function niceParts(raw) {
+    var k = decade(raw), f = raw / pow10(k);
+    if (f <= 1.0000001) return { m: 1, e: k };
+    if (f <= 2.0000001) return { m: 2, e: k };
+    if (f <= 2.5000001) return { m: 25, e: k - 1 };
+    if (f <= 5.0000001) return { m: 5, e: k };
+    return { m: 1, e: k + 1 };
+  }
+
+  /**
+   * The step that judges whether two ends are one value: the smallest of 1, 2 or 5 × a power of ten at or above their
+   * span. Never 2.5: its ticks need one digit more than a step of 5, and every finer nice step needs at least the
+   * judge's digits, so what the judge cannot write no step can.
+   */
+  function judgeParts(raw) {
+    var k = decade(raw), f = raw / pow10(k);
+    if (f <= 1.0000001) return { m: 1, e: k };
+    if (f <= 2.0000001) return { m: 2, e: k };
+    if (f <= 5.0000001) return { m: 5, e: k };
+    return { m: 1, e: k + 1 };
+  }
+
+  /** A tick is a decimal of at most 15 significant digits, what a double holds; past them the digits are rounding. */
+  var TICK_DIGITS = 1e15;
+  var SAME = "same";
+
+  /**
+   * Whether the tick k × 10^e (k a whole number) needs a 16th significant digit: its zeros at the end are not digits
+   * it needs, so 10^15 itself is one digit and 999,999,999,999,999 beside it is fifteen.
+   */
+  function wide(k) {
+    if (k < 0) k = -k;
+    while (!(k < TICK_DIGITS) && k % 10 === 0) k = k / 10;
+    return !(k < TICK_DIGITS);
+  }
+
+  /**
+   * Whether a tick of first × m … last × m (whole numbers of the step's last digit) needs a 16th significant digit.
+   * Two neighbouring ticks of 16 digits or more cannot both end in a zero (m is 1, 2, 5 or 25), so past 2 × 10^15 one
+   * always does, and below it the products are exact and the two ticks at each end decide for all between them.
+   */
+  function wideRange(first, last, m) {
+    var a = first < 0 ? -first : first, b = last < 0 ? -last : last;
+    if (!((a > b ? a : b) * m < 2 * TICK_DIGITS)) return true;
+    if (wide(first * m) || wide(last * m)) return true;
+    return last > first && (wide((first + 1) * m) || wide((last - 1) * m));
+  }
+
+  /**
+   * Where the ticks of [min, max] lie at a step m × 10^e: {step, first, last, wide}; first and last are the whole
+   * multiples of the step at the two ends (an end within a billionth of a step of a multiple is on it), wide whether
+   * one of the ticks needs a 16th significant digit (wideRange). null where a number is not finite.
+   */
+  function indices(min, max, parts) {
+    var step = Number(parts.m + "e" + parts.e);
+    if (!(step > 0 && step < Infinity)) return null;
+    var first = Math.floor(min / step + 1e-9), last = Math.ceil(max / step - 1e-9);
+    if (!(first > -Infinity) || !(last < Infinity)) return null;
+    // At a large index the division's own rounding can put an end one multiple off, either way: the tick itself decides.
+    var tol = step * 1e-9;
+    if (Number(first * parts.m + "e" + parts.e) > min + tol) first--;
+    else if (Number((first + 1) * parts.m + "e" + parts.e) <= min + tol) first++;
+    if (Number(last * parts.m + "e" + parts.e) < max - tol) last++;
+    else if (Number((last - 1) * parts.m + "e" + parts.e) >= max - tol) last--;
+    return { step: step, first: first, last: last, wide: wideRange(first, last, parts.m) };
+  }
+
+  /**
+   * The nice ticks over [min, max] (min < max), each the double its decimal text reads as (index × m, "e", e), so a
+   * tick is its decimal value correctly rounded and never a product's rounding. SAME where the two ends cannot be told
+   * apart: at the judge's step (judgeParts) a tick would still need a 16th significant digit (judged on that one
+   * step, so the answer does not depend on the axis's length). A finer step whose ticks would need a 16th digit is
+   * coarsened, one interval fewer at a time, and at one interval gives way to the judge's step. null where no nice
+   * ticks hold the range (an overflow, more steps than `intervals`): the caller's bounded fallback.
+   */
+  function niceTicks(min, max, intervals) {
+    var span = max - min;
+    if (!(span < Infinity)) return null;
+    var judge = judgeParts(span), coarse = indices(min, max, judge);
+    // A judge's step past the largest double (a span over 10^308) judges nothing: two ends that far apart are never
+    // one value, and the finer steps below decide the range as before (0 … 1.5e308 keeps 0, 5e307, 1e308, 1.5e308).
+    if (coarse !== null && coarse.wide) return SAME;
+    var n = intervals < 1 ? 1 : intervals, tries = 0;
+    for (;;) {
+      var parts = niceParts(span / n), x = indices(min, max, parts);
+      if (x === null) return null;
+      if (x.wide) {
+        if (n > 1) {
+          n--;
+          continue;
+        }
+        if (coarse === null) return null;
+        parts = judge;
+        x = coarse;
+      }
+      var count = x.last - x.first;
+      if (count > intervals && n > 1 && tries < 3) {
+        tries++;
+        n--;
+        continue;
+      }
+      if (count > intervals || count < 1) return null;
+      var ticks = [];
+      for (var i = 0; i <= count; i++) {
+        var t = Number((x.first + i) * parts.m + "e" + parts.e) + 0;
+        if (!(t > -Infinity && t < Infinity)) return null;
+        if (i > 0 && !(t > ticks[i - 1])) return SAME;
+        ticks.push(t);
+      }
+      // The range holds both ends, or it is no nice range (below the normal doubles a decimal step is not a double,
+      // and its multiples can miss an end): the bounded fallback then.
+      if (ticks[0] > min + x.step * 1e-9 || ticks[count] < max - x.step * 1e-9) return null;
+      return { lo: ticks[0], hi: ticks[count], step: x.step, ticks: ticks };
+    }
+  }
+
+  /**
+   * The smallest nice range that contains [min, max] in at most `intervals` steps: {lo, hi, step, ticks}. Two ends
+   * the ticks cannot tell apart (niceTicks) are one value (owner 2026-11-21, #1063): the range is the one a single
+   * value takes, 0 to the value. A range no nice ticks hold takes the bounded fallback.
+   */
   function nice(min, max, intervals) {
     if (!(max > min)) {
       if (min === 0 || min !== min) {
@@ -63,27 +184,22 @@
       } else if (min > 0) min = 0;
       else max = 0;
     }
-    var n = intervals < 1 ? 1 : intervals;
-    for (var tries = 0; tries < 4; tries++, n = n > 1 ? n - 1 : 1) {
-      var span = max - min;
-      if (!(span < Infinity)) return bounded(min, max);
-      var step = niceStep(span / n);
-      var first = Math.floor(min / step + 1e-9), last = Math.ceil(max / step - 1e-9);
-      if (!(step < Infinity) || !(first > -Infinity) || !(last < Infinity)) return bounded(min, max);
-      var count = last - first;
-      if (count > intervals && n > 1) continue;
-      var decimals = Math.max(0, 1 - decade(step));
-      var scale = pow10(decimals > 308 ? 308 : decimals);
-      var ticks = [];
-      for (var i = 0; i <= count; i++) {
-        var t = Math.round((first + i) * step * scale) / scale + 0;
-        if (!(t > -Infinity && t < Infinity)) return bounded(min, max);
-        ticks.push(t);
-      }
-      if (count > intervals) return bounded(min, max);
-      return { lo: ticks[0], hi: ticks[ticks.length - 1], step: step, ticks: ticks };
+    var r = niceTicks(min, max, intervals);
+    if (r === SAME) {
+      // One value: from 0, as a single value is, its fallback included (1.7e308 and the next double: 0 … 1.7e308).
+      if (min > 0) min = 0;
+      else if (max < 0) max = 0;
+      r = niceTicks(min, max, intervals);
     }
-    return bounded(min, max);
+    return r !== null && r !== SAME ? r : bounded(min, max);
+  }
+
+  /**
+   * Whether two ends are one value: the ticks cannot tell them apart (niceTicks' verdict, which is the same at every
+   * axis length). For a caller that takes an extent without asking for its ticks: the second axis.
+   */
+  function oneValue(min, max) {
+    return max > min && niceTicks(min, max, 1) === SAME;
   }
 
   /** The ticks of a fixed domain [lo, hi] (an author's scale.domain): the nice values inside it, the ends kept. */
@@ -169,30 +285,41 @@
       max = 10;
     }
     var k0 = decade(min), lo = pow10(k0);
+    // The smallest double lies below the table's smallest power (#1060): the range starts at the value itself.
+    if (lo > min) lo = min;
     var sets = [[1, 2, 5], [1]];
     for (var a = 0; a < sets.length; a++) {
       var t = ladder(lo, k0, max, sets[a], 1);
-      if (t.length <= limit) return { lo: lo, hi: t[t.length - 1], ticks: t, log: true };
+      if (t !== null && t.length <= limit) return { lo: lo, hi: t[t.length - 1], ticks: t, log: true };
     }
     for (var stride = 2; stride <= 700; stride++) {
       var u = ladder(lo, k0, max, [1], stride);
-      if (u.length <= limit) return { lo: lo, hi: u[u.length - 1], ticks: u, log: true };
+      if (u !== null && u.length <= limit) return { lo: lo, hi: u[u.length - 1], ticks: u, log: true };
     }
-    return { lo: lo, hi: pow10(308), ticks: [lo, pow10(308)], log: true };
+    // No stride from lo lands on a power at or above max inside the table: the two ends, the top the smallest power
+    // of ten at or above max. Past the table's largest power, and for one value at it, no power lies at or above the
+    // value and above lo (#1061): the largest double does.
+    var kt = decade(max), top = pow10(kt);
+    if (top < max) top = kt < 308 ? pow10(kt + 1) : MAX;
+    if (!(top > lo)) top = MAX;
+    return { lo: lo, hi: top, ticks: [lo, top], log: true };
   }
 
-  /** The ticks from lo = 10^k0 up to the first one at or above max (and above lo), every stride-th decade. */
+  /**
+   * The ticks from lo up to the first one at or above max (and above lo), every stride-th decade from 10^k0; null
+   * where the table ends before a tick reaches max (#1061: a ladder that stops below the largest value is no range).
+   */
   function ladder(lo, k0, max, set, stride) {
     var out = [lo];
     for (var k = k0; k <= 308; k += stride) {
       for (var i = 0; i < set.length; i++) {
         var v = tenths(set[i], k);
-        if (!(v > out[out.length - 1])) continue;
+        if (!(v > out[out.length - 1]) || !(v < Infinity)) continue;
         out.push(v);
         if (v >= max) return out;
       }
     }
-    return out;
+    return null;
   }
 
   /** The ticks inside a fixed log domain [lo, hi]: 1-2-5 ticks, then powers of ten, then every s-th power (s = 2, 3 …); the ends kept when none. */
@@ -219,6 +346,9 @@
   /** v ↦ the range position on a log axis [d0, d1] (both > 0); a value at or below 0 is never asked for (G4). */
   function log(d0, d1, r0, r1) {
     var l0 = log10(d0), l1 = log10(d1), dl = l1 - l0;
+    // Two ends a few doubles apart can share one log10 (#1063): over a span that narrow the log scale is a straight
+    // line, so the linear scale places the values.
+    if (!(dl > 0) && d1 > d0) return linear(d0, d1, r0, r1);
     return function (v) {
       if (!(dl > 0)) return r2(r0);
       return r2(r0 + ((log10(v) - l0) / dl) * (r1 - r0));
@@ -257,5 +387,5 @@
     return pow10(k) * sum;
   }
 
-  R.scales = { r2: r2, pow10: pow10, decade: decade, niceStep: niceStep, nice: nice, within: within, linear: linear, log10: log10, logNice: logNice, log: log, tenths: tenths, exp10: exp10 };
+  R.scales = { r2: r2, pow10: pow10, decade: decade, niceStep: niceStep, nice: nice, oneValue: oneValue, within: within, linear: linear, log10: log10, logNice: logNice, log: log, tenths: tenths, exp10: exp10 };
 })(JsRendered);
