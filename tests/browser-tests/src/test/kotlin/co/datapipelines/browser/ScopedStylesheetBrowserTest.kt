@@ -60,10 +60,12 @@ class ScopedStylesheetBrowserTest : DashboardBrowserSuite() {
         val key = mintDashboardKey("$root/boards")
         val host = PageHost()
         try {
-            val onHost = hostRun(host, board, key)
-            val reference = referenceRun(host, board, key, onHost.zoomedWidth)
-            val underSmallRoot = rootFontRun(host, board, key)
+            // One soft scope over the whole case: every B reports in a run, so a plant that breaks one check does not
+            // hide another (the nested soft blocks below defer to this one).
             assertSoftly {
+                val onHost = hostRun(host, board, key)
+                val reference = referenceRun(host, board, key, onHost.zoomedWidth)
+                val underSmallRoot = rootFontRun(host, board, key)
                 compareInside("B3", reference.atFixedWidth, onHost.atFixedWidth)
                 compareInside("B10 (B3 at 150%)", reference.atZoom, onHost.atZoom)
                 compareInside("B7 (B3 under a 10px root)", reference.atFixedWidth, underSmallRoot)
@@ -81,9 +83,11 @@ class ScopedStylesheetBrowserTest : DashboardBrowserSuite() {
         val key = mintDashboardKey("$root/boards")
         val host = PageHost()
         try {
-            val light = themeAtRunTime(host, board, key)
-            themeFromTheStart(host, board, key, light)
-            themeAuto(host, board, key)
+            assertSoftly {
+                val light = themeAtRunTime(host, board, key)
+                themeFromTheStart(host, board, key, light)
+                themeAuto(host, board, key)
+            }
         } finally {
             host.close()
         }
