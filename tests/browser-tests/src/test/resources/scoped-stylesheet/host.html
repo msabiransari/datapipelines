@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>A host page with its own look (#1065)</title>
+  <!-- The host's own look, from the page's own origin; no Datapipelines stylesheet until the test adds it. -->
+  <link rel="stylesheet" href="/scoped/host.css">
+</head>
+<body>
+  <div id="host">
+    <h1>The host's page</h1>
+    <p>The host's paragraph, with <a href="#host">the host's link</a> and <code>its code</code>.</p>
+    <button type="button">The host's button</button>
+    <label>The host's field <input type="text" value="host input"></label>
+    <select><option>The host's option</option></select>
+    <table>
+      <thead><tr><th>Host heading</th><th>Value</th></tr></thead>
+      <tbody><tr><td>Host cell</td><td>1</td></tr></tbody>
+    </table>
+    <ul><li>The host's item</li></ul>
+    <hr>
+  </div>
+  <div id="parameters"></div>
+  <div id="dashboard"></div>
+</body>
+</html>

@@ -1,0 +1,2 @@
+/* #1065 B8: the host's own background for the board container, by its id: a rule of higher weight than the library's. */
+#dashboard { background-color: rgb(250, 240, 200); }
