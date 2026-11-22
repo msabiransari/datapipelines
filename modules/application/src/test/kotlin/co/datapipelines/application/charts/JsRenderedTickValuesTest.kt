@@ -57,8 +57,8 @@ class JsRenderedTickValuesTest {
         val JSON: JsonMapper = JsonMapper()
 
         /**
-         * The probes of `tick-value-probes.js` (brief 1063 A.8): 13 decimal ticks, 4 spans beyond the largest double, 8 one
-         * value, 13 two values, 13 log ranges, 13 whole axes, 3 log placings, 12 second axes (79); the brief's floor is 78.
+         * The probes of `tick-value-probes.js` (brief 1063 A.8): 15 decimal ticks, 4 spans beyond the largest double, 9 one
+         * value, 13 two values, 13 log ranges, 13 whole axes, 3 log placings, 12 second axes (82); the brief's floor is 78.
          */
         const val PROBE_FLOOR = 78
 
